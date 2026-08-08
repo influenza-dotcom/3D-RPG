@@ -76,12 +76,110 @@ extends Resource
 @export var gib_hp_min: int = 1
 ## Most shots it takes to pop a gib — the high end of a gib's random HP.
 @export var gib_hp_max: int = 2
-## World cap on simultaneously-live gibs; spawning past it reclaims the oldest first (keeps a gory scene from tanking framerate).
-@export var gib_max_active: int = 24
+## World cap on simultaneously-live gibs; spawning past it reclaims the oldest first (keeps a gory scene from tanking framerate). Counts BODY-PART gibs too — a part-burst death spawns up to 6 limbs plus body_part_gib_meat_count chunks, so this was raised from 24 when body parts landed.
+@export var gib_max_active: int = 36
 ## Seconds a gib lingers in the world before it begins fading out.
 @export var gib_lifetime: float = 12.0
 ## Seconds a gib takes to fade out once its lifetime expires.
 @export var gib_fade_time: float = 1.0
+## Wipe the PLAYER'S OWN remains when it revives at a checkpoint — the gibs and body parts its death flung, the
+## floor blood splat, the blood drops and their stains, and the corpse if one was authored. On (the default) the
+## Dark-Souls in-place respawn brings you back to a clean spot instead of standing over yesterday's body; off
+## leaves the whole burst lying where you died. Only the player's gore is ever tagged, so NPC gore is untouched
+## either way, and the RELOAD_* death modes rebuild the world regardless. See Character.death_gore_group().
+@export var clear_player_gore_on_respawn: bool = true
+
+@export_group("Body-part gibs")
+## Master switch: on death a character comes apart into its OWN head / torso / arms / legs (the LEGO / Roblox
+## read) as well as spraying meat chunks. Needs a BodyModelSwap on the actor — that component's live part
+## models are what fly. Off = the old meat-chunks-only burst. A BodyPartGibs drop-in on an actor OVERRIDES
+## this switch for that actor, both ways.
+@export var body_part_gibs_enabled: bool = true
+## How many ordinary MEAT chunks still burst alongside the body parts. Deliberately lower than gib_count (the
+## chunks-only count) because up to 6 limbs already fly. 0 = a clean, toy-like break-up with no loose gore.
+@export var body_part_gib_meat_count: int = 3
+## Slowest a body part is flung (m/s) — the low end of the burst speed range. Lower than the meat-chunk range
+## on purpose: a whole limb reads better arcing off the body than rocketing across the room.
+@export var body_part_gib_vel_min: float = 3.5
+## Fastest a body part is flung (m/s) — the high end of the burst speed range. Keep above vel_min.
+@export var body_part_gib_vel_max: float = 8.0
+## Least extra upward fling (m/s) added to a part so the burst pops UP rather than skidding along the floor — low end of the up-bias range.
+@export var body_part_gib_up_bias_min: float = 1.5
+## Most extra upward fling (m/s) added to a part — high end of the up-bias range.
+@export var body_part_gib_up_bias_max: float = 3.5
+## How much the launch direction is randomly jittered off "straight out from the body's centre" (0 = parts fly
+## exactly outward from where they sat, so the body opens up like a flower; 1 = fully scattered).
+@export_range(0.0, 1.0, 0.05) var body_part_gib_spread: float = 0.35
+## Max random tumble (rad/s per axis) spun onto each part as it launches — bigger = wilder cartwheeling limbs.
+@export var body_part_gib_angular_range: float = 10.0
+## Fraction of the killing blow's knockback (the victim's velocity + explosion_velocity) the parts inherit, so
+## a rocket blows the body apart DOWNRANGE instead of straight up. 0 = ignore how it died; 1 = full inherit.
+@export_range(0.0, 2.0, 0.05) var body_part_gib_launch_inherit: float = 0.6
+## Fewest shots it takes to pop a flying body part — the low end of its random HP. Above the meat-chunk range:
+## a limb should survive a stray round and be shootable out of the air on purpose.
+@export var body_part_gib_hp_min: int = 2
+## Most shots it takes to pop a flying body part — the high end of its random HP.
+@export var body_part_gib_hp_max: int = 4
+## Mass (kg) of a flying body part. Heavier than a meat chunk so limbs land and stay put instead of skittering.
+@export var body_part_gib_mass: float = 0.9
+## Seconds a body part lingers before it begins fading out. Longer than gib_lifetime on purpose — the pieces of
+## the guy you just killed are worth leaving on the floor.
+@export var body_part_gib_lifetime: float = 20.0
+## Seconds a body part takes to fade out once its lifetime expires.
+@export var body_part_gib_fade_time: float = 1.5
+
+@export_group("Pinned body parts")
+## Master switch for the PIN kill: a THROWN WEAPON that lands the killing blow carries the body part it struck
+## into the wall behind and staples it there, blade still through it, while the rest of the body slumps. Needs
+## body-part gibs (it re-routes ONE of the limbs that already fly) and a wall behind the victim — with no
+## surface in range the death falls back to the ordinary burst, silently. Off = every kill bursts as before.
+@export var pinned_parts_enabled: bool = true
+## Pin a HEAD hit. The best-reading part by a distance — a head is a big solid blob at eye height, and the
+## silhouette is unmistakable across a room.
+@export var pinned_part_head: bool = true
+## Pin a TORSO hit. The other one that reads: the biggest part, and where most thrown hits land.
+@export var pinned_part_torso: bool = true
+## Pin an ARM hit. OFF by default and worth leaving off: at this game's internal resolution an arm on a wall is
+## a few pixels wide, and with the PS1 vertex snap on top it reads as a mesh poking through the geometry rather
+## than a trophy. Turn it on if you want every hit to pin.
+@export var pinned_part_arms: bool = false
+## Pin a LEG hit. OFF by default for the same reason as arms, though a leg is the chunkier of the two.
+@export var pinned_part_legs: bool = false
+## How far past the victim (metres, along the throw) to look for something to staple to. Nothing solid within
+## this range = no pin, and the death plays as a normal burst. Bigger = the trick fires in more rooms; too big
+## and a limb flies implausibly far to reach the back wall.
+@export var pinned_part_probe_distance: float = 3.5
+## Which physics layers count as a surface worth pinning to. Layer 1 (the world / static geometry) is the
+## intent; adding more lets a limb staple to props or other actors, which nothing here follows if they move.
+@export_flags_3d_physics var pinned_part_probe_mask: int = 1
+## How far off straight-on (degrees) the surface may face and still take the staple. This rejects a GRAZE — a
+## downward throw catching the floor — because a limb lying flat on the ground is what an ordinary gib that
+## failed to bounce already looks like, so pinning there reads as a bug, not a trick shot. 90 accepts anything.
+@export_range(0.0, 90.0, 1.0) var pinned_part_max_surface_angle: float = 55.0
+## Speed (m/s) the struck limb flies to the wall at. It travels in a STRAIGHT line with gravity off, so this is
+## purely how long the flight reads for — the whole point is that the player SEES it carried there rather than
+## finding it already stuck. Too fast and there is no flight to see; too slow and it floats.
+@export var pinned_part_flight_speed: float = 16.0
+## How far the limb sinks into the surface, as a fraction of its OWN half-depth (not metres — a head and a
+## forearm are different sizes and the same absolute sink would swallow one and barely mark the other).
+## 0 = resting against the wall; 1 = half the limb inside it.
+@export_range(0.0, 1.0, 0.05) var pinned_part_bury: float = 0.35
+## How far (metres) the blade's TIP ends up inside the surface. Only has to be enough that the knife reads as
+## driven in rather than balanced on the limb.
+@export var pinned_part_blade_embed: float = 0.1
+## Seconds the limb stays stapled before it comes off the wall. Longer than body_part_gib_lifetime on purpose:
+## this one is the trophy, and it is also what eventually hands the player's knife back if they never fetch it.
+@export var pinned_part_lifetime: float = 30.0
+## Seconds the limb tumbles on the ground after it drops off the wall, before it fades out (the fade itself
+## reuses body_part_gib_fade_time). The "it slid down the wall eventually" beat — 0 fades it the moment it falls.
+@export var pinned_part_drop_linger: float = 3.0
+## Multiplier on how hard the OTHER body parts are flung on a pin kill. The pin only reads if it is the one
+## thing happening: at the normal 1.0 the wall gets its limb inside a cloud of five more, and nobody sees which
+## one behaved differently. Low values make the rest of the body crumple in place instead. 1.0 = no quieting.
+@export_range(0.0, 1.0, 0.05) var pinned_part_burst_speed_scale: float = 0.2
+## How many MEAT chunks a pin kill sprays, instead of body_part_gib_meat_count. Same reason as the speed scale
+## above — loose gore competes with the thing you want looked at. -1 inherits body_part_gib_meat_count.
+@export var pinned_part_meat_count: int = 0
 
 @export_group("Death freeze")
 ## Seconds an enemy holds its pose — frozen in place — after the killing blow BEFORE it bursts into gore (the
@@ -148,6 +246,29 @@ extends Resource
 @export var hit_spark_speed_to_scale: float = 32.0
 ## Radius (metres) of the overkill-penetration burst — bigger than the ordinary spark so a shot punching THROUGH an enemy into the next reads clearly.
 @export var overkill_burst_radius: float = 0.9
+
+@export_group("View-Model Kick (per shot / per swing)")
+## The whole view model's KICK when you attack — GunMesh.fire() tweens the rig out to these and back, and any
+## mounted weapon mesh rides along. Z is Camera3D-local: +Z is BACK toward the player (recoil), -Z is FORWARD
+## toward the crosshair. These four are a GUN's recoil and are the defaults every weapon gets.
+## Local offset (metres) the rig kicks to on a shot. Positive Z = the gun drives back into your shoulder.
+@export var view_model_kick_position: Vector3 = Vector3(0.0, 0.1, 0.4)
+## Rotation offset (degrees) at the peak of the kick — negative X pitches the muzzle up.
+@export var view_model_kick_rotation: Vector3 = Vector3(-5.0, 0.0, 0.0)
+## Seconds to reach the kick (the snap).
+@export var view_model_kick_in_time: float = 0.05
+## Seconds to settle back to rest (the recovery).
+@export var view_model_kick_out_time: float = 0.1
+## The same four for a weapon whose WeaponData sets `view_model_punch` — a PUNCH, which must extend AWAY from
+## you rather than recoil into you, or the rig slides backwards while the arm thrusts forward and the whole
+## swing reads mushy. Note the NEGATIVE Z.
+@export var punch_kick_position: Vector3 = Vector3(0.0, 0.01, -0.1)
+## Rotation offset (degrees) at full extension — a slight downward pitch as the shoulder drops into the punch.
+@export var punch_kick_rotation: Vector3 = Vector3(3.0, 0.0, 0.0)
+## Seconds to full extension. Slightly slower than a gun's snap so the arm reads as thrown, not fired.
+@export var punch_kick_in_time: float = 0.06
+## Seconds to draw the fist back to guard.
+@export var punch_kick_out_time: float = 0.2
 
 @export_group("Gun Holster (view model)")
 ## Seconds to swing the view-model gun down (holster) / up (draw) — higher = a slower, more deliberate put-away/draw.

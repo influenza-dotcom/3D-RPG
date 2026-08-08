@@ -6,6 +6,7 @@
 [ext_resource type="ArrayMesh" uid="uid://cf42vrjr8bh5l" path="res://assets/models/model.obj" id="3_qclup"]
 [ext_resource type="AudioStream" uid="uid://cpuqvnu2y3vyn" path="res://assets/audio/sfx/WeakSplosh.wav" id="4_qclup"]
 [ext_resource type="Script" uid="uid://dnhm3sykhm2ly" path="res://scenes/player/bloody_mess.gd" id="5_qclup"]
+[ext_resource type="Script" uid="uid://dbwx11j72ua30" path="res://scripts/components/random_size.gd" id="6_rsize"]
 
 [sub_resource type="PhysicsMaterial" id="PhysicsMaterial_gib"]
 friction = 0.9
@@ -18,7 +19,7 @@ albedo_texture = ExtResource("3_p2afk")
 [sub_resource type="BoxShape3D" id="BoxShape3D_p2afk"]
 size = Vector3(0.38433838, 0.32025146, 1)
 
-[node name="GoreGib" type="RigidBody3D" unique_id=701305053 node_paths=PackedStringArray("impact_sfx")]
+[node name="GoreGib" type="RigidBody3D" unique_id=701305053 node_paths=PackedStringArray("impact_sfx", "collision_shape", "mesh_instance")]
 mass = 0.6
 physics_material_override = SubResource("PhysicsMaterial_gib")
 continuous_cd = true
@@ -28,6 +29,9 @@ angular_damp = 5.0
 script = ExtResource("1_iact")
 data = ExtResource("2_data")
 impact_sfx = NodePath("ImpactSFX")
+collision_shape = NodePath("CollisionShape3D")
+auto_fit_collider = false
+mesh_instance = NodePath("Model")
 
 [node name="Model" type="MeshInstance3D" parent="." unique_id=902510887]
 material_override = SubResource("StandardMaterial3D_grsif")
@@ -45,5 +49,10 @@ script = ExtResource("5_qclup")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1139759853]
 transform = Transform3D(1, 0, 0, 0, 0.9679726, -0.25105587, 0, 0.25105587, 0.9679726, -0.0055236816, 0.23659055, -0.0051715914)
 shape = SubResource("BoxShape3D_p2afk")
+
+[node name="RandomSize" type="Node" parent="."]
+script = ExtResource("6_rsize")
+min_scale_mult = 0.6
+max_scale_mult = 1.5
 
 [connection signal="destroyed" from="." to="BloodyMess" method="_on_gore_gib_destroy"]

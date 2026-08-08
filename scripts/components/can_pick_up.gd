@@ -26,6 +26,14 @@ const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable pe
 ## OPTIONAL drop table granted ON TOP of `item` when picked up — turns this into a "loot bag" of random
 ## items. Null = just `item`. Can be set WITHOUT an item, for a pure random-loot pickup.
 @export var loot_table: LootTable = null
+## DRAW a weapon granted by this pickup the instant it's taken — but ONLY while the player is EMPTY-HANDED
+## (bare fists, i.e. nothing equipped): picking a pipe up off the floor must never swap the rifle out of your
+## hands mid-fight. So this arms the unarmed player and is silent for an armed one, who equips from the bag.
+## Applies to `item` ONLY — never to an `item_stacks` pile or a `loot_table` roll. Turn OFF for a weapon the
+## player should OWN but not wield even when unarmed (a quest piece, a gift, a display piece). The player can
+## also disable it globally in Options → Game → "Auto-Equip Weapons When Unarmed"
+## (Settings.auto_equip_pickups); BOTH must be on.
+@export var auto_equip_weapon: bool = true
 
 @export_group("Hover Label")
 ## Name shown on the look-at hover; blank -> "Take <item name>".
@@ -63,6 +71,11 @@ const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable pe
 @export var save_id: StringName = &""
 
 var _claimed: bool = false  ## latched the instant pickup commits, before the deferred queue_free lands
+## The weapon-item INSTANCE this grant actually put in the bag (the LAST unique copy that fit), else null.
+## Written by _grant, read by start_talk's auto-equip. It has to be a member rather than a return value
+## because _grant builds those copies internally: equipping the shared `item` template instead would mark the
+## WRONG stack as equipped the moment you carry two of the same gun (see CharacterInventory.equipped_item).
+var _granted_weapon: Item = null
 
 ## Build the item-driven world visual when asked (see build_model_from_item). Runs BEFORE super() so the
 ## look-at outline + auto-fit collider pick up the freshly added mesh.
@@ -138,6 +151,19 @@ func start_talk(player: Node) -> void:
 		var fully_placed := _grant(inv)
 		if not fully_placed and player.has_method(&"notify_toast"):
 			player.notify_toast(PlayerText.TOAST_BACKPACK_PARTIAL, Color(0.85, 0.85, 0.85))
+		# AUTO-EQUIP, but ONLY into EMPTY HANDS. `equipped_item == null` IS the unarmed state — the player
+		# falls back to bare fists whenever it clears (Player._on_equipped_item_lost) — so this arms someone
+		# who has nothing and never takes a decision back from someone who does: walking over a pipe while
+		# wielding a rifle must not swap the rifle away mid-fight. Note it's about OWNING a weapon, not having
+		# it out: a merely HOLSTERED gun still sets equipped_item, so that player is armed and is left alone.
+		# equip_item does NOT consume the stack — it records WHICH instance is drawn and asks the owner to
+		# swap to it (Player -> WeaponSystem.equip_weapon -> the down/up swap anim, which also clears any
+		# holster via Attack.set_holstered(false), so the new gun is actually shootable). Safe on this path
+		# because E can't reach here while carrying a prop (PickupRay routes the interact only when nothing is
+		# held), so the carry draw-lock that would refuse the draw is never engaged. Every gate is read LIVE at
+		# pickup time — this pickup's export and the player's Options toggle both veto without a reload.
+		if auto_equip_weapon and _granted_weapon != null and inv.equipped_item == null and Settings.auto_equip_pickups:
+			inv.equip_item(_granted_weapon)
 		if item != null and item.id != &"":
 			GameState.notify_pickup(item.id)  # advance any "collect <item>" quest objective
 	# Free the CORRECT node: when build_model_from_item built our visual, _host() is that child (OUR descendant), so
@@ -164,15 +190,19 @@ func _disable_interaction_now() -> void:
 ## Grant our payload to `inv`: the configured item (weapons as UNIQUE instances) plus the optional loot
 ## table rolled on top. Split out so it's unit-testable without the pickup's host-free side effect.
 ## Returns false when the primary `item` couldn't be FULLY placed (a full grid bag) — the caller then leaves
-## the pickup in the world instead of freeing it and silently dropping the overflow.
+## the pickup in the world instead of freeing it and silently dropping the overflow. Also records the weapon
+## instance that landed in the bag (_granted_weapon) for the caller's auto-equip.
 func _grant(inv: CharacterInventory) -> bool:
 	var fully_placed := true
+	_granted_weapon = null  # per-grant, so a refused or repeat run can never auto-equip a stale instance
 	if item != null:
 		if item.is_weapon():
 			for _n in maxi(1, amount):
-				if inv.add(item.duplicate() as Item, 1) <= 0:
+				var copy: Item = item.duplicate() as Item
+				if inv.add(copy, 1) <= 0:
 					fully_placed = false
 					break  # bounded bag filled mid-grant — stop duplicating weapons that won't fit
+				_granted_weapon = copy  # the last copy that FIT is the one auto-equip draws
 		else:
 			var placed := inv.add(item, amount)
 			if placed < amount:

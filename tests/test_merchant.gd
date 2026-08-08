@@ -7,6 +7,18 @@ extends GutTest
 
 const Factions = preload("res://scripts/faction/factions.gd")  # WR-5: resolve a faction id -> Faction for the rep tests
 
+## ⭐Merchant.buy now gates on the PAYMENT SEAM (Player.can_pay/charge), which reads the SHARED GameState
+## banking fields — a stale positive account would let a "broke" player buy and turn a refusal test green for
+## the wrong reason. Snapshot + restore (the test_start_menu idiom).
+var _prev_account: float
+var _prev_method: String
+
+func before_each() -> void:
+	_prev_account = GameState.account
+	_prev_method = GameState.payment_method
+	GameState.account = 0.0
+	GameState.payment_method = "debit"
+
 func _merchant(money: float = 1000.0, buy: float = 1.0, sell: float = 0.5) -> Merchant:
 	var m := Merchant.new()
 	m.stock = CharacterInventory.new()
@@ -40,6 +52,8 @@ func _teardown(m: Merchant, p: Player) -> void:
 func after_each() -> void:
 	if ShopScreen.is_open():
 		ShopScreen.close()
+	GameState.account = _prev_account
+	GameState.payment_method = _prev_method
 
 
 func test_stock_counts_seed_quantities() -> void:

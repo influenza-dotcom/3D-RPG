@@ -21,7 +21,8 @@ class StubPlayer extends Node3D:
 	var inventory = null
 	var _sheet := CharacterStats.new()
 	func stats_or_default() -> CharacterStats: return _sheet
-	func unlocked_list() -> Array: return []
+	func unlocked_list() -> Array: return []          ## the ACTIVE implant projection ([player].unlocks)
+	func disabled_list() -> Array: return []          ## ...and the switched-OFF one ([player].disabled_unlocks)
 
 
 func after_each() -> void:

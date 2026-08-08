@@ -103,8 +103,15 @@ func _run() -> void:
 		return
 	await _frames(40)  # HUD/level settle
 
-	# Seed the backpack so the grids aren't empty (runtime-only; inventory changes don't autosave).
+	# Seed the backpack so the grids aren't empty. Bag changes DO autosave on the live player (Player._ready
+	# connects inventory.changed -> _on_inventory_autosave, which flushes GameState.autosave a frame later) —
+	# so first UNPLUG that seam, or this QA run's seeded items (and the implants shot's ability grant below)
+	# would be written into the user's real Continue profile while we await frames between shots.
 	var inv = player.get(&"inventory")
+	if inv != null:
+		var autosave_cb := Callable(player, &"_on_inventory_autosave")
+		if (inv.changed as Signal).is_connected(autosave_cb):
+			(inv.changed as Signal).disconnect(autosave_cb)
 	if inv != null:
 		for id: StringName in [&"healthpack", &"ammo_pistol", &"rock"]:
 			var it: Item = ItemDb.item_by_id(id)
@@ -236,7 +243,7 @@ func _run() -> void:
 	await _frames(2)
 	cm.free()
 
-	# The free-implant New Game step (StartMenu-hosted overlay, not an autoload — instantiated here the
+	# The implant-purchase New Game step (StartMenu-hosted overlay, not an autoload — instantiated here the
 	# same way StartMenu does it, like the TOS gate above). The first roster row is toggled DOWN before the
 	# shot so the pressed/selected accent bar is in frame: the selection art vs row text alignment is
 	# exactly what this shot exists to watch (the empty-row-Button height bug — MenuStyle.size_row_button).
@@ -250,6 +257,27 @@ func _run() -> void:
 	await _shot("20_implant_choice")
 	imp.queue_free()
 	await _frames(2)
+
+	# The Implants tab (the fifth Pip-Boy sibling). Seed BOTH sections so the reference shows the
+	# real two-block layout: grant one mechanic and drop an uninstalled chip in the bag. Safe against the
+	# profile ONLY because the inventory-autosave seam was unplugged above — unlock_mechanic itself writes
+	# nothing, but the chip add would otherwise flush the grant into the user's save.
+	if player.has_method(&"unlock_mechanic"):
+		player.unlock_mechanic(&"wall_climb")
+		# ...and a SECOND implant switched off, so the reference shot carries BOTH row states: the pressed
+		# accent bar of an active implant and the dimmed caption of a switched-off one.
+		player.unlock_mechanic(&"slide")
+		if player.has_method(&"set_mechanic_active"):
+			player.set_mechanic_active(&"slide", false)
+	if inv != null:
+		var chip: Item = ItemDb.item_by_id(&"chip_grapple")
+		if chip != null:
+			inv.add(chip, 1)
+	if _try_open(ImplantsScreen):
+		await _frames(8)
+		await _shot("21_implants")
+		ImplantsScreen.close()
+		await _frames(2)
 
 	_finish()
 

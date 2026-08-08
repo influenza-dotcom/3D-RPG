@@ -22,6 +22,12 @@ extends Control
 ##   reticle just OUTSIDE the body ticks — only a headshot flash (0.25 s) briefly crosses it, tolerable
 ##   because the ring is TRANSIENT (invisible at rest). A designer raising the radius past ~25 starts
 ##   kissing the aim-warning arcs.
+## - The idle FADE only animates transitions the player WATCHED. The ring un-primes whenever it is hidden
+##   (the death cinematic's hide_hud_for_death, the dialogue HUD hide, the Options bar-mode swap) and it
+##   starts unprimed, so the first frame back on screen ADOPTS alpha_target instead of easing toward it
+##   from a value that went stale off-screen — see _fade_primed. This contract relies on ui.gd stamping
+##   `fill` BEFORE the ring's own _process each frame; it does, because ui.gd is the ring's PARENT and
+##   parents process first, so the adopted value is this frame's pool, not last life's.
 ##
 ## Geometry, colours, and fade knobs are HudSettings fields (resources/tuning/HudSettings.tres,
 ## "Stamina ring" group), read LIVE in _draw so inspector tuning shows without a scene reload. The fill
@@ -36,24 +42,54 @@ var centre: Vector2 = Vector2.ZERO
 var fill: float = 1.0
 ## Idle-fade multiplier on the whole ring's alpha: eases toward stamina_ring_idle_alpha while the pool
 ## is full (a full ring is zero-information — fade it so the crosshair area stays clean), snaps back
-## toward 1.0 the moment any stamina is spent. Eased in _process, applied in _draw.
+## toward 1.0 the moment any stamina is spent. Eased in _process, applied in _draw — but only while the
+## ring is on screen and PRIMED (below); an unwatched change is adopted, not animated.
 var _alpha_mult: float = 1.0
+## Has the ring had a live frame on screen since it last became visible? The ease above is only meaningful
+## as an animation of something the PLAYER WATCHED, so it must never replay a transition that happened
+## off-screen. Cleared every hidden frame and false on a brand-new ring; the first visible frame adopts
+## alpha_target outright and sets this.
+##
+## WHY (the "stamina meter flashes when respawning" bug): _process early-outs while hidden, so the death
+## cinematic FREEZES _alpha_mult at whatever it was at death — 1.0 for any death with stamina spent, which
+## is nearly all of them (the pool can't drift back either: die() calls set_physics_process(false) and the
+## regen lives in _physics_process). The in-place revive then snaps the pool to full
+## (player.gd _respawn_at_checkpoint `_set_stamina(stamina_max())`) and re-shows the HUD in the same call
+## (restore_hud_after_death), so the ring came back owing a full 1.0 -> 0.0 dissolve it had no business
+## animating: a complete, fully-lit half-ring at the reticle burning down over ~0.77 s, drawn ON TOP of the
+## fade-up from black (this ring is z_index 1, the fade rect is z 0) — maximum contrast, hence "flash".
+## A FRESHLY BUILT ring had the same flash on every scene reload / new game / level load, because both
+## `fill` and `_alpha_mult` start "full and lit" — one full alpha-unit from a full pool's resting state.
+## One latch covers both.
+var _fade_primed: bool = false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE  # never eat input (HUD gotcha, same as every overlay)
 
 func _process(delta: float) -> void:
 	if not visible:
+		# Hidden (death cinematic / dialogue / bar mode): nothing that happens to the pool now is a
+		# transition anyone can watch, so DROP the priming rather than keep easing or keep a frozen value.
+		# The next visible frame then lands on the truth instead of replaying an off-screen change.
+		_fade_primed = false
 		return
-	# Frame-rate-independent ease toward the idle/active alpha (the 1 - exp idiom used HUD-wide).
-	var t := 1.0 - exp(-GameSettings.hud.stamina_ring_fade_speed * delta)
 	var target := alpha_target(fill, GameSettings.hud.stamina_ring_idle_alpha)
-	_alpha_mult = lerpf(_alpha_mult, target, t)
-	# SNAP the asymptote shut: the exp-lerp approaches its target forever without arriving, and with the
-	# shipped idle alpha of 0 that residue is a permanent ghost ring at ~1% opacity — visibly NOT the
-	# "fully invisible when inactive" contract. Inside a hair of the target, land exactly on it.
-	if absf(_alpha_mult - target) < 0.01:
+	if not _fade_primed:
+		# First frame back on screen (or the first frame of this ring's life): ADOPT the target outright.
+		# ui.gd is our parent and processes first, so `fill` was already stamped from the live pool THIS
+		# frame — a revive that refilled stamina under the death fade arrives here as "already full,
+		# already invisible", with no dissolve to play.
 		_alpha_mult = target
+		_fade_primed = true
+	else:
+		# Frame-rate-independent ease toward the idle/active alpha (the 1 - exp idiom used HUD-wide).
+		var t := 1.0 - exp(-GameSettings.hud.stamina_ring_fade_speed * delta)
+		_alpha_mult = lerpf(_alpha_mult, target, t)
+		# SNAP the asymptote shut: the exp-lerp approaches its target forever without arriving, and with the
+		# shipped idle alpha of 0 that residue is a permanent ghost ring at ~1% opacity — visibly NOT the
+		# "fully invisible when inactive" contract. Inside a hair of the target, land exactly on it.
+		if absf(_alpha_mult - target) < 0.01:
+			_alpha_mult = target
 	queue_redraw()  # redraw every frame — the centre tracks the live (possibly swaying) crosshair
 
 ## Pure arc math: the [from, to] angles (radians) the fill arc spans for `fill_frac` of the gauge.
@@ -85,8 +121,13 @@ static func outline_span(span: Vector2, pad_rad: float) -> Vector2:
 	return Vector2(span.x - s * pad_rad, span.y + s * pad_rad)
 
 func _draw() -> void:
-	if _alpha_mult <= 0.001:
-		return  # fully faded (idle at the shipped 0 alpha) — draw nothing at all, not arcs at alpha 0
+	# UNPRIMED means "_process has not yet adopted a live alpha for this appearance" — paint NOTHING rather
+	# than a stale one. This closes a one-frame race on the revive: restore_hud_after_death() flips `visible`
+	# from outside our own _process pass, and Godot's set_visible -> queue_redraw would otherwise flush a
+	# frame painted with the pre-death alpha AND the pre-revive fill. A single missing frame is
+	# imperceptible; a single bright frame is the bug.
+	if not _fade_primed or _alpha_mult <= 0.001:
+		return  # unprimed, or fully faded (idle at the shipped 0 alpha) — no arcs at all, not arcs at alpha 0
 	var hud: HudSettings = GameSettings.hud
 	# Point density scales with the sweep so a designer widening the gauge keeps a smooth curve.
 	var points := maxi(8, int(ceilf(absf(hud.stamina_ring_sweep_deg) / 6.0)))

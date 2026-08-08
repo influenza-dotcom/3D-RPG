@@ -12,6 +12,10 @@ extends GutTest
 ##     sub-quantum snapping, exact-zero spend-down), the is_zero_approx no-op guard,
 ##     and the money_changed(total, delta) parameter contract.
 ##   * reward_kill routing through the add_money seam (so listeners always fire).
+##   * The DEATH SETTLEMENT (Player._bequeath_wallet): the purse goes to the killer, or is
+##     left alone when there is nowhere to spill it, or is untouched entirely in a reload
+##     death mode — plus the two revive toasts that name the destination. Money is MOVED,
+##     never destroyed, and that is what these pin.
 ##   DELIBERATELY SKIPPED because they are pinned elsewhere:
 ##   * Merchant buy_price/sell_price directional rounding (ceil-buy / floor-sell to the
 ##     coin, the one-coin floor) — test_merchant.gd test_price_rounding_ceil_buy_floor_sell
@@ -48,6 +52,42 @@ class _HolsterReminderKiller extends Node:
 
 	func should_remind_holster_forgiveness_tutorial_on_player_death() -> bool:
 		return should_remind
+
+## A killer the death settlement will actually pay: the ONLY thing _bequeath_wallet requires of a killer is a
+## duck-typed add_money (it is loosely typed there — an NPC, a titled hazard, a stub like this). `display_name` is
+## what _killer_display_name reads for the revive toast; no resolved_disposition, so the stranger mask is skipped
+## and the raw name comes through (that mask is pinned in test_death_card.gd, not here).
+class _PayableKiller extends Node:
+	var money: float = 0.0
+	var display_name: String = "Test Killer"
+	var alive: bool = true
+
+	func add_money(delta: float) -> void:
+		money = snappedf(money + delta, Zorkmids.QUANTUM)
+
+	## Every real Character has this; the settlement refuses to pay a DEAD one (its loot was already minted).
+	func is_alive() -> bool:
+		return alive
+
+
+## Force the death settlement's in-place-revive gate OPEN / restore it. _bequeath_wallet does NOTHING unless
+## Player._death_revives_in_place() is true (death_mode is not a RELOAD_* AND a respawn point is set) — see the
+## reload test below for why. Both bits live on AUTOLOADS shared with every other suite, so each test that moves
+## them banks the old values and puts them back, pass or fail.
+func _bank_respawn_state() -> Dictionary:
+	return {
+		"mode": GameSettings.player_feedback.death_mode,
+		"has": GameState.has_respawn,
+		"pos": GameState.respawn_position,
+		"yaw": GameState.respawn_yaw,
+	}
+
+
+func _restore_respawn_state(banked: Dictionary) -> void:
+	GameSettings.player_feedback.death_mode = banked["mode"]
+	GameState.has_respawn = banked["has"]
+	GameState.respawn_position = banked["pos"]
+	GameState.respawn_yaw = banked["yaw"]
 
 
 # ---------------------------------------------------------------------------
@@ -195,30 +235,159 @@ func test_reward_kill_routes_through_the_add_money_seam() -> void:
 	c.free()
 
 
-func test_player_death_loses_half_wallet_even_without_a_killer() -> void:
-	assert_eq(GameSettings.economy.death_purse_loss_fraction, 0.5,
-		"death_purse_loss_fraction defaults to half the player's current wallet")
+func test_killer_pockets_the_whole_wallet_on_death() -> void:
+	# THE headline rule: death hands your zorkmids to whoever killed you, in full — it never destroys them. The
+	# killer holds them in their live wallet, which NpcMortality reads at THEIR death so LootableCorpse mints it as
+	# a coin tile in their loot bag (that copy is pinned in test_loot_drop.gd). Kill them, loot it back.
+	assert_eq(GameSettings.economy.death_purse_loss_fraction, 1.0,
+		"death_purse_loss_fraction ships at 1.0 — the killer takes the WHOLE purse, because you can go and take it back")
+	var banked := _bank_respawn_state()
+	GameSettings.player_feedback.death_mode = PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN
+	GameState.set_respawn(Vector3.ZERO, 0.0)
+	var p = load("res://scripts/player/player.gd").new()
+	var killer := _PayableKiller.new()
+	p.money = 101.0
+	p._bequeath_wallet(killer)
+	assert_eq(p.money, 0.0,
+		"the whole wallet leaves the player — a half-measure would leave nothing worth hunting the killer for")
+	assert_eq(killer.money, 101.0,
+		"...and lands in the KILLER's wallet, conserved to the coin: money is moved, never burnt")
+	# Amount + killer NAME are banked at death for the revive toast: the toast waits for the respawn (die()'s
+	# HUD-hide would swallow it) and the killer node can be freed or leashed home before then, so the name is
+	# resolved to a STRING now, while the killer is guaranteed live.
+	assert_eq(p._death_wallet_lost, 101.0,
+		"_bequeath_wallet records what moved so _respawn_at_checkpoint can toast the exact amount on the revive")
+	assert_eq(p._death_wallet_killer_name, "Test Killer",
+		"a NAMED destination makes the revive toast say who to hunt — resolved at death, not from a node that may be gone by then")
+	# The toast picks killer-vs-ground off this FLAG, never off the name: a designer may blank
+	# death_unknown_killer and an NPC ships with a blank display_name, and switching on "" would then tell the
+	# player their purse is on the ground while it is really in a killer's pocket (CLAUDE.md: display strings are
+	# never behaviour keys).
+	assert_true(p._death_wallet_to_killer,
+		"the killer branch is recorded as a BOOL, so the revive toast can never mistake an unnamed killer for a ground drop")
+	killer.free()
+	p.free()
+	_restore_respawn_state(banked)
+
+
+func test_a_dead_killer_is_not_a_holder() -> void:
+	# A corpse can't be robbed of money it never had: NpcMortality/GoreSpawner mint the loot bag from `money` at the
+	# INSTANT of death, so anything paid in afterwards is unreachable — and a pooled body stays is_instance_valid
+	# long after, until acquire() re-stamps its authored wallet and the money is simply gone. This is reachable in
+	# ordinary play: kill someone, then fall off a ledge inside kill_credit_window_ms and _resolve_killer hands that
+	# same corpse back as your killer. So a dead killer must fall THROUGH to the ground spill.
+	var banked := _bank_respawn_state()
+	GameSettings.player_feedback.death_mode = PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN
+	GameState.set_respawn(Vector3.ZERO, 0.0)
+	var p = load("res://scripts/player/player.gd").new()
+	var corpse := _PayableKiller.new()
+	corpse.alive = false
+	p.money = 101.0
+	p._bequeath_wallet(corpse)
+	assert_eq(corpse.money, 0.0,
+		"a killer that is already dead is never paid — its loot bag was minted at its own death, so the money would be unreachable")
+	assert_false(p._death_wallet_to_killer,
+		"...and the settlement falls through to the ground-spill branch instead, where 'nobody alive killed you' is the truth")
+	assert_eq(p.money, 101.0,
+		"off-tree there is nowhere to spill either, so the wallet is left alone rather than emptied into nothing")
+	corpse.free()
+	p.free()
+	_restore_respawn_state(banked)
+
+
+func test_loss_fraction_scales_what_the_killer_takes() -> void:
+	# The knob is a designer-facing OFF SWITCH as well as a dial (EconomySettings: "0 = keep it all / feature off"),
+	# and it is documented as such in AUTHORING_GUIDE. Without this, _death_wallet_loss could ignore the fraction
+	# entirely and every other test here would still pass, because they all run at the shipped 1.0.
+	var banked := _bank_respawn_state()
+	var banked_fraction: float = GameSettings.economy.death_purse_loss_fraction
+	GameSettings.player_feedback.death_mode = PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN
+	GameState.set_respawn(Vector3.ZERO, 0.0)
+
+	GameSettings.economy.death_purse_loss_fraction = 0.0
+	var p = load("res://scripts/player/player.gd").new()
+	var killer := _PayableKiller.new()
+	p.money = 101.0
+	p._bequeath_wallet(killer)
+	assert_eq(p.money, 101.0,
+		"fraction 0 is the documented OFF switch — death must take nothing at all, not silently take everything")
+	assert_eq(killer.money, 0.0,
+		"...and pay nobody, so a designer who turns the feature off really has turned it off")
+
+	GameSettings.economy.death_purse_loss_fraction = 0.5
+	p.money = 101.0
+	p._bequeath_wallet(killer)
+	assert_eq(p.money, 50.5,
+		"a partial fraction takes exactly that share of the wallet, quantized to the coin grid")
+	assert_eq(killer.money, 50.5,
+		"...and the killer receives exactly what the player lost — the fraction scales the transfer, it never mints or burns")
+
+	killer.free()
+	p.free()
+	GameSettings.economy.death_purse_loss_fraction = banked_fraction
+	_restore_respawn_state(banked)
+
+
+func test_unattributed_death_never_debits_without_a_bag_to_put_it_in() -> void:
+	# The other half of "money is moved, never burnt": with no killer the purse SPILLS on the ground as a physics
+	# MoneyBag. That spawn needs a world, so an off-tree player (this one — CLAUDE.md forbids running Player._ready
+	# in a unit test) has nowhere to put it, _death_purse_anchor returns null, and the wallet is left ALONE rather
+	# than emptied into nothing. Same guard drop_money has always had. The in-tree spill itself is playtested.
+	var banked := _bank_respawn_state()
+	GameSettings.player_feedback.death_mode = PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN
+	GameState.set_respawn(Vector3.ZERO, 0.0)
 	var p = load("res://scripts/player/player.gd").new()
 	p.money = 101.0
 	p._bequeath_wallet(null)
-	assert_eq(p.money, 50.5,
-		"a no-killer death still loses half the current zorkmids instead of skipping the penalty")
-	# The amount lost is stashed on _death_wallet_lost so the in-place respawn can pop the "Hospital bill!"
-	# toast (the loss happens at death, but the toast waits for the revive — die()'s HUD-hide would swallow it).
-	assert_eq(p._death_wallet_lost, 50.5,
-		"_bequeath_wallet records what it took so _respawn_at_checkpoint can toast the exact bill on the revive")
-	p.free()
-
-
-func test_broke_player_death_records_no_hospital_bill() -> void:
-	# A broke death takes nothing, so _death_wallet_lost stays 0 and the revive skips the toast entirely
-	# (the toast is gated on > 0). Pins the "no free-floating -0 zm toast" edge.
-	var p = load("res://scripts/player/player.gd").new()
-	p.money = 0.0
-	p._bequeath_wallet(null)
+	assert_eq(p.money, 101.0,
+		"nowhere to drop the bag -> the money stays in the wallet; we never debit before the purse is really in the world")
 	assert_eq(p._death_wallet_lost, 0.0,
-		"nothing to lose -> nothing recorded -> the in-place revive shows no Hospital bill toast")
+		"...and nothing is recorded, so the revive can never toast a loss that did not happen")
 	p.free()
+	_restore_respawn_state(banked)
+
+
+func test_reload_death_modes_settle_nothing() -> void:
+	# A RELOAD_* death rebuilds the world: the killer is reset and any dropped bag is gone, so there would be
+	# nowhere recoverable for the money to sit — and the save restores this wallet anyway. Worse, add_money's
+	# autosave flush would write the emptied wallet to the very file RELOAD_LAST_SAVE then reads back, permanently
+	# destroying it. So _death_revives_in_place() gates the WHOLE settlement (it used to gate only the hand-off,
+	# which is exactly how the money got burnt).
+	var banked := _bank_respawn_state()
+	GameSettings.player_feedback.death_mode = PlayerFeedbackSettings.DeathMode.RELOAD_LAST_SAVE
+	GameState.set_respawn(Vector3.ZERO, 0.0)
+	var p = load("res://scripts/player/player.gd").new()
+	var killer := _PayableKiller.new()
+	p.money = 101.0
+	p._bequeath_wallet(killer)
+	assert_eq(p.money, 101.0,
+		"a reload-mode death takes nothing — the reload restores this wallet, so debiting it is money burnt for nobody")
+	assert_eq(killer.money, 0.0,
+		"...and pays nobody: the killer is about to be reset by the reload, so they could never be looted for it")
+	assert_eq(p._death_wallet_lost, 0.0,
+		"nothing moved -> no revive toast (the reload rebuilds the Player anyway)")
+	killer.free()
+	p.free()
+	_restore_respawn_state(banked)
+
+
+func test_broke_player_death_settles_nothing() -> void:
+	# A broke death moves nothing, so _death_wallet_lost stays 0 and the revive skips the toast entirely
+	# (the toast is gated on > 0). Pins the "no free-floating 0 zm toast" edge.
+	var banked := _bank_respawn_state()
+	GameSettings.player_feedback.death_mode = PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN
+	GameState.set_respawn(Vector3.ZERO, 0.0)
+	var p = load("res://scripts/player/player.gd").new()
+	var killer := _PayableKiller.new()
+	p.money = 0.0
+	p._bequeath_wallet(killer)
+	assert_eq(p._death_wallet_lost, 0.0,
+		"nothing to move -> nothing recorded -> the in-place revive shows no wallet toast")
+	assert_eq(p._death_wallet_killer_name, "",
+		"...and no destination is banked either, so a broke death can't leave a stale killer name for the NEXT death to toast")
+	killer.free()
+	p.free()
+	_restore_respawn_state(banked)
 
 
 func test_player_death_to_reminder_eligible_npc_queues_holster_forgiveness_tutorial() -> void:
@@ -239,8 +408,16 @@ func test_player_death_to_reminder_eligible_npc_queues_holster_forgiveness_tutor
 	p.free()
 
 
-func test_hospital_bill_toast_formats_the_loss() -> void:
-	# The respawn toast is a single-[PH] placeholder line trailing the fractional amount via Zorkmids.fmt
-	# (mirrors chess_loss / long_range_kill). Pins the marker + format so the AI-text scrub stays consistent.
-	assert_eq(PlayerText.hospital_bill(50.5), "[PH] Hospital bill!  -50.5 zm",
-		"the death wallet-loss toast reads '[PH] Hospital bill!  -<amount> zm', one placeholder marker up front")
+func test_death_wallet_toasts_name_where_the_money_went() -> void:
+	# Both respawn toasts are single-[PH] placeholder lines carrying the amount via Zorkmids.fmt (mirrors
+	# chess_loss / long_range_kill). Pins the marker + format so the AI-text scrub stays consistent — and, more
+	# importantly, that the two DESTINATIONS read differently: the whole point of the feature is that the player
+	# is told where to go get their zorkmids back.
+	assert_eq(PlayerText.purse_taken("Test Killer", 50.5), "[PH] Robbed!  50.5 zm taken by Test Killer",
+		"the killer-took-it toast reads '[PH] Robbed!  <amount> zm taken by <killer>', one placeholder marker up front")
+	assert_eq(PlayerText.purse_dropped(50.5), "[PH] Purse dropped!  50.5 zm where you fell",
+		"the no-killer toast instead points at the GROUND, so a fall death reads as recoverable rather than as a penalty")
+	# The killer name arrives pre-masked from Player._killer_display_name, so an unintroduced NPC renders as the
+	# lowercase indefinite form. It must sit MID-sentence for that to be grammatical.
+	assert_eq(PlayerText.purse_taken("a stranger", 12.0), "[PH] Robbed!  12 zm taken by a stranger",
+		"the masked 'a stranger' fallback reads grammatically because the name never opens the sentence")

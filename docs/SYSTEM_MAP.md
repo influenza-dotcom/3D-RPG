@@ -10,7 +10,7 @@ This index is generated from `@system` annotations in the code, so it cannot dri
 For the deep narrative see [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md); for current rough edges
 see [ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md).
 
-_13 system(s), 28 entries - scanned scripts/, managers/ + resources/._
+_13 system(s), 29 entries - scanned scripts/, managers/ + resources/._
 
 - [Control-Lock And Immunity](#control-lock-and-immunity)
 - [Derived Stats](#derived-stats)
@@ -67,6 +67,14 @@ restamp_derived is the one strength/endurance re-stamp path LevelUp/PerkManager/
 - **Test:** `tests/test_player_stats.gd`
 
 ## Economy
+
+### `class Atm` - `scripts/components/atm.gd`
+
+deposit()/withdraw() are the ONLY writers of GameState.account outside LedgerAccrual; both are
+
+- **Risk:** A deposit path that does not clamp to maxf(0.0, player.money) lets a debtor mint money.
+- **Risk:** A withdraw path that does not clamp to maxf(0.0, GameState.account) opens a cash advance — and with it
+- **Test:** `tests/test_atm.gd`
 
 ### `class MoneyPurse` - `scripts/inventory/money_purse.gd`
 
@@ -128,7 +136,7 @@ _query_talk_handler is THE line-of-sight wall-gate for every look-at interactabl
 
 - **Risk:** Broaden the occlusion mask or drop the target-own-body exclusion (_interaction_occluded's collision_mask + _target_body_exclusions): silent interact-through-walls, or a dropped item self-occludes and is unpickable on open floor.
 - **Risk:** Break the closer-prop block (the _talk_distance / is_ancestor_of guard, duplicated in _unhandled_input and _update_talk_target): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
-- **Risk:** Remove the liveness bail (the `player as Character` is_alive() gate at the TOP of _unhandled_input): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic.
+- **Risk:** Remove either liveness bail (the `player as Character` is_alive() gates at the TOP of _unhandled_input AND _physics_process): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic — or the corpse camera keeps painting the hover outlines/readout and greeting NPCs it sweeps across.
 - **Risk:** Fold the per-prop throw_impulse_mult multiply INTO the throw test (launch_impulse / is_throw_release read the RAW impulse first): a fast-throw prop's gentle tap-DROP then scales past the throw threshold and silently noses, plays the throw sound, and credits the player with an attack.
 - **Test:** `tests/test_interaction_occlusion.gd` `tests/test_pickup_ray_liveness.gd` `tests/test_interact_prompts.gd` `tests/test_carry_step_over.gd` `tests/test_throw_release_policy.gd`
 

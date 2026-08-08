@@ -11,6 +11,10 @@ var current_speed: float = 0.0
 ## Player; "start with nothing" = add none. An UpgradePickup grants one at runtime by ADDING its node; a loaded
 ## save replaces the live set by id. starting_unlocks below is only an OPTIONAL string fallback (empty default). ---
 signal mechanic_unlocked(id: StringName)
+## An INSTALLED implant was switched off / back on from the Implants tab (set_mechanic_active). Relay of the
+## ability subsystem's mechanic_toggled, mirroring the mechanic_unlocked relay above. The Implants tab listens
+## for its live refresh; deliberately NOT mechanic_unlocked (that means "granted" — ChipInstaller autosaves on it).
+signal mechanic_toggled(id: StringName, active: bool)
 @export_group("Unlockable Mechanics")
 ## OPTIONAL fallback: mechanics to grant on a FRESH game WITHOUT placing an Ability node (each builds its node from
 ## the registry). Pick each from the DROPDOWN -- no more typo'd ids. PREFER dropping the ability scenes under the
@@ -32,6 +36,15 @@ var stamina: float = GameSettings.player_movement.max_stamina
 var _stamina_regen_delay_left: float = 0.0
 var _sprint_lockout_left: float = 0.0
 const STAMINA_EPS := 0.001
+
+## The zero-sum allocator, for its STAT_MIN/STAT_MAX pair ONLY — the bounds the Ledger's credit rating
+## normalizes against, so the live re-rating can never drift from the builder that produced the sheet.
+## Preloaded BY PATH (it has no class_name — the implant_choice.gd idiom).
+const StatBudgetRef := preload("res://scripts/ui/stat_budget.gd")
+## The two payment RAIL keys (GameState.payment_method). Keys, never display strings — PlayerText selects the
+## caption from these, so re-wording a rail can never change which rail a save means.
+const PAY_DEBIT := "debit"
+const PAY_CREDIT := "credit"
 
 ## XP progression (rank 29): xp accrues from kills/quests; crossing an XpSettings threshold grants skill (perk)
 ## points. `level` is XP-derived (NOT LevelUp's stat-sum total_level) and cached so a save survives an XpSettings
@@ -80,8 +93,9 @@ const GROUND_SNAP_RETRY_FRAMES := 120  ## ~2 s at 60 fps — long enough for any
 
 @export_group("First-Person Body")
 ## Show your own legs in first person (body-awareness). They reuse the NPC leg model + walk gait, rendered with
-## REAL world depth on the main camera (the gun keeps its separate view-model layer). Only legs are shown -- a
-## full torso/head would clip into the camera. Tune the offset/scale live on this node.
+## REAL world depth on the main camera (the gun keeps its separate view-model layer). Tune the offset/scale
+## live on this node. The TORSO rides this same rig (first_person_torso below); the HEAD is never shown — it
+## sits exactly where the camera is.
 @export var first_person_legs: bool = true
 ## The leg model shown in first person (defaults to the same leg mesh the NPCs use).
 @export var fp_leg_model: PackedScene = preload("res://assets/models/leg.blend")
@@ -89,6 +103,29 @@ const GROUND_SNAP_RETRY_FRAMES := 120  ## ~2 s at 60 fps — long enough for any
 @export var fp_leg_scale: float = 0.44
 ## Where the leg rig sits relative to the player origin -- lower Y drops the legs toward your feet. PLAYTEST + TUNE.
 @export var fp_leg_offset: Vector3 = Vector3(0.0, -0.55, 0.0)
+## Show your own TORSO under the camera too — look down and you see your chest, not just legs. Resolved from
+## your character-creation appearance through the SAME catalog slice the customizer uses (chosen body model;
+## a drawn shirt planar-projects untinted, else the skin tint), but BODY-ONLY: no head (it would sit inside
+## the camera) and no catalog arms (the hands are the separate view-model rig). A whole_body appearance skips
+## the FP torso — a one-piece character model can't have its head chopped off. Rides the legs rig.
+@export var first_person_torso: bool = true
+## FP-specific nudge ADDED to the catalog body's authored position (rig-local metres; the rig already hangs
+## fp_leg_offset below the camera). Tune STANDING so the shoulder line sits below the camera — crouching then
+## stays clip-safe automatically (_update_fp_torso sinks the torso by the head's own live drop). LIVE-tunable:
+## tracked every frame, so drag it in the editor's Remote inspector while playing.
+@export var fp_torso_offset: Vector3 = Vector3(0.0, -0.1, 0.0)
+## RESTING see-through of the FP torso while it's simply in view (0 = solid, the shipped look; raise it for a
+## permanent Odyssey-style ghost). The look-down fade below ADDS to this: the deeper you bury your look, the
+## more the chest would block your view of the ground, so it dissolves as it gets in the way. All of it draws
+## as a DITHERED screen-door — the retro stipple, never smooth alpha. Crouching overrides to fully hidden.
+@export_range(0.0, 1.0, 0.01) var fp_torso_transparency: float = 0.0
+## The torso starts DISSOLVING (dithering out) once your look passes this many degrees below the horizon.
+## Deliberately DEEP: the chest enters frame around ~40°, and it must read fully SOLID through that whole
+## normal look-down stretch — the dissolve begins only once you're burying the view into yourself...
+@export_range(0.0, 89.0, 0.5, "degrees") var fp_torso_fade_start_deg: float = 65.0
+## ...and is FULLY hidden by this angle (just shy of straight down, so a 100%-down look shows the ground,
+## not your chest). The band between fades it out riding the look itself — no pop.
+@export_range(0.0, 89.0, 0.5, "degrees") var fp_torso_fade_full_deg: float = 88.0
 ## Tint for both legs (WHITE = the model's own colour). Character creation will override this per-save later.
 @export var fp_leg_color: Color = Color(0.486, 0.184, 0.224)
 ## How far (degrees) the first-person legs LEAN toward the wall they're clinging to, at a full wall-climb cling.
@@ -106,7 +143,8 @@ var _fp_legs: BodyModelSwap = null
 @export var fp_arm_model: PackedScene = preload("res://assets/models/arm.blend")
 ## Uniform scale of each hand/arm.
 @export var fp_arm_scale: float = 1.0
-## Where the arm rig sits relative to the camera -- forward + down, toward where a held prop floats. TUNE.
+## Where the arm rig sits relative to the camera -- forward + down, toward where a held prop floats. This is the
+## CARRY rest; while the bare fists are up the rig rests fp_arm_unarmed_nudge away from here instead. TUNE.
 @export var fp_arm_offset: Vector3 = Vector3(0.0, -0.16, -0.4)
 ## Sideways spread of the pair (the LEFT hand's shoulder X; the RIGHT mirrors across X). Bigger = hands further apart.
 @export var fp_arm_spread: float = 0.2
@@ -119,11 +157,87 @@ var _fp_legs: BodyModelSwap = null
 ## Seconds the hands take to SLIDE up into frame on draw (and back down out of frame on stow), instead of popping
 ## in/out instantly. Paired with fp_arm_draw_rise below. 0 -> effectively instant. TUNE.
 @export var fp_arm_draw_time: float = 0.22
-## How far (m) BELOW their rest offset (fp_arm_offset) the hands start the draw and end the stow — the bottom of the
-## slide, just out of frame under the camera. Bigger = they rise from / sink to further down. TUNE with fp_arm_draw_time.
+## How far (m) BELOW the carry rest (fp_arm_offset — the LOWER of the two rests) the hands start a hidden draw and
+## end the stow — the bottom of the slide, just out of frame under the camera. Bigger = they rise from / sink to
+## further down. TUNE with fp_arm_draw_time.
 @export var fp_arm_draw_rise: float = 0.35
+## Show the SAME hands as your permanent UNARMED "weapon" — bare fists when nothing is equipped, instead of a
+## mounted weapon mesh. Off = unarmed shows nothing in first person. The punch knobs below shape the swing.
+@export var fp_arm_unarmed: bool = true
+## How the hands' REST moves off fp_arm_offset while the bare fists are up (camera-local metres). The guard's
+## geometry is counter-intuitive and was tuned by RENDERING it (the fists-frame probe, 2026-08-05): the
+## shoulders DROP (negative Y) while fp_arm_unarmed_tilt_deg swings the arms steeply up, so the fists rise into
+## the lower third FORESHORTENED — which is what actually reads as "fists close to your face". Raising Y
+## instead lifts the whole extended arm and reads as reaching into the distance (the mistake this replaces).
+## RELATIVE on purpose — re-tuning the carry rest moves both poses together. Framed so the fists FLANK the
+## crosshair just below it, aim always visible in the gap between them.
+@export var fp_arm_unarmed_nudge: Vector3 = Vector3(0.0, -0.13, 0.12)
+## Upward pitch (degrees, about the camera's X axis) of the whole rig while the bare fists are up. THE load-
+## bearing "closer" knob: at steep angles the arms FORESHORTEN and the fists swing up toward the lens — big,
+## near, knuckles-first. Shallow values (~10) read as reaching, not guarding. Zero while carrying a prop.
+## LIVE-TUNABLE: the up pose tracks this every frame (see _update_fp_arm_bob), so drag it in the editor's
+## REMOTE inspector while playing and the guard follows — same for the nudge/scale/spread knobs around it.
+@export_range(0.0, 80.0, 0.5, "degrees") var fp_arm_unarmed_tilt_deg: float = 45.0
+## Uniform scale MULTIPLIER on the arms while the bare fists are up — a final size boost on top of the
+## foreshortening. Eased at the slide's pace from _update_fp_arm_bob (never property-tweened — the setter
+## ordering would stomp punches). 1 = same size as the carry hands.
+@export_range(0.7, 2.0, 0.01) var fp_arm_unarmed_scale_mult: float = 1.15
+## Sideways spread of the fist pair while the bare fists are up (the carry hold keeps fp_arm_spread). Wider
+## than the carry reach, so the two fists read as distinct and the crosshair stays visible in the gap between
+## them. Eased alongside the scale — same setter-ordering rule, see _update_fp_arm_bob.
+@export_range(0.05, 0.5, 0.005, "suffix:m") var fp_arm_unarmed_spread: float = 0.28
+## Walk-bob travel (metres) for the bare fists — how far they trace the footstep figure-eight as you run, the
+## same motion (same phase rate, speed scaling and view_bob_enabled accessibility gate) GunPose gives every
+## mounted weapon. Fists-only: the carry hold stays planted on the held prop. 0 = rock steady.
+@export var fp_arm_unarmed_bob_pos: float = 0.007
+## Walk-bob roll (degrees): how much the fists rock left/right with each footstep. Scales with speed, like the travel.
+@export var fp_arm_unarmed_bob_roll_deg: float = 0.6
+## ASYMMETRIC walk-stride (degrees): the fists ALTERNATE — left rises as right falls, the natural arm-pump —
+## on top of the whole-rig bob, at the footstep cadence. Scales with speed like the bob; 0 = the pair moves
+## strictly together. Fists-only (the carry hold stays planted on the prop).
+@export_range(0.0, 30.0, 0.5, "degrees") var fp_arm_unarmed_stride_deg: float = 7.0
+## How fast the bob's amplitude blends in on a fists draw and back out on a stow / carry grab (per-second
+## exponential rate; higher = snappier). Also paces the walk↔idle crossfade between the bob and the breathing.
+@export var fp_arm_unarmed_bob_fade: float = 8.0
+## Idle BREATHING rise/fall (metres) for the fists while you stand still — the hands lift and settle with the
+## breath, plus a slower quarter-strength sideways drift at an offset frequency so they wander a little instead
+## of pumping like a metronome. Fades out while walking (the walk-bob takes over) and back in when you stop.
+## Runs even with View Bobbing off, exactly like the gun's breathing — micro-motion, not travel. 0 = statue hands.
+@export var fp_arm_unarmed_breath_pos: float = 0.006
+## Breathing pitch (degrees): how much the fists tip forward/back with each breath cycle.
+@export var fp_arm_unarmed_breath_deg: float = 1.0
+## Breathing pace (phase advance per second — GunPose's breath_speed idiom). Higher = quicker, more worked-up.
+@export var fp_arm_unarmed_breath_speed: float = 1.6
+## Pitch (degrees) the punching fist swings through, on top of fp_arm_rotation. Negative throws it forward/up.
+@export var fp_arm_punch_pitch: float = -35.0
+## Seconds one punch takes, start to fully settled. Must stay under the weapon's attack_speed (fists: 1.2 s) or
+## spamming attack restarts the swing before it ever completes.
+@export var fp_arm_punch_duration: float = 0.32
+## How far the punching fist THRUSTS, in camera space: -Z is forward (AWAY from the lens), -X pulls it inward
+## toward screen centre. From the steep guard the swing pitches the fist down-forward toward the crosshair.
+## Keep the reach PROPORTIONATE to the guard's rig depth (fp_arm_offset.z + fp_arm_unarmed_nudge.z, ~0.23 m
+## shipped) — an over-deep lunge can swing arm geometry through the near clip plane. After any big guard
+## retune, sanity-check a punch by eye (or re-run the frame probe) rather than trusting the numbers.
+@export var fp_arm_punch_thrust: Vector3 = Vector3(-0.03, 0.02, -0.14)
+## Amplitude shape over the punch's ELAPSED fraction (x 0 = the swing's start, x 1 = settled; y = amplitude,
+## and y BELOW zero is an anticipation pull-back). Null = a flat snap-out-then-ease with no wind-up.
+@export var fp_arm_punch_curve: Curve = preload("res://resources/tuning/punch_strike_curve.tres")
+## Auto-alternate the leading fist. OFF by default because the MOUSE picks the hand — left click throws the
+## left fist, right click the right. Turn it on only if you unbind the second attack button.
+@export var fp_arm_punch_alternate: bool = false
+## How much the NON-punching hand joins in (0 = it holds its guard, 1 = both fists swing together).
+@export var fp_arm_punch_offhand: float = 0.12
 var _fp_arms: BodyModelSwap = null
+var _unarmed_hands_up: bool = false  ## latch: the fists are up as the unarmed "weapon" (NOT the carry hold — see _refresh_unarmed_hands)
 var _fp_arm_tween: Tween = null  ## the in-flight hands slide (draw up / stow down); killed before starting a new one
+var _fp_arm_stowing: bool = false  ## a stow slide is running: FREEZE the pose ease (tilt/scale/spread) so the fists sink out AS fists instead of morphing into the carry reach on screen
+var _fp_arm_bob_mount: Node3D = null  ## camera-child wrapper the fists' walk-bob writes — the rig's OWN position stays the tweens'
+var _fp_bob_time: float = 0.0  ## footstep bob phase, advanced at GameSettings.camera.bob_speed while moving (GunPose parity)
+var _fp_bob_gate: float = 0.0  ## eased 0→1 "fists are up" amplitude gate so the bob fades in/out instead of snapping
+var _fp_breath_time: float = 0.0  ## breathing sine phase, advanced at fp_arm_unarmed_breath_speed (GunPose parity)
+var _fp_breath_t: float = 0.0  ## eased 0→1 idle-breathing blend — fades out while walking/airborne, like GunPose's
+var _fp_torso_catalog_pos: Vector3 = Vector3.ZERO  ## the catalog body's authored position — fp_torso_offset and the crouch sink ADD to it
+var _fp_head_standing_y: float = 0.0  ## Head's standing local Y, cached at rig build — the live delta below it IS the crouch drop the torso mirrors
 var _carrying: bool = false  ## true while a physics prop is held (PickupRay)
 var _holster_before_carry: bool = false  ## weapon holster state to restore when the prop is dropped
 ## The BACKPACK item currently pulled out into your hands via the hotbar's "hold" action (Player.hold_item), or
@@ -138,6 +252,18 @@ var _held_inv_prop: Node3D = null  ## the world node spawned for _held_inv_item,
 ## prior `destructible` flag is restored when you drop/throw it, so a released prop is destructible again in the world.
 var _held_inv_throwable: Throwable = null
 var _held_inv_prev_destructible: bool = true
+## True while the prop in your hands is the weapon H pulled OUT OF YOUR OWN HOLSTER (hold_equipped_weapon), as
+## opposed to a hotbar-pulled bag prop or a world-grabbed crate. It makes the H verb a real TOGGLE on your own
+## weapon: the second press RE-WIELDS the knife instead of dropping it on the floor (see
+## return_held_weapon_to_hands + the re-draw at the end of stash_held_item). Cleared on every carry-end path —
+## the put-back itself, and a genuine drop/throw/prop-freed release (_on_carry_changed). Runtime-only.
+var _held_from_weapon_slot: bool = false
+## Up for the span of a put-back that immediately REWIELDS the weapon (stash_held_item, the H toggle's second
+## stage): armed before the carry release, dropped once the rewield's equip request has gone out. While armed,
+## _unarmed_hands_wanted() refuses — the release's synchronous holster restore reads "FISTS equipped, unholstered"
+## (the real weapon is only re-equipped afterwards), and without this the bare fists rise into the weapon's own
+## re-draw. Never armed by a genuine drop/throw or a non-weapon stash, so the carry→fists handoff stays seamless.
+var _rewield_in_flight: bool = false
 
 @export_group("Audio")
 ## The ONE-SHOTS (bowling / jump / land) play through AudioManager.play_sfx — a fresh self-freeing spatial player
@@ -213,6 +339,11 @@ var _shadow_rest_local: Transform3D  ## the decal's authored local transform (pr
 var _shadow_wall_blend: float = 0.0  ## 0 = grounded (down), 1 = fully projected onto the climbed wall
 
 var _was_on_floor: bool = false
+## The last spot we were actually STANDING on. Sole consumer: the unclaimed-death purse spill
+## (_death_purse_anchor), where it is the anchor for the one death that has no floor under it — a long fall. The
+## ledge you walked off is the place a player goes back to look, so that is where the money waits.
+var _last_grounded_position: Vector3 = Vector3.ZERO
+var _has_last_grounded: bool = false   ## false until we touch floor once, so a never-grounded death falls through to the next rung
 var _continuous_fall_time: float = 0.0
 var input_dir: Vector2 = Vector2.ZERO
 var _step_assist_launch_block_timer: float = 0.0
@@ -366,26 +497,27 @@ func _enter_tree() -> void:
 	bunnyhop.character = self
 	mouse_input.player = self
 
-## Build the first-person "legs" rig: a BodyModelSwap configured legs-ONLY (no body/head/arms -- those would clip
-## the camera at head height), parented to the Player so it reads our `velocity` / `is_on_floor()` for the walk
-## gait and inherits body yaw (not camera pitch, which lives on Head). Rendered on the default layer with real
-## depth, so looking down shows your legs and world geometry occludes them correctly. The gun's separate
-## view-model layer is untouched. Per-leg hip pose comes from the shipped NPC rig; the whole rig's drop is the
-## tunable `fp_leg_offset`.
+## Build the first-person BODY rig (legs + optional torso, never a head): a BodyModelSwap parented to the
+## Player so it reads our `velocity` / `is_on_floor()` for the walk gait and inherits body yaw (not camera
+## pitch, which lives on Head). Rendered on the default layer with real depth, so looking down shows your own
+## body and world geometry occludes it correctly. The gun's separate view-model layer is untouched. Per-leg
+## hip pose comes from the shipped NPC rig; the whole rig's drop is the tunable `fp_leg_offset`; the torso is
+## stamped by _configure_fp_torso and crouch-follows in _update_fp_torso.
 func _build_first_person_legs() -> void:
-	if not first_person_legs or fp_leg_model == null:
+	if (not first_person_legs or fp_leg_model == null) and not first_person_torso:
 		return
 	var legs := BodyModelSwap.new()
 	legs.name = "FirstPersonLegs"
-	legs.casts_shadow = false  # FP legs would cast a shadow from under the camera — looks wrong; suppress it
-	legs.leg_model = fp_leg_model
+	legs.casts_shadow = false  # FP body would cast a shadow from under the camera — looks wrong; suppress it
+	legs.leg_model = fp_leg_model if first_person_legs else null  # torso can show without legs, and vice versa
 	legs.leg_scale = fp_leg_scale
 	legs.leg_position = Vector3(0.095, -0.265, -0.02)  # per-leg hip offset, from scenes/enemies/enemy.tscn
 	legs.leg_rotation = Vector3(0.0, -90.0, 0.0)
-	# Tint the first-person legs with the character customizer's chosen LEG colour so the ONE body part you actually
-	# see in first person (looking down) reflects your customisation — falling back to the authored fp_leg_color when
-	# un-customised. COLOUR ONLY: never run the catalog's configure_swap here (it would add a body + head to this
-	# legs-only rig and clip the camera). See CharacterAppearanceCatalog / [[character customizer]].
+	# Tint the first-person legs with the character customizer's chosen LEG colour so the body parts you actually
+	# see in first person (looking down) reflect your customisation — falling back to the authored fp_leg_color when
+	# un-customised. Never run the catalog's whole configure_swap here — it would also mount a HEAD, which sits
+	# exactly where the camera is. The torso gets the catalog's body-only slice in _configure_fp_torso instead.
+	# See CharacterAppearanceCatalog / [[character customizer]].
 	legs.leg_color = _appearance_fp_color("leg", fp_leg_color)
 	legs.animate_legs = true
 	legs.legs_follow_movement = true
@@ -395,6 +527,14 @@ func _build_first_person_legs() -> void:
 	add_child(legs)
 	legs.position = fp_leg_offset
 	_fp_legs = legs
+	if head != null:
+		_fp_head_standing_y = head.position.y  # built in _ready, before any crouch — this IS the standing Y
+	_configure_fp_torso(legs)
+	if legs.leg_model == null and legs.body_model == null:
+		# Nothing resolved (legs off + a whole_body / catalog-less look): don't tick an empty rig for the whole
+		# life of the Player — free it and let the FP body simply be absent.
+		legs.queue_free()
+		_fp_legs = null
 
 ## Build the first-person HANDS (a mirrored arm pair) for carrying objects: a BodyModelSwap parented to the CAMERA
 ## and forced onto the view-model render layer so the gun's dedicated camera draws it over the world with no wall
@@ -413,14 +553,102 @@ func _build_first_person_arms() -> void:
 	arms.arm_position = Vector3(fp_arm_spread, 0.0, 0.0)  # LEFT shoulder offset; the RIGHT arm mirrors across X
 	arms.arm_rotation = fp_arm_rotation
 	arms.arm_color = _appearance_fp_color("arm", fp_arm_color)  # carry-hands reflect the customizer's ARM colour (colour only — see the FP-legs note)
-	camera_effects.add_child(arms)
+	# Punch shaping. These ride the SAME rig, because unarmed reuses the carry hands rather than mounting a
+	# copy under the gun: that is what keeps the fists on the character's arm colour, centred on the camera
+	# instead of offset to the gun's side, and out of the holster park's 45° tip.
+	arms.arm_strike_pitch = fp_arm_punch_pitch
+	arms.arm_strike_duration = fp_arm_punch_duration
+	arms.arm_strike_thrust = fp_arm_punch_thrust
+	arms.arm_strike_curve = fp_arm_punch_curve
+	arms.arm_strike_alternate = fp_arm_punch_alternate
+	arms.arm_strike_offhand_scale = fp_arm_punch_offhand
+	# Mount the rig on a dedicated bob node: _update_fp_arm_bob writes the MOUNT's transform each frame while the
+	# draw/stow tweens own the rig's own position, so the two never fight over a single property.
+	var bob_mount := Node3D.new()
+	bob_mount.name = "FirstPersonArmsBobMount"
+	camera_effects.add_child(bob_mount)
+	bob_mount.add_child(arms)
 	arms.position = fp_arm_offset
 	arms.visible = false  # hands appear only while carrying an object
 	_fp_arms = arms
+	_fp_arm_bob_mount = bob_mount
+	# The WEAPON look on your bare hands: the same GunVisuals dress pass every view model gets — shadows off,
+	# rim light chained per-surface (or onto the tint override), black inverted-hull outline — so the fists
+	# read as first-class view-model gear beside an outlined gun, for the carry hold and the guard alike.
+	# Code-built child; tune its rim/outline live on the Remote tree (FirstPersonArms/FistVisuals).
+	var visuals := GunVisuals.new()
+	visuals.name = "FistVisuals"
+	visuals.host = arms  # duck-typed: the rig exposes no `layers`, so meshes keep the view-model layer it forced
+	# Probe-calibrated for the fists: the gun's 0.02 default is SUB-PIXEL at fist distance (invisible), ~2
+	# draws a clean one-edge comic outline, ~8 shatters the hull into shards. Set BEFORE add_child — _ready
+	# bakes it into the shared outline material.
+	visuals.outline_width = 2.0
+	arms.add_child(visuals)  # _ready builds the shared rim/outline materials...
+	visuals.dress(arms)  # ...then the dress stamps them onto the already-instanced arm pair
 	# Drive show/hide off the carry ray. The PickupRay lives under the camera (Head/ScreenShake/Camera3D/RayCast).
 	var ray := camera_effects.get_node_or_null(^"RayCast") as PickupRay
 	if ray != null and not ray.carry_changed.is_connected(_on_carry_changed):
 		ray.carry_changed.connect(_on_carry_changed)
+
+## Stamp the player's OWN torso onto the FP body rig — the catalog's BODY slice only (the same resolution
+## configure_swap runs for the customizer/portrait: chosen body model + authored transform; a player-DRAWN
+## shirt planar-projects UNTINTED, else the skin colour tints the body) — deliberately without the head (it
+## sits exactly where the camera is) or the catalog arms (the hands are the separate view-model rig). Skips
+## whole_body appearances: a one-piece character model can't have its head chopped off, so those stay
+## legs-only. body_model is set LAST so the rig rebuilds once with everything above already stamped.
+func _configure_fp_torso(rig: BodyModelSwap) -> void:
+	if not first_person_torso:
+		return
+	var catalog := CharacterAppearanceCatalog.get_catalog()
+	if catalog == null:
+		return
+	var body := catalog.body_option(String(appearance.get("body", "")))
+	if body == null:
+		body = catalog.default_body()
+	if body == null or body.whole_body:
+		return
+	var shirt := catalog.shirt_texture(appearance)
+	rig.body_model_scale = body.scale
+	# +180 yaw on the catalog rotation: body options are authored to face the NPC's +Z forward (see
+	# body_model_rotation's own doc), but the player faces -Z — without the flip you wear the torso backwards.
+	rig.body_model_rotation = body.rotation + Vector3(0.0, 180.0, 0.0)
+	rig.body_texture_planar = shirt != null  # BEFORE body_texture — the texture setter reads the projection mode
+	rig.body_texture = shirt if shirt != null else body.texture
+	var skin: Variant = appearance.get("skin")
+	rig.body_color = Color.WHITE if shirt != null else (skin if skin is Color else catalog.default_skin_color)
+	_fp_torso_catalog_pos = body.position
+	rig.body_model_position = _fp_torso_catalog_pos + fp_torso_offset
+	rig.body_model = body.model
+	# The rig's default breathe stays ON deliberately: the chest pulses gently (±3% scale, the NPC torso's
+	# idle breath) — it pairs with the fists' breathing sway, and the pulse sits well inside the probed
+	# near-clip margin. Set legs.breathe = false here if a dead-still chest is ever wanted.
+
+## Keep the FP torso glued to its authored rest + the LIVE fp_torso_offset (Remote-inspector tunable) and sunk
+## by the head's CURRENT drop below its standing height — so chest-to-eye spacing stays constant while the
+## camera lowers. Crouching ALSO fades the torso out entirely (dithered, riding the already-eased crouch_t)
+## and back in on stand: crouched, your chest would fill the whole lowered view, so it hides for your ease of
+## viewing; the resting state keeps fp_torso_transparency's see-through. Epsilon-skipped writes throughout.
+func _update_fp_torso() -> void:
+	if not first_person_torso or not is_instance_valid(_fp_legs) or _fp_legs.body_model == null:
+		return
+	var sink := 0.0
+	if head != null:
+		sink = maxf(0.0, _fp_head_standing_y - head.position.y)
+	var target := _fp_torso_catalog_pos + fp_torso_offset - Vector3(0.0, sink, 0.0)
+	if _fp_legs.body_model_position.distance_squared_to(target) > 0.000001:
+		_fp_legs.body_model_position = target
+	# LOOK-DOWN dissolve: solid (well, fp_torso_transparency) while merely in view, dithering progressively
+	# out as the look buries past the fade band, fully hidden just shy of straight down — the chest gets out
+	# of the way exactly when it would block what you're looking at. Head owns the look pitch (rotate_x;
+	# negative = down). Crouching then overrides toward fully hidden regardless.
+	var down_deg := (maxf(0.0, -head.rotation_degrees.x) if head != null else 90.0)
+	var fade := clampf(
+		inverse_lerp(fp_torso_fade_start_deg, maxf(fp_torso_fade_full_deg, fp_torso_fade_start_deg + 0.1), down_deg),
+		0.0, 1.0)
+	var see := lerpf(fp_torso_transparency, 1.0, fade)
+	see = lerpf(see, 1.0, crouch.crouch_t if crouch != null else 0.0)
+	if absf(_fp_legs.body_transparency - see) > 0.002:
+		_fp_legs.body_transparency = see
 
 ## The customizer's chosen colour for a first-person limb (`&"arm"` / `&"leg"`) from the mirrored appearance dict,
 ## or `fallback` (the authored fp_*_color) when un-customised or the stored value isn't a Colour. Keeps the FP
@@ -444,6 +672,7 @@ func _on_carry_changed(holding: bool) -> void:
 		_restore_held_prop_destructible()
 		_held_inv_item = null
 		_held_inv_prop = null
+		_held_from_weapon_slot = false  # it's on the floor / in flight now — the H toggle has nothing left to put back
 	# WEAPON STATE first, and INDEPENDENT of whether the cosmetic FP-arms rig was built (first_person_arms off / no
 	# camera / no model). Carrying always puts the gun away and LOCKS it there; dropping unlocks and restores the
 	# pre-carry holster. Kept ABOVE the _fp_arms guard so the lock can never get stuck if the arms rig is absent or
@@ -479,33 +708,136 @@ func _on_carry_changed(holding: bool) -> void:
 		if _dying or _dead:
 			_kill_fp_arm_tween()
 			_fp_arms.visible = false
+			_unarmed_hands_up = false
+		elif _unarmed_hands_wanted():
+			# UNARMED: these are the same hands. Don't stow them — they simply stop holding a prop and become
+			# your fists, so the transition is seamless instead of a stow followed immediately by a re-draw.
+			_unarmed_hands_up = true
+			_ease_fp_arms_to_rest()  # ...but the fists REST closer than the carry hold — pull them into the guard
 		else:
+			_unarmed_hands_up = false
 			_slide_fp_arms(false)
 
 ## Slide the first-person carry hands into frame (into_view true) or out of it (false) with a vertical tween, so they RISE into
-## view on draw and LOWER back out on stow rather than popping. Rest is fp_arm_offset; the hands travel between it
-## and fp_arm_draw_rise metres below it. On hide the arms switch off only once they've slid all the way down (a
-## tween_callback), so you never catch them vanishing mid-frame. Any in-flight slide is killed first so a fast
-## grab/drop can't leave two tweens fighting over the position. No-op with no arms rig.
+## view on draw and LOWER back out on stow rather than popping. Rest is _fp_arm_rest() — the carry hold, or the
+## closer unarmed guard while the fists are up. The out-of-frame bottom is always anchored fp_arm_draw_rise below
+## the LOWER (carry) rest, so a stow fully exits frame no matter which rest the hands left from. A draw only
+## RESETS to that bottom when the rig is currently hidden — hands already on screen (the carry→fists handoff,
+## where the synchronous holster-restore refresh lands here, or a mid-stow re-draw) tween from where they are,
+## so they never teleport off-frame mid-view. On hide the arms
+## switch off only once they've slid all the way down (a tween_callback), so you never catch them vanishing
+## mid-frame. Any in-flight slide is killed first so a fast grab/drop can't leave two tweens fighting over the
+## position. No-op with no arms rig.
 func _slide_fp_arms(into_view: bool) -> void:
 	if not is_instance_valid(_fp_arms):
 		return
 	_kill_fp_arm_tween()
-	var rest := fp_arm_offset  # read live so an inspector tune of the rest offset is honoured
+	var rest := _fp_arm_rest()  # read live so an inspector tune of the rest offsets is honoured
 	var low := fp_arm_offset - Vector3(0.0, fp_arm_draw_rise, 0.0)
 	if into_view:
-		_fp_arms.position = low  # start just out of frame...
+		_fp_arm_stowing = false
+		if not _fp_arms.visible:
+			_fp_arms.position = low  # hidden: start just out of frame...
+			_fp_arms.rotation_degrees.x = 0.0  # ...untilted, so the guard's pitch reads as part of the raise...
+			_fp_arms.arm_scale = fp_arm_scale  # ...and at the carry baseline, so a guard draw GROWS in (and a death mid-guard can't leak the guard scale into the next carry draw)
+			_fp_arms.arm_position = Vector3(fp_arm_spread, 0.0, 0.0)  # same for the guard's wider fist spread
 		_fp_arms.visible = true
 		_fp_arm_tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 		_fp_arm_tween.tween_property(_fp_arms, ^"position", rest, fp_arm_draw_time)  # ...rise to rest
+		_fp_arm_tween.parallel().tween_property(_fp_arms, ^"rotation_degrees:x", _fp_arm_rest_tilt(), fp_arm_draw_time)  # tipping up into the guard (0 for the carry hold)
 	else:
+		# Stow: sink in the CURRENT pose. No tilt/scale/spread retarget here and the per-frame pose ease is
+		# frozen (_fp_arm_stowing) — the latch has already flipped to the next mode, and easing toward it
+		# while still on screen morphed the sinking fists into the flat carry reach for a beat (the reported
+		# "holding-items arm flash" on holster). The next draw's hidden-reset re-poses from scratch.
+		_fp_arm_stowing = true
 		_fp_arm_tween = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_CUBIC)
 		_fp_arm_tween.tween_property(_fp_arms, ^"position", low, fp_arm_draw_time)  # sink from wherever it is...
 		_fp_arm_tween.tween_callback(_hide_fp_arms)  # ...then switch off, fully out of frame
 
+## The hands' current rest offset: the carry hold (fp_arm_offset), or — while the bare fists are the thing on
+## screen — that hold nudged up toward the lens (fp_arm_unarmed_nudge) so the fists frame as a raised guard.
+## Keyed on the _unarmed_hands_up latch, which every caller settles BEFORE sliding.
+func _fp_arm_rest() -> Vector3:
+	return fp_arm_offset + fp_arm_unarmed_nudge if _unarmed_hands_up else fp_arm_offset
+
+## The rig's rest pitch (degrees about the camera's X axis): tipped up into the guard while the bare fists are
+## up, flat for the carry hold. Same latch key as _fp_arm_rest, settled by every caller before sliding.
+func _fp_arm_rest_tilt() -> float:
+	return fp_arm_unarmed_tilt_deg if _unarmed_hands_up else 0.0
+
+## The arms' rest scale: the authored carry scale, multiplied up while the bare fists are up so they read
+## bigger/closer without the rig moving into the near plane. Same latch key as the other _fp_arm_rest_* helpers.
+func _fp_arm_rest_scale() -> float:
+	return fp_arm_scale * fp_arm_unarmed_scale_mult if _unarmed_hands_up else fp_arm_scale
+
+## The fist pair's rest spread (the LEFT shoulder X; the right mirrors): wider for the guard so the fists read
+## distinct and never cover the crosshair, the authored carry spread otherwise. Same latch key as the others.
+func _fp_arm_rest_spread() -> float:
+	return fp_arm_unarmed_spread if _unarmed_hands_up else fp_arm_spread
+
+## Ease the already-visible hands to their current rest WITHOUT the full off-frame draw slide — the carry→fists
+## handoff, where the rig stays on screen but the fists' guard rests closer to the lens than the carry hold it
+## just left. Also retargets (harmlessly, same destination) any draw slide the holster-restore refresh started.
+func _ease_fp_arms_to_rest() -> void:
+	if not is_instance_valid(_fp_arms):
+		return
+	_kill_fp_arm_tween()
+	_fp_arm_stowing = false
+	_fp_arms.visible = true
+	_fp_arm_tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	_fp_arm_tween.tween_property(_fp_arms, ^"position", _fp_arm_rest(), fp_arm_draw_time)
+	_fp_arm_tween.parallel().tween_property(_fp_arms, ^"rotation_degrees:x", _fp_arm_rest_tilt(), fp_arm_draw_time)
+
+## True when the bare fists should be up: nothing but the FISTS fallback equipped, not carrying a prop (those
+## are the SAME hands, driven by the carry slide), not holstered, alive, and no REAL weapon mid-draw.
+##
+## Compared by resource identity first with a resource_path fallback — the same test
+## CharacterInspectScreen._is_unarmed_fallback uses, because a duplicated resource still means "unarmed".
+func _unarmed_hands_wanted() -> bool:
+	if not fp_arm_unarmed or _carrying or _dying or _dead:
+		return false
+	# A REAL weapon is mid-draw: the H put-back reads "FISTS equipped, unholstered" for the beat between the
+	# carry release and its rewield landing (Attack's swap unholsters BEFORE it swaps the weapon hub), and the
+	# fists would flash up into the weapon's own raise. _rewield_in_flight spans stash_held_item's
+	# release→equip call; the BACKPACK's optimistic equipped_item (set before the combat inventory switches,
+	# and held through a request QUEUED behind a mid-flight swap) covers the draw until equipped_weapon stops
+	# reading FISTS. Neither is ever set on a genuine drop/throw — that handoff still raises the fists below.
+	if _rewield_in_flight or (inventory != null and inventory.equipped_item != null):
+		return false
+	if weapon_system == null or not is_instance_valid(_fp_arms):
+		return false
+	var wd: WeaponData = weapon_system.inventory.equipped_weapon if weapon_system.inventory != null else null
+	if wd == null or not (wd == FISTS or wd.resource_path == FISTS.resource_path):
+		return false
+	return weapon_system.attack == null or not weapon_system.attack.holstered
+
+## Bring the bare fists up / put them away to match the current weapon + holster + carry state. Latched on
+## _unarmed_hands_up rather than on `visible`, because during the stow slide the rig is still visible for the
+## length of the tween — comparing against `visible` would re-fire the slide every time this is called.
+func _refresh_unarmed_hands() -> void:
+	if not is_instance_valid(_fp_arms):
+		return
+	var want := _unarmed_hands_wanted()
+	if want == _unarmed_hands_up:
+		return
+	_unarmed_hands_up = want
+	_slide_fp_arms(want)
+
+## Punch: throw the fists' own strike. Gated on the fists actually being the thing on screen — while CARRYING,
+## the same rig is holding a prop and must not swing, and with a real weapon out the gun's recoil is the swing.
+func _on_attack_play_animation() -> void:
+	if not (_unarmed_hands_up and is_instance_valid(_fp_arms)):
+		return
+	# Which fist threw it: the ALT button (right click) leads with the RIGHT hand, the primary with the LEFT.
+	# Attack banks the button on the swing that actually got through its gates, so a refused click never poses
+	# the arms. -1 = right, +1 = left (see BodyModelSwap.strike).
+	_fp_arms.strike(-1.0 if weapon_system.attack.last_attack_alt else 1.0)
+
 ## Switch the FP carry hands off — the tail of the stow slide (a tween_callback), fired only once they're fully out
 ## of frame. A bound method Callable (NOT a lambda) so a freed player never fires a dangling capture.
 func _hide_fp_arms() -> void:
+	_fp_arm_stowing = false  # the stow finished — pose easing may resume (the next draw re-poses from hidden anyway)
 	if is_instance_valid(_fp_arms):
 		_fp_arms.visible = false
 
@@ -514,6 +846,101 @@ func _kill_fp_arm_tween() -> void:
 	if _fp_arm_tween != null and _fp_arm_tween.is_valid():
 		_fp_arm_tween.kill()
 	_fp_arm_tween = null
+
+func _process(delta: float) -> void:
+	_update_fp_arm_bob(delta)
+	_update_fp_torso()
+
+## Per-frame procedural motion for the bare fists: the footstep walk-bob GunPose gives every mounted weapon
+## (cos-half-rate X / sin-full-rate Y / half-rate roll, phase advanced at GameSettings.camera.bob_speed, scaled
+## by run speed, climbing counting as walking, behind the view_bob_enabled accessibility toggle) CROSSFADED with
+## an idle BREATHING sway while you stand still (GunPose's breath envelope + a slight lateral hand-wander).
+## Needed for the same reason GunPose exists: the rig is a CHILD of the camera, so it inherits the head-bob and
+## reads glued to the screen without its own counter-motion. Written onto the rig's dedicated MOUNT, never the rig — the
+## draw/stow tweens own the rig's position, and the two must not fight over one property. Fists-only by design
+## (the carry hold stays planted on the held prop): amplitude rides a gate eased at fp_arm_unarmed_bob_fade on
+## _unarmed_hands_up — so a carry grab fades the bob out through the hand-off (a sub-millimetre remnant decays
+## over the first second) rather than snapping — and once the gate fully closes the mount parks exactly at zero.
+func _update_fp_arm_bob(delta: float) -> void:
+	# GUARD SCALE, eased per-frame from HERE rather than tweened. Deliberate ordering fix: a property tween's
+	# setter runs AFTER node _process each frame, and BodyModelSwap.arm_scale's setter re-poses the arms to
+	# REST — so a tween stomped any punch whose strike envelope overlapped a slide. Player._process runs
+	# BEFORE its descendant rig's _process (parents first), so easing from here lets the strike path re-pose
+	# a mid-punch arm afterwards, every frame. Rate is derived from fp_arm_draw_time (~settled in one slide),
+	# and converged scale skips the write entirely so a steady-state punch is never touched at all.
+	if is_instance_valid(_fp_arms) and not _fp_arm_stowing:
+		var pace := 1.0 - exp(-delta * 3.0 / maxf(fp_arm_draw_time, 0.01))
+		var scale_target := _fp_arm_rest_scale()
+		if absf(_fp_arms.arm_scale - scale_target) > 0.0005:
+			_fp_arms.arm_scale = lerpf(_fp_arms.arm_scale, scale_target, pace)
+		# The guard's wider fist spread, eased under the same ordering rule (arm_position's setter also re-poses).
+		var spread_target := _fp_arm_rest_spread()
+		if absf(_fp_arms.arm_position.x - spread_target) > 0.0005:
+			_fp_arms.arm_position = Vector3(lerpf(_fp_arms.arm_position.x, spread_target, pace), 0.0, 0.0)
+		# Rest position + tilt track their exports CONTINUOUSLY while the hands are on screen and no slide is
+		# in flight (a live tween owns the transform during draw/stow). This is what makes the pose knobs
+		# LIVE-tunable from the editor's Remote inspector mid-game — drag fp_arm_unarmed_* and the guard
+		# follows — and it converges to the same rest the slide would have landed on, so it is invisible in
+		# normal play (epsilon-skipped once settled).
+		if _fp_arms.visible and (_fp_arm_tween == null or not _fp_arm_tween.is_valid()):
+			var rest := _fp_arm_rest()
+			if _fp_arms.position.distance_squared_to(rest) > 0.000001:
+				_fp_arms.position = _fp_arms.position.lerp(rest, pace)
+			var tilt := _fp_arm_rest_tilt()
+			if absf(_fp_arms.rotation_degrees.x - tilt) > 0.01:
+				_fp_arms.rotation_degrees.x = lerpf(_fp_arms.rotation_degrees.x, tilt, pace)
+	if not is_instance_valid(_fp_arm_bob_mount):
+		return
+	var want := 1.0 if (_unarmed_hands_up and is_instance_valid(_fp_arms) and _fp_arms.visible) else 0.0
+	_fp_bob_gate = lerpf(_fp_bob_gate, want, 1.0 - exp(-fp_arm_unarmed_bob_fade * delta))
+	if _fp_bob_gate < 0.001:
+		_fp_arm_bob_mount.position = Vector3.ZERO
+		_fp_arm_bob_mount.rotation_degrees = Vector3.ZERO
+		if is_instance_valid(_fp_arms) and absf(_fp_arms.arm_stride_deg) > 0.01:
+			_fp_arms.arm_stride_deg = 0.0  # park the arm-pump too — the carry hold's hands stay planted
+		return
+	var horizontal_speed := Vector2(velocity.x, velocity.z).length()
+	# Climbing counts as walking for the bob (vertical motion while scaling a wall) — the GunPose parity rule.
+	var climbing := is_climbing()
+	if climbing:
+		horizontal_speed = maxf(horizontal_speed, absf(velocity.y))
+	var moving := horizontal_speed > GameSettings.player_movement.footstep_min_horizontal_speed
+	var factor := 0.0
+	if Settings.view_bob_enabled and (is_on_floor() or climbing) and moving:
+		_fp_bob_time += delta * GameSettings.camera.bob_speed
+		factor = clampf(horizontal_speed / GameSettings.player_movement.max_speed, 0.0, 1.0)
+	else:
+		_fp_bob_time = lerpf(_fp_bob_time, 0.0, 1.0 - exp(-10.0 * delta))  # ease the phase home, as GunPose does
+	var amp := factor * _fp_bob_gate
+	# BREATHING — the idle half of the motion, GunPose's exact envelope (sin Y + half-rate pitch, fading out
+	# while moving or airborne so the walk-bob takes over), plus a slower quarter-strength lateral drift at an
+	# offset frequency so the hands wander organically instead of pumping like a metronome. Deliberately NOT
+	# behind view_bob_enabled: the gun breathes with bobbing off too — comfort-safe micro-motion, not travel.
+	var idle_target := 0.0 if (moving or not is_on_floor()) else 1.0
+	_fp_breath_t = lerpf(_fp_breath_t, idle_target, 1.0 - exp(-fp_arm_unarmed_bob_fade * delta))
+	_fp_breath_time += delta * fp_arm_unarmed_breath_speed
+	var breath := _fp_breath_t * _fp_bob_gate
+	var breath_x := sin(_fp_breath_time * 0.63) * fp_arm_unarmed_breath_pos * 0.25 * breath
+	var breath_y := sin(_fp_breath_time) * fp_arm_unarmed_breath_pos * breath
+	var breath_pitch := sin(_fp_breath_time * 0.5) * fp_arm_unarmed_breath_deg * breath
+	var target_pos := Vector3(
+		cos(_fp_bob_time * 0.5) * fp_arm_unarmed_bob_pos * amp + breath_x,
+		sin(_fp_bob_time) * fp_arm_unarmed_bob_pos * amp + breath_y,
+		0.0)
+	var target_rot := Vector3(breath_pitch, 0.0, sin(_fp_bob_time * 0.5) * fp_arm_unarmed_bob_roll_deg * amp)
+	# ASYMMETRIC stride: ± pitch on the arm PAIR (left +, right − inside the rig) at the half-rate footstep
+	# cadence — one full left-right alternation per two footfalls, the natural arm-pump. Written through the
+	# rig's arm_stride_deg setter under the arm_scale ordering idiom (our write lands before the rig's strike
+	# re-pose, so punches stay authoritative over a mid-walk swing).
+	if is_instance_valid(_fp_arms):
+		var stride_target := sin(_fp_bob_time * 0.5) * fp_arm_unarmed_stride_deg * amp
+		if absf(_fp_arms.arm_stride_deg - stride_target) > 0.01:
+			_fp_arms.arm_stride_deg = stride_target
+	# Smooth toward the target (GunPose's motion_smooth-default feel) so a hard stop mid-stride settles instead
+	# of snapping the fists to dead centre.
+	var s := 1.0 - exp(-10.0 * delta)
+	_fp_arm_bob_mount.position = _fp_arm_bob_mount.position.lerp(target_pos, s)
+	_fp_arm_bob_mount.rotation_degrees = _fp_arm_bob_mount.rotation_degrees.lerp(target_rot, s)
 
 ## The character's chosen name, from character creation (mirrors GameState.player_name). Display-only — the Stats
 ## screen shows it; the save's source of truth is GameState.player_name. "" for an unnamed / older character.
@@ -543,6 +970,7 @@ func _ready() -> void:
 	_discover_abilities()  # register editor-placed Ability children BEFORE the seed/load so they aren't duplicated
 	if GameState.loaded:
 		set_unlocks(GameState.unlocks)  # restore the saved mechanic set (replaces the fresh-game seed wholesale)
+		set_disabled_unlocks(GameState.disabled_unlocks)  # then the switched-OFF implants: built if missing, kept installed-but-off
 		_restore_perks()  # re-record the saved perk ledger (bonuses + abilities already restored via stats + unlocks)
 		xp = GameState.xp
 		level = GameState.level
@@ -554,8 +982,17 @@ func _ready() -> void:
 		# debt together). Apply them here or the never-granted chips would be silently ERASED by the first
 		# autosave's capture() (which rebuilds GameState.unlocks from the live ability set). A bare/dev boot
 		# (empty unlocks) still takes the plain fresh-game seed.
-		if not GameState.unlocks.is_empty():
+		# The pre-boot implant set spans BOTH lists. `unlocks` is only the ACTIVE projection, so a run whose
+		# implants are ALL switched off (Implants tab) carries an EMPTY unlocks and a populated
+		# disabled_unlocks — and this branch IS reached mid-run, not just at New Game: `loaded` stays false
+		# for a whole New-Game session, and Options -> Main Menu -> Continue re-enters _ready without any
+		# disk load. Gating on unlocks alone sent that run to _seed_unlocks() (which grants nothing —
+		# starting_unlocks ships empty), UNINSTALLING the implants; the next autosave then rebuilt both
+		# lists from the empty live set and erased them from disk, with the paid-for chips already consumed.
+		var has_profile_implants := not GameState.unlocks.is_empty() or not GameState.disabled_unlocks.is_empty()
+		if has_profile_implants:
 			set_unlocks(GameState.unlocks)
+			set_disabled_unlocks(GameState.disabled_unlocks)  # ...then re-disable the switched-off ones (builds their nodes first)
 		else:
 			_seed_unlocks()  # grant the fresh-game mechanics (a loaded save replaces this set via set_unlocks)
 		# Seed the default respawn point (this spawn) the first time, so a death before reaching any bonfire still
@@ -641,6 +1078,18 @@ func _ready() -> void:
 	add_child(_dialogue)
 	# Holster: hide the gun mesh whenever Attack reports holstered (hold-R toggle / dialogue).
 	weapon_system.attack.holster_changed.connect(_dialogue.on_weapon_holstered)
+	# UNARMED HANDS: the bare fists are the SAME rig as the carry hands, so they follow the same three state
+	# changes — putting the weapon away, swapping to/from a real weapon, and picking a prop up or dropping it
+	# (that last one is handled inside _on_carry_changed). Punching drives the rig's own strike.
+	weapon_system.attack.holster_changed.connect(func(_on: bool) -> void: _refresh_unarmed_hands())
+	weapon_system.attack.swap_finished.connect(_refresh_unarmed_hands)
+	weapon_system.attack.play_animation.connect(_on_attack_play_animation)
+	# TWO-FISTED input: left click throws the LEFT fist, right click the RIGHT. MouseInput polls the second
+	# button; Attack refuses it for anything that isn't a punch weapon, so right-click stays ADS for guns.
+	if mouse_input != null:
+		weapon_system.attack.alt_attack_action = mouse_input.alt_attack_action
+		mouse_input.alt_attack.connect(weapon_system.attack._on_mouse_input_attack.bind(false, true))
+	_refresh_unarmed_hands.call_deferred()  # deferred so the inventory has equipped its first weapon
 	# Put the weapon away for conversations (restored on finish), reusing the holster.
 	DialogueManager.dialogue_started.connect(_dialogue.on_dialogue_started)
 	DialogueManager.dialogue_finished.connect(_dialogue.on_dialogue_finished)
@@ -871,8 +1320,9 @@ func drop_item(item: Item, count: int = 1) -> void:
 
 ## Take the WIELDED weapon (knife/gun) out of the holster and INTO your hands as a carried physics prop — the
 ## DropHeld / H verb when your hands aren't already full (PickupRay._drop_held_in_hand delegates here). H is a
-## TWO-STAGE verb on a weapon: the first press puts the knife in your hands READY TO THROW, and from there the
-## ORDINARY carry verbs apply — H again drops it, left-click or a Z-hold throws it. No bespoke weapon-throw path.
+## TWO-STAGE TOGGLE on a weapon: the first press puts the knife in your hands READY TO THROW, and the SECOND
+## press puts it back — you re-wield it (return_held_weapon_to_hands), you don't drop it. Throwing it is
+## left-click or a Z-hold, and an E-tap still sets it down; there's no bespoke weapon-throw path.
 ## No-op with bare fists, where inventory.equipped_item is null.
 ## _pull_and_hold is the SAME path the hotbar's "hold from backpack" action uses: it builds the world prop, takes
 ## the item out of the bag — which clears equipped_item -> equipped_item_lost -> _on_equipped_item_lost re-arms
@@ -887,8 +1337,24 @@ func hold_equipped_weapon() -> void:
 	if eq == null or not eq.is_weapon():
 		return
 	if _pull_and_hold(eq):
+		# Remember it came out of YOUR HOLSTER (not the hotbar / the ground) — that's what makes the next H a
+		# put-back instead of a drop, and what re-draws the weapon when it goes back in the bag.
+		_held_from_weapon_slot = true
 		return
 	drop_item(eq, 1)
+
+## The SECOND stage of the H toggle: put the weapon in your hands back where it came from — into the bag AND back
+## in your grip (stash_held_item re-wields it). Returns true when this press was CONSUMED here, so PickupRay can
+## tell "H put my knife away" from "H should set this crate down": it's true ONLY for the weapon a previous H
+## pulled out of your own holster. A world-grabbed prop or a hotbar-pulled prop returns false and still gets the
+## ordinary tap-drop. A put-back the bag REFUSES (loot filled the footprint the pull freed) still returns true —
+## stash_held_item toasts and keeps the weapon in your hands, which is what the toast promises; H must never
+## turn into a surprise floor-drop of your own knife.
+func return_held_weapon_to_hands() -> bool:
+	if not _held_from_weapon_slot:
+		return false
+	stash_held_item()
+	return true
 
 ## Mirrors Character.money into a real coin Item stack in the backpack (built in _ready) — see MoneyPurse.
 var _money_purse: MoneyPurse
@@ -902,6 +1368,106 @@ const MoneyBagBuilder := preload("res://scripts/components/money_bag.gd")
 ## carry; a non-positive amount or an off-tree player is a no-op. The wallet is debited through add_money (so the HUD
 ## floats a -N and the run autosaves), and MoneyPurse then clears the coin tile to match. This is what right-clicking
 ## the zorkmids tile in the backpack does — the coin pile IS the wallet, so it spills the whole lot into one bag.
+## The OTHER producer of a money bag is dying with nobody to blame (_spill_death_purse) — it shares _place_money_bag
+## below, so a purse you dumped and a purse you dropped dead are the same reclaimable object.
+# --- THE PAYMENT RAILS — the Player's override of Character's four-method payment seam --------------------
+# Three kinds of money, one debit order (cash, then savings, then the credit line):
+#   CASH (`money`)                — free to spend, earns nothing, LOST ON DEATH.
+#   SAVINGS (`GameState.account` > 0) — safe from death, earns interest, costs a service charge to spend.
+#   CREDIT (`GameState.account` < 0)  — the same draw continued past zero, up to the live credit line.
+# DEBIT declines rather than crossing zero; CREDIT is the identical draw order allowed to keep going. Arming
+# CREDIT therefore never costs more than DEBIT for a purchase you could already afford — it only extends how
+# far the same draw may go. `GameState.account` is ONE SIGNED field, so a purchase that dips below zero IS the
+# debt, and there is no second ledger to reconcile.
+
+## THE funding split for `cost` under the armed rail: {base, cash, rail, fee, total, ok}. The ONE formula —
+## spendable / charge_total / can_pay / charge all read it, so the dim, the quote and the till cannot diverge.
+## ⭐The fee is derived from the BASE split and simply ADDED; it never re-enters its own split, so there is no
+## fixed-point iteration and the quoted number is stable across repaints.
+func _split(cost: float) -> Dictionary:
+	var base := maxf(0.0, snappedf(cost, Zorkmids.QUANTUM))
+	if base <= 0.0:  # a free service always clears, whatever the wallet or the debt looks like
+		return {"base": 0.0, "cash": 0.0, "rail": 0.0, "fee": 0.0, "total": 0.0, "ok": true}
+	var cash := minf(base, maxf(0.0, money))
+	var rail := snappedf(base - cash, Zorkmids.QUANTUM)  # the portion the Ledger has to cover
+	var fee := snappedf(rail * maxf(0.0, GameSettings.economy.bank_noncash_fee_fraction), Zorkmids.QUANTUM)
+	var total := snappedf(base + fee, Zorkmids.QUANTUM)
+	var pot := snappedf(maxf(0.0, money) + maxf(0.0, GameState.account), Zorkmids.QUANTUM)
+	if GameState.payment_method == PAY_CREDIT:
+		pot = snappedf(pot + credit_left(), Zorkmids.QUANTUM)
+	return {"base": base, "cash": cash, "rail": rail, "fee": fee, "total": total, "ok": total <= pot}
+
+## Cash on hand plus banked savings, plus the remaining credit line when CREDIT is armed. A readout, not a
+## gate — a purchase also has to clear the service charge, which only can_pay/charge_total know about.
+func spendable() -> float:
+	var funds := maxf(0.0, money) + maxf(0.0, GameState.account)
+	if GameState.payment_method == PAY_CREDIT:
+		funds += credit_left()
+	return snappedf(funds, Zorkmids.QUANTUM)
+
+func charge_total(cost: float) -> float:
+	return float(_split(cost)["total"])
+
+func can_pay(cost: float) -> bool:
+	return bool(_split(cost)["ok"])
+
+## Pay `cost`: cash first (it is fee-free and earns nothing, so spending it first is always correct), then the
+## account. Under CREDIT the account may cross zero into debt; under DEBIT `ok` already refused that case.
+## Never pushes `money` below zero — the wallet is CASH-ONLY now, and a negative one would re-create the old
+## "debt hides in the wallet" model the account exists to replace.
+func charge(cost: float) -> bool:
+	var s := _split(cost)
+	var total := float(s["total"])
+	if total <= 0.0:
+		return true
+	if not bool(s["ok"]):
+		return false
+	var pay_cash := minf(total, maxf(0.0, money))
+	var rest := snappedf(total - pay_cash, Zorkmids.QUANTUM)
+	if rest > 0.0:
+		GameState.account = snappedf(GameState.account - rest, Zorkmids.QUANTUM)
+	if pay_cash > 0.0:
+		add_money(-pay_cash)  # money_changed rides the deferred autosave, which persists BOTH halves at once
+	elif rest > 0.0:
+		GameState._autosave_world_state()  # the wallet didn't move, so queue our own coalesced write
+	return true
+
+## What you currently OWE (0 while solvent) and what is still available on the line. The limit itself is
+## recomputed live from the stat sheet and persisted NOWHERE (see credit_limit).
+func credit_used() -> float:
+	return maxf(0.0, -GameState.account)
+
+func credit_left() -> float:
+	return snappedf(maxf(0.0, credit_limit() - credit_used()), Zorkmids.QUANTUM)
+
+## The Ledger re-rates you CONTINUOUSLY off the live PERMANENT stat sheet, so levelling up raises your line —
+## the creditor rewards you for becoming more useful to it. get_stat() is raw, so a carried trinket or a timed
+## buff can NOT inflate the line (no equip-at-the-terminal exploit) while level-ups and perks permanently can.
+## Never fold in status_stat_modifier. Recomputed rather than persisted: there is no stale copy to migrate, and
+## nothing for a reboot to re-seed (the failure that killed an earlier transient debt field).
+func credit_limit() -> float:
+	var sheet := stats_or_default()
+	var values := {}
+	var total := 0
+	for n in CharacterStats.STAT_NAMES:  # always SIX keys — an EMPTY dict means "no application on file" to
+		var v: int = sheet.get_stat(n)   # credit_rating_for and would fail OPEN to the full cap
+		values[n] = v
+		total += v
+	return EconomySettings.credit_limit_for_sheet(values, GameSettings.economy,
+			StatBudgetRef.STAT_MIN, StatBudgetRef.STAT_MAX, total, GameState.credit_standing)
+
+
+## The Ledger's FULL live rating of this player — score, band, filed reason and every underwriting line —
+## build AND record together. The ATM statement reads this; the implant screen deliberately does NOT (a fresh
+## character has no history, so New Game rates the build alone).
+func credit_rating() -> Dictionary:
+	var sheet := stats_or_default()
+	var values := {}
+	for n in CharacterStats.STAT_NAMES:
+		values[n] = sheet.get_stat(n)
+	return EconomySettings.credit_rating_for(values, GameSettings.economy,
+			StatBudgetRef.STAT_MIN, StatBudgetRef.STAT_MAX, GameState.credit_standing)
+
 func drop_money(amount: float) -> void:
 	amount = snappedf(minf(amount, money), Zorkmids.QUANTUM)
 	if amount <= 0.0:
@@ -909,10 +1475,16 @@ func drop_money(amount: float) -> void:
 	var world := get_parent()
 	if world == null:
 		return  # nowhere to drop into (off-tree) — don't debit the wallet if we can't spawn the bag
+	_place_money_bag(world, amount, _drop_position())
+	add_money(-amount)  # routes through the money seam -> HUD -N + autosave -> MoneyPurse re-syncs the coin tile
+
+## Build + park a money bag holding `amount` at `at` under `world`. The ONE money-bag spawn site, shared by the
+## backpack dump (drop_money) and the unclaimed-death spill (_spill_death_purse) so the two can never drift apart.
+## Deliberately does NOT touch the wallet — each caller owns its own debit, and each does it exactly once.
+func _place_money_bag(world: Node, amount: float, at: Vector3) -> void:
 	var bag := MoneyBagBuilder.build(amount)
 	world.add_child(bag)
-	bag.global_position = _drop_position()
-	add_money(-amount)  # routes through the money seam -> HUD -N + autosave -> MoneyPurse re-syncs the coin tile
+	bag.global_position = at
 
 ## Drop the EXACT backpack stack the inventory UI right-clicked — identified by its stable grid `key` — into the
 ## world (the "clicked stack" contract). Goes through remove_stack (remove-BY-KEY), NOT drop_item's remove(item,
@@ -944,16 +1516,31 @@ func _spawn_drop(world: Node, item: Item, removed: int) -> void:
 
 ## A point ~1 m in front of the player, dropped to the floor (down-ray on the world layer); falls back to
 ## the in-front point if nothing's below.
-func _drop_position() -> Vector3:
+## How far a dropped thing looks DOWN from your feet for floor, and how far above that hit it rests (so it settles
+## onto the surface instead of spawning half-buried). Shared by every drop; the unclaimed-death spill probes deeper
+## (GameSettings.economy.death_purse_drop_ground_probe) because it has to cope with dying in mid-air.
+const DROP_PROBE_DEPTH := 3.0
+const DROP_PROBE_LIFT := Vector3(0.0, 0.2, 0.0)
+
+## The point a drop is probed from: one metre in front of your feet, so items land where you're looking rather than
+## inside your own capsule. Split out of _drop_position so the death spill can re-probe the same spot but tell a MISS
+## from a hit (_drop_position silently hands back this mid-air point when the ray finds nothing, which is fine for an
+## item you tossed while standing and very much not fine for a body falling through a void).
+func _drop_probe_origin() -> Vector3:
 	var forward := -global_transform.basis.z
 	forward.y = 0.0
 	forward = forward.normalized() if forward.length() > 0.01 else Vector3.FORWARD
-	var from := global_position + forward * 1.0
-	var space := get_world_3d().direct_space_state
-	var q := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 3.0, 1)
+	return global_position + forward * 1.0
+
+func _drop_probe_ray(from: Vector3, length: float) -> PhysicsRayQueryParameters3D:
+	var q := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * length, 1)
 	q.exclude = [get_rid()]
-	var hit := space.intersect_ray(q)
-	return (hit["position"] + Vector3.UP * 0.2) if not hit.is_empty() else from
+	return q
+
+func _drop_position() -> Vector3:
+	var from := _drop_probe_origin()
+	var hit := get_world_3d().direct_space_state.intersect_ray(_drop_probe_ray(from, DROP_PROBE_DEPTH))
+	return (hit["position"] + DROP_PROBE_LIFT) if not hit.is_empty() else from
 
 ## Smoothly aim the body yaw + head pitch at `target_pos` so the camera frames whatever the player
 ## is talking to. Called externally by the talk handler (talkable.gd / dialogue_npc.gd via
@@ -1000,9 +1587,13 @@ func _flush_autosave() -> void:
 func _init() -> void:
 	_abilities_mgr.host = self
 	_abilities_mgr.mechanic_unlocked.connect(_on_mechanic_unlocked)
+	_abilities_mgr.mechanic_toggled.connect(_on_mechanic_toggled)
 
 func _on_mechanic_unlocked(id: StringName) -> void:
 	mechanic_unlocked.emit(id)
+
+func _on_mechanic_toggled(id: StringName, active: bool) -> void:
+	mechanic_toggled.emit(id, active)
 
 ## Scan our children for Ability nodes (a designer drag-drops them in) and register each. Called once in _ready
 ## before the unlock seed/load, so an editor-placed ability isn't duplicated by the seed.
@@ -1028,6 +1619,18 @@ func _register_ability(a: Ability) -> void:
 ## on the Player because every external caller resolves the Player and duck-types has_method(&"has_mechanic").
 func has_mechanic(id: StringName) -> bool:
 	return _abilities_mgr.has(id)
+
+## True while ANY ability node grants `id`, switched on or off — the INSTALLED predicate (you own the implant).
+## The ChipInstaller guards key on this (an owned-but-off chip must never be re-sold or re-charged) and the
+## Implants tab lists it; gameplay gates keep polling has_mechanic (ACTIVE) above. Thin forwarder.
+func mechanic_installed(id: StringName) -> bool:
+	return _abilities_mgr.is_installed(id)
+
+## Switch an INSTALLED implant off / back on (the Implants-tab toggle). False for an id with no ability node.
+## Emits mechanic_toggled on a real change; switching off runs the ability's on_deactivated hygiene (a live
+## slide ends, a live grapple rope severs). Thin forwarder to the ability subsystem.
+func set_mechanic_active(id: StringName, on: bool) -> bool:
+	return _abilities_mgr.set_active(id, on)
 
 ## Player override of Character._apply_fall_damage: the fall-immunity UPGRADE (a FallImmunity Ability granted by an
 ## UpgradePickup) makes a hard landing cost nothing. Without it, defers to the shared base (FallDamage speed->HP +
@@ -1125,9 +1728,24 @@ func revoke_ability(id: StringName) -> void:
 		a.enabled = false
 		a.queue_free()
 
-## The granted (enabled) ability ids — for the save system to serialize. Thin forwarder to the ability subsystem.
+## The granted-and-ACTIVE ability ids — for the save system's [player].unlocks. Thin forwarder to the ability
+## subsystem. A player-disabled implant is deliberately absent here; it serializes via disabled_list() below.
 func unlocked_list() -> Array:
 	return _abilities_mgr.unlocked_ids()
+
+## Every INSTALLED ability id, on or off — the Implants tab's roster superset. Thin forwarder.
+func installed_list() -> Array:
+	return _abilities_mgr.installed_ids()
+
+## The installed-but-switched-OFF implant ids — for the save system's [player].disabled_unlocks (captured
+## beside unlocked_list, restored via set_disabled_unlocks after set_unlocks). Thin forwarder.
+func disabled_list() -> Array:
+	return _abilities_mgr.disabled_ids()
+
+## Restore the saved switched-off implants (loading a save; call AFTER set_unlocks). Builds any missing node
+## then disables it, so an off implant survives the load INSTALLED. Thin forwarder.
+func set_disabled_unlocks(ids: Array) -> void:
+	_abilities_mgr.set_disabled(ids)
 
 ## Replace the live unlock set wholesale (loading a save): enable wanted abilities, disable the rest, build any
 ## missing. Disables rather than frees, so an editor-placed node survives a load. Thin forwarder — a missing
@@ -1743,12 +2361,15 @@ func _pull_and_hold(item: Item) -> bool:
 	return true
 
 ## Put the currently-held backpack prop back into the bag: re-add the SAME item instance the pull removed, then
-## release + free the world prop. No-op when not holding a bag prop. Returns true when it put something away, false
-## when the bag can't take it back (a full grid) — the prop then stays IN HAND (still reserved + save-reachable).
+## release + free the world prop. A prop that came out of your HOLSTER (the H verb — _held_from_weapon_slot) is
+## also RE-WIELDED at the end, so "put it back" means back in your hands, not merely back in the bag. No-op when
+## not holding a bag prop. Returns true when it put something away, false when the bag can't take it back (a full
+## grid) — the prop then stays IN HAND (still reserved + save-reachable).
 func stash_held_item() -> bool:
 	if _held_inv_item == null:
 		return false
 	var item := _held_inv_item
+	var rewield := _held_from_weapon_slot  # captured before the clears below; drives the re-draw AFTER the release
 	# Refuse if the bag can't take it back (a full Tetris grid — loot picked up while carrying filled the footprint
 	# the pull freed). Clearing the reservation then would orphan the item from BOTH the bag and the save fold, and a
 	# left-in-world prop isn't persisted — so keep holding it instead (mirrors CanPickUp refusing a pickup into a full
@@ -1757,11 +2378,18 @@ func stash_held_item() -> bool:
 		notify_toast(PlayerText.TOAST_BACKPACK_FULL, Color(0.85, 0.85, 0.85))
 		return false
 	var prop := _held_inv_prop
+	# Decide the rewield NOW and arm the fists suppression BEFORE the release below: force_release's synchronous
+	# holster restore fires holster_changed while the combat inventory still reads FISTS (the real weapon is only
+	# re-equipped at the end), and without _rewield_in_flight that refresh raises the bare fists over the
+	# weapon's re-draw (see _unarmed_hands_wanted). Mid-death stays unarmed — the equip is skipped there.
+	var rewield_now := rewield and item.is_weapon() and not _dying and not _dead
+	_rewield_in_flight = rewield_now
 	# Clear the reservation FIRST so the carry_changed(false) that force_release fires below is treated as our
 	# put-back, not a drop (see _on_carry_changed), and so held_inventory_item() reads null for the concurrent save.
 	_restore_held_prop_destructible()  # back to its authored destructibility before it re-enters the bag
 	_held_inv_item = null
 	_held_inv_prop = null
+	_held_from_weapon_slot = false
 	# Re-add the SAME instance BEFORE releasing the prop. The add's bag-change re-fills the reserved hotbar slot while
 	# the item is genuinely back in the bag (can_accept above guaranteed room, so it fits); if we released first, that
 	# release's sync would briefly see the item neither in-bag nor reserved and vacate the slot. The window between add
@@ -1774,6 +2402,18 @@ func stash_held_item() -> bool:
 		head.pickup_ray.force_release_held()  # let the ray restore the prop's physics bookkeeping
 	if is_instance_valid(prop):
 		prop.queue_free()  # it's back in the bag now — remove the world copy
+	# H TOGGLE, second stage: the weapon came out of your holster, so put it back THERE too — bagging it silently
+	# would leave you on bare fists (the pull cleared equipped_item -> equipped_item_lost -> FISTS). Deliberately
+	# LAST, after the force_release above: carrying LOCKS the weapon away (Attack.draw_locked) and set_holstered
+	# refuses to bring it out while locked, so equipping any earlier would swap the knife in behind a locked
+	# holster — visible in hand but unable to fire. Skipped mid-death (die() stashes a carried prop before the
+	# keel-over): the equip DRAWS the weapon, which would pop it up over the death cinematic exactly like the
+	# holster restore _on_carry_changed already suppresses. The respawn re-applies the save's equip anyway.
+	if rewield_now:
+		inventory.equip_item(item)
+	# Suppression over: the equip request is out, and from here the backpack's equipped_item (set optimistically
+	# by equip_item, even when the swap QUEUES) keeps _unarmed_hands_wanted() false until the weapon is truly up.
+	_rewield_in_flight = false
 	return true
 
 ## Restore the currently-held prop's `destructible` flag (shielded to false on the pull) and forget the throwable ref.
@@ -1880,8 +2520,8 @@ func _snap_to_ground() -> bool:
 ## friendly NPC, prefixed "Pick Pocket" when you're crouched behind an off-guard NPC via look_name_for).
 ## Guards on the last shown text + colour so a per-frame refresh only touches the HUD when something changed.
 func _apply_look_readout(handler: Node) -> void:
-	if _dying:
-		handler = null  # a dying/dead player reads NOTHING — else the last-looked enemy's name freezes on the death HUD and rides into the respawn (the interaction ray can also keep firing this during the cinematic)
+	if _dying or _hud_quiet:
+		handler = null  # a dying/dead player reads NOTHING — else the last-looked enemy's name freezes on the death HUD and rides into the respawn (the interaction ray can also keep firing this during the cinematic); quiet = the revive window, where a name popping over the fade-up is the same noise
 	var label := ""
 	var col := Color(0.92, 0.92, 0.95)  # neutral / inanimate default
 	if handler != null and handler.has_method(&"look_name"):
@@ -2198,6 +2838,9 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_was_on_floor = is_on_floor()
+	if _was_on_floor:
+		_last_grounded_position = global_position  # the fall-death purse anchor — see _death_purse_anchor
+		_has_last_grounded = true
 	_update_stamina_recovery(delta)
 
 	_footstep_timer -= delta
@@ -2245,8 +2888,11 @@ func _update_stealth_hud(delta: float) -> void:
 	# Gate on _dying like _apply_look_readout does: die() runs SYNCHRONOUSLY (a fall-damage kill fires it from
 	# _apply_fall_damage earlier in this very _physics_process), so without this guard execution would fall back
 	# through to here and RE-SHOW the [ DANGER ] label the same frame die()'s hide_hud_for_death() just hid it,
-	# leaving it stuck on the death cinematic. Cleared on the in-place revive (_respawn_at_checkpoint).
-	if not _hud or _dying or not is_inside_tree():
+	# leaving it stuck on the death cinematic. Cleared on the in-place revive (_respawn_at_checkpoint) — but
+	# _hud_quiet then holds the readout off through the revive's quiet window: set_stealth_level re-asserts the
+	# label's visibility EVERY frame, so without this second gate a killer still searching the checkpoint would
+	# pop [ CAUTION ] over the still-black screen on the fresh life's first physics frame.
+	if not _hud or _dying or _hud_quiet or not is_inside_tree():
 		return
 	var tree := get_tree()
 	if tree == null:
@@ -2333,6 +2979,13 @@ func _check_bounce(delta: float, pre_velocity: Vector3) -> void:
 		_ram_reactor._check_bounce(delta, pre_velocity)
 
 func on_nearby_death(distance: float) -> void:
+	# No nearby-death juice while WE are the one dying (or fading back in): a posthumous kill — our grenade /
+	# a burn tick felling someone mid-cinematic — would otherwise wobble the keeled-over camera, rumble the pad,
+	# and (worst) FreezeFrame's recovery would ease Engine.time_scale back to 1.0, silently cancelling the death
+	# slow-mo after phase 1 stops re-stamping it. The splatter blobs it spawns also outlive the black (their fade
+	# tween runs on the slowed clock) and would pop with the restored HUD. The quiet window gets the same calm.
+	if _dying or _hud_quiet:
+		return
 	if distance <= GameSettings.screen_shake.death_shake_range:
 		FreezeFrame.freeze(0.01, 0.1, 0.02)
 	if distance <= GameSettings.effects.blood_splatter_range and ui and ui.blood_splatter:
@@ -2354,11 +3007,27 @@ var _death_card: Label = null            ## the death card, created lazily over 
 var _death_card_text: String = ""        ## the death card's line, composed in die() from the killer + weapon (the attacker can free before the card shows)
 var _death_card_override_text: String = ""
 var _has_death_card_override: bool = false
-var _death_wallet_lost: float = 0.0      ## zorkmids the last death actually took (_bequeath_wallet); the in-place revive toasts the "Hospital bill!" then clears it. A full-reload death rebuilds a fresh Player (back to 0), so it never shows there.
+var _death_wallet_lost: float = 0.0      ## zorkmids the last death actually moved out of the wallet (_bequeath_wallet / _spill_death_purse); the in-place revive toasts it once then clears it. A full-reload death takes nothing and rebuilds a fresh Player anyway, so it never shows there.
+## WHO took it, resolved to a display STRING at the moment of death — the killer node can be freed by a rival or
+## leashed home by NpcHomeReturn during the seconds-long cinematic, so holding the node would read wrong (or crash)
+## by the time the revive toasts.
+var _death_wallet_killer_name: String = ""
+## ...and the actual BRANCH the settlement took, because a display string is never a behaviour key (CLAUDE.md).
+## The name above can legitimately come back EMPTY — a designer may blank PlayerFeedbackSettings.death_unknown_killer,
+## and an NPC ships with a blank display_name — and switching the toast on "" would then tell the player their purse
+## is lying on the ground while it is really in a killer's pocket. This flag is the switch; the name is only wording.
+var _death_wallet_to_killer: bool = false
 ## True when the death we're currently playing out was dealt by a hostile NPC, so the respawn should stand every
 ## PROVOKED NPC back down (see _on_killed_by / _settle_provoked_grudges). The VERDICT is banked at death because the
 ## killer can die or be leashed home during the cinematic; the sweep spends it once on the revive, like _death_wallet_lost.
 var _death_settlement_pending: bool = false
+## True through the revive's quiet window (the first respawn_hud_delay seconds of the fade-up): the HUD is
+## still hidden and every per-frame HUD readout that gates on _dying gates on this too (_update_stealth_hud,
+## _apply_look_readout, the takedown/pet/claim cue facades) — else the stealth badge / prompts would pop over
+## the still-black screen the instant _dying clears, which is exactly the flash the window exists to remove.
+var _hud_quiet: bool = false
+## The quiet window's wall-clock timer; killed + flushed by a re-death inside the window (see die()).
+var _respawn_hud_tween: Tween = null
 # NOTE: the death cinematic's audio state (the fade reference + the revive fade tween) deliberately does NOT
 # live here — DeathMix owns it, because the same object owns the death sting those levels are making room for.
 const HOLSTER_FORGIVENESS_TUTORIAL_COLOR := Color(0.85, 0.95, 1.0)
@@ -2409,6 +3078,13 @@ const HEADSHOT_PITCH_MULT := 0.7
 ## Flash the crosshair hitmarker AND play the hit-confirm ding — forwards to PlayerHud. Kept as a NAME
 ## here because a landed shot/explosion calls player.on_dealt_hit. Off-tree (_hud null) it no-ops.
 func on_dealt_hit(headshot := false, hp_frac := 1.0) -> void:
+	# Dead men score no hits: ordnance still in flight when we died (a grenade, a burn tick) can land during the
+	# death cinematic, and the kill branch below pops the WHOLE SKY (StarSky is world-rendered — hide_hud_for_death
+	# can't touch it) over the closing vignette, plus the hit ding under the ducked mix. Gate on _dying only, NOT
+	# _hud_quiet: during the revive's quiet window the player is alive and shooting, and the ding is the one piece
+	# of hit feedback that still works while the HUD visuals wait out the window.
+	if _dying:
+		return
 	if _hud:
 		_hud.on_dealt_hit(headshot, hp_frac)
 	if hp_frac <= 0.0:
@@ -2419,21 +3095,25 @@ func on_dealt_hit(headshot := false, hp_frac := 1.0) -> void:
 ## Slice 6b: forward the takedown prompt + hold-progress cue to PlayerHud. Driven every frame by SilentTakedown:
 ## `active` shows "[key] Take Down <name>" with the hold fill, inactive hides it. Off-tree (_hud null) it no-ops.
 func set_takedown_cue(active: bool, text: String, progress: float) -> void:
+	# The interaction drivers (SilentTakedown / PetInteraction / ClaimInteraction) are SEPARATE nodes that keep
+	# ticking through the death cinematic and the revive's quiet window, re-asserting their cue every frame —
+	# so the hide in die() alone can't keep a prompt down. Force the cue inactive at this ONE forwarding seam
+	# (all three facades share the gate) while _dying or _hud_quiet; the driver's next frame re-shows it.
 	if _hud:
-		_hud.set_takedown_cue(active, text, progress)
+		_hud.set_takedown_cue(active and not _dying and not _hud_quiet, text, progress)
 
 ## Forward the PET prompt + hold-progress cue to PlayerHud. Driven every frame by PetInteraction: `active` shows
 ## "[key] Pet <name>" with the hold fill, inactive hides it. Off-tree (_hud null) it no-ops. Mirrors set_takedown_cue.
 func set_pet_cue(active: bool, text: String, progress: float) -> void:
 	if _hud:
-		_hud.set_pet_cue(active, text, progress)
+		_hud.set_pet_cue(active and not _dying and not _hud_quiet, text, progress)  # death/quiet gate: see set_takedown_cue
 
 ## Forward the CLAIM/UNCLAIM prompt cue to PlayerHud. Driven every frame by ClaimInteraction: `active` shows
 ## "[key] Claim <name>" (tap, progress 0 → no bar) or "[key] Hold to Unclaim <name>" (hold, progress fills the bar).
 ## Off-tree (_hud null) it no-ops.
 func set_claim_cue(active: bool, text: String, progress: float = 0.0) -> void:
 	if _hud:
-		_hud.set_claim_cue(active, text, progress)
+		_hud.set_claim_cue(active and not _dying and not _hud_quiet, text, progress)  # death/quiet gate: see set_takedown_cue
 
 ## Raise the top-centre enemy health bar for whoever we just damaged, showing their HP AFTER the hit.
 ## Pushed by Character.take_damage on the VICTIM's side (it notifies its attacker duck-typed — see the
@@ -2454,26 +3134,128 @@ func on_damaged_target(target: Node, hp: float, max_hp: float, hp_before: float 
 		return
 	_hud.show_enemy_health(target, hp, max_hp, hp_before)
 
-## On death, lose GameSettings.economy.death_purse_loss_fraction of the CURRENT wallet (0.5 by default).
-## If a valid killer will remain in the world after an in-place respawn, they pocket the lost zorkmids so you
-## can hunt them down and recover it from their corpse. No killer / reload death modes still subtract the money;
-## it just does not have a recoverable holder.
+## DEATH MOVES YOUR ZORKMIDS — it never destroys them. GameSettings.economy.death_purse_loss_fraction (1.0 = all of
+## it, by default) leaves your pocket and goes to exactly ONE of two recoverable places:
+##   * KILLED BY SOMEONE -> the killer pockets the whole purse into their live wallet, which NpcMortality reads at
+##     their death and LootableCorpse.setup mints as a real zorkmids coin tile in their loot bag. Kill them, loot it
+##     back. (They keep it while alive, so a pickpocket works too — see _settle_provoked_grudges.)
+##   * KILLED BY NOTHING (a fall, a hazard, your own grenade, anyone _resolve_killer won't credit) -> it SPILLS on
+##     the ground as a physics MoneyBag at the spot you died. Walk back and Interact to pocket the lot.
+## A RELOAD_* death mode — or CHECKPOINT_RESPAWN with no respawn set, which falls back to a full reload — takes
+## NOTHING at all: the world is about to be rebuilt, so neither a killer nor a dropped bag would survive to hold it,
+## and the save restores this wallet anyway. Debiting there is money burnt for nobody, and worse, add_money's
+## autosave flush would write the emptied wallet to the very file RELOAD_LAST_SAVE then reads back. So
+## _death_revives_in_place() gates the WHOLE settlement, not just the hand-off (it used to gate only the latter).
+## The AMOUNT and the KILLER'S NAME are banked for the revive toast; the killer NODE deliberately is not — it can be
+## freed by a rival or leashed home by NpcHomeReturn during the seconds-long death cinematic.
 func _bequeath_wallet(killer: Node) -> void:
 	if is_instance_valid(killer) and killer.has_method(&"should_remind_holster_forgiveness_tutorial_on_player_death") \
 			and killer.call(&"should_remind_holster_forgiveness_tutorial_on_player_death"):
 		GameState.queue_holster_forgiveness_tutorial_reminder()
+	_death_wallet_lost = 0.0          # nothing settled yet; each branch below banks its own toast amount
+	_death_wallet_killer_name = ""
+	_death_wallet_to_killer = false
+	if not _death_revives_in_place():
+		return
 	var lost := _death_wallet_loss()
-	_death_wallet_lost = lost  # remembered for the "Hospital bill!" toast the in-place revive pops (0 when broke -> no toast)
 	if lost <= 0.0:
 		return
-	add_money(-lost)         # we lose it (routes through the money seam -> HUD readout + autosave)
-	if is_instance_valid(killer) and killer.has_method(&"add_money") and _death_revives_in_place():
-		killer.add_money(lost)   # the killer pockets it; it drops with their wallet on death
+	# has_method, not `is Character`: the killer is loosely typed here (a test double, a titled hazard), exactly as
+	# _resolve_killer's own reward_kill duck-test treats it.
+	if is_instance_valid(killer) and killer.has_method(&"add_money") and _killer_can_hold_purse(killer):
+		add_money(-lost)          # routes through the money seam -> HUD -N + autosave
+		killer.add_money(lost)    # ...straight into their wallet, which rides into their corpse's loot bag
+		_death_wallet_lost = lost
+		_death_wallet_to_killer = true
+		_death_wallet_killer_name = _killer_display_name(killer,
+			GameSettings.player_feedback.death_unknown_killer,
+			GameSettings.player_feedback.death_stranger_killer)
+		return
+	if not GameSettings.economy.death_purse_drops_when_unclaimed:
+		return
+	var anchor: Variant = _death_purse_anchor()
+	if anchor == null:
+		return  # nowhere safe to put it (off-tree, or a void with no anchor at all) -> you keep it, see _death_purse_anchor
+	# DEFERRED, and the wallet is debited over THERE, not here. Two reasons this can't spawn the bag inline:
+	# (1) we are commonly inside a physics contact callback (Character.take_damage <- Throwable / ExplosionArea), where
+	#     add_child'ing a RigidBody3D writes physics state mid-flush; (2) _begin_death() -> gore() is about to fire the
+	# gib burst from this very origin, and a bag already sitting there gets punted by it. The deferred call lands at
+	# the end of this frame — after gore() and die(), before the next physics step. We are still in the tree then:
+	# Player.die() plays a cinematic instead of freeing, and the respawn teleport is seconds away.
+	_spill_death_purse.call_deferred(lost, anchor)
+
+## True while `killer` is still a wallet the player could actually come and take the purse back from. A DEAD killer
+## is not: its corpse loot bag was already minted from `money` at the instant it died (NpcMortality.drop_loot /
+## GoreSpawner._attach_loot), so anything paid in afterwards is unreachable — and a pooled body stays
+## is_instance_valid forever after death, until acquire() re-stamps its authored wallet and the money is simply gone.
+## That is reachable without pooling too: kill a raider, then fall off a ledge within kill_credit_window_ms and
+## _resolve_killer hands that same corpse straight back as your killer. Refusing here drops us through to the ground
+## spill, which is exactly right — nobody alive killed you.
+## Duck-typed with ABSENCE MEANING ALIVE: every Character has is_alive(), but a titled hazard or a test double that
+## exposes only add_money has no death state to be wrong about, so it stays eligible.
+func _killer_can_hold_purse(killer: Object) -> bool:
+	if not killer.has_method(&"is_alive"):
+		return true
+	return bool(killer.call(&"is_alive"))
 
 func _death_wallet_loss() -> float:
 	var wallet := maxf(0.0, money)
 	var fraction := clampf(GameSettings.economy.death_purse_loss_fraction, 0.0, 1.0)
 	return minf(wallet, snappedf(wallet * fraction, Zorkmids.QUANTUM))
+
+## Where a killer-less death should rest the spilled purse — or null when there is nowhere, in which case we do NOT
+## take the money at all. A ladder, most-faithful-to-"where you died" first:
+##   1. the everyday feet-forward drop point, IF its short probe actually found floor (a normal on-foot death);
+##   2. a DEEP probe straight down from the death spot (death_purse_drop_ground_probe) — catches dying on a catwalk
+##      or roof, and the long fall that kills you in mid-air but still over real geometry;
+##   3. the last ground we saw you stand on — for a fall that is the ledge you walked off, i.e. the one place a
+##      player actually thinks to look;
+##   4. the checkpoint you are about to respawn at (death_purse_drop_to_respawn_in_void).
+## Why the ladder exists at all: this project has NO kill plane (only the player has a fall-death guard), so a bag
+## spawned over a bottomless void falls forever — the money is destroyed AND an immortal RigidBody leaks into the
+## sim. Refusing to drop is the strictly better bottom rung. Returns Variant (Vector3 or null); off-tree it returns
+## null before touching the physics space, so a bare unit-test Player never errors and never gets debited.
+func _death_purse_anchor() -> Variant:
+	if not is_inside_tree() or get_parent() == null:
+		return null
+	# PHYSICS-FRAME GATE on the two ray probes. A hazard zone (hazard_zone.gd) and a bleed/poison tick
+	# (status_effect_manager.gd) both deal their damage from _process — IDLE time, where direct_space_state refuses
+	# queries and only pushes an error. Those are not edge cases: an ambient hazard passes a null attacker, so it is
+	# one of the commonest deaths that reaches this ground-spill branch at all. It costs us nothing to skip the
+	# probes there, because a hazard or a DoT kills you standing on the floor — the last-grounded rung below IS the
+	# spot you died. Shots, blasts, thrown props and the fall death all resolve in physics and still get the probes.
+	if Engine.is_in_physics_frame():
+		var space := get_world_3d().direct_space_state
+		var hit := space.intersect_ray(_drop_probe_ray(_drop_probe_origin(), DROP_PROBE_DEPTH))
+		if not hit.is_empty():
+			return hit["position"] + DROP_PROBE_LIFT
+		var deep: float = GameSettings.economy.death_purse_drop_ground_probe
+		if deep > 0.0:
+			hit = space.intersect_ray(_drop_probe_ray(global_position, deep))
+			if not hit.is_empty():
+				return hit["position"] + DROP_PROBE_LIFT
+	if _has_last_grounded:
+		return _last_grounded_position + DROP_PROBE_LIFT
+	if GameSettings.economy.death_purse_drop_to_respawn_in_void and GameState.has_respawn:
+		return GameState.respawn_position + DROP_PROBE_LIFT
+	return null
+
+## Deferred half of the unclaimed-death spill (see _bequeath_wallet). Debits ONLY once the bag is genuinely in the
+## tree, so a world that vanished between the death frame and this flush can never swallow the money — and
+## _death_wallet_lost (which unlocks the revive toast) is banked here for the same reason: the toast must never
+## claim a loss that did not happen.
+## KNOWN LIMIT, shared with the killer branch: the debit autosaves (add_money is a save milestone) but the BAG does
+## not persist — it is a dynamic spawn in neither save tier (see WorldSnapshot's roadmap), exactly like every other
+## loot drop. So a quicksave/level-change/quit before the player walks back destroys the purse. Fixing it properly
+## means persisting money bags (and NPC wallets, for the other branch), which is a save-format change, not a patch
+## here. Until then this is a same-session errand — the AUTHORING_GUIDE Death callout says so in as many words.
+func _spill_death_purse(amount: float, anchor: Vector3) -> void:
+	var world := get_parent()
+	if not is_inside_tree() or world == null:
+		return
+	_place_money_bag(world, amount, anchor)
+	add_money(-amount)
+	_death_wallet_lost = amount
 
 ## DEATH SETTLES A PROVOKED GRUDGE — half one: JUDGE it, here at the moment of death, and remember the verdict.
 ## An NPC that turned on us only because we PROVOKED it (a neutral we shot at, FNV-style) has just killed us, so
@@ -2491,7 +3273,12 @@ func _death_wallet_loss() -> float:
 ## rides the same killer-aware Character hook _bequeath_wallet does, which is also the closest precedent (a global,
 ## one-shot, killer-aware death reaction).
 func _on_killed_by(killer: Node) -> void:
-	_death_settlement_pending = HostilityHelpers.death_settles_grudges(killer)
+	# OR, never overwrite: the revive's quiet window DEFERS the settlement (~respawn_hud_delay), so a rapid
+	# re-death can bank its verdict while the previous one is still unspent — and a non-hostile second death
+	# (a fall) must not erase it. Before the window existed the pending flag was always consumed pre-re-death,
+	# so plain assignment and this OR were indistinguishable; the sweep itself is group-wide + idempotent,
+	# so settling "twice as one" on the next revive is exactly right.
+	_death_settlement_pending = _death_settlement_pending or HostilityHelpers.death_settles_grudges(killer)
 
 ## DEATH SETTLES A PROVOKED GRUDGE — half two: APPLY it, on the respawn. Every NPC still hostile ONLY because we
 ## provoked it stands back down and the exact rep each provoke took is restored (the sweep is group-wide because
@@ -2500,11 +3287,12 @@ func _on_killed_by(killer: Node) -> void:
 ##
 ## ON THE RESPAWN, not at death, deliberately: the world should visibly calm down for a player who is there to see
 ## it, not behind a fade-to-black — and the reputation toast the restored rep pushes would otherwise be swallowed by
-## die()'s hide_hud_for_death(), exactly like the "Hospital bill!" toast was (hence the call site next to it, AFTER
+## die()'s hide_hud_for_death(), exactly like the death wallet toast was (hence the call site next to it, AFTER
 ## restore_hud_after_death()). Without any of this, a town whose one-shot holster pardon is already spent stays
 ## hostile forever and every retry re-provokes it. Genuinely-hostile factions were never provoked, so raiders keep
-## hunting us. Note the killer KEEPS the bequeathed wallet: with them non-hostile again you get it back by
-## pickpocketing, or by re-provoking them (which costs the pardon) — hunting your killer is a choice, not a war.
+## hunting us. Note the killer KEEPS the bequeathed wallet — now your WHOLE purse — even after standing down: with
+## them non-hostile again you get it back by pickpocketing, or by re-provoking them (which costs the pardon), or by
+## killing them anyway and looting the corpse. Hunting your killer is a choice, not a war.
 ##
 ## The RELOAD_* death modes call it too, right BEFORE reload_current_scene(): the fresh world spawns unprovoked
 ## NPCs, but Reputation is an autoload that survives the reload, so the provoke deltas have to be reversed while the
@@ -2527,10 +3315,23 @@ func _death_revives_in_place() -> bool:
 		and mode != PlayerFeedbackSettings.DeathMode.RELOAD_CHECKPOINT_FRESH \
 		and GameState.has_respawn
 
+## Character seam: tag everything OUR death burst spawns as player gore, so the checkpoint revive can undo the
+## whole thing in one sweep (_respawn_at_checkpoint -> clear_death_gore). The player is the one actor whose death
+## is REVERSED — CHECKPOINT_RESPAWN brings it back in a world that is otherwise left exactly as it was — so it is
+## the one actor whose remains must not outlive it. NPCs return &"" and their gore stays where it fell forever.
+func death_gore_group() -> StringName:
+	return Groups.PLAYER_GORE
+
 func die() -> void:
 	if _dying:
 		return
 	_dying = true
+	# Killed again INSIDE the previous revive's quiet window (a camper at the checkpoint): flush the deferred
+	# HUD restore FIRST, before this death's hide_hud_for_death() snapshot — hiding over a half-hidden HUD
+	# would strand nodes invisible on every later life. Receipts stay banked for the next revive (see the
+	# deliver_receipts notes on _finish_respawn_hud_restore).
+	if _hud_quiet:
+		_finish_respawn_hud_restore(false)
 	# Dying MID-CONVERSATION (shot during the dialogue's unpaused intro beat, where we're frozen on
 	# is_active and can't dodge): hard-end the dialogue FIRST — once its box opens it pauses the tree,
 	# which would freeze our node-bound death tween under an open conversation. Mirrors the dialogue's
@@ -2585,6 +3386,12 @@ func die() -> void:
 	# card mounts on that same layer), so `ui.visible = false` would hide the ENTIRE cinematic. That was the
 	# long-standing "death just snap-cuts, no fade" bug. hide_hud_for_death() spares the ColorRect.
 	_apply_look_readout(null)  # clear the FNV look-at name FIRST (it's frozen showing whatever you last aimed at) so hide_hud_for_death() doesn't remember it visible and restore the stale name on the revive
+	# Drop the cached stealth snapshot too, not just the label: the throttle in _update_stealth_hud re-pushes
+	# the CACHED level whenever _stealth_hud_accum hasn't expired, so a stale combat snapshot would flash the
+	# pre-death [ DANGER ] at full brightness for up to _STEALTH_HUD_INTERVAL on the fresh life's first un-gated
+	# frame — before the 10Hz rescan replaces it with the post-leash truth. Empty snap = that first frame rescans.
+	_stealth_hud_snap = {}
+	_stealth_hud_accum = 0.0
 	if _hud != null:
 		# Force off every per-frame-driven HUD readout BEFORE hide_hud_for_death() records the visible set, so none
 		# of them is remembered -> restored stale onto the fresh life (the look-at clear above does this for its name):
@@ -2717,7 +3524,12 @@ func _run_death_sequence() -> void:
 	tw.tween_method(_death_step, 0.0, 1.0, fb.death_sequence_time)
 	# On full black, BEFORE the card: broadcast the world-reset cue while nothing is visible (see the method).
 	tw.tween_callback(_on_death_screen_covered)
-	# On full black: create the death card (transparent) and fade it in.
+	# Let the black SETTLE before any text: the vignette completing still reads as mid-fade, so a card arriving
+	# on that same frame lands on top of the fade-out (the information-overload complaint). The world-reset cue
+	# above deliberately stays on the first black frame — the beat gives its teleports the longest cover.
+	if fb.death_card_delay > 0.0:
+		tw.tween_interval(fb.death_card_delay)
+	# After the beat of black: create the death card (transparent) and fade it in.
 	tw.tween_callback(_show_death_card)
 	tw.tween_method(_set_card_alpha, 0.0, 1.0, fb.death_card_fade_time)
 	# Hold the card fully visible, then fade it out — the screen stays black underneath it the whole time.
@@ -2840,6 +3652,7 @@ func _on_death_sequence_done() -> void:
 func _respawn_at_checkpoint() -> void:
 	_hide_death_card()    # clear the "You were killed." card before the fade-up (a full reload frees it instead)
 	_close_open_modals()  # anything opened DURING the cinematic (the screens take input while we're dead)
+	_clear_own_death_gore()  # wipe our remains while the screen is still fully black (see below)
 	_dying = false
 	_dead = false                                        # clear the Character death latch -> can take damage again
 	_took_any_hit = false                                # reset the all-crit kill bookkeeping for the fresh life
@@ -2880,23 +3693,14 @@ func _respawn_at_checkpoint() -> void:
 	_nv_on = false  # un-toggle night vision so the fresh life starts clear, not mid-fade from the frozen timer
 	_nv_t = 0.0
 	set_physics_process(true)
-	# Restore the HUD + look/auto-fire input the death lockout disabled (the full-reload path rebuilds them fresh).
-	if ui != null:
-		ui.restore_hud_after_death()
+	# Hand look/auto-fire input back NOW — control returns on the revive's first frame — but hold the HUD
+	# restore and the respawn receipts back respawn_hud_delay seconds (_schedule_respawn_hud_restore): all of
+	# it used to land on this exact frame, popping a full HUD + a toast burst over a still-black screen while
+	# the world faded in behind (the respawn half of the information-overload complaint).
 	if mouse_input != null:
 		mouse_input.set_process(true)
 		mouse_input.set_process_unhandled_input(true)
-	# Announce the death wallet loss NOW (on the revive), not at death — die()'s hide_hud_for_death() would have
-	# swallowed a toast pushed under the black cinematic. Only fires on this in-place revive (the reload death modes
-	# restore the pre-death wallet from the save, so no bill applies there); _bequeath_wallet set the amount, and we
-	# clear it so it shows exactly once. The half-loss itself already happened at death (death_purse_loss_fraction).
-	if _death_wallet_lost > 0.0:
-		notify_toast(PlayerText.hospital_bill(_death_wallet_lost), GameSettings.player_feedback.death_wallet_toast_color)
-	_death_wallet_lost = 0.0
-	# Square the provoked grudges NOW, for the same reason and in the same beat as the bill above: the world stands
-	# down where the player can see it, and the restored-reputation toast lands on a HUD that is back on screen.
-	_settle_provoked_grudges()
-	_consume_pending_holster_forgiveness_tutorial()
+	_schedule_respawn_hud_restore()
 	# Restore the death lockout's body-awareness bits: show the first-person legs again and hand crouch
 	# input back (die() hid/froze both). The full-reload death modes rebuild a fresh Player, so this only
 	# matters on the in-place revive.
@@ -2908,14 +3712,82 @@ func _respawn_at_checkpoint() -> void:
 	_reset_screen_post_process()
 	_fade_in_from_black()
 	# Bring the ducked world buses back UP from the death silence in step with the visual fade-up. The death
-	# sting is deliberately NOT touched here: the card's hold was already timed (death_sting_overlap) so the
-	# clip is still ringing as the world returns, and it ends on its own a beat into the new life — forcing a
+	# sting is deliberately NOT touched here: the card's hold was already timed (death_sting_sync_point) so the
+	# clip's final chord attacks on this very frame and rings on into the new life — forcing a
 	# fade instead amputates its decay and sounds like a cut. DeathMix owns the curve (and kills any prior one
 	# first, so a rapid re-death can't leave two fades fighting the same global buses); it ignores time scale
 	# to ride the visual fade's clock. The RELOAD_* modes snap-restore instead — a fresh scene, no fade to
 	# sync to, and the sting IS cut dead there.
 	if _death_mix != null:
 		_death_mix.begin_revive()
+
+## Start the revive's QUIET WINDOW: hold the HUD restore + the respawn receipts back respawn_hud_delay
+## seconds so the world fades up clean first (see _hud_quiet). Wall-clock, like every death timing, so the
+## window can't stretch under a lingering time_scale. A 0 delay (or off-tree, where no tween can tick)
+## degrades to the old everything-on-frame-one behaviour.
+func _schedule_respawn_hud_restore() -> void:
+	var delay: float = maxf(GameSettings.player_feedback.respawn_hud_delay, 0.0)
+	if delay <= 0.0 or not is_inside_tree():
+		_finish_respawn_hud_restore()
+		return
+	_hud_quiet = true
+	_respawn_hud_tween = create_tween().set_ignore_time_scale(true)
+	_respawn_hud_tween.tween_interval(delay)
+	_respawn_hud_tween.tween_callback(_finish_respawn_hud_restore)
+
+## End of the quiet window: bring the HUD back and (normally) deliver the respawn receipts.
+##   - The wallet receipt — announced on the revive, not at death, because die()'s hide_hud_for_death() would
+##     have swallowed a toast pushed under the black cinematic. Only the in-place revive can reach it: the
+##     reload death modes deliberately settle nothing (see _bequeath_wallet). The move itself already happened
+##     at death; this is the receipt, and it names the destination so the player knows which way to go — a
+##     killer to hunt, or the spot they fell. Banked name over live node, and cleared here so it shows once.
+##   - The grudge settlement, in the same beat and for the same reason: the world stands down where the player
+##     can see it, and the restored-reputation toasts land on a HUD that is back on screen.
+## `deliver_receipts = false` is the RE-DEATH FLUSH (die(), killed inside the window). Only the HUD restore
+## runs then — ui._death_hidden_hud must be emptied before the new hide_hud_for_death() snapshot, or the
+## still-hidden nodes drop off the restore list and stay invisible on every later life. The receipts are
+## deliberately NOT fired and their state NOT cleared: Character.take_damage banked the NEW death's wallet
+## + settlement verdict (_bequeath_wallet / _on_killed_by) BEFORE die() ran, so delivering here would toast
+## the new receipt into a HUD about to be hidden and then wipe it — eating it from the next revive, where it
+## belongs. Leaving everything banked hands the whole job to the next revive's quiet window.
+func _finish_respawn_hud_restore(deliver_receipts: bool = true) -> void:
+	_hud_quiet = false
+	if _respawn_hud_tween != null and _respawn_hud_tween.is_valid():
+		_respawn_hud_tween.kill()
+	_respawn_hud_tween = null
+	if ui != null:
+		ui.restore_hud_after_death()
+	if not deliver_receipts:
+		return
+	if _death_wallet_lost > 0.0:
+		var wallet_toast := PlayerText.purse_taken(_death_wallet_killer_name, _death_wallet_lost) \
+			if _death_wallet_to_killer else PlayerText.purse_dropped(_death_wallet_lost)
+		notify_toast(wallet_toast, GameSettings.player_feedback.death_wallet_toast_color)
+	_death_wallet_lost = 0.0
+	_death_wallet_killer_name = ""
+	_death_wallet_to_killer = false
+	_settle_provoked_grudges()
+	_consume_pending_holster_forgiveness_tutorial()
+
+## Destroy the gore OUR OWN death flung — the meat chunks and body parts, the floor blood splat, the blood drops
+## and the stains they left, the ragdoll/loot corpse if one is authored, and the secondary splatter any of those
+## gibs already bled. The Dark-Souls revive deliberately leaves the WORLD untouched (enemies keep their HP and
+## positions, loot stays looted), but our remains are not the world: without this the player is brought back to
+## life standing in its own guts, or watching them from a checkpoint in view of the spot it died — and each
+## further death piles another set on, since a gib lingers gib_lifetime seconds and its stains far longer.
+##
+## SURGICAL, not a blanket gore wipe: only the player's burst is tagged (Groups.PLAYER_GORE, stamped by
+## GoreSpawner off death_gore_group()), so an NPC killed in the same firefight keeps every chunk and stain
+## exactly where it fell. The death purse is deliberately NOT gore and NOT tagged — that MoneyBag is the wallet
+## you have to walk back and reclaim (see _bequeath_wallet).
+##
+## Called from _respawn_at_checkpoint BEFORE _fade_in_from_black, i.e. while the screen is still fully black, so
+## nothing is ever seen to blink out. Designer switch: GameSettings.effects.clear_player_gore_on_respawn.
+## The RELOAD_* death modes need none of this — they rebuild the scene, which frees the lot.
+func _clear_own_death_gore() -> void:
+	if not GameSettings.effects.clear_player_gore_on_respawn:
+		return
+	clear_death_gore()
 
 ## Clear the screen post-process back to "normal" on spawn: the death cinematic's full grayscale +
 ## fade-to-black and any leftover hurt drain, plus the global slow-mo. Driven uniforms (low_hp, night

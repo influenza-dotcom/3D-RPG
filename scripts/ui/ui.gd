@@ -146,6 +146,7 @@ var MONEY_DELTA_FONT_SIZE: int = GameSettings.hud.money_delta_font_size
 var MONEY_COLOR: Color = GameSettings.hud.money_color              ## gold for the persistent zorkmid readout
 var MONEY_GAIN_COLOR: Color = GameSettings.hud.money_gain_color    ## green +N on a gain
 var MONEY_LOSS_COLOR: Color = GameSettings.hud.money_loss_color    ## red -N on a spend
+var MONEY_DEBT_COLOR: Color = GameSettings.hud.money_debt_color    ## readout red while the wallet is NEGATIVE (in debt)
 var MONEY_DELTA_RISE: float = GameSettings.hud.money_delta_rise    ## pixels the +N/-N floats up as it fades
 var MONEY_DELTA_TIME: float = GameSettings.hud.money_delta_time    ## seconds for that float + fade
 
@@ -274,7 +275,7 @@ func _ready() -> void:
 	_money_label.add_theme_color_override(&"font_color", MONEY_COLOR)
 	_money_label.add_theme_color_override(&"font_outline_color", MenuStyle.hud.label_outline_color)
 	_money_label.add_theme_constant_override(&"outline_size", MenuStyle.hud.toast_outline_size)
-	_money_label.text = _money_text(0)
+	_stamp_money_readout(0.0)  # placeholder until the first poll/signal; the stamp owns text + debt tint
 	_weighted.add_child(_money_label)
 	if not Reputation.reputation_changed.is_connected(_on_reputation_changed):
 		Reputation.reputation_changed.connect(_on_reputation_changed)
@@ -425,10 +426,34 @@ func hide_hud_for_death() -> void:
 
 ## Restore the HUD hidden by hide_hud_for_death() — the in-place revive (_respawn_at_checkpoint) calls this.
 func restore_hud_after_death() -> void:
+	_purge_transient_notices()
 	for ci in _death_hidden_hud:
 		if is_instance_valid(ci):
 			ci.visible = true
 	_death_hidden_hud.clear()
+
+## Free every transient top-left notification that predates this restore — the toast labels under _rep_toasts
+## and the +N/-N money float. Their hold/fade tweens are deliberately NOT ignore_time_scale, so the death
+## cinematic's slow-mo stretches them: a toast born on the killing-blow frame (a cripple line, a dialogue-abort
+## flush) or pushed invisibly mid-cinematic by a POSTHUMOUS kill (collateral/long-range bounty, a kill-quest
+## objective, a faction hit) is often still alive when the HUD returns, popping half-faded over the spawn
+## fade-in. The fresh life starts with a clean stack; the deliberate revive receipts (wallet / grudge / tutorial
+## toasts) are pushed AFTER this restore by _finish_respawn_hud_restore, so they are never swept. Nodes are
+## hidden before queue_free — a freed node still draws until end of frame, and one stale frame is the bug.
+func _purge_transient_notices() -> void:
+	if _rep_toasts != null:
+		for t in _rep_toasts.get_children():
+			if t is CanvasItem:
+				(t as CanvasItem).visible = false
+			t.queue_free()
+	if is_instance_valid(_money_delta_label):
+		if _money_delta_tw != null:
+			_money_delta_tw.kill()
+		_money_delta_label.visible = false
+		_money_delta_label.queue_free()
+	_money_delta_label = null
+	_money_delta_tw = null
+	_money_delta_sum = 0.0
 
 ## One HUD readout label pinned to the bottom-LEFT (right_side=false) or bottom-RIGHT (true) corner,
 ## white with a black outline so it reads over any scene, mouse-ignoring, above the rest of the HUD.
@@ -900,6 +925,16 @@ func _on_quest_failed(quest: Quest) -> void:
 func _money_text(total: float) -> String:
 	return Zorkmids.money_text(total)
 
+## Stamp the top-left readout — text AND tint in one seam (the build, the money_changed signal and the
+## per-frame poll all route here so the colour can never lag the number). Gold while solvent, the debt
+## red the moment the balance is negative: implants are bought on credit (implant_choice.gd) and this
+## signed readout IS the debt display — the backpack shows no coin tile while below zero.
+func _stamp_money_readout(total: float) -> void:
+	if _money_label == null:
+		return
+	_money_label.text = _money_text(total)
+	_money_label.add_theme_color_override(&"font_color", MONEY_COLOR if total >= 0.0 else MONEY_DEBT_COLOR)
+
 ## Player.money changed (add_money): refresh the readout and float a colour-coded +N / -N up from it.
 ## Rapid deltas (a coin-pile vacuum, a multi-item sale) ACCUMULATE into the one live float — re-stamped and its
 ## rise+fade restarted — instead of stacking unreadable copies at the same spot; a flurry that nets to zero
@@ -907,8 +942,7 @@ func _money_text(total: float) -> String:
 ## must also reject a label whose fade already queue_free'd THIS frame (still "valid" until end-of-frame), else
 ## a same-frame delta re-stamps a dying node and that float never renders.
 func _on_money_changed(total: float, delta: float) -> void:
-	if _money_label != null:
-		_money_label.text = _money_text(total)
+	_stamp_money_readout(total)
 	if is_zero_approx(delta):
 		return
 	if is_instance_valid(_money_delta_label) and not _money_delta_label.is_queued_for_deletion():
@@ -991,7 +1025,7 @@ func _process(delta: float) -> void:
 	# float. NO int() here — zorkmids are FRACTIONAL now, and a truncating poll would stomp the correct
 	# signal-driven text every frame ("12.5" would never survive a frame).
 	if _money_label != null and is_instance_valid(player):
-		_money_label.text = _money_text(float(player.get(&"money")))
+		_stamp_money_readout(float(player.get(&"money")))
 
 ## Ammo readout for the equipped weapon: "clip / reserve" (rounds in the magazine / rounds left in the
 ## backpack). Blank for a caliber-less weapon (melee / rock / spray) — those carry no reserve and their

@@ -44,11 +44,20 @@ func do_respec(player: Node) -> int:
 	# station is FREE and must serve even a wallet in DEBT — the New Game implant purchase can legitimately
 	# start the run negative, and `money < 0.0` must not lock a debtor out of a free service. The paid path
 	# still refuses any wallet below the fee, debtors included.
-	if respec_cost > 0.0 and float(player.money) < respec_cost:
+	# ⭐DUCK-TYPED, like every other call in this function: `player` is a bare Node here (the dialogue path and
+	# the tests both hand in stubs that carry only `money` / `add_money`). Prefer the payment seam when the
+	# host has it — that is what reaches the bank account and the credit line — and fall back to the plain
+	# wallet comparison when it doesn't, so a minimal host is still served correctly rather than crashing.
+	var affordable: bool = player.can_pay(respec_cost) if player.has_method(&"can_pay") \
+			else float(player.money) >= respec_cost
+	if respec_cost > 0.0 and not affordable:
 		return 0
 	var n := pm.respec()
-	if respec_cost > 0.0 and player.has_method(&"add_money"):  # > 0, not != 0: a mis-authored NEGATIVE cost must not pay the player
-		player.add_money(-respec_cost)
+	if respec_cost > 0.0:  # > 0, not != 0: a mis-authored NEGATIVE cost must not pay the player
+		if player.has_method(&"charge"):
+			player.charge(respec_cost)          # the payment seam: cash, then savings, then the armed rail
+		elif player.has_method(&"add_money"):
+			player.add_money(-respec_cost)      # minimal host (a stub / a non-Player wallet): the plain debit
 	GameState.autosave(player)  # the authoritative persist of the reversed build
 	if player.has_method(&"notify_toast"):
 		player.notify_toast(PlayerText.respec_refunded(n), Color(0.6, 0.85, 1.0))

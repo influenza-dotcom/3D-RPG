@@ -34,7 +34,13 @@ func _process(delta: float) -> void:
 	# `wielder` is Node-typed, so has_mechanic() resolves dynamically (Variant): the `or`-chain has no inferable
 	# type — annotate bool explicitly (:= here is a PARSER ERROR that kills this whole script, like dash_ok).
 	var laser_unlocked: bool = wielder == null or not wielder.has_method(&"has_mechanic") or wielder.has_mechanic(&"laser_sight")
-	visible = _light_on and not attack.holstered and attack.current_weapon != null and attack.current_weapon.has_laser_sight and laser_unlocked
+	# T2 liveness (the PickupRay hover-cue idiom): die() never holsters the weapon or touches this node, and this
+	# _process keeps running through the whole death cinematic — without this term the corpse swept a live, tracking
+	# laser beam + dot across the world while the camera rolled. Duck-typed like laser_unlocked above (a wielder
+	# without is_alive() counts as alive), so a bare test body keeps its laser; is_alive() flips true on respawn and
+	# the light simply comes back if it was toggled on.
+	var wielder_alive: bool = wielder == null or not wielder.has_method(&"is_alive") or wielder.is_alive()
+	visible = _light_on and wielder_alive and not attack.holstered and attack.current_weapon != null and attack.current_weapon.has_laser_sight and laser_unlocked
 	if attack.current_weapon and attack.current_weapon.effective_range > 0.0:
 		spot_range = attack.current_weapon.effective_range
 	else:
@@ -83,6 +89,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	# visible). A no-laser weapon (e.g. the sniper, has_laser_sight = false) or a holstered gun ignores
 	# the key entirely — you can't toggle a sight that isn't there.
 	if attack.current_weapon == null or not attack.current_weapon.has_laser_sight or attack.holstered:
+		return
+	# A DEAD wielder can't flick the light either (same duck-typed liveness as _process's visibility term) —
+	# without this the key still flipped the toggle state and played the click over the death cinematic.
+	var wielder: Node = attack.character if attack else null
+	if wielder != null and wielder.has_method(&"is_alive") and not wielder.is_alive():
 		return
 	_light_on = not _light_on
 	flashlight_click.play()

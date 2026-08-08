@@ -7,12 +7,13 @@ extends Node3D
 ## light, and the outline onto a gun subtree. The root just calls dress(target) — once on itself from
 ## _ready, then on each swapped-in weapon model.
 ##
-## Host-coupled: GunMesh builds it in _ready and sets `host` right after .new(); this child needs the host
-## only as the Node3D whose `layers` every submesh is forced onto (so projected world decals — keyed to a
-## cull_mask that excludes the gun's render layer — never land on the weapon). Off-tree (a unit-test GunMesh
-## built via .new() with no add_child) this child never exists, so GunMesh's _ready never runs and never
-## dresses anything — matching the monolith, where _ready (and the deferred view-model equip) never ran
-## either.
+## Host-coupled but host-AGNOSTIC: GunMesh builds one in _ready for the gun, and the Player builds one for
+## the first-person ARMS rig (the bare fists wear the same look as every weapon). The host is needed only
+## for its render `layers` (duck-typed — so projected world decals, keyed to a cull_mask that excludes the
+## gun's layer, never land on the weapon); a host with no `layers` property (the BodyModelSwap arms rig,
+## which already forces its parts onto the view-model layer itself) leaves mesh layers untouched. Off-tree
+## (a unit-test GunMesh built via .new() with no add_child) this child never exists, so nothing dresses —
+## matching the monolith.
 
 const RIM_LIGHT_SHADER = preload("res://resources/shaders/rim_light.gdshader")
 
@@ -42,9 +43,10 @@ const RIM_LIGHT_SHADER = preload("res://resources/shaders/rim_light.gdshader")
 ## prop. If your gun's laser sight still gets outlined, add its exact node name to this list.
 @export var outline_skip_name_hints: PackedStringArray = ["laser", "sight", "beam"]
 
-## The GunMesh this dresses — set right after .new() in GunMesh._ready. READ-only here (we only force the
-## submeshes onto host.layers); the canonical state stays on the host.
-var host: GunMesh
+## The node this dresses FOR — GunMesh for the gun, the BodyModelSwap arms rig for the fists. Set right
+## after .new() by the builder. READ-only here, and only its `layers` are read (duck-typed .get, absent =
+## leave mesh layers alone); the canonical state stays on the host.
+var host: Node3D
 
 var _rim_material: ShaderMaterial
 var _outline_material: ShaderMaterial  ## black inverted-hull outline, shared across every gun submesh
@@ -84,7 +86,11 @@ func _disable_shadows_recursive(node: Node) -> void:
 		# exclude via cull_mask) so projected decals — e.g. the player's blob
 		# shadow when crouching lowers the gun near the floor — don't land on the
 		# weapon. The imported model's submeshes default to layer 1 otherwise.
-		mi.layers = host.layers
+		# Duck-typed: the arms rig host has no `layers` and keeps its own (it already
+		# forced the view-model layer onto every part).
+		var host_layers: Variant = host.get(&"layers") if host != null else null
+		if host_layers != null:
+			mi.layers = int(host_layers)
 	for child in node.get_children():
 		_disable_shadows_recursive(child)
 
@@ -99,6 +105,14 @@ func _apply_rim_recursive(node: Node) -> int:
 func _chain_rim_on_mesh(mi: MeshInstance3D) -> int:
 	if not mi.mesh or not _rim_material:
 		return 0
+	# A mesh carrying a material_override (BodyModelSwap._skin tints the arms that way) outranks every
+	# per-surface override, so the rim must chain onto the OVERRIDE itself or it silently loses. Duplicated
+	# per-instance, same as the surface path below.
+	if mi.material_override != null:
+		var dup := mi.material_override.duplicate()
+		dup.next_pass = _rim_material
+		mi.material_override = dup
+		return 1
 	var applied := 0
 	for surface_idx in mi.mesh.get_surface_count():
 		var base: Material = mi.get_surface_override_material(surface_idx)

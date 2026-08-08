@@ -1,11 +1,14 @@
 extends GutTest
 
 ## Contract tests for the dialogue music bed (scripts/dialogue/dialogue_music_bed.gd) — the looping track
-## faded in under every conversation. Covers the three things that break SILENTLY:
+## faded in under every conversation. Covers the four things that break SILENTLY:
 ##   1. The DialogueManager autoload actually BUILDS the bed as a child (a dropped add_child = no music, no error).
 ##   2. The authored track in DialogueSettings.tres is set to LOOP (a Disabled .wav import still plays, but
 ##      seams audibly on repeat — the exact regression a re-import can reintroduce).
 ##   3. The loop-flag probe reads BOTH stream shapes (AudioStreamWAV.loop_mode vs .mp3/.ogg `loop`).
+##   4. The talk duck (the slight per-spoken-line dip under the voice): its two levels COMPOSE instead of
+##      stomping one volume_db, a stale auto-release can't cut the next line's dip, and the pulse is inert
+##      without a playing bed.
 ## The bed itself is built OFF-TREE (.new() without add_child, so _ready never runs) — no audio device, no
 ## GameSettings mutation, per the "don't run _ready() in a unit test" rule.
 
@@ -14,19 +17,46 @@ const BED_SCRIPT := preload("res://scripts/dialogue/dialogue_music_bed.gd")
 func _make_bed() -> DialogueMusicBed:
 	return BED_SCRIPT.new() as DialogueMusicBed
 
+## A stand-in for an imported .wav: `seconds` of 8-bit mono silence at 44100 Hz (the fixture idiom already
+## used by tests/test_audio_manager_spawn.gd). ⭐THE DATA IS THE POINT. A bare AudioStreamWAV.new() holds no
+## frames, so get_length() is 0 — and _looping_copy derives the forced loop's range from
+## get_length() * mix_rate, so over a data-less fixture that range comes back ZERO-LENGTH. A zero-length loop
+## IS silence (the regression that once shipped), so the bed correctly refuses it, warns, and hands the
+## authored stream back UNLOOPED for the finished-restart backstop — meaning a data-less fixture exercises
+## that give-up path instead of the force-a-loop path these tests are about. 8-bit mono makes bytes == frames,
+## so get_length() is exactly `seconds` and the derived loop_end lands on a whole frame count.
+## Loop points are left at the Loop-Mode-Disabled import default (loop_begin == loop_end == 0) on purpose:
+## filling those in is the code's job, and the contract under test.
+func _silent_wav(seconds: float) -> AudioStreamWAV:
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_8_BITS
+	wav.mix_rate = 44100
+	wav.stereo = false
+	var silence := PackedByteArray()
+	silence.resize(int(44100.0 * seconds))  # 1 byte per frame at 8-bit mono; zero bytes = silence
+	wav.data = silence
+	return wav
+
 # --- Settings surface -------------------------------------------------------------------------------
 
 func test_dialogue_settings_exposes_music_bed_knobs() -> void:
 	var cfg: DialogueSettings = GameSettings.dialogue
 	assert_not_null(cfg, "GameSettings.dialogue must resolve to the DialogueSettings resource")
-	# Every knob the bed reads in _ready / set_bed_playing must exist, or the bed hard-errors at runtime.
-	for field in ["dialogue_music", "dialogue_music_volume_db", "dialogue_music_fade_in", "dialogue_music_fade_out", "dialogue_music_bus"]:
+	# Every knob the bed reads in _ready / set_bed_playing / the talk duck must exist, or the bed hard-errors at runtime.
+	for field in ["dialogue_music", "dialogue_music_volume_db", "dialogue_music_fade_in", "dialogue_music_fade_out", "dialogue_music_talk_duck_db", "dialogue_music_talk_duck_fade", "dialogue_music_bus"]:
 		assert_true(field in cfg, "DialogueSettings must expose '%s' — the DialogueMusicBed reads it" % field)
 
 func test_dialogue_music_fades_are_non_negative() -> void:
 	var cfg: DialogueSettings = GameSettings.dialogue
 	assert_gte(cfg.dialogue_music_fade_in, 0.0, "fade-in seconds cannot be negative")
 	assert_gte(cfg.dialogue_music_fade_out, 0.0, "fade-out seconds cannot be negative")
+	assert_gte(cfg.dialogue_music_talk_duck_fade, 0.0, "talk-duck fade seconds cannot be negative")
+
+func test_authored_talk_duck_is_a_dip_not_a_boost() -> void:
+	# The bed clamps a positive value to off at runtime (a "duck" that BOOSTS the bed over the voice is never
+	# meant), but the authored resource should say what it does: at-or-below zero.
+	assert_lte(GameSettings.dialogue.dialogue_music_talk_duck_db, 0.0,
+		"dialogue_music_talk_duck_db must be <= 0 — more negative = a deeper dip under the voice; positive is clamped to off")
 
 func test_dialogue_music_bus_exists_in_the_bus_layout() -> void:
 	# Bus routing is load-bearing: a typo'd bus name silently drops the bed onto Master, escaping the
@@ -46,7 +76,7 @@ func test_the_bed_forces_a_non_looping_track_to_loop() -> void:
 	# the track's import settings say. _looping_copy must hand back a looping stream — on a COPY, leaving the
 	# authored resource other systems may share untouched.
 	var bed := _make_bed()
-	var authored := AudioStreamWAV.new()
+	var authored := _silent_wav(1.0)  # a real import has SAMPLE FRAMES; without them there is no range to loop
 	authored.loop_mode = AudioStreamWAV.LOOP_DISABLED
 	var played := bed._looping_copy(authored)
 	assert_true(bed._stream_loops(played), "the bed must force a non-looping track to loop")
@@ -60,8 +90,7 @@ func test_the_forced_loop_gets_a_real_range_not_a_zero_length_one() -> void:
 	# loop_begin == loop_end == 0. Setting LOOP_FORWARD alone then loops a ZERO-LENGTH region, which plays
 	# silence — the flag is set, every flag assertion passes, and you hear nothing. The range must be filled in.
 	var bed := _make_bed()
-	var authored := AudioStreamWAV.new()
-	authored.mix_rate = 44100
+	var authored := _silent_wav(1.0)  # one second at 44100 Hz, so the forced loop_end must land on 44100 frames
 	authored.loop_mode = AudioStreamWAV.LOOP_DISABLED
 	assert_eq(authored.loop_end, 0, "precondition: a Loop-Mode-Disabled import leaves loop_end at 0")
 	var played: AudioStream = bed._looping_copy(authored)
@@ -142,4 +171,44 @@ func test_bed_without_a_stream_is_inert() -> void:
 	bed.set_bed_playing(true)
 	assert_false(bed.playing, "set_bed_playing(true) with no authored track must not start playback")
 	bed.set_bed_playing(false)
+	bed.free()
+
+# --- The talk duck ----------------------------------------------------------------------------------
+
+func test_talk_duck_pulse_without_a_playing_bed_is_inert() -> void:
+	# The manager pulses note_line_speech for EVERY spoken line, bed or no bed — with no stream (or the bed
+	# not up yet) it must be a clean no-op: no tween, no timer, no volume write. Off-tree, so any accidental
+	# create_tween/get_tree() reach here would error the test — that silence IS the contract.
+	var bed := _make_bed()
+	bed.note_line_speech(3.0)
+	assert_eq(bed._speech_duck_db, 0.0, "a pulse with no playing bed must not duck anything")
+	bed.note_line_speech_stop()  # the release side must be just as safe when nothing was ever ducked
+	assert_eq(bed._speech_duck_db, 0.0, "a stop with nothing ducked stays at 0")
+	bed.free()
+
+func test_volume_is_the_sum_of_envelope_and_talk_duck() -> void:
+	# The two fade tweens (conversation envelope vs talk duck) write SEPARATE levels composed in _apply_volume —
+	# the design that lets the first line's dip run while the fade-in is still swelling, instead of the two
+	# tweens stomping one volume_db. Pin the composition.
+	var bed := _make_bed()
+	bed._set_base_db(-10.0)
+	assert_eq(bed.volume_db, -10.0, "with no duck, volume is the envelope alone")
+	bed._set_speech_duck_db(-4.0)
+	assert_eq(bed.volume_db, -14.0, "a spoken line sits duck dB UNDER the envelope")
+	bed._set_base_db(-6.0)
+	assert_eq(bed.volume_db, -10.0, "an envelope fade moving mid-dip keeps the duck offset intact")
+	bed._set_speech_duck_db(0.0)
+	assert_eq(bed.volume_db, -6.0, "releasing the duck returns to the envelope level")
+	bed.free()
+
+func test_a_stale_auto_release_does_not_cut_the_next_lines_dip() -> void:
+	# Each pulse bumps _speech_token and the timed release only fires on a matching token — so line 1's timer
+	# expiring mid-line-2 must NOT swell the bed back up while the NPC is still talking. Driven directly
+	# (off-tree there are no real timers): a release bound to a stale token is ignored, the current one lands.
+	var bed := _make_bed()
+	bed._set_speech_duck_db(-4.0)
+	var stale := bed._speech_token
+	bed._speech_token += 1  # "line 2 pulsed" — what note_line_speech does before arming its own release
+	bed._release_speech_duck(stale)
+	assert_eq(bed._speech_duck_db, -4.0, "a stale (superseded) auto-release must leave the dip alone")
 	bed.free()

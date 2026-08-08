@@ -55,6 +55,81 @@ func test_can_pick_up_grants_unique_weapon_to_player() -> void:
 	# cp queue_free'd itself in start_talk; don't free it again.
 
 
+func test_can_pick_up_auto_equips_into_empty_hands() -> void:
+	# An UNARMED player (equipped_item null = bare fists) who takes a weapon off the ground has it drawn for
+	# them. The instance equipped must be the UNIQUE copy that was just granted, never the shared template:
+	# equipped_item is what the UI paints its "(equipped)" marker from, so equipping the template would mark
+	# the wrong stack the moment the player carries two of the same gun.
+	var cp := CanPickUp.new()
+	cp.item = PISTOL_ITEM
+	var player: NPC = load("res://scripts/npc/npc.gd").new()
+	var bag := CharacterInventory.new()
+	player.inventory = bag
+	watch_signals(bag)
+	cp.start_talk(player)
+	var granted: Item = bag.contents()[0]["item"]
+	assert_true(bag.equipped_item == granted,
+		"an unarmed player equips the picked-up weapon — the granted copy, not the shared item template")
+	assert_signal_emitted(bag, "equip_weapon_requested",
+		"auto-equip goes through the normal equip bridge so the owner plays the swap/draw")
+	bag.free()
+	player.free()
+	# cp queue_free'd itself in start_talk; don't free it again.
+
+
+func test_can_pick_up_never_swaps_a_weapon_out_of_armed_hands() -> void:
+	# THE reason auto-equip is gated on empty hands: grabbing a pipe off the floor mid-fight must not put the
+	# rifle away. Anything already equipped — even something the player is holstering — leaves the pickup as a
+	# plain backpack grant. Pinned separately from the toggles because this one isn't configurable: it's the
+	# rule itself.
+	var cp := CanPickUp.new()
+	cp.item = PISTOL_ITEM
+	var player: NPC = load("res://scripts/npc/npc.gd").new()
+	var bag := CharacterInventory.new()
+	player.inventory = bag
+	var wielded: Item = PISTOL_ITEM.duplicate() as Item
+	bag.add(wielded, 1)
+	bag.equip_item(wielded)  # the player is now ARMED
+	cp.start_talk(player)
+	assert_eq(bag.contents().size(), 2,
+		"the picked-up weapon still lands in the backpack for an armed player")
+	assert_true(bag.equipped_item == wielded,
+		"picking a weapon up never takes the one already in your hands away from you")
+	bag.free()
+	player.free()
+	# cp queue_free'd itself in start_talk; don't free it again.
+
+
+func test_can_pick_up_auto_equip_is_vetoed_per_pickup_and_by_the_options_toggle() -> void:
+	# TWO independent vetoes, both read live at pickup time: the designer's per-pickup export (a quest weapon
+	# the player should own but not wield) and the player's Options -> Game toggle. Either one off = the
+	# weapon still lands in the bag, just un-drawn.
+	var cp := CanPickUp.new()
+	cp.item = PISTOL_ITEM
+	cp.auto_equip_weapon = false
+	var player: NPC = load("res://scripts/npc/npc.gd").new()
+	var bag := CharacterInventory.new()
+	player.inventory = bag
+	cp.start_talk(player)
+	assert_eq(bag.contents().size(), 1, "the weapon is still granted with auto-equip off")
+	assert_null(bag.equipped_item, "auto_equip_weapon = false leaves the picked-up weapon un-drawn")
+
+	var was: bool = Settings.auto_equip_pickups
+	Settings.auto_equip_pickups = false  # set directly, not via the setter — no settings.cfg write in a test
+	var cp2 := CanPickUp.new()
+	cp2.item = PISTOL_ITEM  # export left at its default ON, so only the Options toggle can veto here
+	var bag2 := CharacterInventory.new()
+	player.inventory = bag2
+	cp2.start_talk(player)
+	Settings.auto_equip_pickups = was
+	assert_eq(bag2.contents().size(), 1, "the weapon is still granted with the Options toggle off")
+	assert_null(bag2.equipped_item, "Settings.auto_equip_pickups = false leaves the picked-up weapon un-drawn")
+	bag2.free()
+	bag.free()
+	player.free()
+	# cp / cp2 queue_free'd themselves in start_talk; don't free them again.
+
+
 func test_can_pick_up_start_talk_is_single_use_before_free_processes() -> void:
 	var cp := CanPickUp.new()
 	cp.item = PISTOL_ITEM

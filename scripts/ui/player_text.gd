@@ -156,14 +156,43 @@ const CHARACTER_NAME_PLACEHOLDER := "[PH] Enter a name…"
 const CHARACTER_CREATE_NAME_REQUIRED := "[PH] Name your character to begin"
 
 ## The implant-purchase step (implant_choice.gd) — New Game's SECOND screen, after character creation's
-## Begin: fit ANY set of starting chips ON CREDIT — each is billed at its authored Item.value against the
-## starting wallet, and the balance is allowed to go NEGATIVE (start the run in debt). Buying nothing is the
-## default. Chip rows paint Item.label() / AbilityRegistry.display_name_for / Zorkmids.money_text — only the
-## chrome lives here; the tally line is composed by implant_choice_tally below.
+## Begin: fit starting chips ON CREDIT — each is billed at its authored Item.value against the starting
+## wallet, and the balance is allowed to go NEGATIVE (start the run in debt). The Ledger rates the creation
+## BUILD first (EconomySettings.credit_rating_for/credit_limit_for), and the cart can never bill past the
+## limit that rating earns. THREE stacked lines: this standing explainer, then the VERDICT (a whole template
+## per score band, implant_choice_verdict) and the FILED REASON (implant_choice_reason) below it. Buying
+## nothing is the default. Chip rows paint Item.label() / AbilityRegistry.display_name_for /
+## Zorkmids.money_text — only the chrome lives here; the tally line is composed by implant_choice_tally.
 const IMPLANT_CHOICE_TITLE := "Starting Implants"
-const IMPLANT_CHOICE_HINT := "[PH] Implants go on your tab — whatever you fit is billed against your starting zorkmids."
-## The PINNED footer tally under the roster: the running implant bill + the resulting starting balance.
-const IMPLANT_CHOICE_TALLY := "[PH] Implant bill: {cost}  ·  Starting zorkmids: {balance}"
+const IMPLANT_CHOICE_HINT := "[PH] Implants go on your tab — whatever you fit is billed against your starting zorkmids.\nThe Ledger rates the build, then sets the line."
+## The PINNED footer tally under the roster: the running implant bill + the resulting starting balance +
+## the credit still extendable (limit + starting money − bill; the roster greys rows that no longer fit it).
+const IMPLANT_CHOICE_TALLY := "[PH] Implant bill: {cost}  ·  Starting zorkmids: {balance}  ·  Credit left: {credit}"
+
+## THE LEDGER'S VERDICT on the creation build — one WHOLE template per score band, SELECTED by the key
+## EconomySettings.credit_rating_for returns (never a prose fragment glued to a number; re-wording a band here
+## can never change what the bank actually does). The creditor is "the Ledger", the same always-online thing
+## the first-launch terms gate says keeps the Record — the entity financing your body-mods is the entity that
+## remembers what you do with them. Keep every line under ~100 chars: it paints on an 11px autowrapped band.
+const IMPLANT_CREDIT_BAND_NO_FILE := "[PH] No file — {score}. Nothing on record to price. The Ledger will advance you {money}."
+const IMPLANT_CREDIT_BAND_DECLINED := "[PH] Declined — {score}. Nothing here we could repossess. You're good for {money}."
+const IMPLANT_CREDIT_BAND_SUBPRIME := "[PH] Subprime — {score}. No trade, no assets, no notable features. You're good for {money}."
+const IMPLANT_CREDIT_BAND_SERVICEABLE := "[PH] Serviceable — {score}. No enthusiasm, no objection. You're good for {money}."
+const IMPLANT_CREDIT_BAND_BANKABLE := "[PH] Bankable — {score}. We can price this. You're good for {money}."
+const IMPLANT_CREDIT_BAND_PREFERRED := "[PH] Preferred debtor — {score}. We like your odds of living long enough. You're good for {money}."
+
+## The FILED REASON — the adverse-action notice parody: the one underwriting line the build falls furthest
+## under, or a commendation when nothing is short. Whole templates keyed like the bands above. "Notable
+## Cowardice" is a callback to the standing heading the terms gate files declined choices under.
+const IMPLANT_CREDIT_REASON_NONE := "[PH] Noted in your favour: a specialty the Ledger can insure."
+const IMPLANT_CREDIT_REASON_NO_FILE := "[PH] Filed reason: no established identity. The Ledger has no notes on you."
+const IMPLANT_CREDIT_REASON_UNSPENT := "[PH] Filed reason: allocation left undrawn — see 'Notable Cowardice'."
+const IMPLANT_CREDIT_REASON_THIN_TRADE := "[PH] Filed reason: no trade of record — allocation spread too thin to price."
+const IMPLANT_CREDIT_REASON_NO_INCOME := "[PH] Filed reason: no visible means of support."
+const IMPLANT_CREDIT_REASON_MORTALITY := "[PH] Filed reason: life expectancy under the repayment term."
+const IMPLANT_CREDIT_REASON_EXPOSURE := "[PH] Filed reason: pledged attributes exceed recoverable value."
+## The one reason you can fix TODAY — walk to a terminal and pay — so it outranks every build complaint.
+const IMPLANT_CREDIT_REASON_DELINQUENT := "[PH] Filed reason: unsatisfactory payment history."
 ## The name-entry modal's BUILD-TIME card title. NameEntryDialog re-titles the card on every open() with the
 ## caller's composed prompt (claim_name_dialog, routed through MenuStyle.title_text for the skin's casing), so
 ## this is only what the card is CONSTRUCTED with. Deliberately not shared with CHARACTER_CREATE_NAME_LABEL —
@@ -327,10 +356,13 @@ const SAVE_LOAD_LOAD_FAILED := "[PH] Load failed"
 const SAVE_SLOT_CAPTION := "{level}   ·   {time}"
 const SAVE_SLOT_CAPTION_NO_LEVEL := "{time}"
 ## Player-menu tab-strip labels (the Deus Ex / Pip-Boy tab group). DISPLAY text only: PlayerMenus routes
-## between the four screens on StringName keys (PlayerMenus.TABS); these are just what the strip's buttons
+## between the five screens on StringName keys (PlayerMenus.TABS); these are just what the strip's buttons
 ## paint (PlayerMenus.TAB_LABELS maps key -> label). Re-wording one here can never change routing.
 const MENU_TAB_INVENTORY := "Inventory"
 const MENU_TAB_STATS := "Stats"
+## Deliberately NOT a reuse of IMPLANT_CHOICE_TITLE's wording family: that titles New Game's implant-purchase
+## (on-credit) step, an independent surface — this labels the in-game tab-strip button.
+const MENU_TAB_IMPLANTS := "Implants"
 const MENU_TAB_REPUTATION := "Reputation"
 const MENU_TAB_JOURNAL := "Journal"
 const QUEST_JOURNAL_EMPTY := "[PH] No quests yet."
@@ -351,6 +383,20 @@ const STATS_SCREEN_TITLE := "Stats"
 ## The Stats screen's portrait-column button — hands off to the fullscreen CharacterInspectScreen
 ## (full body + the equipped weapon, drag to rotate).
 const STATS_INSPECT_BUTTON := "Inspect"
+## The Implants tab (implants_screen.gd — the fifth Pip-Boy tab): its two section headings (cased by
+## MenuStyle.title_text, the chip-install heading idiom), the per-section empty line, the dim "click to
+## switch an implant off" hint under the INSTALLED toggle rows, and the "how to get a carried chip fitted"
+## hint under the carried rows. Deliberately NOT reuses of the INSTALL_* consts: those paint the
+## ChipInstallScreen (the paid mechanic modal), an independent surface.
+const IMPLANTS_INSTALLED_HEADING := "[PH] Installed"
+## The toggle verb, under the installed rows. Switching one OFF keeps it installed (it just stops working)
+## — the copy must not read as uninstalling, or a player will fear losing a chip they paid for.
+const IMPLANTS_TOGGLE_HINT := "[PH] Click an implant to switch it off — it stays installed."
+const IMPLANTS_CARRIED_HEADING := "[PH] In your bag — not installed"
+const IMPLANTS_CARRIED_HINT := "[PH] A chip mechanic can fit these."
+## The per-section empty line. Reads like INSTALL_NONE's "(none)" but is deliberately its OWN const —
+## one const per painted surface, so re-wording the install screen never re-words this tab.
+const IMPLANTS_NONE := "(none)"
 
 ## The fullscreen "inspect your character" showcase (opened from the Stats screen, NOT a Pip-Boy tab): its
 ## panel title. Deliberately its own const rather than sharing CHARACTER_CREATE_TITLE — same surface family,
@@ -636,11 +682,41 @@ static func wallet_you(amount: float) -> String:
 	return TextFormat.subst(PLAYER_WALLET, {"money": Zorkmids.money_text(amount)})
 
 
+## The Ledger's VERDICT line on the pending build: one whole band template SELECTED by key, carrying the
+## score as a bare number and the limit as a whole money phrase. An unknown key degrades to the no-file
+## wording rather than painting blank — a band added to EconomySettings without a template here still reads.
+static func implant_choice_verdict(band: StringName, score: int, limit: float) -> String:
+	var template := IMPLANT_CREDIT_BAND_NO_FILE
+	match band:
+		EconomySettings.BAND_DECLINED: template = IMPLANT_CREDIT_BAND_DECLINED
+		EconomySettings.BAND_SUBPRIME: template = IMPLANT_CREDIT_BAND_SUBPRIME
+		EconomySettings.BAND_SERVICEABLE: template = IMPLANT_CREDIT_BAND_SERVICEABLE
+		EconomySettings.BAND_BANKABLE: template = IMPLANT_CREDIT_BAND_BANKABLE
+		EconomySettings.BAND_PREFERRED: template = IMPLANT_CREDIT_BAND_PREFERRED
+	return TextFormat.subst(template, {"score": score, "money": Zorkmids.money_text(limit)})
+
+
+## The single FILED REASON under the verdict — one whole template per reason key, no substitution at all
+## (the bank cites a line, it doesn't quote your numbers back at you). Unknown keys read as the commendation.
+static func implant_choice_reason(reason: StringName) -> String:
+	match reason:
+		EconomySettings.REASON_NO_FILE: return IMPLANT_CREDIT_REASON_NO_FILE
+		EconomySettings.REASON_UNSPENT: return IMPLANT_CREDIT_REASON_UNSPENT
+		EconomySettings.REASON_THIN_TRADE: return IMPLANT_CREDIT_REASON_THIN_TRADE
+		EconomySettings.REASON_NO_INCOME: return IMPLANT_CREDIT_REASON_NO_INCOME
+		EconomySettings.REASON_MORTALITY: return IMPLANT_CREDIT_REASON_MORTALITY
+		EconomySettings.REASON_EXPOSURE: return IMPLANT_CREDIT_REASON_EXPOSURE
+		EconomySettings.REASON_DELINQUENT: return IMPLANT_CREDIT_REASON_DELINQUENT
+	return IMPLANT_CREDIT_REASON_NONE
+
+
 ## The implant screen's footer tally: the running bill for the checked chips + the post-debit starting
-## balance (negative = the run starts in debt; the balance label is tinted danger by the screen).
-static func implant_choice_tally(cost: float, balance: float) -> String:
+## balance (negative = the run starts in debt; the balance label is tinted danger by the screen) + the
+## credit still extendable under the bank's limit (what the roster's row-gating measures against).
+static func implant_choice_tally(cost: float, balance: float, credit_left: float) -> String:
 	return TextFormat.subst(IMPLANT_CHOICE_TALLY,
-		{"cost": Zorkmids.money_text(cost), "balance": Zorkmids.money_text(balance)})
+		{"cost": Zorkmids.money_text(cost), "balance": Zorkmids.money_text(balance),
+		"credit": Zorkmids.money_text(credit_left)})
 
 
 static func wallet_merchant(amount: float) -> String:
@@ -799,6 +875,146 @@ static func install_title(name: String) -> String:
 
 static func heal_title(name: String) -> String:
 	return TextFormat.subst("HEAL — {name}", {"name": name}) if not name.is_empty() else "HEAL"
+
+
+# --- THE LEDGER TERMINAL (the ATM: scripts/components/atm.gd + scripts/ui/atm_screen.gd) -------------------
+# The account is ONE SIGNED number, so DEPOSIT and "settle your debt" are the same action — only the button
+# caption differs, selected by sign (whole templates by state, never a fragment glued on). The creditor is
+# "the Ledger", the same entity that financed your implants and that the first-launch terms gate says keeps
+# the Record — never a second bank brand.
+
+## Card title when the terminal is unnamed; open_atm re-titles per station through atm_title.
+const ATM_CARD_TITLE := "[PH] LEDGER TERMINAL"
+## Hover readout when the Atm carries no station_name.
+const ATM_DEFAULT_PROMPT := "[PH] Ledger Terminal"
+## The amount field's placeholder — the affordance that says "type a number here".
+const ATM_AMOUNT_PLACEHOLDER := "[PH] amount"
+## The controller-path fill chips (a pad player cannot type into a LineEdit).
+const ATM_ALL_CASH := "[PH] All cash"
+const ATM_HALF_CASH := "[PH] Half"
+const ATM_ALL_SAVED := "[PH] All saved"
+## Withdraw is one word in every state — only DEPOSIT swaps caption when you owe (see atm_deposit_button).
+const ATM_WITHDRAW := "[PH] Withdraw"
+const ATM_DEPOSIT := "[PH] Deposit"
+const ATM_SETTLE := "[PH] Pay down"
+## The five-line statement, TWO whole templates selected on whether anything is owed. ⭐The line COUNT is
+## identical in both, so the fixed-width card can never hop mid-transaction (the heal-status padding lesson).
+## {owed} arrives as an absolute value: Zorkmids.fmt prints its own minus, and "Owed  -240 zm" reads as a
+## double negative.
+const ATM_STATEMENT_SOLVENT := "[PH] Cash on hand   {cash}\nOn deposit   {saved}\nOwed   nothing\nCredit line   {left} of {limit}\nCredit score   {score}   ·   {band}"
+const ATM_STATEMENT_OWING := "[PH] Cash on hand   {cash}\nOn deposit   {saved}\nOwed   {owed}\nCredit line   {left} of {limit}\nCredit score   {score}   ·   {band}"
+## Short band names for the statement's score line and the score toast — the same KEYS the verdict templates
+## use, worded tight enough to sit at the end of a line on a fixed-width card.
+## ⭐DELIBERATELY BARE (no "[PH] "): these are VALUE tokens substituted into templates that already carry the
+## marker, and a second marker landing mid-sentence ("rates you [PH] subprime") is the failure that convention
+## exists to prevent. Same rule as the authored BODY_PART_* / archetype display names.
+const ATM_BAND_NO_FILE := "no file"
+const ATM_BAND_DECLINED := "declined"
+const ATM_BAND_SUBPRIME := "subprime"
+const ATM_BAND_SERVICEABLE := "serviceable"
+const ATM_BAND_BANKABLE := "bankable"
+const ATM_BAND_PREFERRED := "preferred"
+
+
+## The short band name for the statement's score line, selected by KEY (never by the painted label).
+static func atm_band_short(band: StringName) -> String:
+	match band:
+		EconomySettings.BAND_DECLINED: return ATM_BAND_DECLINED
+		EconomySettings.BAND_SUBPRIME: return ATM_BAND_SUBPRIME
+		EconomySettings.BAND_SERVICEABLE: return ATM_BAND_SERVICEABLE
+		EconomySettings.BAND_BANKABLE: return ATM_BAND_BANKABLE
+		EconomySettings.BAND_PREFERRED: return ATM_BAND_PREFERRED
+	return ATM_BAND_NO_FILE
+
+
+## Hover readout for a terminal: its authored name, else the default label (the trade_prompt mold).
+static func atm_prompt(station_name: String) -> String:
+	if station_name.is_empty():
+		return ATM_DEFAULT_PROMPT
+	return TextFormat.subst("[PH] Bank at {name}", {"name": station_name})
+
+
+## Card title, re-stamped per terminal on open. MenuStyle.title_text owns the casing.
+static func atm_title(station_name: String) -> String:
+	if station_name.is_empty():
+		return ATM_CARD_TITLE
+	return TextFormat.subst("[PH] LEDGER — {name}", {"name": station_name})
+
+
+## The statement: one whole template per state, five lines in both. Every amount rides in as a formatted
+## money phrase; `owed` is passed already absolute by the screen.
+static func atm_statement(cash: float, saved: float, owed: float, credit_left: float, credit_limit: float,
+		score: int, band: StringName) -> String:
+	var template := ATM_STATEMENT_OWING if owed > 0.0 else ATM_STATEMENT_SOLVENT
+	return TextFormat.subst(template, {
+		"cash": Zorkmids.money_text(cash),
+		"saved": Zorkmids.money_text(saved),
+		"owed": Zorkmids.money_text(owed),
+		"left": Zorkmids.money_text(credit_left),
+		"limit": Zorkmids.money_text(credit_limit),
+		"score": score,
+		"band": atm_band_short(band),
+	})
+
+
+## The standing explainer under the statement — the ONE place the economy is taught. Two whole templates:
+## a terminal whose fee multiplier zeroes the charge says so outright rather than printing "0%".
+static func atm_hint(fee_fraction: float) -> String:
+	if fee_fraction <= 0.0:
+		return "[PH] Banked money is safe if you die. This terminal charges nothing to spend it."
+	return TextFormat.subst(
+		"[PH] Banked money is safe if you die. Spending it costs {pct}% — the cash in your pocket never does.",
+		{"pct": TextFormat.num(snappedf(fee_fraction * 100.0, 0.1))})
+
+
+## DEPOSIT doubles as SETTLE: two whole captions selected by whether anything is owed.
+static func atm_deposit_button(owing: bool) -> String:
+	return ATM_SETTLE if owing else ATM_DEPOSIT
+
+
+## Post-transaction toasts. Depositing while in the red is REPAYMENT, and saying so is the only way the
+## player learns the two are the same operation.
+static func atm_deposited(amount: float, was_owing: bool) -> String:
+	var template := "[PH] {money} off your balance." if was_owing else "[PH] {money} deposited."
+	return TextFormat.subst(template, {"money": Zorkmids.money_text(amount)})
+
+
+static func atm_withdrew(amount: float) -> String:
+	return TextFormat.subst("[PH] {money} withdrawn.", {"money": Zorkmids.money_text(amount)})
+
+
+## The armed payment RAIL, as a button caption — TWO whole templates selected by the KEY (never by the painted
+## label, the label-is-never-a-key rule). DEBIT spends what you have; CREDIT keeps going past zero onto the
+## line, which is what the interest then compounds against.
+static func payment_rail_button(method: String) -> String:
+	if method == "credit":
+		return "[PH] Paying with: Credit"
+	return "[PH] Paying with: Debit"
+
+
+## The top-left CREDIT SCORE announcement (CreditWatch). FOUR whole templates selected by two booleans —
+## direction, and whether the move crossed into a new band. Crossing a band is the moment that actually
+## changes what the Ledger will lend you, so it earns the longer line; a plain drift gets the short one.
+## The delta rides in pre-signed via "%+d" (TextFormat.num would drop the plus the readout depends on) and
+## the band arrives as a KEY, resolved here through the same short-name selector the ATM statement uses.
+static func credit_score_toast(score: int, delta: int, band: StringName, band_changed: bool) -> String:
+	if band_changed:
+		var crossed := "[PH] Credit score {score} ({delta}) — the Ledger now rates you {band}." if delta > 0 \
+				else "[PH] Credit score {score} ({delta}) — the Ledger has downgraded you to {band}."
+		return TextFormat.subst(crossed,
+			{"score": score, "delta": "%+d" % delta, "band": atm_band_short(band)})
+	return TextFormat.subst("[PH] Credit score {score} ({delta})",
+		{"score": score, "delta": "%+d" % delta})
+
+
+## The daily interest posting (LedgerAccrual). TWO whole templates selected by DIRECTION — the delta already
+## carries its own sign from Zorkmids.fmt, so the debt variant takes the absolute value rather than printing
+## a stray double minus.
+static func ledger_interest(delta: float) -> String:
+	if delta < 0.0:
+		return TextFormat.subst("[PH] The Ledger added {money} to what you owe.",
+			{"money": Zorkmids.money_text(absf(delta))})
+	return TextFormat.subst("[PH] Your deposits earned {money}.", {"money": Zorkmids.money_text(delta)})
 
 
 static func respec_title(name: String) -> String:

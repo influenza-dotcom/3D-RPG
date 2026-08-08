@@ -58,7 +58,7 @@ var controller_look_sensitivity: float = 3.0   ## right-stick look speed (rad/s-
 var invert_look_y: bool = false                ## invert vertical look (mouse + controller)
 var keybinds: Dictionary = {}                  ## action name (String) -> Array of serialized event dicts (rebinds only)
 var screen_shake_scale: float = 1.0            ## scales GameSettings.screen_shake.intensity_multiplier
-var screen_flash_enabled: bool = true          ## off = suppress every full-screen flash pulse — a photosensitivity toggle, read live at each fire site: PlayerHud.flash_* (hurt/dash/kill), StarSky.flash_kill (on-kill sky pop), and the camera white-flash on hitscan fire (Attack) / ram kill (RamReactor)
+var screen_flash_enabled: bool = true          ## off = suppress every full-screen flash pulse — a photosensitivity toggle, read live at each fire site: PlayerHud.flash_* (hurt/dash/kill), StarSky.flash_kill (on-kill sky pop), and the camera white-flash on hitscan fire (Attack; view_model_punch weapons — the fists — are exempt and never flash) / ram kill (RamReactor)
 var hitstop_enabled: bool = true               ## off = player immune to the freeze-frame slow (FreezeFrame reads this live)
 var colorblind_mode: int = 0                    ## post-process daltonization: 0 none, 1 protan, 2 deutan, 3 tritan
 var colorblind_safe_cues: bool = false          ## recolor disposition / rep cues to a CB-safe palette (read by CBPalette)
@@ -78,6 +78,7 @@ var hud_sway_scale: float = 1.0                 ## 0..1 accessibility scale on t
 var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
 var heartbeat_enabled: bool = true              ## off = silence JUST the low-HP heartbeat pulse (the SFX bus volume is unaffected); read live by the player's _update_low_hp
 var difficulty_level: int = DifficultySettings.Level.NORMAL  ## 0 Easy / 1 Normal / 2 Hard -> GameSettings.difficulty.apply_level (ML-3)
+var auto_equip_pickups: bool = true             ## ON = a WEAPON picked up off the ground with Interact (E) is drawn immediately, but ONLY while the player is UNARMED (bare fists / equipped_item null) — an already-armed player keeps what they're holding, so a floor pipe can't swap the rifle away mid-fight (CanPickUp.start_talk -> CharacterInventory.equip_item -> the swap anim). OFF = it always just lands in the backpack. Polled live at pickup time, so a change takes effect on the very next E. Per-pickup designer veto: CanPickUp.auto_equip_weapon
 ## The first-launch Terms-of-Service gate: false until the player consents to the (fake, comedic) TOS the very first
 ## time they boot (StartMenu shows terms_of_service_screen.gd while this is false, then calls accept_tos()). Persisted
 ## HERE, in per-install settings.cfg, on purpose — it must survive New Game (unlike the wiped-on-new-game gamestate.cfg
@@ -399,6 +400,12 @@ func set_difficulty(level: int) -> void:
 	apply_difficulty()
 	save_settings()
 
+## Draw a weapon picked up off the ground (E) when the player is UNARMED, instead of leaving it in the
+## backpack. No apply step — CanPickUp reads this live at pickup time, so the toggle bites on the next pickup.
+func set_auto_equip_pickups(on: bool) -> void:
+	auto_equip_pickups = on
+	save_settings()
+
 ## Record the player's one-time consent to the first-launch Terms of Service and persist it, so the gate never shows
 ## again on this install (StartMenu calls this from the TOS screen's `accepted` signal). No apply step — nothing live
 ## reads it except StartMenu's boot check. There is intentionally no matching "un-accept" setter.
@@ -459,6 +466,7 @@ func load_settings() -> void:
 	debug_skip_menu = _cfg_bool(cfg, "debug", "skip_menu", debug_skip_menu)
 	debug_always_show_tos = _cfg_bool(cfg, "debug", "always_show_tos", debug_always_show_tos)
 	difficulty_level = clampi(int(cfg.get_value("gameplay", "difficulty_level", difficulty_level)), 0, 2)
+	auto_equip_pickups = _cfg_bool(cfg, "gameplay", "auto_equip_pickups", auto_equip_pickups)
 	tos_accepted = _cfg_bool(cfg, "legal", "tos_accepted", tos_accepted)
 	_loaded = true
 
@@ -510,6 +518,7 @@ func save_settings() -> void:
 	cfg.set_value("debug", "skip_menu", debug_skip_menu)
 	cfg.set_value("debug", "always_show_tos", debug_always_show_tos)
 	cfg.set_value("gameplay", "difficulty_level", difficulty_level)
+	cfg.set_value("gameplay", "auto_equip_pickups", auto_equip_pickups)
 	cfg.set_value("legal", "tos_accepted", tos_accepted)
 	cfg.save(CONFIG_PATH)
 

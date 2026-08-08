@@ -136,12 +136,21 @@ func _process(delta: float) -> void:
 ## Walk head-bob, called by player.gd ONLY while grounded. Amplitude and rate
 ## scale with speed (faster = bigger, quicker); below GameSettings.camera.bob_min_speed the offset is
 ## eased out so a still player has a still camera. Horizontal bob runs at half the
-## vertical rate (figure-8 feel). This is the CAMERA bob — the gun mesh and the
-## view-model hands run their own separate bob in gun_mesh.gd.
+## vertical rate (figure-8 feel). This is the CAMERA bob — the gun and the bare fists run their own
+## separate, independently-integrated bobs (GunPose._process in scripts/effects/gun_pose.gd and
+## Player._update_fp_arm_bob), both of which advance on the RENDER delta because they run in _process.
+##
+## TIMEBASE CONTRACT — bob() is called from _physics_process ONLY (player.gd's ground-movement arm and
+## WallClimb.tick, which the same _physics_process drives), so every integrator in here MUST use the
+## PHYSICS delta. Using get_process_delta_time() here is the bug this comment exists to prevent: it
+## returns the idle/render delta, so a 60 Hz physics tick advancing by a render delta scales the whole
+## bob by 60/render_fps — correct at exactly 60 fps, and six times too slow at a 360 fps cap, which
+## reads in-game as "the head-bob is gone" (the camera drifts once per room instead of once per step)
+## while the gun/fists bobs, correctly integrated, keep their footstep cadence.
 func bob(velocity: Vector3) -> void:
 	# Accessibility: head-bob off -> ease any current offset out and stop (read live so the toggle applies now).
 	if not Settings.view_bob_enabled:
-		var off_dt := get_process_delta_time()
+		var off_dt := get_physics_process_delta_time()
 		_bob_offset = _bob_offset.lerp(Vector3.ZERO, 1.0 - exp(-GameSettings.camera.recovery_speed * off_dt))
 		return
 	var max_speed := GameSettings.player_movement.max_speed
@@ -162,12 +171,16 @@ func bob(velocity: Vector3) -> void:
 	speed_factor = clampf(speed_factor, 0.0, 1.0)
 	bob_amount = base_amt * speed_factor
 	var speed = minf(planar, max_speed) * speed_factor
+	# NOTE: `speed` already carries speed_factor, so this compares bob_min_speed against roughly
+	# current_speed^2 / max_speed, NOT the raw planar speed its tuning comment describes — the effective
+	# near-still cutoff is ~0.71 m/s, not 0.1. Harmless (every real movement tier clears it) but don't
+	# read the threshold as m/s of travel.
 	if speed < GameSettings.camera.bob_min_speed:
-		var dt := get_process_delta_time()
+		var dt := get_physics_process_delta_time()
 		var t := 1.0 - exp(-GameSettings.camera.recovery_speed * dt)
 		_bob_offset = _bob_offset.lerp(Vector3.ZERO, t)
 		return
-	_time += get_process_delta_time() * GameSettings.camera.bob_speed
+	_time += get_physics_process_delta_time() * GameSettings.camera.bob_speed
 	_bob_offset.y = sin(_time) * bob_amount * speed
 	var bob_h_ratio: float = GameSettings.camera.bob_horizontal_ratio
 	_bob_offset.x = cos(_time * bob_h_ratio) * bob_amount * speed * bob_h_ratio

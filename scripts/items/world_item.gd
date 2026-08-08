@@ -52,8 +52,11 @@ static func build(item: Item, count: int = 1) -> Node3D:
 		if world_visual != null:
 			return _make_throwable(item, maxi(1, count), world_visual, Vector3(0.35, 0.35, 0.35), Vector3(0.5, 0.5, 0.5))
 	# 3. A weapon with no dedicated world model falls back to its first-person view model.
-	if item != null and item.is_weapon() and item.weapon != null and item.weapon.view_model != null:
-		var vm := item.weapon.view_model.instantiate()  # the actual weapon model
+	# held_view_model() skips a FIRST-PERSON-only rig (the bare hands): dropping fists would otherwise litter
+	# the floor with a pair of floating forearms. Falls through to the generic pickup box instead.
+	var held_vm: PackedScene = item.weapon.held_view_model() if (item != null and item.is_weapon() and item.weapon != null) else null
+	if held_vm != null:
+		var vm := held_vm.instantiate()  # the actual weapon model
 		_make_world_renderable(vm)  # FP view models draw on the gun layer / no-depth -> would show through walls
 		# A view_model whose ROOT bakes a first-person-only pose (the knife: FP scale 1.585 + a tilt + a 0.42/0.45
 		# offset for the player's gun camera) sits ~0.6 m off its pickup box, oversized and mis-angled, when dropped
@@ -130,6 +133,9 @@ static func _make_throwable(item: Item, amount: int, visual: Node, body_size: Ve
 	#     the hit from the generic speed-based prop bludgeon to a real weapon hit (weapon damage + headshot multiplier
 	#     + stat scaling + located limb damage). Null for a gun, which keeps the blunt formula. The opt-in matters:
 	#     stamping it unconditionally would make a thrown PISTOL deal its BULLET damage as a bludgeon.
+	#   • pins_body_part ← weapon.thrown_pins_body_part — a LETHAL thrown hit staples the struck body part to the wall
+	#     behind, blade embedded (GoreSpawner._resolve_pin). Rides on the thrown_weapon path above for its located
+	#     contact point, so a weapon that sets it without thrown_uses_weapon_damage simply never pins.
 	#   • throw_impulse_mult ← weapon.thrown_impulse_mult — how fast a real throw launches it (the knife is HURLED,
 	#     a gun is tossed). See the continuous_cd note below.
 	#   • throw_sound ← weapon.thrown_sound — a signature throw sound, played instead of the drop's release sound.
@@ -146,6 +152,7 @@ static func _make_throwable(item: Item, amount: int, visual: Node, body_size: Ve
 		t.destructible = false
 		t.impact_damage_mult = item.weapon.thrown_impact_damage_mult
 		t.thrown_weapon = item.weapon if item.weapon.thrown_uses_weapon_damage else null
+		t.pins_body_part = item.weapon.thrown_pins_body_part
 		t.throw_impulse_mult = item.weapon.thrown_impulse_mult
 		t.throw_sound = item.weapon.thrown_sound
 		t.face_travel_when_thrown = item.weapon.thrown_faces_travel

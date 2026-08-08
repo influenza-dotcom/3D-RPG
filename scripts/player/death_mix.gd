@@ -113,18 +113,32 @@ func begin() -> void:
 	# or the governing slider is at 0), and a re-death landing during the previous sting's release fade would
 	# otherwise have just had that fade killed above — leaving the old clip audibly running with no owner.
 	stop()
-	# The sting is deliberately NOT on the killing blow: death_sting_start_delay holds it back (by default
-	# until the vignette has finished closing) so the world drains into silence FIRST and the sting opens
-	# against a black frame. Wall-clock, like the cinematic itself — the death slow-mo must not stretch it.
-	# Re-uses _sting_tween: the delay always resolves long before begin_revive() could start a release, and
-	# sharing the handle means a re-death's _kill_tweens() cancels a pending start it no longer wants.
-	var delay: float = maxf(GameSettings.player_feedback.death_sting_start_delay, 0.0)
-	if delay <= 0.0 or not is_inside_tree():
-		_start_sting()
+	_start_sting_sequence()
+
+
+## Hold the sting back, start it, and SWELL it in — one wall-clock tween, so the death slow-mo cannot stretch
+## any of it. Three beats, each optional:
+##   1. death_sting_start_delay — the sting is deliberately NOT on the killing blow, so the world drains a
+##      moment first and the sting arrives as a reaction rather than as part of the gunshot.
+##   2. play() at silence.
+##   3. death_sting_fade_in — swell up to level. Starting at full volume is a hard edge against a world that
+##      is ducking AWAY, which reads as a jolt; the swell hands the mix over instead of snatching it.
+## Re-uses _sting_tween: this always resolves long before begin_revive() could start a release, and sharing
+## the handle means a re-death's _kill_tweens() cancels a pending start it no longer wants.
+func _start_sting_sequence() -> void:
+	var fb := GameSettings.player_feedback
+	if not _sting_will_play() or not is_inside_tree():
 		return
+	var delay: float = maxf(fb.death_sting_start_delay, 0.0)
+	var swell: float = maxf(fb.death_sting_fade_in, 0.0)
 	_sting_tween = create_tween().set_ignore_time_scale(true)
-	_sting_tween.tween_interval(delay)
+	if delay > 0.0:
+		_sting_tween.tween_interval(delay)
 	_sting_tween.tween_callback(_start_sting)
+	if swell > 0.0:
+		# Tween a 0..1 LINEAR-AMPLITUDE factor, not volume_db directly. A straight dB ramp from silence spends
+		# most of its length inaudible and then rushes in — the same reason the release fade was dropped.
+		_sting_tween.tween_method(_set_sting_gain, 0.0, 1.0, swell)
 
 
 ## Phase 1 of the cinematic, 0..1 over death_sequence_time: the world ducks out in lockstep with the closing
@@ -158,8 +172,8 @@ func restore_world() -> void:
 ## The in-place revive (CHECKPOINT_RESPAWN): the world swells back up over spawn_fade_in_time.
 ##
 ## THE STING IS DELIBERATELY LEFT ALONE HERE. By default (death_sting_release = 0) it simply keeps playing
-## and ends when the clip ends — death_sting_overlap has already timed the respawn so the tail rings on over
-## the world fading in, which is the whole effect. Forcing a fade instead SOUNDS LIKE A CUT: a ramp to
+## and ends when the clip ends — death_sting_sync_point has already timed the respawn onto its final chord, so
+## the tail rings on over the world fading in, which is the whole effect. Forcing a fade SOUNDS LIKE A CUT: a ramp to
 ## silence is perceptually over long before it mathematically finishes (a linear-dB fade is ~inaudible after
 ## the first third), so it amputates the clip's own decay rather than blending with it.
 ##
@@ -226,64 +240,100 @@ func _end_world_fade() -> void:
 
 ## Start (or RE-start) the sting. play() from the top is deliberate: a second death during the tail of the
 ## first must not layer a second copy of an 8-second clip over itself.
-func _start_sting() -> void:
+## The sting's level once fully swelled in. `sting` has no Options slider of its own (it is not in
+## Settings.VOLUME_BUSES), so the nominated slider is folded into this player's own level instead of adding a
+## sixth slider nobody asked for. A muted slider never reaches here — _sting_will_play() refuses first.
+func _sting_target_db() -> float:
 	var fb := GameSettings.player_feedback
-	if fb.death_sting == null or not is_inside_tree():
-		return
-	# `sting` has no Options slider of its own (it is not in Settings.VOLUME_BUSES), so fold the nominated
-	# slider into this player's own level instead of adding a sixth slider nobody asked for. At 0% the
-	# player has muted that category — play nothing rather than a sting they explicitly silenced.
 	var slider: float = 1.0
 	if fb.death_sting_slider_bus != &"":
 		slider = clampf(Settings.get_volume(fb.death_sting_slider_bus), 0.0, 1.0)
-		if slider <= 0.0:
-			return
+	return fb.death_sting_volume_db + linear_to_db(maxf(slider, 0.0001))
+
+
+## Drive the swell from a 0..1 linear-amplitude factor. Re-reads the target each frame so a volume slider
+## dragged mid-cinematic is honoured, exactly like the world duck.
+func _set_sting_gain(k: float) -> void:
+	volume_db = _sting_target_db() + linear_to_db(maxf(k, 0.0001))
+
+
+## Mount and start the clip. Opens at SILENCE when a swell is authored (the tween takes it up from there);
+## with no swell it starts at level, which is the old instant-on behaviour.
+func _start_sting() -> void:
+	var fb := GameSettings.player_feedback
+	if not _sting_will_play() or not is_inside_tree():
+		return
 	stream = fb.death_sting
 	bus = fb.death_sting_bus
-	volume_db = fb.death_sting_volume_db + linear_to_db(slider)
+	volume_db = SILENT_DB if fb.death_sting_fade_in > 0.0 else _sting_target_db()
 	play()
 
 
-## Wall-clock seconds from the moment of death to the sting's LAST SAMPLE — start delay + the clip's real
-## length, read off the stream so it re-derives itself whenever a designer swaps the clip. 0.0 when there is
-## nothing to wait for (no clip authored, or the governing volume slider is muted, in which case nothing will
-## play and the cinematic must not stall on it). Player's cinematic uses this to stretch the death card's
-## hold so the sting is never cut off mid-phrase — see death_card_holds_for_sting.
-func sting_end_time() -> float:
+## Whether a sting will actually sound at all this death — false if none is authored, or if the player has
+## muted the slider governing it. Both timing helpers below return 0.0 in that case, so the cinematic never
+## stretches itself around audio nobody is going to hear.
+func _sting_will_play() -> bool:
 	var fb := GameSettings.player_feedback
 	if fb.death_sting == null:
-		return 0.0
+		return false
 	if fb.death_sting_slider_bus != &"" and Settings.get_volume(fb.death_sting_slider_bus) <= 0.0:
+		return false
+	return true
+
+
+## Wall-clock seconds from the moment of death to the sting's LAST SAMPLE — start delay + the clip's real
+## length, read off the stream so it re-derives itself whenever a designer swaps the clip. 0.0 when nothing
+## will play. Not used for timing the cinematic (sting_sync_time is); this is how far the sting rings on.
+func sting_end_time() -> float:
+	if not _sting_will_play():
 		return 0.0
+	var fb := GameSettings.player_feedback
 	return maxf(fb.death_sting_start_delay, 0.0) + maxf(fb.death_sting.get_length(), 0.0)
 
 
-## How long the death card should hold FULLY VISIBLE: `respawn_delay`, stretched so the sting plays out and
-## then CROSS-FADES with the world coming back (death_card_holds_for_sting).
+## Wall-clock seconds from the moment of death to the instant in the clip the respawn should land ON — the
+## sting's own `death_sting_sync_point` (its final chord) offset by the start delay. This is what the death
+## card's hold is solved against, so the chord attacks exactly as the screen starts fading back in.
 ##
-## The clip outlasts the cinematic — with the shipped numbers the respawn would land at 4.15 s against a
-## ~8.2 s sting, chopping it mid-phrase. But holding for the clip's FULL length is wrong too: the screen
-## would sit black waiting on silence. So we aim the respawn a deliberate overlap short of the end:
+## Clamped to the clip's real length: an over-long sync point could otherwise push the respawn past the end
+## of the audio, holding the player on a black screen listening to nothing. 0.0 when nothing will play, or
+## when the designer set the sync point to 0 to opt out of aligning entirely.
+func sting_sync_time() -> float:
+	if not _sting_will_play():
+		return 0.0
+	var fb := GameSettings.player_feedback
+	if fb.death_sting_sync_point <= 0.0:
+		return 0.0
+	var cue: float = minf(fb.death_sting_sync_point, maxf(fb.death_sting.get_length(), 0.0))
+	return maxf(fb.death_sting_start_delay, 0.0) + cue
+
+
+## How long the death card should hold FULLY VISIBLE: `respawn_delay`, stretched so the screen starts fading
+## back in exactly ON the sting's sync point — its final chord (death_card_holds_for_sting).
 ##
-##     respawn  ==  sting_end_time() - death_sting_overlap
+## THE CINEMATIC IS SCORED TO THE CLIP, not merely long enough for it. The card's hold is the only beat that
+## can absorb the difference, so it is what we solve for:
 ##
-## The clip's last `death_sting_overlap` seconds then ring on over the world fading back in, ending on their
-## own — the game returns underneath a sting that is still finishing, instead of one that was cut. Solved for
-## rather than authored, because a magic number in the .tres goes stale the moment anyone swaps the clip —
-## and because tests/test_player_core.gd pins `respawn_delay` at 1.0.
+##     death_sequence_time + death_card_delay + fade_in + HOLD + fade_out + death_card_gap  ==  sting_sync_time()
+##
+## Everything before the hold is the keel-over, the settle-on-black beat and the card's own fade-in;
+## everything after it is the card fading out and the black gap. Land that sum on the sync point and the chord attacks on the same frame
+## _fade_in_from_black() starts, then rings out underneath the fade-up. Solved rather than authored, because a
+## hold baked into the .tres goes stale the moment anyone touches another timing — and because
+## tests/test_player_core.gd pins `respawn_delay` at 1.0.
 ##
 ## `respawn_delay` stays the FLOOR: this only ever lengthens the beat, never shortens it, so a short clip
-## (or none) plays the original snappy cinematic with nothing changed.
+## (or none, or a sync point of 0) plays the original snappy cinematic with nothing changed.
 func card_hold_seconds() -> float:
 	var fb := GameSettings.player_feedback
 	if not fb.death_card_holds_for_sting:
 		return fb.respawn_delay
-	var sting_end := sting_end_time()
-	if sting_end <= 0.0:
-		return fb.respawn_delay  # nothing will play (no clip, or the player muted its slider) — don't stall on it
+	var sync := sting_sync_time()
+	if sync <= 0.0:
+		return fb.respawn_delay  # nothing to align to (no clip, muted slider, or sync point opted out of)
 	# Everything in the cinematic that is NOT the hold, i.e. what plays before and after it.
-	var fixed := fb.death_sequence_time + fb.death_card_fade_time * 2.0 + fb.death_card_gap
-	return maxf(fb.respawn_delay, sting_end - maxf(fb.death_sting_overlap, 0.0) - fixed)
+	var fixed := fb.death_sequence_time + maxf(fb.death_card_delay, 0.0) + fb.death_card_fade_time * 2.0 + fb.death_card_gap
+	return maxf(fb.respawn_delay, sync - fixed)
 
 
 func _kill_tweens() -> void:

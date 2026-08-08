@@ -139,15 +139,38 @@ func setup(p_player: Character, p_inventory: Inventory, p_attack: Attack, p_ammo
 			p_attack.shell_particle.connect(Callable(sd, "emit"))
 			p_attack.shell_drop = sd as GPUParticles3D  # let Attack resize the casing per WeaponData.casing_size_scale before each eject
 
+## The ONE visual reaction to attacking, for every weapon: kick the whole rig out and back. A mounted view
+## model is a CHILD of this node, so it rides the kick for free — which is why no weapon needs its own
+## animation to feel like it fired.
+##
+## A PUNCH is the same tween with the opposite sign: `WeaponData.view_model_punch` swaps the gun's backward
+## recoil for a forward extension (GameSettings.effects punch_kick_*), because a fist that recoils into your
+## own face while the arm thrusts out reads as mush. That flag ALSO asks the mounted model to play its own
+## strike, if it has one — the unarmed hands do (BodyModelSwap.strike), a gun mesh doesn't, and the
+## has_method() guard is what lets one call site serve both.
 func fire():
 	if tween:
 		tween.kill()
+	var fx := GameSettings.effects
+	var wd: WeaponData = inventory.equipped_weapon if inventory != null else null
+	var punch: bool = wd != null and wd.view_model_punch
+	var kick_pos: Vector3 = fx.punch_kick_position if punch else fx.view_model_kick_position
+	var kick_rot: Vector3 = fx.punch_kick_rotation if punch else fx.view_model_kick_rotation
+	var in_time: float = fx.punch_kick_in_time if punch else fx.view_model_kick_in_time
+	var out_time: float = fx.punch_kick_out_time if punch else fx.view_model_kick_out_time
 	tween = create_tween().set_parallel()
 	tween.set_trans(Tween.TRANS_CUBIC)
-	tween.tween_property(self, "_recoil_pos", Vector3(0.0, 0.1, 0.4), 0.05)
-	tween.tween_property(self, "_recoil_rot", Vector3(-5.0, 0.0, 0.0), 0.05)
-	tween.chain().tween_property(self, "_recoil_pos", Vector3.ZERO, 0.1)
-	tween.chain().tween_property(self, "_recoil_rot", Vector3.ZERO, 0.1)
+	tween.tween_property(self, "_recoil_pos", kick_pos, in_time)
+	tween.tween_property(self, "_recoil_rot", kick_rot, in_time)
+	tween.chain().tween_property(self, "_recoil_pos", Vector3.ZERO, out_time)
+	tween.chain().tween_property(self, "_recoil_rot", Vector3.ZERO, out_time)
+	# Re-resolve the mounted model every time, never cache it: WeaponModelSwapper frees and re-instantiates it
+	# on every equip, so a stored ref would be freed the first time you swap weapons.
+	if not punch:
+		return
+	var vm: Node = _swapper.current_model() if _swapper != null else null
+	if vm != null and vm.has_method(&"strike"):
+		vm.call(&"strike")
 
 func reload():
 	# A holstered weapon must stay parked off-screen (same invariant as land() / _on_ammo_finished_reloading()).

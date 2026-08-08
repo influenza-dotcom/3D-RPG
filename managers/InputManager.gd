@@ -78,6 +78,9 @@ var action_stats: StringName = &"Stats"
 var action_reputation: StringName = &"Factions"
 ## Open the read-only Quest Journal (default J). Rebindable; no controller default (the obvious pads are taken).
 var action_journal: StringName = &"Journal"
+## Open the Implants screen (default I) — its rows toggle an implant off/on. Rebindable; no controller default (the obvious pads are
+## taken — matches Stats/Journal/Factions).
+var action_implants: StringName = &"Implants"
 ## Grab-to-throw (Z): picks up the aimed throwable to CARRY/THROW it. Distinct from PickUp/Interact (E),
 ## which adds a dual item to the inventory instead — so an item that's both takeable AND throwable uses E
 ## to stash and Z to throw.
@@ -89,9 +92,11 @@ var action_takedown: StringName = &"Takedown"
 ## follow you (see [[claim_interaction.gd]] / claimable.gd). Polled by ClaimInteraction. Rebindable; no controller
 ## default (the obvious pads are taken — matches Takedown/Stats/Journal).
 var action_claim: StringName = &"Claim"
-## Drop what's in your hands (default H): TAP to release a carried physics prop to the ground WITHOUT throwing it, or
-## — hands not full of a prop — drop your WIELDED weapon (knife/gun) as a world pickup. Polled by PickupRay
-## (ray_cast.gd). Rebindable; no controller default (the obvious pads are taken — matches Throw/Takedown/Claim).
+## Hand verb (default H): with hands EMPTY it takes your WIELDED weapon (knife/gun) out of the holster and into your
+## hands as a carriable/throwable prop; pressing it AGAIN on that weapon puts it straight back and re-wields it (a
+## toggle). Carrying anything else — a world-grabbed or hotbar-pulled prop — it sets that down WITHOUT throwing it.
+## Polled by PickupRay (ray_cast.gd). Rebindable; no controller default (the obvious pads are taken — matches
+## Throw/Takedown/Claim).
 var action_drop_held: StringName = &"DropHeld"
 ## Rotate the item being DRAGGED in the inventory grid (default R, shared with Reload — harmless since gameplay
 ## is suppressed while the bag is open). Read only by GridInventoryView mid-drag. Rebindable; no controller default.
@@ -139,9 +144,11 @@ func _ensure_modal_reg() -> void:
 		{screen = LevelUpScreen, pausing = true},
 		{screen = RespecScreen, pausing = true},
 		{screen = HealScreen, pausing = true},
+		{screen = AtmScreen, pausing = true},                # the Ledger terminal; pauses like its station siblings
 		{screen = ChipInstallScreen, pausing = true},
 		{screen = ChessScreen, pausing = true},
 		{screen = QuestJournal, pausing = false},
+		{screen = ImplantsScreen, pausing = false},          # the implants tab (rows toggle an implant off/on); real-time like its Pip-Boy siblings
 		{screen = CharacterInspectScreen, pausing = false},  # fullscreen hero-view overlay; real-time like the Pip-Boy tabs
 		{screen = SaveLoadScreen, pausing = false},          # manual save/load slot menu; non-pausing (the Options Dark-Souls posture)
 	]
@@ -150,7 +157,7 @@ func _ensure_modal_reg() -> void:
 
 ## True while a NON-pausing overlay menu is up OR control is otherwise suppressed (a cutscene / the name-entry box).
 ## The gameplay control gates — move / jump / fire / aim / crouch / grapple — check this. Truth set is the
-## 14 registry screens + the two control-only suppressors (byte-identical to the pre-registry OR-chain, plus
+## 15 registry screens + the two control-only suppressors (byte-identical to the pre-registry OR-chain, plus
 ## each screen registered since).
 func gameplay_suppressed() -> bool:
 	return any_modal_open() or CutscenePlayer.is_active() or NameEntryDialog.is_open()
@@ -187,7 +194,7 @@ func any_modal_open(exclude: Object = null) -> bool:
 			return true
 	return false
 
-## True if any PAUSING screen is open (the `pausing` rows). The real-time Pip-Boy tabs (Inventory/Stats/Reputation/
+## True if any PAUSING screen is open (the `pausing` rows). The real-time Pip-Boy tabs (Inventory/Stats/Implants/Reputation/
 ## Journal) refuse to open over these — but NOT over each other (they switch siblings via PlayerMenus.close_others).
 func any_pausing_open() -> bool:
 	_ensure_modal_reg()

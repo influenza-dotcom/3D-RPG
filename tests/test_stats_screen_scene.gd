@@ -6,7 +6,7 @@ extends GutTest
 ## skin-driven look on top. These are prefab WIRING contract tests (the silent-when-broken seams): the
 ## autoload points at the SCENE, every %node the script binds exists, no text is authored in the scene
 ## (strings belong to PlayerText / l10n, never a .tscn), and the player-menu-group layout contracts hold —
-## incl. the PlayerMenus seam: the tab strip is CODE-BUILT into %TabSlot (its four-Button structure is
+## incl. the PlayerMenus seam: the tab strip is CODE-BUILT into %TabSlot (its one-Button-per-tab structure is
 ## test_player_menus.gd's contract), so the scene must ship the slot EMPTY with zero authored Buttons.
 ## Behaviour (open/close/live refresh) is in-tree -> playtest + test_stats_screen.gd.
 
@@ -57,7 +57,7 @@ func test_layout_contracts_for_the_player_menu_group() -> void:
 	#  * root + dim span the screen; the panel keeps the shared PANEL_MARGIN 0.12 anchor band (the
 	#    loot/shop chrome — a drifted band would off-centre this tab against its siblings at 792x444);
 	#  * %TabSlot ships EMPTY — the strip is built by PlayerMenus.build_tab_strip at boot, and its
-	#    4-direct-Button structure is a cross-screen contract (test_player_menus.gd); an authored Button
+	#    one-Button-per-tab structure is a cross-screen contract (test_player_menus.gd); an authored Button
 	#    here would silently double the strip;
 	#  * the body splits 1:2 — the portrait column EXPAND_FILLs at the default 1 share, the stat scroll
 	#    at stretch_ratio 2, so the six blocks keep their two-abreast width budget;
@@ -79,7 +79,7 @@ func test_layout_contracts_for_the_player_menu_group() -> void:
 	assert_almost_eq(panel.anchor_right, 1.0 - margin, 0.001, "panel keeps the shared PANEL_MARGIN band (right)")
 	assert_almost_eq(panel.anchor_bottom, 1.0 - margin, 0.001, "panel keeps the shared PANEL_MARGIN band (bottom)")
 	assert_eq((inst.get_node("%TabSlot") as Node).get_child_count(), 0,
-		"%TabSlot ships empty — PlayerMenus builds the 4-button strip into it at boot (never author tabs)")
+		"%TabSlot ships empty — PlayerMenus builds the tab strip into it at boot (never author tabs)")
 	var col := inst.get_node("%PortraitCol") as Control
 	assert_eq(col.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "the portrait column takes its 1 width share")
 	assert_almost_eq(col.size_flags_stretch_ratio, 1.0, 0.001, "portrait column = 1 share vs the stat column's 2")

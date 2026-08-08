@@ -5,7 +5,7 @@ extends RayCast3D
 ## @seam _query_talk_handler is THE line-of-sight wall-gate for every look-at interactable (pickup/loot/talk/doors): its talk-ray is gated by _interaction_occluded (a second solid-body ray, target's own bodies excluded).
 ## @risk Broaden the occlusion mask or drop the target-own-body exclusion (_interaction_occluded's collision_mask + _target_body_exclusions): silent interact-through-walls, or a dropped item self-occludes and is unpickable on open floor.
 ## @risk Break the closer-prop block (the _talk_distance / is_ancestor_of guard, duplicated in _unhandled_input and _update_talk_target): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
-## @risk Remove the liveness bail (the `player as Character` is_alive() gate at the TOP of _unhandled_input): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic.
+## @risk Remove either liveness bail (the `player as Character` is_alive() gates at the TOP of _unhandled_input AND _physics_process): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic — or the corpse camera keeps painting the hover outlines/readout and greeting NPCs it sweeps across.
 ## @risk Fold the per-prop throw_impulse_mult multiply INTO the throw test (launch_impulse / is_throw_release read the RAW impulse first): a fast-throw prop's gentle tap-DROP then scales past the throw threshold and silently noses, plays the throw sound, and credits the player with an attack.
 ## @test res://tests/test_interaction_occlusion.gd
 ## @test res://tests/test_pickup_ray_liveness.gd
@@ -150,20 +150,27 @@ func _unhandled_input(event: InputEvent) -> void:
 		_drop_held_in_hand()
 		get_viewport().set_input_as_handled()
 
-## The DropHeld / H verb — a TWO-STAGE hand verb. Carrying a physics prop (world-grabbed OR pulled from the hotbar,
-## both the SAME _holding carry, distinguished downstream in Player._on_carry_changed) gets a gentle DROP: the
-## tap-drop impulse, never a throw. Hands otherwise empty, ask the player to take its WIELDED weapon out of the
-## holster and INTO its hands as a carried prop (Player.hold_equipped_weapon) — the next H then drops it, and
-## left-click / a Z-hold throws it, so a thrown knife reuses the ordinary carry verbs instead of a bespoke path.
+## The DropHeld / H verb — a TWO-STAGE hand verb, and on your OWN WEAPON a full TOGGLE.
+##   * Hands empty: ask the player to take its WIELDED weapon out of the holster and INTO its hands as a carried
+##     prop (Player.hold_equipped_weapon), ready to throw.
+##   * Carrying THAT weapon: put it straight back — return_held_weapon_to_hands re-bags AND re-wields it, and
+##     returns true to say it owned this press. Pressing H twice must leave you exactly where you started, so
+##     this branch comes FIRST and never falls through to the drop below (a refused put-back keeps it in hand).
+##   * Carrying anything else (a world-grabbed prop, a hotbar-pulled prop — both the SAME _holding carry,
+##     distinguished downstream in Player._on_carry_changed): a gentle DROP at the tap-drop impulse, never a throw.
+## Throwing the weapon is unchanged and still uses the ordinary carry verbs (left-click, or a Z-hold), and an
+## E/Z tap still sets it down — so the toggle costs no way of getting the knife OUT of your hands.
 ## Gate on `_holding`, NOT `held_object`: a prop freed out from under us leaves held_object falsy while _holding
 ## stays true (see the _holding docstring), and _release already cleans that freed case up. `player` is exported as
-## CharacterBody3D, so the weapon branch downcasts `as Player` (the same idiom _drive_readout uses) —
-## hold_equipped_weapon lives on Player, and the cast is null for a bare/AI test body, so it simply no-ops there.
+## CharacterBody3D, so both weapon branches downcast `as Player` (the same idiom _drive_readout uses) — the two
+## weapon methods live on Player, and the cast is null for a bare/AI test body, where H simply drops as before.
 func _drop_held_in_hand() -> void:
+	var pl := player as Player
 	if _holding:
+		if pl != null and pl.return_held_weapon_to_hands():
+			return  # H put your own weapon back in your hands — this press was the toggle, not a drop
 		_release(GameSettings.physics_damage.pickup_drop_impulse)
 		return
-	var pl := player as Player
 	if pl != null:
 		pl.hold_equipped_weapon()
 
@@ -207,8 +214,19 @@ func force_release_held(impulse: float = 0.0) -> void:
 ## if holding — chase hold_anchor with a clamped, collision-safe step. Drops the
 ## object if it strays past the max hold distance (e.g. yanked through a wall).
 func _physics_process(delta: float) -> void:
-	_update_target_outline()
-	_update_talk_target()
+	# T2 liveness — the per-frame twin of the _unhandled_input bail above: a DEAD player must not keep the hover
+	# cues alive. The death cinematic sweeps the camera while PickupRay keeps physics-processing (die() only stops
+	# the Player's OWN callback), so without this the corpse still painted the orange throwable outline, the white
+	# look-highlight, and the centre name readout — and hover-GREETED NPCs — on whatever crossed the crosshair.
+	# Clear once and hold cleared for the whole cinematic; is_alive() flips true again on respawn and the hover
+	# updates below simply resume. Everything AFTER this gate still runs while dead: die() already released/stashed
+	# the held prop, but the freed-held recovery beneath must stay reachable regardless (same reasoning as ever).
+	var pl := player as Character
+	if pl != null and not pl.is_alive():
+		_clear_look_cues()
+	else:
+		_update_target_outline()
+		_update_talk_target()
 	if _stack_wake_remaining > 0.0:
 		_stack_wake_remaining = maxf(0.0, _stack_wake_remaining - delta)
 		_wake_nearby_bodies(_stack_wake_origin)
@@ -355,6 +373,21 @@ func _recover_from_penetration() -> void:
 		return
 	var normal: Vector3 = info["normal"]
 	held_object.global_position += normal * PICKUP_DEPEN_PUSH
+
+## Drop every hover cue at once — the orange throwable target outline, the white look-highlight, the talk handler,
+## and the centre name readout — for the dead-player gate in _physics_process. It runs every physics frame of the
+## death cinematic, so each branch guards on its own state and the call is a no-op once everything is already clear.
+func _clear_look_cues() -> void:
+	if _last_targeted and is_instance_valid(_last_targeted):
+		_last_targeted.set_outline_visible(false)
+	_last_targeted = null
+	if is_instance_valid(_highlighted) and _highlighted.has_method(&"set_look_highlight"):
+		_highlighted.set_look_highlight(false)
+	_highlighted = null
+	_talk_handler = null
+	_talk_distance = INF
+	if _readout_shown:
+		_drive_readout(null)
 
 func _update_target_outline() -> void:
 	var current: Throwable = null
@@ -533,6 +566,11 @@ func carry(target: Throwable) -> void:
 ## it a weightless kinematic frozen body on the pickup collision layer, wake its
 ## neighbors/stack, and exclude it from player collision. on_picked_up notifies it.
 func _pick_up(target: Throwable) -> void:
+	# A blade left EMBEDDED by a pin kill is frozen with its collider deliberately buried in the wall. Release it
+	# BEFORE the snapshot below, so we stash its free physics state rather than the pinned one (restoring "frozen,
+	# no gravity" on a later drop would leave it hanging in mid-air), and so the carry system is never handed a
+	# body overlapping static geometry. unpin() also lifts it clear of the surface. No-op on everything else.
+	target.unpin()
 	held_object = target
 	_holding = true  # the sole grab entry (aimed E/Z AND the hotbar carry() both land here); paired with every _release / recovery
 	_pickup_grace_remaining = PICKUP_GRACE_TIME

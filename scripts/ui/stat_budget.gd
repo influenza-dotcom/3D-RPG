@@ -14,6 +14,14 @@ extends RefCounted
 ## No class_name on purpose: consumers preload it by path (const StatBudget := preload(...)), keeping it off the
 ## global class cache so a headless GUT run never trips the "new class_name not yet registered" cascade.
 
+## The allocator's per-stat bounds — the SINGLE source. character_creation.gd's steppers clamp to these, and
+## the Ledger's underwriting scorer normalizes against them (implant_choice.gd forwards them into
+## EconomySettings.credit_rating_for), so the builder's rules and the scorer's normalizers CANNOT drift. They
+## live HERE, not on a tuning resource, so the dependency arrow points one way: the bank reads the allocator,
+## never the reverse. `_init` still takes explicit bounds, so a caller may override them.
+const STAT_MIN := -5
+const STAT_MAX := 10
+
 var values: Dictionary = {}   ## StringName stat -> int (public: the screen reads it to stamp the value labels)
 var stat_min: int
 var stat_max: int

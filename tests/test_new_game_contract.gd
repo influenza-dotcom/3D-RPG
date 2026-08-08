@@ -43,5 +43,14 @@ func test_fresh_boot_applies_a_seeded_unlock_set() -> void:
 	var src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
 	assert_true(src.contains("not GameState.unlocks.is_empty()"),
 		"player.gd keeps the fresh-boot escape hatch that applies a seeded GameState.unlocks (the purchased implant cart)")
+	# ...and the escape hatch must span BOTH implant lists. `unlocks` is only the ACTIVE projection, so a run
+	# whose implants are ALL switched off (Implants tab) reaches this branch with an EMPTY unlocks and a
+	# populated disabled_unlocks — and this boot mode is reached mid-run (Options -> Main Menu -> Continue
+	# never loads from disk, so `loaded` stays false). Gating on unlocks alone fell through to
+	# _seed_unlocks() and permanently UNINSTALLED those implants at the next capture().
+	assert_true(src.contains("not GameState.disabled_unlocks.is_empty()"),
+		"player.gd's fresh-boot escape hatch also fires for a profile whose implants are all switched OFF (else they're uninstalled for good)")
+	assert_true(src.contains("set_disabled_unlocks(GameState.disabled_unlocks)"),
+		"...and restores them switched-off rather than dropping them")
 	assert_true(src.contains("elif GameState.profile_active:"),
 		"player.gd keeps the created-run wallet branch (GameState.money — the implant bill and the goods must never separate)")

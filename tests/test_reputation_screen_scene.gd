@@ -6,7 +6,7 @@ extends GutTest
 ## skin-driven look on top. These are prefab WIRING contract tests (the silent-when-broken seams): the
 ## autoload points at the SCENE, every %node the script binds exists, no text is authored in the scene
 ## (strings belong to PlayerText / l10n, never a .tscn), and the player-menu-group layout contracts hold —
-## incl. the PlayerMenus seam: the tab strip is CODE-BUILT into %TabSlot (its four-Button structure is
+## incl. the PlayerMenus seam: the tab strip is CODE-BUILT into %TabSlot (its one-Button-per-tab structure is
 ## test_player_menus.gd's contract), so the scene must ship the slot EMPTY with zero authored Buttons.
 ## Behaviour (open/close/live rep refresh) is in-tree -> playtest + test_reputation_screen.gd.
 
@@ -62,7 +62,7 @@ func test_layout_contracts_for_the_player_menu_group() -> void:
 	#  * the panel keeps the shared PANEL_MARGIN 0.12 anchor band (the loot/shop chrome — a drifted band
 	#    would off-centre this tab against its siblings at 792x444);
 	#  * %TabSlot ships EMPTY — the strip is built by PlayerMenus.build_tab_strip at boot, and its
-	#    4-direct-Button structure is a cross-screen contract (test_player_menus.gd); an authored Button
+	#    one-Button-per-tab structure is a cross-screen contract (test_player_menus.gd); an authored Button
 	#    here would silently double the strip;
 	#  * the faction scroll EXPAND_FILLs both ways with horizontal scroll OFF (long faction names must
 	#    TRIM — _make_faction_row's OVERRUN_TRIM_ELLIPSIS — instead of widening the panel past its band);
@@ -80,7 +80,7 @@ func test_layout_contracts_for_the_player_menu_group() -> void:
 	assert_almost_eq(panel.anchor_right, 1.0 - margin, 0.001, "panel keeps the shared PANEL_MARGIN band (right)")
 	assert_almost_eq(panel.anchor_bottom, 1.0 - margin, 0.001, "panel keeps the shared PANEL_MARGIN band (bottom)")
 	assert_eq((inst.get_node("%TabSlot") as Node).get_child_count(), 0,
-		"%TabSlot ships empty — PlayerMenus builds the 4-button strip into it at boot (never author tabs)")
+		"%TabSlot ships empty — PlayerMenus builds the tab strip into it at boot (never author tabs)")
 	var scroll := inst.get_node("%Scroll") as ScrollContainer
 	assert_eq(scroll.horizontal_scroll_mode, ScrollContainer.SCROLL_MODE_DISABLED,
 		"horizontal scroll is OFF so runaway faction names trim instead of widening the panel")

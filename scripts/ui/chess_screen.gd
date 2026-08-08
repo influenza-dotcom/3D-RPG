@@ -104,6 +104,9 @@ func open_match(match_node: Node, player: Node) -> void:
 	_player_color = ChessGame.WHITE if bool(match_node.player_is_white()) else ChessGame.BLACK
 	_wager = int(match_node.wager_amount())
 	# A wagered match refuses to start unless the player can cover the stake (a friendly game, wager 0, always plays).
+	# ⭐DELIBERATELY cash-only — NOT the can_pay/charge payment seam. A wager is staked and then paid back out,
+	# so a credit-funded stake would be a pure-profit loop: borrow the stake, win and keep the winnings, lose and
+	# the debt survives your death anyway (the account is death-safe in both directions). You bet what you carry.
 	if _wager > 0 and _player.money < float(_wager):
 		if _player.has_method(&"notify_toast"):
 			_player.notify_toast(PlayerText.chess_cant_cover(float(_wager)), GameSettings.hud.money_loss_color)

@@ -86,6 +86,16 @@ const SEATED_REPROBE_DISTANCE := 0.02
 	set(value):
 		body_color = value
 		_apply_body_texture()
+## See-through amount for the BODY part only (0 = solid, 1 = invisible), rendered as a DITHERED screen-door
+## (alpha-hash — depth-writes stay on, no transparency sorting, and it reads as the retro stipple) rather than
+## smooth alpha blending. The player's first-person torso drives this (its resting see-through + the crouch
+## fade-out); NPCs leave it 0 and take a zero-cost early-out. Applied over WHATEVER material path the body
+## took — the _skin override or the model's own baked surface materials — via per-instance duplicates, so the
+## shared originals (other NPCs, icon bakes) are never mutated.
+@export_range(0.0, 1.0, 0.01) var body_transparency: float = 0.0:
+	set(value):
+		body_transparency = value
+		_apply_body_transparency()
 
 # --- Head (sits on the torso; the head-look tracks it) -----------------------------------------------------------
 ## PICK a seated HEAD by name from res://resources/parts/heads/ -- the fastest way to change an NPC's face. See
@@ -287,6 +297,32 @@ const SEATED_REPROBE_DISTANCE := 0.02
 @export var arm_strike_pitch: float = -120.0
 ## Seconds the fist-strike flail takes to rise and settle back to the side. ~1s reads as "wind up and strike".
 @export var arm_strike_duration: float = 1.0
+## Amplitude shape over the strike's ELAPSED fraction: x 0 = the instant of the punch, x 1 = fully recovered;
+## y = how much of arm_strike_pitch / arm_strike_thrust to apply. NULL (default) = the legacy snap-to-full
+## then ease-out, which is what every NPC punch uses -- note that means FULL amplitude on frame one, i.e. a
+## follow-through with no wind-up. Author a curve for a real punch: dip y BELOW zero near x 0 for the
+## anticipation pull-back, spike to 1 for the snap out, then fall to 0 for the recovery. Because the curve is
+## sampled on the elapsed FRACTION, one curve re-times itself when arm_strike_duration changes.
+@export var arm_strike_curve: Curve = null
+## Extra local translation at full amplitude, in the same space and units as arm_position (the right arm's
+## copy is mirrored across X automatically, so a forward/up thrust stays forward/up). ZERO (default) = the
+## NPC's rotation-only flail; give it a forward value to turn the strike into a JAB that actually extends.
+@export var arm_strike_thrust: Vector3 = Vector3.ZERO
+## Alternate which fist LEADS on each strike() -- left, right, left. False (default) = both arms flail
+## together, the two-fisted NPC swing.
+@export var arm_strike_alternate: bool = false
+## Amplitude multiplier for the NON-leading arm. 1.0 (default) = both arms move identically (the NPC flail);
+## 0 = a single fist punches while the other holds still, which is what reads as a jab rather than a shove.
+@export var arm_strike_offhand_scale: float = 1.0
+## Live ANTISYMMETRIC stride for the arm pair (degrees of pitch: the LEFT arm gets +this, the RIGHT gets
+## MINUS this) — the walking arm-pump for the player's first-person fists rig. Host-driven per frame (the
+## Player eases it from its own _process — the arm_scale ordering idiom, so a mid-punch frame is still
+## re-posed by the strike path afterwards); NPCs leave it 0. Composed into BOTH the rest re-apply and the
+## strike path, so punching mid-walk neither pops the stride off nor doubles it.
+@export var arm_stride_deg: float = 0.0:
+	set(value):
+		arm_stride_deg = value
+		_apply_arm_transform()
 
 # --- Sitting pose (host-driven; NPC.sitting toggles it) ---------------------------------------------------------
 ## Visual offset applied to the body/head/limbs while the host reports is_sitting(). The Y here is only the LAST
@@ -399,6 +435,7 @@ const SEATED_REPROBE_DISTANCE := 0.02
 		_rebuild()
 
 var _body: Node3D = null       ## live body instance (unowned -> never baked into the .tscn)
+var _body_transp_touched: bool = false  ## a non-zero body_transparency has been applied — 0 must then RESTORE solid, not early-out
 var _head: Node3D = null       ## live head instance (the head-look's target at runtime)
 var _arm_left: Node3D = null   ## live left-arm instance
 var _arm_right: Node3D = null  ## live right-arm instance (a mirror of the left)
@@ -420,6 +457,7 @@ var _talk_t: float = 0.0         ## talking-envelope countdown (seconds): the he
 
 static var _mouth_texture: Texture2D = null  ## the shared black-circle texture for every mouth (built once)
 var _strike_t: float = 0.0       ## 1 -> 0 fist-strike flail envelope, set by strike() on a punch, decays over arm_strike_duration
+var _strike_side: float = 1.0    ## which fist LEADS the current strike (+1 = left); flipped per strike when arm_strike_alternate
 var _fists_sway: float = 0.0     ## smoothed fists-out alternating-sway amplitude (eases to 0 when not squared up)
 var _breathe_phase: float = 0.0  ## breathing sine phase (advances at breathe_rate while alive)
 var _body_base_scale: float = 1.0  ## the torso's authored uniform scale; breathing modulates AROUND it (cached so _process doesn't re-resolve _eff_body each frame)
@@ -471,7 +509,10 @@ func _process(delta: float) -> void:
 	# (below), so the NPC you're talking to stays alive without the limbs animating mid-freeze.
 	var sitting := _host_sitting()
 	_sync_posture_transforms(sitting)
-	if not get_tree().paused and (animate_arms or animate_legs):
+	# `or _strike_t > 0.0` so a rig with BOTH animation flags off still ticks long enough to play out a strike
+	# (and, just as importantly, to DECAY the envelope -- otherwise a stray strike() latches _strike_t at 1.0
+	# forever and the arms snap up the moment anyone later enables animate_arms).
+	if not get_tree().paused and (animate_arms or animate_legs or _strike_t > 0.0):
 		_animate_limbs(delta, sitting)
 	if breathe:
 		# Only the NPC you're TALKING TO breathes during a conversation — every other NPC holds still. (Without
@@ -757,7 +798,12 @@ func _animate_limbs(delta: float, sitting: bool) -> void:
 			mode_target = arm_fists_pitch        # arms out — squared up to punch
 		_mode_pitch = lerpf(_mode_pitch, mode_target, 1.0 - exp(-12.0 * delta))
 		_strike_t = maxf(0.0, _strike_t - delta / maxf(arm_strike_duration, 0.01))
-		var flail := arm_strike_pitch * smoothstep(0.0, 1.0, _strike_t) if not gun_out else 0.0  # fists: snap up, ease down
+		# Strike amplitude, split per arm so one fist can LEAD (arm_strike_alternate / arm_strike_offhand_scale).
+		# At the shipped defaults (no alternation, off-hand 1.0) both sides get the same value, which is exactly
+		# the old single symmetric `flail` — every existing NPC punch is byte-identical.
+		var amp := strike_amplitude(_strike_t, arm_strike_curve) if not gun_out else 0.0
+		var amp_lead := amp if _strike_side >= 0.0 else amp * arm_strike_offhand_scale
+		var amp_off := amp * arm_strike_offhand_scale if _strike_side >= 0.0 else amp
 		_swing_blend = lerpf(_swing_blend, 1.0 if arms_walking else 0.0, 1.0 - exp(-10.0 * delta))
 		var a := swing * arm_swing_amplitude * _swing_blend  # antisymmetric walk swing (0 while fists are out)
 		# Fists-out: an ANTISYMMETRIC sway (arms ALTERNATE -- one forward, one back, like a natural stride) on top
@@ -765,9 +811,27 @@ func _animate_limbs(delta: float, sitting: bool) -> void:
 		var sway_target := (arm_fists_walk_sway if moving else arm_fists_idle_sway) if fists_out else 0.0
 		_fists_sway = lerpf(_fists_sway, sway_target, 1.0 - exp(-8.0 * delta))
 		var s := swing * _fists_sway  # left +s / right -s -> the arms alternate (same shape as the walk swing)
-		_arm_left.transform = _arm_pose(arm_rotation + Vector3(_mode_pitch + flail + a + s, 0.0, 0.0))
+		_arm_left.transform = _arm_pose(arm_rotation + Vector3(_mode_pitch + arm_strike_pitch * amp_lead + a + s, 0.0, 0.0), arm_strike_thrust * amp_lead)
 		if is_instance_valid(_arm_right):
-			_arm_right.transform = _reflect() * _arm_pose(arm_rotation + Vector3(_mode_pitch + flail - a - s, 0.0, 0.0))
+			_arm_right.transform = _reflect() * _arm_pose(arm_rotation + Vector3(_mode_pitch + arm_strike_pitch * amp_off - a - s, 0.0, 0.0), arm_strike_thrust * amp_off)
+	# STRIKE-ONLY path — how an animate_arms-OFF rig punches. The player's unarmed view-model hands
+	# (Player._build_first_person_arms, animate_arms = false) live here: they must NOT walk-swing, mode-pitch or fists-sway just
+	# because they can throw a punch, so instead of enabling all of that we write rest pose + the strike terms
+	# and nothing else. Reachable only when animate_arms is false, so no NPC ever takes it.
+	#
+	# Self-terminating: the envelope decays FIRST (unconditionally, so an arm-less rig cannot leak it), and the
+	# frame it reaches 0 the amplitude is 0, which writes exactly the authored rest pose — the same expression
+	# _apply_arm_transform() uses — before the branch stops running.
+	elif _strike_t > 0.0:
+		_strike_t = maxf(0.0, _strike_t - delta / maxf(arm_strike_duration, 0.01))
+		if is_instance_valid(_arm_left):
+			var s_amp := strike_amplitude(_strike_t, arm_strike_curve)
+			var s_lead := s_amp if _strike_side >= 0.0 else s_amp * arm_strike_offhand_scale
+			var s_off := s_amp * arm_strike_offhand_scale if _strike_side >= 0.0 else s_amp
+			var s_base := arm_rotation + Vector3(_seated_arm_pitch_eff() if sitting else 0.0, 0.0, 0.0)
+			_arm_left.transform = _arm_pose(s_base + Vector3(arm_strike_pitch * s_lead + arm_stride_deg, 0.0, 0.0), arm_strike_thrust * s_lead)
+			if is_instance_valid(_arm_right):
+				_arm_right.transform = _reflect() * _arm_pose(s_base + Vector3(arm_strike_pitch * s_off - arm_stride_deg, 0.0, 0.0), arm_strike_thrust * s_off)
 	# LEGS: swing forward/back -- a walk on the ground, a faster + WIDER flail in the air. Left -swing / right
 	# +swing -> opposite each other (and contralateral to the arms while walking).
 	if animate_legs and is_instance_valid(_leg_left):
@@ -992,11 +1056,38 @@ func _apply_posture_transforms() -> void:
 	_apply_leg_transform()
 	_bob_head = null
 
-## Kick off the fist-strike FLAIL: the arms snap up (arm_strike_pitch) then ease back to the side over
-## arm_strike_duration. Called by the NPC the moment it lands a punch (npc.gd _punch). No-op visually while a gun
-## is out (the flail is suppressed there) or with no arms swapped in.
-func strike() -> void:
+## Kick off the fist strike: the arms swing through arm_strike_pitch / arm_strike_thrust, shaped by
+## arm_strike_curve, then settle back to their rest pose over arm_strike_duration.
+##
+## TWO callers, deliberately sharing one envelope: the NPC punch (scripts/npc/npc_combat.gd) on an
+## animate_arms-ON rig, and the PLAYER's unarmed view-model hands (via GunMesh.fire) on an animate_arms-OFF
+## one. Takes no arguments so both can call it duck-typed by name.
+##
+## `lead` picks the fist: +1 LEFT, -1 RIGHT, 0 (the default) = let arm_strike_alternate decide. The player
+## binds it to the mouse — left click throws the left fist, right click the right — while the NPC calls
+## strike() bare and keeps the shipped alternating/two-fisted behaviour.
+##
+## Suppressed while a gun is out on an animated rig (an NPC holding a rifle should not throw hands); the
+## strike-only path has no such gate, because a rig that reaches it has no gun to be holding.
+func strike(lead: float = 0.0) -> void:
+	if lead > 0.0:
+		_strike_side = 1.0    # LEFT fist leads
+	elif lead < 0.0:
+		_strike_side = -1.0   # RIGHT fist leads
+	elif arm_strike_alternate:
+		_strike_side = -_strike_side
 	_strike_t = 1.0
+
+
+## The strike envelope's amplitude at `t` (1 = the instant of the punch, 0 = fully recovered), shaped by an
+## optional authored Curve. Pure + static so the shape can be unit-tested without a node or a scene.
+##
+## The curve is sampled on ELAPSED fraction (1 - t), so x reads left-to-right as time since the punch. y is
+## unclamped on purpose: below 0 is anticipation (the fist pulls back), above 1 is overshoot.
+static func strike_amplitude(t: float, curve: Curve) -> float:
+	if curve == null:
+		return smoothstep(0.0, 1.0, t)  # legacy NPC shape: full amplitude immediately, then ease out
+	return curve.sample_baked(clampf(1.0 - t, 0.0, 1.0))
 
 ## Drop the arms to their by-side REST pose NOW and clear every raised-arm state (weapon-hold pitch, walk swing,
 ## fists-out sway, strike flail). Called by the host NPC on entering dialogue (NPC.set_in_dialogue): the world
@@ -1135,6 +1226,7 @@ func _rebuild() -> void:
 	_leg_left = null
 	_leg_right = null
 	_arm_reach = -1.0  # a new arm model means a new reach — remeasure lazily on the next seated clamp
+	_body_transp_touched = false  # fresh instances carry pristine materials — a 0-transparency rig skips the walk again
 	_set_meshes_visible(_target_body(), true)  # restore first, so clearing a model un-hides the Man.glb mesh
 	var eb := _eff_body()
 	var eh := _eff_head()
@@ -1244,14 +1336,16 @@ func head_rest_position() -> Vector3:
 func _apply_arm_transform() -> void:
 	var rot := arm_rotation + Vector3(_seated_arm_pitch_eff() if _host_sitting() else 0.0, 0.0, 0.0)
 	if is_instance_valid(_arm_left):
-		_arm_left.transform = _arm_pose(rot)
+		_arm_left.transform = _arm_pose(rot + Vector3(arm_stride_deg, 0.0, 0.0))
 	if is_instance_valid(_arm_right):
-		_arm_right.transform = _reflect() * _arm_pose(rot)
+		_arm_right.transform = _reflect() * _arm_pose(rot + Vector3(-arm_stride_deg, 0.0, 0.0))
 
 ## One arm's local transform from its rotation (degrees) at the shoulder, sized by arm_scale.
-func _arm_pose(rot_deg: Vector3) -> Transform3D:
+## `extra_pos` is an additive local translation (the strike thrust); the RIGHT arm's copy is mirrored by the
+## caller's _reflect(), which negates X only -- so a forward/up thrust stays forward/up on both hands.
+func _arm_pose(rot_deg: Vector3, extra_pos: Vector3 = Vector3.ZERO) -> Transform3D:
 	var b := Basis.from_euler(Vector3(deg_to_rad(rot_deg.x), deg_to_rad(rot_deg.y), deg_to_rad(rot_deg.z)))
-	return Transform3D(b.scaled(Vector3.ONE * arm_scale), arm_position + _posture_offset())
+	return Transform3D(b.scaled(Vector3.ONE * arm_scale), arm_position + _posture_offset() + extra_pos)
 
 ## Place the LEFT leg at its rest pose, then mirror it across the body centre (X=0) for the RIGHT leg -- the same
 ## one-model-becomes-a-pair trick as the arms. POSTURE-AWARE: a seated host rests at seated_leg_pitch (legs out in
@@ -1286,6 +1380,58 @@ func _apply_body_texture() -> void:
 		_skin_planar(_body, e["tex"], e["col"])
 	else:
 		_skin(_body, e["tex"], e["col"])  # skins the swapped body model (every shipped NPC has one; texture re-skins it in place)
+	_apply_body_transparency()  # LAST: _skin may have swapped the override, so the see-through re-wraps whatever won
+
+## Push body_transparency onto every mesh under the body instance as DITHERED (alpha-hash) see-through. Zero
+## with no prior application is a pure no-op (the every-NPC path). Each touched material is a per-instance
+## duplicate tagged with meta, so repeat applications mutate OUR copy instead of stacking duplicates, and a
+## return to 0 RESTORES solid on those same copies.
+func _apply_body_transparency() -> void:
+	if body_transparency <= 0.0 and not _body_transp_touched:
+		return
+	if not is_instance_valid(_body):
+		return
+	_body_transp_touched = _body_transp_touched or body_transparency > 0.0
+	var stack: Array[Node] = [_body]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		for child in node.get_children():
+			stack.push_back(child)
+		var mi := node as MeshInstance3D
+		if mi == null:
+			continue
+		if mi.material_override != null:
+			mi.material_override = _see_through_variant(mi.material_override)
+		elif mi.mesh != null:
+			for s in mi.mesh.get_surface_count():
+				var base := mi.get_surface_override_material(s)
+				if base == null:
+					base = mi.mesh.surface_get_material(s)
+				var variant := _see_through_variant(base)
+				if variant != null:
+					mi.set_surface_override_material(s, variant)
+
+## A per-instance duplicate of `mat` carrying the current body_transparency (alpha-hash + albedo alpha). The
+## planar drawn-shirt override is special-cased: it is a ShaderMaterial (already per-mesh, no duplication
+## needed) whose shader carries a matching `see_through` dither uniform — without this branch a custom-shirt
+## player's torso would silently stay OPAQUE through the crouch fade. FOREIGN ShaderMaterials (e.g. a
+## PS1-pass shader) are left alone, and null stays null. The meta tag marks OUR BaseMaterial3D duplicates so
+## they're mutated in place on later applications.
+func _see_through_variant(mat: Material) -> Material:
+	var sm := mat as ShaderMaterial
+	if sm != null:
+		if sm.shader == ShirtPlanarShader:
+			sm.set_shader_parameter(&"see_through", body_transparency)
+		return mat
+	var bm := mat as BaseMaterial3D
+	if bm == null:
+		return mat
+	if not bm.has_meta(&"bms_body_transp"):
+		bm = bm.duplicate() as BaseMaterial3D
+		bm.set_meta(&"bms_body_transp", true)
+	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_HASH if body_transparency > 0.0 else BaseMaterial3D.TRANSPARENCY_DISABLED
+	bm.albedo_color.a = clampf(1.0 - body_transparency, 0.0, 1.0)
+	return bm
 
 func _apply_head_texture() -> void:
 	var e := _eff_head()

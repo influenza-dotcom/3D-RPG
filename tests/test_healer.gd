@@ -6,6 +6,21 @@ extends GutTest
 const CHARACTER_PATH := "res://scripts/player/character.gd"
 const PLAYER_PATH := "res://scripts/player/player.gd"
 
+## ⭐Healer.do_heal now gates on the PAYMENT SEAM (Player.can_pay/charge), which reads the SHARED GameState
+## banking fields — a stale positive account would let a "can't afford" case heal anyway.
+var _prev_account: float
+var _prev_method: String
+
+func before_each() -> void:
+	_prev_account = GameState.account
+	_prev_method = GameState.payment_method
+	GameState.account = 0.0
+	GameState.payment_method = "debit"
+
+func after_each() -> void:
+	GameState.account = _prev_account
+	GameState.payment_method = _prev_method
+
 
 func test_character_limb_heal() -> void:
 	var c = load(CHARACTER_PATH).new()

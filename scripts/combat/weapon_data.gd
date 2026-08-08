@@ -58,6 +58,15 @@ const Calibers = preload("res://scripts/items/calibers.gd")
 ## weapon tuned to fly faster silently hit far harder — a 2.5x launch speed took the knife from ~10 to ~50 damage.
 ## Weapon damage is speed-independent, so the two knobs stop fighting.
 @export var thrown_uses_weapon_damage: bool = false
+## A LETHAL thrown hit from a dropped copy staples the body part it struck to the surface behind the victim, with
+## the blade left embedded through it, while the rest of the body slumps (stamped onto Throwable.pins_body_part;
+## the effect lives in GoreSpawner._resolve_pin and the "Pinned body parts" group on GameSettings.effects).
+## REQUIRES `thrown_uses_weapon_damage` — the pin needs that path's located contact point to know which part was
+## struck, and the blunt speed path deliberately carries no location at all. It also needs a BodyModelSwap on the
+## victim (it re-routes one of the limbs the death burst already flings) and something solid behind them; with no
+## surface in range the kill silently plays as an ordinary burst. OFF by default: it is a signature move for a
+## thrown BLADE, not something a tossed pistol should do.
+@export var thrown_pins_body_part: bool = false
 ## Multiplier on the IMPACT damage a DROPPED copy of this weapon deals to a Character when THROWN (stamped onto the
 ## drop's Throwable.impact_damage_mult). Applies on BOTH damage paths, so it keeps one meaning — "how hard this prop
 ## hits when thrown" — whether the hit is the speed-based bludgeon or a `thrown_uses_weapon_damage` weapon hit. It is
@@ -218,6 +227,36 @@ func power_score() -> float:
 ## This weapon's first-person view-model scene (e.g. ak_472.tscn). The gun rig instantiates it on equip
 ## so each weapon shows its own mesh + material. Unset = the rig's built-in placeholder shows.
 @export var view_model: PackedScene
+## TRUE when this weapon's first-person visual is NOT a mounted view model at all — the player's OWN body
+## draws it. **fists.tres is the case**: unarmed shows the Player's first-person arms rig (the same hands you
+## see when carrying a prop, `Player._build_first_person_arms`), which lives under the camera rather than
+## under the gun rig, so it keeps the character's arm colour and does not tip 45° into the gun's holster park.
+##
+## Two effects. It suppresses the "this weapon has no view_model" authoring warning in WeaponModelSwapper —
+## having none is the POINT here, not an oversight. And it makes `held_view_model()` return null, so an NPC
+## hand, a dropped pickup and an inventory tile show nothing rather than guessing at a stand-in.
+##
+## Leave FALSE (the default) for every real weapon: a gun or a knife is a physical object that reads correctly
+## in an NPC's hand, on the ground and in the grid, which is exactly what `held_view_model()` then returns.
+@export var view_model_is_first_person_only: bool = false
+## TRUE when this weapon's swing is a PUNCH rather than a shot. Two effects, both in GunMesh.fire(): the whole
+## view model kicks FORWARD (GameSettings.effects `punch_kick_*`) instead of recoiling back into you, and the
+## mounted view-model root is asked to play its own `strike()` if it exposes one — which the unarmed hands
+## rig does (BodyModelSwap) and a gun mesh does not.
+##
+## Leave FALSE for every gun. The knife could be flagged, but its view model is a plain Node3D with no
+## `strike()`, so today it would only get the forward kick — decide that as a feel change, not a default.
+@export var view_model_punch: bool = false
+
+
+## The view model as an OBJECT SOMEONE HOLDS — for an NPC's hand, a dropped world pickup, or an inventory
+## mesh tile. Null when the scene is a first-person-only rig (see `view_model_is_first_person_only`), which
+## those consumers already treat as "show nothing at all".
+##
+## The player's own gun rig deliberately does NOT use this: it wants the first-person rig, and it is the one
+## consumer for which the arms ARE the correct visual.
+func held_view_model() -> PackedScene:
+	return null if view_model_is_first_person_only else view_model
 
 @export_group("NPC Hand-Hold")
 ## Does this weapon's view_model need a SEPARATE pose when an NPC holds it, distinct from its first-person pose?
@@ -281,6 +320,12 @@ func power_score() -> float:
 ## Bigger one-shot shake for a scoped-attack launch / air dash specifically (screen_shake_amount stays
 ## the per-shot fire shake).
 @export var launch_screen_shake: float = 0.6
+## Opacity of the player's full-screen white hit-flash on this weapon's instant-hit (hitscan) shots.
+## 1 = full-strength white; the knife authors 0.5 so its fast repeat swings read as a soft pop instead of
+## a strobe (the same concern that exempts view_model_punch weapons outright, dimmed rather than dropped).
+## Cosmetic only — the 85ms hitscan combat beat in attack.gd runs regardless, and the Accessibility
+## "Screen Flashes" toggle can still hide the flash entirely.
+@export_range(0.0, 1.0) var hit_flash_opacity: float = 1.0
 ## Hitstop ("screen freeze") when this weapon hits an enemy — a brief slow-mo for punch. hitstop_duration
 ## = real-time hold; hitstop_recovery = how long it eases back to full speed. Set both low (or 0) on a
 ## fast weapon like the SMG so the per-shot freezes don't pile up.
@@ -293,8 +338,13 @@ func power_score() -> float:
 ## weapon with no sight to raise: the fists / bare hands. Leave false for guns and for melee weapons that ADS to
 ## trigger a scoped-attack launch (launch_on_scoped_attack below). Mirrors is_spray_paint's no-ADS handling.
 @export var no_ads: bool = false
-## scoped_fov_override: FOV this weapon zooms to while scoped (ADS). 0.0 = use GameSettings.camera.scoped_fov;
-## > 0.0 = this weapon's own scope FOV (a sniper sets a deep, narrow value).
+## scoped_fov_override: FOV this weapon zooms to while scoped (ADS). 0.0 = use the global ADS zoom (which is
+## SOLVED from the player's rest FOV via GameSettings.camera.scope_magnification); > 0.0 = this weapon's own
+## scope FOV. Deliberately an ABSOLUTE angle, unlike the global: a scope is a fixed optic, so a sniper's
+## magnification belongs to the weapon and must not drift with the player's Field of View setting. That also
+## means it does NOT get the FOV-invariance the global path has — authoring a very small number here pins a
+## very deep zoom at every FOV. ScopeIn clamps it to Camera3D's legal 1..179 range, so anything below 1 degree
+## is the SAME ~75x scope; author the angle you actually want to look through.
 @export var scoped_fov_override: float = 0.0
 ## When true the camera's depth-of-field blur is turned OFF while scoped (a clear, crisp scope picture);
 ## when false, scoping merely LESSENS the DoF.

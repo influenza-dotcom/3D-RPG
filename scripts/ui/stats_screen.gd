@@ -9,7 +9,7 @@ extends CanvasLayer
 ## every string is set here from PlayerText (l10n + the text-debt ratchet own strings, never a .tscn).
 ## The six stat blocks stay CODE-built into the authored %StatGrid (rebuilt per open / live-modifier
 ## change), the CharacterPreview portrait stays CODE-instantiated into %PortraitFrame, and the PlayerMenus
-## tab strip stays CODE-BUILT into the authored %TabSlot (the strip's four-Button structure is a
+## tab strip stays CODE-BUILT into the authored %TabSlot (the strip's one-Button-per-tab structure is a
 ## cross-screen contract owned by player_menus.gd, not this scene).
 ## tests/test_stats_screen_scene.gd pins the wiring.
 ##
@@ -24,7 +24,7 @@ signal closed
 
 const PANEL_MARGIN := 0.12  ## same border as the inventory/shop/loot screens — shared menu chrome (authored on the scene's Panel anchors; tests pin the band)
 const STATS: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"larceny"]
-const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation/Journal)
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Implants/Reputation/Journal)
 
 var _root: Control
 var _name_label: Label   ## the character's chosen name, shown under the title (hidden when unnamed)
@@ -53,7 +53,7 @@ func toggle() -> void:
 func open() -> void:
 	# Never stack over a NON-player modal (incl. the pausing shop/heal/level-up — our input is PROCESS_MODE_ALWAYS).
 	# The sibling player menus (Inventory/Reputation) are NOT blocked: opening us SWITCHES off an open sibling
-	# (PlayerMenus.close_others below), so the four act as one Deus Ex / Pip-Boy tab group.
+	# (PlayerMenus.close_others below), so the tabs act as one Deus Ex / Pip-Boy tab group.
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
 			or LootScreen.is_open() or InputManager.any_pausing_open() \
 			or not PlayerMenus.player_alive(get_tree()):  # M5: pausing modals via the shared helper; refuse mid-death (PROCESS_MODE_ALWAYS would else re-open over the death cinematic)
@@ -118,10 +118,10 @@ func _bind_ui() -> void:
 	var vbox: VBoxContainer = %VBox
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared per-screen rhythm (skin Layout group)
 	# The tab strip is the only header — it already labels the screen, so no separate title line (the
-	# Inventory convention, adopted across all four tabs so content starts at one height). The strip stays
-	# CODE-BUILT by PlayerMenus into the authored %TabSlot: its four-Button EXPAND_FILL structure is a
+	# Inventory convention, adopted across all the tabs so content starts at one height). The strip stays
+	# CODE-BUILT by PlayerMenus into the authored %TabSlot: its one-Button-per-tab EXPAND_FILL structure is a
 	# cross-screen contract (tests/test_player_menus.gd), so the scene authors only the slot.
-	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"stats"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
+	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"stats"))  # [Inventory | Stats | Implants | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
 
 	# The character's name (from creation) directly under the tab strip. A plain accent Label so the name
 	# keeps its own casing (never uppercased). Hidden when unnamed (set in _rebuild off the live player).

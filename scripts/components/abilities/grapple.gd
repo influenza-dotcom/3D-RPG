@@ -69,3 +69,9 @@ func is_active() -> bool:
 func detach() -> void:
 	if _hook != null:
 		_hook.detach(false)
+
+## Implants-tab switch-off hygiene: sever a live rope. apply_pull is deliberately NOT gated on `enabled`
+## (a rope already out keeps its physics until released — see the header), so a menu disable must cut it
+## explicitly or the pull would keep dragging the player with the implant "off".
+func on_deactivated() -> void:
+	detach()

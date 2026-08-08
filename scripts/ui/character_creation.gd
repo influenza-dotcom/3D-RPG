@@ -44,9 +44,11 @@ const NAME_MAX_LENGTH := 24
 ## Selectable shirt brush footprints (square side in canvas cells) offered on the Shirt tab; first = the default.
 const SHIRT_BRUSH_SIZES: Array[int] = [1, 2, 3, 4]
 ## Per-stat allocation bounds: a stat can be dumped to STAT_MIN (a real weakness) and raised to STAT_MAX. The
-## zero-sum rule still applies on top — raising still costs a point freed by lowering another stat.
-const STAT_MIN := -5
-const STAT_MAX := 10
+## zero-sum rule still applies on top — raising still costs a point freed by lowering another stat. DERIVED
+## from the allocator (the STATS/STAT_NAMES idiom): the same pair normalizes the implant step's credit check,
+## so a bound changed in one place can never leave the bank scoring against the old range.
+const STAT_MIN := StatBudget.STAT_MIN
+const STAT_MAX := StatBudget.STAT_MAX
 ## The stats, in display order. Derived from CharacterStats.STAT_NAMES (the single source; cannot drift — a drift
 ## here would silently drop a stat from the builder); the value labels/steppers are keyed by these.
 const STATS: Array[StringName] = CharacterStats.STAT_NAMES

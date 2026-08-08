@@ -1,24 +1,21 @@
 [gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://b0f1stsnpcw3k"]
 
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="1_fists"]
-[ext_resource type="PackedScene" uid="uid://y5h0hqup3n1b" path="res://scenes/weapons/hammer.tscn" id="2_biwaf"]
 [ext_resource type="AudioStream" uid="uid://nf33twle4svs" path="res://assets/audio/sfx/ViolentSwipeSword.mp3" id="2_gqr1c"]
 [ext_resource type="AudioStream" uid="uid://h5xbbdcagi7g" path="res://assets/audio/sfx/SwordClash.mp3" id="3_ofxai"]
 [ext_resource type="AudioStream" uid="uid://bejdl6um6xd4" path="res://assets/audio/sfx/Whoosh.mp3" id="6_e4upy"]
 
 [resource]
 script = ExtResource("1_fists")
-is_melee = true
 effective_range = 1.5
 move_speed_multiplier = 1.25
+is_melee = true
 headshot_multiplier = 1.5
 sneak_attack_multiplier = 1.2
 overkill_penetration = false
 pellet_spread = 0.0
 attack_windup = 0.05
 attack_speed = 1.2
-enemy_knockback = 10.0
-enemy_lift = 5.0
 max_ammo = 1
 is_infinite_ammo = true
 reload_time = 0.0
@@ -28,7 +25,10 @@ bullet_gravity_scale = 0.0
 max_explosion_force = 0.0
 explosion_radius = 0.0
 self_knockback = -2.0
-view_model = ExtResource("2_biwaf")
+enemy_knockback = 10.0
+enemy_lift = 5.0
+view_model_is_first_person_only = true
+view_model_punch = true
 has_muzzle_flash = false
 has_laser_sight = false
 spawns_casing = false

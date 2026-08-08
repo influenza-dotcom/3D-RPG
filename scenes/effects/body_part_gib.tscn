@@ -1,0 +1,43 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/effects/body_part_gib.gd" id="1_part"]
+[ext_resource type="Resource" uid="uid://bgore1gib0dat" path="res://resources/interactables/gore_gib_data.tres" id="2_data"]
+[ext_resource type="AudioStream" uid="uid://cpuqvnu2y3vyn" path="res://assets/audio/sfx/WeakSplosh.wav" id="3_sfx"]
+[ext_resource type="Script" uid="uid://dnhm3sykhm2ly" path="res://scenes/player/bloody_mess.gd" id="4_mess"]
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_part"]
+friction = 0.9
+rough = true
+bounce = 0.15
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_part"]
+size = Vector3(0.25, 0.25, 0.25)
+
+[node name="BodyPartGib" type="RigidBody3D" node_paths=PackedStringArray("impact_sfx", "collision_shape", "mesh_instance")]
+mass = 0.6
+physics_material_override = SubResource("PhysicsMaterial_part")
+continuous_cd = true
+linear_damp_mode = 1
+linear_damp = 1.0
+angular_damp = 3.0
+script = ExtResource("1_part")
+data = ExtResource("2_data")
+impact_sfx = NodePath("ImpactSFX")
+collision_shape = NodePath("CollisionShape3D")
+mesh_instance = NodePath("Model")
+
+[node name="Model" type="MeshInstance3D" parent="."]
+
+[node name="ImpactSFX" type="AudioStreamPlayer3D" parent="."]
+stream = ExtResource("3_sfx")
+unit_size = 2.0
+max_db = 0.0
+bus = &"sfx"
+
+[node name="BloodyMess" type="Node3D" parent="."]
+script = ExtResource("4_mess")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_part")
+
+[connection signal="destroyed" from="." to="BloodyMess" method="_on_gore_gib_destroy"]

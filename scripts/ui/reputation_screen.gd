@@ -8,7 +8,7 @@ extends CanvasLayer
 ## in the editor and the skin keeps owning colours/fonts/separations. NO text is authored in the scene —
 ## every string is set here from PlayerText (l10n + the text-debt ratchet own strings, never a .tscn).
 ## The per-faction rows stay CODE-built into the authored %RepList (rebuilt per open / live rep change),
-## and the PlayerMenus tab strip stays CODE-BUILT into the authored %TabSlot (the strip's four-Button
+## and the PlayerMenus tab strip stays CODE-BUILT into the authored %TabSlot (the strip's one-Button-per-tab
 ## structure is a cross-screen contract owned by player_menus.gd, not this scene).
 ## tests/test_reputation_screen_scene.gd pins the wiring.
 ##
@@ -24,7 +24,7 @@ signal closed
 
 const PANEL_MARGIN := 0.12  ## same border as the other inventory-style screens — shared chrome (authored on the scene's Panel anchors; tests pin the band)
 const Factions := preload("res://scripts/faction/factions.gd")  # registry (no class_name; preloaded where used)
-const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation/Journal)
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Implants/Reputation/Journal)
 ## Disposition display words single-sourced from PlayerText's ALIGNMENT_*_WORD consts (the same words the
 ## HUD's standing-change toast keys its templates on) — a reword can't drift between this screen and the toast.
 const DISPOSITION_NAME := {
@@ -56,7 +56,7 @@ func toggle() -> void:
 ## (start menu / character creation) — there's nothing to show then, matching Inventory/Stats' own bail.
 func open() -> void:
 	# Block only the NON-player modals; the sibling player menus (Inventory/Stats) instead SWITCH to us via
-	# PlayerMenus.close_others — the four behave as one Deus Ex / Pip-Boy tab group.
+	# PlayerMenus.close_others — the tabs behave as one Deus Ex / Pip-Boy tab group.
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
 			or LootScreen.is_open() or InputManager.any_pausing_open() \
 			or not PlayerMenus.player_alive(get_tree()) \
@@ -108,11 +108,11 @@ func _bind_ui() -> void:
 	MenuStyle.style_dim(%Dim)
 
 	(%VBox as VBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared menu rhythm — same gap as every panel screen (skin Layout group)
-	# The tab strip is the only header (the Inventory convention, adopted across all four tabs so content
+	# The tab strip is the only header (the Inventory convention, adopted across all the tabs so content
 	# starts at one height). The strip stays CODE-BUILT by PlayerMenus into the authored %TabSlot: its
-	# four-Button EXPAND_FILL structure is a cross-screen contract (tests/test_player_menus.gd), so the
+	# one-Button-per-tab EXPAND_FILL structure is a cross-screen contract (tests/test_player_menus.gd), so the
 	# scene authors only the slot.
-	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"reputation"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
+	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"reputation"))  # [Inventory | Stats | Implants | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
 
 	# The faction list scrolls vertically only (horizontal scroll authored OFF on %Scroll, so a runaway-long
 	# faction name trims — see _make_faction_row — instead of widening the panel past its anchors). The

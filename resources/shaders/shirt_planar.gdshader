@@ -29,6 +29,11 @@ uniform vec3 width_dir = vec3(1.0, 0.0, 0.0);
 uniform vec3 depth_dir = vec3(0.0, 0.0, 1.0);
 // Which side of depth_dir is the CHEST (+1.0 or -1.0) — flips which faces count as "front".
 uniform float front_sign = 1.0;
+// DITHERED see-through (0 = solid, 1 = invisible) — BodyModelSwap.body_transparency routes here for the
+// player's first-person torso (the Odyssey-style screen-door), because this override REPLACES the
+// BaseMaterial3D path that alpha-hash would otherwise handle. Screen-space discard: depth still writes for
+// surviving pixels, nothing re-sorts, and the stipple matches the alpha-hash look on plain-skin torsos.
+uniform float see_through : hint_range(0.0, 1.0) = 0.0;
 
 varying vec3 v_local;
 varying vec3 v_normal;
@@ -52,6 +57,14 @@ vec3 region_fabric(bool front) {
 }
 
 void fragment() {
+	// Interleaved-gradient-noise threshold on FRAGCOORD only — deliberately NO TIME term (a TIME-fed hash
+	// strobes; the repo's grain-strobe lesson), so the dither pattern is stable per screen pixel.
+	if (see_through > 0.001) {
+		float ign = fract(52.9829189 * fract(0.06711056 * FRAGCOORD.x + 0.00583715 * FRAGCOORD.y));
+		if (see_through > ign) {
+			discard;
+		}
+	}
 	vec3 nrm = normalize(v_normal);
 	vec3 rel = clamp((v_local - aabb_min) / max(aabb_size, vec3(0.0001)), vec3(0.0), vec3(1.0));
 	vec3 col;

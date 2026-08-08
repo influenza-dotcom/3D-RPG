@@ -54,8 +54,10 @@ func _ready() -> void:
 static func model_resource_for(item: Item) -> Resource:
 	if item == null:
 		return null
-	if item.is_weapon() and item.weapon != null and item.weapon.view_model != null:
-		return item.weapon.view_model
+	# held_view_model(): a first-person-only rig (the bare hands) is not a thing you can picture in a grid
+	# cell, so it reports null and has_mesh() falls through to the category glyph.
+	if item.is_weapon() and item.weapon != null and item.weapon.held_view_model() != null:
+		return item.weapon.held_view_model()
 	return item.world_model
 
 ## Does `item` have a mesh to show? (The grid tile draws a category glyph instead when not.)

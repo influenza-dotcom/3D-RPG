@@ -164,6 +164,14 @@ func suppress_fire_for_carry_release() -> void:
 	if Input.is_action_pressed("Attack"):
 		_drew_on_press = true
 
+## Which fist / hand threw the most recent attack: true = the ALT button (right click), false = primary.
+## Read by Player._on_attack_play_animation to lead with the matching hand.
+var last_attack_alt: bool = false
+
+## The action bound to alt fire. Set by Player when it wires MouseInput.alt_attack, so the semi-auto
+## once-per-click check below tests the button that actually fired rather than always testing "Attack".
+var alt_attack_action: StringName = &"Zoom"
+
 func can_fire() -> bool:
 	return current_weapon != null and attack.is_stopped() and reload.is_stopped() and swap.is_stopped()
 
@@ -270,8 +278,12 @@ func _fire_should_abort(from_ai: bool) -> bool:
 		return false
 	return holstered or draw_locked or DialogueManager.is_active()
 
-func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
+func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false, alt := false) -> void:
 	if not current_weapon:
+		return
+	# ALT FIRE (the second attack button, MouseInput.alt_attack). Only a weapon that declares its swing a PUNCH
+	# takes it — for everything else that button is ADS and must stay ADS. Unarmed uses it for the RIGHT fist.
+	if alt and not current_weapon.view_model_punch:
 		return
 	# Don't fire while the spray's colour picker is open — those clicks are for the picker.
 	if _is_color_picker_open():
@@ -300,8 +312,11 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	# Semi-auto weapons (e.g. melee) fire once per click instead of continuously
 	# while held (MouseInput emits `attack` every frame the button is down). An AI
 	# wielder (from_ai) sets its own cadence, so it skips the player input check.
-	if not from_ai and not current_weapon.auto_fire and not Input.is_action_just_pressed("Attack"):
+	if not from_ai and not current_weapon.auto_fire and not Input.is_action_just_pressed(alt_attack_action if alt else &"Attack"):
 		return
+	# Bank WHICH button threw this attack, for anything that poses off it — the player's fists read it to pick
+	# the leading hand. Set only once every gate above has passed, so a refused click never re-poses the arms.
+	last_attack_alt = alt
 	# Spray paint: tag the aimed surface with a coloured decal instead of attacking.
 	if current_weapon.is_spray_paint:
 		_do_spray_paint()
@@ -358,10 +373,19 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	# (Gating the whole block on the toggle used to make an accessibility setting change combat outcomes: flash-off shots
 	# skipped the await + abort, so the same shot could deal 0 vs full damage in the death-race window.) The world muzzle
 	# light + fire audio still play, so a photosensitive player keeps firing feedback without the strobe.
+	# PUNCHES never flash: fists are hitscan too, but a white screen-pop per swing reads as a strobe, not gunfire
+	# feedback — so view_model_punch weapons take the same VISIBILITY-only exemption (the 85ms beat still runs).
 	var _hit_flash := character.get_hit_flash()
 	if _hit_flash and current_weapon.projectile_life_time <= 0.0:
-		var _show_flash: bool = Settings.screen_flash_enabled
+		var _show_flash: bool = Settings.screen_flash_enabled and not current_weapon.view_model_punch
+		# Per-weapon flash strength (WeaponData.hit_flash_opacity): the knife authors 0.5 so its fast repeat
+		# swings pop softly instead of strobing (the same concern that exempts punches above, dimmed rather
+		# than dropped). Applied to the sprite's modulate for THIS flash only and restored on hide, because
+		# the RAM-reactor break flash reuses the same sprite and must keep its full-strength white.
+		var _flash_sprite := _hit_flash as SpriteBase3D
 		if _show_flash:
+			if _flash_sprite:
+				_flash_sprite.modulate.a = current_weapon.hit_flash_opacity
 			_hit_flash.visible = true
 		await get_tree().create_timer(0.085).timeout
 		# This 85ms can outlive the wielder (an enemy freed mid-flash) OR the world can change (holster / carry-lock /
@@ -369,8 +393,12 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		# shot never strands it visible (a no-op when it was never shown). _hit_flash is non-null (enclosing guard).
 		if not is_inside_tree() or _fire_should_abort(from_ai):
 			_hit_flash.visible = false
+			if _flash_sprite:
+				_flash_sprite.modulate.a = 1.0
 			return
 		_hit_flash.visible = false
+		if _flash_sprite:
+			_flash_sprite.modulate.a = 1.0
 
 	if _audio:
 		_audio.play_fire(current_weapon, ammo_before)

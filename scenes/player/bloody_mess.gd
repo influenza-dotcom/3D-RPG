@@ -12,6 +12,34 @@ extends Node3D
 
 const BLOODY_MESS = preload("uid://yeq88l33gvle")
 
+## OWNERSHIP TAG — the group every WORLD node this controller spawns joins, or &"" for none. Answers "whose gore
+## is this?", and today only the player's death names one (Groups.PLAYER_GORE), so its checkpoint revive can wipe
+## its own remains without touching a single NPC's. Two ways it gets set, both handled by _resolved_tag():
+##   * DIRECTLY — GoreSpawner writes it onto the dying actor's controller just before the death burst.
+##   * INHERITED — a gore gib's own controller (gore_gib.tscn's BloodyMess child) leaves it blank and reads the
+##     tag off the GIB BODY it hangs under. That is what keeps the secondary splatter of a player gib tagged:
+##     the gib may pop minutes later, long after the player revived, and its bleed must still belong to it.
+## It is set at DEATH, so the cheap per-hit splatter_at() decals a character sprayed while it was still alive are
+## untagged and survive the revive — correct: those are the wounds you took on the way here, not your remains.
+var gore_tag: StringName = &""
+
+## This controller's effective tag: its own if set, else the host body's (a tagged gore gib). See gore_tag.
+func _resolved_tag() -> StringName:
+	if gore_tag != &"":
+		return gore_tag
+	var host := get_parent()
+	if host != null and host.is_in_group(Groups.PLAYER_GORE):
+		return Groups.PLAYER_GORE
+	return &""
+
+## Stamp the tag onto a node we just put in the world (and hand it to a spawner that will pass it further down).
+func _tag(node: Node) -> void:
+	if node == null:
+		return
+	var group := _resolved_tag()
+	if group != &"":
+		node.add_to_group(group)
+
 ## Physics blood drops per death burst (GameSettings.effects.blood_drop_count) — high for a
 ## visceral splatter; tolerable now because BloodDropEmitter dribbles them in
 ## blood_drop_per_frame at a time across several frames instead of registering them all with
@@ -25,6 +53,7 @@ const BLOODY_MESS = preload("uid://yeq88l33gvle")
 func particles(_offset: Vector3) -> void:
 	var _particles = BLOODY_MESS.instantiate()
 	get_tree().root.add_child(_particles)
+	_tag(_particles)
 	_particles.global_position = global_position + _offset
 	# Trim the death burst from the scene's 960 — that many translucent sphere particles at once
 	# is a big fill-rate spike on every kill. 300 is still plenty for a visceral splat.
@@ -40,6 +69,10 @@ func _rain_drops(origin: Vector3) -> void:
 	# its BloodyMess child) is freed at the end of this frame.
 	var emitter := BloodDropEmitter.new()
 	get_tree().root.add_child(emitter)
+	# Tag the emitter AND hand it the tag to stamp onto each drop: sweeping the emitter itself stops a rain that
+	# is still in flight (it dribbles over several frames), and the per-drop tag carries on to the landed decals.
+	_tag(emitter)
+	emitter.gore_tag = _resolved_tag()
 	var drop_count: int = GameSettings.effects.blood_drop_count
 	var drop_per_frame: int = GameSettings.effects.blood_drop_per_frame
 	emitter.start(origin, drop_count, drop_per_frame)
@@ -93,6 +126,7 @@ func _spawn_hit_decal(pos: Vector3, normal: Vector3) -> void:
 	decal.grow_time = GameSettings.effects.blood_decal_grow_time
 	decal.cull_mask = HIT_DECAL_CULL_MASK
 	get_tree().root.add_child(decal)
+	_tag(decal)
 	decal.global_position = pos + normal * GameSettings.effects.decal_normal_offset
 	var up := normal
 	var z: Vector3
@@ -115,13 +149,16 @@ func _on_gore_gib_destroy() -> void:
 	_spawn_gib_floor_decal()
 	var _particles = BLOODY_MESS.instantiate()
 	get_tree().root.add_child(_particles)
+	_tag(_particles)  # tag INHERITED off the gib body we hang under (_resolved_tag) — a player gib bleeds player gore
 	_particles.global_position = global_position
 	_particles.emitting = true
 	_particles.finished.connect(_particles.queue_free)
 	_particles.amount = 16
-	
+
 	var emitter := BloodDropEmitter.new()
 	get_tree().root.add_child(emitter)
+	_tag(emitter)
+	emitter.gore_tag = _resolved_tag()
 	var gib_drops: int = GameSettings.effects.gib_destroy_drops
 	emitter.start(global_position, gib_drops, gib_drops)
 
@@ -148,6 +185,7 @@ func _spawn_gib_floor_decal() -> void:
 	decal.target_size = Vector3(GIB_FLOOR_DECAL_SIZE, 0.15, GIB_FLOOR_DECAL_SIZE)
 	decal.cull_mask = 2
 	get_tree().root.add_child(decal)
+	_tag(decal)
 	var normal: Vector3 = result["normal"]
 	decal.global_position = result["position"] + normal * GameSettings.effects.decal_normal_offset
 	var up := normal

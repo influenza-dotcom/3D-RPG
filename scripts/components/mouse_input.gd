@@ -12,10 +12,17 @@ signal rotate(_amt: Vector2)
 ## semi-auto behaviour is enforced downstream in attack.gd via WeaponData.auto_fire.
 ## Carries the active viewport camera so the hitscan/aim origin is correct.
 signal attack(_camera: Camera3D)
+## Emitted EVERY frame the ALT fire action is held — the second attack button. Only weapons that opt in react
+## (Attack gates it on WeaponData.view_model_punch): unarmed throws the RIGHT fist with it, while for a gun the
+## same button is ADS and this is ignored. Same cadence rules as `attack`; carries the same camera.
+signal alt_attack(_camera: Camera3D)
 
 ## The player body this look-input drives — its horizontal speed scales look sensitivity down at bhop
 ## speeds (see speed_sensitivity_multiplier). Wire to the Player; null = no speed-based falloff.
 @export var player: CharacterBody3D
+## The SECOND attack button, for weapons that punch with either hand. Defaults to the ADS button, which is free
+## exactly when it matters: a punching weapon sets no_ads, so ScopeIn already refuses to scope with it out.
+@export var alt_attack_action: StringName = &"Zoom"
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -30,9 +37,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		rotate.emit(Vector2(pitch, -mm.relative.x * sensitivity))
 
 func _process(delta: float) -> void:
-	if Input.is_action_pressed("Attack") and not InputManager.gameplay_suppressed():
+	if not InputManager.gameplay_suppressed():
 		var _camera: Camera3D = get_viewport().get_camera_3d()
-		attack.emit(_camera)
+		if Input.is_action_pressed("Attack"):
+			attack.emit(_camera)
+		if Input.is_action_pressed(alt_attack_action):
+			alt_attack.emit(_camera)
 	_controller_look(delta)
 
 ## Right-stick look: read the look_* action set (bound to the right stick by InputManager) and feed the

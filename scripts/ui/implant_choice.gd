@@ -10,6 +10,22 @@ extends Control
 ## HUD's signed readout is the debt display). On "Begin" it emits confirmed(ability_ids, total_cost); on
 ## "Back", cancelled.
 ##
+## THE LEDGER RATES THE BUILD FIRST: StartMenu hands the pending creation's stat sheet in via present_build
+## (before add_child), and the screen rates it through EconomySettings.credit_rating_for — the underwriting
+## sheet (CAPACITY / VIABILITY / TRADE minus EXPOSURE, off the authored per-stat actuarial table) — mapped
+## through credit_limit_for to a spending LIMIT capped at GameSettings.economy.credit_limit_max. The rating
+## also returns a BAND and a FILED REASON as StringName KEYS, which %Verdict / %Reason paint through
+## PlayerText selectors; this screen never branches on wording. The tally tracks the credit still
+## extendable, and _refresh_tally greys any UNCHECKED row whose price no longer fits — the cart can never
+## bill past limit + player_starting_money, so the never-gated Begin stays safe by construction. A CHECKED
+## row never greys (any chip can always come back off the bill).
+##
+## ⭐Investing always RAISES the rating and dumping always lowers it, by the model's construction — so the
+## committed build the player is proud of rates above the sheet that allocated nothing (which is a real,
+## scored applicant here: the no-file baseline, ~432, good for one cheap chip). An ABSENT sheet — a bare
+## scene with no present_build, i.e. no application at all — is the separate fail-OPEN case and rates the
+## ceiling, which is what keeps Begin ungated in tests that never hand a build over.
+##
 ## ROSTER: one row per DISTINCT installable ability, disk-driven — ItemDb already scanned resources/items at
 ## boot, so dropping a new chip .tres in that folder adds a row here with no code change (its value IS its
 ## creation price — the designer tunes debt on the chip resource). Chips are filtered by
@@ -21,9 +37,11 @@ extends Control
 ## differentiator. Hover = the shared derived ItemInfo.tooltip ("Installs …"), never authored prose.
 ##
 ## The PINNED footer tally (%Tally, under the roster, outside the scroll) shows the running bill + the
-## resulting starting balance, projected from GameSettings.economy.player_starting_money — truthful for the
-## shipped boot, which assigns no Loadout; a Loadout's money override (player.gd wallet settle) would win at
-## spawn without showing here. The balance label tints danger the moment the build goes into debt.
+## resulting starting balance, projected from GameSettings.economy.player_starting_money — truthful for
+## EVERY created run: the stamp writes exactly base − bill into GameState.money, and the Player's
+## profile_active wallet branch reads it back on every loaded=false boot, overriding even a Loadout's money
+## override (only a dev boot straight into game.tscn — which never shows this screen — keeps a Loadout's
+## money). The balance label tints danger the moment the build goes into debt.
 ##
 ## AUTHORED SCENE: scenes/ui/implant_choice.tscn owns the structure (the character_creation idiom — %Dim +
 ## the 0.05..0.95 panel band + a scrolling roster with the tally and Back/Begin PINNED below it); _bind_ui
@@ -36,6 +54,9 @@ extends Control
 
 ## Canonical ability-name / buildability accessor (path-preloaded, no class_name — the item_info.gd idiom).
 const AbilityRegistry := preload("res://scripts/components/abilities/ability_registry.gd")
+## The zero-sum allocator — for its STAT_MIN/STAT_MAX pair ONLY. The bank normalizes its underwriting lines
+## against the very bounds the builder clamped to, so the rating can never drift from the sheet it rates.
+const StatBudget := preload("res://scripts/ui/stat_budget.gd")
 
 signal confirmed(ability_ids: Array, total_cost: float)
 signal cancelled
@@ -44,11 +65,60 @@ var _begin_btn: Button            ## the PINNED confirm; never gated — an empt
 var _chip_list: VBoxContainer     ## the authored container the roster rows are code-built into
 var _rows: Array[Button] = []     ## independent toggle rows, each carrying "ability_id" + "price" metas (tests drive these)
 var _tally: Label                 ## the PINNED footer: running bill + resulting starting balance (danger-tinted in debt)
+var _hint: Label                  ## the standing on-credit explainer (no build data — that's %Verdict's job)
+var _verdict: Label               ## the Ledger's band + score + limit, painted from the rating's band KEY
+var _reason: Label                ## the single filed adverse-action line (or the commendation)
+var _stat_values: Dictionary = {} ## the pending creation's stat sheet (present_build) — {} = NO application, rates the ceiling
+var _credit_score: int = 0        ## the Ledger's rating of _stat_values (EconomySettings.credit_rating_for)
+var _credit_limit: float = 0.0    ## the zorkmids that score is good for (EconomySettings.credit_limit_for)
+var _credit_band: StringName = &""    ## verdict-band KEY (EconomySettings.BAND_*) — never a display string
+var _credit_reason: StringName = &""  ## filed-reason KEY (EconomySettings.REASON_*) — likewise
 
 func _ready() -> void:
 	MenuStyle.apply(self)  # shared menu Theme + button sounds
+	_compute_credit()  # score the (possibly absent) build BEFORE binding — _bind_ui paints the verdict line
 	_bind_ui()
-	_refresh_tally()  # boots at "bill: 0 · balance: base" — nothing checked yet
+	_refresh_tally()  # boots at "bill: 0 · balance: base · credit left: full" — nothing checked yet
+
+## StartMenu hands the pending creation's stat build here BEFORE add_child, so _ready scores it (the same
+## Dictionary the profile stamp will write into GameState.stat_values). Tests may also call it on a LIVE
+## screen — the verdict line, tally and row gates all rescore + repaint.
+func present_build(stat_values: Dictionary) -> void:
+	_stat_values = stat_values.duplicate()
+	if _tally != null:  # already bound — a live re-present
+		_compute_credit()
+		_paint_credit_hint()
+		_refresh_tally()
+
+## Rate the build and derive its limit from the economy knobs — the two pure EconomySettings curves are the
+## ONE formula (what the verdict announces IS what the row-gating enforces, the pickpocket rule). The
+## allocator's own bounds are forwarded so the underwriting normalizers match the sheet's real range.
+func _compute_credit() -> void:
+	var eco: EconomySettings = GameSettings.economy
+	var rating := EconomySettings.credit_rating_for(_stat_values, eco, StatBudget.STAT_MIN, StatBudget.STAT_MAX)
+	_credit_score = int(rating["score"])
+	_credit_band = rating["band"]
+	_credit_reason = rating["reason"]
+	_credit_limit = EconomySettings.credit_limit_for(_credit_score,
+			eco.credit_score_min, eco.credit_score_max,
+			eco.credit_limit_max, eco.credit_limit_step, eco.credit_limit_curve)
+
+## The most the whole cart may ever bill: the bank's limit plus whatever cash the run actually starts with.
+func _spendable() -> float:
+	return snappedf(GameSettings.economy.player_starting_money + _credit_limit, Zorkmids.QUANTUM)
+
+## Paint the Ledger's two verdict lines from the rating KEYS. Both labels are ALWAYS painted (never hidden),
+## so the block keeps a constant height and the roster below it can't hop between a good and a bad build —
+## the heal-screen's constant-line-count precedent.
+func _paint_credit_hint() -> void:
+	if _verdict != null:
+		_verdict.text = PlayerText.implant_choice_verdict(_credit_band, _credit_score, _credit_limit)
+		# Gold while the Ledger will lend at all; danger the moment it declines outright — the same
+		# solvent/refused colour seam every other wallet readout paints through.
+		_verdict.add_theme_color_override(&"font_color",
+			MenuStyle.danger() if _credit_band == EconomySettings.BAND_DECLINED else MenuStyle.gold())
+	if _reason != null:
+		_reason.text = PlayerText.implant_choice_reason(_credit_reason)
 
 ## Bind the authored chrome by %unique name, apply the skin-derived values on top, and fill the roster.
 func _bind_ui() -> void:
@@ -59,9 +129,16 @@ func _bind_ui() -> void:
 	MenuStyle.style_title(title)
 	title.text = MenuStyle.title_text(PlayerText.IMPLANT_CHOICE_TITLE)
 
-	var hint: Label = %Hint
-	MenuStyle.style_hint(hint)
-	hint.text = PlayerText.IMPLANT_CHOICE_HINT
+	_hint = %Hint
+	MenuStyle.style_hint(_hint)
+	_hint.text = PlayerText.IMPLANT_CHOICE_HINT  # the standing explainer; the build-specific verdict is below it
+	# The Ledger's verdict + the one filed reason. Hint-styled like the line above so the three read as one
+	# block; _paint_credit_hint then tints the verdict (gold while it lends, danger when it declines).
+	_verdict = %Verdict
+	MenuStyle.style_hint(_verdict)
+	_reason = %Reason
+	MenuStyle.style_hint(_reason)
+	_paint_credit_hint()
 
 	_chip_list = %ChipList
 	_build_rows()
@@ -135,6 +212,7 @@ func _make_row(text: String, ability_name: String, price_text: String) -> Button
 	row.offset_right = -sb.content_margin_right
 	row.offset_bottom = -sb.content_margin_bottom
 	btn.add_child(row)
+	btn.set_meta("caption_box", row)  # _refresh_tally dims the caption trio when the row stops fitting the credit
 	var name_l := Label.new()
 	name_l.text = text
 	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -181,17 +259,27 @@ func _total_cost() -> float:
 			total += float(row.get_meta("price"))
 	return snappedf(total, Zorkmids.QUANTUM)
 
-## Re-paint the footer: the running bill + the post-debit starting balance, projected from the same economy
-## knob the boot seeds from (truthful while no Loadout overrides money — see the header note). Gold while
-## solvent, danger the moment the build dips into debt.
+## Re-paint the footer (running bill + post-debit starting balance + credit still extendable, projected
+## from the same economy knob the profile stamp debits from — truthful for every created run, see the
+## header note) and RE-GATE the roster: an UNCHECKED row whose price no longer fits the remaining credit
+## disables + dims (the level-up broke-row look) — the cart can never bill past _spendable(), so Begin
+## stays legitimately never-gated. A CHECKED row never disables: any chip can always come back off the
+## bill. Gold while solvent, danger the moment the build dips into debt.
 func _refresh_tally() -> void:
 	if _tally == null:
 		return
 	var base: float = GameSettings.economy.player_starting_money
 	var cost := _total_cost()
 	var balance := snappedf(base - cost, Zorkmids.QUANTUM)
-	_tally.text = PlayerText.implant_choice_tally(cost, balance)
-	_tally.add_theme_color_override(&"font_color", MenuStyle.gold() if balance >= 0.0 else MenuStyle.danger())
+	var credit_left := snappedf(maxf(0.0, _spendable() - cost), Zorkmids.QUANTUM)
+	_tally.text = PlayerText.implant_choice_tally(cost, balance, credit_left)
+	_tally.add_theme_color_override(&"font_color", MenuStyle.wallet_color(balance))  # the shared solvent/debt seam
+	for row in _rows:
+		if row.button_pressed:
+			continue  # checked rows stay live — un-checking must always be possible
+		var fits: bool = float(row.get_meta("price")) <= credit_left
+		row.disabled = not fits
+		(row.get_meta("caption_box") as Control).modulate.a = 1.0 if fits else 0.4
 
 ## Confirm: hand the cart (ability ids + the bill) to StartMenu, which resets + stamps the profile — the
 ## unlocks AND the debt — and boots. An empty cart is a legal, debt-free start; Begin is never gated.

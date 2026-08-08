@@ -88,7 +88,7 @@ func open() -> void:
 	# NameEntryDialog is kept explicit since it's a control-only suppressor, not a _modal_reg entry). T1.
 	if _is_open or DialogueManager.is_active() or NameEntryDialog.is_open() or InputManager.any_modal_open(self):
 		return  # don't fight another modal for the mouse / Escape (no stacked overlays — symmetric with every screen's own gate + InputManager.gameplay_suppressed)
-	# Refuse MID-DEATH, like every sibling screen (Inventory / Stats / Reputation / Journal / CharacterInspect /
+	# Refuse MID-DEATH, like every sibling screen (Inventory / Stats / Implants / Reputation / Journal / CharacterInspect /
 	# SaveLoad). We are a NON-pausing PROCESS_MODE_ALWAYS autoload, so Escape keeps reaching _unhandled_input all
 	# through the death cinematic AND the in-place checkpoint revive — where the player stays in-tree with the
 	# _dead latch set and hp 0 (Character.is_alive() == false). die() slams us shut (Player._close_open_modals ->

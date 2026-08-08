@@ -51,7 +51,18 @@ func test_the_sting_slider_bus_is_a_real_slider_when_set() -> void:
 func test_sting_timings_are_sane() -> void:
 	var fb: PlayerFeedbackSettings = GameSettings.player_feedback
 	assert_gte(fb.death_sting_release, 0.0, "death_sting_release seconds cannot be negative (0 = ring out naturally)")
-	assert_gte(fb.death_sting_overlap, 0.0, "death_sting_overlap seconds cannot be negative")
+	assert_gte(fb.death_sting_sync_point, 0.0, "death_sting_sync_point seconds cannot be negative")
+	assert_gte(fb.death_sting_fade_in, 0.0, "death_sting_fade_in seconds cannot be negative (0 = instant on)")
+	if fb.death_sting != null and fb.death_sting_sync_point > 0.0:
+		# The swell must finish long before the beat the whole cinematic is scored to, or the final chord
+		# arrives while the sting is still ramping and lands under-level against the returning world.
+		assert_lt(fb.death_sting_fade_in, fb.death_sting_sync_point,
+			"the %.2fs swell must complete well before the %.2fs sync point (the final chord)"
+			% [fb.death_sting_fade_in, fb.death_sting_sync_point])
+		assert_lte(fb.death_sting_sync_point, fb.death_sting.get_length(),
+			("death_sting_sync_point %.2fs is past the end of a %.2fs clip — the respawn would be held on a "
+			+ "black screen listening to nothing (DeathMix clamps it, but the authored value is wrong)")
+			% [fb.death_sting_sync_point, fb.death_sting.get_length()])
 	assert_gte(fb.death_world_residue, 0.0, "death_world_residue is a 0..1 fraction of the world's configured level")
 	assert_lte(fb.death_world_residue, 1.0, "death_world_residue above 1.0 would make the world LOUDER as you die")
 
@@ -66,6 +77,31 @@ func test_the_sting_does_not_start_on_the_killing_blow() -> void:
 		assert_gt(fb.death_sting_start_delay, 0.0,
 			"a sting is authored but death_sting_start_delay is 0 — it would hit on the killing blow")
 
+func test_the_screen_fade_in_lands_on_the_stings_sync_point() -> void:
+	# THE beat the whole cinematic is scored to: the sting's final chord must attack on the same frame
+	# _fade_in_from_black() starts. The card's hold is the only slack in the timeline, so this is really a
+	# check that card_hold_seconds() solved it correctly — and it fails the moment anyone retunes
+	# death_sequence_time / death_card_fade_time / death_card_gap without re-checking the arithmetic.
+	var mix: DeathMix = MIX_SCRIPT.new()
+	var fb: PlayerFeedbackSettings = GameSettings.player_feedback
+	var sync: float = mix.sting_sync_time()
+	if sync <= 0.0:
+		pass_test("no sync point in play (no clip, muted slider, or death_sting_sync_point opted out of)")
+		mix.free()
+		return
+	var respawn_at: float = fb.death_sequence_time + maxf(fb.death_card_delay, 0.0) + fb.death_card_fade_time \
+		+ mix.card_hold_seconds() + fb.death_card_fade_time + fb.death_card_gap
+	# Only exact while the derived hold is above the respawn_delay floor; if the floor won, the cinematic is
+	# simply too short to reach the chord and the alignment is impossible rather than wrong.
+	if mix.card_hold_seconds() <= fb.respawn_delay:
+		pass_test("respawn_delay floor dominates — the cinematic is shorter than the sync point, so no alignment")
+		mix.free()
+		return
+	assert_almost_eq(respawn_at, sync, 0.01,
+		("the screen starts fading in at %.3fs but the sting's sync point lands at %.3fs — the final chord "
+		+ "would miss the fade-in by %.3fs") % [respawn_at, sync, respawn_at - sync])
+	mix.free()
+
 func test_the_sting_rings_on_past_the_respawn() -> void:
 	# THE invariant this timing exists for: the game must come back UNDER a sting that is still finishing,
 	# not after one that already stopped (a black screen waiting on silence) and not by cutting one off.
@@ -78,8 +114,9 @@ func test_the_sting_rings_on_past_the_respawn() -> void:
 		pass_test("no sting will play (no clip authored, or its slider is muted) — nothing to overlap")
 		mix.free()
 		return
-	# The cinematic's own timeline: phase 1, card fade in, the hold, card fade out, the black gap.
-	var respawn_at: float = fb.death_sequence_time + fb.death_card_fade_time \
+	# The cinematic's own timeline: phase 1, the settle-on-black beat, card fade in, the hold, card fade
+	# out, the black gap.
+	var respawn_at: float = fb.death_sequence_time + maxf(fb.death_card_delay, 0.0) + fb.death_card_fade_time \
 		+ mix.card_hold_seconds() + fb.death_card_fade_time + fb.death_card_gap
 	var overlap: float = sting_end - respawn_at
 	assert_gt(overlap, 0.0,
@@ -98,9 +135,10 @@ func test_the_sting_is_not_force_faded_by_default() -> void:
 		return
 	# If someone DOES opt in, the fade must at least cover the tail that is still to play, or it cuts.
 	var mix: DeathMix = MIX_SCRIPT.new()
-	assert_gte(fb.death_sting_release, fb.death_sting_overlap,
+	var tail: float = mix.sting_end_time() - mix.sting_sync_time()
+	assert_gte(fb.death_sting_release, tail,
 		("death_sting_release %.2fs is shorter than the %.2fs of clip still to play at the respawn — the "
-		+ "remainder would be cut off") % [fb.death_sting_release, fb.death_sting_overlap])
+		+ "remainder would be cut off") % [fb.death_sting_release, tail])
 	mix.free()
 
 func test_the_card_hold_never_shortens_the_original_cinematic() -> void:
@@ -130,7 +168,7 @@ func test_sting_end_time_is_zero_when_nothing_will_play() -> void:
 
 func test_death_mix_exposes_the_four_cinematic_seams() -> void:
 	var mix: DeathMix = MIX_SCRIPT.new()
-	for seam in ["begin", "set_world_duck", "restore_world", "begin_revive", "sting_end_time", "card_hold_seconds"]:
+	for seam in ["begin", "set_world_duck", "restore_world", "begin_revive", "sting_end_time", "sting_sync_time", "card_hold_seconds"]:
 		assert_true(mix.has_method(seam), "DeathMix must expose %s() — Player's cinematic calls it" % seam)
 	mix.free()
 

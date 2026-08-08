@@ -161,6 +161,10 @@ extends Resource
 @export var money_gain_color: Color = Color(0.45, 1.0, 0.5)
 ## Red -N on a spend.
 @export var money_loss_color: Color = Color(1.0, 0.5, 0.4)
+## Red the persistent readout wears while the wallet is NEGATIVE (implants are bought on credit — the run
+## can start in debt, and the signed readout IS the debt display). Solvent stays money_color gold. The
+## menu wallet labels tint the same state through MenuStyle.wallet_color (MenuSkin.danger_color).
+@export var money_debt_color: Color = Color(1.0, 0.5, 0.4)
 ## Pixels the +N/-N floats up as it fades.
 @export var money_delta_rise: float = 22.0
 ## Seconds for that float + fade.

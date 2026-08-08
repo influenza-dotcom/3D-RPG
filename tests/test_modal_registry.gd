@@ -3,7 +3,7 @@ extends GutTest
 ## M5: modal-exclusion guards are centralized on InputManager (any_modal_open / any_pausing_open) instead of a long
 ## inline is_open() list duplicated in every screen. This fixes the asymmetry where a pausing NPC-transaction screen
 ## (shop/heal/level-up/respec) would open OVER the QuestJournal (and level-up over Respec), and gates the ray_cast
-## interact key AND the weapon hotbar's slot keys over ALL menus. The Pip-Boy tab group (Inventory/Stats/Reputation/
+## interact key AND the weapon hotbar's slot keys over ALL menus. The Pip-Boy tab group (Inventory/Stats/Implants/Reputation/
 ## Journal) still opens over its OWN siblings (it switches via PlayerMenus.close_others), so those are NOT blocked.
 ## gameplay_suppressed() is unchanged.
 ##
@@ -74,7 +74,7 @@ func test_guards_route_through_the_shared_helpers() -> void:
 	# interact gate via any_modal_open(). One place (InputManager) registers a screen, not every guard.
 	for path in ["res://scripts/ui/shop_screen.gd", "res://scripts/ui/heal_screen.gd", "res://scripts/ui/level_up_screen.gd", "res://scripts/ui/respec_screen.gd"]:
 		assert_string_contains(FileAccess.get_file_as_string(path), "InputManager.any_modal_open(self)", "%s (pausing) should guard via InputManager.any_modal_open(self)" % path)
-	for path in ["res://scripts/ui/stats_screen.gd", "res://scripts/ui/reputation_screen.gd", "res://scripts/ui/inventory_screen.gd", "res://scripts/ui/quest_journal.gd"]:
+	for path in ["res://scripts/ui/stats_screen.gd", "res://scripts/ui/reputation_screen.gd", "res://scripts/ui/inventory_screen.gd", "res://scripts/ui/quest_journal.gd", "res://scripts/ui/implants_screen.gd"]:
 		assert_string_contains(FileAccess.get_file_as_string(path), "InputManager.any_pausing_open()", "%s (tab group) should guard via InputManager.any_pausing_open()" % path)
 	assert_string_contains(FileAccess.get_file_as_string("res://scripts/components/ray_cast.gd"), "InputManager.gameplay_suppressed()", "ray_cast interact gate should route through InputManager.gameplay_suppressed() (T2 hardened it from any_modal_open to also cover cutscenes + the name-entry dialog; gameplay_suppressed still derives from the modal registry)")
 	# The weapon hotbar's slot-key gate is the same class of raw-input consumer, but it EXCLUDES the backpack
@@ -83,15 +83,44 @@ func test_guards_route_through_the_shared_helpers() -> void:
 	assert_string_contains(FileAccess.get_file_as_string("res://scripts/ui/hotbar.gd"), "InputManager.any_modal_open(InventoryScreen)", "hotbar slot-key gate should route through InputManager.any_modal_open(InventoryScreen)")
 
 
+## Every screen a PLAYER can summon on their own — a hotkey, Escape, or the Options row — must ALSO consult the
+## shared mid-death gate (PlayerMenus.player_alive), not just the registry guard above. These screens all run
+## PROCESS_MODE_ALWAYS and none of them pauses the tree, so their open hotkeys keep firing right through the death
+## cinematic AND the in-place checkpoint revive, where the player is still in-tree with the _dead latch set.
+## Player.die() sweeps them shut (close_all_modals) and _respawn_at_checkpoint sweeps again, but a sweep can only
+## close what is open — nothing but this gate stops a key press RE-opening a menu over the black screen.
+##
+## OptionsMenu was the hole this test exists for: it was the ONE self-opening screen without the gate, so Escape
+## opened the full settings menu (freed cursor, Main Menu / Save-Load / Quit rows, live rebind capture) over the
+## death card. The gate is per-screen by necessity — it can't be folded into the registry, because the world-driven
+## screens (Loot/Shop/Heal/LevelUp/Respec/ChipInstall/Chess) are opened BY an interaction that is already blocked
+## while dead. So the list is hand-maintained, and this sweep is what keeps the next one from being forgotten.
+func test_self_opening_screens_all_gate_on_the_mid_death_predicate() -> void:
+	for path in [
+		"res://scripts/ui/options_menu.gd",             # Escape — the regression this test was written for
+		"res://scripts/ui/inventory_screen.gd",         # Tab
+		"res://scripts/ui/stats_screen.gd",             # Pip-Boy tab hotkey / tab strip
+		"res://scripts/ui/reputation_screen.gd",
+		"res://scripts/ui/quest_journal.gd",
+		"res://scripts/ui/implants_screen.gd",          # the implants tab (I)
+		"res://scripts/ui/character_inspect_screen.gd", # fullscreen hero-view takeover
+		"res://scripts/ui/save_load_screen.gd",         # reached from the Options bottom row
+	]:
+		assert_string_contains(FileAccess.get_file_as_string(path), "PlayerMenus.player_alive(",
+			"%s opens from a player hotkey while PROCESS_MODE_ALWAYS, so its open() must refuse mid-death via PlayerMenus.player_alive() — else the key re-opens it over the death cinematic / in-place revive" % path)
+
+
 func test_registry_size_and_membership() -> void:
 	# T1: pin the registry so the historically-forgotten screens force a deliberate test edit when a new screen lands.
 	var screens := InputManager._modal_screens()
-	assert_eq(screens.size(), 14, "the modal registry holds all 14 player-facing screens")
+	assert_eq(screens.size(), 16, "the modal registry holds all 16 player-facing screens")
+	assert_true(screens.has(AtmScreen), "AtmScreen is registered (the Ledger terminal; pauses like its station siblings)")
 	assert_true(screens.has(ChessScreen), "ChessScreen is registered (was missed by the death sweep)")
 	assert_true(screens.has(ChipInstallScreen), "ChipInstallScreen is registered")
 	assert_true(screens.has(QuestJournal), "QuestJournal is registered (historically forgotten)")
 	assert_true(screens.has(CharacterInspectScreen), "CharacterInspectScreen is registered")
-	assert_true(screens.has(SaveLoadScreen), "SaveLoadScreen is registered (the newest — the manual save/load slot menu; non-pausing)")
+	assert_true(screens.has(SaveLoadScreen), "SaveLoadScreen is registered (the manual save/load slot menu; non-pausing)")
+	assert_true(screens.has(ImplantsScreen), "ImplantsScreen is registered (the newest — the implants tab; non-pausing)")
 
 
 func test_gameplay_suppressed_fires_for_every_registered_modal() -> void:

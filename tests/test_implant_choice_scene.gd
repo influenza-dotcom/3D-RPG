@@ -15,7 +15,7 @@ const HOST_SCRIPT := "res://scripts/ui/start_menu.gd"
 
 ## Every unique name implant_choice.gd binds in _bind_ui (plus %ChipScroll, whose layout the pins below hang
 ## off) — a rename in the editor breaks the bind at boot, so pin the roster here where it fails loudly instead.
-const BOUND := ["Dim", "Column", "Title", "Hint", "ChipScroll", "ChipList",
+const BOUND := ["Dim", "Column", "Title", "Hint", "Verdict", "Reason", "ChipScroll", "ChipList",
 	"Tally", "Buttons", "BackButton", "BeginButton"]
 
 
@@ -83,5 +83,17 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 		"Back/Begin stay pinned in the column, outside the scroll")
 	assert_eq((inst.get_node("%Tally") as Control).get_parent(), inst.get_node("%Column"),
 		"the bill/balance tally stays pinned in the column too — visible however long the roster grows")
+
+	# The Ledger's verdict + filed reason sit ABOVE the scroll, beside the explainer they extend: they are a
+	# property of the build (fixed for the whole screen), not of the cart, so they must not scroll away with
+	# the roster. Both AUTOWRAP, because the panel is a fixed anchor band on a 792x444 canvas and an
+	# un-wrapped verdict would push it wider.
+	for line in ["Hint", "Verdict", "Reason"]:
+		var label := inst.get_node("%" + line) as Label
+		assert_eq(label.get_parent(), inst.get_node("%Column"), "%%%s stays pinned in the column" % line)
+		assert_ne(label.autowrap_mode, TextServer.AUTOWRAP_OFF,
+			"%%%s autowraps — a long line must reflow inside the fixed panel, never widen it" % line)
+	assert_lt(inst.get_node("%Verdict").get_index(), inst.get_node("%ChipScroll").get_index(),
+		"the verdict is read BEFORE the roster it constrains — it sits above the scroll")
 
 	inst.free()

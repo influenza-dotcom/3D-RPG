@@ -14,6 +14,7 @@ extends GutTest
 const ROW_BUILDER_FILES := [
 	"res://scripts/ui/implant_choice.gd",
 	"res://scripts/ui/chip_install_screen.gd",
+	"res://scripts/ui/implants_screen.gd",  # the Implants tab's INSTALLED toggle rows (switch an implant off)
 ]
 
 

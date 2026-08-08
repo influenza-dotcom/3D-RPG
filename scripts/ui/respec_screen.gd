@@ -113,6 +113,12 @@ func _refresh() -> void:
 	# no-autowrap prose was exactly what dragged the card wide).
 	_blurb.text = PlayerText.respec_blurb(perks.size())
 	_status.text = PlayerText.respec_status(cost, _player.money)
+	# Heal-screen parity (heal_screen._refresh): the facts line tints danger when the respec is refused for
+	# money — cost > 0 and the wallet under it, which is ALWAYS true in debt — so a negative balance never
+	# reads in the neutral tint. A FREE respec stays neutral even in debt: it's affordable by definition
+	# (RespecStation's zero-cost short-circuit).
+	_status.add_theme_color_override(&"font_color",
+		MenuStyle.danger() if (cost > 0.0 and float(_player.money) < cost) else MenuStyle.text_color())
 	# The cost + affordability already read on the _status line above, so the button caption stays SHORT +
 	# fixed-width ("Respec — N zm"); can't-afford just greys it out rather than appending a long "(… — can't
 	# afford)" caption that would be the one string long enough to clip on the fixed-width card.
@@ -121,7 +127,10 @@ func _refresh() -> void:
 		_confirm_btn.disabled = true
 	else:
 		_confirm_btn.text = PlayerText.respec_button(cost)
-		_confirm_btn.disabled = float(_player.money) < cost
+		# Same gate as RespecStation.do_respec (fee only when there IS one): a FREE station must stay
+		# clickable for a wallet in DEBT — without the cost > 0 guard, `money < 0` greyed the button the
+		# station itself would serve (the free-respec-refused-while-negative wart, UI half).
+		_confirm_btn.disabled = cost > 0.0 and not _player.can_pay(cost)  # the SAME predicate RespecStation.do_respec gates on
 
 # ---------------------------------------------------------------------------------------------------
 # UI binding (the layout is AUTHORED in scenes/ui/respec_screen.tscn — this adopts it; mirrors heal_screen.gd)

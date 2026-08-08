@@ -512,6 +512,44 @@ func test_effects_settings_gore_defaults() -> void:
 	s = null
 
 
+func test_effects_settings_body_part_gib_defaults() -> void:
+	# Sibling to test_effects_settings_gore_defaults for the "Body-part gibs" group — the burst that flings
+	# the dying character's OWN head/torso/arms/legs (gore_spawner.gd _spawn_body_part_gibs). RELATIONAL
+	# assertions only, like its sibling, so retuning the feel never breaks the suite.
+	var s = EffectsSettings.new()
+	assert_eq(typeof(s.body_part_gibs_enabled), TYPE_BOOL,
+		"body_part_gibs_enabled is the master switch gore_spawner.gd reads when an actor has no BodyPartGibs drop-in")
+	assert_eq(typeof(s.body_part_gib_meat_count), TYPE_INT,
+		"body_part_gib_meat_count must be an int — it feeds a `for i in count` loop")
+	assert_gte(s.body_part_gib_meat_count, 0,
+		"body_part_gib_meat_count must be >= 0; 0 is the legitimate 'body parts only, no loose gore' setting")
+	assert_true(s.body_part_gib_vel_min < s.body_part_gib_vel_max,
+		"body_part_gib_vel_min must be < max so the limb launch-speed randf_range is a valid ascending range")
+	assert_true(s.body_part_gib_up_bias_min <= s.body_part_gib_up_bias_max,
+		"body_part_gib_up_bias_min must not exceed max — they bound the upward pop each limb gets")
+	assert_gt(s.body_part_gib_angular_range, 0.0,
+		"body_part_gib_angular_range must be > 0 so limbs cartwheel instead of flying frozen")
+	assert_gte(s.body_part_gib_spread, 0.0,
+		"body_part_gib_spread must be >= 0; 0 means limbs fly exactly outward from the body's centre")
+	assert_gte(s.body_part_gib_launch_inherit, 0.0,
+		"body_part_gib_launch_inherit must be >= 0 — a negative share would fling the body INTO the blast that killed it")
+	assert_eq(typeof(s.body_part_gib_hp_min), TYPE_INT,
+		"body_part_gib_hp_min must be an int — shots-to-pop is counted in whole hits")
+	assert_gte(s.body_part_gib_hp_min, 1,
+		"body_part_gib_hp_min must be >= 1 so a limb survives its own spawn and takes at least one shot to pop")
+	assert_lte(s.body_part_gib_hp_min, s.body_part_gib_hp_max,
+		"body_part_gib_hp_min must not exceed max — they bound the randomized shots-to-pop range")
+	assert_gt(s.body_part_gib_mass, 0.0,
+		"body_part_gib_mass must be > 0 — a massless RigidBody3D is invalid to the physics server")
+	assert_gt(s.body_part_gib_fade_time, 0.0,
+		"body_part_gib_fade_time must be > 0 so a despawning limb fades out instead of popping away")
+	assert_gt(s.body_part_gib_lifetime, s.body_part_gib_fade_time,
+		"body_part_gib_lifetime must exceed its fade time so a limb lingers fully visible before fading")
+	assert_gte(s.gib_max_active, s.body_part_gib_meat_count + 6,
+		"gib_max_active must fit ONE death's whole burst (up to 6 body parts + the meat chunks) or a single kill evicts its own gibs — body parts share the &\"gib\" group and its oldest-first cap")
+	s = null
+
+
 func test_audio_settings_defaults() -> void:
 	var s = AudioSettings.new()
 	assert_true(s.falling_air_min_move_speed < s.falling_air_max_move_speed,
@@ -591,6 +629,19 @@ func test_economy_settings_defaults() -> void:
 		"long_range_bounty_per_m must be >= 0 — a negative per-metre slope would SHRINK the reward the farther you shot")
 	assert_true(s.long_range_bounty_max >= 0.0,
 		"long_range_bounty_max must be >= 0 — the cap on the marksman payout can be zeroed but never negative")
+	# The Death group — what happens to the player's purse when they die. It is never destroyed: it goes to the
+	# killer, or onto the ground where you fell (Player._bequeath_wallet). These pin the SCRIPT defaults; the
+	# behaviour itself is in test_money.gd.
+	assert_eq(s.death_purse_loss_fraction, 1.0,
+		"death_purse_loss_fraction ships at 1.0 — death takes the WHOLE purse, which is only fair because you can always go and take it back")
+	assert_true(s.death_purse_loss_fraction >= 0.0 and s.death_purse_loss_fraction <= 1.0,
+		"death_purse_loss_fraction is a FRACTION of the wallet — outside 0..1 it would either pay the player for dying or take money they don't have")
+	assert_true(s.death_purse_drops_when_unclaimed,
+		"an unclaimed death drops the purse on the ground by default — otherwise a fall would silently destroy your zorkmids, the exact thing this feature exists to stop")
+	assert_true(s.death_purse_drop_ground_probe >= 0.0,
+		"death_purse_drop_ground_probe is a downward search DISTANCE (m) — negative would flip the probe upward and find ceilings; 0 legitimately disables it")
+	assert_true(s.death_purse_drop_to_respawn_in_void,
+		"a void death parks the purse at the respawn point by default — the alternative is refusing to drop it at all, which is the harsher stance and should be opt-in")
 	s = null
 
 
@@ -621,6 +672,288 @@ func test_long_range_bonus_curve() -> void:
 	# Zeroing the payout knobs disables the reward at ANY distance (the designer's off switch):
 	assert_eq(EconomySettings.long_range_bonus_for(500.0, 30.0, 0.0, 0.0, 0.0), 0.0,
 		"zeroing long_range_bounty and long_range_bounty_per_m disables the reward at any distance")
+
+
+# --- The Ledger's underwriting sheet (New Game's implant credit check) --------------------------------------
+# The pure rating (EconomySettings.credit_rating_for) — off-tree, no nodes, the long_range_bonus_for mold. It
+# rates a creation build on four lines (CAPACITY / VIABILITY / TRADE minus EXPOSURE, off the authored per-stat
+# table) and the score sets the implant cart's spending limit. The tests below assert ORDERING and STRUCTURE
+# rather than hand-computed magic numbers wherever possible, so a designer may re-price the actuarial table in
+# EconomySettings.tres without breaking the suite — only the contracts must hold.
+
+const CREDIT_FLOOR := -5   ## StatBudget.STAT_MIN — the allocator bounds the scorer normalizes against
+const CREDIT_CEIL := 10    ## StatBudget.STAT_MAX
+
+## ⭐The economy carrying the AUTHORED actuarial table. A bare EconomySettings.new() ships an EMPTY
+## `credit_underwriting` array — a flat credit market where EVERY build rates exactly the baseline — so any
+## test about ratings, orderings or reasons MUST use the live resource, which is where the six
+## StatUnderwriting rows actually live. (`.new()` is still right for pinning script-default KNOBS, and for
+## the deliberate empty-table degrade test.) Never free what this returns: it is the live shared resource,
+## and a trailing `= null` in a test only drops the local reference.
+func _live_eco() -> EconomySettings:
+	return GameSettings.economy
+
+## A throwaway COPY of the live economy — same authored table, safe to mutate one knob on. Resource.duplicate
+## is shallow, which is exactly what we want: the StatUnderwriting rows are shared and never written to.
+func _eco_copy() -> EconomySettings:
+	return GameSettings.economy.duplicate() as EconomySettings
+
+## A full six-key creation sheet (what StatBudget.to_dict always produces), defaulting every unnamed stat to 0.
+func _credit_sheet(values: Dictionary) -> Dictionary:
+	var out := {}
+	for stat in CharacterStats.STAT_NAMES:
+		out[stat] = int(values.get(stat, 0))
+	return out
+
+
+func _credit_score(values: Dictionary, eco: EconomySettings) -> int:
+	return EconomySettings.credit_score_for(_credit_sheet(values), eco, CREDIT_FLOOR, CREDIT_CEIL)
+
+
+func test_starting_credit_absent_sheet_and_no_file_sheet_are_different_inputs() -> void:
+	# THE distinction the whole model rests on. An EMPTY dict is the ABSENCE of an application (a bare-scene
+	# instantiation with no present_build) and fails OPEN to the ceiling — that is what keeps the implant
+	# screen's Begin legitimately never-gated. The all-zero SIX-KEY sheet is a filed-but-empty form: a real
+	# applicant who allocated nothing, scored normally at the baseline. The retired model conflated the two
+	# and handed the do-nothing build the best terms in the game.
+	var eco := _live_eco()
+	assert_eq(EconomySettings.credit_score_for({}, eco, CREDIT_FLOOR, CREDIT_CEIL), eco.credit_score_max,
+		"an ABSENT sheet ({}) fails open to score_max — no application means nothing to decline")
+	assert_lt(_credit_score({}, eco), eco.credit_score_max,
+		"a FILED but all-zero sheet is a real applicant with no assets — it must NOT rate the ceiling")
+	assert_gt(_credit_score({}, eco), eco.credit_score_min,
+		"…but allocating nothing is not a crime either: the no-file build still rates above the floor")
+	eco = null
+
+
+func test_starting_credit_committing_to_a_build_always_beats_allocating_nothing() -> void:
+	# ⭐THE HEADLINE PIN — the exact inversion this model replaced. Under the retired formula the zero-sum
+	# budget made every invested point cost a dumped point, so committing was a flat tax: gun+5/end-5 rated
+	# 820 against the do-nothing build's 850. Spending the budget must RAISE the rating, never lower it.
+	var eco := _live_eco()
+	assert_gt(_credit_score({&"gunplay": 5, &"endurance": -5}, eco), _credit_score({}, eco),
+		"a committed build out-rates the sheet that allocated nothing — the whole point of the model")
+	eco = null
+
+
+func test_starting_credit_orders_builds_by_quality() -> void:
+	# Ordering, not values: a designer may re-price the table freely, but these relationships are the design.
+	var eco := _live_eco()
+	var operator := _credit_score({&"gunplay": 10, &"strength": 10, &"endurance": -5, &"agility": -5,
+		&"streetwise": -5, &"larceny": -5}, eco)
+	var ghost := _credit_score({&"larceny": 8, &"agility": 7, &"strength": -5, &"endurance": -5, &"gunplay": -5}, eco)
+	var dabbler := _credit_score({&"strength": 3, &"gunplay": 3, &"agility": 2, &"streetwise": 2,
+		&"endurance": -5, &"larceny": -5}, eco)
+	var nothing := _credit_score({}, eco)
+	var crippled := _credit_score({&"strength": -5, &"endurance": -5, &"gunplay": -5, &"agility": -5,
+		&"streetwise": -5, &"larceny": -5}, eco)
+	assert_gt(operator, ghost, "a fully committed two-stat specialist out-rates a lighter one")
+	assert_gt(ghost, dabbler, "a real specialty out-rates points sprinkled across four stats")
+	assert_gt(dabbler, nothing, "even a scattered build out-rates allocating nothing at all")
+	assert_gt(nothing, crippled, "…and allocating nothing out-rates actively crippling yourself")
+	assert_eq(crippled, eco.credit_score_min, "the all-dumped build bottoms out exactly at score_min")
+	eco = null
+
+
+func test_starting_credit_is_monotone_in_every_stat() -> void:
+	# ⭐THE STRUCTURAL PROPERTY. Positives feed only the additive lines and negatives only the subtractive one,
+	# so raising any stat can NEVER lower a score and lowering any can NEVER raise it — for any authored table.
+	# That is what makes re-creating the retired inverted model impossible rather than merely unlikely. A
+	# deterministic sweep stands in for the exhaustive proof (the full space is ~1.7M builds).
+	var eco := _live_eco()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260807  # deterministic: the same sheets every run
+	var free_lunch := 0
+	var spend_penalty := 0
+	for i in 200:
+		var sheet := {}
+		for stat in CharacterStats.STAT_NAMES:
+			sheet[stat] = rng.randi_range(CREDIT_FLOOR, CREDIT_CEIL)
+		var base := EconomySettings.credit_score_for(sheet, eco, CREDIT_FLOOR, CREDIT_CEIL)
+		for stat in CharacterStats.STAT_NAMES:
+			if int(sheet[stat]) > CREDIT_FLOOR:
+				var lower := sheet.duplicate()
+				lower[stat] = int(sheet[stat]) - 1
+				if EconomySettings.credit_score_for(lower, eco, CREDIT_FLOOR, CREDIT_CEIL) > base:
+					free_lunch += 1
+			if int(sheet[stat]) < CREDIT_CEIL:
+				var higher := sheet.duplicate()
+				higher[stat] = int(sheet[stat]) + 1
+				if EconomySettings.credit_score_for(higher, eco, CREDIT_FLOOR, CREDIT_CEIL) < base:
+					spend_penalty += 1
+	assert_eq(free_lunch, 0,
+		"lowering a stat must NEVER raise the score — a free lunch means dumping pays, the retired model's bug")
+	assert_eq(spend_penalty, 0,
+		"raising a stat must NEVER lower the score — a spend penalty is literally a tax on having a character")
+	eco = null
+
+
+func test_starting_credit_degrades_safely_on_a_bad_table() -> void:
+	# Fail-safes, each mirroring an existing convention. None of these may crash or invert the model.
+	var eco := _live_eco()
+	var build := _credit_sheet({&"gunplay": 10, &"strength": 10, &"endurance": -5, &"agility": -5,
+		&"streetwise": -5, &"larceny": -5})
+	var shipped := EconomySettings.credit_score_for(build, eco, CREDIT_FLOOR, CREDIT_CEIL)
+	# An unrecognised stat key is inert — the bank simply has no row for it (fail-quiet at runtime; the drift
+	# test below is where a missing row fails loud).
+	var with_junk := build.duplicate()
+	with_junk[&"zzz_not_a_stat"] = 10
+	assert_eq(EconomySettings.credit_score_for(with_junk, eco, CREDIT_FLOOR, CREDIT_CEIL), shipped,
+		"a stat name with no underwriting row neither crashes nor moves the rating")
+	# An EMPTY table is a flat credit market at the baseline — never a bank that declines everybody. This is
+	# the ONE case that legitimately wants a bare .new(): an unauthored economy is exactly what it models.
+	var flat := EconomySettings.new()
+	flat.credit_underwriting = []
+	var baseline_score := int(roundf(float(flat.credit_score_min)
+		+ float(flat.credit_score_max - flat.credit_score_min) * flat.credit_baseline_fraction))
+	assert_eq(EconomySettings.credit_score_for(build, flat, CREDIT_FLOOR, CREDIT_CEIL), baseline_score,
+		"an unauthored table rates every build at the baseline — a flat market, not a blanket decline")
+	# A mis-authored NEGATIVE weight is floored to 0, i.e. it DISABLES that line rather than inverting it.
+	# ⭐Note the direction differs by line, which is the whole point of pinning it: zeroing one of the three
+	# ADDITIVE lines removes a bonus (the score falls), while zeroing the SUBTRACTIVE exposure line removes a
+	# penalty (the score rises). What must never happen is the sign flipping — a negative weight paying score
+	# in proportion to the thing it was meant to charge for.
+	for knob in ["credit_weight_capacity", "credit_weight_viability", "credit_weight_trade"]:
+		var bad := _eco_copy()  # the AUTHORED table with one knob sabotaged — a bare .new() would have no table to distort
+		bad.set(knob, -50.0)
+		var zeroed := _eco_copy()
+		zeroed.set(knob, 0.0)
+		assert_eq(EconomySettings.credit_score_for(build, bad, CREDIT_FLOOR, CREDIT_CEIL),
+			EconomySettings.credit_score_for(build, zeroed, CREDIT_FLOOR, CREDIT_CEIL),
+			"a negative %s behaves exactly like 0 — the line is disabled, never inverted" % knob)
+		assert_lte(EconomySettings.credit_score_for(build, bad, CREDIT_FLOOR, CREDIT_CEIL), shipped,
+			"…and since %s is an ADDITIVE line, disabling it can only lower this build's rating" % knob)
+		bad = null
+		zeroed = null
+	var no_exposure := _eco_copy()
+	no_exposure.credit_weight_exposure = -50.0
+	var exposure_off := _eco_copy()
+	exposure_off.credit_weight_exposure = 0.0
+	assert_eq(EconomySettings.credit_score_for(build, no_exposure, CREDIT_FLOOR, CREDIT_CEIL),
+		EconomySettings.credit_score_for(build, exposure_off, CREDIT_FLOOR, CREDIT_CEIL),
+		"a negative credit_weight_exposure also behaves exactly like 0 — floored, never inverted")
+	assert_gte(EconomySettings.credit_score_for(build, no_exposure, CREDIT_FLOOR, CREDIT_CEIL), shipped,
+		"…and because exposure is the SUBTRACTIVE line, disabling it RAISES this dumped build's rating")
+	no_exposure = null
+	exposure_off = null
+	# A null settings object degrades instead of null-dereferencing.
+	assert_eq(EconomySettings.credit_score_for(build, null, CREDIT_FLOOR, CREDIT_CEIL), 0,
+		"a null EconomySettings degrades to a declined rating rather than crashing the New Game flow")
+	eco = null
+	flat = null
+
+
+func test_starting_credit_underwriting_table_covers_every_stat() -> void:
+	# DRIFT: a stat added to CharacterStats.STAT_NAMES without a row here is invisible to the bank — it would
+	# silently contribute nothing to any rating. Fail-quiet in the score, so it must fail LOUD in CI.
+	var eco: EconomySettings = GameSettings.economy
+	var priced := {}
+	for row in eco.credit_underwriting:
+		assert_not_null(row, "no null rows in the shipped actuarial table")
+		if row != null:
+			assert_false(priced.has(row.stat), "stat '%s' is priced exactly once — a duplicate row double-counts it" % row.stat)
+			priced[row.stat] = true
+	for stat in CharacterStats.STAT_NAMES:
+		assert_true(priced.has(stat),
+			"'%s' has a StatUnderwriting row in EconomySettings.tres — an unpriced stat is invisible to the credit check" % stat)
+
+
+func test_starting_credit_reason_codes_are_actionable() -> void:
+	# The filed reason names the underwriting line the build falls furthest under, so the player can read it
+	# off their own sheet. These are the four diagnoses the screen can print, plus the two overrides.
+	var eco := _live_eco()
+	var function_of := func(values: Dictionary) -> StringName:
+		return EconomySettings.credit_rating_for(_credit_sheet(values), eco, CREDIT_FLOOR, CREDIT_CEIL)["reason"]
+	assert_eq(function_of.call({}), EconomySettings.REASON_NO_FILE,
+		"allocating nothing files 'no established identity', not a line-item fault")
+	assert_eq(function_of.call({&"gunplay": 4, &"strength": -5, &"endurance": -5}), EconomySettings.REASON_UNSPENT,
+		"idle freed points override the line ranking — that IS the player's real problem")
+	assert_eq(function_of.call({&"strength": 3, &"gunplay": 3, &"agility": 2, &"streetwise": 2,
+		&"endurance": -5, &"larceny": -5}), EconomySettings.REASON_THIN_TRADE,
+		"a build with no peak is filed as having no trade of record")
+	assert_eq(function_of.call({&"gunplay": 10, &"strength": 10, &"endurance": -5, &"agility": -5,
+		&"streetwise": -5, &"larceny": -5}), EconomySettings.REASON_NONE,
+		"a near-perfect build is COMMENDED, never scolded — the commendation fraction overrides the ranking")
+	eco = null
+
+
+func test_starting_credit_score_curve() -> void:
+	# The shipped rating of the canonical builds — the numbers the design was tuned to, pinned so a re-price
+	# of the actuarial table is a DELIBERATE act rather than a silent drift. (Ordering + structure are pinned
+	# separately above, so a designer retuning the table only has to revisit this one test.)
+	var eco := _live_eco()
+	assert_eq(_credit_score({}, eco), 432,
+		"the no-file build rates 432 — good for one cheap chip, so allocating nothing is never a lockout")
+	assert_eq(_credit_score({&"gunplay": 10, &"strength": 10, &"endurance": -5, &"agility": -5,
+		&"streetwise": -5, &"larceny": -5}, eco), 842,
+		"the best legal build rates 842 — deliberately just under score_max: the Ledger never quotes its own ceiling")
+	assert_eq(_credit_score({&"gunplay": 5, &"endurance": -5}, eco), 600,
+		"the headline regression case (which the retired model fined BELOW the do-nothing build) now rates 600")
+	assert_eq(_credit_score({&"strength": -5, &"endurance": -5, &"gunplay": -5, &"agility": -5,
+		&"streetwise": -5, &"larceny": -5}, eco), 300,
+		"the self-crippled build reaches score_min honestly (every line at its worst), not by clamp arithmetic")
+	# No cliff off zero: the first traded point must be a smooth step, not a jump.
+	var one_step := _credit_score({&"strength": 1, &"endurance": -1}, eco)
+	var two_step := _credit_score({&"strength": 2, &"endurance": -2}, eco)
+	assert_gt(one_step, _credit_score({}, eco), "the very first traded point already improves the rating")
+	assert_gt(two_step, one_step, "…and the second improves it again — a smooth ramp, no cliff off zero")
+	eco = null
+
+
+func test_starting_credit_limit_curve() -> void:
+	# The pure limit mapping (EconomySettings.credit_limit_for): score_min..score_max -> 0..limit_max shaped by
+	# `curve`, floored to whole steps (banks quote round numbers), quantized to the coin grid. The eight
+	# assertions below all omit `curve`, which DEFAULTS to 1.0 = the plain linear map — they are unchanged from
+	# before the gamma was added precisely so the new argument can't have altered the existing mapping.
+	# A perfect score earns EXACTLY the cap — the "up to 2100 zm" contract:
+	assert_eq(EconomySettings.credit_limit_for(850, 300, 850, 2100.0, 50.0), 2100.0,
+		"score_max earns exactly limit_max — the cap is reachable, never overshot")
+	# A mid score maps linearly then floors to the step: (575-300)/550 = 0.5 -> 1050 (already on-step):
+	assert_eq(EconomySettings.credit_limit_for(575, 300, 850, 2100.0, 50.0), 1050.0,
+		"the mid-range score earns the linear share of the cap")
+	# The step FLOORS, never rounds up: 670 -> 1412.7 raw -> 1400:
+	assert_eq(EconomySettings.credit_limit_for(670, 300, 850, 2100.0, 50.0), 1400.0,
+		"the limit floors to whole credit_limit_step quotes — the bank never rounds in your favour")
+	# Step 0 = unstepped (coin-grid quantized only): 670 -> 1412.73:
+	assert_eq(EconomySettings.credit_limit_for(670, 300, 850, 2100.0, 0.0), 1412.73,
+		"a zero step disables the round-number flooring — the raw linear limit, coin-quantized")
+	# The worst shipped-knob build (score 310) floors all the way to NO credit:
+	assert_eq(EconomySettings.credit_limit_for(310, 300, 850, 2100.0, 50.0), 0.0,
+		"a floor-adjacent score steps down to zero credit — the bank can decline outright")
+	# A score below the range clamps to nothing rather than going negative:
+	assert_eq(EconomySettings.credit_limit_for(250, 300, 850, 2100.0, 50.0), 0.0,
+		"a score under score_min clamps to zero credit, never negative")
+	# The documented OFF-SWITCH: a degenerate score range (min >= max) rates everyone at the cap:
+	assert_eq(EconomySettings.credit_limit_for(400, 500, 500, 2100.0, 50.0), 2100.0,
+		"score_min == score_max is the credit check's off-switch — every build rates the full cap")
+	# The SHIPPED gamma (1.6) is what the game actually quotes — pin the live path too, not just the identity.
+	assert_eq(EconomySettings.credit_limit_for(842, 300, 850, 2100.0, 50.0, 1.6), 2050.0,
+		"the best legal build (842) is advanced 2050 zm — just under the advertised cap, by design")
+	assert_eq(EconomySettings.credit_limit_for(432, 300, 850, 2100.0, 50.0, 1.6), 200.0,
+		"the no-file build (432) is still advanced 200 zm — exactly one cheap chip, so nobody is locked out")
+	assert_eq(EconomySettings.credit_limit_for(600, 300, 850, 2100.0, 50.0, 1.6), 750.0,
+		"a serviceable rating (600) buys 750 zm — the gamma makes a mediocre file buy proportionally less")
+	assert_lt(EconomySettings.credit_limit_for(575, 300, 850, 2100.0, 50.0, 1.6),
+		EconomySettings.credit_limit_for(575, 300, 850, 2100.0, 50.0, 1.0),
+		"a gamma above 1 lends LESS at every score below the ceiling than the linear map did")
+	assert_eq(EconomySettings.credit_limit_for(850, 300, 850, 2100.0, 50.0, 1.6), 2100.0,
+		"…but the ceiling itself is unmoved: a perfect score still earns the whole cap at any gamma")
+	# The shipped knob defaults — the feature's authored contract, incl. the 2100 zm ceiling:
+	var s := EconomySettings.new()
+	assert_eq(s.credit_limit_max, 2100.0, "credit_limit_max ships at 2100 zm — the specified ceiling")
+	assert_eq(s.credit_score_min, 300, "credit_score_min ships at the classic 300 floor")
+	assert_eq(s.credit_score_max, 850, "credit_score_max ships at the classic 850 ceiling")
+	assert_eq(s.credit_limit_step, 50.0, "credit_limit_step ships at 50 zm round-number quotes")
+	assert_eq(s.credit_limit_curve, 1.6, "credit_limit_curve ships at 1.6 (the .tres is knob-default here, so this IS the live gamma)")
+	assert_eq(s.credit_baseline_fraction, 0.24, "credit_baseline_fraction ships at 0.24 — where the no-file applicant sits")
+	assert_eq(s.credit_weight_capacity, 0.48, "the CAPACITY weight ships at 0.48")
+	assert_eq(s.credit_weight_viability, 0.38, "the VIABILITY weight ships at 0.38")
+	assert_eq(s.credit_weight_trade, 0.23, "the TRADE weight ships at 0.23")
+	assert_eq(s.credit_weight_exposure, 0.30, "the EXPOSURE weight ships at 0.30 — the only subtractive line")
+	assert_eq(s.credit_depth_points, 8,
+		"credit_depth_points ships at 8 — anchored on the pickpocket equipped-weapon threshold, the game's one real stat breakpoint")
+	assert_eq(s.credit_dump_exponent, 1.6, "credit_dump_exponent ships at 1.6 — pledges price superlinearly")
+	s = null
 
 
 func test_player_feedback_settings_defaults() -> void:
@@ -663,8 +996,14 @@ func test_player_feedback_settings_defaults() -> void:
 		"death_sequence_time must be > 0 so the keel-over/drain/fade cinematic has a duration at all")
 	assert_gt(s.respawn_delay, 0.0,
 		"respawn_delay must be > 0 so the fully-black death beat is perceptible before the respawn")
+	assert_gte(s.death_card_delay, 0.0,
+		"death_card_delay cannot be negative — 0 is the old card-on-the-black-frame timing, anything above is the settle beat")
 	assert_gt(s.spawn_fade_in_time, 0.0,
 		"spawn_fade_in_time must be > 0 so a fresh spawn fades up from black instead of hard-cutting")
+	assert_gte(s.respawn_hud_delay, 0.0,
+		"respawn_hud_delay cannot be negative — 0 restores the HUD + receipts on the revive's first frame")
+	assert_lt(s.respawn_hud_delay, s.spawn_fade_in_time,
+		"respawn_hud_delay must end inside the spawn fade-up — a longer quiet window would leave the player playing with no HUD after the world is fully visible")
 	assert_eq(typeof(s.sneak_toast_cooldown_ms), TYPE_INT,
 		"sneak_toast_cooldown_ms must be an int — player.gd compares it against msec tick deltas")
 	assert_gt(s.sneak_toast_cooldown_ms, 0,

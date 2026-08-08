@@ -14,7 +14,7 @@ extends CanvasLayer
 ## in the editor and the skin keeps owning colours/fonts/separations/height budgets. NO text is authored
 ## in the scene — every string is set here from PlayerText (l10n + the text-debt ratchet own strings,
 ## never a .tscn). The Tetris GridInventoryView stays CODE-instantiated into the authored %Scroll slot,
-## and the PlayerMenus tab strip stays CODE-BUILT into the authored %TabSlot (the strip's four-Button
+## and the PlayerMenus tab strip stays CODE-BUILT into the authored %TabSlot (the strip's one-Button-per-tab
 ## structure is a cross-screen contract owned by player_menus.gd, not this scene).
 ## tests/test_inventory_screen_scene.gd pins the wiring.
 
@@ -23,7 +23,7 @@ signal closed
 
 
 const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME margin as the loot/shop screens, so every inventory-style menu shares one chrome; AUTHORED into the scene's Panel anchors (0.12..0.88), this const documents the contract (test-pinned)
-const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation)
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Implants/Reputation/Journal)
 
 var _root: Control
 var _grid_view: GridInventoryView  ## the Tetris grid of the backpack (drag to move, R to rotate, click to equip/use)
@@ -130,9 +130,9 @@ func _bind_ui() -> void:
 	# The tab strip is the only header — it already labels the screen, so no separate title. Stats aren't shown
 	# here (dedicated Stats screen, one tab away); zorkmids ride INSIDE the grid as their own coin tile now
 	# (MoneyPurse mirrors the wallet into a real backpack stack), so there's no separate money widget to place.
-	# The strip stays CODE-BUILT by PlayerMenus into the authored %TabSlot: its four-Button EXPAND_FILL
+	# The strip stays CODE-BUILT by PlayerMenus into the authored %TabSlot: its one-Button-per-tab EXPAND_FILL
 	# structure is a cross-screen contract (tests/test_player_menus.gd), so the scene authors only the slot.
-	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"inventory"))  # [Inventory | Stats | Reputation | Journal] — click to switch (routing KEY, not the painted label)
+	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"inventory"))  # [Inventory | Stats | Implants | Reputation | Journal] — click to switch (routing KEY, not the painted label)
 
 	# The Tetris grid itself — drag a tile to move it, R to rotate the held tile, click to equip/use, right-click
 	# to drop. Cells size to the SLOT: the resized hook below feeds the grid the scroll slot's height as its

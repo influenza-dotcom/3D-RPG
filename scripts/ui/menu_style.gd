@@ -89,6 +89,12 @@ func text_color() -> Color: return skin.text_color
 func dim_color() -> Color: return skin.text_dim_color
 func danger() -> Color: return skin.danger_color
 
+## The tint a WALLET readout wears for `amount`: gold while solvent, danger the moment the balance is
+## NEGATIVE. Implants are bought on credit (the run can start in debt — implant_choice.gd), so every
+## menu wallet label routes its colour through this ONE seam (shop / level-up / chip-install headers,
+## the implant tally); the HUD's readout mirrors the same rule via HudSettings.money_debt_color.
+func wallet_color(amount: float) -> Color: return gold() if amount >= 0.0 else danger()
+
 ## Set `root.theme` to the menu theme so every child inherits the look, and MARK the subtree so every
 ## button under it auto-gets the hover/click sounds. Call once on a menu's root Control.
 func apply(root: Control) -> void:

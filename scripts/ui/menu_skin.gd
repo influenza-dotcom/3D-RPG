@@ -98,9 +98,9 @@ extends Resource
 ## Minimum width of a dialog action button (Confirm/Cancel/Close/Heal). One value so the
 ## transaction modals' buttons match across screens.
 @export var dialog_button_min_width: int = 160
-## Width FLOOR for one player-menu tab button (Inventory/Stats/Reputation/Journal). The strip
-## stretches to the panel's width; this only guards pathological narrow canvases. Keep the four
-## tabs' total (4x + separations) under the 0.12-margin panel width at the smallest canvas.
+## Width FLOOR for one player-menu tab button (Inventory/Stats/Implants/Reputation/Journal). The strip
+## stretches to the panel's width; this only guards pathological narrow canvases. Keep the five
+## tabs' total (5x + separations) under the 0.12-margin panel width at the smallest canvas.
 @export var tab_min_width: int = 72
 ## FIXED width (px) of a centered transaction / prompt dialog card (heal / respec / name-entry). The card
 ## is pinned to EXACTLY this width regardless of its text (MenuStyle.make_dialog), so a long station /

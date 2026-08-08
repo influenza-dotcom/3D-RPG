@@ -11,6 +11,17 @@ const AbilityRegistry := preload("res://scripts/components/abilities/ability_reg
 const ITEMS_DIR := "res://resources/items/"
 const MECHANIC_SCENE := "res://scenes/characters/chip_mechanic.tscn"
 
+## ⭐ChipInstaller now gates on the PAYMENT SEAM (Player.can_pay/charge), which reads the SHARED GameState
+## banking fields — a stale positive account would fund an install the wallet couldn't cover.
+var _prev_account: float
+var _prev_method: String
+
+func before_each() -> void:
+	_prev_account = GameState.account
+	_prev_method = GameState.payment_method
+	GameState.account = 0.0
+	GameState.payment_method = "debit"
+
 func _installer(install_mult: float = 0.5, buy_mult: float = 1.25, min_fee: int = 10) -> ChipInstaller:
 	var m := ChipInstaller.new()
 	m.stock = CharacterInventory.new()  # _ready never ran (off-tree) — hand-build the stock, like test_merchant
@@ -45,6 +56,8 @@ func _teardown(m: ChipInstaller, p: Player) -> void:
 func after_each() -> void:
 	if ChipInstallScreen.is_open():
 		ChipInstallScreen.close()
+	GameState.account = _prev_account
+	GameState.payment_method = _prev_method
 
 ## First entry in get_property_list() whose name matches, else {}.
 func _property(obj: Object, prop_name: String) -> Dictionary:

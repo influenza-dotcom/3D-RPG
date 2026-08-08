@@ -164,3 +164,72 @@ func test_death_freeze_stops_the_mode_poll_resurrecting_widgets() -> void:
 	ui._apply_stamina_mode()
 	assert_true(ui._stamina_ring.visible, "after the revive clears the snapshot, the mode poll resumes")
 	ui.free()
+
+# --- the fade PRIMING latch (the respawn-flash regression) -------------------------------------------
+
+## Off-tree, no add_child: _ready never runs, nothing is drawn — we drive _process by hand and assert the
+## fade STATE. Free with .free() (Node, not RefCounted). The one ambient dep is the GameSettings.hud
+## autoload the ease already reads at runtime, so the asserts compare against alpha_target rather than a
+## hardcoded number — a designer retuning stamina_ring_idle_alpha must not fail the suite.
+func _offtree_ring():
+	return RING.new()
+
+func _idle_alpha() -> float:
+	return GameSettings.hud.stamina_ring_idle_alpha
+
+func test_first_visible_frame_adopts_the_target_instead_of_replaying_an_offscreen_change() -> void:
+	# THE respawn-flash regression. Reproduces the death->revive seam exactly: the ring is lit (stamina
+	# spent), hide_hud_for_death hides it, the pool is refilled OFF-SCREEN by _respawn_at_checkpoint, and
+	# restore_hud_after_death shows it again. Before the fix the ring came back owing a full 1.0 -> 0.0
+	# dissolve — a bright half-ring at the reticle over the spawn fade-up.
+	var ring = _offtree_ring()
+	ring.visible = true
+	ring.fill = 0.4
+	for _i in 30:
+		ring._process(1.0 / 60.0)
+	assert_almost_eq(ring._alpha_mult, 1.0, 0.001, "a spent pool leaves the ring fully lit — the shipped contract")
+	ring.visible = false                     # hide_hud_for_death
+	ring._process(1.0 / 60.0)
+	assert_false(ring._fade_primed, "hiding the ring un-primes the fade — an unwatched change is never animated")
+	ring.fill = 1.0                          # _respawn_at_checkpoint: _set_stamina(stamina_max())
+	ring.visible = true                      # restore_hud_after_death
+	ring._process(1.0 / 60.0)
+	assert_almost_eq(ring._alpha_mult, _idle_alpha(), 0.001,
+		"the first visible frame ADOPTS the full-pool target — it must not replay the off-screen refill as a ~0.77 s dissolve (the respawn flash landed this frame at ~0.905)")
+	assert_true(ring._fade_primed, "…and the ease is armed again from here on")
+	ring.free()
+
+func test_a_fresh_ring_never_fades_in_from_full() -> void:
+	# The second face of the same bug: the scene-reload death modes, a new game and every level load build
+	# a FRESH ring, whose `fill` and `_alpha_mult` both start at 1.0 — a full alpha-unit from a full pool's
+	# resting state, so it used to dissolve on every spawn.
+	var ring = _offtree_ring()
+	assert_false(ring._fade_primed,
+		"a brand-new ring is unprimed — its 1.0 initialiser is a don't-care, never a value to animate away from")
+	ring.visible = true
+	ring._process(1.0 / 60.0)
+	assert_almost_eq(ring._alpha_mult, _idle_alpha(), 0.001,
+		"a HUD built with a full pool starts at the idle alpha, not mid-dissolve")
+	ring.free()
+
+func test_a_primed_ring_still_eases_rather_than_cutting() -> void:
+	# Guards the shipped feel against an over-eager fix: the latch must not turn the fade into a hard cut
+	# while the ring is continuously on screen. Bounds, not exact values, so retuning fade_speed is safe.
+	var ring = _offtree_ring()
+	ring.visible = true
+	ring.fill = 1.0
+	ring._process(1.0 / 60.0)  # prime at the idle alpha
+	ring.fill = 0.5
+	ring._process(1.0 / 60.0)
+	assert_gt(ring._alpha_mult, _idle_alpha(), "spending stamina starts lighting the ring…")
+	assert_lt(ring._alpha_mult, 1.0, "…but EASES there over ~three quarters of a second — the pop is a fast fade, not a cut")
+	# 60 more frames = 1.02 s of ease. The exp-lerp needs ~4.6 time constants to fall inside the 0.01 snap
+	# window, which at the shipped fade_speed 6 is 47 frames / 0.78 s — the same ~0.77 s dissolve the
+	# respawn-flash test above quotes. The old 30-frame budget stopped the clock mid-ease at 1 - exp(-3.1) =
+	# 0.955. ⭐The SNAP is still what closes it, not the extra time: after 61 frames the raw asymptote alone
+	# would sit exp(-6.1) = 0.0022 short of 1.0, outside this 0.001 tolerance — so deleting the snap still
+	# fails this test. Don't stretch past ~69 frames or the ease arrives unaided and the assert goes vacuous.
+	for _i in 60:
+		ring._process(1.0 / 60.0)
+	assert_almost_eq(ring._alpha_mult, 1.0, 0.001, "and it does arrive, exactly (the 0.01 snap closes the asymptote)")
+	ring.free()

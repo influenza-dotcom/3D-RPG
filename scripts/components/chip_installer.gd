@@ -134,6 +134,8 @@ func installable_stock(player_node: Node) -> Array:
 
 ## Shared filter: from `entries` ({"item","count"} dicts) keep each chip whose ability the player hasn't
 ## installed and isn't in `exclude` (a set of ability ids), deduped by ability id. Returns Array[Item].
+## INSTALLED (mechanic_installed), not ACTIVE (has_mechanic): an implant the player switched OFF on the
+## Implants tab is still owned — offering its chip again would charge money just to flip it back on.
 func _distinct_installable(entries: Array, player: Player, exclude: Dictionary) -> Array:
 	var out: Array = []
 	var seen := {}
@@ -144,7 +146,7 @@ func _distinct_installable(entries: Array, player: Player, exclude: Dictionary) 
 		if item == null or not item.is_upgrade_chip() or item.value <= 0.0:
 			continue
 		var id := item.installs_ability
-		if seen.has(id) or exclude.has(id) or player.has_mechanic(id):
+		if seen.has(id) or exclude.has(id) or player.mechanic_installed(id):
 			continue
 		seen[id] = true
 		out.append(item)
@@ -160,8 +162,8 @@ func install_carried(item: Item, player_node: Node) -> bool:
 	var player := player_node as Player
 	if player == null or item == null or not item.is_upgrade_chip() or player.inventory == null:
 		return false
-	if player.has_mechanic(item.installs_ability) or not player.inventory.has(item):
-		return false
+	if player.mechanic_installed(item.installs_ability) or not player.inventory.has(item):
+		return false  # INSTALLED guard: a switched-off implant is still owned — never charge to re-enable it
 	# Resolve the grant BEFORE charging: a typo'd installs_ability (no ability script on disk for it, so
 	# AbilityRegistry.can_build is false) would build nothing, yet the old flow still took money + consumed the chip.
 	# Refuse with no charge instead.
@@ -169,9 +171,10 @@ func install_carried(item: Item, player_node: Node) -> bool:
 		push_warning("ChipInstaller: chip '%s' installs unknown ability '%s' — install refused, no charge." % [item.label(), item.installs_ability])
 		return false
 	var cost := install_fee(item)
-	if cost <= 0 or player.money < float(cost):
+	if cost <= 0 or not player.can_pay(float(cost)):  # the ONE affordability predicate (cash -> savings -> armed rail)
 		return false
-	player.add_money(-float(cost))          # routes through the wallet seam -> HUD readout + floating -N
+	if not player.charge(float(cost)):      # routes through the payment seam -> HUD readout + floating -N
+		return false
 	player.inventory.remove(item, 1)        # the chip is consumed into the machine
 	_grant(item, player)
 	return true
@@ -182,16 +185,17 @@ func buy_and_install(item: Item, player_node: Node) -> bool:
 	var player := player_node as Player
 	if player == null or item == null or not item.is_upgrade_chip() or stock == null:
 		return false
-	if player.has_mechanic(item.installs_ability) or not stock.has(item):
-		return false
+	if player.mechanic_installed(item.installs_ability) or not stock.has(item):
+		return false  # same INSTALLED guard as install_carried — an owned-but-off implant is not for sale
 	# Same pre-charge guard as install_carried: never take money for a chip whose ability can't be built.
 	if not player.can_grant_mechanic(item.installs_ability):
 		push_warning("ChipInstaller: chip '%s' installs unknown ability '%s' — install refused, no charge." % [item.label(), item.installs_ability])
 		return false
 	var cost := buy_and_install_cost(item)
-	if cost <= 0 or player.money < float(cost):
+	if cost <= 0 or not player.can_pay(float(cost)):  # the ONE affordability predicate (cash -> savings -> armed rail)
 		return false
-	player.add_money(-float(cost))
+	if not player.charge(float(cost)):
+		return false
 	stock.remove(item, 1)                   # taken off the shelf and fitted straight in
 	_grant(item, player)
 	return true

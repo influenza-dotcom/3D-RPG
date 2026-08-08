@@ -45,5 +45,10 @@ func test_should_show_requires_player_shooter_non_player_character_and_real_loss
 
 func test_throwable_impacts_route_real_loss_into_damage_numbers() -> void:
 	var src := FileAccess.get_file_as_string("res://scripts/components/Throwable.gd")
-	assert_true(src.contains("DamageNumberPopupScript.show(character, real_loss, global_position, false, attacker)"),
-		"thrown prop impacts (zorkmids, dogs, crates) should show the same post-mitigation damage numbers")
+	# The 4th argument was a hardcoded `false` only while a thrown prop COULDN'T crit. It can now: the
+	# thrown_weapon branch computes was_crit from is_headshot + ShotResolver.crit_allowed, and this call
+	# forwards the SAME flag take_damage was given — matching projectile.gd and damage_trace.gd. Pinning
+	# `false` again would make one strike a crit for damage and a non-crit for its number, silently costing a
+	# thrown-knife headshot its crit colour.
+	assert_true(src.contains("DamageNumberPopupScript.show(character, real_loss, global_position, was_crit, attacker)"),
+		"thrown prop impacts (zorkmids, dogs, crates) should show the same post-mitigation damage numbers, and forward the SAME crit flag take_damage was given so a thrown-weapon headshot paints the crit colour")

@@ -105,13 +105,87 @@ func test_tally_shows_the_bill_and_projected_balance() -> void:
 	var s := _make_screen()
 	var base: float = GameSettings.economy.player_starting_money
 	var tally := s.get_node("%Tally") as Label
-	assert_eq(tally.text, PlayerText.implant_choice_tally(0.0, base),
-		"the tally boots at a zero bill and the untouched base balance")
+	var spendable: float = s._spendable()  # the bank's limit + the base cash — what the whole cart may bill
+	assert_eq(tally.text, PlayerText.implant_choice_tally(0.0, base, spendable),
+		"the tally boots at a zero bill, the untouched base balance, and the full credit")
 	var a := s._rows[0] as Button
 	a.button_pressed = true
 	var cost: float = float(a.get_meta("price"))
-	assert_eq(tally.text, PlayerText.implant_choice_tally(cost, snappedf(base - cost, Zorkmids.QUANTUM)),
+	assert_eq(tally.text, PlayerText.implant_choice_tally(cost, snappedf(base - cost, Zorkmids.QUANTUM),
+			snappedf(spendable - cost, Zorkmids.QUANTUM)),
 		"checking a chip re-tallies: the SAME formula feeds the display and the confirmed payload")
+
+
+# --- The Ledger's credit check (present_build -> rating -> limit -> row gating) ----------------------------
+
+const StatBudgetScript := preload("res://scripts/ui/stat_budget.gd")  ## for the allocator bounds the scorer normalizes against
+
+## Every stat dumped to the creation floor — the worst build the allocator can express (STAT_MIN = -5).
+func _trash_build() -> Dictionary:
+	var out := {}
+	for stat in CharacterStats.STAT_NAMES:
+		out[stat] = StatBudgetScript.STAT_MIN
+	return out
+
+
+func _rating(build: Dictionary) -> Dictionary:
+	return EconomySettings.credit_rating_for(build, GameSettings.economy,
+			StatBudgetScript.STAT_MIN, StatBudgetScript.STAT_MAX)
+
+
+func test_absent_build_fails_open_to_the_full_cap() -> void:
+	# A bare-scene instantiation presents NO build — no application on file, which fails OPEN to the ceiling.
+	# (That is deliberately NOT the same as an all-zero sheet, which is a real applicant with nothing to
+	# lend against; see test_managers_tuning.) The screen must derive BOTH numbers through the pure
+	# EconomySettings curves fed from the live knobs — no private formula, because the verdict it prints IS
+	# the number the row-gating enforces.
+	var s := _make_screen()
+	var eco: EconomySettings = GameSettings.economy
+	var want: Dictionary = _rating({})
+	assert_eq(s._credit_score, int(want["score"]),
+		"the screen rates through EconomySettings.credit_rating_for — the ONE bank formula")
+	assert_eq(s._credit_band, want["band"], "…and carries the band KEY it returned, never a display string")
+	assert_eq(s._credit_reason, want["reason"], "…and the filed-reason KEY likewise")
+	assert_eq(s._credit_limit, EconomySettings.credit_limit_for(int(want["score"]), eco.credit_score_min,
+			eco.credit_score_max, eco.credit_limit_max, eco.credit_limit_step, eco.credit_limit_curve),
+		"…deriving the limit through credit_limit_for (gamma included), so verdict and row-gating can't disagree")
+	assert_eq(s._credit_limit, eco.credit_limit_max,
+		"an absent application earns exactly the authored cap (2100 zm shipped) — this is what keeps Begin ungated")
+	assert_eq((s.get_node("%Verdict") as Label).text,
+		PlayerText.implant_choice_verdict(s._credit_band, s._credit_score, s._credit_limit),
+		"the verdict line paints through the ONE composer, selected by the band key")
+	assert_eq((s.get_node("%Reason") as Label).text, PlayerText.implant_choice_reason(s._credit_reason),
+		"…and the filed reason likewise")
+	assert_eq((s.get_node("%Hint") as Label).text, PlayerText.IMPLANT_CHOICE_HINT,
+		"the hint stays the STANDING explainer — build-specific numbers live on the verdict line, not here")
+
+
+func test_a_fully_dumped_build_rates_low_and_greys_rows_that_no_longer_fit() -> void:
+	var s := _make_screen()
+	s.present_build(_trash_build())  # a live present_build re-rates + re-gates on the spot
+	var eco: EconomySettings = GameSettings.economy
+	assert_eq(s._credit_score, int(_rating(_trash_build())["score"]),
+		"a live present_build re-rates through the same pure curve")
+	assert_lt(s._credit_limit, eco.credit_limit_max,
+		"an all-dumped build can never rate the full cap — every point pledged is collateral the bank discounts")
+	var left: float = s._spendable()  # nothing checked yet, so the whole limit (+ base cash) remains
+	for row in s._rows:
+		assert_eq((row as Button).disabled, float(row.get_meta("price")) > left,
+			"an unchecked row greys exactly when its price no longer fits the remaining credit")
+
+
+func test_a_checked_row_never_greys_so_it_can_always_come_off_the_bill() -> void:
+	var s := _make_screen()
+	var a := s._rows[0] as Button
+	a.button_pressed = true  # checked while the default clean-build limit still covers it
+	s.present_build(_trash_build())  # the limit collapses UNDER the already-checked chip
+	assert_gt(float(a.get_meta("price")), s._spendable(),
+		"precondition: the collapsed limit no longer covers the checked chip (shipped knobs)")
+	assert_false(a.disabled,
+		"a CHECKED row stays live even when the limit collapses under it — un-checking must always be possible")
+	a.button_pressed = false
+	assert_true(a.disabled,
+		"…and the moment it comes off the bill it greys like any other unpayable row")
 
 
 func test_back_emits_cancelled() -> void:
@@ -143,6 +217,23 @@ func test_creation_begin_raises_the_implant_step_instead_of_booting() -> void:
 	assert_null(menu._implant_choice, "Back drops the implant step")
 
 
+func test_creation_begin_hands_the_real_build_to_the_credit_check() -> void:
+	# Pins the ONE line that connects the flow (start_menu._on_character_confirmed's present_build call) —
+	# with a build that scores BELOW clean. An absent build deliberately scores clean, so a dropped hand-off
+	# would leave every other test green while silently rating every real build at the full cap; this build
+	# is distinguishable, so losing the hand-off fails HERE.
+	var menu := _make_menu()
+	var build := {&"strength": -3}  # dumped + underspent: 3 unspent net points AND 3 dumped points
+	menu._on_character_confirmed("Chooms", build, {})
+	assert_not_null(menu._implant_choice, "Begin on creation raises the implant step")
+	var eco: EconomySettings = GameSettings.economy
+	assert_eq(menu._implant_choice._credit_score, int(_rating(build)["score"]),
+		"the raised screen rated the REAL pending build, not the fail-open absent-application default")
+	assert_lt(menu._implant_choice._credit_score, eco.credit_score_max,
+		"precondition: the dumped build rates below the ceiling — this pin can actually detect a dropped hand-off")
+	menu._on_implant_cancelled()  # drop the step; leave the shared menu state clean
+
+
 func test_stamp_bills_the_cart_into_debt_after_the_reset() -> void:
 	var menu := _make_menu()
 	menu._pending_creation = ["Chooms", {&"strength": 2}, {}]
@@ -151,8 +242,14 @@ func test_stamp_bills_the_cart_into_debt_after_the_reset() -> void:
 	assert_eq(GameState.player_name, "Chooms", "the stashed name is stamped after the reset")
 	assert_true(GameState.unlocks.has(&"air_dash") and GameState.unlocks.has(&"grapple"),
 		"every bought implant lands in GameState.unlocks AFTER reset_for_new_game (which clears unlocks)")
-	assert_eq(GameState.money, snappedf(base - 850.0, Zorkmids.QUANTUM),
-		"the bill is debited from GameState.money — the ONE home of the (negative-capable) balance every loaded=false boot of a created run reads")
+	# ⭐The bill rides the LEDGER ACCOUNT, not the wallet. `GameState.account` is ONE SIGNED number (positive
+	# savings / negative debt), so the starting debt is repayable at an ATM — depositing against it IS the
+	# repayment — while `money` stays CASH-ONLY. That split is also what stops dying (which empties only the
+	# wallet) from clearing what you owe, and stops income silently auto-paying the balance.
+	assert_eq(GameState.money, base,
+		"the wallet is untouched by the bill — cash stays cash, and stays >= 0 for a created run")
+	assert_eq(GameState.account, snappedf(-850.0, Zorkmids.QUANTUM),
+		"the implant bill lands on GameState.account as DEBT — the one signed balance an ATM can settle")
 	assert_true(GameState.profile_active, "a created character IS an authoritative run (P0-2) — and the flag routes the Player's wallet branch to GameState.money")
 	GameState.reset_for_new_game()  # leave the shared autoload clean for the rest of the suite
 

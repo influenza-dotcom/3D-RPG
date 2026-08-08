@@ -16,8 +16,10 @@ extends Node
 ## `host` is the owning Player — typed Node (not Player) to avoid a Player <-> Ability class cycle, so every
 ## host.* access is dynamic (the same idiom AimSway / HurtFeedback use).
 
-## Turn the ability OFF without removing the node (a temporarily-revoked upgrade). The Player's gate
-## (has_mechanic) ignores a disabled ability, and unlocked_list() omits it, so it doesn't persist as granted.
+## Turn the ability OFF without removing the node — the ACTIVE flag. The Player's gate (has_mechanic)
+## ignores a disabled ability and unlocked_list() omits it, so all gameplay reads it as off; the node's
+## PRESENCE still counts as INSTALLED (installed_list / mechanic_installed), and a player-toggled OFF
+## implant persists through saves via GameState.disabled_unlocks (the Implants tab owns the toggle).
 @export var enabled: bool = true
 
 ## The mechanic's PLAYER-FACING name ("Wall Climb"), authored on each ability scene's root in the Inspector.
@@ -37,3 +39,10 @@ func ability_id() -> StringName:
 ## runtime grant). Subclasses override to cache the host parts they need + build in-tree helpers; call super.
 func setup(player: Node) -> void:
 	host = player
+
+## Hygiene hook fired when the PLAYER switches this implant off (AbilityManager.set_active(false) — the
+## Implants-tab toggle). Override to end any live use of the mechanic so a re-enable can't resume stale
+## state: Slide ends a slide mid-glide, Grapple severs a live rope. NOT fired by the load path's disable
+## (set_unlocks / set_disabled build fresh state) or by revoke (the node is freed outright). Default: nothing.
+func on_deactivated() -> void:
+	pass

@@ -42,6 +42,46 @@ func add_money(delta: float) -> void:
 	money = snappedf(money + delta, Zorkmids.QUANTUM)
 	money_changed.emit(money, delta)
 
+# --- THE PAYMENT SEAM — the ONE chokepoint every priced transaction in the game goes through ---------------
+# Four methods, one rule: `can_pay` is the sole affordability predicate and `charge` is the sole debit. Every
+# station's gate AND every screen's affordability dimming read the SAME pair, so a row can never look dead
+# while the till would have served it (or the reverse). Before this seam each site hand-rolled
+# `player.money >= cost` + `add_money(-cost)`, which is why the free-service and negative-wallet cases kept
+# drifting apart between the gate and the display.
+#
+# THE BASE RAIL IS A PLAIN WALLET. An NPC has no bank account and no credit line and never will — the account
+# lives on the GameState autoload, not on any Character — so that isolation is STRUCTURAL, not a guard someone
+# can forget. `Player` overrides these four with the cash -> savings -> credit logic.
+
+## What this character could put toward a purchase right now — the raw pot, BEFORE any service charge.
+## Display-only (a "you have N" readout); `can_pay` is the authority on whether a specific price is affordable.
+func spendable() -> float:
+	return maxf(0.0, money)
+
+## The ALL-IN price of `cost` on this character's active rail: the base price plus whatever service charge the
+## rail adds (none, for a plain wallet). THE one quoted number — every display site paints this and `charge`
+## re-derives it from the same formula, so the label and the till can never disagree (the pickpocket rule:
+## one formula feeds the shown odds AND the roll).
+func charge_total(cost: float) -> float:
+	return maxf(0.0, snappedf(cost, Zorkmids.QUANTUM))
+
+## THE one affordability predicate. Every transaction gate and every UI dim reads exactly this.
+func can_pay(cost: float) -> bool:
+	return charge_total(cost) <= spendable()
+
+## Pay `cost`. FAIL-CLOSED: returns false having moved NOTHING when the whole quoted total isn't covered — no
+## partial draw, no goods, no debt. A cost of 0 or less always SUCCEEDS and charges nothing, so a free service
+## still serves a character with an empty wallet or an open debt (the RespecStation / ChipInstaller convention,
+## and the fix for the free-respec-refused-while-negative class of bug).
+func charge(cost: float) -> bool:
+	var total := charge_total(cost)
+	if total <= 0.0:
+		return true
+	if not can_pay(cost):
+		return false
+	add_money(-total)
+	return true
+
 ## Kill-bounty hook, duck-typed by _award_kill: this character downed an enemy — pay the 1 / 2 / 4 zorkmid
 ## bounty (and the collateral extras) into its wallet. EVERY character earns now, not just the player: an
 ## NPC's winnings sit in its wallet until the player loots its corpse.
@@ -359,7 +399,7 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 		_dead = true
 		_award_kill(attacker, was_crit)  # pay the killer a zorkmid bounty (player only; see _award_kill)
 		var killer := _resolve_killer(attacker)  # resolved ONCE, AFTER _award_kill, so both hooks below name the same killer
-		_bequeath_wallet(killer)  # the PLAYER loses death_purse_loss_fraction of its wallet to the killer (base no-op; see Player)
+		_bequeath_wallet(killer)  # the PLAYER hands death_purse_loss_fraction of its wallet to the killer, or spills it on the ground when there isn't one (base no-op; see Player)
 		_on_killed_by(killer)     # post-mortem reaction to WHO killed us (base no-op; the Player settles provoked grudges)
 		_begin_death()
 	else:
@@ -367,6 +407,9 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 		# branch so it doesn't double up under the death SFX/gore, and only for the player (gated
 		# inside) so NPC hits stay silent here.
 		_play_damage_thud()
+		# We SURVIVED a hit, so any pin intent a thrown weapon just stamped is spent — the knife that stuck in
+		# our shoulder does not get to staple a limb to the wall when we die of something else ten seconds later.
+		_pin_hit = {}
 
 ## The on-death VISUAL + removal beat — the gore burst, then die(). Split out of take_damage into an
 ## overridable seam so a subclass can act BEFORE the body bursts: NPC overrides this to hold the actor
@@ -398,6 +441,7 @@ func reset_for_reuse() -> void:
 	_blast_timer = 0.0
 	velocity = Vector3.ZERO
 	heal_limbs()  # clears _limb_condition / _crippled so a prior life's crippled limb doesn't ride in
+	_pin_hit = {}  # a pooled body reused for a new NPC must not pin from the previous life's marker
 	if _flash_tween and _flash_tween.is_valid():
 		_flash_tween.kill()  # a freeze-paused whole-body flash tween would resume on reuse
 	_flash_tween = null
@@ -446,6 +490,14 @@ func _award_kill(attacker: Node, killing_was_crit: bool) -> void:
 			else (eco.headshot_kill_bounty if killing_was_crit else eco.kill_bounty)
 	if killer.is_in_group(Groups.PLAYER):
 		bounty *= GameSettings.difficulty.money_mult  # ML-4: difficulty scales the PLAYER's earnings (1.0 at Normal)
+		# ⭐THE LEDGER'S CONDUCT DIVIDEND. Your creditor watches, and its model likes precision — a headshot
+		# nudges your credit standing, an all-headshot kill doubles it. Deliberately MARGINAL (a headshot is
+		# worth ~1/400th of a spotless record at the shipped rate): this is flavour on top of the payment
+		# history, never a substitute for it, and it must never become a way to grind a rating. PLAYER-ONLY —
+		# an NPC has no file with the Ledger, and standing lives on GameState, not on any Character.
+		if killing_was_crit or killed_by_only_crits():
+			var per: float = maxf(0.0, GameSettings.economy.credit_standing_per_headshot)
+			GameState.add_credit_standing(per * (2.0 if killed_by_only_crits() else 1.0))
 	killer.reward_kill(bounty)
 	_award_long_range_bonus(killer)  # EXTRA marksman pay when the kill was a distant one (see below)
 
@@ -488,10 +540,11 @@ func _resolve_killer(attacker: Node) -> Node:
 		return null
 	return killer
 
-## Hook: hand this character's wallet to whoever killed it (`killer`, null when nobody qualifies) as it dies.
-## Base NO-OP — only the Player bequeaths its zorkmids (so you recover them by hunting down your killer and
-## looting their corpse); an NPC's money instead stays in its wallet and drops as loot the normal way. The
-## Player overrides this (see Player._bequeath_wallet).
+## Hook: settle this character's wallet as it dies — hand it to `killer` (null when nobody qualifies).
+## Base NO-OP — only the Player bequeaths its zorkmids: to the killer (recover them by hunting that killer down and
+## looting their corpse) or, when nobody gets credit, onto the ground as a money bag where it died. An NPC needs
+## none of this; its money just stays in its wallet and drops as loot the normal way (NpcMortality -> LootableCorpse).
+## The Player overrides this (see Player._bequeath_wallet).
 func _bequeath_wallet(_killer: Node) -> void:
 	pass
 
@@ -591,6 +644,43 @@ func zone_damage_mult_at(world_pos: Vector3) -> float:
 	if zone_damage_mult.is_empty() or not world_pos.is_finite():
 		return 1.0
 	return float(zone_damage_mult.get(body_part_at(world_pos), 1.0))
+
+# --- Pin intent (thrown-weapon PIN kill) ---------------------------------------------------------------------
+#
+# A thrown weapon that opts in (Throwable.pins_body_part) stamps WHERE it struck and WHICH WAY it was travelling
+# here, immediately before the lethal take_damage — the NPC.mark_silent_takedown idiom, and for the same reason:
+# the death burst that needs this runs many frames and many signatures later (take_damage -> _begin_death -> a
+# SceneTree timer for the death-freeze beat -> _complete_death -> gore() -> GoreSpawner), so the intent has to be
+# STASHED rather than passed. GoreSpawner.spawn_gibs consumes it to staple one limb to the wall behind.
+#
+# PER-LIFE STATE. It is cleared in three places and needs all three: on the survive branch of take_damage (a
+# non-lethal knife hit must not leave a marker that pins on some later, unrelated death), in reset_for_reuse
+# (a POOLED body reused for a new NPC would otherwise pin from its previous life's marker — the exact trap
+# NPC._silent_death documents), and by the consuming read itself.
+var _pin_hit: Dictionary = {}
+
+## Stash the pin intent for the hit that is about to land. `contact` is the strike's world-space contact point
+## (the same one the damage classifies against), `travel_dir` the NORMALISED direction the weapon was moving,
+## `blade` the Throwable itself, which ends up embedded in the surface, and `surface` the ALREADY-PROBED wall
+## ({"point", "normal", "collider"} from Throwable._probe_pin_surface). Overwrites any earlier marker: the last
+## thrown hit before death is the one that gets the trophy.
+##
+## The surface is passed IN rather than looked up later, and that is not an optimisation — it is the only place
+## it CAN be found. The death burst that spends this marker runs off the death-freeze SceneTreeTimer, on the idle
+## frame, where PhysicsDirectSpaceState3D queries come back empty however solid the wall is. See
+## Throwable._probe_pin_surface for the full note; that bug shipped once and made the whole feature inert.
+func mark_pin_hit(contact: Vector3, travel_dir: Vector3, blade: Node, surface: Dictionary) -> void:
+	_pin_hit = {"contact": contact, "dir": travel_dir, "blade": blade, "surface": surface}
+
+## CONSUME the pin intent — returns it and clears it, so a death can only ever spend it once (gore() is reachable
+## twice in principle: the death-freeze timer and a direct call). Empty Dictionary when this death was not a pin
+## kill, which is every death that is not a thrown-weapon kill. The caller MUST re-check `blade` with
+## is_instance_valid: the marker holds a hard Node reference across the freeze beat, and the player can pick the
+## knife back up (freeing the world prop) inside that window.
+func take_pin_hit() -> Dictionary:
+	var hit := _pin_hit
+	_pin_hit = {}
+	return hit
 
 ## A located hit chips the struck limb's condition; emptying it cripples the limb (legs limp, arms widen
 ## your shots, head staggers). Torso never cripples. Skipped for un-located damage (fall/explosion).
@@ -935,6 +1025,27 @@ func gore() -> void:
 	if _gore_spawner == null:
 		return
 	_gore_spawner.run()
+
+## The SceneTree group EVERY world node this actor's death burst spawns joins — the gibs (meat chunks AND body
+## parts), the floor blood splat, the ragdoll/loot corpse, and, propagated down the chain by bloody_mess.gd ->
+## BloodDropEmitter -> BloodDrop, the secondary splatter those gibs bleed when they later pop. `&""` (the base)
+## tags NOTHING, which is what an NPC wants: its gore is world dressing and has to stay lying where it fell.
+## The PLAYER overrides it with Groups.PLAYER_GORE so its own burst can be undone wholesale by the in-place
+## checkpoint revive — see clear_death_gore() and Player._respawn_at_checkpoint.
+##
+## Why an overridable seam instead of an `is Player` test inside GoreSpawner: gore_spawner.gd sits on Character's
+## parse path, so a `Player` TYPE reference from there closes a parse cycle (the same reason gib_scene load()s
+## instead of preload()ing). A group NAME crosses that boundary with no type dependency at all.
+func death_gore_group() -> StringName:
+	return &""
+
+## Undo this actor's death burst: free every world node tagged with death_gore_group(). Returns how many were
+## freed — always 0 for an actor that tags nothing (every NPC), which is what makes this safe to call blind.
+## Thin facade over the GoreSpawner child; null off-tree (_ready skipped) — then this no-ops like the rest.
+func clear_death_gore() -> int:
+	if _gore_spawner == null:
+		return 0
+	return _gore_spawner.clear_tagged_gore()
 
 ## Spawn the outward-flying gib rigid bodies. Thin facade over the GoreSpawner child. Null off-tree
 ## (_ready skipped) — then this no-ops, exactly as the monolith returned early on a null gib_scene.

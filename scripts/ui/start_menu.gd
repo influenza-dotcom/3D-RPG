@@ -21,11 +21,12 @@ const GAME_SCENE := "res://scenes/game.tscn"
 ## AUTHORED SCENE (its root carries character_creation.gd, which has no class_name — the scene preload keeps
 ## it off the global class cache); instanced on demand in _on_new_game.
 const CharacterCreationScreen := preload("res://scenes/ui/character_creation.tscn")
-## The implant-purchase step (fit any set of starting chips ON CREDIT — the bill can push the starting
-## wallet NEGATIVE), shown between character creation's "Begin" and the boot. Same authored-scene overlay
-## idiom as CharacterCreationScreen (its root carries implant_choice.gd, no class_name); instanced on demand
-## in _on_character_confirmed while the creation overlay stays ALIVE-BUT-HIDDEN underneath so "Back" returns
-## to it with the build intact.
+## The implant-purchase step (starting chips ON CREDIT — the bill can push the starting wallet NEGATIVE,
+## but the bank rates the pending build first and caps the cart at the credit limit it earns:
+## EconomySettings.credit_*, fed in via present_build), shown between character creation's "Begin" and the
+## boot. Same authored-scene overlay idiom as CharacterCreationScreen (its root carries implant_choice.gd,
+## no class_name); instanced on demand in _on_character_confirmed while the creation overlay stays
+## ALIVE-BUT-HIDDEN underneath so "Back" returns to it with the build intact.
 const ImplantChoiceScreen := preload("res://scenes/ui/implant_choice.tscn")
 ## The first-launch Terms-of-Service consent gate (the fake, comedic EULA). Shown ONCE — after the startup internet
 ## warning on the very first boot, before the menu is usable — when Settings.tos_accepted is false; accepting records
@@ -187,6 +188,9 @@ func _on_character_confirmed(character_name: String, stat_values: Dictionary, ap
 	if _char_create != null:
 		_char_create.suspend()  # hidden, not freed — also silences its ui_cancel _input while this step is up
 	_implant_choice = ImplantChoiceScreen.instantiate()
+	# The bank rates the pending build BEFORE the screen enters the tree: _ready scores this stat sheet into
+	# a credit limit (EconomySettings.credit_*) that caps how much implant the cart can put on the tab.
+	_implant_choice.present_build(stat_values)
 	_implant_choice.confirmed.connect(_on_implant_confirmed)
 	_implant_choice.cancelled.connect(_on_implant_cancelled)
 	add_child(_implant_choice)
@@ -226,7 +230,11 @@ func _stamp_new_game_profile(ability_ids: Array, total_cost: float) -> void:
 		if StringName(id) != &"":
 			GameState.unlocks.append(StringName(id))  # the bought implants — billed below, granted at spawn
 	if total_cost > 0.0:
-		GameState.money = snappedf(GameState.money - total_cost, Zorkmids.QUANTUM)  # the bill; may push the balance negative
+		# ⭐The bill rides the LEDGER ACCOUNT, not the wallet: GameState.account goes NEGATIVE and the run
+		# starts owing. That is what makes the debt repayable (deposit at an ATM IS repayment, since the
+		# account is one signed number), keeps `money` cash-only so income no longer silently auto-pays the
+		# balance, and stops dying — which empties only the wallet — from clearing what you owe.
+		GameState.account = snappedf(GameState.account - total_cost, Zorkmids.QUANTUM)
 	GameState.profile_active = true  # a created character IS an authoritative run even before the first autosave (P0-2)
 
 ## "Back" on the implant step: drop it and wake the kept creation overlay — the typed build survives.

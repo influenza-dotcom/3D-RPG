@@ -1,7 +1,7 @@
 extends CanvasLayer
 ## QuestJournal — a read-only QUEST LOG screen, opened with its own key (InputManager.action_journal, default J).
-## Registered as an autoload, mirroring StatsScreen / ReputationScreen, and a fourth member of the
-## Pip-Boy tab group (Inventory / Stats / Reputation / Journal). Lists ACTIVE quests (title + each objective with
+## Registered as an autoload, mirroring StatsScreen / ReputationScreen, and a member of the
+## Pip-Boy tab group (Inventory / Stats / Implants / Reputation / Journal). Lists ACTIVE quests (title + each objective with
 ## a checkbox + progress) and COMPLETED ones. Like the other player menus it does NOT pause the world; it frees
 ## the mouse (restored on close). Refreshes live off GameState.quest_started / objective_advanced / quest_completed.
 ##
@@ -11,7 +11,7 @@ extends CanvasLayer
 ## in the editor and the skin keeps owning colours/fonts/separations. NO text is authored in the scene —
 ## every string is set here from PlayerText (l10n + the text-debt ratchet own strings, never a .tscn).
 ## The per-quest blocks stay CODE-built into the authored %QuestList (rebuilt per open / live quest change),
-## and the PlayerMenus tab strip stays CODE-BUILT into the authored %TabSlot (the strip's four-Button
+## and the PlayerMenus tab strip stays CODE-BUILT into the authored %TabSlot (the strip's one-Button-per-tab
 ## structure is a cross-screen contract owned by player_menus.gd, not this scene).
 ## tests/test_quest_journal_scene.gd pins the wiring.
 
@@ -105,9 +105,9 @@ func _bind_ui() -> void:
 	MenuStyle.style_dim(%Dim)
 
 	(%VBox as VBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared panel-screen rhythm (MenuSkin)
-	# The tab strip is the only header (the Inventory convention, adopted across all four tabs so content
+	# The tab strip is the only header (the Inventory convention, adopted across all the tabs so content
 	# starts at one height). The strip stays CODE-BUILT by PlayerMenus into the authored %TabSlot: its
-	# four-Button EXPAND_FILL structure is a cross-screen contract (tests/test_player_menus.gd), so the
+	# one-Button-per-tab EXPAND_FILL structure is a cross-screen contract (tests/test_player_menus.gd), so the
 	# scene authors only the slot.
 	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"journal"))  # routing KEY, not the painted label
 

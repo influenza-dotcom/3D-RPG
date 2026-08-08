@@ -45,6 +45,19 @@ horizontal_alignment = 1
 unique_name_in_owner = true
 layout_mode = 2
 horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Verdict" type="Label" parent="Panel/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Reason" type="Label" parent="Panel/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+autowrap_mode = 3
 
 [node name="ChipScroll" type="ScrollContainer" parent="Panel/Column"]
 unique_name_in_owner = true

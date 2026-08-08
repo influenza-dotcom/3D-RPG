@@ -176,6 +176,9 @@ func _rebuild() -> void:
 		return
 	_money_merchant.text = PlayerText.wallet_merchant(_merchant_money())
 	_money_player.text = PlayerText.wallet_you(_player.money)
+	# Your wallet re-tints per sign (gold, or danger while in debt); the merchant till never goes negative
+	# (Merchant.sell gates on it), so its heading keeps the bind-time gold.
+	_money_player.add_theme_color_override(&"font_color", MenuStyle.wallet_color(_player.money))
 	_sync_cell_sizes.call_deferred()  # first open: the root was hidden — sizes settle a frame after visible
 
 ## Click a STOCK tile -> buy ONE of it (same as the old row press). The grid emits activate_requested.
@@ -222,7 +225,7 @@ func _on_hover(item: Item, from_stock: bool = false) -> void:
 	var price: float = _merchant.buy_price(item, _player) if from_stock else _merchant.sell_price(item, _player)
 	var affordable: bool
 	if from_stock:
-		affordable = price > 0.0 and _player.money >= price
+		affordable = price > 0.0 and _player.can_pay(price)  # the SAME predicate Merchant.buy gates on
 	else:
 		affordable = price > 0.0 and _merchant_money() >= price
 	_detail.add_theme_color_override(&"font_color", MenuStyle.text_color())
@@ -381,4 +384,4 @@ func _sync_cell_sizes() -> void:
 ## never move and digits grow rightward from a pinned edge.
 func _style_wallet(l: Label) -> void:
 	l.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	l.add_theme_color_override(&"font_color", MenuStyle.gold())
+	l.add_theme_color_override(&"font_color", MenuStyle.gold())  # bind-time default; _rebuild re-tints YOUR wallet danger while in debt

@@ -27,6 +27,10 @@ const DEFAULT_FACE_TRAVEL_MIN_SPEED: float = 2.0  ## the thrown-facing release s
 ## collapse the collider to ~zero -- see _autofit_collision_shape for why that's catastrophic.
 const AUTOFIT_MIN_EXTENT: float = 0.01
 
+## The pin geometry + policy statics, preloaded by path rather than referenced by their `PartPinner` class_name
+## (the BodyPartGibs idiom in gore_spawner.gd) — this script sits on the actor parse path via Character.
+const PartPinnerScript := preload("res://scripts/effects/part_pinner.gd")
+
 enum HeldVisibilityMode { INHERIT, FADE, OPAQUE }
 
 ## Safety floor: a stealth decoy NoiseSource MUST be one-shot (a non-positive lifetime would make it persistent
@@ -123,12 +127,26 @@ const GIB_HELD_DESPAWN_RECHECK: float = 0.5
 @export var data: ThrowableData : set = _set_data
 ## The AudioStreamPlayer3D that plays the impact thud (volume/pitch scaled by hit speed); also the fallback for the destroy sound. Wire to the prop's audio child.
 @export var impact_sfx: AudioStreamPlayer3D
-## The CollisionShape3D auto-fitted to the mesh's bounds on ready/save. Wire to the prop's collider child so its shape tracks the visual size.
+## The CollisionShape3D auto-fitted to the mesh's bounds on ready/save (unless `auto_fit_collider` is off). Wire to the prop's collider child so its shape tracks the visual size.
 @export var collision_shape: CollisionShape3D:
 	set(value):
 		collision_shape = value
 		update_configuration_warnings()
+## Whether `collision_shape`'s SHAPE is resized to the visual bounds on ready/save (see _autofit_collision_shape).
+## ON is right for almost every prop: the collider tracks whatever mesh the node or its ThrowableData ends up with,
+## so a crate reskinned by swapping the `.tres` — or a code-built money bag — is never mis-sized.
+##
+## Turn it OFF to keep a HAND-AUTHORED collider that deliberately does NOT match the mesh's AABB. The auto-fit only
+## rewrites the shape's SIZE; it never touches the CollisionShape3D's own transform, and a BoxShape3D is centred on
+## that transform's origin. So a collider intentionally offset/rotated away from the visual centre (the meat gib's
+## tilted, raised box) would be grown to the full mesh bounds while KEEPING that offset — a box poking out one side
+## of the prop and missing the other. That is strictly worse than either the authored box or a clean auto-fit, which
+## is why the opt-out exists rather than "just wire it and retune".
+## Cost of turning it off: a ThrowableData mesh swap no longer resizes the collider, so re-author the box by hand.
+## (Same field name and meaning as the `auto_fit_collider` on LookAtInteractable / Pettable / Claimable.)
+@export var auto_fit_collider: bool = true
 ## The MeshInstance3D visual root. Data meshes are pushed onto it; data scenes mount under it so carry fade/breathing still work.
+## Also what the gib despawn fade tweens (see _fade_out_for_despawn) — an unwired one makes that fade a silent no-op.
 @export var mesh_instance: MeshInstance3D:
 	set(value):
 		mesh_instance = value
@@ -163,12 +181,23 @@ const GIB_HELD_DESPAWN_RECHECK: float = 0.5
 ## for however fast it happened to be moving; the blunt formula scales with velocity, so making a weapon fly faster
 ## silently made it hit far harder. The located hit is also forwarded to take_damage, so limb/zone damage applies
 ## exactly as it would from a swing or a shot. Null (every crate, gib and gun) keeps the blunt speed formula.
-## SCOPE: only the crit/headshot multiplier applies — the sneak and backstab multipliers are deliberately NOT rolled
-## in, because at the impact site the prop knows neither the victim's alert state nor the approach arc, and stacking
-## the knife's 4x sneak on top would put a thrown hit far past the melee swing it is meant to match.
+## SCOPE: the crit/headshot AND sneak multipliers apply; the BACKSTAB one does not. Sneak is in because a thrown
+## weapon is a stealth verb and the numbers only work with it — the knife's 2 base damage caps out around 9 on a
+## headshot against a 14 HP raider, so without the 4x an ambush throw cannot kill anyone it did not already
+## wound, which is the wrong shape for the weapon. The victim's own alert state is the gate (Character.is_off_guard,
+## the same predicate the hitscan and projectile paths read through DamageApplier.off_guard_for), so a target that
+## has locked on takes the ordinary hit. Backstab stays out: it needs the arc between the victim's facing and the
+## ATTACKER, and at the impact site the prop knows only where IT came from — a knife thrown at someone's front
+## while standing behind them is not a backstab, and the prop cannot tell the difference.
 ## `impact_damage_mult` still multiplies the result, so that field keeps ONE meaning ("how hard this prop hits when
 ## thrown") on both paths. A weapon drop takes this from WeaponData.thrown_uses_weapon_damage.
 @export var thrown_weapon: WeaponData = null
+## Whether a LETHAL hit from this prop staples the body part it struck to the surface behind the victim, blade
+## still through it (see GoreSpawner._spawn_pinned_part / GameSettings.effects "Pinned body parts"). Requires
+## `thrown_weapon` — the pin needs the located weapon hit's contact point to know WHICH part was struck, and the
+## blunt speed path deliberately carries no location at all. A weapon drop takes this from
+## WeaponData.thrown_pins_body_part; a hand-placed prop (a spear on a rack) can set it directly.
+@export var pins_body_part: bool = false
 ## Multiplier on the LAUNCH SPEED of a real throw: PickupRay._release scales
 ## GameSettings.physics_damage.pickup_throw_impulse by this before it becomes the released body's velocity. 1.0 = the
 ## normal throw every crate gets; raise it for something meant to be HURLED rather than lobbed (the knife leaves the
@@ -330,6 +359,10 @@ func _apply_data_material(material: Material) -> void:
 		m.material_override = material
 
 func _autofit_collision_shape() -> void:
+	# Opted-out props keep the collider exactly as authored — see the `auto_fit_collider` export for why a
+	# deliberately off-centre collider is made WORSE, not merely retuned, by fitting it to the mesh bounds.
+	if not auto_fit_collider:
+		return
 	if not collision_shape or not mesh_instance:
 		return
 	if not collision_shape.shape:
@@ -472,18 +505,49 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	if vel.length() < _resolved_face_travel_min_speed():
 		_facing_travel = false  # landed / slowed — hand it back to physics to tumble and rest
 		return
-	var dir := vel.normalized()
+	var prop_scale := state.transform.basis.get_scale()  # preserve an authored non-unit scale
+	var xf := state.transform
+	xf.basis = travel_facing_basis(vel.normalized()).scaled(prop_scale)
+	state.transform = xf
+	state.angular_velocity = Vector3.ZERO
+
+## The rotation this prop wears when nosing along `dir` — its authored front pointed down that direction, with the
+## same mesh-front correction the carry pose applies (face_carrier_rotation_degrees; the knife's Y=180 is what makes
+## the BLADE lead instead of the hilt). Split out of _integrate_forces so the thrown facing has ONE home: the pin
+## seat (BodyPartGib._seat, which parks an embedded blade at an authored pose rather than letting physics aim it)
+## needs the identical basis, and a second copy of this would be a silently-hilt-first bug waiting to happen.
+func travel_facing_basis(dir: Vector3) -> Basis:
+	if dir.length_squared() < 0.000001:
+		return global_basis.orthonormalized()
+	var d := dir.normalized()
 	# look_at degenerates when the travel is straight up/down; swap the up hint so the basis stays valid.
-	var up := Vector3.UP if absf(dir.dot(Vector3.UP)) < 0.99 else Vector3.FORWARD
-	var aimed := Basis.looking_at(dir, up)  # -Z points along dir, matching look_at / face_carrier
+	var up := Vector3.UP if absf(d.dot(Vector3.UP)) < 0.99 else Vector3.FORWARD
+	var aimed := Basis.looking_at(d, up)  # -Z points along dir, matching look_at / face_carrier
 	var offset := _face_carrier_offset_radians()
 	if offset != Vector3.ZERO:
 		aimed = aimed * Basis.from_euler(offset)  # same mesh-front correction the carry pose uses
-	var prop_scale := state.transform.basis.get_scale()  # preserve an authored non-unit scale
-	var xf := state.transform
-	xf.basis = aimed.orthonormalized().scaled(prop_scale)
-	state.transform = xf
-	state.angular_velocity = Vector3.ZERO
+	return aimed.orthonormalized()
+
+## This prop's collider SIZE as full extents on each axis, in its own local frame — what the pin geometry measures
+## to seat a body flush against a surface (PartPinner.support_along). Covers the four shape kinds the auto-fit
+## writes (see _autofit_collision_shape); anything else, or no collider at all, reports ZERO, which seats the body
+## exactly on the surface point — visibly shallow rather than NaN or a wild offset.
+func collider_size() -> Vector3:
+	if collision_shape == null or collision_shape.shape == null:
+		return Vector3.ZERO
+	var s := collision_shape.shape
+	if s is BoxShape3D:
+		return (s as BoxShape3D).size
+	if s is SphereShape3D:
+		var d: float = (s as SphereShape3D).radius * 2.0
+		return Vector3(d, d, d)
+	if s is CapsuleShape3D:
+		var cap := s as CapsuleShape3D
+		return Vector3(cap.radius * 2.0, cap.height, cap.radius * 2.0)
+	if s is CylinderShape3D:
+		var cyl := s as CylinderShape3D
+		return Vector3(cyl.radius * 2.0, cyl.height, cyl.radius * 2.0)
+	return Vector3.ZERO
 
 func _on_body_entered(body: Node) -> void:
 	var my_speed := _pre_step_velocity.length()
@@ -542,12 +606,20 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 		was_crit = character.is_headshot(hit_pos) and ShotResolver.crit_allowed(character, from_ai)
 		# The thrower's own stat sheet scales it, so a thrown knife tracks STRENGTH exactly like a knife swing.
 		var thrower_stats: CharacterStats = (attacker as Character).stats_or_default() if attacker is Character else null
-		# off_guard / behind passed FALSE: see thrown_weapon's docstring for why sneak + backstab are out of scope.
+		# SNEAK: a victim that hasn't locked on takes the ambush multiplier — see thrown_weapon's docstring for why
+		# it's in and backstab still isn't. Read off the victim directly rather than through
+		# DamageApplier.off_guard_for (identical rule, minus an `is Character` test we have already passed):
+		# DamageApplier type-refs Throwable in hp_before, so reaching back would close a class_name parse cycle.
+		var off_guard := character.is_off_guard()
 		damage = ShotResolver.scaled_damage(
 			thrown_weapon.damage, thrown_weapon.headshot_multiplier, thrown_weapon.sneak_attack_multiplier,
-			was_crit, false, thrown_weapon.backstab_multiplier, false,
+			was_crit, off_guard, thrown_weapon.backstab_multiplier, false,
 			thrower_stats, 0.0, thrown_weapon.is_melee, 0.0)
 		damage *= damage_scale * impact_damage_mult
+		# The same sneak-or-not toast the hitscan path shows (damage_trace.gd), so a thrown ambush reads as one
+		# instead of silently paying four times the damage. Player throws only — an NPC has no such method.
+		if attacker != null and attacker.is_in_group(Groups.PLAYER) and attacker.has_method(&"notify_sneak_result"):
+			attacker.call(&"notify_sneak_result", off_guard)
 	else:
 		damage = roundf((my_speed - GameSettings.physics_damage.interactable_damage_min_velocity) * GameSettings.physics_damage.interactable_damage_per_m_per_s)
 		damage = roundf(damage * damage_scale * impact_damage_mult)  # impact_damage_mult: 1.0 for a normal prop; a money bag scales it with its zorkmids
@@ -558,6 +630,17 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 		var dir := _pre_step_velocity if _pre_step_velocity.length() > 0.01 else Vector3.UP
 		character.bloody_mess.splatter_at(character.global_position, dir)
 	var hp_before := character.hp
+	# PIN INTENT — stashed on the victim IMMEDIATELY before the lethal hit, the NPC.mark_silent_takedown idiom,
+	# because the decision cannot be threaded as an argument: take_damage -> _begin_death -> (a SceneTree timer, for
+	# the death-freeze beat) -> _complete_death -> gore() -> GoreSpawner is a dozen signatures and crosses a timer
+	# boundary. Marked UNCONDITIONALLY rather than predicting lethality here (armour, difficulty and DR all move the
+	# number after we hand it over); Character clears it again on the survive branch, and on pooled reuse.
+	# `hit_pos` is the SAME point the damage classified against, so a strike never carries two contact points.
+	if pins_body_part and thrown_weapon != null and _pre_step_velocity.length() > 0.01:
+		var throw_dir := _pre_step_velocity.normalized()
+		var surface := _probe_pin_surface(hit_pos, throw_dir, character)
+		if not surface.is_empty():
+			character.mark_pin_hit(hit_pos, throw_dir, self, surface)
 	character.take_damage(damage, was_crit, attacker, hit_pos)
 	var hp_after := character.hp if is_instance_valid(character) else 0.0
 	var real_loss := hp_before - hp_after
@@ -638,6 +721,100 @@ func _resolved_face_travel_min_speed() -> float:
 func mark_thrown_for_facing() -> void:
 	_facing_travel = faces_travel_when_thrown()
 
+# --- Embedded (pinned) blade ---------------------------------------------------------------------------------
+#
+# A knife that landed a PIN kill ends up driven into the wall through the limb it carried there. Physically that
+# is just "frozen at an authored pose", but the release has to be handled carefully: the collider is deliberately
+# buried in static geometry while pinned, and clearing `freeze` on a body that overlaps a wall lets the solver's
+# depenetration fire it across the room. So unpin() restores the free pose FIRST and only then goes dynamic.
+# Driven by BodyPartGib (which owns the limb this blade is through) — it pins on seating and unpins on despawn.
+
+var _pinned: bool = false
+var _pin_free_position: Vector3 = Vector3.ZERO  ## where to put the body before it goes dynamic again — clear of the surface
+var _pin_prior_gravity: float = 1.0
+
+## Look for the surface to staple a body part to: straight on down the throw, from the strike. Returns
+## {"point", "normal", "collider"} or {} when there is nothing worth pinning to (open ground behind them, or only
+## a graze — see PartPinner.surface_accepts).
+##
+## ⚠️ THIS MUST RUN AT STRIKE TIME, AND THAT IS THE WHOLE REASON IT LIVES HERE RATHER THAN IN GoreSpawner, WHERE
+## THE REST OF THE PIN LOGIC IS. `PhysicsDirectSpaceState3D` is only valid to query DURING the physics frame, and
+## the death burst does not run in one: an NPC's gore() is fired from the death-freeze SceneTreeTimer, whose
+## timeout lands on the IDLE frame, so a raycast there returns an empty result no matter what is standing in
+## front of it. That silently made the pin unreachable in the shipped build — every other seam correct, the probe
+## finding a wall exactly never. `_on_body_entered` IS a physics callback (`_is_airborne` already ray-queries
+## from this same path), so the answer found here is real; it rides along in the marker to be spent later.
+func _probe_pin_surface(from: Vector3, dir: Vector3, victim: Node) -> Dictionary:
+	if not is_inside_tree():
+		return {}
+	var fx := GameSettings.effects
+	if not fx.pinned_parts_enabled:
+		return {}
+	var space := get_world_3d().direct_space_state
+	if space == null:
+		return {}
+	var query := PhysicsRayQueryParameters3D.create(from, from + dir * fx.pinned_part_probe_distance, fx.pinned_part_probe_mask)
+	# Exclude ourselves and the body we just struck, plus every live gib — a previous kill's limb lying between
+	# this victim and the wall would otherwise BE the "surface", and the pin would hang off a despawning chunk.
+	var excluded: Array[RID] = [get_rid()]
+	var victim_body := victim as CollisionObject3D
+	if victim_body != null:
+		excluded.append(victim_body.get_rid())
+	for g in get_tree().get_nodes_in_group(Groups.GIB):
+		var body := g as CollisionObject3D
+		if body != null:
+			excluded.append(body.get_rid())
+	query.exclude = excluded
+	var res := space.intersect_ray(query)
+	if res.is_empty():
+		return {}
+	if not PartPinnerScript.surface_accepts(res["normal"], dir, fx.pinned_part_max_surface_angle):
+		return {}
+	return {"point": res["position"], "normal": res["normal"], "collider": res["collider"]}
+
+## True while this prop is embedded in a surface. Read by PickupRay so a grab can release it first.
+func is_pinned() -> bool:
+	return _pinned
+
+## Park this prop, frozen, at `pose` — the embedded blade. `free_position` is where unpin() will put it before it
+## goes dynamic again: somewhere its collider is clear of the surface it is buried in. STATIC (not KINEMATIC)
+## freeze on purpose: a kinematic frozen body is code-moved and PUSHES what it touches, and this one is
+## deliberately overlapping a wall. The collision layer is deliberately LEFT ALONE so the prop stays solid — that
+## is what lets PickupRay's aim ray still find it, which is the whole retrieval beat.
+func pin_at(pose: Transform3D, free_position: Vector3) -> void:
+	if _pinned or _held or not is_inside_tree():
+		return
+	_pinned = true
+	_pin_free_position = free_position
+	_pin_prior_gravity = gravity_scale
+	_facing_travel = false  # the flight is over; nothing left for _integrate_forces to nose toward
+	linear_velocity = Vector3.ZERO
+	angular_velocity = Vector3.ZERO
+	gravity_scale = 0.0
+	global_transform = pose
+	freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
+	freeze = true
+
+## Release the embedded prop back to normal physics — it drops out of the wall. Called when the limb it is
+## through despawns, and by PickupRay the moment the player grabs it.
+## Two guards, both load-bearing:
+##   * not _pinned — the despawn path and the pickup path can both reach here for one blade, and the second must
+##     not stomp physics state the first already handed back.
+##   * _held — while carried, PickupRay OWNS this body's freeze / gravity / layer and restores its own snapshot
+##     on release; writing freeze here would drop a carried knife out of the player's hands mid-carry.
+func unpin() -> void:
+	if not _pinned:
+		return
+	_pinned = false
+	if _held:
+		return
+	if is_inside_tree():
+		global_position = _pin_free_position  # clear of the surface BEFORE going dynamic — see the block comment
+	freeze = false
+	gravity_scale = _pin_prior_gravity
+	linear_velocity = Vector3.ZERO
+	angular_velocity = Vector3.ZERO
+
 ## Who to blame for this prop's impact damage right now: whoever just threw it (within the throw grace),
 ## else whoever is grappling / just released it (a tethered slam is a deliberate hit too), else no-one — a
 ## stray bump while at rest credits nobody, so it can't wrongly aggro an NPC at the player.
@@ -689,12 +866,21 @@ func begin_gib_lifetime(lifetime: float, fade: float) -> void:
 	if _destroyed or not is_inside_tree():
 		return  # already shot apart / culled / freed during the wait
 	_destroyed = true  # claim it so a stray hit mid-fade can't also run _destroy()
-	if mesh_instance:
-		var tw := create_tween()
-		tw.tween_property(mesh_instance, "transparency", 1.0, fade)
-		await tw.finished
+	await _fade_out_for_despawn(fade)
 	if is_inside_tree():
 		queue_free()
+
+## The despawn fade, split out as an OVERRIDABLE seam. Base: tween the wired mesh_instance's transparency --
+## correct for a gib whose whole visual IS that one MeshInstance3D. A subclass whose visual is a SUBTREE
+## under the mount point must override it, because GeometryInstance3D.transparency is per-instance and does
+## NOT propagate to children (BodyPartGib, which flies a real limb, does exactly that). Always awaited, so an
+## override may take as long as `fade`; queue_free happens after it returns.
+func _fade_out_for_despawn(fade: float) -> void:
+	if mesh_instance == null:
+		return
+	var tw := create_tween()
+	tw.tween_property(mesh_instance, "transparency", 1.0, fade)
+	await tw.finished
 
 ## Route the impact SFX: striking a CHARACTER (NPC/player) with a configured character_impact_sound plays THAT (the
 ## Dog's bite) instead of the generic body-thud; everything else (walls, props) — and any prop without a character

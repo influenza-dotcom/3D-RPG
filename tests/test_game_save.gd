@@ -638,6 +638,8 @@ func test_reset_for_new_game_clears_profile() -> void:
 	gs.stat_values = {&"strength": 5}
 	var unlocks: Array[StringName] = [&"grapple"]
 	gs.unlocks = unlocks
+	var switched_off: Array[StringName] = [&"air_dash"]
+	gs.disabled_unlocks = switched_off
 	gs.set_respawn(Vector3(1.0, 2.0, 3.0), 1.5)
 	gs.has_inventory = true
 	gs.inventory_stacks = [{"id": "pistol", "count": 1}]
@@ -648,6 +650,7 @@ func test_reset_for_new_game_clears_profile() -> void:
 	assert_eq(gs.money, GameSettings.economy.player_starting_money, "money back to the fresh-game default (the player_starting_money knob) — the implant screen re-debits it AFTER this reset")
 	assert_true(gs.stat_values.is_empty(), "stat values cleared")
 	assert_true(gs.unlocks.is_empty(), "unlocks cleared")
+	assert_true(gs.disabled_unlocks.is_empty(), "switched-off implants cleared too (a fresh run has nothing installed)")
 	assert_false(gs.has_inventory, "the saved bag is forgotten (a new game seeds the loadout)")
 	assert_true(gs.inventory_stacks.is_empty(), "inventory stacks cleared")
 	assert_eq(gs.equipped_index, -1, "no saved equip")

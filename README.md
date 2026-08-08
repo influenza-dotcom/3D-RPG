@@ -64,7 +64,7 @@ the current `LevelData` as the runtime `Level` child. Run levels through
 | Aim down sights | Right mouse |
 | Reload | `R` |
 | Pick up / carry / throw / interact | `E` / `Z` / configured actions |
-| Drop held prop, or take the wielded weapon into your hands to throw | `H` |
+| Take the wielded weapon into your hands to throw (press again to put it back), or set down a held prop | `H` |
 | Flashlight | `F` |
 | Night vision | `N` |
 | Weapon slots | number keys |

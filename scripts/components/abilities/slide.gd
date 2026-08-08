@@ -124,6 +124,12 @@ func jump_launch() -> bool:
 func end() -> void:
 	_sliding = false
 
+## Implants-tab switch-off hygiene: end a slide mid-glide. Without this the _sliding latch survives the
+## disable (update_movement — the only decay path — stops being called once is_active() reads false), and a
+## later re-enable would resume a stale slide with the old direction/speed.
+func on_deactivated() -> void:
+	end()
+
 ## Drive the looping slide wind: swell to 0 dB while sliding, fade to silence otherwise. No ordering
 ## constraint, so it self-ticks here instead of from the host step.
 func _physics_process(delta: float) -> void:

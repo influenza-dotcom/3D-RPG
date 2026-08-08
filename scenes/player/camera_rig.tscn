@@ -40,8 +40,10 @@ shader_parameter/fade_power = 8.0
 shader_parameter/invert_fade = false
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mwk7e"]
+transparency = 1
 no_depth_test = true
 shading_mode = 0
+vertex_color_use_as_albedo = true
 
 [node name="Head" type="Node3D" unique_id=1864373220 node_paths=PackedStringArray("pickup_ray")]
 script = ExtResource("1_rocmw")

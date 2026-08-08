@@ -139,13 +139,35 @@ grapple, slide, air-dash, laser-sight, fall-immunity, board-visualizer, and the
 whose presence grants it; a fresh game starts with **none** (`Player.tscn`
 `starting_unlocks` is empty) beyond any implants **bought on credit** at New Game's
 implant-purchase step (`scripts/ui/implant_choice.gd`, raised by StartMenu after
-character creation's Begin; an empty cart keeps the zero-ability start). StartMenu stamps
+character creation's Begin; an empty cart keeps the zero-ability start). The step runs a
+**credit check** — *the Underwriting Sheet*: StartMenu presents the pending stat sheet
+(`present_build`), and the screen rates it through the pure
+`EconomySettings.credit_rating_for` / `credit_limit_for` curves. The rating reads four
+normalized lines off an AUTHORED per-stat actuarial table (`credit_underwriting`, one
+`StatUnderwriting` row per stat) — CAPACITY and VIABILITY and TRADE from invested points,
+minus EXPOSURE from pledged (dumped) ones — over a `credit_baseline_fraction` floor,
+yielding a 300..850 score, a band key, a filed-reason key, and a limit capped at
+`credit_limit_max` (shipped 2100 zm). Unchecked chip rows grey the moment their price
+stops fitting the remaining credit — the cart can never bill past the limit plus
+`player_starting_money`, so Begin stays never-gated by construction.
+⭐**Positives feed only the additive lines and negatives only the subtractive one, so
+investing can never lower a rating and dumping can never raise it, for any authored
+table.** That structural property is the fix for the model this replaced: the creation
+budget is zero-sum, so a flat per-dump penalty was algebraically a tax on spending the
+budget — the all-zero non-character rated the ceiling and took the full cap while a
+committed build was fined. The scorer normalizes against `StatBudget.STAT_MIN/STAT_MAX`
+(forwarded by the screen), which is why those bounds live on the allocator and
+`CharacterCreation` derives them: the bank reads the builder, never the reverse. An EMPTY
+sheet is the ABSENCE of an application and fails OPEN to the ceiling (the bare-scene
+default); the all-zero SIX-KEY sheet is a filed-but-empty form and is rated normally. StartMenu stamps
 the cart into `GameState.unlocks` after `reset_for_new_game`, and `Player._ready`'s
 fresh-boot escape hatch (a non-empty `GameState.unlocks` while `loaded` is false — the
 `stat_values` idiom) applies it at spawn. The BILL is debited straight
 from `GameState.money` (reset had just re-seeded it to the `player_starting_money` base)
 — the balance is ALLOWED to go negative, so a loaded build starts the run in debt and
-every paid service refuses until the wallet recovers. `GameState.money` is the ONE home
+every paid service refuses until the wallet recovers; every wallet readout (the HUD's
+signed top-left, the shop / level-up / chip-install headers, the implant tally) tints
+red while negative (`HudSettings.money_debt_color` / `MenuStyle.wallet_color`). `GameState.money` is the ONE home
 of that balance: `Player._ready`'s wallet settle reads it not only when `loaded` but also
 on the `profile_active` fresh branch, so every loaded=false boot of a created run (the
 New Game boot, a menu-and-back Continue, a no-save death reload) re-applies the debt
@@ -161,13 +183,31 @@ special "online immediately" pickups.
 The grant/revoke/persistence plumbing behind those calls lives in a **Player-owned
 `AbilityManager`** (`scripts/components/abilities/ability_manager.gd`, a `RefCounted`
 built at the Player's var-init and wired in `Player._init`), not inside `player.gd`. The
-Player exposes thin forwarders (`has_mechanic`, `unlock_mechanic`, `grant_ability`,
-`revoke_ability`, `can_grant_mechanic`, `unlocked_list`, `set_unlocks`) that every caller
-duck-types, and keeps only the three typed hot-path refs (`_wall_climb` / `_slide` /
-`_grapple_ability`) its physics step drives each frame — those stay on the Player because
-the movement feel depends on their exact call order. A runtime grant is rebuilt from the
-id by the shared `AbilityRegistry` snake_case naming convention (scene ↔ `ability_id()` ↔
+Player exposes thin forwarders (`has_mechanic`, `mechanic_installed`, `unlock_mechanic`,
+`grant_ability`, `revoke_ability`, `can_grant_mechanic`, `set_mechanic_active`,
+`unlocked_list`, `installed_list`, `disabled_list`, `set_unlocks`, `set_disabled_unlocks`)
+that every caller duck-types, and keeps only the three typed hot-path refs (`_wall_climb` /
+`_slide` / `_grapple_ability`) its physics step drives each frame — those stay on the Player
+because the movement feel depends on their exact call order. A runtime grant is rebuilt from
+the id by the shared `AbilityRegistry` snake_case naming convention (scene ↔ `ability_id()` ↔
 script), so there is no hand-maintained id→script table.
+
+**Installed vs active (the Implants tab's on/off switch).** An `Ability` node's presence is
+INSTALLED; its `enabled` flag is ACTIVE. The player switches an installed implant off from
+the Implants tab (`Player.set_mechanic_active` → `AbilityManager.set_active`, which fires
+each node's `on_deactivated()` hygiene hook so a live slide ends and a live grapple rope
+severs, then emits `mechanic_toggled`). A switched-off implant reads FALSE from
+`has_mechanic` — so every gameplay gate turns off — while `mechanic_installed` stays true, so
+the `ChipInstaller` guards (`_distinct_installable`, `install_carried`, `buy_and_install`,
+all keyed on `mechanic_installed`) never re-sell an implant the player already owns. **New
+gameplay gates should ask `has_mechanic`; only economy/UI "do they own it" questions ask
+`mechanic_installed`.** Because `unlocked_list()` is the ACTIVE projection, the off state
+needs its own persistence or one autosave would delete the implant: it rides the separate
+additive `[player].disabled_unlocks` key (`GameState.disabled_unlocks`, captured from
+`player.disabled_list()`, restored by `set_disabled_unlocks` right after `set_unlocks` — that
+call BUILDS a missing node then disables it, since `set_unlocks` only builds ids it enables).
+No `SAVE_VERSION` bump: an older save simply lacks the key and reads as nothing switched off.
+Pinned by `tests/test_implant_toggle.gd`.
 
 The autosave is written **atomically**: `save_to_disk` writes a sibling `.tmp`,
 rotates the previous good file to `.bak`, then renames the temp over the target,
@@ -440,6 +480,40 @@ driving. The per-actor override is the `BodyPartGibs` drop-in, found DUCK-TYPED 
 because `gore_spawner.gd` is on `Character`'s parse path and cannot afford a class_name that the editor has
 not registered yet. Feel numbers: the `body_part_gib_*` group on `EffectsSettings`. Both gib kinds share the
 `&"gib"` group, its oldest-first world cap (`gib_max_active`), and `gore_gib_data.tres`.
+
+**The PIN kill — a lethal thrown blade staples the struck limb to the wall.** A thrown weapon that opts in
+(`WeaponData.thrown_pins_body_part` → `Throwable.pins_body_part`, shipped ON for `melee.tres` only) does not add a
+new object to the death: it **re-routes one of the six limbs that already fly**. The decision cannot be passed as
+an argument — `Throwable._try_damage_character` → `Character.take_damage` → `_begin_death` → *(a SceneTree timer,
+for the NPC death-freeze beat)* → `_complete_death` → `gore()` → `GoreSpawner` is a dozen signatures across a timer
+boundary — so it is **stashed**, the `NPC.mark_silent_takedown` idiom: `Character.mark_pin_hit(contact, dir, blade)`
+immediately before the lethal hit, `take_pin_hit()` consuming it in `GoreSpawner._resolve_pin`. ⚠️ **The marker
+carries an ALREADY-PROBED wall**, found by `Throwable._probe_pin_surface` inside `body_entered`, and that split is
+mandatory rather than tidy: `PhysicsDirectSpaceState3D` is only valid to query *during a physics frame*, and the
+death burst is not one — an NPC's `gore()` runs off the death-freeze `SceneTreeTimer`, whose timeout lands on the
+idle frame, where `intersect_ray` returns empty however solid the wall is. The first cut of this feature raycast
+from `GoreSpawner` and was therefore inert in every kill, with every other seam correct; `_is_airborne` was the
+precedent proving a ray query from `body_entered` is fine. That marker is
+**per-life state and is cleared in three places** — the consuming read, `take_damage`'s survive branch (a non-lethal
+knife hit must not pin on some later death), and `Character.reset_for_reuse` (a pooled body must not pin from its
+previous life). Four contracts beyond that:
+(1) **The limb flies on rails.** Both collision layers and gravity go to zero for the whole pin, so it travels the
+exact ray the probe already cleared and stops by arithmetic (`PartPinner.reached`, a half-space test that survives
+an overshoot), never by collision. That removes self-damage on arrival, the need for collision exceptions against
+the five limbs bursting beside it, and tunneling — and it makes the seated trophy **inert**: no NPC line-of-sight
+blocking, no shoving the player, nothing for an editor-baked navmesh to be wrong about.
+(2) **Nothing unfreezes in place.** Both the limb and the blade are deliberately buried in static geometry;
+clearing `freeze` on an overlapping body lets solver depenetration fire it across the room, so `_release_pin` and
+`Throwable.unpin` restore a clear pose *first*.
+(3) **The blade holds the limb up.** Pull the knife (`PickupRay._pick_up` unpins before it snapshots physics state)
+and the limb drops off the wall — polled in `_physics_process`, because the blade can also leave by being freed.
+(4) **The trophy belongs to its wall.** Gore is parented under the tree root and survives a level swap, which frees
+only the `Level` child — so a seated pin watches the collider it is stapled to and takes itself with it.
+Geometry and policy are pure statics in `PartPinner` (`scripts/effects/part_pinner.gd`, pinned by
+`tests/test_part_pinner.gd`); it picks the limb by **nearest live part centre**, not `Character.body_part_at`,
+because that classifier has no left/right and desyncs by ~0.28 m on a seated actor. Feel numbers: the
+`pinned_part_*` group on `EffectsSettings`, which also quiets the rest of the burst on a pin kill — the staple only
+reads if it is the only thing moving. Not persisted in either save tier, like all gore.
 
 **Gore carries an owner, and the player's revive undoes its own.** `CHECKPOINT_RESPAWN` brings the player back
 in an **untouched world** — which is right for enemies and loot, and wrong for the player's own remains: without

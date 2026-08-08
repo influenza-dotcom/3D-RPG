@@ -137,6 +137,7 @@ func _rebuild() -> void:
 	if not is_instance_valid(_installer) or not is_instance_valid(_player):
 		return
 	_money_player.text = PlayerText.wallet_you(_player.money)
+	_money_player.add_theme_color_override(&"font_color", MenuStyle.wallet_color(_player.money))  # gold, or danger while in debt
 	_fill(_carried_list, _installer.installable_carried(_player), false)  # your chips -> INSTALL (fee)
 	_fill(_stock_list, _installer.installable_stock(_player), true)       # shelf -> BUY & INSTALL
 
@@ -160,7 +161,7 @@ func _fill(list: VBoxContainer, chips: Array, is_buy: bool) -> void:
 		if it == null:
 			continue
 		var price: int = _installer.buy_and_install_cost(it) if is_buy else _installer.install_fee(it)
-		var affordable := price > 0 and _player.money >= float(price)
+		var affordable := price > 0 and _player.can_pay(float(price))  # the SAME predicate ChipInstaller gates on
 		list.add_child(_make_row(it, price, affordable, is_buy))
 
 ## One install row: a full-width Button carrying an HBox of two Labels — the chip name on the left (trims with
@@ -230,8 +231,9 @@ func _bind_ui() -> void:
 	MenuStyle.style_title(_title)
 	_title.text = MenuStyle.title_text(PlayerText.INSTALL_SCREEN_TITLE)  # open_install re-titles per installer
 
-	# Wallet — one header readout (your zorkmids). Right-aligned (authored), header-sized gold; row-inset so
-	# its right edge lands on the rows' price column instead of overhanging it in the full panel box.
+	# Wallet — one header readout (your zorkmids). Right-aligned (authored), header-sized gold (_rebuild
+	# re-tints danger while in debt); row-inset so its right edge lands on the rows' price column instead
+	# of overhanging it in the full panel box.
 	_money_player = %MoneyPlayer
 	_money_player.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	_money_player.add_theme_color_override(&"font_color", MenuStyle.gold())

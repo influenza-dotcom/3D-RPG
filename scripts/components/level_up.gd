@@ -67,18 +67,28 @@ func total_level(player_node: Node) -> int:
 ## Zorkmids to raise `stat` by 1 right now — the flat total-level curve (Dark Souls): base_cost plus the total
 ## points invested times cost_per_level. It is the SAME for every stat (the `stat` arg is accepted for API symmetry
 ## and future gating, but no longer changes the price — raising a maxed stat costs exactly what a fresh one does).
+## ⭐FLOORED AT ZERO, and the floor is load-bearing: total_level is the SUM of the six stats, and character
+## creation's zero-sum allocator permits a NET-NEGATIVE build (every stat may sit at -5), so the raw curve goes
+## NEGATIVE below baseline — at the shipped knobs an all(-5) sheet priced -44, and a negative price inverts the
+## whole transaction (the affordability guard passes for a broke player and the charge PAYS them; see
+## level_up_stat). Below baseline the curve simply bottoms out: training a sub-baseline character is FREE, never
+## profitable. A free raise stays LEGAL — see the cost > 0.0 gate in level_up_stat (the RespecStation convention).
 func level_up_cost(player_node: Node, _stat: StringName = &"") -> float:
-	return base_cost + (total_level(player_node) * cost_per_level)
+	return maxf(0.0, base_cost + (total_level(player_node) * cost_per_level))
 
 ## Raise `stat` (&"strength", &"gunplay", …) by 1, charging the player. Strength re-applies its max-HP + carry
-## bonus as a DELTA (never the whole bonus again). Returns false (charging nothing) when the player can't afford
-## it or the stat name is unknown.
+## bonus as a DELTA (never the whole bonus again). Returns false (charging nothing) when the stat name is unknown
+## or the player can't afford a PAID raise; a zero-cost raise (the floored sub-baseline price) succeeds free.
 func level_up_stat(player_node: Node, stat: StringName) -> bool:
 	var player := player_node as Player
 	if player == null or not (stat in STAT_NAMES):
 		return false
-	var cost := level_up_cost(player, stat)  # flat total-level cost (same for every stat)
-	if player.money < cost:
+	var cost := level_up_cost(player, stat)  # flat total-level cost (same for every stat), floored at 0
+	# Gate the fee only when there IS one (the RespecStation.do_respec / ChipInstaller convention): a FREE raise
+	# (the floored sub-baseline price) must serve even a wallet in DEBT — the New Game implant purchase can
+	# legitimately start the run negative, and `money < 0.0` must not lock a debtor out of a free service. The
+	# paid path still refuses any wallet below the fee, debtors included.
+	if cost > 0.0 and not player.can_pay(cost):
 		return false
 	# Own a PRIVATE stats sheet before mutating — never edit a (possibly shared) assigned .tres in place.
 	var stats := player.stats_or_default()
@@ -96,7 +106,8 @@ func level_up_stat(player_node: Node, stat: StringName) -> bool:
 	# go through the ONE CharacterStats.restamp_derived chokepoint, so LevelUp / PerkManager / PassiveItemBuffs stay
 	# byte-identical. Zero number change for a normal positive raise; it now also clamps/floors/signals like the others.
 	CharacterStats.restamp_derived(player, stats.max_hp_bonus() - old_hp_bonus, stats.carry_bonus() - old_carry_bonus, old_stamina_max)
-	player.add_money(-cost)                                    # charge LAST so its money_changed autosave sees the full raise
+	if cost > 0.0:                                             # > 0, not != 0: belt-and-braces with the cost floor, so no price can ever PAY the player (the RespecStation guard)
+		player.charge(cost)                                    # charge LAST so its money_changed autosave sees the full raise
 	GameState.autosave(player)  # a raised stat is a milestone — the authoritative persist of the run
 	return true
 

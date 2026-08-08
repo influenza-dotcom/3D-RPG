@@ -19,6 +19,8 @@ func test_defaults_match_the_former_consts() -> void:
 	assert_almost_eq(h.rep_toast_hold, 2.5, 0.001, "rep_toast_hold default preserved")
 	assert_eq(h.rep_toast_font_size, 10, "rep_toast_font_size default preserved")
 	assert_eq(h.money_color, Color(1.0, 0.86, 0.3), "money_color default preserved")
+	assert_eq(h.money_debt_color, Color(1.0, 0.5, 0.4),
+		"money_debt_color ships as the loss red — the readout's in-debt tint matches the -N float's family")
 	assert_almost_eq(h.money_delta_time, 0.8, 0.001, "money_delta_time default preserved")
 	h = null
 

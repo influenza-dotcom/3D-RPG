@@ -70,7 +70,7 @@ func open() -> void:
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player):
 		return
-	# Full takeover: switch off any open real-time tab (Inventory/Stats/Reputation/Journal) before we cover the screen.
+	# Full takeover: switch off any open real-time tab (Inventory/Stats/Implants/Reputation/Journal) before we cover the screen.
 	PlayerMenus.close_others(null)
 	_is_open = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE  # free the cursor so the player can drag/zoom the model

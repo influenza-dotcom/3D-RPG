@@ -59,9 +59,10 @@ func do_heal(player_node: Node) -> bool:
 	if player == null:
 		return false
 	var cost := heal_cost(player)
-	if cost <= 0 or player.money < cost:
+	if cost <= 0 or not player.can_pay(cost):  # the ONE affordability predicate (cash -> savings -> armed rail)
 		return false
-	player.add_money(-cost)       # routes through the wallet seam -> HUD readout + the floating -N indicator
+	if not player.charge(cost):   # routes through the payment seam -> HUD readout + the floating -N indicator
+		return false              # fail-closed: no heal without payment
 	player.heal(player.max_hp)    # heal() clamps to max_hp -> full
 	player.heal_limbs()
 	return true

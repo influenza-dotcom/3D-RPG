@@ -231,6 +231,12 @@ func _begin_line_speech(text: String) -> void:
 	# Drive the speaker's mouth + head-bob for the utterance (no-op for an inanimate speaker / one with no body).
 	if _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&"note_speaking"):
 		_speaker.note_speaking(secs)
+	# Seat the dialogue music bed slightly under the voice for the same spoken window (the bed's talk duck —
+	# a designer knob, dialogue_music_talk_duck_db). Pulsed for EVERY spoken line, including an inanimate /
+	# null speaker's (a terminal, a Readable note): the voice reads aloud either way, and it's the voice the
+	# duck makes room for. Released by _stop_speaker_talking (menu up / conversation end) or its own estimate.
+	if _music_bed != null:
+		_music_bed.note_line_speech(secs)
 	_line_token += 1  # invalidates any still-pending auto-advance timer from the previous line
 	if GameSettings.dialogue.auto_advance:
 		var tok := _line_token
@@ -275,7 +281,11 @@ func _clear_choices() -> void:
 ## per-line duration (NPC.note_speaking), so without this cut the head keeps bobbing while the player reads the
 ## choices, and for a beat after the box closes as the NPC returns to idle — reading as "bobbing when it isn't
 ## talking". Duck-typed + validity-guarded like the note_speaking pulse; no-op for a speaker without the method.
+## The music bed's talk duck tracks this exact envelope, so its swell-back rides the same call — released
+## BEFORE the speaker guard, since a null/inanimate speaker never bobbed but did duck the bed.
 func _stop_speaker_talking() -> void:
+	if _music_bed != null:
+		_music_bed.note_line_speech_stop()
 	if _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&"note_speaking_stop"):
 		_speaker.note_speaking_stop()
 

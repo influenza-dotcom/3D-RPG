@@ -8,8 +8,9 @@ extends AudioStreamPlayer
 ## avoids `set_playing` — that would shadow the native AudioStreamPlayer `playing` property's setter, which the
 ## engine rejects with a warning this project treats as an error.)
 ##
-## The track, level, fades and bus are designer knobs on GameSettings.dialogue (dialogue_music /
-## dialogue_music_volume_db / dialogue_music_fade_in / dialogue_music_fade_out / dialogue_music_bus).
+## The track, level, fades, talk duck and bus are designer knobs on GameSettings.dialogue (dialogue_music /
+## dialogue_music_volume_db / dialogue_music_fade_in / dialogue_music_fade_out / dialogue_music_talk_duck_db /
+## dialogue_music_talk_duck_fade / dialogue_music_bus).
 ## Leave `dialogue_music` EMPTY for the old behaviour: conversations play with no bed at all.
 ##
 ## TWO THINGS THIS IS NOT:
@@ -26,6 +27,14 @@ extends AudioStreamPlayer
 ## behind a sub-menu (Trade / Heal / Level Up / Install) keeps the bed playing — the conversation still
 ## EXISTS (is_engaged()), the box is just hidden, and cutting the music there would stutter the scene.
 ## The bed RESTARTS from the top each conversation, so a short loop always opens on its downbeat.
+##
+## THE TALK DUCK: on top of the conversation envelope, the bed dips SLIGHTLY (dialogue_music_talk_duck_db)
+## while a line is actually being SPOKEN, so the loop seats under the voice and swells back while the player
+## reads the response menu. The manager pulses note_line_speech(secs) per spoken line — the SAME estimated
+## envelope that drives the speaker's head-bob (NPC.note_speaking) — and cuts it with note_line_speech_stop()
+## when the menu goes up / the conversation ends. The dip and the conversation fades are SEPARATE levels
+## (_base_db + _speech_duck_db) summed into volume_db, so the two tweens compose instead of fighting (the
+## first line starts speaking while the fade-in is still swelling).
 
 ## The "off" floor the fades run from/to. Effectively inaudible; the bed is stop()ed once a fade-out lands,
 ## so nothing is left spinning between conversations.
@@ -33,6 +42,10 @@ const SILENT_DB: float = -60.0
 
 var _bed_playing: bool = false  ## guards against a re-trigger restarting the loop mid-conversation, and stops the `finished` restart backstop from firing during/after the fade-out
 var _fade: Tween
+var _base_db: float = SILENT_DB   ## the conversation envelope (silence <-> authored level); one of the two levels summed into volume_db
+var _speech_duck_db: float = 0.0  ## the talk-duck offset while a line is spoken (0 = un-ducked); the other summed level
+var _speech_token: int = 0        ## bumped on every pulse/stop; a pending talk-duck auto-release only fires if its token still matches (so the next line's pulse extends the dip instead of being cut by the previous line's timer)
+var _duck_fade: Tween
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keep playing through the dialogue tree-pause
@@ -88,14 +101,18 @@ func set_bed_playing(play_bed: bool) -> void:
 	if play_bed:
 		# play() restarts at 0, so a short loop always opens on its downbeat — including a conversation that
 		# re-opens while the previous fade-out is still running (the fade below then swells from wherever the
-		# volume currently sits, so it slides back up rather than popping).
+		# envelope currently sits, so it slides back up rather than popping).
 		play()
+	# Either direction settles the talk duck: a conversation must OPEN un-ducked (no stale dip inherited
+	# across conversations), and the fade-out should carry the swell-back with it rather than freeze a dip in.
+	# Its short fade runs in parallel with the envelope fade below — the two levels compose.
+	note_line_speech_stop()
 	var target: float = cfg.dialogue_music_volume_db if play_bed else SILENT_DB
 	var time: float = cfg.dialogue_music_fade_in if play_bed else cfg.dialogue_music_fade_out
 	if _fade and _fade.is_valid():
 		_fade.kill()
 	_fade = create_tween()
-	_fade.tween_property(self, ^"volume_db", target, maxf(time, 0.0))
+	_fade.tween_method(_set_base_db, _base_db, target, maxf(time, 0.0))
 	if not play_bed:
 		# Stop only once the fade-out has actually landed — stopping up front would cut the tail dead.
 		# Guarded on _bed_playing so a conversation that re-opens DURING the fade-out isn't silenced by
@@ -105,6 +122,67 @@ func set_bed_playing(play_bed: bool) -> void:
 func _stop_if_still_idle() -> void:
 	if not _bed_playing:
 		stop()
+
+## The manager's pulse that a line is being SPOKEN right now (the bed-side mirror of NPC.note_speaking):
+## dip the bed slightly under the voice for the line's estimated spoken time, then swell back. A monologue
+## re-pulses before the release lands, so consecutive lines hold ONE continuous dip rather than yo-yoing;
+## the swell-back comes at the response menu (note_line_speech_stop) or, with auto-advance off, once the
+## estimate elapses and the NPC falls silent. `seconds` is the same estimate the head-bob runs on — real TTS
+## audio may overrun it slightly, exactly as the head-bob does. No-op without a playing bed.
+func note_line_speech(seconds: float) -> void:
+	if stream == null or not _bed_playing:
+		return
+	_speech_token += 1  # a still-pending release from the PREVIOUS line must not cut this line's dip short
+	# A positive "duck" would BOOST the bed over the voice — clamp to off. Authored 0 = talk duck disabled:
+	# no dip, no timer. But SETTLE (don't just skip) — the knob is read live per-pulse, so a mid-monologue
+	# retune to 0 arrives with the previous line's dip still held and its release timer just invalidated by
+	# the token bump above; a bare return here would freeze that dip in until the response menu.
+	var duck: float = minf(GameSettings.dialogue.dialogue_music_talk_duck_db, 0.0)
+	if duck >= 0.0:
+		if _speech_duck_db != 0.0 or (_duck_fade and _duck_fade.is_valid()):
+			_fade_speech_duck(0.0)
+		return
+	_fade_speech_duck(duck)
+	# Token-guarded auto-release at the end of the spoken estimate; process_always so it ticks through the
+	# dialogue tree-pause. Bound-method connect (not a lambda) per the freed-capture rule, though this node
+	# is an autoload child and outlives every timer anyway.
+	get_tree().create_timer(maxf(seconds, 0.0), true).timeout.connect(_release_speech_duck.bind(_speech_token))
+
+## The line is no longer being delivered — the response menu went up, the conversation is ending, or the bed
+## itself is turning over (set_bed_playing calls this both directions). Swells the dip back to level and
+## invalidates any pending auto-release so it can't fire into the next line/conversation. Cheap no-op when
+## nothing is ducked and nothing is in flight (also what keeps it safe on an off-tree bed: no tween is built).
+func note_line_speech_stop() -> void:
+	_speech_token += 1
+	if _speech_duck_db == 0.0 and not (_duck_fade and _duck_fade.is_valid()):
+		return
+	_fade_speech_duck(0.0)
+
+## The spoken estimate elapsed with no advance (auto-advance off, player idling on the line): release the dip —
+## unless the token moved, i.e. a newer line re-pulsed or a stop already settled it.
+func _release_speech_duck(tok: int) -> void:
+	if tok != _speech_token:
+		return
+	_fade_speech_duck(0.0)
+
+func _fade_speech_duck(target: float) -> void:
+	if _duck_fade and _duck_fade.is_valid():
+		_duck_fade.kill()
+	_duck_fade = create_tween()
+	_duck_fade.tween_method(_set_speech_duck_db, _speech_duck_db, target, maxf(GameSettings.dialogue.dialogue_music_talk_duck_fade, 0.0))
+
+func _set_base_db(db: float) -> void:
+	_base_db = db
+	_apply_volume()
+
+func _set_speech_duck_db(db: float) -> void:
+	_speech_duck_db = db
+	_apply_volume()
+
+## The ONE place the live volume is composed: the conversation envelope plus the talk-duck offset. Both fade
+## tweens write their own level and meet here, so neither ever stomps the other's contribution.
+func _apply_volume() -> void:
+	volume_db = _base_db + _speech_duck_db
 
 ## `finished` fires only for a stream that ISN'T set to loop (see _ready) — restart it so the bed covers a
 ## conversation longer than the track. Gated on _bed_playing so it can't resurrect the bed after the

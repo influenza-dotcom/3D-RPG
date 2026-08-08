@@ -19,6 +19,11 @@ var _origin: Vector3
 var _remaining: int = 0
 var _per_frame: int = 1
 
+## OWNERSHIP TAG passed down from the BloodyMess that built us (see bloody_mess.gd `gore_tag`): the group each
+## drop joins, and hands on again to the decal it leaves where it lands. &"" = untagged, the NPC/default case.
+## Set right after add_child, before start().
+var gore_tag: StringName = &""
+
 ## Begin raining `count` drops centred on `origin`, at most `per_frame` per physics
 ## frame. Call right after add_child()ing the emitter to the scene root.
 func start(origin: Vector3, count: int, per_frame: int) -> void:
@@ -39,6 +44,9 @@ func _spawn_one() -> void:
 	if drop == null:
 		return  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 	get_tree().root.add_child(drop)
+	if gore_tag != &"":
+		drop.add_to_group(gore_tag)
+		drop.set(&"gore_tag", gore_tag)  # so the decal it leaves on impact is tagged too (blood_drop.gd)
 	var scatter: float = GameSettings.effects.blood_drop_scatter
 	drop.global_position = _origin + Vector3(
 		randf_range(-scatter, scatter),

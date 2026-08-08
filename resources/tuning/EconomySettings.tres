@@ -1,7 +1,56 @@
 [gd_resource type="Resource" script_class="EconomySettings" format=3 uid="uid://v8d476w80rsd"]
 
 [ext_resource type="Script" uid="uid://dyjfueltksr7i" path="res://resources/tuning/EconomySettings.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/player/stat_underwriting.gd" id="2"]
+
+[sub_resource type="Resource" id="Underwriting_strength"]
+script = ExtResource("2")
+stat = &"strength"
+income_weight = 0.55
+survival_weight = 1.0
+dump_severity = 2.0
+dump_saturation = 2
+
+[sub_resource type="Resource" id="Underwriting_endurance"]
+script = ExtResource("2")
+stat = &"endurance"
+income_weight = 0.3
+survival_weight = 0.45
+dump_severity = 0.15
+dump_saturation = 5
+
+[sub_resource type="Resource" id="Underwriting_gunplay"]
+script = ExtResource("2")
+stat = &"gunplay"
+income_weight = 1.0
+survival_weight = 0.55
+dump_severity = 0.4
+dump_saturation = 5
+
+[sub_resource type="Resource" id="Underwriting_agility"]
+script = ExtResource("2")
+stat = &"agility"
+income_weight = 0.45
+survival_weight = 0.75
+dump_severity = 0.65
+dump_saturation = 5
+
+[sub_resource type="Resource" id="Underwriting_streetwise"]
+script = ExtResource("2")
+stat = &"streetwise"
+income_weight = 1.0
+survival_weight = 0.2
+dump_severity = 0.6
+dump_saturation = 5
+
+[sub_resource type="Resource" id="Underwriting_larceny"]
+script = ExtResource("2")
+stat = &"larceny"
+income_weight = 0.85
+survival_weight = 0.6
+dump_severity = 0.35
+dump_saturation = 3
 
 [resource]
 script = ExtResource("1")
-death_purse_loss_fraction = 0.5
+credit_underwriting = Array[ExtResource("2")]([SubResource("Underwriting_strength"), SubResource("Underwriting_endurance"), SubResource("Underwriting_gunplay"), SubResource("Underwriting_agility"), SubResource("Underwriting_streetwise"), SubResource("Underwriting_larceny")])

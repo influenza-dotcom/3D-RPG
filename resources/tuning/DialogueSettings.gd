@@ -3,9 +3,10 @@ extends Resource
 
 ## Tuning for the conversation FLOW + presentation feel: the pre-talk pacing (NPC turn + buffer beat),
 ## the dialogue intro delay + speaker face-turn, the cinematic letterbox bars, the music duck while a
-## conversation is up, and the dialogue box's layout (panel margins, font sizes, label offsets). Consumed by
-## TalkHelpers / DialogueManager / DialogueView / MusicDucker via GameSettings.dialogue. Pure pacing/feel/
-## presentation — no logic depends on the exact values.
+## conversation is up, the dialogue music bed + its talk duck, the face light, and the dialogue box's layout
+## (panel margins, font sizes, label offsets). Consumed by DialogueManager / DialogueView / MusicDucker /
+## DialogueMusicBed / DialogueFaceLight / DialogueNPC / Talkable / TalkApproach via GameSettings.dialogue.
+## Pure pacing/feel/presentation — no logic depends on the exact values.
 
 @export_group("Pacing")
 ## Seconds for an NPC to rotate to face the player when talked to — the "turns to face you" beat. Higher = a slower, more deliberate turn.
@@ -50,6 +51,13 @@ extends Resource
 ## music_duck_amount_db dip ALSO applies to it while a conversation is up — a constant offset here, since the bed
 ## only ever plays during a conversation. Tune this by ear; changing the duck amount shifts this bed too.
 @export var dialogue_music_volume_db: float = 0.0
+## How far (dB) the bed dips BELOW dialogue_music_volume_db while a line is actually being SPOKEN — a slight
+## extra duck that seats the loop under the voice, swelling back while the player reads the response menu (and
+## once the spoken estimate elapses). More negative = a deeper dip; 0 = no talk duck (the bed holds one level
+## for the whole conversation, the pre-duck behaviour).
+@export var dialogue_music_talk_duck_db: float = -4.0
+## Fade time (seconds) for the talk duck's dip down / swell back. Higher = a smoother, lazier dip.
+@export var dialogue_music_talk_duck_fade: float = 0.25
 ## Fade time (seconds) from silence up to level as the conversation opens. Higher = a slower swell.
 @export var dialogue_music_fade_in: float = 0.6
 ## Fade time (seconds) back down to silence as the conversation ends (the bed stops once it lands). Higher = a longer tail.

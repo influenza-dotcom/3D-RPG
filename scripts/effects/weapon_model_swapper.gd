@@ -4,8 +4,10 @@ extends Node3D
 ## Swaps the equipped weapon's own view-model in and out under the gun rig — built in code (no .tscn) and
 ## owned by GunMesh. Split off so the root stays a thin coordinator: this child instantiates the equipped
 ## weapon's view_model scene under the rig (freeing the previous one), dresses it via GunVisuals, snaps the
-## muzzle via MuzzleRig, and hides/restores the rig's built-in placeholder gun. A weapon with no view_model
-## falls back to that placeholder, so unassigned weapons still show something.
+## muzzle via MuzzleRig, and hides the rig's built-in placeholder gun. A weapon with NO view_model shows
+## NOTHING — matching the NPC hand mount — because that placeholder is a silenced pistol, so falling back to
+## it handed an unarmed player a gun. UNARMED is the real case: fists.tres has no view model at all, and the
+## bare hands are drawn by the Player's own first-person arms rig instead (Player._build_first_person_arms).
 ##
 ## Host-coupled: GunMesh builds it in _ready, sets `host` right after .new() (the model is added under the
 ## host so the rim/outline/shadow passes and the laser's marker search all see it in the gun subtree), and
@@ -30,10 +32,9 @@ var _placeholder_meshes: Dictionary = {}  ## stashed built-in rig meshes, so the
 func current_model() -> Node:
 	return _weapon_model
 
-## Show the equipped weapon's own view-model. Instantiates its view_model scene under the rig
-## (freeing the previous one) so each weapon has its own mesh + material, and hides the rig's
-## built-in placeholder gun. A weapon with no view_model falls back to that placeholder, so
-## unassigned weapons still show something.
+## Show the equipped weapon's own view-model. Instantiates its view_model scene under the rig (freeing the
+## previous one) so each weapon has its own mesh + material, and hides the rig's built-in placeholder gun.
+## A weapon with no view_model shows nothing — see the class comment for why that is not the placeholder.
 func equip() -> void:
 	var inventory: Inventory = host.inventory
 	if not inventory or not inventory.equipped_weapon:
@@ -53,11 +54,14 @@ func equip() -> void:
 			muzzle_rig.align_to(_weapon_model)
 		_set_placeholder_hidden(true)
 	else:
-		# Placeholder weapon (no view_model): still reset the rig muzzle so it doesn't keep the
-		# previous weapon's marker spot.
+		# No view model (unarmed, or a scaffolded weapon nobody has given a mesh yet): show NOTHING. Reset the
+		# rig muzzle so it doesn't keep the previous weapon's marker spot, and keep the placeholder hidden —
+		# revealing it would put a silenced pistol in the hands of an unarmed player.
 		if muzzle_rig:
 			muzzle_rig.align_to(null)
-		_set_placeholder_hidden(false)
+		_set_placeholder_hidden(true)
+		if not inventory.equipped_weapon.view_model_is_first_person_only:
+			push_warning("WeaponModelSwapper: '%s' has no view_model — the gun rig will show nothing." % inventory.equipped_weapon.resource_path)
 
 ## Hide/restore the rig's built-in placeholder gun (Sketchfab_Scene) by stashing/restoring each of
 ## its meshes — NOT toggling visibility, because the Muzzle + FX are parented under it and would

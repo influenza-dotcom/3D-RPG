@@ -101,6 +101,33 @@ var save_version: int = 0
 ## saved wallet (fractional zorkmids — see Zorkmids); fresh-game seed reads the economy tuning group
 ## (explicitly annotated, NOT ':='-inferred off the GameSettings chain). EconomySettings' default is 0.0 (the player starts broke).
 var money: float = GameSettings.economy.player_starting_money
+## ⭐THE LEDGER ACCOUNT — ONE SIGNED number: POSITIVE is savings, NEGATIVE is what you owe. Debt and savings
+## are therefore the same field with opposite signs, which is why "pay off your debt" and "deposit" are the
+## SAME operation (Atm.deposit) and why you can never hold a death-safe hoard WHILE owing — every deposit is
+## consumed by the debt until you are solvent.
+##
+## It lives ONLY here. It is never mirrored onto a Character, never read by capture(), and never touched by any
+## death path (those move Character.money alone). Three consequences fall out for free:
+##   * Player._ready has nothing to re-seed, so the reboot that killed an earlier transient debt field
+##     (unlocks re-granted while the debt was refunded) is structurally impossible rather than merely guarded.
+##   * Banked money is DEATH-SAFE with zero code — no death-path branch mentions it.
+##   * You cannot die your way out of the Ledger: the debt is not in the wallet death empties.
+## The New Game implant bill rides THIS field (start_menu._stamp_new_game_profile), not the wallet, so
+## `money` stays cash-only and >= 0 for a created run.
+var account: float = 0.0
+## The armed payment RAIL for purchases: "debit" (cash then savings, never crossing zero) or "credit" (the
+## same draw order, but allowed below zero up to the live credit line). A String KEY, never an enum ordinal
+## (a designer reordering an enum would silently re-map every existing save) and never a display string —
+## PlayerText selects the caption from this key, the label-is-never-a-key rule.
+var payment_method: String = "debit"
+## ⭐YOUR RECORD WITH THE LEDGER — the earned half of the credit score, in
+## [-economy.credit_standing_max, +credit_standing_max]. The four build lines rate who you ARE; this rates how
+## you have BEHAVED, and it is the only way a mediocre build's rating climbs over a run. Fed by exactly three
+## events: repaying debt at a terminal (Atm.deposit), sitting in arrears when interest posts (LedgerAccrual),
+## and the Ledger's undisclosed conduct dividend (Character._award_kill — it likes headshots and declines to
+## explain why). A fresh character has NO history, which is why credit_rating_for defaults it to 0 and New
+## Game rates the build alone. Persisted; add through add_credit_standing so the clamp is never bypassed.
+var credit_standing: float = 0.0
 ## The character's chosen NAME (set once at character creation; "" for an unnamed or pre-naming save). Persisted in
 ## the [player] save section and applied to the live Player (Player.player_name) for display on the Stats screen.
 ## Never changes in-game, so capture() leaves it alone — it's authored at creation and simply carried on every save.
@@ -115,7 +142,12 @@ var player_name: String = ""
 ## default on load.
 var appearance: Dictionary = {}
 var stat_values: Dictionary = {}           ## StringName stat -> int; empty = all baseline (a fresh sheet)
-var unlocks: Array[StringName] = []         ## the saved unlocked-mechanic ids
+var unlocks: Array[StringName] = []         ## the saved unlocked-mechanic ids (granted AND active — a switched-off implant lives in disabled_unlocks instead)
+## Installed-but-switched-OFF implant ids (the Implants-tab toggle). A SEPARATE additive key — never folded
+## into `unlocks` (that key's meaning is "granted and active"; changing it would be a save-schema break).
+## Captured from player.disabled_list(), restored via player.set_disabled_unlocks AFTER set_unlocks. An older
+## save simply has no [player].disabled_unlocks key -> empty -> nothing disabled (clean back-compat, no v-bump).
+var disabled_unlocks: Array[StringName] = []
 
 ## The saved BACKPACK. has_inventory marks that the save carried an [inventory] section at all — an older save
 ## (written before inventory persisted) doesn't, and the Player then seeds its authored starting loadout instead
@@ -204,6 +236,24 @@ var _world_snapshot_pending: bool = false
 ## still-in-tree OLD player, and overwrite the just-loaded profile (and null the pending world_snapshot) with the abandoned
 ## timeline's state — then persist that franken-profile over the sole checkpoint. See _load_and_reload / autosave.
 var _reload_pending: bool = false
+
+## Public read of the quickload-in-flight latch, so a per-frame subscriber (LedgerAccrual's dawn posting) can
+## refuse to move a balance that is about to be thrown away, without reaching into the underscore field.
+func reload_pending() -> bool:
+	return _reload_pending
+
+## THE one mutator for the credit record — clamped to +/- economy.credit_standing_max so no event, however
+## mis-authored, can run the score off its rails. Returns what actually moved (0.0 = already at the clamp), so
+## a caller can skip a toast nobody needs to read. Deliberately does NOT autosave: every caller is already at
+## a save milestone (a terminal transaction, an interest posting) or is a per-kill hook far too hot to persist.
+func add_credit_standing(delta: float) -> float:
+	if is_zero_approx(delta):
+		return 0.0
+	var cap: float = maxf(0.0, GameSettings.economy.credit_standing_max)
+	var before := credit_standing
+	credit_standing = clampf(credit_standing + delta, -cap, cap)
+	return credit_standing - before
+
 ## Live per-level ledger of authored NPCs that have died this run: { level_path -> { snapshot_key: true } }.
 ## Fed by record_npc_death (each NPC's died signal), read by WorldSnapshot.capture (a dead NPC has freed itself,
 ## so it can't be seen in the tree at capture time), and reloaded from a snapshot on a snapshot load so post-load
@@ -282,6 +332,16 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 			return false
 	save_version = _cfg_int(cfg, "meta", "version", 0)  # H1b: 0 = a pre-versioning save; recorded for a future migration
 	money = _cfg_float(cfg, "player", "money", GameSettings.economy.player_starting_money)  # missing/junk -> the fresh-game knob; older saves stored ints, _cfg_float casts them
+	account = _cfg_float(cfg, "player", "account", 0.0)          # the Ledger account (signed: + savings, - debt); absent in pre-ATM saves -> 0
+	payment_method = _cfg_str(cfg, "player", "payment_method", "debit")  # the armed rail KEY; absent -> the safe default
+	credit_standing = _cfg_float(cfg, "player", "credit_standing", 0.0)  # the earned record; absent -> a clean slate
+	# LEGACY FOLD: saves written BEFORE the ATM carried the implant debt as a NEGATIVE WALLET. The wallet is
+	# cash-only now (a purchase can no longer push it under zero), so a negative one can only be pre-ATM debt —
+	# move it onto the account, where the ATM can actually repay it. Idempotent by construction: after one save
+	# `money` is >= 0 and the branch can never fire again, which is precisely why this needs no SAVE_VERSION bump.
+	if money < 0.0:
+		account = snappedf(account + money, Zorkmids.QUANTUM)
+		money = 0.0
 	player_name = _cfg_str(cfg, "player", "name", "")  # missing / junk-typed -> unnamed via the type guard (name is always written as a String, so this is lossless); a raw String(<Variant>) cast could raise "Invalid constructor" and abort the load
 	# Appearance (head/body customizer): rebuild the dict from whatever's present, type-guarded. A missing section
 	# (older save / never customised) leaves it EMPTY -> consumers use the catalog default. Junk-typed values drop.
@@ -312,6 +372,11 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	if raw_unlocks is Array:
 		for u in raw_unlocks:
 			unlocks.append(StringName(str(u)))  # str() first — StringName(<non-string Variant>) errors
+	disabled_unlocks.clear()
+	var raw_disabled = cfg.get_value("player", "disabled_unlocks", [])  # absent on an older save -> [] -> nothing disabled
+	if raw_disabled is Array:
+		for u in raw_disabled:
+			disabled_unlocks.append(StringName(str(u)))
 	stat_values.clear()
 	for n in STAT_NAMES:
 		stat_values[n] = _cfg_int(cfg, "stats", String(n), 0)
@@ -452,6 +517,9 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 	var cfg := ConfigFile.new()
 	cfg.set_value("meta", "version", SAVE_VERSION)  # H1b: stamp the schema version FIRST so a future load can migrate
 	cfg.set_value("player", "money", money)
+	cfg.set_value("player", "account", account)                  # the signed Ledger account (+ savings / - debt)
+	cfg.set_value("player", "payment_method", payment_method)    # the armed rail KEY
+	cfg.set_value("player", "credit_standing", credit_standing)  # the earned half of the credit score
 	cfg.set_value("player", "name", player_name)
 	# Appearance (head/body customizer): stamp only the keys that are set, so an uncustomised profile writes no
 	# [appearance] section at all (load treats a missing section as "use the catalog default", identical behaviour).
@@ -471,6 +539,10 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 	for u in unlocks:
 		raw_unlocks.append(String(u))
 	cfg.set_value("player", "unlocks", raw_unlocks)
+	var raw_disabled: Array = []
+	for u in disabled_unlocks:
+		raw_disabled.append(String(u))
+	cfg.set_value("player", "disabled_unlocks", raw_disabled)  # the switched-off implants, same String round-trip as unlocks
 	for n in STAT_NAMES:
 		cfg.set_value("stats", String(n), int(stat_values.get(n, 0)))
 	for fid in reputation:
@@ -549,6 +621,14 @@ func capture(player: Node) -> void:
 	unlocks.clear()
 	for u in player.unlocked_list():
 		unlocks.append(StringName(u))
+	# The switched-off implants ride a SEPARATE key: unlocked_list() deliberately omits them (it is the
+	# ACTIVE projection), so without this line one autosave would permanently uninstall a toggled-off implant.
+	# has_method-guarded like every duck-typed capture read: a stand-in player without the ability subsystem
+	# (the in-tree StubPlayer the slot tests capture off) reads as "nothing switched off", never a crash.
+	disabled_unlocks.clear()
+	if player.has_method(&"disabled_list"):
+		for u in player.disabled_list():
+			disabled_unlocks.append(StringName(u))
 	# Faction standings are GLOBAL (the Reputation autoload), not on the player — snapshot them here so the
 	# autosave carries them. Stored String-keyed for a clean cfg round-trip; Reputation.restore re-types on load.
 	var standings := Reputation.all_standings()
@@ -926,11 +1006,15 @@ func reset_for_new_game() -> void:
 	profile_active = false  # cleared here; character creation re-sets it once the run is real (P0-2)
 	save_version = SAVE_VERSION   # H1b: a fresh run is current-schema
 	respawn_level_matches = true  # M3: a fresh run has no stale saved level identity to mismatch
-	money = GameSettings.economy.player_starting_money  # the implant screen re-debits this AFTER the reset (bought on credit — may go negative)
+	money = GameSettings.economy.player_starting_money  # cash on hand; stays >= 0 for a created run (the implant bill rides `account`)
+	account = 0.0                # a fresh run owes nothing and has nothing banked; the implant bill debits this AFTER the reset
+	payment_method = "debit"     # every run starts spending its own money
+	credit_standing = 0.0        # a fresh character has no record: New Game rates the BUILD alone
 	player_name = ""             # a fresh run is unnamed until character creation stamps a name
 	appearance.clear()           # ...and un-customised until character creation stamps a look (empty -> catalog default)
 	stat_values.clear()
 	unlocks.clear()
+	disabled_unlocks.clear()     # a fresh run has no switched-off implants (nothing installed at all)
 	has_inventory = false
 	inventory_stacks.clear()
 	equipped_index = -1

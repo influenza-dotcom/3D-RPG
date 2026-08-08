@@ -31,6 +31,10 @@ const SFX_LEAK_BACKSTOP: float = 8.0
 
 ## Set by spawners to skip the impact SFX (a mass scatter would be deafening).
 var silent: bool = false
+## OWNERSHIP TAG inherited from BloodDropEmitter (see bloody_mess.gd `gore_tag`) — the LAST hop of the chain: the
+## decal this drop leaves where it lands joins the same group, so a player-death splatter is swept whole on the
+## revive even though the stain outlives the drop that made it. &"" = untagged, the NPC/default case.
+var gore_tag: StringName = &""
 ## One-shot guard: the drop reacts to its FIRST contact only, then frees.
 var _consumed: bool = false
 
@@ -91,6 +95,8 @@ func _spawn_impact_decal() -> void:
 	decal.grow_time = GameSettings.effects.blood_decal_grow_time
 	decal.cull_mask = DECAL_CULL_MASK
 	get_tree().root.add_child(decal)
+	if gore_tag != &"":
+		decal.add_to_group(gore_tag)
 	decal.global_position = result["position"] + result["normal"] * GameSettings.effects.decal_normal_offset
 	_orient_to_normal(decal, result["normal"])
 

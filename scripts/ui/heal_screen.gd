@@ -90,7 +90,7 @@ func _refresh() -> void:
 	# otherwise be the one string long enough to clip on the button. We pass only the FACTS (limb damage on
 	# its own line, affordability): PlayerText.heal_status selects one of four whole authored templates —
 	# this screen never assembles line fragments (the TextFormat rule).
-	var cant := cost > 0 and _player.money < cost
+	var cant := cost > 0 and not _player.can_pay(float(cost))  # the SAME predicate Healer.do_heal gates on
 	var status_text := PlayerText.heal_status(int(round(_player.hp)), int(round(_player.max_hp)), _player.has_limb_damage(), _player.money, cant)
 	# Pad the status to a CONSTANT 4 lines (HP / limb / zorkmids / note is the worst case). make_dialog pins
 	# the card's WIDTH only — its height shrink-wraps and the CenterContainer re-centers on every height

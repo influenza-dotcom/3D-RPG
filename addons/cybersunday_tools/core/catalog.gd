@@ -737,6 +737,16 @@ const COMPONENTS: Array[Dictionary] = [
 		"key_exports": ["lifetime", "fade_time", "fade_speed", "outline_color", "outline_width"],
 	},
 	{
+		"class_name": "BodyPartGibs",
+		"script_path": "res://scripts/components/body_part_gibs.gd",
+		"scene_path": "",
+		"extends": "Node",
+		"category": "NPC",
+		"add_mode": "child",
+		"description": "Per-actor control over the body-part death burst — the character coming apart into its OWN head/torso/arms/legs (LEGO/Roblox style) instead of only spraying meat chunks. You do NOT need this node: the burst is already on for every actor with a BodyModelSwap (GameSettings.effects > Body-part gibs). Drop it in to override that for one character — untick `enabled` to leave a boss in one piece, or tick it to gib one actor while the global switch is off — and to choose which parts fly and how much loose gore goes with them. NOTE: `enabled` also gates the thrown-blade PIN kill for this actor, because the pin re-routes one of the limbs this burst throws — an actor that never comes apart can never be stapled to a wall.",
+		"key_exports": ["enabled", "burst_head", "burst_torso", "burst_arms", "burst_legs", "meat_gib_count", "launch_speed_scale", "part_gib_scene"],
+	},
+	{
 		"class_name": "LootBag",
 		"script_path": "res://scripts/components/loot_bag.gd",
 		"scene_path": "res://scenes/props/loot_bag.tscn",

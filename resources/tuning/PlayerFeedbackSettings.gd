@@ -66,6 +66,13 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 @export var death_message_color: Color = Color(0.85, 0.1, 0.1)
 ## The death card's font size (the small 396x216 viewport — keep it modest).
 @export var death_message_size: int = 28
+## Beat (seconds) of PURE BLACK between the vignette fully covering the screen and the death card starting
+## to fade in. Without it the card arrives on the very frame the fade completes — which still READS as
+## mid-fade, so the text lands on top of the closing vignette (information overload at the death moment).
+## The beat lets the black settle first, then the card arrives as its own beat. 0 = the old
+## card-on-the-black-frame timing. Folded into DeathMix.card_hold_seconds' sting-sync arithmetic, so the
+## respawn still lands exactly on death_sting_sync_point.
+@export var death_card_delay: float = 1.0
 ## Seconds the death card takes to fade IN (once the screen is black) and, later, to fade OUT (before the
 ## respawn). One knob for both ends of the card's fade.
 @export var death_card_fade_time: float = 0.6
@@ -82,6 +89,13 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 ## Fade-up-from-black duration on a fresh spawn / respawn -- a longer, cinematic emerge (the game-start intro
 ## the in-sky game title is timed to). Dial this for a snappier / slower entrance.
 @export var spawn_fade_in_time: float = 2.5
+## Seconds into the respawn fade-up before the HUD comes back and the respawn receipts pop (the wallet
+## toast, the grudge-settlement reputation toasts, the holster tutorial reminder). At 0 everything used to
+## land on the revive's FIRST frame — a full HUD plus a toast burst popping over a still-black screen while
+## the world fades in behind it (information overload). The delay lets the world emerge first; the player
+## keeps control from frame one — only the HUD visuals and the receipts wait. Keep it under
+## spawn_fade_in_time so the HUD is back before the fade finishes.
+@export var respawn_hud_delay: float = 1.0
 
 @export_group("Death sting (the cinematic's soundtrack)")
 ## The clip that plays when YOU die, riding OVER the cinematic while the world ducks out from under it.
@@ -97,12 +111,19 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 ## offset on purpose: the sting still opens under the keel-over, while the world is draining away beneath it.
 ## 0 = fire on the killing blow. Push it past death_sequence_time and the sting starts on a black screen.
 @export_range(0.0, 10.0, 0.05) var death_sting_start_delay: float = 0.2
+## Seconds the sting SWELLS up from silence once it starts. 0 = full volume on its first sample, which reads
+## as a jolt: the world is ducking AWAY underneath it, so a hard-edged entry snatches the mix instead of being
+## handed it. The swell is a linear-AMPLITUDE ramp (not a dB ramp, which would sit inaudible then rush in).
+## Keep it short enough that the clip's own opening still lands — this shapes the entry, not the whole track.
+@export_range(0.0, 4.0, 0.05) var death_sting_fade_in: float = 0.5
 ## Hold the death card long enough that the sting plays out and is STILL RINGING as the world comes back.
 ## When on, `respawn_delay` becomes a MINIMUM: the cinematic stretches the card's fully-visible beat so the
-## respawn lands exactly `death_sting_overlap` before the clip ends — so the game returns underneath a sting
-## that is still finishing, instead of the clip being cut off or the screen sitting black waiting on silence.
-## Re-derived from the clip's real length every death, so swapping `death_sting` needs no number changed
-## here. Turn it OFF to run the short cinematic on `respawn_delay` alone.
+## screen starts fading back in exactly ON `death_sting_sync_point` — the sting's final chord — so the game
+## returns underneath a chord that is still ringing, instead of after silence or by cutting the clip short.
+## The hold is RE-SOLVED every death from the clip and the surrounding beat lengths, so retuning any other
+## cinematic timing (death_sequence_time / death_card_fade_time / death_card_gap) keeps the chord aligned
+## automatically — `death_sting_sync_point` is the one value you must re-measure by ear if you swap the clip.
+## Turn it OFF to run the short cinematic on `respawn_delay` alone.
 @export var death_card_holds_for_sting: bool = true
 ## The bus the sting plays on. MUST NOT appear in death_cinematic_buses — that is the whole trick, and
 ## DeathMix pushes a warning at boot if you break it. `sting` sends straight to Master and carries no
@@ -118,11 +139,17 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 ## silence is perceptually done long before it mathematically finishes. Set a value here only if a particular
 ## clip genuinely outstays its welcome. The RELOAD_* death modes always cut it dead regardless (fresh scene).
 @export_range(0.0, 8.0, 0.05) var death_sting_release: float = 0.0
-## How long the sting is still sounding AFTER you respawn — the deliberate overlap that stops the death
-## screen from sitting black waiting on silence. The cinematic solves the death card's hold so the respawn
-## lands exactly this far before the clip ends, so the tail rings on over the world fading back in.
-## Raise it to hand more of the clip to live gameplay; 0 = the clip finishes exactly as you respawn.
-@export_range(0.0, 8.0, 0.05) var death_sting_overlap: float = 1.0
+## The moment INSIDE the clip (seconds from the clip's own start) that should land exactly as the screen
+## begins fading back in. For the shipped sting that is its FINAL SYNTH CHORD, measured at 6.32 s — the last
+## real attack in the track, after which it is pure decay to silence at ~7.95 s. The cinematic solves the
+## death card's hold so the respawn lands on this instant, so the chord hits as the world returns and then
+## rings out (~1.6 s) underneath the fade-up.
+##
+## CLIP-SPECIFIC — the one number here that does NOT re-derive itself, because nothing can detect a chord for
+## you. Re-measure it if you swap `death_sting`, or set it to 0 to stop aligning to anything (the cinematic
+## then runs on `respawn_delay` alone and the sting simply plays on into the new life). Clamped to the clip's
+## length, so an over-long value can never push the respawn past the end of the audio.
+@export_range(0.0, 30.0, 0.01) var death_sting_sync_point: float = 6.32
 ## The buses the death cinematic ducks — i.e. everything that counts as "the world". These four cover 100%
 ## of authored audio: `radio` sends into `music` and `ambient_bed` into `ambient`, so ducking a parent takes
 ## its children with it. In Godot EVERY bus chain terminates at Master, so a sound cannot dodge a bus that
@@ -154,5 +181,6 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 @export var sneak_toast_color: Color = Color(0.4, 1.0, 0.45)
 ## Limb-cripple toast colour — e.g. "Your head is crippled!" (was the player.gd CRIPPLE_TOAST_COLOR const).
 @export var cripple_toast_color: Color = Color(1.0, 0.42, 0.38)
-## "Hospital bill!" toast colour — the half-wallet death loss (death_purse_loss_fraction) shown on the in-place respawn.
+## Colour of the death wallet-settlement toast (death_purse_loss_fraction) shown on the in-place respawn — the one
+## that tells you whether your killer pocketed the purse or it spilled on the ground where you fell.
 @export var death_wallet_toast_color: Color = Color(1.0, 0.78, 0.32)

@@ -173,7 +173,7 @@ func buy(item: Item, player_node: Node) -> bool:
 	if not stock.has(item):
 		return false
 	var price := buy_price(item, player)
-	if price <= 0.0 or player.money < price:
+	if price <= 0.0 or not player.can_pay(price):  # the ONE affordability predicate — cash, then savings, then the armed rail
 		return false
 	# Bounded-bag guard: don't charge for something the (Tetris) backpack can't hold — the transfer below would
 	# move nothing and the player would lose the coin. Refuse the sale and tell them why.
@@ -181,7 +181,8 @@ func buy(item: Item, player_node: Node) -> bool:
 		if player.has_method(&"notify_toast"):
 			player.notify_toast(PlayerText.TOAST_BACKPACK_FULL, Color(0.85, 0.85, 0.85))
 		return false
-	player.add_money(-price)
+	if not player.charge(price):  # fail-closed: moves nothing and sells nothing if the rails can't cover it
+		return false
 	money = snappedf(money + price, Zorkmids.QUANTUM)  # keep the till on the coin grid like every wallet (Character.add_money snaps)
 	stock.transfer_to(player.inventory, item, 1)
 	return true

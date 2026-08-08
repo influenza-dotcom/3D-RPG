@@ -24,7 +24,17 @@ extends Resource
 ## Resting field of view (degrees) when not scoped — the ONE rest-FOV source of truth. Higher = wider, more peripheral view.
 @export var default_fov: float = 75.0
 ## Field of view (degrees) the camera zooms to when aiming down sights (a weapon's scoped_fov_override beats this). Lower = tighter zoom.
+## ONLY consulted when scope_magnification is 0 — see that field for why an ABSOLUTE ADS angle is the wrong shape.
 @export var scoped_fov: float = 40.0
+## ADS zoom STRENGTH, as a magnification over the player's CURRENT rest FOV: 2 = aiming brings the world twice
+## as close. This is the Field-of-View-INVARIANT knob, and the one to tune. The scoped FOV is SOLVED from
+## default_fov, so ADS feels the same at 75 FOV as at 120 — whereas the absolute scoped_fov above pins ADS to
+## one angle, which silently STRENGTHENS the zoom every time a player widens their FOV slider (at 110 rest the
+## authored 40-degree scope is a 3.9x jump instead of the intended 2.1x, and reads as "way too far in").
+## Magnification is a TANGENT ratio, not a ratio of degrees: apparent size goes with tan(fov/2), so halving the
+## degrees does NOT double the apparent size. 0 = off, fall back to the absolute scoped_fov (the legacy
+## behaviour). The default reproduces the authored 75 -> 40 ADS feel exactly.
+@export var scope_magnification: float = 2.108
 ## How fast the FOV eases in/out of the scoped zoom (higher = snappier ADS).
 @export var scope_zoom_speed: float = 8.0
 ## Extra FOV (degrees) added at full fall speed — the speed-rush widen as you plummet. 0 disables the fall kick.

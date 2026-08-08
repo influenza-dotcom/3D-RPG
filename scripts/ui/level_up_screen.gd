@@ -31,7 +31,7 @@ var _root: Control
 var _title: Label
 var _header: HBoxContainer  ## level + wallet as TWO Labels (a literal space-run can't align in a variable-width font)
 var _level_label: Label
-var _money_label: Label     ## the zorkmid half — only it wears the gold tint
+var _money_label: Label     ## the zorkmid half — only it wears the wallet tint (gold, or danger while in debt)
 var _rows: VBoxContainer
 var _perks: VBoxContainer  ## rank 29 perk-pick section (hidden when the station authored no available_perks)
 var _is_open := false
@@ -100,16 +100,21 @@ func _rebuild() -> void:
 		return
 	# Cost is FLAT (Dark Souls) — the same for every stat at a given total level — so each row shows the identical
 	# next-level price and gates on it. FRACTIONAL throughout so the UI's affordability + display match
-	# LevelUp.level_up_stat exactly (a barely-affordable stat mustn't look clickable when the station would refuse it).
+	# LevelUp.level_up_stat exactly (a barely-affordable stat mustn't look clickable when the station would refuse it,
+	# and — the inverse, which the zero-cost branch below covers — a raise the station WOULD serve must never look dead).
 	var level: int = _station.total_level(_player)
 	_level_label.text = PlayerText.level_label(level)
 	_money_label.text = PlayerText.your_zorkmids(_player.money)
+	_money_label.add_theme_color_override(&"font_color", MenuStyle.wallet_color(_player.money))  # gold, or danger while in debt
 	for c in _rows.get_children():
 		c.queue_free()
 	var s := _player.stats_or_default()
 	for stat in STAT_ORDER:
-		var cost: float = _station.level_up_cost(_player, stat)  # flat total-level cost (identical for every stat)
-		var affordable := _player.money >= cost
+		var cost: float = _station.level_up_cost(_player, stat)  # flat total-level cost (identical for every stat), floored at 0
+		# Mirrors LevelUp.level_up_stat's gate EXACTLY, zero-cost branch included: a FREE raise (the floored
+		# sub-baseline price) stays clickable for a wallet in DEBT, which `money >= cost` alone would grey out
+		# while the station happily served it (the free-respec-refused-while-negative wart, level-up edition).
+		var affordable := cost <= 0.0 or _player.can_pay(cost)  # the SAME predicate LevelUp.level_up_stat gates on
 		# Aligned columns (name | value | +1 | cost) overlaid on a clickable Button — space-padding can't
 		# line up a variable-width font, so each column is its own fixed-width Label. The HBox is capped at
 		# skin.level_up_cols_width and centered by a full-rect CenterContainer so the four columns read as one group; the
@@ -288,7 +293,7 @@ func _bind_ui() -> void:
 	_level_label.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	_money_label = %MoneyLabel
 	_money_label.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	_money_label.add_theme_color_override(&"font_color", MenuStyle.gold())  # zorkmid tint — the wallet half only
+	_money_label.add_theme_color_override(&"font_color", MenuStyle.gold())  # zorkmid tint — the wallet half only; _rebuild re-tints danger while in debt
 
 	var body: VBoxContainer = %Body
 	body.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
