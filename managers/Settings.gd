@@ -82,6 +82,7 @@ var hud_sway_scale: float = 1.0                 ## 0..1 accessibility scale on t
 var minimap_enabled: bool = true                ## OFF = hide the top-right HUD floorplan entirely AND reflow the objective tracker back to the bare 8 px inset (the enemy_health_bar_enabled / detection_meter_enabled / loot_beacons declutter family). Polled live by ui.gd each frame, so the Options toggle bites the same frame with no rebuild; hiding it also stops the widget's gather/slice/redraw completely (Minimap._process bails on is_visible_in_tree), so OFF is a real cost win and not just a hidden node
 var minimap_rotates: bool = true                ## ON = HEADING-UP (the plan turns under a fixed caret); OFF = NORTH-UP (the plan is axis-locked and the caret spins instead). A BOOL rather than a dropdown on purpose: there are exactly two modes, and a generic DROPDOWN spec loses its options on an editor .tres re-save (SettingSpec's own @risk). Read live by Minimap._draw
 var minimap_zoom: float = 1.0                   ## Divides GameSettings.hud.minimap_world_span, so >1 shows FEWER metres (zooms IN). Clamped MINIMAP_ZOOM_MIN..MAX. Read live by Minimap._draw — a zoom change needs no re-slice, only the view matrix moves
+var minimap_show_npcs: bool = true              ## OFF = the top-right floorplan draws terrain and objective markers only, no NPC blips. ON, a living NPC within the mapped area shows as a dot tinted by allegiance (CBPalette, matching the hover name / dialogue name / enemy health bar). This is a real gameplay affordance, not just decoration — it is effectively through-wall knowledge of who is nearby — so it belongs to the player, next to the difficulty-adjacent comfort rows. Dots are CLIPPED to the box and never pinned to its rim: a pinned dot would report every body on the level and turn a floorplan into a radar. Read live by Minimap._draw
 var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
 var heartbeat_enabled: bool = true              ## off = silence JUST the low-HP heartbeat pulse (the SFX bus volume is unaffected); read live by the player's _update_low_hp
 var difficulty_level: int = DifficultySettings.Level.NORMAL  ## 0 Easy / 1 Normal / 2 Hard -> GameSettings.difficulty.apply_level (ML-3)
@@ -402,6 +403,10 @@ func set_minimap_zoom(f: float) -> void:
 	minimap_zoom = clampf(f, MINIMAP_ZOOM_MIN, MINIMAP_ZOOM_MAX)
 	save_settings()  # no apply step — Minimap reads it live in _draw
 
+func set_minimap_show_npcs(on: bool) -> void:
+	minimap_show_npcs = on
+	save_settings()  # no apply step — Minimap reads it live in _draw
+
 func set_debug_skip_menu(on: bool) -> void:
 	debug_skip_menu = on
 	save_settings()
@@ -483,6 +488,7 @@ func load_settings() -> void:
 	minimap_enabled = _cfg_bool(cfg, "accessibility", "minimap_enabled", minimap_enabled)
 	minimap_rotates = _cfg_bool(cfg, "accessibility", "minimap_rotates", minimap_rotates)
 	minimap_zoom = clampf(float(cfg.get_value("accessibility", "minimap_zoom", minimap_zoom)), MINIMAP_ZOOM_MIN, MINIMAP_ZOOM_MAX)
+	minimap_show_npcs = _cfg_bool(cfg, "accessibility", "minimap_show_npcs", minimap_show_npcs)
 	tts_enabled = _cfg_bool(cfg, "accessibility", "tts_enabled", tts_enabled)
 	heartbeat_enabled = _cfg_bool(cfg, "accessibility", "heartbeat_enabled", heartbeat_enabled)
 	debug_skip_menu = _cfg_bool(cfg, "debug", "skip_menu", debug_skip_menu)
@@ -538,6 +544,7 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "minimap_enabled", minimap_enabled)
 	cfg.set_value("accessibility", "minimap_rotates", minimap_rotates)
 	cfg.set_value("accessibility", "minimap_zoom", minimap_zoom)
+	cfg.set_value("accessibility", "minimap_show_npcs", minimap_show_npcs)
 	cfg.set_value("accessibility", "tts_enabled", tts_enabled)
 	cfg.set_value("accessibility", "heartbeat_enabled", heartbeat_enabled)
 	cfg.set_value("debug", "skip_menu", debug_skip_menu)

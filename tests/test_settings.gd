@@ -129,6 +129,7 @@ func test_minimap_defaults() -> void:
 	assert_true(fresh.minimap_enabled, "the minimap ships ON — it is the shipped HUD, not an opt-in")
 	assert_true(fresh.minimap_rotates, "heading-up is the shipped mode (the plan turns under a fixed caret)")
 	assert_eq(fresh.minimap_zoom, 1.0, "zoom ships at 1x = GameSettings.hud.minimap_world_span verbatim")
+	assert_true(fresh.minimap_show_npcs, "NPC dots ship visible")
 	fresh.free()
 
 func test_minimap_zoom_clamps() -> void:
@@ -150,3 +151,7 @@ func test_minimap_toggles_round_trip() -> void:
 	assert_false(Settings.minimap_rotates, "north-up is reachable")
 	Settings.set_minimap_rotates(true)
 	assert_true(Settings.minimap_rotates, "...and heading-up restores")
+	Settings.set_minimap_show_npcs(false)
+	assert_false(Settings.minimap_show_npcs, "NPC dots can be switched off — it is a real gameplay affordance")
+	Settings.set_minimap_show_npcs(true)
+	assert_true(Settings.minimap_show_npcs, "...and back on")

@@ -56,7 +56,10 @@ func test_component_defaults() -> void:
 	assert_null(mm.map_data, "the authored underlay is OPTIONAL and off by default")
 	assert_true(mm.draw_walkable, "the navmesh fill is the day-one picture, so it ships on")
 	assert_true(mm.draw_walls, "the section cut ships on, and is the knob to flip if brushwork cuts to mush")
-	assert_false(mm.dot_npcs, "Groups.MINIMAP is the AUTHORED channel — dotting every NPC is opt-in")
+	# Deliberately flipped ON (user request): NPC dots ship visible. The radar risk that made it opt-in is
+	# handled differently now — dots are CLIPPED to the box instead of pinned to its rim, so a dot means
+	# "near you" rather than "somewhere on this level" — and the player can still switch them off in Options.
+	assert_true(mm.dot_npcs, "NPC dots ship on; the rim-pin exclusion is what keeps them from being a radar")
 	assert_eq(mm.deck_cache_max, 12, "deck cache bound")
 	assert_gt(mm.bake_delay, 0.0, "a gather on frame one can see a half-built level, so the delay is real")
 
@@ -192,3 +195,79 @@ class AirborneStub extends Node3D:
 	var grounded: bool = true
 	func is_on_floor() -> bool:
 		return grounded
+
+
+# --- NPC dots -------------------------------------------------------------------------------------------
+
+## NPC dots are tinted by ALLEGIANCE, through the same CBPalette.disposition_color the hover name, the
+## dialogue speaker name and the enemy health bar use — so the four surfaces can never end up telling
+## different stories about the same body. Duck-typed, so this needs no real NPC.
+func test_npc_dot_color_follows_disposition() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	var npc := NpcStub.new()
+	autofree(npc)
+	npc.disposition = Disposition.Kind.HOSTILE
+	assert_eq(mm.npc_dot_color(npc), CBPalette.hostile(), "a hostile reads as hostile")
+	npc.disposition = Disposition.Kind.FRIENDLY
+	assert_eq(mm.npc_dot_color(npc), CBPalette.friendly(), "a friendly reads as friendly")
+	npc.disposition = Disposition.Kind.NEUTRAL
+	assert_eq(mm.npc_dot_color(npc), MenuStyle.hud.minimap_npc_color,
+			"a neutral falls to the skin's own minimap tint, not to a hardcoded grey")
+
+## A recruited companion WINS over disposition — the same precedence CBPalette documents.
+func test_npc_dot_color_marks_a_recruited_companion() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	var npc := NpcStub.new()
+	autofree(npc)
+	npc.disposition = Disposition.Kind.HOSTILE   # deliberately the losing branch
+	npc.following = true
+	assert_eq(mm.npc_dot_color(npc), CBPalette.ally(), "a companion is a companion even mid-grudge")
+
+## Not-an-NPC must degrade, never crash: this runs over a whole group every frame.
+func test_npc_dot_color_degrades_for_a_plain_node() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	var plain := Node3D.new()
+	autofree(plain)
+	assert_eq(mm.npc_dot_color(plain), MenuStyle.hud.minimap_npc_color, "no disposition -> the neutral tint")
+
+## NPCs are POOLED in this project, so a dead one stays in the group waiting to be reused. Without this
+## filter its dot would sit on the map forever, exactly where it fell.
+func test_dead_npcs_get_no_dot() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	var npc := NpcStub.new()
+	autofree(npc)
+	npc.alive = true
+	assert_true(mm._npc_is_live(npc), "a living NPC is dotted")
+	npc.alive = false
+	assert_false(mm._npc_is_live(npc), "a corpse is not — pooled bodies would otherwise blip forever")
+	var plain := Node3D.new()
+	autofree(plain)
+	assert_true(mm._npc_is_live(plain), "a host with no is_alive() is assumed live rather than silently dropped")
+
+## The designer switch ships ON now (the player asked to see NPCs), but BOTH it and the player's Options row
+## must agree — either one off means no dots.
+func test_npc_dots_ship_on_for_both_owners() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	assert_true(mm.dot_npcs, "the designer switch ships on")
+	var fresh = load("res://managers/Settings.gd").new()
+	assert_true(fresh.minimap_show_npcs, "and so does the player-facing row")
+	fresh.free()
+
+
+## Minimal stand-in for an NPC: the widget duck-types resolved_disposition / is_following / is_alive, so a
+## test needs none of npc.gd's _ready (which builds weapons, nav, audio and mutates shared statics).
+class NpcStub extends Node3D:
+	var disposition: int = Disposition.Kind.NEUTRAL
+	var following: bool = false
+	var alive: bool = true
+	func resolved_disposition() -> int:
+		return disposition
+	func is_following() -> bool:
+		return following
+	func is_alive() -> bool:
+		return alive

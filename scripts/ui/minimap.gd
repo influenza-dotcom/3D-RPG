@@ -53,9 +53,11 @@ extends Control
 @export var arrow_size: float = 5.0
 ## Hide markers further than this many metres away (0 = no limit) — the compass.gd idiom.
 @export var max_marker_distance: float = 0.0
-## Also dot every Groups.NPC body. OFF by default: Groups.MINIMAP is the AUTHORED channel, and dotting
-## every NPC turns a floorplan into a radar. Handy while a level has no WorldMarkers placed yet.
-@export var dot_npcs: bool = false
+## Dot every LIVING Groups.NPC body, tinted by allegiance (hostile / friendly / recruited companion) through
+## CBPalette, so the colours match the hover name, the dialogue speaker name and the enemy health bar. The
+## designer switch; the player's own is Options -> Accessibility -> "NPCs On Minimap", and BOTH must be on.
+## Unlike a POI marker an NPC dot is never pinned to the rim — see _paint_one_marker.
+@export var dot_npcs: bool = true
 
 ## The wall layer's geometry source, gathered ONCE per level. Preloaded BY PATH and kept untyped so this
 ## file parses before the editor registers the new class_name (the STAMINA_RING_SCRIPT cache guard).
@@ -273,17 +275,27 @@ func _draw() -> void:
 ## `view`, so they sit exactly on the plan they annotate.
 func _paint_markers(view: Transform2D, hud: HudSettings) -> void:
 	var art: Texture2D = map_data.npc_marker if map_data != null else null
+	# POI markers PIN to the rim when off-box: a quest objective's whole job is to point you at something you
+	# cannot see yet.
 	for n in get_tree().get_nodes_in_group(Groups.MINIMAP):
-		_paint_one_marker(n, view, hud, art)
-	if dot_npcs:
-		for n in get_tree().get_nodes_in_group(Groups.NPC):
-			# An NPC that also carries a WorldMarker is already drawn above; skip it rather than
-			# double-painting a dot at half the intended alpha.
-			if not n.is_in_group(Groups.MINIMAP):
-				_paint_one_marker(n, view, hud, art)
+		_paint_one_marker(n, view, hud, art, true, marker_color(n))
+	if not (dot_npcs and Settings.minimap_show_npcs):
+		return
+	for n in get_tree().get_nodes_in_group(Groups.NPC):
+		# An NPC that also carries a WorldMarker is already drawn above; skip it rather than double-painting
+		# a dot at half the intended alpha.
+		if n.is_in_group(Groups.MINIMAP):
+			continue
+		if not _npc_is_live(n):
+			continue
+		# NPC dots deliberately do NOT pin to the rim. A pinned dot would report every body on the level
+		# against the box edge — that is a radar, not a floorplan, and it would quietly hand the player
+		# through-wall knowledge of the whole map. Clipped to the box, a dot means "actually near you".
+		_paint_one_marker(n, view, hud, art, false, npc_dot_color(n))
 
 
-func _paint_one_marker(n: Node, view: Transform2D, hud: HudSettings, art: Texture2D) -> void:
+func _paint_one_marker(n: Node, view: Transform2D, hud: HudSettings, art: Texture2D,
+		pin_offscreen: bool, col: Color) -> void:
 	if not is_instance_valid(n):
 		return
 	var n3 := n as Node3D
@@ -292,15 +304,16 @@ func _paint_one_marker(n: Node, view: Transform2D, hud: HudSettings, art: Textur
 	var w := n3.global_position
 	if max_marker_distance > 0.0 and Vector2(w.x, w.z).distance_to(_centre_xz) > max_marker_distance:
 		return
-	var col := marker_color(n3)
-	# Vertical honesty: a beacon two storeys up fades instead of pretending to be in this room.
-	col.a *= FloorplanSection.marker_alpha(w.y - _ground_y, hud.minimap_band_height,
-			hud.minimap_marker_floor_alpha)
 	var q: Vector2 = view * Vector2(w.x, w.z)
 	if not Rect2(Vector2.ZERO, size).has_point(q):
+		if not pin_offscreen:
+			return  # off the box and not worth pointing at — see the radar note at the call site
 		# Off the box: pin it to the rim pointing the right way, through the compass's own pure edge
 		# projection rather than a second implementation of the same maths.
 		q = Compass.project_to_edge(q - size * 0.5, size, hud.minimap_marker_edge_margin)
+	# Vertical honesty: a beacon two storeys up fades instead of pretending to be in this room.
+	col.a *= FloorplanSection.marker_alpha(w.y - _ground_y, hud.minimap_band_height,
+			hud.minimap_marker_floor_alpha)
 	if art != null:
 		draw_texture(art, q - art.get_size() * 0.5, col)
 	else:
@@ -313,6 +326,32 @@ func _paint_one_marker(n: Node, view: Transform2D, hud: HudSettings, art: Textur
 func marker_color(marker: Node) -> Color:
 	var raw_col: Variant = marker.get(&"color")
 	return raw_col if raw_col is Color else MenuStyle.hud.minimap_npc_color
+
+
+## An NPC dot's tint, by ALLEGIANCE rather than by art: a recruited companion reads blue, a hostile red and a
+## friendly green, exactly as that NPC's hover name, dialogue speaker name and enemy health bar already do —
+## one mapping (CBPalette.disposition_color) so the four surfaces can never drift into telling different
+## stories about the same body. Anything that is not really an NPC falls back to the skin's neutral tint.
+##
+## Duck-typed with `== true` rather than bool(...): these are Variant returns from a dynamic call, and
+## GDScript 4 has no bool(String) constructor (the house rule, and the enemy_health_bar._color_for idiom).
+func npc_dot_color(npc: Node) -> Color:
+	var neutral: Color = MenuStyle.hud.minimap_npc_color
+	if not is_instance_valid(npc) or not npc.has_method(&"resolved_disposition"):
+		return neutral
+	var ally: bool = npc.has_method(&"is_following") and npc.call(&"is_following") == true
+	return CBPalette.disposition_color(ally, int(npc.call(&"resolved_disposition")), neutral)
+
+
+## Is this NPC worth a dot? A corpse is not — and NPCs are POOLED here, so a dead one stays in the group
+## waiting to be reused and would otherwise leave a permanent blip where it fell. is_alive() is duck-typed;
+## a host without it is assumed live rather than silently dropped.
+func _npc_is_live(npc: Node) -> bool:
+	if not is_instance_valid(npc):
+		return false
+	if not npc.has_method(&"is_alive"):
+		return true
+	return npc.call(&"is_alive") == true
 
 
 ## The player, always at the box centre. Heading-up welds the caret pointing screen-up and turns the plan
