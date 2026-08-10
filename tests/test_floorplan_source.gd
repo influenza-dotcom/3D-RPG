@@ -214,3 +214,40 @@ func test_ring_rejects_need_BOTH_axes() -> void:
 	assert_true(FS.ring_is_shell(shell, 120.0), "a map-enclosing brush IS a void seal")
 	var speck := PackedVector2Array([Vector2(0, 0), Vector2(0.1, 0), Vector2(0.1, 0.1), Vector2(0, 0.1)])
 	assert_true(FS.ring_is_noise(speck, 0.35), "a pipe collar IS speckle")
+
+
+# --- the MinimapHide drop-in ----------------------------------------------------------------------------
+
+const HIDE := preload("res://scripts/components/minimap_hide.gd")
+
+## THE INVARIANT. It marks its PARENT, not itself — the gather skips subtrees by their ROOT, and this tag
+## node owns no colliders, so a version that added itself would look identical in the inspector and do
+## nothing at all.
+func test_minimap_hide_joins_its_parent() -> void:
+	var prop := Node3D.new()
+	add_child_autofree(prop)
+	prop.add_child(HIDE.new())
+	assert_true(prop.is_in_group(Groups.MINIMAP_HIDE), "the PROP is what gets marked")
+
+func test_minimap_hide_disabled_marks_nothing() -> void:
+	var prop := Node3D.new()
+	add_child_autofree(prop)
+	var tag = HIDE.new()
+	tag.enabled = false
+	prop.add_child(tag)
+	assert_false(prop.is_in_group(Groups.MINIMAP_HIDE), "disabled = the prop is a wall again, node kept")
+
+## End to end: a tagged prop's colliders must actually drop out of the gather.
+func test_a_tagged_prop_contributes_no_walls() -> void:
+	var root := Node3D.new()
+	add_child_autofree(root)
+	var fence := Node3D.new()
+	root.add_child(fence)
+	var sb := StaticBody3D.new()
+	fence.add_child(_box_body(sb, Vector3(4, 2, 0.1), Vector3.ZERO))
+	var s = SRC.new()
+	s.gather(root, Groups.MINIMAP_HIDE)
+	assert_eq(s.solid_count(), 1, "untagged, the fence IS drawn as a wall")
+	fence.add_child(HIDE.new())          # _ready fires on add_child, marking `fence`
+	s.gather(root, Groups.MINIMAP_HIDE)
+	assert_eq(s.solid_count(), 0, "tagged, it drops out of the floorplan entirely")

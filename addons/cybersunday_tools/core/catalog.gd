@@ -547,6 +547,16 @@ const COMPONENTS: Array[Dictionary] = [
 		"key_exports": ["on_compass", "on_minimap", "color"],
 	},
 	{
+		"class_name": "MinimapHide",
+		"script_path": "res://scripts/components/minimap_hide.gd",
+		"scene_path": "",
+		"extends": "Node",
+		"category": "Level",
+		"add_mode": "child",
+		"description": "Child it under a prop (fence, awning, parked car) to keep its colliders out of the HUD minimap's wall cut. Marks its PARENT, so it must be a child of the prop itself.",
+		"key_exports": ["enabled"],
+	},
+	{
 		"class_name": "QuestMarkerSync",
 		"script_path": "res://scripts/components/quest_marker_sync.gd",
 		"scene_path": "",

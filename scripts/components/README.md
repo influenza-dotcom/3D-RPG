@@ -108,6 +108,18 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
   instead of ~9 m. It is set through `CanPickUp.item_light_always_lit`, which `WorldItem` stamps from
   `WeaponData.dropped_item_light_always_lit` — so the knife glows identically on the floor, in hand, and in flight.
 
+- **`WorldMarker`** (`world_marker.gd`, `extends Node3D`) — a point-of-interest beacon: joins the `&"compass"`
+  and `&"minimap"` groups on `_ready`, so a chevron rides the screen edge and a dot sits on the HUD floorplan
+  with no wiring. Place by hand for fixed landmarks; `QuestMarkerSync` spawns them for live objectives.
+- **`MinimapHide`** (`minimap_hide.gd`, `extends Node`) — the "not a wall" tag. `FloorplanSource.gather` skips
+  the whole subtree it marks, so a fence / awning / parked car stops being drawn as a wall on the minimap's
+  section cut. Collision is untouched: the prop still blocks bullets, footsteps and navigation.
+  **Invariant — it joins its PARENT, not itself,** which is why it is a plain `Node` and must be childed under
+  the prop. The gather skips subtrees by their ROOT, and the tag node owns no colliders of its own, so a
+  version that added itself to the group would look identical in the inspector and silently do nothing.
+  Second invariant: the group is read ONCE per level, during the gather that makes the map free per frame —
+  toggling `enabled` at runtime does nothing until someone calls `Minimap.rebake()`.
+
 ### Adding a new interactable type
 
 1. `class_name Foo` / `extends LookAtInteractable`. Add `@tool` only if you want an in-editor preview or a
