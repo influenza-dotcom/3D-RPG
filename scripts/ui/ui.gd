@@ -7,7 +7,7 @@ extends CanvasLayer
 ## death/scene reload while this layer briefly persists.
 ##
 ## DIEGETIC HUD WEIGHT (the Borderlands 2 feel): the corner "instrument panel" — HP/stamina bars, ammo,
-## money, toasts, quest tracker, hotbar — rides ONE full-rect carrier (`_weighted`) whose position is a
+## money, toasts, quest tracker, minimap, hotbar — rides ONE full-rect carrier (`_weighted`) whose position is a
 ## damped spring trailing camera turns (HudSway, knobs in GameSettings.hud "HUD weight", scaled 0..1 by
 ## the Options -> Accessibility "HUD Sway" slider). THE MOVED-vs-PINNED RULE: anything that ANNOTATES
 ## THE AIM POINT stays welded to the layer and never sways — the crosshair (already repositioned per
@@ -88,11 +88,17 @@ var _quest_tracker: Label  ## top-right active-objective line, refreshed off the
 ## player_hud.gd — "Could not find type X" cascade guard).
 const STAMINA_RING_SCRIPT := preload("res://scripts/ui/stamina_ring.gd")
 const HUD_SWAY_SCRIPT := preload("res://scripts/ui/hud_sway.gd")
+const MINIMAP_SCRIPT := preload("res://scripts/ui/minimap.gd")
 
 ## Full-rect carrier for every corner HUD element that has "weight" (see the header): its position IS
 ## the live sway offset, so one write a frame moves the whole instrument panel. Children keep their
 ## absolute canvas coords (the carrier sits at the origin, full-rect), so parenting into it is layout-free.
 var _weighted: Control
+## The top-right procedural floorplan (scripts/ui/minimap.gd). Untyped and preloaded BY PATH like the other
+## drop-ins here, so this file parses before the editor registers the new class_name. MAY BE NULL: several
+## suites build a bare UI.new() without _ready and call the visibility methods directly, so every touch of
+## it below is null-guarded — that guard is load-bearing, not defensive habit.
+var _minimap = null
 var _sway = HUD_SWAY_SCRIPT.new()  ## the damped-spring state behind the panel sway (pure math, unit-tested)
 var _sway_fov = HUD_SWAY_SCRIPT.new()  ## SECOND spring, scalar (.x only): the FOV "lens breath" scale delta — kept
 								   ## separate so a dash punch breathing the lens never eats the offset spring's travel
@@ -244,7 +250,26 @@ func _ready() -> void:
 	# edge of the +N/-N delta's float band — derived, so a HudSettings font bump slides it instead of colliding.
 	_rep_toasts.position = Vector2(8, _money_delta_row_y() + float(MONEY_DELTA_FONT_SIZE) + MONEY_ROW_PAD)
 	_notices.add_child(_rep_toasts)
-	# Quest tracker: the current active objective, pinned to the FREE top-right corner (money/rep/toasts are
+	# TOP-RIGHT STACK, ROW 1: the procedural minimap — a vector floorplan of the floor the player is standing
+	# on, drawn from the level's baked navmesh (+ its static colliders). Built BEFORE the quest tracker below
+	# because that tracker's offset_top is DERIVED from this box's footprint (quest_tracker_top) instead of
+	# the literal 8.0 it used to carry: the corner is shared now, and one of the two has to own the reflow.
+	_minimap = MINIMAP_SCRIPT.new()
+	_minimap.name = "Minimap"
+	_minimap.anchor_left = 1.0
+	_minimap.anchor_right = 1.0
+	_minimap.offset_right = -GameSettings.hud.minimap_inset.x
+	_minimap.offset_left = -GameSettings.hud.minimap_inset.x - GameSettings.hud.minimap_size.x
+	_minimap.offset_top = GameSettings.hud.minimap_inset.y
+	_minimap.offset_bottom = GameSettings.hud.minimap_inset.y + GameSettings.hud.minimap_size.y
+	# z 1: above the full-screen hurt/kill/dash flashes PlayerHud adds to this layer (z 0), still under the
+	# crosshair (z 2) — the same reasoning as the stamina ring.
+	_minimap.z_index = 1
+	if GameSettings.hud.minimap_rides_hud_weight:
+		_weighted.add_child(_minimap)  # corner readout -> rides the HUD-weight carrier (the header's rule)
+	else:
+		add_child(_minimap)  # pinned to the layer; still swept by hide_hud_for_death's direct-child loop
+	# Quest tracker: the current active objective, in the top-right corner UNDER the minimap (money/rep/toasts are
 	# top-left, HP/ammo bottom). A FIXED quest_tracker_width column, right-aligned: short lines still hug the
 	# right edge, long authored text word-wraps DOWNWARD over empty screen instead of marching left toward the
 	# money band. No ellipsis trim — it would eat the "(2/5)" progress tail. Refreshed off the QuestTracker
@@ -255,7 +280,7 @@ func _ready() -> void:
 	_quest_tracker.anchor_right = 1.0
 	_quest_tracker.offset_left = -8.0 - GameSettings.hud.quest_tracker_width
 	_quest_tracker.offset_right = -8.0
-	_quest_tracker.offset_top = 8.0
+	_quest_tracker.offset_top = quest_tracker_top(true)
 	_quest_tracker.autowrap_mode = TextServer.AUTOWRAP_WORD
 	_quest_tracker.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_quest_tracker.add_theme_font_size_override(&"font_size", REP_TOAST_FONT_SIZE)
@@ -432,6 +457,7 @@ func _set_gameplay_hud_visible(vis: bool) -> void:
 	if _hotbar != null:
 		_hotbar.visible = vis
 	_apply_stamina_mode()
+	_apply_minimap_visibility()
 
 ## THE STAMINA MODE SWITCH: exactly one of ring/bar shows, polled live off Settings.stamina_ring_enabled
 ## (so the Options toggle applies the same frame, like loot_beacons/detection_meter). The RING ships as
@@ -448,6 +474,38 @@ func _apply_stamina_mode() -> void:
 		_stamina_ring.visible = _gameplay_hud_visible and ring_mode
 	if _stamina_bar != null:
 		_stamina_bar.visible = _gameplay_hud_visible and not ring_mode
+
+## Pure: the y the top-right objective column's first line starts at. WITH the minimap up it sits under it
+## (inset + box height + gap); with the map off (Options -> Accessibility -> "Minimap") it returns to
+## GameSettings.hud.minimap_tracker_bare_top, which ships as 8.0 — byte-identical to the pre-minimap
+## layout, so turning the map off restores the historical corner exactly instead of leaving a hole where
+## it used to be. Static + unit-tested, because "the top-right stack does not collide" is a layout
+## INVARIANT and not something to eyeball once and hope about.
+static func quest_tracker_top_for(map_visible: bool, inset_y: float, map_h: float, gap: float, bare: float) -> float:
+	return (inset_y + map_h + gap) if map_visible else bare
+
+## The same rule bound to the live knobs.
+func quest_tracker_top(map_visible: bool) -> float:
+	var h := GameSettings.hud
+	return quest_tracker_top_for(map_visible, h.minimap_inset.y, h.minimap_size.y,
+			h.minimap_tracker_gap, h.minimap_tracker_bare_top)
+
+## The minimap's visibility, polled live off Settings.minimap_enabled so the Options toggle bites the same
+## frame with no rebuild (the loot_beacons / detection_meter / stamina_ring family), composed with the
+## dialogue-hide flag. It ALSO re-derives the quest tracker's top, because that tracker was pushed down to
+## clear a map the player may have just switched off. BAILS during the death cinematic for exactly the
+## reason _apply_stamina_mode does: hide_hud_for_death has already hidden these and remembered which, and a
+## per-frame re-show here would resurrect the panel over the fade.
+func _apply_minimap_visibility() -> void:
+	if not _death_hidden_hud.is_empty():
+		return
+	var want: bool = _gameplay_hud_visible and Settings.minimap_enabled
+	if _minimap != null:
+		_minimap.visible = want
+	if _quest_tracker != null:
+		var top := quest_tracker_top(want)
+		if not is_equal_approx(_quest_tracker.offset_top, top):
+			_quest_tracker.offset_top = top
 
 ## HUD nodes hidden for the death cinematic; restored on the in-place revive (a full reload rebuilds a fresh UI).
 var _death_hidden_hud: Array[CanvasItem] = []
@@ -1085,6 +1143,9 @@ func _process(delta: float) -> void:
 		_update_hp_bar()
 	if is_instance_valid(player):
 		_update_stamina_readout()
+	# Deliberately NOT gated on a live player: the Options toggle has to work on any frame, including the
+	# ones around a death/respawn where `player` is briefly invalid.
+	_apply_minimap_visibility()
 	_update_hud_sway(delta)
 	if is_instance_valid(ammo_count) and _hud_ammo != null:
 		_hud_ammo.text = _ammo_text()

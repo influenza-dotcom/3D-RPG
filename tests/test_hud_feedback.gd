@@ -44,3 +44,40 @@ func test_dialogue_gameplay_hud_visibility_includes_hotbar() -> void:
 	ui._set_gameplay_hud_visible(true)
 	assert_true(ui._hotbar.visible, "the hotbar returns with the rest of the gameplay HUD after dialogue")
 	ui.free()
+
+
+## THE NULL-DEREF THIS SUITE EXISTS TO CATCH. This file (and test_stamina_ring.gd) build a bare UI.new()
+## WITHOUT running _ready, set a handful of members by hand and call the visibility methods directly — so
+## _minimap and _quest_tracker are both null. _apply_minimap_visibility runs from _set_gameplay_hud_visible
+## AND once per frame, which means an unguarded touch there takes down every suite that constructs a bare
+## HUD, from a file whose author was only thinking about the real game.
+func test_gameplay_hud_visibility_tolerates_a_missing_minimap() -> void:
+	var ui := UI.new()
+	ui._hp_bar = Control.new()
+	ui.add_child(ui._hp_bar)
+	assert_null(ui._minimap, "a bare UI has no minimap")
+	assert_null(ui._quest_tracker, "...and no quest tracker")
+	ui._set_gameplay_hud_visible(false)   # must not crash on either null
+	ui._set_gameplay_hud_visible(true)
+	ui._apply_minimap_visibility()        # the per-frame path, called directly
+	assert_false(ui._hp_bar.visible == false and ui._hp_bar.visible == true, "reached without crashing")
+	ui.free()
+
+
+## The death cinematic owns HUD visibility while it runs: hide_hud_for_death remembers exactly which nodes
+## it hid, so a per-frame re-show would resurrect the minimap over the fade. Same bail _apply_stamina_mode
+## has, and it must be checked BEFORE the null guards or the bail is untested.
+func test_minimap_visibility_bails_during_the_death_cinematic() -> void:
+	var ui := UI.new()
+	var map := Control.new()
+	ui.add_child(map)
+	ui._minimap = map
+	map.visible = false                       # as if hide_hud_for_death had just hidden it
+	ui._death_hidden_hud = [map] as Array[CanvasItem]
+	ui._gameplay_hud_visible = true
+	ui._apply_minimap_visibility()
+	assert_false(map.visible, "the map stays hidden while the death list is non-empty")
+	ui._death_hidden_hud.clear()
+	ui._apply_minimap_visibility()
+	assert_true(map.visible, "and comes back once the revive has cleared it")
+	ui.free()
