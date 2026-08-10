@@ -226,6 +226,12 @@ extends Resource
 ## One cached deck's vertical validity — the navmesh band filter, the deck cache key's quantum, AND the
 ## marker cross-floor fade denominator. One number so a floor can never mean three different heights.
 @export var minimap_band_height: float = 2.6
+## How far CLEAR of the current floor band the player must get before the map redraws as a different storey.
+## Without it the whole plan flips the instant the reference height crosses a boundary, and a stair riser, a
+## kerb or a gentle slope is enough to make it flip back and forth. (JUMPING is fixed at the root instead —
+## the widget keys off the last GROUNDED height, not live altitude, so leaving the ground cannot change which
+## floor you are shown.) Ships above one 0.5 m stair riser, so a single step near a boundary does not swap it.
+@export var minimap_band_hysteresis: float = 0.6
 ## Wall stroke px. 0 or less = Godot's transform-INDEPENDENT hairline (the shipped look and the safe
 ## default); a positive value routes through FloorplanSection.stroke_width so it does not fatten with zoom.
 @export var minimap_wall_width: float = 0.0

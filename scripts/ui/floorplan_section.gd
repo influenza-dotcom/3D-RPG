@@ -83,6 +83,30 @@ static func deck_key(origin_y: float, band: float) -> int:
 	return int(floorf(origin_y / band))
 
 
+## WHICH BAND TO DRAW, given the one already on screen — the fix for "the map changes wildly when I jump".
+##
+## Raw band_floor quantisation flips the ENTIRE floorplan the instant the reference Y crosses a boundary, and
+## two things make that happen constantly in play: standing near a boundary and JUMPING, and walking a slope
+## or stair riser that straddles one, where a few centimetres of movement swap the map back and forth every
+## frame. (The caller fixes the jump at its root as well, by feeding the last GROUNDED height instead of live
+## altitude — this margin is what covers the slope/riser case.)
+##
+## So the current band STICKS until the reference is `hysteresis` metres clear of it. Deliberately a band-EXIT
+## margin rather than a re-centring: the drawn floor changes only once you have properly committed to another
+## one. `has_current` false means "nothing drawn yet" and takes the raw answer.
+static func sticky_band_key(current_key: int, has_current: bool, ground_y: float, band: float,
+		hysteresis: float) -> int:
+	var raw := deck_key(ground_y, band)
+	if not has_current or band <= 0.0:
+		return raw
+	if raw == current_key:
+		return current_key
+	var lo := float(current_key) * band
+	if ground_y >= lo - hysteresis and ground_y <= lo + band + hysteresis:
+		return current_key  # drifted out of the band, but not yet CLEAR of it
+	return raw
+
+
 ## The height the section cut is taken at: `cut_height` metres above the player's ORIGIN. Chest height cuts
 ## through walls and doorways but under most desks and railings, which is what makes a floorplan read as
 ## rooms. NEVER a downward raycast — see the @risk above.

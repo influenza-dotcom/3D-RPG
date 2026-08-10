@@ -74,7 +74,13 @@ var _deck: Dictionary = {}          ## the ACTIVE deck (empty until one is built
 var _source_region_id: int = 0      ## instance id of the NavigationRegion3D the decks were sliced from
 var _centre_xz: Vector2 = Vector2.ZERO
 var _yaw: float = 0.0
-var _player_y: float = 0.0
+## THE FLOOR THE PLAYER IS STANDING ON, not their live altitude — the reference every vertical decision here
+## keys off (which deck to draw, where to cut, how far off-floor a marker is). Only updated while the player
+## is grounded, so a JUMP cannot change which storey the map shows. See _update_ground_reference.
+var _ground_y: float = 0.0
+var _ground_primed: bool = false
+var _band_key: int = 0              ## the band currently DRAWN — sticky, see FloorplanSection.sticky_band_key
+var _band_keyed: bool = false       ## false until the first deck exists (then _band_key is meaningful)
 var _prev_centre: Vector2 = Vector2.ZERO
 var _prev_yaw: float = 0.0
 var _deck_dirty: bool = true        ## force one repaint (fresh deck, level swap, first frame)
@@ -118,9 +124,9 @@ func _process(delta: float) -> void:
 		_source = FLOORPLAN_SOURCE.new()
 		_source.gather(_level_root_for(region), Groups.MINIMAP_HIDE)
 	_centre_xz = Vector2(p.global_position.x, p.global_position.z)
-	_player_y = p.global_position.y
+	_update_ground_reference(p)
 	_yaw = _camera_yaw(p)
-	_ensure_deck(region, _player_y)
+	_ensure_deck(region, _ground_y)
 	# The idle gate: a standing, still player never repaints. It keys on the PLAYER, so it has to be
 	# overridden whenever something else on the map can move on its own — otherwise a marker (or a dotted
 	# NPC) would freeze in place the moment the player stopped walking.
@@ -152,6 +158,21 @@ func _camera_yaw(p: Node3D) -> float:
 	return atan2(-fwd.x, -fwd.z)
 
 
+## THE FIX FOR "THE MAP CHANGES WILDLY WHEN I JUMP". Every vertical decision this widget makes — which floor
+## deck to draw, where to take the section cut, how far off-floor a marker is — keys off the floor the player
+## is STANDING ON, never their instantaneous altitude. A jump taken anywhere near a band boundary would
+## otherwise swap the entire floorplan mid-air and swap it back on landing.
+##
+## is_on_floor() is duck-typed: this widget only knows it holds a Node3D, and a host without the method (a
+## test stub, a flying/no-clip debug body) degrades to tracking live Y, which is the old behaviour rather
+## than a crash. The first sample always takes, so frame one is never stuck at zero.
+func _update_ground_reference(p: Node3D) -> void:
+	var grounded: Variant = p.call(&"is_on_floor") if p.has_method(&"is_on_floor") else true
+	if grounded == true or not _ground_primed:
+		_ground_y = p.global_position.y
+		_ground_primed = true
+
+
 ## Is there anything on the map that moves independently of the player? Cheap (two group-size reads) and
 ## it keeps the idle gate honest — see the note at its call site.
 func _has_live_markers() -> bool:
@@ -164,7 +185,13 @@ func _has_live_markers() -> bool:
 ## lets a player walk a whole floor without re-slicing anything.
 func _ensure_deck(region: NavigationRegion3D, y: float) -> void:
 	var band: float = GameSettings.hud.minimap_band_height
-	var key := FloorplanSection.deck_key(y, band)
+	# STICKY, not a raw quantisation: the drawn floor only changes once the player is properly clear of the
+	# one on screen. Paired with the grounded-Y reference above, this is what stops a jump (or a stair riser,
+	# or a slope) from flipping the whole plan back and forth.
+	var key := FloorplanSection.sticky_band_key(_band_key, _band_keyed, y, band,
+			GameSettings.hud.minimap_band_hysteresis)
+	_band_key = key
+	_band_keyed = true
 	if _decks.has(key):
 		var hit: Dictionary = _decks[key]
 		if _deck != hit:
@@ -172,7 +199,9 @@ func _ensure_deck(region: NavigationRegion3D, y: float) -> void:
 			_deck_dirty = true
 		_touch_deck(key)
 		return
-	var y_lo := FloorplanSection.band_floor(y, band)
+	# The band edges come from the CHOSEN key, never from re-quantising `y` — otherwise a deck kept alive by
+	# the hysteresis above would be filled with the geometry of the band the player has drifted into.
+	var y_lo := float(key) * band
 	var tris := PackedVector2Array()
 	if region != null:
 		tris = FloorplanSection.walkable_triangles(region.navigation_mesh, region.global_transform,
@@ -265,7 +294,7 @@ func _paint_one_marker(n: Node, view: Transform2D, hud: HudSettings, art: Textur
 		return
 	var col := marker_color(n3)
 	# Vertical honesty: a beacon two storeys up fades instead of pretending to be in this room.
-	col.a *= FloorplanSection.marker_alpha(w.y - _player_y, hud.minimap_band_height,
+	col.a *= FloorplanSection.marker_alpha(w.y - _ground_y, hud.minimap_band_height,
 			hud.minimap_marker_floor_alpha)
 	var q: Vector2 = view * Vector2(w.x, w.z)
 	if not Rect2(Vector2.ZERO, size).has_point(q):
@@ -321,6 +350,7 @@ func rebake() -> void:
 	_decks.clear()
 	_deck_lru.clear()
 	_deck = {}
+	_band_keyed = false   # nothing drawn -> the next band choice takes the raw answer, not a stale sticky one
 	_source = null   # the solids are in the OLD level's world space — re-gather, never re-cut
 	_deck_dirty = true
 

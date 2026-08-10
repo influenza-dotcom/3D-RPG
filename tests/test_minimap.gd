@@ -99,9 +99,9 @@ func test_active_band_follows_the_player_between_storeys() -> void:
 	var band: float = GameSettings.hud.minimap_band_height
 	mm._ensure_deck(null, 0.5)
 	assert_almost_eq(mm.active_band_floor(), 0.0, 0.0001, "standing on the ground floor")
-	mm._ensure_deck(null, band + 0.5)
-	assert_almost_eq(mm.active_band_floor(), band, 0.0001, "one storey up")
-	mm._ensure_deck(null, -0.5)
+	mm._ensure_deck(null, band * 1.5)
+	assert_almost_eq(mm.active_band_floor(), band, 0.0001, "one CLEAR storey up (band+0.5 is inside the sticky margin)")
+	mm._ensure_deck(null, -band * 0.5)
 	assert_almost_eq(mm.active_band_floor(), -band, 0.0001, "a basement floors DOWN, not toward zero")
 
 
@@ -118,3 +118,77 @@ func test_rebake_drops_every_deck() -> void:
 	mm.rebake()
 	assert_eq(mm.deck_count(), 0, "a level swap drops every deck")
 	assert_almost_eq(mm.active_band_floor(), 0.0, 0.0001, "and clears the active band")
+
+
+# --- the "map flips when I jump" fix --------------------------------------------------------------------
+
+## Reported from play: the whole floorplan changed wildly on a small vertical move such as a jump. Cause was
+## the deck being keyed off the player's LIVE Y, so a jump taken anywhere near a 2.6 m band boundary swapped
+## the storey mid-air and swapped it back on landing. Two independent guards now, and this pins the second:
+## once a band is drawn it STICKS until the reference is properly clear of it.
+func test_a_small_rise_past_a_boundary_does_not_swap_the_floor() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	var band: float = GameSettings.hud.minimap_band_height
+	mm._ensure_deck(null, band - 0.1)               # standing just under a boundary
+	var floor_before: float = mm.active_band_floor()
+	var decks_before: int = mm.deck_count()
+	mm._ensure_deck(null, band + 0.1)               # a small hop over it
+	assert_almost_eq(mm.active_band_floor(), floor_before, 0.0001,
+			"a hop across a band boundary must not change the drawn storey")
+	assert_eq(mm.deck_count(), decks_before, "...and must not slice a second deck for it either")
+
+## Jitter must never oscillate the map: feeding heights back and forth across a boundary has to settle.
+func test_jitter_across_a_boundary_never_oscillates() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	var band: float = GameSettings.hud.minimap_band_height
+	mm._ensure_deck(null, band - 0.05)
+	var settled: float = mm.active_band_floor()
+	for i in 8:
+		mm._ensure_deck(null, band + (0.2 if i % 2 == 0 else -0.2))
+		assert_almost_eq(mm.active_band_floor(), settled, 0.0001, "still the same storey on jitter step %s" % i)
+	assert_eq(mm.deck_count(), 1, "eight boundary crossings still slice exactly one deck")
+
+## The other half of the fix, and the one that actually addresses JUMPING: the vertical reference is the
+## last GROUNDED height, so leaving the floor cannot change which storey is drawn however high the jump.
+func test_ground_reference_ignores_airborne_height() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	var body := AirborneStub.new()
+	add_child_autofree(body)  # in-tree: global_position errors and reads zero off-tree
+	body.grounded = true
+	body.position = Vector3(0, 1.0, 0)
+	mm._update_ground_reference(body)
+	assert_almost_eq(mm._ground_y, 1.0, 0.0001, "standing on the floor sets the reference")
+	body.grounded = false
+	body.position = Vector3(0, 9.0, 0)              # mid-jump, two storeys up
+	mm._update_ground_reference(body)
+	assert_almost_eq(mm._ground_y, 1.0, 0.0001,
+			"AIRBORNE height is ignored entirely — this is what stops a jump redrawing the map")
+	body.grounded = true
+	body.position = Vector3(0, 9.0, 0)              # landed on a balcony
+	mm._update_ground_reference(body)
+	assert_almost_eq(mm._ground_y, 9.0, 0.0001, "landing somewhere new DOES move the reference")
+
+## A host with no is_on_floor (a test stub, a no-clip debug body) must degrade to tracking live Y rather
+## than crashing or freezing the map on frame one's height.
+func test_ground_reference_degrades_without_is_on_floor() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	var plain := Node3D.new()
+	add_child_autofree(plain)  # in-tree, same reason
+	plain.position = Vector3(0, 4.0, 0)
+	mm._update_ground_reference(plain)
+	assert_almost_eq(mm._ground_y, 4.0, 0.0001, "a host without the method just tracks live Y")
+	plain.position = Vector3(0, 6.0, 0)
+	mm._update_ground_reference(plain)
+	assert_almost_eq(mm._ground_y, 6.0, 0.0001, "...and keeps following it")
+
+
+## Minimal stand-in for a CharacterBody3D: the widget only duck-types is_on_floor(), so a test needs no
+## physics server, no collider and no gravity to exercise the grounded/airborne contract.
+class AirborneStub extends Node3D:
+	var grounded: bool = true
+	func is_on_floor() -> bool:
+		return grounded

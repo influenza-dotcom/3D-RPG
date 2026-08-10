@@ -226,3 +226,40 @@ func test_walkable_triangles_survives_out_of_range_indices() -> void:
 	assert_eq(FS.walkable_triangles(nm, Transform3D.IDENTITY, -1.0, 1.0).size(), 0,
 			"an out-of-range polygon index is skipped, not indexed")
 	nm = null
+
+
+# --- sticky_band_key (the "map flips when I jump" fix) --------------------------------------------------
+
+func test_sticky_band_takes_the_raw_answer_with_nothing_drawn() -> void:
+	assert_eq(FS.sticky_band_key(0, false, 7.0, 2.6, 0.6), FS.deck_key(7.0, 2.6),
+			"the first band drawn has nothing to stick to")
+
+func test_sticky_band_holds_through_a_small_overshoot() -> void:
+	# THE BUG: standing at 2.5 on a 2.6 band and rising to 2.7 crosses a boundary, and a raw quantisation
+	# swapped the entire floorplan for it. Within the margin the drawn band must not move.
+	assert_eq(FS.deck_key(2.7, 2.6), 1, "raw quantisation really does flip here — this is the bug")
+	assert_eq(FS.sticky_band_key(0, true, 2.7, 2.6, 0.6), 0, "...and the sticky band does not")
+	assert_eq(FS.sticky_band_key(0, true, -0.5, 2.6, 0.6), 0, "same just below the band's floor")
+
+func test_sticky_band_releases_once_properly_clear() -> void:
+	assert_eq(FS.sticky_band_key(0, true, 3.5, 2.6, 0.6), 1, "a full storey up does change the drawn floor")
+	assert_eq(FS.sticky_band_key(0, true, -1.5, 2.6, 0.6), -1, "and so does dropping into a basement")
+
+func test_sticky_band_clears_one_stair_riser() -> void:
+	# This project's brush stairs have 0.5 m risers (CLAUDE.md). One step taken next to a boundary must not
+	# swap the map, or climbing a flight strobes it.
+	var band := 2.6
+	var hyst := 0.6
+	assert_gt(hyst, 0.5, "the shipped margin must exceed one riser or stairs flicker")
+	assert_eq(FS.sticky_band_key(0, true, band + 0.4, band, hyst), 0, "one riser over the line still holds")
+
+func test_sticky_band_is_stable_once_settled() -> void:
+	# Idempotence: feeding the result back in must never oscillate, or the map alternates every frame.
+	var key := 0
+	for y in [2.7, 2.5, 2.8, 2.4, 2.9]:
+		key = FS.sticky_band_key(key, true, y, 2.6, 0.6)
+		assert_eq(key, 0, "jitter across the boundary never moves the drawn band (y=%s)" % y)
+
+func test_sticky_band_degenerate_band_is_safe() -> void:
+	assert_eq(FS.sticky_band_key(3, true, 9.0, 0.0, 0.6), FS.deck_key(9.0, 0.0),
+			"a zero band cannot divide, so it falls through to the raw answer")

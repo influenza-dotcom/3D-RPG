@@ -52,6 +52,11 @@ func test_minimap_geometry_defaults() -> void:
 	assert_almost_eq(h.minimap_world_span, 40.0, 0.001, "metres across the short axis at zoom 1")
 	assert_almost_eq(h.minimap_cut_height, 1.2, 0.001, "chest-height section cut")
 	assert_almost_eq(h.minimap_band_height, 2.6, 0.001, "one storey: deck cache quantum + marker fade span")
+	assert_almost_eq(h.minimap_band_hysteresis, 0.6, 0.001, "band-exit margin")
+	assert_gt(h.minimap_band_hysteresis, 0.5,
+		"MUST exceed one 0.5 m stair riser (CLAUDE.md) — at or below it, a single step next to a band boundary swaps the whole floorplan, which is the reported 'map changes wildly when I jump' bug")
+	assert_lt(h.minimap_band_hysteresis, h.minimap_band_height * 0.5,
+		"...but well under half a storey, or you keep drawing a floor you have genuinely left")
 	assert_almost_eq(h.minimap_wall_width, 0.0, 0.001,
 		"ships at the hairline sentinel, which is transform-INDEPENDENT — strokes cannot fatten with zoom")
 	assert_almost_eq(h.minimap_max_solid_span, 120.0, 0.001, "void-seal reject")
