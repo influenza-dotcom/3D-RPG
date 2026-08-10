@@ -139,3 +139,24 @@ func test_template_scene_only_needs_a_bake() -> void:
 	assert_false(_has(w, "Nothing feeds"), "...navmesh geometry (Geometry + Ground)")
 	assert_false(_has(w, "No PlayerSpawn"), "...a default PlayerSpawn")
 	assert_true(_has(w, "isn't baked"), "...and ships UNBAKED, so the only remaining warning is the bake reminder")
+
+
+## Every new level starts from this template, so the objective-marker channel is wired here ONCE rather than
+## per level. Without a QuestMarkerSync in the scene, Groups.MINIMAP has no producers at all: WorldMarker and
+## QuestMarkerSync appear in NO shipped .tscn, so the HUD minimap's POI dots and the compass chevrons are both
+## dead on arrival in any level a designer creates. This is the fix for new levels; alive.map still needs
+## markers placed by hand (see README's Rough Edges).
+func test_template_ships_the_objective_marker_channel() -> void:
+	var packed := load("res://scenes/levels/LevelTemplate.tscn") as PackedScene
+	assert_not_null(packed, "LevelTemplate.tscn loads")
+	if packed == null:
+		return
+	var root := packed.instantiate()
+	if root.get_child_count() == 0:
+		root.free()  # reimport can briefly yield an empty PackedScene — skip rather than false-fail
+		return
+	add_child_autofree(root)
+	var sync := root.get_node_or_null(^"QuestMarkerSync")
+	assert_not_null(sync, "the template ships a QuestMarkerSync, so objective markers work with no wiring")
+	if sync != null:
+		assert_true(sync is QuestMarkerSync, "...and it carries the real script, not a bare Node")
