@@ -10,7 +10,7 @@ This index is generated from `@system` annotations in the code, so it cannot dri
 For the deep narrative see [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md); for current rough edges
 see [ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md).
 
-_15 system(s), 31 entries - scanned scripts/, managers/ + resources/._
+_16 system(s), 32 entries - scanned scripts/, managers/ + resources/._
 
 - [Audio](#audio)
 - [Control-Lock And Immunity](#control-lock-and-immunity)
@@ -18,6 +18,7 @@ _15 system(s), 31 entries - scanned scripts/, managers/ + resources/._
 - [Economy](#economy)
 - [Effect And Audio Seams](#effect-and-audio-seams)
 - [Interaction](#interaction)
+- [Minimap](#minimap)
 - [NPC Brain](#npc-brain)
 - [Options Settings](#options-settings)
 - [Passive Item Buffs](#passive-item-buffs)
@@ -151,6 +152,16 @@ _query_talk_handler is THE line-of-sight wall-gate for every look-at interactabl
 - **Risk:** Remove either liveness bail (the `player as Character` is_alive() gates at the TOP of _unhandled_input AND _physics_process): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic — or the corpse camera keeps painting the hover outlines/readout and greeting NPCs it sweeps across.
 - **Risk:** Fold the per-prop throw_impulse_mult multiply INTO the throw test (launch_impulse / is_throw_release read the RAW impulse first): a fast-throw prop's gentle tap-DROP then scales past the throw threshold and silently noses, plays the throw sound, and credits the player with an attack.
 - **Test:** `tests/test_interaction_occlusion.gd` `tests/test_pickup_ray_liveness.gd` `tests/test_interact_prompts.gd` `tests/test_carry_step_over.gd` `tests/test_throw_release_policy.gd`
+
+## Minimap
+
+### `class FloorplanSection` - `scripts/ui/floorplan_section.gd`
+
+view_transform() is THE single projection the HUD minimap draws through: handed to draw_set_transform_matrix(), it maps world (x, z) metres straight onto the Control's pixel space, so the baked floorplan, the optional authored underlay and every marker dot share ONE matrix and can never fork projections. walkable_triangles() turns the level's BAKED NavigationMesh into a flat triangle list for one floor band — the day-one picture, needing no authored texture and no MapData; it reads the same three accessors NavMeshAudit / NavLinkPlanner already rely on (get_vertices / get_polygon_count / get_polygon).
+
+- **Risk:** A section cut renders ONLY the band it cuts — a mezzanine, catwalk or stair tread above the cut plane is invisible by construction, and a flight of stairs reads as a gap between two bands.
+- **Risk:** band_floor quantises the player's ORIGIN Y and never raycasts down: get_world_3d().direct_space_state returns EMPTY, silently, outside a physics frame — a previously-shipped bug class in this project.
+- **Test:** `tests/test_floorplan_section.gd`
 
 ## NPC Brain
 

@@ -1,0 +1,228 @@
+extends GutTest
+
+## FloorplanSection — the pure geometry brain behind the HUD minimap (scripts/ui/floorplan_section.gd).
+## Everything risky about the minimap lives here as a static so it can be pinned off-tree, the HudSway /
+## NavMeshAudit / Compass.project_to_edge split. The widget's PAINTING is playtest-verified; the projection,
+## the band quantisation, the redraw gate and the navmesh fan are proven here.
+##
+## The load-bearing one is test_view_transform_rotate_puts_forward_at_screen_up: "rot = +yaw" is derived in
+## the script's header, and a sign error there is invisible in code review but rotates the whole map backwards.
+
+const FS := preload("res://scripts/ui/floorplan_section.gd")
+
+## A synthetic NavigationMesh with no bake and no tree — enough for the fan/band/transform contracts.
+func _mesh(verts: PackedVector3Array, polys: Array) -> NavigationMesh:
+	var nm := NavigationMesh.new()
+	nm.set_vertices(verts)
+	for p in polys:
+		nm.add_polygon(p)
+	return nm
+
+
+# --- px_per_metre -------------------------------------------------------------------------------------
+
+func test_px_per_metre_uses_the_short_axis() -> void:
+	# A 200x100 box showing 40 m across its SHORT axis -> 100 px / 40 m.
+	assert_almost_eq(FS.px_per_metre(Vector2(200, 100), 40.0, 1.0), 2.5, 0.0001,
+			"the short axis sets the scale, so a non-square box never crops the promised span")
+
+func test_px_per_metre_zoom_shows_fewer_metres() -> void:
+	var one := FS.px_per_metre(Vector2(108, 108), 40.0, 1.0)
+	var two := FS.px_per_metre(Vector2(108, 108), 40.0, 2.0)
+	assert_almost_eq(two, one * 2.0, 0.0001, "zoom 2 shows half the metres -> twice the px/m (zooms IN)")
+	var half := FS.px_per_metre(Vector2(108, 108), 40.0, 0.5)
+	assert_almost_eq(half, one * 0.5, 0.0001, "zoom 0.5 shows twice the metres (zooms OUT)")
+
+func test_px_per_metre_degenerate_inputs_are_safe() -> void:
+	assert_almost_eq(FS.px_per_metre(Vector2.ZERO, 40.0, 1.0), 1.0, 0.0001, "zero rect -> 1.0, no divide by zero")
+	assert_almost_eq(FS.px_per_metre(Vector2(108, 108), 0.0, 1.0), 1.0, 0.0001, "zero span -> 1.0")
+	assert_almost_eq(FS.px_per_metre(Vector2(108, 108), 40.0, 0.0), 1.0, 0.0001, "zero zoom -> 1.0")
+	assert_almost_eq(FS.px_per_metre(Vector2(108, 108), 40.0, -3.0), 1.0, 0.0001, "negative zoom -> 1.0")
+
+
+# --- view_transform -----------------------------------------------------------------------------------
+
+func test_view_transform_centres_the_player() -> void:
+	var rect := Vector2(108, 108)
+	var centre := Vector2(37.5, -12.25)
+	for rotate in [true, false]:
+		for zoom in [0.5, 1.0, 2.0, 3.0]:
+			var ppm := FS.px_per_metre(rect, 40.0, zoom)
+			var view := FS.view_transform(centre, 1.1, ppm, rect, rotate)
+			var p: Vector2 = view * centre
+			assert_almost_eq(p.x, rect.x * 0.5, 0.001,
+					"the player's own world position always lands on the box centre (rotate=%s zoom=%s)" % [rotate, zoom])
+			assert_almost_eq(p.y, rect.y * 0.5, 0.001, "...on both axes")
+
+func test_view_transform_north_up_is_axis_locked() -> void:
+	var rect := Vector2(100, 100)
+	var centre := Vector2(5, 7)
+	for yaw in [0.0, 0.9, PI, -2.2]:
+		var view := FS.view_transform(centre, yaw, 2.0, rect, false)
+		assert_almost_eq(view.get_rotation(), 0.0, 0.0001, "north-up never rotates, whatever the yaw (%s)" % yaw)
+		var east: Vector2 = view * (centre + Vector2(1, 0))
+		assert_almost_eq(east.x, 52.0, 0.001, "+world X goes RIGHT")
+		assert_almost_eq(east.y, 50.0, 0.001, "...with no vertical component")
+		var south: Vector2 = view * (centre + Vector2(0, 1))
+		assert_almost_eq(south.y, 52.0, 0.001, "+world Z goes DOWN — the MapData.world_to_uv handedness")
+		assert_almost_eq(south.x, 50.0, 0.001, "...with no horizontal component")
+
+func test_view_transform_rotate_puts_forward_at_screen_up() -> void:
+	# THE DERIVATION TEST. Godot forward at yaw t is (-sin t, -cos t) in the XZ plane; heading-up must put a
+	# point 10 m ahead directly ABOVE the caret, at every yaw. A sign slip here mirrors the whole map.
+	var rect := Vector2(100, 100)
+	var centre := Vector2(-4, 11)
+	var ppm := 2.0
+	for yaw in [0.0, PI * 0.5, PI, -PI * 0.5, 2.37]:
+		var fwd := Vector2(-sin(yaw), -cos(yaw))
+		var view := FS.view_transform(centre, yaw, ppm, rect, true)
+		var ahead: Vector2 = view * (centre + fwd * 10.0)
+		assert_almost_eq(ahead.x, 50.0, 0.001, "10 m ahead stays on the caret's column at yaw %s" % yaw)
+		assert_almost_eq(ahead.y, 30.0, 0.001, "...and 10 m * 2 px/m ABOVE it (screen -y) at yaw %s" % yaw)
+
+func test_view_transform_scales_by_ppm() -> void:
+	var rect := Vector2(100, 100)
+	var a := FS.view_transform(Vector2.ZERO, 0.0, 3.0, rect, false)
+	var p0: Vector2 = a * Vector2.ZERO
+	var p1: Vector2 = a * Vector2(4, 0)
+	assert_almost_eq(p0.distance_to(p1), 12.0, 0.001, "4 m at 3 px/m draws 12 px apart")
+
+
+# --- arrow_angle --------------------------------------------------------------------------------------
+
+func test_arrow_angle_is_zero_in_heading_up() -> void:
+	for yaw in [0.0, 1.0, -2.5, PI]:
+		assert_almost_eq(FS.arrow_angle(yaw, true), 0.0, 0.0001,
+				"heading-up welds the caret pointing up and turns the world under it")
+
+func test_arrow_angle_is_negative_yaw_in_north_up() -> void:
+	for yaw in [0.0, 1.0, -2.5, PI]:
+		assert_almost_eq(FS.arrow_angle(yaw, false), -yaw, 0.0001,
+				"north-up freezes the world and spins the caret instead")
+
+
+# --- stroke_width -------------------------------------------------------------------------------------
+
+func test_stroke_width_survives_the_view_scale() -> void:
+	for ppm in [0.5, 1.0, 2.7, 9.0]:
+		assert_almost_eq(FS.stroke_width(2.0, ppm) * ppm, 2.0, 0.0001,
+				"a 2 px stroke renders 2 px wide at any zoom (px/m = %s)" % ppm)
+
+func test_stroke_width_zero_is_the_hairline_sentinel() -> void:
+	assert_almost_eq(FS.stroke_width(0.0, 2.7), -1.0, 0.0001,
+			"0 px -> Godot's -1.0 transform-INDEPENDENT hairline (the shipped default disarms the fatten trap)")
+	assert_almost_eq(FS.stroke_width(-4.0, 2.7), -1.0, 0.0001, "negative is the same sentinel")
+
+
+# --- band_floor / deck_key / cut_plane ------------------------------------------------------------------
+
+func test_band_floor_quantises() -> void:
+	assert_almost_eq(FS.band_floor(0.0, 2.6), 0.0, 0.0001, "the ground band starts at 0")
+	assert_almost_eq(FS.band_floor(2.4, 2.6), 0.0, 0.0001, "still the ground band just under the ceiling")
+	assert_almost_eq(FS.band_floor(3.0, 2.6), 2.6, 0.0001, "one storey up")
+	assert_almost_eq(FS.band_floor(-0.1, 2.6), -2.6, 0.0001, "a basement floors DOWN, not toward zero")
+	assert_almost_eq(FS.band_floor(5.0, 0.0), 5.0, 0.0001, "a zero band degrades to identity, never a divide by zero")
+
+func test_deck_key_is_stable_inside_a_band() -> void:
+	var k := FS.deck_key(0.0, 2.6)
+	assert_eq(FS.deck_key(0.4, 2.6), k, "walking around one floor never re-slices the deck")
+	assert_eq(FS.deck_key(2.4, 2.6), k, "...right up to the band's ceiling")
+
+func test_deck_key_differs_across_bands() -> void:
+	assert_ne(FS.deck_key(3.0, 2.6), FS.deck_key(0.0, 2.6), "a storey up is a different deck")
+	assert_ne(FS.deck_key(-1.0, 2.6), FS.deck_key(0.0, 2.6), "a basement is a different deck")
+
+func test_cut_plane_sits_above_the_origin() -> void:
+	assert_almost_eq(FS.cut_plane(12.0, 1.2), 13.2, 0.0001,
+			"the cut is chest height above the player's feet — never a downward raycast")
+
+
+# --- needs_redraw -------------------------------------------------------------------------------------
+
+func test_needs_redraw_is_false_when_still() -> void:
+	assert_false(FS.needs_redraw(Vector2(3, 4), Vector2(3, 4), 1.0, 1.0, 0.02, 0.004),
+			"a standing, still player costs literally nothing")
+	assert_false(FS.needs_redraw(Vector2(3, 4), Vector2(3.01, 4), 1.0, 1.002, 0.02, 0.004),
+			"sub-epsilon jitter does not repaint")
+
+func test_needs_redraw_true_past_the_epsilon() -> void:
+	assert_true(FS.needs_redraw(Vector2(3, 4), Vector2(3.5, 4), 1.0, 1.0, 0.02, 0.004), "a step repaints")
+	assert_true(FS.needs_redraw(Vector2(3, 4), Vector2(3, 4), 1.0, 1.2, 0.02, 0.004), "a turn repaints")
+
+func test_needs_redraw_wraps_the_yaw_seam() -> void:
+	# The +-PI seam: without wrapf this reads as a full-circle flick every frame the player faces backwards.
+	assert_false(FS.needs_redraw(Vector2.ZERO, Vector2.ZERO, PI - 0.001, -PI + 0.001, 0.02, 0.02),
+			"crossing +-PI is a tiny turn, not a 2PI one")
+
+
+# --- marker_alpha -------------------------------------------------------------------------------------
+
+func test_marker_alpha_full_on_this_floor() -> void:
+	assert_almost_eq(FS.marker_alpha(0.0, 2.6, 0.3), 1.0, 0.0001, "a marker at the player's height is solid")
+
+func test_marker_alpha_fades_to_floor_alpha() -> void:
+	assert_almost_eq(FS.marker_alpha(2.6, 2.6, 0.3), 0.3, 0.0001, "a full band away sits at the floor alpha")
+	assert_almost_eq(FS.marker_alpha(-9.0, 2.6, 0.3), 0.3, 0.0001, "and never fades past it, above or below")
+
+func test_marker_alpha_is_monotone() -> void:
+	var prev := 2.0
+	for dy in [0.0, 0.5, 1.0, 1.5, 2.0, 2.6, 5.0]:
+		var a: float = FS.marker_alpha(dy, 2.6, 0.3)
+		assert_lte(a, prev, "alpha never rises as the marker gets further away vertically (dy=%s)" % dy)
+		assert_gte(a, 0.3, "...and never drops below the floor alpha")
+		prev = a
+
+
+# --- walkable_triangles -------------------------------------------------------------------------------
+
+func test_walkable_triangles_null_navmesh_is_empty() -> void:
+	# Must return empty and push NO engine error — GUT 9.6 fails the whole suite on one.
+	var out := FS.walkable_triangles(null, Transform3D.IDENTITY, -1.0, 1.0)
+	assert_eq(out.size(), 0, "a level with no baked navmesh simply has no walkable fill")
+
+func test_walkable_triangles_unbaked_mesh_is_empty() -> void:
+	var nm := NavigationMesh.new()
+	assert_eq(FS.walkable_triangles(nm, Transform3D.IDENTITY, -1.0, 1.0).size(), 0, "0 polygons -> empty, no error")
+	nm = null
+
+func test_walkable_triangles_band_filters() -> void:
+	# Two quads, one at y 0 and one at y 10. A [-1, 1) band keeps exactly one.
+	var nm := _mesh(PackedVector3Array([
+			Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(1, 0, 1), Vector3(0, 0, 1),
+			Vector3(0, 10, 0), Vector3(1, 10, 0), Vector3(1, 10, 1), Vector3(0, 10, 1),
+		]), [PackedInt32Array([0, 1, 2, 3]), PackedInt32Array([4, 5, 6, 7])])
+	var out := FS.walkable_triangles(nm, Transform3D.IDENTITY, -1.0, 1.0)
+	assert_eq(out.size(), 6, "one quad fans to 2 triangles = 6 vertices; the storey above is filtered out")
+	for p in out:
+		assert_lte(p.x, 1.001, "only the ground quad's footprint survives")
+	nm = null
+
+func test_walkable_triangles_is_a_multiple_of_three() -> void:
+	# A convex 5-gon fans to 3 triangles. Fan integrity matters: a stray vertex shifts every triangle after it.
+	var nm := _mesh(PackedVector3Array([
+			Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(3, 0, 2), Vector3(1, 0, 3), Vector3(-1, 0, 2),
+		]), [PackedInt32Array([0, 1, 2, 3, 4])])
+	var out := FS.walkable_triangles(nm, Transform3D.IDENTITY, -1.0, 1.0)
+	assert_eq(out.size(), 9, "a 5-gon fans to 3 triangles = 9 vertices")
+	assert_eq(out.size() % 3, 0, "the buffer is always whole triangles")
+	nm = null
+
+func test_walkable_triangles_applies_the_region_transform() -> void:
+	# The mesh's vertices are region-LOCAL; a level that offsets its NavigationRegion3D must not draw its
+	# floor in the wrong place. Note the band is tested in WORLD space too — the offset moves it.
+	var nm := _mesh(PackedVector3Array([Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(1, 0, 1)]),
+			[PackedInt32Array([0, 1, 2])])
+	var xf := Transform3D(Basis.IDENTITY, Vector3(100, 0, -50))
+	var out := FS.walkable_triangles(nm, xf, -1.0, 1.0)
+	assert_eq(out.size(), 3, "the triangle survives the band filter at its WORLD height")
+	assert_almost_eq(out[0].x, 100.0, 0.001, "the region's translation moves the fill in X")
+	assert_almost_eq(out[0].y, -50.0, 0.001, "...and in Z")
+	nm = null
+
+func test_walkable_triangles_survives_out_of_range_indices() -> void:
+	# A corrupt / partially-imported mesh must degrade to "no fill", never an engine error mid-draw.
+	var nm := _mesh(PackedVector3Array([Vector3.ZERO, Vector3(1, 0, 0), Vector3(1, 0, 1)]),
+			[PackedInt32Array([0, 1, 99])])
+	assert_eq(FS.walkable_triangles(nm, Transform3D.IDENTITY, -1.0, 1.0).size(), 0,
+			"an out-of-range polygon index is skipped, not indexed")
+	nm = null
