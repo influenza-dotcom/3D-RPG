@@ -1930,8 +1930,9 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 
 **HUD markers (compass / minimap points of interest):**
 
-- **`WorldMarker`** (`world_marker.gd`, plain `Node3D`) — a point-of-interest beacon: drop it in the world and it shows as a chevron on the `Compass` (screen edge) and a dot on the `Minimap`. Joins the `"compass"` and `"minimap"` groups on `_ready` so both HUD channels pick it up with no wiring. Knobs: `on_compass`, `on_minimap`, `color` (the Compass chevron tint). Place by hand for fixed landmarks (a vendor, an exit, a stash).
-- **`QuestMarkerSync`** (`quest_marker_sync.gd`, plain `Node`) — drop ONE into a level: it spawns a `WorldMarker` for each ACTIVE quest objective that has `show_marker`, and removes them as objectives complete / quests finish or fail — so the Compass + Minimap point at your current objectives with NO per-quest wiring. Driven by `GameState`'s quest signals. Knob: `marker_color`. Pairs with the per-objective `show_marker` / `marker_position` exports (§14).
+- **`WorldMarker`** (`world_marker.gd`, plain `Node3D`) — a point-of-interest beacon: drop it in the world and it shows as a chevron on the `Compass` (screen edge) and a dot on the `Minimap`. Joins the `"compass"` and `"minimap"` groups on `_ready` so both HUD channels pick it up with no wiring. Knobs: `on_compass`, `on_minimap`, `color` (the Compass chevron tint). Place by hand for fixed landmarks (a vendor, an exit, a stash). The minimap half works out of the box (the HUD ships one, §16); the `Compass` half still needs a `Compass` Control on the HUD.
+- **`QuestMarkerSync`** (`quest_marker_sync.gd`, plain `Node`) — drop ONE into a level: it spawns a `WorldMarker` for each ACTIVE quest objective that has `show_marker`, and removes them as objectives complete / quests finish or fail — so the Compass + Minimap point at your current objectives with NO per-quest wiring. Driven by `GameState`'s quest signals. Knob: `marker_color`. **`LevelTemplate.tscn` already ships one**, so a level started from the template needs nothing; add one by hand only to a level built another way. Pairs with the per-objective `show_marker` / `marker_position` exports (§14).
+- **`MinimapHide`** (`minimap_hide.gd`, plain `Node`) — child it under a prop (fence, awning, parked car, pipe run) to keep that prop's colliders out of the HUD minimap's wall cut; collision is untouched. **Marks its PARENT, not itself**, so it must be a child of the prop. Knob: `enabled`, read once at level load (see §16).
 - **`Compass`** (`compass.gd`, `extends Control`) — a screen-edge compass HUD: for every `WorldMarker` (anything in the `"compass"` group) it draws a dot at its on-screen position when visible, else a chevron pinned to the screen edge pointing toward it. Add it to the HUD (`res://scenes/player/ui.tscn`) as a full-rect Control. Knobs: `edge_margin` (px the edge ring is inset, default `28`), `marker_size` (px radius, default `6`), `max_distance` (hide farther markers; 0 = no limit).
 
 **Death & gore drop-ins:** **`BodyPartGibs`** (`body_part_gibs.gd`, plain `Node`) — per-actor control over the **body-part death burst**: the character coming apart into its OWN head, torso, arms and legs (the LEGO/Roblox read) instead of only spraying generic meat chunks. **You do not need to place this node** — the burst is already ON for every actor that has a `BodyModelSwap`, governed globally by `GameSettings.effects` → **Body-part gibs**. Drop it under a Character (a DIRECT child of the root — that's where it's looked for) purely to override that for one actor: untick **`enabled`** to leave a boss/quest NPC in one piece, or tick it to gib one actor while the global switch is off. Also picks **which** parts fly (`burst_head` / `burst_torso` / `burst_arms` / `burst_legs` — arms and legs are one pair each), how much loose gore goes with them (`meat_gib_count`, `-1` = inherit the global, `0` = parts only), how hard they're flung (`launch_speed_scale`), and an optional replacement chassis (`part_gib_scene`). The flying parts need no art: their visual is lifted live off that actor's `BodyModelSwap`, skin and tint included.
@@ -2936,37 +2937,102 @@ Key files: `rpg/scripts/components/music_director.gd`, `rpg/scripts/components/r
 
 ## Map and minimap
 
-A minimap is two pieces: a **`MapData`** Resource that says *what the level looks like from above and which world area that picture covers*, and a **`Minimap`** `Control` on the HUD that draws it plus live dots for the player and flagged NPCs. A sample `MapData` ships at `res://resources/maps/sample_map.tres` (copy it as a starting point); only the HUD `Control` placement is left to you.
+**The HUD ships a minimap. You do not author one.** It sits in the top-right corner, it is built in code by
+`ui.gd`, and it draws a **procedural vector floorplan of the floor you are standing on** — derived at runtime
+from the level's own geometry. There is no texture to render, no `MapData` to create, and nothing to place.
+Open any level and it works.
 
-### The MapData Resource (`res://scripts/ui/map_data.gd`)
+That is a change: this section used to tell you to render the level top-down, author a `MapData`, and drop a
+`Minimap` `Control` into `ui.tscn` yourself. None of that is required now. `MapData` still exists and is still
+supported, but it has been demoted to an **optional underlay** — see the end of this section.
 
-A `MapData` (`class_name MapData`, `@tool` `Resource`) pairs a top-down image with the world rectangle it spans, so the minimap can project any world position onto the image. Create one with **right-click in the FileSystem → New Resource → MapData** and fill:
+### What it draws, and where each part comes from
 
-- **`map_texture`** (`Texture2D`) — a top-down render of the level. This is the image the minimap draws.
-- **`world_bounds`** (`Rect2`, default `Rect2(-50, -50, 100, 100)`) — the **world area the texture covers**. It's a top-down projection, so the rect's `x` / `width` map to the world **X** span and its `y` / `height` map to the world **Z** span (in world units); **world Y is ignored**. Get this right or every dot lands in the wrong place — it's the whole projection.
-- **`player_marker`** (`Texture2D`) — optional icon drawn at the player's position. Null → a cyan fallback dot.
-- **`npc_marker`** (`Texture2D`) — optional icon drawn at each flagged NPC. Null → a red fallback dot.
+Two layers, both derived from the level and both cached per floor:
 
-### The Minimap Control (`res://scripts/ui/minimap.gd`)
+1. **The walkable fill** — a dim wash over the floor, fanned from the level's **baked `NavigationMesh`**. This
+   is why a freshly baked level has a usable map immediately. An UNBAKED level has no fill (see §14 — bake it).
+2. **The wall strokes** — a **horizontal section cut** of the level's STATIC colliders, taken at chest height.
+   A real floorplan is a section cut: walls become lines and doorways become the gaps between them. A level
+   with no static colliders has no strokes.
 
-A `Minimap` (`class_name Minimap`, `extends Control`) draws the `MapData` and the markers. Add it to the HUD (`res://scenes/player/ui.tscn`) and assign:
+On top of that: a caret for you, and dots for points of interest and NPCs.
 
-- **`map_data`** (`MapData`) — the level's authored map. Null → it draws nothing.
-- **`marker_radius`** (`float`, `4.0`) — radius of the **fallback dot** drawn when a marker `Texture2D` is null.
+**It draws ONE FLOOR — the band you are standing in.** This is the honest limitation to design around. A
+mezzanine, a catwalk, or the top of a staircase is simply not on the map while you are below it, and a flight
+of stairs reads as a gap between two floors. Markers on another storey fade rather than lying about being in
+the room with you.
 
-It reads the player from the **`&"Player"` group** (`Groups.PLAYER`, cyan fallback dot) and NPC markers from the **`&"minimap"` group** (red fallback dot), projecting each through `MapData.world_to_uv`. It only redraws while it's visible, so a hidden minimap costs nothing.
+### Which knobs live where
 
-**Worked example — a minimap for the back-alley level**
+The split is the usual one, and it matters when you go looking for a value:
 
-> Goal: a top-right minimap showing the player and a couple of patrolling guards.
+| You want to change | It lives on |
+|---|---|
+| Box size, corner inset, metres shown, cut height, floor-band height, stroke width, clutter-reject spans | `GameSettings.hud` -> `resources/tuning/HudSettings.tres`, group **Minimap** |
+| Every colour (walls, floor fill, backing, rim), optional frame art | `MenuStyle.hud` -> `resources/ui/hud_skin.tres`, group **Minimap** (§27) |
+| On/off, heading-up vs north-up, zoom, NPC dots | The PLAYER's, in Options -> Accessibility. `Settings.minimap_*`, polled live |
+| Whether a particular prop counts as a wall | A `MinimapHide` child on that prop (below) |
 
-1. Render the level top-down and save the image. Create `res://resources/maps/alley_map.tres` (a `MapData`); set `map_texture` to that render.
-2. Measure the level's X/Z extent and set `world_bounds = Rect2(-60, -40, 120, 80)` — i.e. world X from −60 to +60, world Z from −40 to +40.
-3. Open `res://scenes/player/ui.tscn`, add a **`Minimap`** `Control` in a corner (anchor it top-right, give it a size), and set `map_data = alley_map.tres`.
-4. Play. The player shows as a **cyan dot**. Any `Node3D` you put in the `&"minimap"` group shows as a **red dot** at its projected position.
+`minimap_size` and `minimap_inset` must stay WHOLE PIXELS: the 792x444 canvas is nearest-upscaled ~2.4x, and a
+fractional size rasterizes into a ragged edge. A test pins this.
+
+**The top-right corner is shared with the objective tracker**, and the minimap owns the reflow: `ui.gd` derives
+the tracker's top from `minimap_inset.y + minimap_size.y + minimap_tracker_gap`, so moving or resizing the box
+moves the tracker with it. Turning the map off in Options returns the tracker to `minimap_tracker_bare_top`
+(8 px — exactly where it sat before the minimap existed). Do not hand-place the tracker against the map.
+
+### Markers on it
+
+- **Points of interest** — anything in the `&"minimap"` group (`Groups.MINIMAP`), which is what a **`WorldMarker`**
+  joins. These are drawn in the marker's own `color`, and when one is off the edge of the box it PINS to the rim
+  pointing at itself, because an objective you cannot see yet is exactly what you want pointed at. Active quest
+  objectives get theirs automatically from a **`QuestMarkerSync`**, which `LevelTemplate.tscn` now ships — see §17.
+- **NPCs** — every living NPC, tinted by allegiance (companion / hostile / friendly) through the same `CBPalette`
+  mapping the hover name, dialogue speaker name and enemy health bar use. Unlike a POI marker an NPC dot is
+  **never pinned to the rim**: pinning bodies would report every NPC on the level against the box edge, which is
+  a radar rather than a floorplan. A dot means "actually near you". Dead NPCs are filtered (bodies are pooled,
+  so a corpse would otherwise blip forever). The player switches these off with Options -> Accessibility ->
+  **NPCs On Minimap**; the designer switch is `Minimap.dot_npcs`.
+
+### Keeping a prop out of the walls (`MinimapHide`)
+
+A chain-link fence, a market awning, a parked car and a pipe run all have colliders, and all of them cut into
+clutter that hides the room behind them. Child a **`MinimapHide`** (`scripts/components/minimap_hide.gd`, a
+plain `Node`) under the prop and its whole subtree drops out of the wall cut. Collision is untouched — the prop
+still blocks bullets, footsteps and navigation.
+
+- **It marks its PARENT, not itself**, which is why you child it under the prop rather than dropping it beside
+  one. (That is also why it is a `Node` and not a `Node3D`.)
+- **`enabled` is read once, at level load**, during the single gather that makes the map free per frame.
+  Toggling it at runtime does nothing until something calls `Minimap.rebake()`.
+
+Two blunter dials for the same problem, both in the Minimap tuning group: `minimap_min_solid_span` rejects
+detail smaller than it on both axes (trim, sign backers, pipe collars), and `minimap_max_solid_span` rejects a
+brush bigger than it on both axes — that one exists for the Quake "void seal", a worldspawn box enclosing the
+whole map, which would otherwise draw a frame around every room.
+
+### The optional authored underlay (`MapData`)
+
+`MapData` (`class_name MapData`, `@tool` `Resource`, `res://scripts/ui/map_data.gd`) is still here and still
+supported; it is simply no longer required. Assign one to `Minimap.map_data` and its image is drawn UNDER the
+procedural plan, positioned through the SAME view matrix via its `world_bounds` — so the picture and the dots
+cannot drift apart. Use it for a stylised hand-drawn map over the top of real geometry.
+
+- **`map_texture`** (`Texture2D`) — a top-down image of the level.
+- **`world_bounds`** (`Rect2`, default `Rect2(-50, -50, 100, 100)`) — the world area that image covers. It is a
+  top-down projection, so `x` / `width` are the world **X** span and `y` / `height` are the world **Z** span;
+  **world Y is ignored.** Get this wrong and the image slides off the plan under it.
+- **`player_marker`** / **`npc_marker`** (`Texture2D`) — optional icons replacing the drawn caret and dots.
+
+A texture-less `MapData` is VALID and means "no underlay" — it no longer means the minimap renders nothing.
+A sample ships at `res://resources/maps/sample_map.tres`.
 
 **Gotcha**
-- **Use a `WorldMarker` to put things on the minimap.** Anything in the `&"minimap"` group shows as a dot; the supported way to join it is to drop a `WorldMarker` (`on_minimap = true`) at the spot, or let a `QuestMarkerSync` spawn one for an active objective — see **"Quest markers and the compass"** (§17). (A manual `add_to_group(Groups.MINIMAP)` still works for ad-hoc cases — use the `Groups` const, not a raw literal.) The player dot works out of the box because the player is already in the `&"Player"` group (`Groups.PLAYER`).
+- **The map only knows about a level's geometry, not its intent.** If a room reads badly, reach for the dials in
+  the table above rather than assuming it is broken: `minimap_cut_height` (is the cut passing through a mezzanine
+  floor or under a counter?), `minimap_min_solid_span` (speckle), and `MinimapHide` on the individual offender.
+- **An unbaked level draws no floor fill.** That is the navmesh bake talking, not the minimap — see §14.
 
 ---
 
@@ -3009,7 +3075,7 @@ So the full objective-marker recipe is: tick `show_marker` and set `marker_posit
 
 1. In the quest's `QuestObjective` for the turn-in step, open the **Marker** group: tick `show_marker`, and set `marker_position` to the questgiver's world position (copy it from the NPC's `Transform`).
 2. Drop a **`QuestMarkerSync`** anywhere in the level (it's a plain `Node`; tint its `marker_color` if you like).
-3. Make sure the HUD has a **`Compass`** (full-rect Control) and a `Minimap` (§16).
+3. The **minimap** needs nothing — the HUD ships one (§16). For the screen-edge chevron as well, add a **`Compass`** (full-rect Control) to the HUD; unlike the minimap it is still not shipped by default.
 4. Play. While that objective is active, a cyan chevron rides the screen edge toward the NPC (and a dot shows on the minimap); finishing the objective removes both automatically.
 
 For a **permanent landmark** (a vendor that's always marked), skip the objective and just drop a `WorldMarker` at the spot -- set its `color`, leave `on_compass`/`on_minimap` on.
@@ -3779,7 +3845,7 @@ Open `menu_skin.tres` and edit, by group:
 | **Layout budgets (English-measured px)** | the fixed pixel widths of TEXT-bearing columns/buttons, measured against the ENGLISH strings that land in them (German runs +30-40% longer): `slider_readout_width` + `rebind_button_width` + `setting_label_col_width`(`_dense`) (options rails), `sort_button_width` + `price_col_width` (shop / chip-install), `level_up_cols_width` + `stat_name_col_width` (level-up rows), `disposition_col_width` + `rep_value_col_width` (reputation — the disposition word and the right-aligned signed `+100`/`-100` standing columns), `cycler_value_width` (character creation), `start_button_min_width` (start menu — the Continue/New Game/Settings/Quit button floor; a min width with air, not a clip budget). A future locale retunes them via a per-locale remapped `menu_skin.tres`; do **not** "fix" a clipped string by growing one globally -- the fixed widths are what stop runtime text from resizing/shifting controls (see each knob's fit math in `menu_skin.gd`) |
 | **Widget art — buttons / toggles / sliders / text fields / meters / tabs / scrollbars / misc** | **the UI artist's drop-in surface.** Eight groups of OPTIONAL per-widget, per-state art slots that replace the generated flat look wholesale: `button_normal`/`hover`/`pressed`/`focus`/`disabled` (`StyleBox` each), the four `toggle_*_icon` textures (CheckButton/CheckBox switch art), `slider_track`/`slider_fill` (+ `slider_grabber` thumb texture), `line_edit_normal`/`focus`, `meter_background`/`meter_fill` (deliver fill art in white/grey — tinted meters recolour a copy per row), `tab_selected`/`unselected`/`hovered` (worn by BOTH tab systems — the Options `TabContainer` and the player-menu strip), `scrollbar_track`/`grabber`, `separator_style`, and `tooltip_panel` (the cursor tip and native tooltips). Every slot is null by default and falls back to the generated look, so art can land **one widget at a time**. To turn a PNG into a slot value: in the slot pick **New StyleBoxTexture**, drop the PNG into its `texture`, and set its **Texture Margins** so the corners don't stretch (9-patch). Pinned by `tests/test_menu_skin_art.gd` |
 | **Grid tiles** | the tetris-grid stack tiles (`grid_tile.gd` / `grid_inventory_view.gd` -- the inventory/loot/shop cells): `equipped_border_color` (the equipped item's tile border -- defaults to the accent gold, so diverging from the ammo/money category gold is a deliberate choice), `tile_consumable_color` (border tint of a consumable stack's tile, the non-weapon "use it" category), `tile_hover_ring_color` (the thin ring the overlay draws around the hovered stack), `drag_source_dim_alpha` (the alpha the source tile dims to while its stack is being dragged) |
-| **Sounds** | **the menu's whole audio vocabulary — one `AudioStream` slot per SEMANTIC event, every one optional (null = that event is silent), so audio lands one cue at a time exactly like the widget art.** `hover_sound` (mouse over any button — the highest-frequency cue, keep it short and quiet), `click_sound` (the DEFAULT confirm), `open_sound` (a menu came up COLD — never a tab swap), `back_sound` (back / close / cancel), `tab_sound` (a SIDEWAYS swap: tab strip, tab bar, shop sort, payment-rail flip), `step_left_sound` / `step_right_sound` (a value stepped down/left or up/right — cycler arrows, +/- buttons, slider ticks), `commit_sound` (a HEAVY commit: money spent, level taken, save written, run stamped). The shipped clips live in `res://assets/audio/sfx/ui/`. **Volume** sub-group: `ui_sound_volume_db` is the MASTER trim and each `*_volume_db` is ADDED to it (the clips are not normalised against each other and land on the `sfx` bus, which carries its own trim plus a distortion insert — so levelling is a designer job here, never an import-time normalize; `step_volume_db` covers the L/R pair with ONE knob so the two directions can't drift apart). **Retrigger limits** sub-group: `hover_min_interval` (drop hover ticks closer than this — sweeping a 12-row list otherwise machine-guns), `step_min_interval` (tames keyboard auto-repeat on the cyclers), `slider_tick_count` (a full slider sweep is quantised to this many ticks whatever the slider's own step is, so a 360-step Max FPS slider and a 0..1 slider feel identical) |
+| **Sounds** | **the menu's whole audio vocabulary — one `AudioStream` slot per SEMANTIC event, every one optional (null = that event is silent), so audio lands one cue at a time exactly like the widget art.** `hover_sound` (mouse over any button — the highest-frequency cue, keep it short and quiet), `click_sound` (the DEFAULT confirm), `open_sound` (a menu came up COLD — never a tab swap), `back_sound` (back / close / cancel), `tab_sound` (a SIDEWAYS swap: tab strip, tab bar, shop sort, payment-rail flip), `step_left_sound` / `step_right_sound` (a value stepped down/left or up/right — cycler arrows, +/- buttons, slider ticks), `commit_sound` (a HEAVY commit: money spent, level taken, save written, run stamped), `denied_sound` (the game REFUSED the action: can't afford it, out of stock, bag full, nothing to withdraw, an illegal move, a failed save). The shipped clips live in `res://assets/audio/sfx/ui/`. **`denied_sound` is the ONE slot you can leave empty and still hear** — unassigned, it DERIVES from `back_sound` played at `denied_pitch_scale` (0.75), which is why refusals are audible out of the box with no ninth clip; assign a real stream to override, and tune `denied_pitch_scale` either way. Do not repurpose `back_sound` for refusals yourself: back means "this closed / I honoured your cancel", and a refused Confirm that plays the ordinary close sound reads as "done". **Volume** sub-group: `ui_sound_volume_db` is the MASTER trim and each `*_volume_db` is ADDED to it (the clips are not normalised against each other and land on the `sfx` bus, which carries its own trim plus a distortion insert — so levelling is a designer job here, never an import-time normalize; `step_volume_db` covers the L/R pair with ONE knob so the two directions can't drift apart; `denied_volume_db` is the only trim shipping non-zero at `-2.0`, since its default voice is a clip levelled for a different job). **Retrigger limits** sub-group: `hover_min_interval` (drop hover ticks closer than this — sweeping a 12-row list otherwise machine-guns), `step_min_interval` (tames keyboard auto-repeat on the cyclers), `slider_tick_count` (a full slider sweep is quantised to this many ticks whatever the slider's own step is, so a 360-step Max FPS slider and a 0..1 slider feel identical) |
 
 To restyle: edit the fields and save -- every screen updates next run. For a whole alternate theme, author a second `MenuSkin` `.tres` and point `MenuStyle` at it (`MenuStyle.set_skin`).
 

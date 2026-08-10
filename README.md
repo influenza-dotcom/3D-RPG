@@ -123,6 +123,9 @@ rpg/
 
 - **Editor-first authoring.** Gameplay features should appear as a drop-in
   component, an authored Resource, or a tuning `.tres`.
+- **Procedural HUD minimap.** The top-right map is a vector floorplan derived at
+  runtime from the level's baked navmesh and its static colliders — no per-level
+  authoring, no top-down render to keep in sync with the geometry.
 - **Level seam.** `GameRoot` loads a `LevelData` resource, instantiates its scene
   as `Level`, applies level music/ambience, and places the player at a
   `PlayerSpawn`. `LevelDoor` swaps levels at runtime.
@@ -222,6 +225,18 @@ ConfigFile round-trips for saves, Resource validation for data catalogs, and
 off-tree pure tests for planner/combat/math logic.
 
 ## Current Rough Edges
+
+- The HUD minimap draws **one floor — the band you are standing in**. A mezzanine,
+  a catwalk or the top of a staircase is not on the map while you are below it, and
+  a flight of stairs reads as a gap between two floors.
+- `alive.map` ships **no `WorldMarker`s**, so the minimap and compass show no
+  point-of-interest dots there until some are placed. A level started from
+  `LevelTemplate.tscn` gets objective markers automatically (it ships a
+  `QuestMarkerSync`); `alive.map` predates that and needs them by hand.
+- The screen-edge **`Compass` is still not on the HUD** — the minimap half of the
+  marker system ships, the chevron half needs a `Compass` Control added.
+- A level whose navmesh is not baked draws **no walkable floor fill** on the minimap
+  (walls only). That is the bake, not the map.
 
 - Save/load preserves profile, active level identity, discovered corpse markers,
   and an additive per-object ledger — `Door` open/locked plus consumed

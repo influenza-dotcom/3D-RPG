@@ -819,6 +819,40 @@ literals so an untouched skin is pixel-identical (`tests/test_hud_skin.gd`), whi
 gameplay-tuning numbers stay on `GameSettings.hud` and semantic/accessibility colours
 stay on `CBPalette`/`Settings`.
 
+**The HUD minimap** (`scripts/ui/minimap.gd`, code-built by `ui.gd` into the `_weighted`
+carrier, top-right) is a PROCEDURAL vector floorplan — no authored texture and no second
+3D pass. The contract, end to end: the level's `Groups.NAVMESH` region -> `FloorplanSource`
+(walks the level ONCE, turning every STATIC collider into a world-space solid) +
+`FloorplanSection` (pure statics: the navmesh triangle fan, the chest-height section cut,
+the view matrix) -> a per-floor "deck" cached in the widget -> ONE `draw_multiline` plus one
+`canvas_item_add_triangle_array`, both under a single `view_transform`, so the plan, an
+optional `MapData` underlay and every marker dot share one projection and cannot fork.
+
+Four things about it are load-bearing and easy to undo by accident:
+- **A level swap is detected from the navmesh region's INSTANCE ID**, not a `GameRoot` signal.
+  A freed region leaves the group by itself, so the deck cache self-heals and `game_root.gd`
+  is untouched by this feature.
+- **The vertical reference is the last GROUNDED player height, and the floor band is sticky**
+  (`FloorplanSection.sticky_band_key`, margin `GameSettings.hud.minimap_band_hysteresis`).
+  Keying off live Y instead makes a jump near a band boundary swap the whole floorplan
+  mid-air; a stair riser does the same every frame. Both guards are needed — grounding fixes
+  jumping, the margin fixes slopes and risers.
+- **The static gate is `is StaticBody3D and not is AnimatableBody3D`, a TYPE and never a
+  physics layer.** `Player.tscn` and `enemy.tscn` are both `collision_layer 2`, the same layer
+  as level ground, so no mask can separate characters from geometry — and `AnimatableBody3D`
+  INHERITS `StaticBody3D`, so the obvious gate bakes every door leaf in shut.
+- **`_process` bails on `is_visible_in_tree()` before doing anything.** That is what makes the
+  Options toggle, the dialogue hide and the death hide genuinely free rather than a hidden
+  node still slicing and redrawing.
+
+Layout: the top-right corner is SHARED with the objective tracker, and the minimap owns the
+reflow — `ui.gd.quest_tracker_top_for` derives the tracker's top from the map's footprint and
+returns it to the historical 8 px when the map is off (`tests/test_minimap_hud_layout.gd`).
+Geometry knobs are on `GameSettings.hud`, paint on `MenuStyle.hud`, and the player's own
+on/off + rotate + zoom + NPC dots on `Settings`, polled live. `MapData` is NOT orphaned: it
+survives as the optional authored underlay, drawn through the same matrix via its
+`world_bounds`.
+
 `scripts/tools/menu_qa_shots.tscn` is the menu screenshot harness: one windowed run
 opens every menu screen (faking merchant/healer/corpse context off-tree like the GUT
 tests do) and saves a PNG per screen —
