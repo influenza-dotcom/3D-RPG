@@ -10,7 +10,7 @@ This index is generated from `@system` annotations in the code, so it cannot dri
 For the deep narrative see [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md); for current rough edges
 see [ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md).
 
-_16 system(s), 32 entries - scanned scripts/, managers/ + resources/._
+_16 system(s), 33 entries - scanned scripts/, managers/ + resources/._
 
 - [Audio](#audio)
 - [Control-Lock And Immunity](#control-lock-and-immunity)
@@ -162,6 +162,14 @@ view_transform() is THE single projection the HUD minimap draws through: handed 
 - **Risk:** A section cut renders ONLY the band it cuts — a mezzanine, catwalk or stair tread above the cut plane is invisible by construction, and a flight of stairs reads as a gap between two bands.
 - **Risk:** band_floor quantises the player's ORIGIN Y and never raycasts down: get_world_3d().direct_space_state returns EMPTY, silently, outside a physics frame — a previously-shipped bug class in this project.
 - **Test:** `tests/test_floorplan_section.gd`
+
+### `class Minimap` - `scripts/ui/minimap.gd`
+
+Code-built by ui.gd into the _weighted carrier (top-right corner, shared with the quest tracker). Geometry comes from the level's baked NavigationMesh via FloorplanSection, paint from MenuStyle.hud.minimap_*, layout from GameSettings.hud.minimap_*, and the player's choices are polled LIVE off Settings.minimap_enabled / _rotates / _zoom so an Options change bites the same frame with no rebuild. The level swap is detected from the Groups.NAVMESH region's INSTANCE ID, not a GameRoot signal — a freed region leaves the group by itself, so the deck cache self-heals across a LevelDoor transition and this widget needs no new wiring in game_root.gd.
+
+- **Risk:** Renders ONLY the player's own floor band, so a mezzanine or catwalk above the cut is invisible and a staircase reads as a gap between two decks.
+- **Risk:** An unbaked level has no walkable fill and a level with no static colliders has no walls; either degrades to a partial map in silence, because both are legitimate states. Minimap.deck_count() is the introspection seam when a level looks blank.
+- **Test:** `tests/test_minimap.gd`
 
 ## NPC Brain
 

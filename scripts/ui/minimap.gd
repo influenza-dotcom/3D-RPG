@@ -1,44 +1,318 @@
 class_name Minimap
 extends Control
 
-## A HUD minimap: draws the level's MapData texture with the player (and flagged NPCs) as markers, projected via
-## MapData.world_to_uv. Add it to the HUD and assign `map_data`. It reads the player from the &"Player" group
-## (Groups.PLAYER) and markers from the &"minimap" group (WorldMarkers / an NPC with show_on_minimap), each drawn
-## in its own `color` when it sets one (else the skin's NPC red). Rendering is playtest-tuned; the projection it
-## relies on (MapData.world_to_uv) is unit-tested. Marker ART stays on the authored MapData (player_marker /
-## npc_marker); the code-drawn fallback dot TINTS come from the artist skin (MenuStyle.hud), and the dot radius
-## stays the scene-authored @export below.
+## @system Minimap
+## @seam Code-built by ui.gd into the _weighted carrier (top-right corner, shared with the quest tracker). Geometry comes from the level's baked NavigationMesh via FloorplanSection, paint from MenuStyle.hud.minimap_*, layout from GameSettings.hud.minimap_*, and the player's choices are polled LIVE off Settings.minimap_enabled / _rotates / _zoom so an Options change bites the same frame with no rebuild.
+## @seam The level swap is detected from the Groups.NAVMESH region's INSTANCE ID, not a GameRoot signal — a freed region leaves the group by itself, so the deck cache self-heals across a LevelDoor transition and this widget needs no new wiring in game_root.gd.
+## @risk Renders ONLY the player's own floor band, so a mezzanine or catwalk above the cut is invisible and a staircase reads as a gap between two decks.
+## @risk An unbaked level has no walkable fill and a level with no static colliders has no walls; either degrades to a partial map in silence, because both are legitimate states. Minimap.deck_count() is the introspection seam when a level looks blank.
+## @test res://tests/test_minimap.gd
+##
+## The HUD minimap: a procedural VECTOR FLOORPLAN of the floor the player is standing on, drawn straight
+## into a Control with no authored texture, no per-level MapData and no second 3D pass.
+##
+## WHY NOT A RENDERED IMAGE. The box is ~108 px on a 792x444 canvas that is nearest-upscaled ~2.4x to the
+## window. A downscaled 3D render of grey brushwork is mush at that size; hairline strokes are crisp. A
+## canvas item is also structurally immune to ps1.gdshader's vertex snap — that is a SPATIAL shader and
+## cannot reach 2D drawing — so the plan never warps with the world.
+##
+## THE PICTURE IS TWO LAYERS, both cached per floor band in a "deck":
+##   1. the walkable fill, fanned from the level's BAKED NavigationMesh (FloorplanSection.walkable_triangles);
+##   2. the wall strokes, a chest-height section cut of the level's STATIC colliders (added by FloorplanSource).
+## Layer 1 alone is already a usable map and needs nothing but a baked navmesh, which every level here has.
+## Both are baked ONCE per floor band and then drawn under ONE view matrix, so walking around a floor costs
+## a single draw call over a cached buffer and no CPU vertex work at all.
+##
+## MARKERS are the existing POI channel, unchanged: anything in Groups.MINIMAP (a WorldMarker you place, or
+## one QuestMarkerSync spawns for a live objective) gets a dot in its own `color`. Off-floor markers FADE
+## rather than lying about being in this room, and off-box ones pin to the rim through the compass's own
+## project_to_edge — the same pure projection, not a second copy of it.
+##
+## The optional `map_data` underlay keeps the authored MapData path alive: assign one and its image is drawn
+## UNDER the procedural plan, positioned by its own world_bounds through the SAME matrix, so the picture and
+## the dots can never fork projections. Leaving it null — the shipped case — just means the plan is the
+## whole map.
 
-@export var map_data: MapData
+@export_group("Geometry")
+## The dim navmesh floor fill under the strokes. Off = wall strokes only (a pure line drawing).
+@export var draw_walkable: bool = true
+## The static-collider section cut. Off = the navmesh fill only — the designed fallback if a level's
+## brushwork cuts into unreadable speckle rather than rooms.
+@export var draw_walls: bool = true
+## How many floor decks stay sliced before the least-recently-used one is dropped. A tower with more
+## storeys than this still works; it just re-slices when you revisit a floor.
+@export var deck_cache_max: int = 12
+## Seconds to wait after a level swap before gathering geometry. func_godot brushes and CSG colliders
+## settle over the first frames, and a gather on frame one can see a half-built level.
+@export var bake_delay: float = 0.2
+
+@export_group("Markers")
+## Radius (px) of the drawn dot used when no MapData marker texture is assigned — the shipped case.
 @export var marker_radius: float = 4.0
+## Half-length (px) of the player caret triangle.
+@export var arrow_size: float = 5.0
+## Hide markers further than this many metres away (0 = no limit) — the compass.gd idiom.
+@export var max_marker_distance: float = 0.0
+## Also dot every Groups.NPC body. OFF by default: Groups.MINIMAP is the AUTHORED channel, and dotting
+## every NPC turns a floorplan into a radar. Handy while a level has no WorldMarkers placed yet.
+@export var dot_npcs: bool = false
 
-func _process(_delta: float) -> void:
-	if map_data != null and is_visible_in_tree():
+@export_group("Authored underlay (optional)")
+## LEGACY / OPTIONAL: an authored top-down MapData drawn UNDER the procedural plan and positioned through
+## the same view matrix via its world_bounds. It is also where marker ART comes from (player_marker /
+## npc_marker). Null — the shipped HUD case — means the procedural plan is the whole picture.
+@export var map_data: MapData
+
+## deck_key -> {fill: PackedVector2Array, idx: PackedInt32Array, walls: PackedVector2Array, y_lo, y_hi}
+var _decks: Dictionary = {}
+var _deck_lru: Array[int] = []      ## deck keys, least-recently-used first
+var _deck: Dictionary = {}          ## the ACTIVE deck (empty until one is built)
+var _source_region_id: int = 0      ## instance id of the NavigationRegion3D the decks were sliced from
+var _centre_xz: Vector2 = Vector2.ZERO
+var _yaw: float = 0.0
+var _player_y: float = 0.0
+var _prev_centre: Vector2 = Vector2.ZERO
+var _prev_yaw: float = 0.0
+var _deck_dirty: bool = true        ## force one repaint (fresh deck, level swap, first frame)
+var _bake_delay_left: float = 0.0
+
+
+func _ready() -> void:
+	# The default MOUSE_FILTER_STOP would make this box eat clicks in the corner of the screen — every
+	# other HUD element in this project is explicitly IGNORE for exactly that reason.
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	clip_contents = true          # a marker pinned to the rim must not escape onto the quest tracker
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+
+
+func _process(delta: float) -> void:
+	# A HIDDEN MAP COSTS NOTHING. Not a redraw, not a slice, not even the group scan. This one line is what
+	# makes the Options toggle, the dialogue hide and the death hide genuinely free rather than a hidden
+	# node still doing all its work.
+	if not is_inside_tree() or not is_visible_in_tree():
+		return
+	var region := _find_region()
+	var rid: int = region.get_instance_id() if region != null else 0
+	if rid != _source_region_id:
+		# A different level (or none). Drop every deck — they are sliced in the old level's world space.
+		_source_region_id = rid
+		rebake()
+		_bake_delay_left = bake_delay
+	if _bake_delay_left > 0.0:
+		_bake_delay_left = maxf(0.0, _bake_delay_left - delta)
+		return
+	# The HUMAN player, not get_first_node_in_group(PLAYER) — recruited companions join that group too and
+	# the map must never re-centre on one.
+	var p := Groups.human_player(get_tree())
+	if p == null:
+		return
+	_centre_xz = Vector2(p.global_position.x, p.global_position.z)
+	_player_y = p.global_position.y
+	_yaw = _camera_yaw(p)
+	_ensure_deck(region, _player_y)
+	# The idle gate: a standing, still player never repaints. It keys on the PLAYER, so it has to be
+	# overridden whenever something else on the map can move on its own — otherwise a marker (or a dotted
+	# NPC) would freeze in place the moment the player stopped walking.
+	var moved := FloorplanSection.needs_redraw(_prev_centre, _centre_xz, _prev_yaw, _yaw,
+			GameSettings.hud.minimap_redraw_pos_eps, GameSettings.hud.minimap_redraw_yaw_eps)
+	if _deck_dirty or moved or _has_live_markers():
+		_prev_centre = _centre_xz
+		_prev_yaw = _yaw
+		_deck_dirty = false
 		queue_redraw()
 
-func _draw() -> void:
-	if map_data == null or map_data.map_texture == null:
-		return
-	draw_texture_rect(map_data.map_texture, Rect2(Vector2.ZERO, size), false)
-	if not is_inside_tree():
-		return
-	var player := get_tree().get_first_node_in_group(Groups.PLAYER)
-	if player is Node3D:
-		_draw_marker((player as Node3D).global_position, map_data.player_marker, MenuStyle.hud.minimap_player_color)
-	for n in get_tree().get_nodes_in_group(Groups.MINIMAP):
-		if n is Node3D:
-			_draw_marker((n as Node3D).global_position, map_data.npc_marker, marker_color(n))
 
-## A marker's own color (quest / vendor / exit beacons set it) — type-guarded like compass.gd; a marker that
-## carries none falls back to the skin's NPC red. Instance method so tests can call it off-tree; unit-tested.
+## The level's NavigationRegion3D. Groups.NAVMESH holds the geometry FEEDER nodes as well as the region
+## itself (TestLevel.tscn puts both in it), so this must type-filter rather than take the first member.
+func _find_region() -> NavigationRegion3D:
+	for n in get_tree().get_nodes_in_group(Groups.NAVMESH):
+		if n is NavigationRegion3D:
+			return n as NavigationRegion3D
+	return null
+
+
+## The bearing the map is drawn along: the ACTIVE camera's, degrading to the player's own rotation when
+## there is no camera (the compass.gd idiom). Matches FloorplanSection's convention, where a yaw of t means
+## a forward of (-sin t, -cos t) — the same atan2 ui.gd's sway measurement uses.
+func _camera_yaw(p: Node3D) -> float:
+	var cam := get_viewport().get_camera_3d()
+	var src: Node3D = cam if cam != null else p
+	var fwd: Vector3 = -src.global_transform.basis.z
+	return atan2(-fwd.x, -fwd.z)
+
+
+## Is there anything on the map that moves independently of the player? Cheap (two group-size reads) and
+## it keeps the idle gate honest — see the note at its call site.
+func _has_live_markers() -> bool:
+	if not get_tree().get_nodes_in_group(Groups.MINIMAP).is_empty():
+		return true
+	return dot_npcs and not get_tree().get_nodes_in_group(Groups.NPC).is_empty()
+
+
+## Make sure the deck for the band containing `y` is built and active. A cache hit is free — this is what
+## lets a player walk a whole floor without re-slicing anything.
+func _ensure_deck(region: NavigationRegion3D, y: float) -> void:
+	var band: float = GameSettings.hud.minimap_band_height
+	var key := FloorplanSection.deck_key(y, band)
+	if _decks.has(key):
+		var hit: Dictionary = _decks[key]
+		if _deck != hit:
+			_deck = hit
+			_deck_dirty = true
+		_touch_deck(key)
+		return
+	var y_lo := FloorplanSection.band_floor(y, band)
+	var tris := PackedVector2Array()
+	if region != null:
+		tris = FloorplanSection.walkable_triangles(region.navigation_mesh, region.global_transform,
+				y_lo, y_lo + band)
+	# canvas_item_add_triangle_array wants an explicit index list; the soup is already whole triangles in
+	# order, so it is just 0..n-1 — built once here rather than every frame in _draw.
+	var idx := PackedInt32Array()
+	idx.resize(tris.size())
+	for i in tris.size():
+		idx[i] = i
+	_deck = {"fill": tris, "idx": idx, "walls": PackedVector2Array(), "y_lo": y_lo, "y_hi": y_lo + band}
+	_decks[key] = _deck
+	_touch_deck(key)
+	_evict_decks()
+	_deck_dirty = true
+
+
+func _touch_deck(key: int) -> void:
+	_deck_lru.erase(key)
+	_deck_lru.append(key)   # most-recently-used last, so the ACTIVE deck is never the eviction candidate
+
+
+func _evict_decks() -> void:
+	while _deck_lru.size() > maxi(deck_cache_max, 1):
+		_decks.erase(_deck_lru[0])
+		_deck_lru.remove_at(0)
+
+
+func _draw() -> void:
+	var hud: HudSettings = GameSettings.hud
+	draw_rect(Rect2(Vector2.ZERO, size), MenuStyle.hud.minimap_backing_color, true)
+	var ppm := FloorplanSection.px_per_metre(size, hud.minimap_world_span, Settings.minimap_zoom)
+	var view := FloorplanSection.view_transform(_centre_xz, _yaw, ppm, size, Settings.minimap_rotates)
+	# EVERYTHING below this line that is in WORLD METRES goes through this one matrix. The underlay, the
+	# fill, the walls and (via `view` passed down) the markers all share it, which is the whole reason the
+	# image and the dots cannot drift apart.
+	draw_set_transform_matrix(view)
+	if map_data != null and map_data.map_texture != null:
+		# world_bounds IS the draw rect under this matrix — it is already in world X/Z metres.
+		draw_texture_rect(map_data.map_texture, map_data.world_bounds, false)
+	if not _deck.is_empty():
+		var fill: PackedVector2Array = _deck["fill"]
+		if draw_walkable and not fill.is_empty():
+			# A triangle soup has no single-polygon form, so this goes through the RenderingServer rather
+			# than draw_colored_polygon (which triangulates ONE polygon) or draw_mesh (which would need a
+			# texture and an ArrayMesh for no gain). It honours the transform set above.
+			RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), _deck["idx"], fill,
+					PackedColorArray([MenuStyle.hud.minimap_walkable_color]))
+		var walls: PackedVector2Array = _deck["walls"]
+		if draw_walls and not walls.is_empty():
+			# ONE call for the whole floorplan. The width goes through stroke_width because draw_multiline's
+			# width is in LOCAL units and this matrix scales by ppm — a raw px value would fatten as the
+			# player zooms in.
+			draw_multiline(walls, MenuStyle.hud.minimap_wall_color,
+					FloorplanSection.stroke_width(hud.minimap_wall_width, ppm))
+	draw_set_transform_matrix(Transform2D.IDENTITY)
+	_paint_markers(view, hud)
+	_paint_player_caret()
+	_paint_chrome(hud)
+
+
+## POI dots. Markers are painted in SCREEN space (the matrix is already reset) but positioned through
+## `view`, so they sit exactly on the plan they annotate.
+func _paint_markers(view: Transform2D, hud: HudSettings) -> void:
+	var art: Texture2D = map_data.npc_marker if map_data != null else null
+	for n in get_tree().get_nodes_in_group(Groups.MINIMAP):
+		_paint_one_marker(n, view, hud, art)
+	if dot_npcs:
+		for n in get_tree().get_nodes_in_group(Groups.NPC):
+			# An NPC that also carries a WorldMarker is already drawn above; skip it rather than
+			# double-painting a dot at half the intended alpha.
+			if not n.is_in_group(Groups.MINIMAP):
+				_paint_one_marker(n, view, hud, art)
+
+
+func _paint_one_marker(n: Node, view: Transform2D, hud: HudSettings, art: Texture2D) -> void:
+	if not is_instance_valid(n):
+		return
+	var n3 := n as Node3D
+	if n3 == null:
+		return
+	var w := n3.global_position
+	if max_marker_distance > 0.0 and Vector2(w.x, w.z).distance_to(_centre_xz) > max_marker_distance:
+		return
+	var col := marker_color(n3)
+	# Vertical honesty: a beacon two storeys up fades instead of pretending to be in this room.
+	col.a *= FloorplanSection.marker_alpha(w.y - _player_y, hud.minimap_band_height,
+			hud.minimap_marker_floor_alpha)
+	var q: Vector2 = view * Vector2(w.x, w.z)
+	if not Rect2(Vector2.ZERO, size).has_point(q):
+		# Off the box: pin it to the rim pointing the right way, through the compass's own pure edge
+		# projection rather than a second implementation of the same maths.
+		q = Compass.project_to_edge(q - size * 0.5, size, hud.minimap_marker_edge_margin)
+	if art != null:
+		draw_texture(art, q - art.get_size() * 0.5, col)
+	else:
+		draw_circle(q, marker_radius, col)
+
+
+## A marker's own color (quest / vendor / exit beacons set it) — type-guarded like compass.gd; a marker
+## that carries none falls back to the skin's NPC tint. Instance method so tests can call it off-tree;
+## unit-tested, and test_hud_skin.gd depends on this exact contract.
 func marker_color(marker: Node) -> Color:
 	var raw_col: Variant = marker.get(&"color")
 	return raw_col if raw_col is Color else MenuStyle.hud.minimap_npc_color
 
-func _draw_marker(world_pos: Vector3, tex: Texture2D, fallback: Color) -> void:
-	var uv := MapData.world_to_uv(world_pos, map_data.world_bounds)
-	var p := Vector2(uv.x * size.x, uv.y * size.y)
-	if tex != null:
-		draw_texture(tex, p - tex.get_size() * 0.5)
-	else:
-		draw_circle(p, marker_radius, fallback)
+
+## The player, always at the box centre. Heading-up welds the caret pointing screen-up and turns the plan
+## under it; north-up freezes the plan and spins the caret. An authored MapData.player_marker replaces the
+## drawn triangle (the widget-art fallback rule).
+func _paint_player_caret() -> void:
+	var c := size * 0.5
+	var col: Color = MenuStyle.hud.minimap_player_color
+	var art: Texture2D = map_data.player_marker if map_data != null else null
+	if art != null:
+		draw_texture(art, c - art.get_size() * 0.5, col)
+		return
+	var r := Transform2D(FloorplanSection.arrow_angle(_yaw, Settings.minimap_rotates), Vector2.ZERO)
+	draw_colored_polygon(PackedVector2Array([
+		c + r.basis_xform(Vector2(0.0, -arrow_size)),
+		c + r.basis_xform(Vector2(arrow_size * 0.7, arrow_size * 0.8)),
+		c + r.basis_xform(Vector2(-arrow_size * 0.7, arrow_size * 0.8)),
+	]), col)
+
+
+## The box's edge: authored frame art when the skin carries it, else a drawn contrast rim.
+func _paint_chrome(hud: HudSettings) -> void:
+	var frame: Texture2D = MenuStyle.hud.minimap_frame_texture
+	if frame != null:
+		draw_texture_rect(frame, Rect2(Vector2.ZERO, size), false)
+		return
+	if hud.minimap_outline_width > 0.0:
+		draw_rect(Rect2(Vector2.ZERO, size), MenuStyle.hud.minimap_outline_color, false,
+				hud.minimap_outline_width)
+
+
+## Drop every cached deck and re-slice on the next frame. Called automatically on a level swap; exposed
+## for a designer/debug hook and for a future "the level geometry changed" caller.
+func rebake() -> void:
+	_decks.clear()
+	_deck_lru.clear()
+	_deck = {}
+	_deck_dirty = true
+
+
+## How many floor decks are currently sliced. Introspection for tests, and the thing to check first when a
+## level's map looks blank.
+func deck_count() -> int:
+	return _decks.size()
+
+
+## The lower edge (world metres) of the band currently drawn, or 0.0 before the first deck exists.
+func active_band_floor() -> float:
+	return float(_deck.get("y_lo", 0.0))
