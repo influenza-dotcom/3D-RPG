@@ -1,14 +1,20 @@
 extends GutTest
 
-## M5: modal-exclusion guards are centralized on InputManager (any_modal_open / any_pausing_open) instead of a long
-## inline is_open() list duplicated in every screen. This fixes the asymmetry where a pausing NPC-transaction screen
+## M5: modal-exclusion guards are centralized on InputManager (any_modal_open / any_tab_blocking_open) instead of a
+## long inline is_open() list duplicated in every screen. This fixes the asymmetry where a station screen
 ## (shop/heal/level-up/respec) would open OVER the QuestJournal (and level-up over Respec), and gates the ray_cast
 ## interact key AND the weapon hotbar's slot keys over ALL menus. The Pip-Boy tab group (Inventory/Stats/Implants/Reputation/
 ## Journal) still opens over its OWN siblings (it switches via PlayerMenus.close_others), so those are NOT blocked.
 ## gameplay_suppressed() is unchanged.
 ##
+## ⭐2026-08-09: NO SCREEN IN THE REGISTRY PAUSES THE TREE ANY MORE. The station screens froze the world because
+## they were "a transaction with an NPC" — but every one of them except the ATM is opened from a CONVERSATION that
+## already paused, so the freeze was invisible there and glaring at a walk-up kiosk. They are all real-time now
+## (dialogue still pauses on its own), and the registry flag that used to be `pausing` is `blocks_tabs`: the
+## question it always really answered was "does this screen own the player's hands?", not "does it stop time".
+##
 ## The tests flip autoload screens' _is_open directly — setting the flag has no open/close side effects (no mouse
-## grab, no pause) — and reset every one in after_each so the wider suite is untouched.
+## grab, no cue) — and reset every one in after_each so the wider suite is untouched.
 
 
 func after_each() -> void:
@@ -17,19 +23,29 @@ func after_each() -> void:
 		s.set(&"_is_open", false)
 
 
-func test_any_pausing_open_detects_only_transaction_screens() -> void:
-	assert_false(InputManager.any_pausing_open(), "no pausing screen open initially")
+func test_tab_blocking_set_is_the_hands_owning_screens_not_the_pausing_ones() -> void:
+	assert_false(InputManager.any_tab_blocking_open(), "nothing open -> a Pip-Boy tab may open")
 	ShopScreen._is_open = true
-	assert_true(InputManager.any_pausing_open(), "an open Shop is a pausing modal")
+	assert_true(InputManager.any_tab_blocking_open(), "an open Shop owns the player's hands — a tab must not stack on it")
 	ShopScreen._is_open = false
 	RespecScreen._is_open = true
-	assert_true(InputManager.any_pausing_open(), "an open Respec is a pausing modal")
+	assert_true(InputManager.any_tab_blocking_open(), "…same for the respec confirm")
 	RespecScreen._is_open = false
+	# ⭐The whole point of the rename: these screens no longer pause, and they must STILL block tabs. Two screens
+	# that both grabbed the mouse fight over Escape, and the loser restores the CAPTURED cursor under a menu that
+	# is still up — an unclickable backpack. The ATM is the one that proved it (later autoload ⇒ eats Escape first).
+	AtmScreen._is_open = true
+	assert_true(InputManager.any_tab_blocking_open(), "the real-time ATM still blocks tabs — it owns the cursor even though it doesn't pause")
+	assert_true(InputManager.any_modal_open(), "…and it is a modal (blocks stacking + suppresses gameplay while you bank)")
+	AtmScreen._is_open = false
+	ChessScreen._is_open = true
+	assert_true(InputManager.any_tab_blocking_open(), "a real-time chess match blocks tabs too")
+	ChessScreen._is_open = false
 	QuestJournal._is_open = true
-	assert_false(InputManager.any_pausing_open(), "the QuestJournal (a real-time Pip-Boy tab) is NOT a pausing modal")
+	assert_false(InputManager.any_tab_blocking_open(), "a Pip-Boy tab never blocks its own group — they switch via close_others")
 	QuestJournal._is_open = false
 	SaveLoadScreen._is_open = true
-	assert_false(InputManager.any_pausing_open(), "the SaveLoadScreen is NOT a pausing modal (the Options Dark-Souls posture)")
+	assert_false(InputManager.any_tab_blocking_open(), "the SaveLoadScreen does NOT block tabs (the Options Dark-Souls posture)")
 	assert_true(InputManager.any_modal_open(), "...but it IS a modal (blocks stacking + suppresses gameplay)")
 
 
@@ -70,12 +86,26 @@ func test_hotbar_slot_key_gate_blocks_realtime_tabs_but_not_backpack() -> void:
 
 
 func test_guards_route_through_the_shared_helpers() -> void:
-	# Drift guard: pausing modals guard via any_modal_open(self); tab-group screens via any_pausing_open(); ray_cast's
-	# interact gate via any_modal_open(). One place (InputManager) registers a screen, not every guard.
+	# Drift guard: station screens guard via any_modal_open(self); tab-group screens via any_tab_blocking_open();
+	# ray_cast's interact gate via gameplay_suppressed(). One place (InputManager) registers a screen, not every guard.
 	for path in ["res://scripts/ui/shop_screen.gd", "res://scripts/ui/heal_screen.gd", "res://scripts/ui/level_up_screen.gd", "res://scripts/ui/respec_screen.gd"]:
-		assert_string_contains(FileAccess.get_file_as_string(path), "InputManager.any_modal_open(self)", "%s (pausing) should guard via InputManager.any_modal_open(self)" % path)
-	for path in ["res://scripts/ui/stats_screen.gd", "res://scripts/ui/reputation_screen.gd", "res://scripts/ui/inventory_screen.gd", "res://scripts/ui/quest_journal.gd", "res://scripts/ui/implants_screen.gd"]:
-		assert_string_contains(FileAccess.get_file_as_string(path), "InputManager.any_pausing_open()", "%s (tab group) should guard via InputManager.any_pausing_open()" % path)
+		assert_string_contains(FileAccess.get_file_as_string(path), "InputManager.any_modal_open(self)", "%s (station) should guard via InputManager.any_modal_open(self)" % path)
+	# ⭐The tab guards must name NOTHING but the registry predicate. Hand-naming a screen beside it is exactly the
+	# drift this registry exists to kill: the refusal set changed twice in two days (the ATM, then every station),
+	# and a guard carrying its own list would have silently missed both.
+	for path in ["res://scripts/ui/stats_screen.gd", "res://scripts/ui/reputation_screen.gd", "res://scripts/ui/inventory_screen.gd", "res://scripts/ui/quest_journal.gd", "res://scripts/ui/implants_screen.gd", "res://scripts/ui/character_inspect_screen.gd"]:
+		var tab_src := FileAccess.get_file_as_string(path)
+		assert_string_contains(tab_src, "InputManager.any_tab_blocking_open()", "%s (tab group) should guard via InputManager.any_tab_blocking_open()" % path)
+		assert_false(tab_src.contains("LootScreen.is_open()"), "%s should NOT hand-name LootScreen — it is a blocks_tabs row in the registry now" % path)
+		assert_false(tab_src.contains("AtmScreen.is_open()"), "%s should NOT hand-name AtmScreen — it is a blocks_tabs row in the registry now" % path)
+	# ⭐NOTHING in the registry pauses the tree any more. A walk-up station must not stop the city (atm_screen.gd's
+	# header carries the argument); a station opened from dialogue is already frozen by the conversation. Only the
+	# screen itself can flip get_tree().paused, so the registry row cannot pin this — the source has to.
+	for path in ["res://scripts/ui/atm_screen.gd", "res://scripts/ui/shop_screen.gd", "res://scripts/ui/heal_screen.gd",
+			"res://scripts/ui/level_up_screen.gd", "res://scripts/ui/respec_screen.gd",
+			"res://scripts/ui/chip_install_screen.gd", "res://scripts/ui/chess_screen.gd"]:
+		assert_false(FileAccess.get_file_as_string(path).contains("get_tree().paused"),
+			"%s must NOT touch get_tree().paused — the station screens are real-time; the only pause left in the game is DialogueManager's" % path)
 	assert_string_contains(FileAccess.get_file_as_string("res://scripts/components/ray_cast.gd"), "InputManager.gameplay_suppressed()", "ray_cast interact gate should route through InputManager.gameplay_suppressed() (T2 hardened it from any_modal_open to also cover cutscenes + the name-entry dialog; gameplay_suppressed still derives from the modal registry)")
 	# The weapon hotbar's slot-key gate is the same class of raw-input consumer, but it EXCLUDES the backpack
 	# (InventoryScreen) — a slot key ASSIGNS the hovered item there instead of activating, so that path must fall
@@ -114,7 +144,7 @@ func test_registry_size_and_membership() -> void:
 	# T1: pin the registry so the historically-forgotten screens force a deliberate test edit when a new screen lands.
 	var screens := InputManager._modal_screens()
 	assert_eq(screens.size(), 16, "the modal registry holds all 16 player-facing screens")
-	assert_true(screens.has(AtmScreen), "AtmScreen is registered (the Ledger terminal; pauses like its station siblings)")
+	assert_true(screens.has(AtmScreen), "AtmScreen is registered (the Ledger terminal; real-time, unlike its station siblings)")
 	assert_true(screens.has(ChessScreen), "ChessScreen is registered (was missed by the death sweep)")
 	assert_true(screens.has(ChipInstallScreen), "ChipInstallScreen is registered")
 	assert_true(screens.has(QuestJournal), "QuestJournal is registered (historically forgotten)")
@@ -133,14 +163,34 @@ func test_gameplay_suppressed_fires_for_every_registered_modal() -> void:
 		s.set(&"_is_open", false)
 
 
-func test_chess_and_chipinstall_are_pausing() -> void:
+func test_chess_and_chipinstall_are_registered_stations() -> void:
 	ChessScreen._is_open = true
-	assert_true(InputManager.any_pausing_open(), "an open Chess match pauses the tree")
+	assert_true(InputManager.any_tab_blocking_open(), "an open Chess match owns the player's hands")
 	assert_true(InputManager.any_modal_open(), "...and counts as a modal")
 	ChessScreen._is_open = false
 	ChipInstallScreen._is_open = true
-	assert_true(InputManager.any_pausing_open(), "an open chip-install screen pauses the tree")
+	assert_true(InputManager.any_tab_blocking_open(), "an open chip-install screen owns the player's hands")
 	assert_true(InputManager.any_modal_open(), "...and counts as a modal")
+
+
+## The blocks_tabs column, pinned as a whole. It is the one piece of registry DATA with no other test — and
+## getting a row wrong is silent: a false where true belongs strands the cursor under a stacked menu, a true
+## where false belongs makes a Pip-Boy tab refuse to open with no feedback at all.
+func test_every_registry_row_declares_the_right_tab_posture() -> void:
+	var blocks := [OptionsMenu, LootScreen, ShopScreen, LevelUpScreen, RespecScreen, HealScreen, AtmScreen,
+			ChipInstallScreen, ChessScreen]
+	var allows := [InventoryScreen, StatsScreen, ReputationScreen, QuestJournal, ImplantsScreen,
+			CharacterInspectScreen, SaveLoadScreen]
+	for s in blocks:
+		s.set(&"_is_open", true)
+		assert_true(InputManager.any_tab_blocking_open(), "%s owns the player's hands — a Pip-Boy tab must refuse over it" % s)
+		s.set(&"_is_open", false)
+	for s in allows:
+		s.set(&"_is_open", true)
+		assert_false(InputManager.any_tab_blocking_open(), "%s must NOT block a Pip-Boy tab (the group switches freely)" % s)
+		s.set(&"_is_open", false)
+	assert_eq(blocks.size() + allows.size(), InputManager._modal_screens().size(),
+		"every registered screen is accounted for above — a new row must pick a side here, not inherit one silently")
 
 
 func test_close_sweep_and_gates_route_through_registry() -> void:

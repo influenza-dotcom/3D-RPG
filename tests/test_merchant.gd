@@ -6,6 +6,10 @@ extends GutTest
 ## exactly the pattern test_loot_drop uses. Item is a Resource (RefCounted) -> .new() + `= null`.
 
 const Factions = preload("res://scripts/faction/factions.gd")  # WR-5: resolve a faction id -> Faction for the rep tests
+## The character-creation allocator's own bounds, so the arbitrage sweep below covers exactly the streetwise a
+## player can actually reach and can never drift from the builder. No class_name on purpose (see stat_budget.gd),
+## so it is preloaded by path like every other consumer.
+const StatBudgetScript := preload("res://scripts/ui/stat_budget.gd")
 
 ## ⭐Merchant.buy now gates on the PAYMENT SEAM (Player.can_pay/charge), which reads the SHARED GameState
 ## banking fields — a stale positive account would let a "broke" player buy and turn a refusal test green for
@@ -109,8 +113,14 @@ func test_prices_use_markup_and_markdown() -> void:
 func test_faction_favor_discounts_buy_and_boosts_sell() -> void:
 	# WR-2: a favoured faction sells to the player cheaper AND pays them more. A constant 0.2-favor curve isolates
 	# the effect from the standing value, so the test doesn't depend on the exact rep min/max.
+	#
+	# ⭐THE MERCHANT KEEPS ITS REAL MARKDOWN (0.5). This case used to neutralise it (sell_mult 1.0) to read the
+	# favor straight off the item value — but a vendor that pays exactly what it charges is a ZERO spread, and
+	# favor on top of that inverts it, which sell_price now refuses (the arbitrage floor; see the sweeps below).
+	# Both numbers are still purely the favor: the buy is the markup x (1 - favor), the sell the markdown x
+	# (1 + favor), and with a real markdown the floor stays slack so what's measured here is the curve alone.
 	Reputation.reset()
-	var m := _merchant(1000, 1.0, 1.0)  # markdown neutralised so the favor is what we measure
+	var m := _merchant(1000, 1.0, 0.5)
 	m.faction_id = "townsfolk"
 	var curve := Curve.new()
 	curve.add_point(Vector2(0.0, 0.2))
@@ -118,7 +128,7 @@ func test_faction_favor_discounts_buy_and_boosts_sell() -> void:
 	m.reputation_discount_curve = curve
 	var it := _item(100)
 	assert_almost_eq(m.buy_price(it), 80.0, 0.01, "favor 0.2 -> buys 20% cheaper (100 -> 80)")
-	assert_almost_eq(m.sell_price(it), 120.0, 0.01, "favor 0.2 -> sells 20% dearer (100 -> 120)")
+	assert_almost_eq(m.sell_price(it), 60.0, 0.01, "favor 0.2 -> pays 20% MORE than the plain markdown (50 -> 60)")
 	var p := _player()
 	_teardown(m, p)
 	it = null
@@ -135,6 +145,105 @@ func test_no_faction_pricing_is_inert() -> void:
 	var p := _player()
 	_teardown(m, p)
 	it = null
+
+
+# --- ⭐THE ARBITRAGE FLOOR: the spread must never invert ------------------------------------------------------
+#
+# This is an INVARIANT, not a number, so it is asserted as a property over every input a character can actually
+# reach rather than at one hand-picked build. Two pricing inputs bend the spread and NEITHER is capped by design:
+# streetwise (4%/point cheaper to buy AND dearer to sell) and a merchant's reputation_discount_curve
+# ((1 - favor)x to buy, (1 + favor)x to sell). Left uncoupled they cross, and past the crossing the shop is a
+# money printer: buy an item off the shelf, sell it straight back for more, forever, against a till the .tscn
+# re-seeds on every level load. merchant.gd clamps sell_price to buy_price - GameSettings.economy.min_vendor_spread
+# in the ONE place a payout is computed; these two sweeps are what stop that clamp from being deleted or
+# side-stepped by a new pricing input that only bends one side.
+#
+# STRICTLY below, not "no higher than": min_vendor_spread ships at one Zorkmids.QUANTUM, the least that keeps the
+# inequality strict on the coin grid. A designer MAY set it to 0 for exact parity (still loop-free — the round
+# trip nets zero, it just leaves the vendor no margin), and this is the test that would say so.
+
+## One actor's spread on one item. `ctx` names the sample so a failure says WHICH corner of the sweep broke
+## instead of just "a price is wrong".
+func _assert_spread_holds(m: Merchant, p: Player, it: Item, ctx: String) -> void:
+	var buy := m.buy_price(it, p)
+	var sell := m.sell_price(it, p)
+	assert_lt(sell, buy,
+		"%s: sell_price (%s) must stay STRICTLY under buy_price (%s) for the SAME item and actor — sell above buy is a free-money loop, sell AT buy is a vendor with no margin at all" % [ctx, sell, buy])
+
+
+## A Curve that samples to the same FAVOR at every standing, so the sweep measures the favor itself and not where
+## reputation happens to sit (the test_faction_favor_discounts_buy_and_boosts_sell idiom). The value range is
+## opened to -1 FIRST: Curve clamps a point added outside [min_value, max_value], so a hostile (negative) markup
+## would otherwise silently flatten to 0 and that half of the sweep would test nothing.
+func _constant_favor_curve(favor: float) -> Curve:
+	var c := Curve.new()
+	c.min_value = -1.0
+	c.max_value = 1.0
+	c.add_point(Vector2(0.0, favor))
+	c.add_point(Vector2(1.0, favor))
+	return c
+
+
+func test_the_spread_never_inverts_across_the_streetwise_range() -> void:
+	# The whole allocation range, one sample per point, on the SHIPPED default markdown (buy 1.0 / sell 0.5) —
+	# i.e. the configuration a designer actually ships, not a contrived one. With that markdown the streetwise
+	# lines cross at ~8.3 points, which is INSIDE what character creation hands out (StatBudget.STAT_MAX is 10,
+	# reachable by dumping two other stats), so this is a build a player reaches on day one, not a theoretical tail.
+	# Item values span the coin floor (one QUANTUM of dust, where buy_price is pinned at its minimum) up to a big
+	# fractional price, because the clamp rounds onto the coin grid and rounding is where an off-by-one coin hides.
+	var m := _merchant(1000, 1.0, 0.5)
+	var p := _player()
+	var sheet := CharacterStats.new()
+	p.stats = sheet
+	for sw in range(StatBudgetScript.STAT_MIN, StatBudgetScript.STAT_MAX + 1):
+		sheet.streetwise = sw
+		for value in [Zorkmids.QUANTUM, 1.0, 15.0, 100.0, 4321.75]:
+			var it := _item(value)
+			_assert_spread_holds(m, p, it, "streetwise %d on a %s-value item" % [sw, value])
+			it = null
+	# ...and prove the CLAMP is what held the line, not the multipliers happening to stay apart: at the top of the
+	# range the raw markdown payout is above the buy price, so the sweep above could not pass with the floor gone.
+	sheet.streetwise = StatBudgetScript.STAT_MAX
+	var top := _item(100)
+	var unclamped: float = top.value * m.sell_mult * sheet.sell_price_mult()
+	assert_gt(unclamped, m.buy_price(top, p),
+		"sanity: at max streetwise the UNCLAMPED markdown payout must exceed the buy price, or this test isn't exercising the arbitrage floor at all")
+	assert_lt(m.sell_price(top, p), unclamped,
+		"...and the shipped sell_price must land BELOW that raw payout — i.e. the floor actually bit here")
+	_teardown(m, p)
+	sheet = null
+	top = null
+
+
+func test_the_spread_never_inverts_under_faction_favor() -> void:
+	# The SECOND uncapped input, and the nastier one: favor crosses the spread at streetwise 0 (a baseline
+	# character at a generous vendor), and it STACKS on top of streetwise for a build that has both — so the
+	# curve is swept across the full allocation range too, including a hostile negative favor (which widens the
+	# spread and must not trip the clamp) and a favor big enough to collapse the buy price toward free.
+	Reputation.reset()
+	var m := _merchant(1000, 1.0, 0.5)
+	m.faction_id = "townsfolk"
+	var p := _player()
+	var sheet := CharacterStats.new()
+	p.stats = sheet
+	var it := _item(100)
+	# Sanity FIRST: a faction id that doesn't resolve makes _rep_favor() return 0, which would leave every sample
+	# below measuring plain streetwise again and passing for the wrong reason. With the curve attached the buy
+	# price must actually move.
+	var no_favor_buy := m.buy_price(it, p)  # faction set, curve still null -> the favor path is inert
+	m.reputation_discount_curve = _constant_favor_curve(0.5)
+	assert_lt(m.buy_price(it, p), no_favor_buy,
+		"the favor curve must actually reach the price — otherwise this sweep is vacuous (an unresolvable faction_id samples no curve at all)")
+	for favor in [-0.25, 0.0, 0.2, 0.5, 0.9]:
+		m.reputation_discount_curve = _constant_favor_curve(favor)
+		for sw in range(StatBudgetScript.STAT_MIN, StatBudgetScript.STAT_MAX + 1):
+			sheet.streetwise = sw
+			_assert_spread_holds(m, p, it, "favor %s + streetwise %d" % [favor, sw])
+	m.reputation_discount_curve = null
+	_teardown(m, p)
+	it = null
+	sheet = null
+	Reputation.reset()
 
 
 # --- WR-5: rep-gated stock — a StockEntry.required_reputation gates the line at seed + refill ----------------

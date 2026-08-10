@@ -5,7 +5,7 @@
 [ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="2_s4ika"]
 [ext_resource type="AudioStream" uid="uid://eufth266t4jq" path="res://assets/audio/sfx/crt_monitor_startup.mp3" id="4_yuhi4"]
 [ext_resource type="AudioStream" uid="uid://dllmir1cyleod" path="res://assets/audio/sfx/crt_static_noise.mp3" id="5_wf8b1"]
-[ext_resource type="AudioStream" uid="uid://ctmp2op3eo4b5" path="res://scenes/player/kai_audio-computer-hum-440742.mp3" id="6_yuhi4"]
+[ext_resource type="AudioStream" uid="uid://ctmp2op3eo4b5" path="res://assets/audio/sfx/kai_audio-computer-hum-440742.mp3" id="6_yuhi4"]
 [ext_resource type="Shader" uid="uid://biylyevmnfvq8" path="res://resources/shaders/post_process.gdshader" id="7_wf8b1"]
 [ext_resource type="Script" uid="uid://buc7j2mx4mswi" path="res://scripts/effects/ps1_applier.gd" id="8_ps1ap"]
 [ext_resource type="Shader" uid="uid://6w5msx4jvsfl" path="res://resources/shaders/pixel.gdshader" id="9_pixsh"]

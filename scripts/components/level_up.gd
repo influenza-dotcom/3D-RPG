@@ -52,6 +52,8 @@ func _ready() -> void:
 	_build_outline()
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
+	if standalone:
+		StationSpeaker.ensure(self)  # a self-serve terminal answers with the shared panel chirp; a data-only station rides a talking NPC, and people don't beep
 
 ## The player's total level = the sum of all stats (= points invested; baseline is 0).
 func total_level(player_node: Node) -> int:

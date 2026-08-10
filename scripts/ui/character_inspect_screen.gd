@@ -6,7 +6,7 @@ extends CanvasLayer
 ##
 ## Like the other player menus it does NOT pause the world (real-time, Deus Ex style — you stay vulnerable while
 ## admiring your guy) and runs PROCESS_MODE_ALWAYS. It frees the mouse for the UI (so you can drag/zoom the model)
-## and restores gameplay capture on close. Registered in InputManager's modal registry (pausing = false) so the
+## and restores gameplay capture on close. Registered in InputManager's modal registry (blocks_tabs = false) so the
 ## don't-stack guard and the death/quickload sweep cover it automatically; it has NO hotkey of its own — it's only
 ## reached programmatically from Stats (mirroring how the station screens open without a key).
 ##
@@ -39,7 +39,7 @@ signal closed
 const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME margin as the inventory/loot/shop screens, so every inventory-style menu shares one chrome (authored on the scene's Panel anchors; the scene test pins the band)
 ## Same six stats, in the same order, as the Stats screen — the compact summary mirrors it.
 const STATS: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"larceny"]
-const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper — used only to close an open sibling tab
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper — this takeover is not a tab, but it enters/leaves the group's shared mouse + cue bookkeeping
 
 var _root: Control
 var _preview: CharacterPreview   ## the big full-body hero view (drag/zoom + weapon in hand)
@@ -60,20 +60,28 @@ func is_open() -> bool:
 	return _is_open
 
 ## Open the inspect view over the live human player. Refuses in the same cases the Stats screen does (a conversation,
-## the settings/loot overlays, any pausing modal, mid-death), and when there's no player to show. Closes any open
+## the settings/loot overlays, any station screen — all one registry predicate now, mid-death), and when there's no player to show. Closes any open
 ## Pip-Boy tab first — this is a fullscreen takeover, not a sibling tab.
 func open() -> void:
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
-			or LootScreen.is_open() or InputManager.any_pausing_open() \
+	if _is_open or DialogueManager.is_active() \
+			or InputManager.any_tab_blocking_open() \
 			or not PlayerMenus.player_alive(get_tree()):
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player):
 		return
-	# Full takeover: switch off any open real-time tab (Inventory/Stats/Implants/Reputation/Journal) before we cover the screen.
-	PlayerMenus.close_others(null)
+	# Full takeover: switch off any open real-time tab (Inventory/Stats/Implants/Reputation/Journal) before we
+	# cover the screen, and free the cursor so the player can drag/zoom the model — enter() does both.
+	# Through enter(null), NOT a bare close_others(null): `keep` stays null because we are not a tab, but the
+	# outgoing tab's close() MUST happen inside enter's _switching window. Outside it, PlayerMenus.leave() read
+	# that close as the LAST close of the whole group and (a) fired the back cue for what is really a SIDEWAYS
+	# hand-off, and (b) restored MOUSE_MODE_CAPTURED an instant before we re-freed the cursor — the recentering
+	# round-trip the group's mouse bookkeeping exists to avoid. enter() also owns the cue for BOTH entrances
+	# this screen has (sideways when we take over from a tab, the cold open sting when we come up over
+	# gameplay), so never add an open cue here — it would double. Safe against re-entry: our _is_open is still
+	# false, so enter's own "close the inspect takeover" branch sees nothing to close.
+	PlayerMenus.enter(null)
 	_is_open = true
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE  # free the cursor so the player can drag/zoom the model
 	_rebuild()
 	_preview.set_active(true)  # start the live render + turntable only while up
 	_root.visible = true
@@ -89,8 +97,13 @@ func close() -> void:
 	# to play) or a Pip-Boy tab hotkey is mid-SWITCH into its screen: PlayerMenus.enter() closes this takeover
 	# inside its _switching window, and recapturing here would round-trip the cursor through CAPTURED
 	# (recentering it) an instant before the incoming tab frees it again.
+	# "Are we actually going back to gameplay?" is the SAME question for the cursor and for the sound, so the
+	# back cue rides this ONE test rather than a second one that could drift from it: mid-switch, enter() has
+	# already played the sideways cue, and with another modal still up that screen owns both the cursor and the
+	# audio — neither case is a back-out. (The death/quickload sweep is silenced by InputManager's quiet latch.)
 	if not PlayerMenus.switching() and not InputManager.any_modal_open(self):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		MenuStyle.play_back()
 	closed.emit()
 
 ## Live-refresh the summary while open (non-pausing: the wallet / stat modifiers can shift under you as you read).
@@ -169,6 +182,10 @@ func _bind_ui() -> void:
 	var back: Button = %BackButton
 	back.text = PlayerText.BACK
 	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)  # skin width pin — never authored into the scene
+	# Mute the generic click: close() owns this screen's cue, because Esc and the Interact key reach it without
+	# a press, and only close() can tell a real back-out from enter()'s mid-switch takedown. Unmuted, one Back
+	# press would fire the click AND the back cue a frame apart.
+	MenuStyle.set_button_sound(back, &"")
 	back.pressed.connect(close)
 
 	# NO RETRO PASS HERE — see the header note. This screen renders like every other menu.

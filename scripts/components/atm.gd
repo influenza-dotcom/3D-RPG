@@ -3,11 +3,11 @@ class_name Atm
 extends LookAtInteractable
 
 ## @system Economy
-## @seam deposit()/withdraw() are the ONLY writers of GameState.account outside LedgerAccrual; both are
-##   self-guarding and callable off-tree, so AtmScreen stays a pure view with no rules of its own.
+## NOTE: each @seam/@risk below must stay on ONE line — ArchScan only reads lines that start with a @tag, so a
+## wrapped continuation line is DROPPED and the statement renders truncated in docs/SYSTEM_MAP.md.
+## @seam deposit()/withdraw() are the ONLY writers of GameState.account outside LedgerAccrual; both are self-guarding and callable off-tree, so AtmScreen stays a pure view with no rules of its own.
 ## @risk A deposit path that does not clamp to maxf(0.0, player.money) lets a debtor mint money.
-## @risk A withdraw path that does not clamp to maxf(0.0, GameState.account) opens a cash advance — and with it
-##   the draw-the-line / redeposit / earn-savings-interest arbitrage that the single clamp closes today.
+## @risk A withdraw path that does not clamp to maxf(0.0, GameState.account) opens a cash advance — and with it the draw-the-line / redeposit / earn-savings-interest arbitrage that the single clamp closes today.
 ## @test res://tests/test_atm.gd
 ##
 ## Drop-in LEDGER TERMINAL, dual-mode like Merchant / Healer / Bonfire:
@@ -28,16 +28,19 @@ extends LookAtInteractable
 ## Deposits and withdrawals are FREE in both directions on purpose — the counterweight is the service charge
 ## on PURCHASES funded from the account (GameSettings.economy.bank_noncash_fee_fraction), which is what keeps
 ## cash you already carry the cheapest way to buy.
+##
+## ⭐THAT FEE IS GLOBAL AND HAS NO PER-TERMINAL KNOB, deliberately. A `fee_multiplier` export used to live here
+## as a "placement design lever"; it is deleted. Purchases are charged in Player._split straight from the global
+## fraction with NO terminal in scope (a rate that changed with whichever machine you last stood at would be
+## unquotable at the point of sale — the reason it was never plumbed), so the multiplier only ever scaled the
+## number the SCREEN quoted: a kiosk authored at 0.0 advertised a free spend and the till charged the global
+## rate regardless. A mislabeled receipt is worse than no knob. AtmScreen now quotes the global fraction
+## verbatim. Tune the rate on EconomySettings, for the whole world — never re-add a display-only multiplier.
 
 @export var station_name: String = ""   ## hover + screen title; blank -> "Ledger Terminal"
 ## ON = a self-serve kiosk: aim + Interact opens the terminal directly. OFF = drive it from a dialogue NPC's
 ## "Bank" option instead (the station stops responding to direct interaction).
 @export var standalone: bool = true
-## Per-machine multiplier on the GLOBAL purchase fee, so terminal PLACEMENT becomes a design lever instead of
-## a chore: 0.0 = a free public kiosk, 2.0 = a gouging machine somewhere convenient. Read by AtmScreen for its
-## quoted rate line. (Purchases themselves read the global knob — a fee that changed with which terminal you
-## last stood at would be unquotable at the point of sale.)
-@export var fee_multiplier: float = 1.0
 
 @export_group("Services")
 ## OFF = this terminal refuses deposits (a withdrawal-only cash machine).
@@ -64,6 +67,13 @@ func _ready() -> void:
 	_build_outline()
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
+	# The terminal's own panel voice. A drop-in StationSpeaker, not code here: the chirp stopped being an ATM
+	# feature the day every self-serve station got one, so the machine's voice is now ONE component every
+	# station shares (scripts/components/station_speaker.gd). ensure() leaves an AUTHORED speaker alone, which
+	# is how a designer retunes or MUTES this terminal without touching the Atm's own inspector. Gated like
+	# every other station: a data-only Atm rides a talking teller, and a person who beeps is a bug.
+	if standalone:
+		StationSpeaker.ensure(self)
 
 
 # --- Transactions — the ONLY writers of GameState.account outside the interest posting -------------------
@@ -133,7 +143,8 @@ func can_be_talked_to() -> bool:
 	return true
 
 
-## Aim + Interact (standalone only) opens the terminal over the paused world.
+## Aim + Interact (standalone only) opens the terminal. The card is REAL-TIME — the world keeps running behind
+## it and you can be shot while you bank (the reasoning lives in the AtmScreen header).
 func start_talk(player: Node) -> void:
 	if player == null:
 		return

@@ -266,10 +266,75 @@ extends Resource
 ## Alpha the source tile dims to while its stack is being dragged.
 @export var drag_source_dim_alpha: float = 0.35
 
+## ------------------------------------------------------------------------------------------------------
+## SOUNDS — the menu's whole audio vocabulary, one AudioStream slot per SEMANTIC event. Every slot is
+## OPTIONAL (null = that event is silent), so audio can land one cue at a time exactly like the widget art.
+## MenuStyle owns the players and every play site; a screen NEVER preloads a clip or builds its own
+## AudioStreamPlayer — it calls MenuStyle.play_open() / play_back() / play_tab() / … (see menu_style.gd's
+## "menu sounds" block). That is what keeps the vocabulary consistent across 20 screens and reskinnable from
+## this one resource.
+##
+## THE GRAMMAR (why there are seven cues and not one click): the player should be able to tell what happened
+## with their eyes shut. Sideways moves (tab/step) sound different from depth moves (open/back), and a cue
+## that SPENDS something (money, a level, a save slot) is heavier than an ordinary confirm. Keep new cues
+## inside that grammar rather than adding a per-screen one-off.
+## ------------------------------------------------------------------------------------------------------
+
 @export_group("Sounds")
-## Played when the mouse hovers any menu button. Drop an AudioStream here in the inspector; null = silent.
+## Played when the mouse hovers any menu button — the highest-frequency cue in the game, so keep it SHORT
+## and quiet. Auto-wired to every button under a menu root; no per-button code. null = silent.
 @export var hover_sound: AudioStream
-## Played when any menu button is clicked. Drop an AudioStream here; null = silent.
+## Played when any menu button is clicked. The DEFAULT confirm — a button with a more specific meaning
+## (back, tab, commit) overrides it via MenuStyle.set_button_sound instead of stacking a second cue.
 @export var click_sound: AudioStream
-## Volume (dB) for the menu hover/click sounds.
+## Played when a menu comes up COLD. NEVER on a tab/page swap within an already-open menu group — that is
+## tab_sound. This is the longest cue in the set, so it is deliberately reserved for a real entrance.
+@export var open_sound: AudioStream
+## Played on back / close / cancel: the last menu of a group closing, an Esc, a dismissed confirm dialog.
+@export var back_sound: AudioStream
+## Played when the view swaps SIDEWAYS without opening or closing — the player-menu tab strip, the Options
+## and character-creation tab bars, the shop's sort cycle, the payment-rail flip.
+@export var tab_sound: AudioStream
+## Played when a value steps DOWN/LEFT (a cycler's prev arrow, a minus button, a slider tick downward).
+## Keep it matched with step_right_sound — a mismatched pair reads as a broken control, not as direction.
+@export var step_left_sound: AudioStream
+## Played when a value steps UP/RIGHT. The step_left_sound twin — see its note.
+@export var step_right_sound: AudioStream
+## Played on a HEAVY commit: money spent, a level taken, a save written, a new run stamped. Deliberately
+## NOT for ordinary confirms — if everything is heavy, nothing is.
+@export var commit_sound: AudioStream
+
+@export_subgroup("Volume")
+## MASTER trim (dB) for every menu sound. Each per-cue trim below is ADDED to this, so one knob moves the
+## whole UI mix. (Kept at this exact name because MenuStyle and tests/test_options_menu.gd both read it.)
 @export var ui_sound_volume_db: float = 0.0
+## Per-cue trim (dB) added to ui_sound_volume_db. The shipped clips are NOT normalised against each other
+## (they span 0.10s to 1.66s), and they land on the "sfx" bus which already carries its own trim plus a
+## distortion insert — so levelling them by ear is a designer job here, never an import-time normalize.
+@export var hover_volume_db: float = 0.0
+## Per-cue trim for click_sound — see hover_volume_db.
+@export var click_volume_db: float = 0.0
+## Per-cue trim for open_sound — the longest cue; usually the first one that needs pulling down.
+@export var open_volume_db: float = 0.0
+## Per-cue trim for back_sound.
+@export var back_volume_db: float = 0.0
+## Per-cue trim for tab_sound.
+@export var tab_volume_db: float = 0.0
+## Per-cue trim for the step_left/step_right PAIR — ONE knob on purpose, so the two directions can never
+## drift to different loudnesses (which reads as one arrow being broken).
+@export var step_volume_db: float = 0.0
+## Per-cue trim for commit_sound.
+@export var commit_volume_db: float = 0.0
+
+@export_subgroup("Retrigger limits")
+## Minimum seconds between two hover ticks. Sweeping the cursor down a 12-row list fires a dozen
+## mouse_entered signals within a few frames; ticks inside this gap are DROPPED (never queued), which is
+## what turns a machine-gun into a texture. 0 = no limit.
+@export var hover_min_interval: float = 0.05
+## Minimum seconds between two value-step ticks. Tames keyboard AUTO-REPEAT on the Options cyclers (which
+## echo at the OS repeat rate) and fast slider drags. Roughly half the step clip's length is a good floor.
+@export var step_min_interval: float = 0.08
+## How many ticks a FULL slider sweep should produce, whatever that slider's own step is. MenuStyle
+## quantises value_changed into this many buckets before playing, so Max FPS (hundreds of steps) and a
+## 0..1 accessibility slider (a handful) both feel identical instead of one buzzing and one going silent.
+@export var slider_tick_count: int = 12

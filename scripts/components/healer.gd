@@ -39,6 +39,8 @@ func _ready() -> void:
 	_build_outline()  # look-at outline over the host's meshes (LookAtInteractable helper)
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
+	if standalone:
+		StationSpeaker.ensure(self)  # a self-serve med-station answers with the shared panel chirp; a data-only healer rides a talking NPC, and people don't beep
 
 ## Zorkmids to fully heal `player` right now — LINEAR in missing HP, floored at min_cost while anything is
 ## hurt. 0 means there's nothing to heal (full HP + no limb damage), so the service refuses / is free.

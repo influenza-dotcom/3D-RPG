@@ -250,14 +250,19 @@ func test_npc_applies_stats_too() -> void:
 func test_merchant_prices_respect_streetwise() -> void:
 	var m = load(MERCHANT_PATH).new()
 	m.buy_mult = 1.0
-	m.sell_mult = 1.0
+	# ⭐KEEP THE REAL MARKDOWN (0.5). This case used to neutralise it (sell_mult 1.0) so the streetwise curve
+	# could be read straight off the item value -- but a vendor that pays exactly what it charges is a ZERO
+	# spread, and streetwise on top of that INVERTS it, which sell_price now refuses (the arbitrage floor).
+	# With a real markdown the floor stays slack, so what's measured here is still purely the streetwise curve.
+	# tests/test_merchant.gd's sibling case carries the same note.
+	m.sell_mult = 0.5
 	var it := Item.new()
 	it.value = 100
 	assert_eq(m.buy_price(it), 100, "no buyer -> the bare markup price (NPCs / tests unchanged)")
 	var p = load(PLAYER_PATH).new()
 	p.stats = _sheet(0, 0, 0, 5)  # streetwise 5
 	assert_eq(m.buy_price(it, p), 80, "streetwise 5 buys at 80%")
-	assert_eq(m.sell_price(it, p), 120, "streetwise 5 sells at 120%")
+	assert_eq(m.sell_price(it, p), 60, "streetwise 5 sells at 120% of the 0.5 markdown")
 	p.free()
 	m.free()
 	it = null

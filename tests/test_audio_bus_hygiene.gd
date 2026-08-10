@@ -70,6 +70,29 @@ func test_every_authored_audio_player_declares_a_bus() -> void:
 		+ "buses rather than Master. Set a bus in the Inspector (ambient / sfx / music / voice / radio). "
 		+ "Offenders: %s") % ", ".join(offenders))
 
+## The DIEGETIC-SPEAKER bus: the tinny high-pass + lo-fi crunch + low-pass chain every self-serve station's panel
+## speaker plays through (StationSpeaker.bus). Two things are pinned, and both are the same failure the scan above
+## guards in its authored form — a sound that escapes the volume sliders:
+##  * it EXISTS. StationSpeaker falls back to `sfx` with a warning if it doesn't, so a deleted bus degrades to a clean
+##    full-range chirp rather than silence — you would hear a wrong sound, not a missing one, which is exactly
+##    the kind of drift a test should catch instead of a playtest.
+##  * it SENDS INTO `sfx`, not Master. That is what keeps it under the SFX volume slider and inside the death
+##    cinematic's world duck (death_mix.gd ducks the four world buses; a child bus inherits its parent's
+##    volume). Re-pointing it at Master in the editor's Audio panel would silently undo both.
+func test_the_speaker_bus_exists_and_routes_through_sfx() -> void:
+	var idx := AudioServer.get_bus_index(&"speaker")
+	assert_gte(idx, 0,
+		"the `speaker` bus is missing from default_bus_layout.tres — the Atm's panel speaker loses its tinny "
+		+ "treatment and falls back to a clean `sfx` chirp")
+	if idx < 0:
+		return
+	assert_eq(AudioServer.get_bus_send(idx), &"sfx",
+		"the `speaker` bus must send into `sfx` so the SFX volume slider and the death-cinematic duck both "
+		+ "still reach it — sending it to Master escapes every slider")
+	assert_gt(AudioServer.get_bus_effect_count(idx), 0,
+		"the `speaker` bus with no effects IS a clean bus — the filters are the whole point of it existing")
+
+
 func test_the_scan_actually_finds_audio_players() -> void:
 	# Guard against the scan silently matching nothing (a .tscn format change would make the test above pass
 	# vacuously forever). The project authors dozens of players; assert we can see a healthy number.

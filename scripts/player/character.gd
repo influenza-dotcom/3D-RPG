@@ -69,6 +69,18 @@ func charge_total(cost: float) -> float:
 func can_pay(cost: float) -> bool:
 	return charge_total(cost) <= spendable()
 
+## THE TWO-PART PRICE QUOTE, for a point-of-sale display that wants to show the service charge SEPARATELY rather
+## than only the all-in total: {base, cash, rail, fee, total, ok}. `base` is the sticker price, `cash`/`rail` how
+## it would be funded, `fee` the service charge that funding adds, `total` what actually leaves the player, `ok`
+## the same answer `can_pay` gives. Same shape on Player (which overrides it with the real split), so a screen can
+## paint any character's quote without asking what kind it is.
+##
+## A plain wallet has no rail and therefore no fee, so the quote degrades to "the price is the price".
+func quote(cost: float) -> Dictionary:
+	var base := maxf(0.0, snappedf(cost, Zorkmids.QUANTUM))
+	return {"base": base, "cash": minf(base, maxf(0.0, money)), "rail": 0.0,
+		"fee": 0.0, "total": base, "ok": can_pay(cost)}
+
 ## Pay `cost`. FAIL-CLOSED: returns false having moved NOTHING when the whole quoted total isn't covered — no
 ## partial draw, no goods, no debt. A cost of 0 or less always SUCCEEDS and charges nothing, so a free service
 ## still serves a character with an empty wallet or an open debt (the RespecStation / ChipInstaller convention,

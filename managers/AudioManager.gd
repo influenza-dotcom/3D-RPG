@@ -14,6 +14,9 @@ extends Node
 # position, lifetime, fade, or editor wiring is part of the feature.
 
 const DEFAULT_3D_MAX_DISTANCE: float = 30.0
+## AudioStreamPlayer3D's OWN default ceiling, mirrored here so the spawned one-shot keeps behaving exactly as it
+## did before `max_db` became a parameter. NOT a tuning knob — a caller that wants a different ceiling passes one.
+const DEFAULT_MAX_DB: float = 3.0
 const SFX_BUS: StringName = &"sfx"
 const ONE_SHOT_META: StringName = &"_audio_manager_one_shot"
 
@@ -28,13 +31,22 @@ const APPLAUSE_FADE_TO_DB: float = -40.0  ## near-silence target the fade eases 
 
 ## One-shot positional SFX. Routed to the `bus` (default "sfx") so the audio-options sliders actually
 ## affect it — a bare AudioStreamPlayer3D.new() lands on Master and ignores the SFX volume setting.
-func play_sfx(pos: Vector3, stream: AudioStream, volume_db: float = 0.0, pitch_scale: float = 1.0, bus: StringName = &"sfx") -> void:
+##
+## ⭐`max_db` IS the audible loudness for this project's authored idiom, and callers that modulate volume have to
+## pass it. AudioStreamPlayer3D outputs `min(volume_db + distance_attenuation, max_db)`, and the attenuation is
+## POSITIVE inside `unit_size` (~+20 dB at 1 m with the default 10). At the volume_db ≈ 80 this project authors
+## everywhere (weapon.tscn / enemy.tscn / the Player's audio exports), the sum is ~100 dB at any playable range —
+## permanently pinned to the ceiling — so a caller that cuts only `volume_db` cuts NOTHING you can hear. Carrying
+## the ceiling is the same discipline weapon_audio.gd / projectile.gd already follow when they copy an authored
+## node's max_db onto their spawned one-shot.
+func play_sfx(pos: Vector3, stream: AudioStream, volume_db: float = 0.0, pitch_scale: float = 1.0, bus: StringName = &"sfx", max_db: float = DEFAULT_MAX_DB) -> void:
 	if stream == null:
 		return
 	var player := AudioStreamPlayer3D.new()
 	player.stream = stream
 	player.volume_db = volume_db
 	player.pitch_scale = pitch_scale
+	player.max_db = max_db
 	player.max_distance = DEFAULT_3D_MAX_DISTANCE
 	player.bus = bus
 	player.set_meta(ONE_SHOT_META, true)

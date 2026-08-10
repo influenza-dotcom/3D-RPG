@@ -10,8 +10,9 @@ This index is generated from `@system` annotations in the code, so it cannot dri
 For the deep narrative see [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md); for current rough edges
 see [ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md).
 
-_13 system(s), 29 entries - scanned scripts/, managers/ + resources/._
+_15 system(s), 31 entries - scanned scripts/, managers/ + resources/._
 
+- [Audio](#audio)
 - [Control-Lock And Immunity](#control-lock-and-immunity)
 - [Derived Stats](#derived-stats)
 - [Economy](#economy)
@@ -22,9 +23,20 @@ _13 system(s), 29 entries - scanned scripts/, managers/ + resources/._
 - [Passive Item Buffs](#passive-item-buffs)
 - [Player Abilities](#player-abilities)
 - [PS1 Warp](#ps1-warp)
+- [Quests](#quests)
 - [Run And Level Flow](#run-and-level-flow)
 - [Save Model](#save-model)
 - [Save Model — the EXACT-snapshot tier (authored-NPC death/position + cross-level deaths + container contents)](#save-model--the-exact-snapshot-tier-authored-npc-deathposition--cross-level-deaths--container-contents)
+
+## Audio
+
+### `class StationSpeaker` - `scripts/components/station_speaker.gd`
+
+chirp(station) is THE open cue for every station screen (shop/heal/level-up/respec/install/chess/atm): the screen calls it at its commit point and feeds the RESULT to ModalMenu.grab_mouse(not chirped), so a machine with a voice REPLACES the generic UI sting instead of doubling it and a mute one still gets the sting. Static, type-agnostic and null-safe, so no screen branches or duck-types. ensure(station) is the auto-build seam the station components call in _ready (gated on `standalone`); it never replaces an AUTHORED StationSpeaker child, which is what makes a hand-placed one the tuning AND the mute switch.
+
+- **Risk:** A PAUSABLE AudioStreamPlayer3D silences itself on NOTIFICATION_PAUSED ~15 ms in, with no error and nothing logged — a dialogue-hosted station opens under the conversation's pause, so the built player MUST stay PROCESS_MODE_ALWAYS.
+- **Risk:** find_speaker matches by TYPE, not name: a station that exported a NodePath or looked for "Speaker" would go silent the first time a designer renamed the node in their own scene.
+- **Test:** `tests/test_station_speaker.gd`
 
 ## Control-Lock And Immunity
 
@@ -51,8 +63,8 @@ is_engaged() (_active != null) = a conversation exists at all — the unpaused i
 
 - **Risk:** Dropping is_engaged() from InputManager.world_frozen() loses immunity in the unpaused intro beat — an enemy shoots the frozen player with no error (C66).
 - **Risk:** die() gating on is_active() not is_engaged() skips abort() during a sub-menu suspension — the menu's close then re-pauses + re-opens the box over the death cinematic.
-- **Risk:** A suspending sub-menu (Shop/Install/Chess) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
-- **Risk:** Speaker menus are duck-typed via has_method/has_signal scans (buy/sell, do_heal, install_carried, ai_search_depth, set_in_dialogue/died); a rename silently drops the option with no compile error.
+- **Risk:** A suspending sub-menu (Shop/Install/Chess/Atm) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
+- **Risk:** Speaker menus are duck-typed via has_method/has_signal scans (buy/sell, do_heal, install_carried, ai_search_depth, deposit/withdraw, set_in_dialogue/died); a rename silently drops the option with no compile error.
 - **Test:** `tests/test_dialogue.gd` `tests/test_dialogue_suspend_closed.gd` `tests/test_dialogue_speaker_contracts.gd`
 
 ## Derived Stats
@@ -70,10 +82,10 @@ restamp_derived is the one strength/endurance re-stamp path LevelUp/PerkManager/
 
 ### `class Atm` - `scripts/components/atm.gd`
 
-deposit()/withdraw() are the ONLY writers of GameState.account outside LedgerAccrual; both are
+deposit()/withdraw() are the ONLY writers of GameState.account outside LedgerAccrual; both are self-guarding and callable off-tree, so AtmScreen stays a pure view with no rules of its own.
 
 - **Risk:** A deposit path that does not clamp to maxf(0.0, player.money) lets a debtor mint money.
-- **Risk:** A withdraw path that does not clamp to maxf(0.0, GameState.account) opens a cash advance — and with it
+- **Risk:** A withdraw path that does not clamp to maxf(0.0, GameState.account) opens a cash advance — and with it the draw-the-line / redeposit / earn-savings-interest arbitrage that the single clamp closes today.
 - **Test:** `tests/test_atm.gd`
 
 ### `class MoneyPurse` - `scripts/inventory/money_purse.gd`
@@ -241,6 +253,17 @@ GameRoot drives Ps1Warp.cover() on level load; cover() parents ONE ps1_applier u
 
 - **Risk:** If the LevelRoot gate breaks or GameRoot stops calling cover(), levels get no applier and the PS1 look silently disappears; test_level_data.gd::test_game_root_load_level_covers_a_levelroot_with_the_ps1_warp asserts the applier attaches on load.
 - **Test:** `tests/test_global_node_added_listeners.gd` `tests/test_level_data.gd`
+
+## Quests
+
+### `autoload QuestTracker` - `managers/QuestTracker.gd`
+
+QuestTracker OWNS the live quest tracker (active/completed/failed + objective progress) and the four quest signals; GameState keeps one-line forwarders so authored content and old call sites keep working. save_into/load_from write and restore the [quests_active]/[quests_completed]/[quests_failed] cfg sections; GameState._save_perks_and_quests / _load_perks_and_quests delegate their quest halves here. notify_kill/pickup/talk/enter/use + notify_flag_set are the world's hooks INTO quests — one shared _advance_objectives_matching body behind all of them.
+
+- **Risk:** A quest transition that forgets _gs().autosave_world_state() leaves progress unpersisted until an unrelated money/xp event happens to coincide — the classic "Continue lost my progress" bug.
+- **Risk:** _grant_quest_rewards early-returns off-tree, so a bare test grants NOTHING (not even reputation); asserting rewards without a live player silently passes for the wrong reason.
+- **Risk:** Restoring a quest whose .tres moved drops it SILENTLY — the _load_warnings array is the only surface that tells the player, and it is consume-once.
+- **Test:** `tests/test_quests.gd` `tests/test_quest_tracker.gd`
 
 ## Run And Level Flow
 

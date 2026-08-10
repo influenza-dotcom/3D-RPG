@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://casooqe01qj65" path="res://scripts/player/player.gd" id="1_xhfnw"]
 [ext_resource type="Script" path="res://scripts/components/ledger_accrual.gd" id="37_ledger"]
 [ext_resource type="Script" path="res://scripts/components/credit_watch.gd" id="38_credit"]
+[ext_resource type="Script" path="res://scripts/player/landing.gd" id="39_landg"]
 [ext_resource type="AudioStream" uid="uid://cgci6nkj0hxol" path="res://assets/audio/sfx/Footstep3.mp3" id="2_2n1s8"]
 [ext_resource type="AudioStream" uid="uid://budx7vymim0j0" path="res://assets/audio/sfx/PinballDing.mp3" id="2_4ntn1"]
 [ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://scripts/components/mouse_input.gd" id="2_kpjcp"]
@@ -51,7 +52,7 @@ return_shake = 0.0
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 height = 1.5292969
 
-[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("walking_sfx", "falling_air_sfx", "crouch", "head", "weapon_system", "coyote_time", "jump_buffer", "bullet_time", "bunnyhop", "mouse_input", "ui", "player_collision_shape", "grapple_hook_origin") groups=["Player"]]
+[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("walking_sfx", "falling_air_sfx", "crouch", "head", "weapon_system", "coyote_time", "jump_buffer", "bullet_time", "bunnyhop", "landing", "mouse_input", "ui", "player_collision_shape", "grapple_hook_origin") groups=["Player"]]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
@@ -64,7 +65,8 @@ fp_arm_unarmed_tilt_deg = 20.5
 fp_arm_unarmed_scale_mult = 2.0
 fp_arm_unarmed_spread = 0.5
 fp_arm_unarmed_bob_pos = 0.127
-fp_arm_punch_thrust = Vector3(-0.03, 0.02, -5)
+fp_arm_punch_pitch = -2.23
+fp_arm_punch_thrust = Vector3(-0.0019, 0.0013, -0.3185)
 bowling_sound = ExtResource("2_udvyq")
 jump_sound = ExtResource("3_3vjad")
 land_sound = ExtResource("9_ijyjs")
@@ -77,6 +79,7 @@ coyote_time = NodePath("CoyoteTime")
 jump_buffer = NodePath("JumpBuffer")
 bullet_time = NodePath("BulletTime")
 bunnyhop = NodePath("Bunnyhop")
+landing = NodePath("Landing")
 mouse_input = NodePath("MouseInput")
 ui = NodePath("UI")
 player_collision_shape = NodePath("PlayerCollisionShape")
@@ -132,6 +135,10 @@ script = ExtResource("33_jbuff")
 [node name="Bunnyhop" type="Node" parent="." unique_id=1700000004 node_paths=PackedStringArray("character")]
 script = ExtResource("35_bhop")
 character = NodePath("..")
+
+[node name="Landing" type="Node" parent="." node_paths=PackedStringArray("host")]
+script = ExtResource("39_landg")
+host = NodePath("..")
 
 [node name="WalkingSFX" type="AudioStreamPlayer3D" parent="." unique_id=203515311]
 stream = ExtResource("2_2n1s8")

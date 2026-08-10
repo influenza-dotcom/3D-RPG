@@ -1,6 +1,7 @@
 extends CanvasLayer
-## LevelUpScreen — spend zorkmids to raise a stat. Autoload; PAUSES the world while open (PROCESS_MODE_ALWAYS
-## so its buttons work through the pause), frees the mouse — same as ShopScreen / HealScreen. The cost RISES
+## LevelUpScreen — spend zorkmids to raise a stat. Autoload; REAL-TIME — it does NOT pause the world (the
+## STATION-SCREEN rule, argued in full in the atm_screen.gd header; PROCESS_MODE_ALWAYS anyway, so a
+## dialogue-hosted open keeps working under the conversation's pause), frees the mouse. The cost RISES
 ## with total level (Dark Souls) and is the same for every stat. Opened by LevelUp.start_talk (standalone) or
 ## the dialogue "Level Up" option (open_level_up).
 ##
@@ -31,6 +32,7 @@ var _root: Control
 var _title: Label
 var _header: HBoxContainer  ## level + wallet as TWO Labels (a literal space-run can't align in a variable-width font)
 var _level_label: Label
+var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; rail_changed drives _rebuild (every stat row re-prices)
 var _money_label: Label     ## the zorkmid half — only it wears the wallet tint (gold, or danger while in debt)
 var _rows: VBoxContainer
 var _perks: VBoxContainer  ## rank 29 perk-pick section (hidden when the station authored no available_perks)
@@ -59,7 +61,10 @@ func open_level_up(station: Node, player: Node) -> void:
 		return
 	_station = station
 	_is_open = true
-	_prev_mouse_mode = ModalMenu.grab_mouse()
+	# ONE OPEN CUE, NEVER TWO (the station-screen idiom): a self-serve terminal answers with its OWN diegetic
+	# StationSpeaker chirp, so the generic UI sting is suppressed exactly when that chirp fires and kept when the
+	# station is a person (no speaker). Past every refuse guard, so a station that couldn't open never beeps.
+	_prev_mouse_mode = ModalMenu.grab_mouse(not StationSpeaker.chirp(station))
 	var station_name_v: Variant = station.get(&"station_name")  # duck-typed: only is_instance_valid was checked, not the type
 	var station_nm: String = station_name_v if station_name_v is String else ""
 	# Route the re-title through title_text so the skin's uppercase_titles casing applies to RUNTIME titles
@@ -67,7 +72,6 @@ func open_level_up(station: Node, player: Node) -> void:
 	_title.text = MenuStyle.title_text(PlayerText.level_up_title(station_nm))
 	_rebuild()
 	_root.visible = true
-	get_tree().paused = true
 	opened.emit()
 
 func close() -> void:
@@ -78,7 +82,6 @@ func close() -> void:
 	ModalMenu.restore_mouse(_prev_mouse_mode)
 	_station = null
 	_player = null
-	get_tree().paused = false
 	closed.emit()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -91,13 +94,22 @@ func _unhandled_input(event: InputEvent) -> void:
 ## Raise `stat` (the station charges + applies it), then refresh — the cost rises + buttons disable when broke.
 func _on_raise(stat: StringName) -> void:
 	if is_instance_valid(_station) and is_instance_valid(_player):
-		_station.level_up_stat(_player, stat)
+		# Cue on the STATION's verdict, never on the row's affordability dim — those two gates have drifted before
+		# (the free-raise-while-in-debt wart the _rebuild comment documents), and a raise the station refused must
+		# stay silent: there is no denied cue in this set, and the back cue already means "this screen closed".
+		# This is MENU feedback (the click landed), NOT the reward sting seam — scripts/components/reward_stinger.gd
+		# is the diegetic "you earned something" surface and stays separate; don't merge the two later.
+		var raised: bool = _station.level_up_stat(_player, stat)
+		if raised:
+			MenuStyle.play_commit()
 		_rebuild()
 
 ## Rebuild the header (level / wallet / next cost) + one button per stat (its value + the +1 cost).
 func _rebuild() -> void:
 	if not is_instance_valid(_station) or not is_instance_valid(_player):
 		return
+	if _rail_btn != null:
+		_rail_btn.refresh()  # the rail may have been flipped at an ATM since this screen was built
 	# Cost is FLAT (Dark Souls) — the same for every stat at a given total level — so each row shows the identical
 	# next-level price and gates on it. FRACTIONAL throughout so the UI's affordability + display match
 	# LevelUp.level_up_stat exactly (a barely-affordable stat mustn't look clickable when the station would refuse it,
@@ -131,6 +143,9 @@ func _rebuild() -> void:
 		MenuStyle.attach_tip(btn, StatInfo.tooltip(stat, s))
 		if affordable:
 			btn.pressed.connect(_on_raise.bind(stat))
+		# _on_raise owns this button's voice (it commits only when the station actually served the raise), so
+		# drop the auto-wired generic click or every press would sound twice.
+		MenuStyle.set_button_sound(btn, &"")
 		row.add_child(btn)
 		var center := CenterContainer.new()
 		center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -212,6 +227,8 @@ func _perk_row(perk: Perk, pm: PerkManager, points: int) -> Control:
 		MenuStyle.attach_tip(btn, perk.description)
 	if pickable:
 		btn.pressed.connect(_on_pick_perk.bind(perk))
+	# Same contract as the stat rows: the cue is conditional in _on_pick_perk, so mute the generic click here.
+	MenuStyle.set_button_sound(btn, &"")
 	row.add_child(btn)
 	# Same skin.level_up_cols_width + CenterContainer treatment as the stat rows so the perk names left-align
 	# with the stat names above them (wrapper + label mouse-ignore; the full-rect Button stays the hit target).
@@ -236,7 +253,11 @@ func _perk_row(perk: Perk, pm: PerkManager, points: int) -> Control:
 ## Pick `perk`: the station spends a point + unlocks it, then refresh (the point count drops and the row picks up its owned marker).
 func _on_pick_perk(perk: Perk) -> void:
 	if is_instance_valid(_station) and is_instance_valid(_player):
-		_station.unlock_perk(_player, perk)
+		# Conditional commit, same contract as _on_raise (and the same reward_stinger distinction): unlock_perk
+		# refuses — spending nothing — with no point left or prereqs unmet, and a refusal must stay silent.
+		var unlocked: bool = _station.unlock_perk(_player, perk)
+		if unlocked:
+			MenuStyle.play_commit()
 		_rebuild()
 
 ## The player's PerkManager child, or null — for reading skill_points / has_perk in the picker.
@@ -292,6 +313,10 @@ func _bind_ui() -> void:
 	_level_label = %LevelLabel
 	_level_label.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	_money_label = %MoneyLabel
+	# The rail selector: flipping it changes every price gate on this card, so its signal drives the rebuild.
+	_rail_btn = %RailButton as PaymentRailButton
+	MenuStyle.cap_button(_rail_btn)
+	_rail_btn.rail_changed.connect(_rebuild)
 	_money_label.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	_money_label.add_theme_color_override(&"font_color", MenuStyle.gold())  # zorkmid tint — the wallet half only; _rebuild re-tints danger while in debt
 

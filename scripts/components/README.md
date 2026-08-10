@@ -123,8 +123,14 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
    const — and null-guard the host reads so a bare instance never crashes.
 5. Document it: add ONE catalogue row to `docs/AUTHORING_GUIDE.md` (*The "look-at interactable" family*) and
    a line to the tree above.
-6. If `start_talk` opens a PAUSING modal screen, register that modal in `InputManager` — an unregistered
-   pausing modal is the recurring drift this codebase watches for.
+6. If `start_talk` opens a modal screen, register that modal in `InputManager._modal_reg` — an unregistered
+   modal is the recurring drift this codebase watches for. Its `blocks_tabs` flag answers ONE question: does
+   this screen own the player's hands (so a Pip-Boy tab must refuse to open over it)? A station screen: yes.
+   ⭐It is NOT about pausing — **no registered screen pauses the tree**; only `DialogueManager` still does.
+   A station screen that froze the world would stop the city at a walk-up kiosk (see `atm_screen.gd`'s header).
+7. If it is a self-serve station, give it a voice in one line: `StationSpeaker.ensure(self)` in `_ready`,
+   gated on `standalone` (a data-only station rides a talking NPC, and a person who beeps is a bug). The
+   screen sounds it with `StationSpeaker.chirp(station)` and suppresses the generic UI sting when it fires.
 
 **Dual item** — a `CanPickUp` parented under a `Throwable` makes one prop both stashable (E → backpack)
 and throwable (Z → carry/throw). `ray_cast.gd` resolves E-vs-Z by ancestry, so the `CanPickUp` MUST be a

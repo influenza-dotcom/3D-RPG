@@ -1,4 +1,3 @@
-@tool
 class_name SkyTitle
 extends Node3D
 
@@ -12,6 +11,10 @@ extends Node3D
 ## SETUP: drop ONE under the Game root. Tune cue_seconds BY EAR if it lands early/late (the cue counts from when
 ## the title is armed, not from any audible beat). sky_distance is auto-clamped just inside the camera's far plane
 ## so the title never gets clipped away.
+##
+## Deliberately NOT a @tool script: every node here is BUILT at runtime (_ready spawns the Label3D, the overlay
+## CanvasLayer and its BackBufferCopy, then _process runs a wall-clock timeline), and none of it carries an
+## `owner`, so running it in-editor would only burn frames and spawn unsaveable nodes while a scene is open.
 
 ## The title text (all-caps reads best as a sky title).
 @export var text: String = "CYBER SUNDAY"

@@ -17,6 +17,7 @@ const COMPONENT_CONTRACTS := {
 	"res://scripts/components/bonfire.gd": ["rest"],                            # _find_bonfire
 	"res://scripts/components/level_up.gd": ["level_up_stat", "level_up_cost"], # _find_levelup_station
 	"res://scripts/components/chess_match.gd": ["ai_search_depth", "display_opponent_name", "ai_blunder", "player_is_white", "wager_amount"], # _speaker_chess (2) + ChessScreen.open_match (5)
+	"res://scripts/components/atm.gd": ["deposit", "withdraw"],                 # _speaker_atm (the "Bank" option)
 }
 
 # Transaction screens DialogueManager opens: script path -> the open method it calls (+ each awaits a `closed` signal).
@@ -26,6 +27,7 @@ const SCREEN_CONTRACTS := {
 	"res://scripts/ui/level_up_screen.gd": "open_level_up",
 	"res://scripts/ui/chess_screen.gd": "open_match",
 	"res://scripts/ui/chip_install_screen.gd": "open_install",  # DialogueManager suspends into open_install, awaiting `closed`
+	"res://scripts/ui/atm_screen.gd": "open_atm",               # ditto for the ledger terminal's "Bank" option
 }
 
 # NPC speaker methods DialogueManager duck-scans (set_in_dialogue/note_speaking/note_speaking_stop/provoke/

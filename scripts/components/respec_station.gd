@@ -23,6 +23,7 @@ func _ready() -> void:
 	_build_outline()
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
+	StationSpeaker.ensure(self)  # always a kiosk (this station has no dialogue-hosted mode) — give it the shared panel chirp
 
 ## Aim + Interact opens the confirm modal (mirrors LevelUp.start_talk -> LevelUpScreen). The modal previews the
 ## cost + the perks that will be refunded and calls do_respec() on Confirm; nothing changes until then.
@@ -31,9 +32,10 @@ func start_talk(player: Node) -> void:
 		return
 	RespecScreen.open_respec(self, player)
 
-## The respec transaction: reverse every unlocked perk (refunding each skill point), charge respec_cost, and
+## The respec transaction: charge respec_cost, then reverse every unlocked perk (refunding each skill point), and
 ## autosave the reversed build. Returns the perk count refunded. Called by RespecScreen on Confirm — but it is
-## self-guarding (no perks / can't afford -> 0, no charge) so it is also safe to call directly or from a test.
+## self-guarding (no perks / can't afford / a refused debit -> 0, nothing charged and nothing reversed) so it is
+## also safe to call directly or from a test.
 func do_respec(player: Node) -> int:
 	if player == null:
 		return 0
@@ -52,12 +54,27 @@ func do_respec(player: Node) -> int:
 			else float(player.money) >= respec_cost
 	if respec_cost > 0.0 and not affordable:
 		return 0
-	var n := pm.respec()
+	# CHARGE FIRST, AND NEVER DISCARD charge()'s ANSWER — the Healer.do_heal / ChipInstaller.install_carried
+	# idiom (`can_pay` gate, then `if not player.charge(cost): return`, then apply). Both halves are load-bearing:
+	#  * ORDER: pm.respec() subtracts every perk's stat bonuses from the LIVE character sheet, and the credit
+	#    limit is derived from that same sheet — so refunding first can SHRINK the available credit BETWEEN the
+	#    affordability gate above and the debit below, at which point charge() fail-closes on a respec that was
+	#    genuinely affordable one line earlier.
+	#  * RETURN VALUE: charge() is fail-closed (it moves NOTHING when it refuses), so ignoring the bool left the
+	#    perks refunded for FREE — and the autosave below then persisted the freebie.
+	# This is deliberately the OPPOSITE order to LevelUp.raise_stat's charge-last, whose stated concern is that the
+	# money_changed autosave inside add_money not catch a half-applied transaction. That concern does not bite here:
+	# the Player's money_changed autosave (_on_money_autosave) is a ONE-FRAME-DEFERRED coalesced flush, so the write
+	# it queues already sees the finished refund below. Even if it were immediate, a transient interim snapshot
+	# superseded by the authoritative autosave below would still be a far cheaper wart than a free respec — and a
+	# perk refund, unlike a stat raise, is not cheaply re-appliable, which rules out the capture-and-undo variant.
 	if respec_cost > 0.0:  # > 0, not != 0: a mis-authored NEGATIVE cost must not pay the player
 		if player.has_method(&"charge"):
-			player.charge(respec_cost)          # the payment seam: cash, then savings, then the armed rail
+			if not player.charge(respec_cost):  # the payment seam: cash, then savings, then the armed rail
+				return 0                        # fail-closed: nothing left the player, so nothing gets refunded
 		elif player.has_method(&"add_money"):
 			player.add_money(-respec_cost)      # minimal host (a stub / a non-Player wallet): the plain debit
+	var n := pm.respec()
 	GameState.autosave(player)  # the authoritative persist of the reversed build
 	if player.has_method(&"notify_toast"):
 		player.notify_toast(PlayerText.respec_refunded(n), Color(0.6, 0.85, 1.0))

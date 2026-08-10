@@ -96,6 +96,26 @@ static func long_range_bonus_for(distance: float, min_distance: float, flat: flo
 ## not re-rolled. Read as GameSettings.economy.restock_interval.
 @export var restock_interval: float = 60.0
 
+@export_group("Vendor pricing")
+## ⭐THE ARBITRAGE FLOOR — the one number that couples a Merchant's two multipliers. It is the minimum gap
+## (zorkmids) a vendor keeps between what it CHARGES for an item and what it PAYS for the same item from the
+## same actor: `Merchant.sell_price` is clamped to `buy_price - this`, so you can never sell a thing back for
+## more than it costs.
+##
+## ⭐WHY IT MUST EXIST: nothing else couples the two sides. STREETWISE bends buying DOWN and selling UP by the
+## same 4%/point (CharacterStats.buy_price_mult / sell_price_mult, both deliberately uncapped), so at the
+## shipped 1.0/0.5 spread the lines CROSS at about 9 points — well inside the +10 character creation already
+## allows — and every vendor becomes an unbounded money printer (buy at 60, sell back at 70, repeat), made
+## worse by a till that re-seeds from the .tscn on every level load. A `reputation_discount_curve` pushes the
+## same way and can cross at streetwise 0. Clamping the SELL side keeps streetwise monotonically better for
+## the player: more points narrow the spread toward parity instead of inverting it.
+##
+## Shipped at one Zorkmids.QUANTUM (the smallest coin), the least that keeps the inequality STRICT on the coin
+## grid — so this only ever bites a build/curve that had already crossed. Raise it to guarantee every vendor a
+## real cut however skilled the trader; 0 permits exact PARITY, which is still loop-free (the round trip nets
+## zero) but leaves no margin. Read as GameSettings.economy.min_vendor_spread.
+@export var min_vendor_spread: float = Zorkmids.QUANTUM
+
 @export_group("Money bag")
 ## When you DUMP your zorkmids from the backpack (right-click the coin tile), they drop as a physics BAG you can
 ## grab + hurl (Player.drop_money -> MoneyBag): a fat purse is a better bludgeon, so its SIZE, MASS, and THROW

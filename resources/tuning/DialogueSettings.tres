@@ -1,7 +1,7 @@
 [gd_resource type="Resource" script_class="DialogueSettings" format=3 uid="uid://8gbhb0pey6ke"]
 
 [ext_resource type="Script" uid="uid://csrx3cj8kmw65" path="res://resources/tuning/DialogueSettings.gd" id="1"]
-[ext_resource type="AudioStream" uid="uid://blcn6rm26u3ry" path="res://569856__danlucaz__hip-hop-loop-2.wav" id="2_dlgmusic"]
+[ext_resource type="AudioStream" uid="uid://blcn6rm26u3ry" path="res://assets/audio/music/569856__danlucaz__hip-hop-loop-2.wav" id="2_dlgmusic"]
 
 [resource]
 script = ExtResource("1")

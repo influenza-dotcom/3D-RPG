@@ -8,14 +8,27 @@ extends GutTest
 ## no third verb and no second ledger, which is why "pay off your debt" needs no code of its own and why you
 ## can never hold death-safe savings WHILE owing.
 ##
-## The components are driven off-tree (`.new()`, never `_ready`) with a bare Player as the host. GameState is
-## an AUTOLOAD, so every test snapshots and restores the banking fields (the test_start_menu Settings idiom):
-## leaving a balance behind would silently make a "broke" player solvent in some other suite.
+## The components are driven off-tree (`.new()`, never `_ready`) with a bare Player as the host.
+##
+## ⭐TWO DIFFERENT GameStates, and the line between them is load-bearing:
+##   • `Atm` / `LedgerAccrual` / `CreditWatch` all read and write the GameState AUTOLOAD by name, so the
+##     behaviour tests have to drive the real singleton. They touch exactly four fields, and before_each /
+##     after_each snapshot and restore those four (the test_start_menu Settings idiom) — leaving a balance
+##     behind would silently make a "broke" player solvent in some other suite.
+##   • Anything that calls `save_to_disk` / `load_from_disk` / `reset_for_new_game` uses a BARE off-tree
+##     instance (`load(GAMESTATE_PATH).new()`), the way every save test in the suite does. Those three
+##     methods each rewrite ~25 fields (and a load sets `loaded`/`profile_active` and re-arms the clock
+##     apply), which no four-field snapshot can put back; worse, on the autoload `self == GameState`, so a
+##     load routes the quest half at the QuestTracker AUTOLOAD and clears whatever journal another suite was
+##     mid-way through — the exact shared-journal hole the M1 tracker split was built to close. A bare
+##     instance gets its OWN private tracker child and is freed with it.
 
 const PLAYER_PATH := "res://scripts/player/player.gd"
 const ATM_PATH := "res://scripts/components/atm.gd"
 const ACCRUAL_PATH := "res://scripts/components/ledger_accrual.gd"
 const WATCH_PATH := "res://scripts/components/credit_watch.gd"
+const GAMESTATE_PATH := "res://managers/GameState.gd"
+const TMP_SAVE := "user://test_atm_tmp.cfg"
 
 var _prev_account: float
 var _prev_method: String
@@ -39,6 +52,11 @@ func after_each() -> void:
 	GameState.payment_method = _prev_method
 	GameState.credit_standing = _prev_standing
 	GameState.profile_active = _prev_profile
+	# Never leave the temp save behind. The atomic write (H1) also produces .tmp / .bak siblings of the save path,
+	# and load_from_disk's recovery ladder READS those — a stranded sibling would feed some later test's load.
+	for f in [TMP_SAVE, TMP_SAVE + ".tmp", TMP_SAVE + ".bak"]:
+		if FileAccess.file_exists(f):
+			DirAccess.remove_absolute(f)
 
 
 ## A bare off-tree Player. ALIVE (hp > 0) because the accrual and announcer both refuse to touch a dead one.
@@ -176,6 +194,23 @@ func test_transactions_are_free_in_both_directions() -> void:
 	assert_eq(GameState.account, 0.0, "…and leaves the account exactly where it started")
 	atm.free()
 	p.free()
+
+
+# --- THE PANEL SPEAKER -------------------------------------------------------------------------------------
+
+func test_the_terminal_chirps_through_the_shared_drop_in_and_survives_having_no_speaker() -> void:
+	# The panel chirp is no longer the Atm's own code: it is a StationSpeaker drop-in, the same one every station
+	# uses (the ATM was just first). AtmScreen fires it with the STATIC seam — StationSpeaker.chirp(atm) — which
+	# is type-agnostic and null-safe, so no station needs a has_method() dance and none can drift out of sync.
+	# An Atm that never entered the tree (this one, and every off-tree test here) never built a speaker: chirp
+	# must report false rather than fault.
+	var atm = _atm()
+	assert_false(StationSpeaker.chirp(atm), "an off-tree terminal has no speaker — chirp() reports it, it doesn't crash")
+	assert_null(StationSpeaker.find_speaker(atm), "…and there is nothing to find on it")
+	assert_false(StationSpeaker.chirp(null), "a null station is a no-op too (the refuse paths call through freely)")
+	assert_string_contains(FileAccess.get_file_as_string("res://scripts/components/atm.gd"), "StationSpeaker.ensure(self)",
+		"a standalone terminal must build its own default voice at _ready — a bare atm.tscn dropped in a level chirps with zero authoring")
+	atm.free()
 
 
 # --- STANDING: the earned half of the credit score ---------------------------------------------------------
@@ -326,47 +361,58 @@ func test_the_announcer_is_inert_at_a_zero_interval() -> void:
 
 # --- PERSISTENCE -------------------------------------------------------------------------------------------
 
+## Off the singleton from here down (see the header): these three drive the whole-profile methods, so they run on
+## bare instances. A FRESH instance also makes the round-trip honest for free — its account/rail/standing start at
+## the shipped defaults, so every assert below proves the LOAD wrote them rather than that a reset was skipped.
 func test_the_banking_fields_round_trip_through_a_save() -> void:
-	var path := "user://test_atm_roundtrip.cfg"
-	GameState.account = -137.5
-	GameState.payment_method = "credit"
-	GameState.credit_standing = 42.25
-	assert_eq(GameState.save_to_disk(path), OK, "the profile writes")
-	GameState.account = 0.0
-	GameState.payment_method = "debit"
-	GameState.credit_standing = 0.0
-	assert_true(GameState.load_from_disk(path), "…and reads back")
-	assert_eq(GameState.account, -137.5, "the signed account survives, debt and all")
-	assert_eq(GameState.payment_method, "credit", "the armed rail survives as its KEY")
-	assert_eq(GameState.credit_standing, 42.25, "…and so does the earned record")
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	var gs = load(GAMESTATE_PATH).new()
+	gs.account = -137.5
+	gs.payment_method = "credit"
+	gs.credit_standing = 42.25
+	assert_eq(gs.save_to_disk(TMP_SAVE), OK, "the profile writes")
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_eq(gs2.account, 0.0, "precondition: a fresh instance banks nothing, so the asserts below can't pass by accident")
+	assert_true(gs2.load_from_disk(TMP_SAVE), "…and reads back")
+	assert_eq(gs2.account, -137.5, "the signed account survives, debt and all")
+	assert_eq(gs2.payment_method, "credit", "the armed rail survives as its KEY")
+	assert_eq(gs2.credit_standing, 42.25, "…and so does the earned record")
+	gs.free()
+	gs2.free()
 
 
 func test_a_pre_atm_save_folds_its_negative_wallet_onto_the_account() -> void:
 	# ⭐Saves written BEFORE the ATM carried the implant debt as a NEGATIVE WALLET. The wallet is cash-only
-	# now, so a negative one can only be that legacy debt — move it where the terminal can actually repay it.
-	# Idempotent by construction, which is exactly why this needed no SAVE_VERSION bump.
-	var path := "user://test_atm_legacy.cfg"
+	# now, so on one of THOSE files a negative one can only be that legacy debt — move it where the terminal can
+	# actually repay it. It is a version-gated migration (< v5), NOT the "idempotent by construction" fold it
+	# shipped as: that argument assumed a wallet that can never go below zero, and DialogueChoice.give_money takes
+	# a NEGATIVE amount for a fee, so a CURRENT run can reach a genuine cash shortfall — folding that into
+	# interest-bearing bank debt behind the player's back is the bug the gate closes. The v5 half of the gate is
+	# pinned in test_game_save.gd alongside the other migrations; this end is the LEDGER's stake in it.
 	var cfg := ConfigFile.new()
-	cfg.set_value("meta", "version", GameState.SAVE_VERSION)
+	cfg.set_value("meta", "version", 4)  # a pre-ATM save: the last schema that could carry debt in the wallet
 	cfg.set_value("player", "money", -250.0)  # the old shape: debt hiding in the wallet
-	assert_eq(cfg.save(path), OK, "the legacy-shaped save writes")
-	assert_true(GameState.load_from_disk(path), "…and loads")
-	assert_eq(GameState.money, 0.0, "the negative wallet is emptied — cash can no longer be negative")
-	assert_eq(GameState.account, -250.0, "…and the debt now lives on the account, where it is repayable")
-	# Idempotence: saving and reloading must not fold a second time.
-	assert_eq(GameState.save_to_disk(path), OK, "re-saving the folded profile")
-	assert_true(GameState.load_from_disk(path), "…and reloading it")
-	assert_eq(GameState.account, -250.0, "the fold ran exactly once — it can never double-charge a debt")
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	assert_eq(cfg.save(TMP_SAVE), OK, "the legacy-shaped save writes")
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "…and loads")
+	assert_eq(gs.money, 0.0, "the negative wallet is emptied — cash can no longer be negative")
+	assert_eq(gs.account, -250.0, "…and the debt now lives on the account, where it is repayable")
+	# Idempotence: the re-save stamps the current SAVE_VERSION, so a reload cannot fold a second time.
+	assert_eq(gs.save_to_disk(TMP_SAVE), OK, "re-saving the folded profile")
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "…and reloading it")
+	assert_eq(gs2.account, -250.0, "the fold ran exactly once — it can never double-charge a debt")
+	gs.free()
+	gs2.free()
 
 
 func test_a_new_game_starts_with_a_clean_ledger() -> void:
-	GameState.account = -999.0
-	GameState.payment_method = "credit"
-	GameState.credit_standing = -50.0
-	GameState.reset_for_new_game()
-	assert_eq(GameState.account, 0.0, "a fresh run owes nothing and has nothing banked")
-	assert_eq(GameState.payment_method, "debit", "…spends its own money by default")
-	assert_eq(GameState.credit_standing, 0.0,
+	var gs = load(GAMESTATE_PATH).new()
+	gs.account = -999.0
+	gs.payment_method = "credit"
+	gs.credit_standing = -50.0
+	gs.reset_for_new_game()
+	assert_eq(gs.account, 0.0, "a fresh run owes nothing and has nothing banked")
+	assert_eq(gs.payment_method, "debit", "…spends its own money by default")
+	assert_eq(gs.credit_standing, 0.0,
 		"…and has NO record, so New Game rates the build alone (credit_rating_for defaults standing to 0)")
+	gs.free()

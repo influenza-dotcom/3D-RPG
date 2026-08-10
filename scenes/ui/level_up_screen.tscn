@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/level_up_screen.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/ui/payment_rail_button.gd" id="2_rail"]
 
 [node name="LevelUpScreen" type="CanvasLayer"]
 layer = 121
@@ -66,6 +67,13 @@ layout_mode = 2
 size_flags_horizontal = 3
 horizontal_alignment = 2
 text_overrun_behavior = 3
+
+[node name="RailButton" type="Button" parent="Root/Panel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+clip_text = true
+script = ExtResource("2_rail")
 
 [node name="Scroll" type="ScrollContainer" parent="Root/Panel/VBox"]
 layout_mode = 2

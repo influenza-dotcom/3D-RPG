@@ -206,6 +206,51 @@ func test_legacy_stealth_and_pickpocket_fold_into_larceny_on_old_load() -> void:
 	assert_eq(gs2.make_stats().get_stat(&"larceny"), 6, "a current save's larceny loads unchanged — no re-migration / double-count")
 	gs2.free()
 
+
+## v5 (2026-08-08): the NEGATIVE-WALLET fold. Saves written before the ATM carried the New Game implant bill as a
+## negative `money`; the wallet is cash-only now, so on a PRE-v5 file a negative one can only be that legacy debt and
+## it is moved onto the signed Ledger account, where a terminal can actually repay it. It is ADDITIVE (a pre-ATM save
+## could already owe on the account too), and it is a proper version-gated migration exactly like the two stat folds
+## above — a separate `if`, so an ancient save still runs every fold it needs in ONE load.
+func test_pre_v5_negative_wallet_folds_onto_the_account_exactly_once() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("meta", "version", 4)          # the last schema that could carry debt in the wallet
+	cfg.set_value("player", "money", -250.0)     # the old shape: the implant bill hiding in the wallet ...
+	cfg.set_value("player", "account", -10.0)    # ... on top of an account that already owed something
+	cfg.save(TMP_SAVE)
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "the v4 save loads")
+	assert_almost_eq(gs.money, 0.0, 0.001, "the negative wallet is emptied — cash can no longer be negative")
+	assert_almost_eq(gs.account, -260.0, 0.001, "the debt is ADDED to the account (-10 + -250), never assigned over it")
+	# Keep playing -> autosave: the re-save stamps the current SAVE_VERSION, so the fold is gated OFF on the next load.
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the re-saved profile loads")
+	assert_eq(gs2.save_version, GameState.SAVE_VERSION, "re-saving stamps the current SAVE_VERSION (the fold won't re-run)")
+	assert_almost_eq(gs2.account, -260.0, 0.001, "the fold ran exactly ONCE — a reload can never double-charge the debt")
+	assert_almost_eq(gs2.money, 0.0, 0.001, "...and the emptied wallet stays empty")
+	gs.free()
+	gs2.free()
+
+
+## ⭐WHY that fold needed a version gate at all, and the half a "it's idempotent by construction" argument missed: a
+## CURRENT run can reach a negative wallet honestly — DialogueChoice.give_money is documented as taking a NEGATIVE
+## amount for a fee and Character.add_money does not clamp — so an ungated fold would quietly convert a cash shortfall
+## into interest-bearing BANK debt on the next load. At v5+ the wallet's sign means what it says and is left alone.
+func test_a_current_version_save_never_folds_a_negative_wallet() -> void:
+	assert_gte(GameState.SAVE_VERSION, 5, "the negative-wallet fold is gated at <v5, so the current schema must be at least 5 for this to test anything")
+	var cfg := ConfigFile.new()
+	cfg.set_value("meta", "version", GameState.SAVE_VERSION)
+	cfg.set_value("player", "money", -40.0)   # a genuine in-run shortfall, NOT legacy implant debt
+	cfg.set_value("player", "account", 0.0)
+	cfg.save(TMP_SAVE)
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "the current-schema save loads")
+	assert_almost_eq(gs.account, 0.0, 0.001, "a v5+ negative wallet is NOT folded — the ledger account is untouched")
+	assert_almost_eq(gs.money, -40.0, 0.001, "...and the shortfall stays where it happened, in the wallet")
+	gs.free()
+
+
 func test_world_save_id_key_for() -> void:
 	# WorldSaveId is the shared per-object key: an authored save_id is the WHOLE key (stable across moves/renames);
 	# a blank id falls back to a level|path|position key. Off-tree (no add_child) so the position is zeroed, not errored.
@@ -712,6 +757,189 @@ func test_load_prefers_tmp_over_bak_on_missing_primary() -> void:
 	assert_true(gs.load_from_disk(TMP_SAVE), "recovers from siblings when the primary is missing")
 	assert_almost_eq(gs.money, 20.0, 0.001, "prefers the .tmp (newest interrupted write) over the older .bak (10)")
 	gs.free()
+
+
+# --- H1 recovery, the REJECTION half ---------------------------------------------------------------------------
+## The tests above cover a MISSING primary. These cover a primary that is still THERE and still parses — the case
+## `ConfigFile.load() == OK` cannot see. ConfigFile returns OK for a zero-length file (zero sections) and for any
+## fragment cut at a line boundary, so gating the ladder on the Error alone accepted a shredded primary as a pristine
+## profile: `loaded`/`profile_active` true, every field silently at its default, and the .tmp/.bak that still held
+## the run never even consulted. The ladder therefore asks a second question per rung — does this file LOOK like one
+## of ours (GameState._cfg_is_profile / PROFILE_SECTIONS) — and each rung parses into its OWN ConfigFile so a
+## rejected one can never leave residue behind for the fallback to be merged on top of.
+
+## Overwrite `path` with EXACTLY `text` ("" truncates it to zero bytes). The corruption these tests simulate is a
+## partial/empty file on disk, which no ConfigFile call can produce — it has to be stored as raw bytes.
+func _write_raw(path: String, text: String) -> void:
+	var f := FileAccess.open(path, FileAccess.WRITE)  # WRITE truncates an existing file
+	assert_not_null(f, "the test fixture must be writable at %s" % path)
+	if f != null:
+		f.store_string(text)
+		f.close()
+
+
+func test_zero_length_primary_falls_through_to_the_bak() -> void:
+	# The crash-during-create shape: the primary exists but holds nothing. It must be SKIPPED, not loaded as an
+	# empty-but-valid profile (which is how a real run gets silently replaced by a default character).
+	var gs = load(GAMESTATE_PATH).new()
+	gs.money = 512.0
+	gs.player_name = "Bak Holder"
+	gs.save_to_disk(TMP_SAVE)
+	DirAccess.copy_absolute(TMP_SAVE, TMP_SAVE + ".bak")  # the previous good checkpoint survives beside it
+	_write_raw(TMP_SAVE, "")
+	var probe := ConfigFile.new()
+	assert_eq(probe.load(TMP_SAVE), OK, "precondition: a 0-byte file parses OK — the Error alone can never catch this")
+	assert_true(probe.get_sections().is_empty(), "precondition: ...with zero sections, indistinguishable from a fresh profile once you read keys")
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "a zero-length primary falls through to the .bak instead of loading as an empty profile")
+	assert_almost_eq(gs2.money, 512.0, 0.001, "...and the .bak's wallet is what loads (a default 0/knob here would BE the bug)")
+	assert_eq(str(gs2.player_name), "Bak Holder", "...character and all")
+	gs.free()
+	gs2.free()
+
+
+func test_a_truncated_primary_with_no_recognisable_section_falls_through() -> void:
+	# A file cut at a LINE BOUNDARY still parses — this one is sliced down to a single mid-file section — so only the
+	# "does it look like one of our saves" gate can reject it. [reputation] is a real save section but deliberately
+	# NOT a PROFILE_SECTIONS sentinel, so this is exactly the shape the sentinel list exists to refuse.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.money = 640.0
+	gs.reputation = {"faction_alpha": 12.0}  # guarantees a [reputation] section to slice out
+	gs.save_to_disk(TMP_SAVE)
+	DirAccess.copy_absolute(TMP_SAVE, TMP_SAVE + ".bak")
+	var text := FileAccess.get_file_as_string(TMP_SAVE)
+	var start := text.find("[reputation]")
+	assert_gte(start, 0, "precondition: the written save carries a [reputation] section to slice")
+	var stop := text.find("\n[", start + 1)
+	assert_gte(stop, 0, "precondition: another section follows it, so the slice ends on a line boundary")
+	_write_raw(TMP_SAVE, text.substr(start, stop - start + 1))
+	var probe := ConfigFile.new()
+	assert_eq(probe.load(TMP_SAVE), OK, "precondition: the truncated primary still PARSES")
+	assert_true(probe.has_section("reputation"), "precondition: ...and still carries a real save section, just not a sentinel one")
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the shredded primary is skipped and the .bak loads")
+	assert_almost_eq(gs2.money, 640.0, 0.001, "...restoring the wallet the fragment no longer carried")
+	gs.free()
+	gs2.free()
+
+
+func test_recovery_never_merges_the_rejected_primary_onto_the_fallback() -> void:
+	# ⭐THE FRANKEN-PROFILE GUARD. ConfigFile.load() does NOT clear what the instance already holds, so ONE shared
+	# ConfigFile across the ladder let a rejected primary's keys survive underneath the fallback's — the .bak's money
+	# sitting beside the dead primary's level/clock/status, a blended save that loads without a single warning.
+	# Every field below is authored DIFFERENTLY in the two files, so a blend cannot pass by luck.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.money = 100.0
+	gs.player_name = "Bak Run"
+	gs.time_of_day = 0.25
+	gs.current_level_path = "res://levels/bak.tres"
+	gs.reputation = {"faction_alpha": 11.0}
+	gs.save_to_disk(TMP_SAVE)
+	DirAccess.copy_absolute(TMP_SAVE, TMP_SAVE + ".bak")
+	# The rejected primary: parses fine, carries a CONFLICTING value for every field the .bak sets — plus a [status]
+	# section the .bak never wrote at all (the sharpest tell, since a blend has nothing to overwrite it with).
+	var rogue := ConfigFile.new()
+	rogue.set_value("reputation", "faction_alpha", 999.0)
+	rogue.set_value("clock", "time_of_day", 0.99)
+	rogue.set_value("level", "path", "res://levels/rogue.tres")
+	rogue.set_value("status", "effects", [{"path": "res://fx/rogue.tres", "remaining": 9.0}])
+	assert_eq(rogue.save(TMP_SAVE), OK, "the rogue primary writes")
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the ladder rejects the rogue primary and recovers from the .bak")
+	assert_almost_eq(gs2.money, 100.0, 0.001, "the .bak's wallet loads")
+	assert_eq(str(gs2.player_name), "Bak Run", "...and its character")
+	assert_almost_eq(gs2.time_of_day, 0.25, 0.0001, "the clock is the .bak's 0.25, NOT the rejected primary's 0.99")
+	assert_eq(str(gs2.current_level_path), "res://levels/bak.tres", "the level identity is purely the .bak's")
+	assert_almost_eq(float(gs2.reputation.get("faction_alpha", 0.0)), 11.0, 0.01, "a faction standing present in BOTH files takes the .bak's value")
+	assert_true(gs2.status_effects.is_empty(), "a section the .bak never wrote does not leak in from the rejected primary — the loaded profile is ONE file's")
+	gs.free()
+	gs2.free()
+
+
+func test_a_tail_truncated_primary_falls_through_to_a_complete_bak() -> void:
+	# save_to_disk writes [meta]/[player] FIRST and [perks]/[quests] LAST, so a truncated write keeps its HEAD:
+	# money and stats survive while perks and quests vanish. The section sentinel alone cannot catch that — the
+	# file genuinely IS one of ours — so save_to_disk stamps [eof] as its final section and the ladder demands it.
+	# Losing one write to the .bak is strictly better than resuming a run with its perks and quests silently gone.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.money = 777.0
+	gs.skill_points = 4  # rides [perks], written near the END of the file — the part a truncation eats
+	gs.save_to_disk(TMP_SAVE)
+	# An older but WHOLE checkpoint in .bak — whole meaning it carries the [eof] marker a finished write leaves.
+	var older := ConfigFile.new()
+	older.set_value("meta", "version", GameState.SAVE_VERSION)
+	older.set_value("player", "money", 111.0)
+	older.set_value("perks", "points", 9)
+	older.set_value("eof", "complete", true)
+	assert_eq(older.save(TMP_SAVE + ".bak"), OK, "the older checkpoint writes")
+	var text := FileAccess.get_file_as_string(TMP_SAVE)
+	var cut := text.find("\n[stats]")
+	assert_gte(cut, 0, "precondition: [stats] follows the [meta]/[player] head, so there is a line boundary to cut on")
+	assert_true(text.contains("[eof]"), "precondition: a COMPLETE save carries the terminal marker...")
+	_write_raw(TMP_SAVE, text.substr(0, cut + 1))
+	assert_false(FileAccess.get_file_as_string(TMP_SAVE).contains("[eof]"), "...and truncating it takes the marker with it")
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the ladder still produces a profile")
+	assert_almost_eq(gs2.money, 111.0, 0.001, "but from the COMPLETE .bak, not the truncated primary (777)")
+	assert_eq(gs2.skill_points, 9, "so the perks the truncation ate come back with it")
+	gs.free()
+	gs2.free()
+
+
+func test_a_marker_less_primary_is_kept_when_no_sibling_is_complete() -> void:
+	# BACKWARDS COMPATIBILITY, pinned. Every save written before the [eof] marker existed lacks it, and so does
+	# every hand-built fixture in this file. Demanding the marker unconditionally would have erased those profiles
+	# outright, so the ladder only prefers a sibling that verifiably HAS one — with no such sibling it keeps the
+	# primary and reads it exactly as it did before the marker. This is the case that must never get stricter.
+	var legacy := ConfigFile.new()
+	legacy.set_value("meta", "version", GameState.SAVE_VERSION)
+	legacy.set_value("player", "money", 250.0)
+	legacy.set_value("perks", "points", 3)
+	assert_eq(legacy.save(TMP_SAVE), OK, "the marker-less legacy save writes")
+	assert_false(FileAccess.get_file_as_string(TMP_SAVE).contains("[eof]"), "precondition: it carries no terminal marker")
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "a marker-less save with no complete sibling still loads")
+	assert_almost_eq(gs.money, 250.0, 0.001, "and it is read in full")
+	assert_eq(gs.skill_points, 3, "including the sections a truncation would have eaten")
+	gs.free()
+
+
+func test_a_marker_less_bak_still_rescues_an_unusable_primary() -> void:
+	# The other half of the compatibility rule, and the sharper edge of it. The marker ARBITRATES between rungs; it
+	# must never CONDEMN one on its own. A player whose save predates the marker still has a pre-marker .bak, so if
+	# requiring the marker could veto that rung, the first real corruption would turn a fully recoverable run into
+	# "no save found" — strictly worse than the behaviour this whole ladder was hardened to fix.
+	var older := ConfigFile.new()
+	older.set_value("meta", "version", GameState.SAVE_VERSION)
+	older.set_value("player", "money", 432.0)
+	assert_eq(older.save(TMP_SAVE + ".bak"), OK, "the marker-less legacy .bak writes")
+	_write_raw(TMP_SAVE, "")  # the primary is shredded to zero bytes
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "the unusable primary still falls through to the marker-less .bak")
+	assert_almost_eq(gs.money, 432.0, 0.001, "and the legacy checkpoint is read")
+	gs.free()
+
+
+func test_the_ladder_still_accepts_a_sparse_legacy_save() -> void:
+	# The counterweight to every rejection above: the sentinel list is deliberately WIDER than [meta]/[player],
+	# because a legitimately sparse file is a real save. A pre-versioning profile has no [meta] at all (the
+	# test_legacy_save_without_meta_reads_version_0 fixture), and hand-authored migration fixtures can carry a
+	# single section. Refusing those would be a worse bug than the shredded-primary one the gate exists to catch.
+	var cfg := ConfigFile.new()
+	cfg.set_value("player", "money", 61.0)  # [player] and nothing else: a save written before versioning
+	cfg.save(TMP_SAVE)
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "a [meta]-less legacy save is a REAL save — the sentinel gate must not reject it")
+	assert_almost_eq(gs.money, 61.0, 0.001, "...and its wallet loads")
+	assert_eq(gs.save_version, 0, "...still reading as version 0, so every migration below still runs on it")
+	gs.free()
+	var flags_only := ConfigFile.new()
+	flags_only.set_value("flags", "seen_intro", 1)  # the sparsest shape in the suite (see test_bool_coercion_...)
+	flags_only.save(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "a single-section [flags] fixture is still recognised as a profile")
+	assert_true(gs2.get_flag_bool(&"seen_intro"), "...and its flags load")
+	gs2.free()
 
 
 ## H1b: every save stamps [meta].version = SAVE_VERSION, and a load reads it back into save_version.

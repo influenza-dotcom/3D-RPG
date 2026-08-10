@@ -232,7 +232,8 @@ var _unarmed_hands_up: bool = false  ## latch: the fists are up as the unarmed "
 var _fp_arm_tween: Tween = null  ## the in-flight hands slide (draw up / stow down); killed before starting a new one
 var _fp_arm_stowing: bool = false  ## a stow slide is running: FREEZE the pose ease (tilt/scale/spread) so the fists sink out AS fists instead of morphing into the carry reach on screen
 var _fp_arm_bob_mount: Node3D = null  ## camera-child wrapper the fists' walk-bob writes — the rig's OWN position stays the tweens'
-var _fp_bob_time: float = 0.0  ## footstep bob phase, advanced at GameSettings.camera.bob_speed while moving (GunPose parity)
+var _fp_bob_time: float = 0.0  ## footstep bob phase, advanced at GameSettings.camera.bob_speed while moving (GunPose parity); WRAPPED to TAU*2 — see _update_fp_arm_bob
+var _fp_bob_amp: float = 0.0   ## eased walk-bob amplitude (speed × grounded). EASED, never stepped: a one-frame is_on_floor() blip must not snap the arm-pump
 var _fp_bob_gate: float = 0.0  ## eased 0→1 "fists are up" amplitude gate so the bob fades in/out instead of snapping
 var _fp_breath_time: float = 0.0  ## breathing sine phase, advanced at fp_arm_unarmed_breath_speed (GunPose parity)
 var _fp_breath_t: float = 0.0  ## eased 0→1 idle-breathing blend — fades out while walking/airborne, like GunPose's
@@ -268,8 +269,11 @@ var _rewield_in_flight: bool = false
 @export_group("Audio")
 ## The ONE-SHOTS (bowling / jump / land) play through AudioManager.play_sfx — a fresh self-freeing spatial player
 ## per hit, so rapid jumps/lands layer instead of cutting each other off. The stream lives here as an @export
-## AudioStream (was a per-node AudioStreamPlayer3D; the nodes are gone). volume_db is passed through play_sfx, whose
-## spawned player caps at the default max_db (3.0) — the same clamp the old nodes used, so loudness is preserved.
+## AudioStream (was a per-node AudioStreamPlayer3D; the nodes are gone). volume_db is passed through play_sfx.
+## ⭐These *_volume_db knobs sit far above the CEILING that actually decides loudness: a spawned one-shot outputs
+## min(volume_db + distance attenuation, max_db), and at the 40-80 dB authored here the sum is pinned to max_db
+## at every playable range. So the ceiling is the loudness, and any per-hit MODULATION has to ride it — see
+## land_sound_max_db, which is why the touchdown's impact softening is audible at all (Landing.on_land).
 ## The two LOOPS stay node-driven (play_sfx is fire-and-forget and can't model them): WalkingSFX (crouch/climb-aware
 ## footstep cadence) and FallingAirSFX (a volume-modulated wind loop that slide.gd also borrows).
 ## Bowling-strike "STRIKE!" stream played ONLY on a body-ram KILL (a non-lethal ram plays ram_thud_sound instead).
@@ -281,6 +285,12 @@ var _rewield_in_flight: bool = false
 ## Touchdown stream; its volume + pitch scale with landing impact (a hard fall is louder + lower) off these bases.
 @export var land_sound: AudioStream
 @export var land_sound_base_volume_db: float = 80.0  ## was captured from the LandSFX node's volume_db
+## The touchdown's LOUDEST ceiling — a full-impact fall plays at exactly this, and a softer one at this MINUS
+## (1 - impact) * AudioSettings.land_sfx_volume_db_reduction, which is the cut you actually hear (see the group
+## note above: the 80 dB base is pinned to the ceiling at any playable range, so cutting it alone did nothing and
+## a kerb thudded like a lethal fall). Defaults to AudioManager.DEFAULT_MAX_DB, the engine ceiling the one-shot
+## used before — so the hardest landing is as loud as it has always been.
+@export var land_sound_max_db: float = 3.0
 @export var land_sound_base_pitch: float = 1.0       ## was captured from the LandSFX node's pitch_scale
 ## Looping footstep step played on the footstep cadence while moving on foot or climbing; quieter while crouched. Wire to a 3D player on the body.
 @export var walking_sfx: AudioStreamPlayer3D
@@ -303,6 +313,9 @@ var _rewield_in_flight: bool = false
 @export var bullet_time: BulletTime
 ## The Bunnyhop component (chained jumps build speed). Wire to the player's Bunnyhop child.
 @export var bunnyhop: Bunnyhop
+## The Landing component (M13 residual): owns the touchdown burst + the footstep cadence, both POST-move.
+## Wire to the player's Landing child. Null (an off-tree test Player) simply means no landing FX / no footsteps.
+@export var landing: Landing
 ## The MouseInput component that turns mouse motion into look/aim and feeds this player's yaw. Wire to the player's MouseInput child.
 @export var mouse_input: MouseInput
 
@@ -326,9 +339,6 @@ var screen_shake: ScreenShake
 var muzzle: Marker3D
 
 var gun_mesh: GunMesh
-
-var footstep_interval: float = GameSettings.player_movement.footstep_base_interval
-var _footstep_timer: float = 0.0
 
 ## The fake blob shadow (a Decal child) projects straight DOWN on the ground; while wall-climbing we
 ## rotate it to project onto the WALL instead, easing back when grounded. Cached + driven in code.
@@ -437,7 +447,6 @@ var is_indoors: bool = false
 
 var target_speed: float = GameSettings.player_movement.max_speed
 
-var _walking_sfx_base_db: float
 # Host-owned ADS flag: ScopeCoordinator WRITES host._is_scoped; GroundMovement reads it off the host for the
 # scope slow, and sprint_blocked_by_scope() reads it here for the run lockout.
 var _is_scoped: bool = false
@@ -898,6 +907,7 @@ func _update_fp_arm_bob(delta: float) -> void:
 		_fp_arm_bob_mount.rotation_degrees = Vector3.ZERO
 		if is_instance_valid(_fp_arms) and absf(_fp_arms.arm_stride_deg) > 0.01:
 			_fp_arms.arm_stride_deg = 0.0  # park the arm-pump too — the carry hold's hands stay planted
+		_fp_bob_amp = 0.0  # and drop the eased amplitude, so the next draw fades the pump back IN from rest
 		return
 	var horizontal_speed := Vector2(velocity.x, velocity.z).length()
 	# Climbing counts as walking for the bob (vertical motion while scaling a wall) — the GunPose parity rule.
@@ -905,13 +915,26 @@ func _update_fp_arm_bob(delta: float) -> void:
 	if climbing:
 		horizontal_speed = maxf(horizontal_speed, absf(velocity.y))
 	var moving := horizontal_speed > GameSettings.player_movement.footstep_min_horizontal_speed
-	var factor := 0.0
+	# AMPLITUDE is EASED, never stepped — this is the fix for the 2026-08-08 "fists jitter while walking" report.
+	# `is_on_floor()` blips false for single frames all the time while actually walking (brush seams, the 0.5 m
+	# stair risers, any bump), and horizontal_speed dips under the threshold between strides. Taking the raw gate
+	# as the amplitude meant one such frame drove the arm-pump to ZERO and the next drove it back to full: a
+	# ±fp_arm_unarmed_stride_deg snap, which on this rig's ~2.9 m arm swinging from a shoulder ~2 m behind the
+	# lens is ~0.35 m of fist travel in ONE FRAME. The mount's own bob hid it (it is lerped below, so it only
+	# ever moved 15% of the step) — the STRIDE was written raw, so the whole pair popped.
+	var amp_target := 0.0
 	if Settings.view_bob_enabled and (is_on_floor() or climbing) and moving:
-		_fp_bob_time += delta * GameSettings.camera.bob_speed
-		factor = clampf(horizontal_speed / GameSettings.player_movement.max_speed, 0.0, 1.0)
-	else:
-		_fp_bob_time = lerpf(_fp_bob_time, 0.0, 1.0 - exp(-10.0 * delta))  # ease the phase home, as GunPose does
-	var amp := factor * _fp_bob_gate
+		amp_target = clampf(horizontal_speed / GameSettings.player_movement.max_speed, 0.0, 1.0)
+	_fp_bob_amp = lerpf(_fp_bob_amp, amp_target, 1.0 - exp(-fp_arm_unarmed_bob_fade * delta))
+	# PHASE only ever advances (while moving) and is WRAPPED — never eased toward zero. Easing a phase is what
+	# turned the blip above into a random jump: the phase grows without bound while you walk (bob_speed rad/s, so
+	# hundreds of radians within a minute), and lerping THAT toward 0 moves it tens of radians in one frame —
+	# several whole bob cycles, i.e. the fists teleport to an unrelated point in the walk cycle. The settle-to-
+	# centre this used to serve is already done properly by the eased amplitude above plus the mount lerp below.
+	# TAU * 2 is the period of the HALF-rate terms (cos/sin of _fp_bob_time * 0.5), so the wrap is continuous for
+	# every consumer — the full-rate sin, the half-rate bob/roll, and the stride.
+	_fp_bob_time = advance_bob_phase(_fp_bob_time, GameSettings.camera.bob_speed, delta, amp_target > 0.0)
+	var amp := _fp_bob_amp * _fp_bob_gate
 	# BREATHING — the idle half of the motion, GunPose's exact envelope (sin Y + half-rate pitch, fading out
 	# while moving or airborne so the walk-bob takes over), plus a slower quarter-strength lateral drift at an
 	# offset frequency so the hands wander organically instead of pumping like a metronome. Deliberately NOT
@@ -928,19 +951,41 @@ func _update_fp_arm_bob(delta: float) -> void:
 		sin(_fp_bob_time) * fp_arm_unarmed_bob_pos * amp + breath_y,
 		0.0)
 	var target_rot := Vector3(breath_pitch, 0.0, sin(_fp_bob_time * 0.5) * fp_arm_unarmed_bob_roll_deg * amp)
+	# Smooth toward the target (GunPose's motion_smooth-default feel) so a hard stop mid-stride settles instead
+	# of snapping the fists to dead centre.
+	var s := 1.0 - exp(-10.0 * delta)
 	# ASYMMETRIC stride: ± pitch on the arm PAIR (left +, right − inside the rig) at the half-rate footstep
 	# cadence — one full left-right alternation per two footfalls, the natural arm-pump. Written through the
 	# rig's arm_stride_deg setter under the arm_scale ordering idiom (our write lands before the rig's strike
 	# re-pose, so punches stay authoritative over a mid-walk swing).
+	# SMOOTHED with the same `s` as the mount, and for the same reason: this drives a LEVER (the arm swings from
+	# a shoulder ~2 m behind the lens), so degrees here are decimetres of fist on screen. Writing it raw made the
+	# pair pop on any single-frame amplitude change — the mount, being lerped, never showed it. Keep the two on
+	# one smoothing constant: they are the same motion, and a stride that leads or lags the bob reads as a limp.
 	if is_instance_valid(_fp_arms):
 		var stride_target := sin(_fp_bob_time * 0.5) * fp_arm_unarmed_stride_deg * amp
 		if absf(_fp_arms.arm_stride_deg - stride_target) > 0.01:
-			_fp_arms.arm_stride_deg = stride_target
-	# Smooth toward the target (GunPose's motion_smooth-default feel) so a hard stop mid-stride settles instead
-	# of snapping the fists to dead centre.
-	var s := 1.0 - exp(-10.0 * delta)
+			_fp_arms.arm_stride_deg = lerpf(_fp_arms.arm_stride_deg, stride_target, s)
 	_fp_arm_bob_mount.position = _fp_arm_bob_mount.position.lerp(target_pos, s)
 	_fp_arm_bob_mount.rotation_degrees = _fp_arm_bob_mount.rotation_degrees.lerp(target_rot, s)
+
+## One step of the fists' walk-bob PHASE — pure + static so the anti-jitter contract is unit-testable without a
+## Player, a rig, a floor or a physics tick (tests/test_fists_view_model.gd). `advancing` is "the walk-bob has
+## amplitude this frame" (grounded/climbing AND moving AND View Bobbing on).
+##
+## THE CONTRACT, and why it is shaped like this — this function IS the 2026-08-08 "the fists jitter while
+## walking" fix:
+##   - The phase ONLY EVER ADVANCES; when not advancing it HOLDS. It must NEVER be eased toward zero. A phase
+##     grows without bound while you walk (bob_speed rad/s — ~240 rad after 30 s), so `lerpf(phase, 0, ~0.15)`
+##     moves it ~37 radians in ONE FRAME: six whole bob cycles, i.e. the hands teleport to an unrelated point
+##     in the walk cycle. Settling to centre is the AMPLITUDE's job (see _fp_bob_amp), not the phase's.
+##   - It is WRAPPED to TAU * 2 — the period of the HALF-rate consumers (the cos/sin of phase * 0.5 that drive
+##     the horizontal bob, the roll and the arm stride). Wrapping there is continuous for the full-rate sin too,
+##     and keeps the value small forever instead of drifting into the thousands.
+static func advance_bob_phase(phase: float, bob_speed: float, delta: float, advancing: bool) -> float:
+	if not advancing:
+		return phase
+	return fposmod(phase + delta * bob_speed, TAU * 2.0)
 
 ## The character's chosen name, from character creation (mirrors GameState.player_name). Display-only — the Stats
 ## screen shows it; the save's source of truth is GameState.player_name. "" for an unnamed / older character.
@@ -977,9 +1022,10 @@ func _ready() -> void:
 	else:
 		# A CREATED character can carry pre-boot grants while loaded is still false: the implant cart bought
 		# ON CREDIT on the New Game implant screen (StartMenu stamps the ids into GameState.unlocks — the
-		# stat_values escape hatch above is the same idiom; the BILL rides GameState.money, which the
-		# profile_active wallet branch in the settle below reads, so these boots re-apply the goods AND the
-		# debt together). Apply them here or the never-granted chips would be silently ERASED by the first
+		# stat_values escape hatch above is the same idiom; the BILL rides GameState.account — the SIGNED
+		# Ledger balance _stamp_new_game_profile drives NEGATIVE — and NOTHING in _ready re-seeds that field,
+		# so these boots re-apply the goods while the debt simply stays where it already sits. It is never in
+		# the wallet). Apply them here or the never-granted chips would be silently ERASED by the first
 		# autosave's capture() (which rebuilds GameState.unlocks from the live ability set). A bare/dev boot
 		# (empty unlocks) still takes the plain fresh-game seed.
 		# The pre-boot implant set spans BOTH lists. `unlocks` is only the ACTIVE projection, so a run whose
@@ -1006,7 +1052,6 @@ func _ready() -> void:
 	_hurt.host = self
 	add_child(_hurt)
 	_hurt.setup_lpf()
-	_walking_sfx_base_db = walking_sfx.volume_db
 	# Scope reactions + music duck: drive the crosshair/optics/DoF and duck music on ADS in/out.
 	_scope = ScopeCoordinator.new()
 	_scope.host = self
@@ -1140,15 +1185,18 @@ func _ready() -> void:
 			rotation = Vector3(0.0, GameState.respawn_yaw, 0.0)
 	elif GameState.profile_active:
 		# A CREATED run booted WITHOUT a disk load — the fresh New Game boot itself, a menu-and-back Continue
-		# on the in-memory run, or a death reload that found no readable save. The wallet lives on
-		# GameState.money: reset + the implant-purchase stamp seeded it (the player_starting_money knob MINUS
-		# the implant bill — implants are bought ON CREDIT, so the balance may start NEGATIVE and every paid
-		# service simply refuses until it recovers), and every capture() keeps it current after that. Reading
-		# it here instead of re-seeding from the economy knob/loadout keeps the BILL attached to the implants
-		# the unlocks escape hatch above re-applies on these same boots — a loaded=false reboot of a real run
-		# can never refund the debt while keeping the goods. Settled BEFORE the MoneyPurse build below, so the
-		# mirror seeds from the final balance (a negative wallet mirrors as NO coin tile — the HUD's signed
-		# readout is the debt display). A bare dev boot (profile_active false) keeps the knob/loadout seed.
+		# on the in-memory run, or a death reload that found no readable save. The live CASH wallet lives on
+		# GameState.money: reset_for_new_game seeded it from the player_starting_money knob and every capture()
+		# has kept it current since, so reading it here instead of re-seeding from the economy knob/loadout is
+		# what preserves whatever this in-memory run has already earned or spent.
+		# ⭐The implant bill is NOT in this number. It rides GameState.account, the ONE signed Ledger balance
+		# (+ savings / - debt), which no death path and no branch in _ready touches — so the goods the unlocks
+		# escape hatch above re-applies and the debt that bought them can never separate on a loaded=false
+		# reboot, and a created run's wallet stays CASH-ONLY and >= 0. Keep that invariant: GameState's
+		# load-time legacy fold reads a negative `money` as pre-ATM debt and MOVES it onto the account, so any
+		# path that let a live wallet go negative would have the next load quietly eat it. Settled BEFORE the
+		# MoneyPurse build below, so the coin tile mirrors the final cash (the debt is never in that tile — the
+		# HUD's OWED row reads the account). A bare dev boot (profile_active false) keeps the knob/loadout seed.
 		money = GameState.money
 	# Restore the day/night clock onto the free-running WorldClock autoload, but ONLY after a genuine disk-load or New
 	# Game (the one-shot flag) — NOT a death-respawn reload, which should carry the LIVE clock forward instead of
@@ -1222,7 +1270,17 @@ func _restore_saved_inventory() -> void:
 		if it == null:
 			push_warning("Player: the save references unknown item id '%s' — skipped" % str(entry.get("id", "")))
 			continue
-		var cnt := int(entry.get("count", 1))
+		# `count` is type-guarded for the SAME reason x/y/w/h are below (and with the same idiom as
+		# CharacterInventory.restore_serialized_stacks, the snapshot tier's twin of this loop): a hand-edited
+		# save can hold any Variant here, and int([3]) is a hard runtime ERROR, not a coercion — it would abort
+		# this loop mid-restore inside _ready, dropping every LATER stack AND skipping the equip / fists-fallback
+		# below it. No in-game path writes a non-numeric count today; this keeps the two loaders' junk-tolerance
+		# identical rather than leaving one of them one bad key away from a half-restored bag.
+		var cnt_v: Variant = entry.get("count", 1)
+		if not (cnt_v is int or cnt_v is float):
+			push_warning("Player: save stack '%s' has a non-numeric count (%s) — skipped" % [str(entry.get("id", "")), str(cnt_v)])
+			continue
+		var cnt := int(cnt_v)
 		# Placement (x,y,w,h) only when ALL four are numeric — a junk-typed value (Array under "x", …) falls back
 		# to auto-place instead of erroring int(). No "x" at all = an old, placement-less save -> auto-place.
 		if _entry_has_placement(entry):
@@ -1411,6 +1469,13 @@ func charge_total(cost: float) -> float:
 func can_pay(cost: float) -> bool:
 	return bool(_split(cost)["ok"])
 
+## The two-part price quote (Character.quote override) — literally the funding split, so a point-of-sale display
+## can show "120 zm (+4 service charge)" instead of a single opaque total. Nothing here is recomputed: the label,
+## the affordability dim and the till all read this ONE dictionary, which is what keeps the quote and the charge
+## from drifting the way they did before the seam existed.
+func quote(cost: float) -> Dictionary:
+	return _split(cost)
+
 ## Pay `cost`: cash first (it is fee-free and earns nothing, so spending it first is always correct), then the
 ## account. Under CREDIT the account may cross zero into debt; under DEBIT `ok` already refused that case.
 ## Never pushes `money` below zero — the wallet is CASH-ONLY now, and a negative one would re-create the old
@@ -1429,7 +1494,7 @@ func charge(cost: float) -> bool:
 	if pay_cash > 0.0:
 		add_money(-pay_cash)  # money_changed rides the deferred autosave, which persists BOTH halves at once
 	elif rest > 0.0:
-		GameState._autosave_world_state()  # the wallet didn't move, so queue our own coalesced write
+		GameState.autosave_world_state()  # the wallet didn't move, so queue our own coalesced write
 	return true
 
 ## What you currently OWE (0 while solvent) and what is still available on the line. The limit itself is
@@ -2253,9 +2318,9 @@ func _on_head_crippled(_attacker: Node = null) -> void:
 var _last_sneak_toast_msec: int = -100000
 
 ## Quicksave (F5) / quickload (F9) — the immersive-sim core loop (ML-1). Polled here so it only fires during
-## live gameplay (a Player exists); suppressed during a conversation, while the tree is paused for a transaction
-## screen, AND while any NON-pausing overlay is up (Inventory/Loot/Stats/Options/name-entry — those leave
-## _physics_process running, so without this gate F9 would reload the scene out from under an open backpack). Quicksave
+## live gameplay (a Player exists); suppressed during a conversation and while ANY overlay is up (a station
+## screen, Inventory/Loot/Stats/Options/name-entry — none of them pauses the tree, so _physics_process keeps
+## running and without this gate F9 would reload the scene out from under an open backpack). Quicksave
 ## snapshots the run + your position; quickload reloads the scene and the fresh Player re-applies the saved build.
 func _update_save_input() -> void:
 	if InputManager.gameplay_suppressed():
@@ -2264,6 +2329,10 @@ func _update_save_input() -> void:
 		# quicksave() returns true ONLY when the file actually persisted; a failed write (disk full / permission)
 		# now toasts the failure instead of a false "Quicksaved". (We're always in-tree here, so false == write error.)
 		if GameState.quicksave(self):
+			# Same HEAVY-commit class as a slot write (save_load_screen._do_save) — a hotkey, so there is no
+			# button click to collide with. Gated on the write, so the failure branch below stays SILENT: there
+			# is no "denied" cue in the set and the toast already carries the bad news.
+			MenuStyle.play_commit()
 			notify_toast(PlayerText.TOAST_QUICKSAVED, Color.WHITE)
 		else:
 			notify_toast(PlayerText.TOAST_QUICKSAVE_FAILED, Color(1.0, 0.5, 0.4))
@@ -2275,7 +2344,12 @@ func _update_save_input() -> void:
 			# but sweeping FIRST restores the captured cursor before the fresh scene grabs the mouse. INSIDE the
 			# has_quicksave gate so an F9 with no file on disk stays a true no-op (no phantom picker dismissal).
 			_close_open_modals()
-		GameState.quickload()  # reloads the scene on success; no toast — the reload IS the feedback
+		# Reloads the scene on success; no toast — the reload IS the feedback. The commit cue is the audible
+		# half of that, gated on the same return so an F9 with no file on disk stays a true no-op. Safe to fire
+		# here: _close_open_modals' sweep already dropped MenuStyle's quiet latch, the reload is deferred, and
+		# MenuStyle's players are autoload-owned so the cue rings across the scene swap.
+		if GameState.quickload():
+			MenuStyle.play_commit()
 
 func _force_release_carried_prop() -> void:
 	if head != null and head.pickup_ray != null:
@@ -2683,8 +2757,10 @@ func _physics_process(delta: float) -> void:
 
 	input_dir = Input.get_vector("left", "right", "forward", "backward")
 	if InputManager.gameplay_suppressed():
-		# A NON-pausing modal (options/inventory/stats/loot) is open: stand idle but keep gravity + stay vulnerable
-		# (Dark Souls). ShopScreen pauses the tree, so its check never actually fires — kept as belt-and-braces.
+		# ⭐A modal is open: stand idle but keep gravity + stay vulnerable (Dark Souls). This gate is now the ONLY
+		# thing holding the player still inside a menu — since 2026-08-09 no modal pauses the tree, so the shop /
+		# heal / atm / chess screens reach here for real instead of being covered by a freeze (it used to be
+		# belt-and-braces for those). Losing it would let the player walk away mid-transaction.
 		input_dir = Vector2.ZERO
 	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 
@@ -2803,36 +2879,11 @@ func _physics_process(delta: float) -> void:
 	if _ram_reactor:
 		_ram_reactor.tick(delta, pre_velocity)
 
-	if is_on_floor() and !_was_on_floor:
-		var impact := clampf(-pre_landing_velocity / GameSettings.player_movement.landing_impact_divisor, 0.0, 1.0)
-		var dampened_impact := impact * (1.0 - crouch.crouch_t)
-		camera_effects.land(dampened_impact)
-		if gun_mesh and impact > 0.0:
-			gun_mesh.land(impact)
-		if screen_shake and dampened_impact > 0.0:
-			screen_shake.shake(dampened_impact * 1.5)
-		# The HUD-weight panel dips with the same crouch-softened impact (Ui.hud_land): the camera dip is a
-		# POSITIONAL offset the sway spring's rotation measurement can't see, so the landing is handed to the
-		# discrete kick channel here — one event, one strength, told by camera + gun + shake + panel together.
-		if ui and dampened_impact > 0.0:
-			ui.hud_land(dampened_impact)
-		if impact >= GameSettings.audio.land_sfx_min_impact_to_play:
-			# One-shot through AudioManager (spatialized + self-freeing); volume + pitch scale with landing impact
-			# off the authored bases. play_sfx no-ops on a null stream.
-			var land_vol := land_sound_base_volume_db - (1.0 - impact) * GameSettings.audio.land_sfx_volume_db_reduction
-			var land_pitch := lerpf(
-				land_sound_base_pitch + GameSettings.audio.land_sfx_pitch_spread,
-				land_sound_base_pitch - GameSettings.audio.land_sfx_pitch_spread,
-				impact
-			)
-			AudioManager.play_sfx(global_position, land_sound, land_vol, land_pitch)
-		if impact >= GameSettings.effects.dust_land_min_impact_to_spawn:
-			spawn_dust(GameSettings.effects.dust_land_base_intensity + impact * GameSettings.effects.dust_land_impact_bonus)
-		if _slide != null:
-			_slide.try_start(pre_velocity)  # begin a slide on a fast crouched landing (the Slide ability decides)
-		# HP cost for a hard landing (FallDamage math, gated by the fall-immunity upgrade). pre_landing_velocity.y is
-		# negative falling, so negate for a positive fall speed. Was silently never called — the player took no fall damage.
-		_apply_fall_damage(-pre_landing_velocity)
+	# Touchdown: the whole burst (camera/gun/shake/HUD dip, land SFX, dust, slide start, fall damage) is the
+	# Landing component's — see scripts/player/landing.gd. It reads the PRE-move velocity because the move
+	# zeroes velocity.y on contact.
+	if is_on_floor() and !_was_on_floor and landing != null:
+		landing.on_land(pre_landing_velocity, pre_velocity)
 
 	if _update_continuous_fall_death(delta):
 		return
@@ -2843,29 +2894,10 @@ func _physics_process(delta: float) -> void:
 		_has_last_grounded = true
 	_update_stamina_recovery(delta)
 
-	_footstep_timer -= delta
-
-	footstep_interval = GameSettings.player_movement.footstep_base_interval * (GameSettings.player_movement.max_speed / max(target_speed, 0.01))
-
-	var planar_speed := Vector2(velocity.x, velocity.z).length()
-	var on_foot := is_on_floor() and planar_speed > GameSettings.player_movement.footstep_min_horizontal_speed
-	# Climb footsteps only while actually moving up/down the wall — a wall-hold (velocity.y == 0) is silent
-	# like standing still (the into-wall grip push isn't real movement, so don't count it).
-	var on_climb := is_climbing() and absf(velocity.y) > GameSettings.player_movement.footstep_min_horizontal_speed
-	if (on_foot or on_climb) and not is_sliding() and _footstep_timer <= 0.0:
-		# Footstep loudness = authored base minus two independent dB cuts that stack cleanly:
-		#   • crouch — quieter the deeper you're crouched (quiet_footstep_db * crouch_t; full cut at full crouch).
-		#   • speed  — quieter the slower you're moving. A creep at footstep_min_horizontal_speed takes the full
-		#     footstep_slow_volume_db cut, easing to 0 (full loudness) by max_speed; bhop overspeed clamps at 0.
-		#     Climb uses vertical speed as its "how fast am I moving" measure. This mirrors the cadence in
-		#     footstep_interval (line ~2024), which already quickens with speed — now loudness swells with it too.
-		var move_speed := absf(velocity.y) if on_climb else planar_speed
-		var speed_t := clampf(inverse_lerp(GameSettings.player_movement.footstep_min_horizontal_speed, GameSettings.player_movement.max_speed, move_speed), 0.0, 1.0)
-		var speed_db := lerpf(GameSettings.player_movement.footstep_slow_volume_db, 0.0, speed_t)
-		var crouch_db := GameSettings.player_crouch.quiet_footstep_db * crouch.crouch_t
-		walking_sfx.volume_db = _walking_sfx_base_db + crouch_db + speed_db
-		walking_sfx.play()
-		_footstep_timer = footstep_interval
+	# Footstep cadence + its crouch/speed dB cuts — Landing owns the timer and the interval. `target_speed` sets
+	# the stride rate, so the cadence quickens with the speed this frame is chasing.
+	if landing != null:
+		landing.tick_footsteps(delta, target_speed)
 
 	_update_falling_air(delta)
 	_update_noise(delta)
@@ -3404,14 +3436,20 @@ func die() -> void:
 	if mouse_input != null:
 		mouse_input.set_process(false)
 		mouse_input.set_process_unhandled_input(false)
-	# Hide your own first-person legs and freeze the crouch driver for the death cinematic. The legs
-	# (body-awareness rig, _build_first_person_legs) would otherwise hang in view as the camera keels
+	# Hide your own first-person BODY (legs + bare fists) and freeze the crouch driver for the death cinematic.
+	# The legs (body-awareness rig, _build_first_person_legs) would otherwise hang in view as the camera keels
 	# over; and the Crouch node runs its OWN _physics_process, which the player's set_physics_process(false)
 	# above does NOT stop — so without this it keeps reading the Crouch action, letting a dead player still
-	# duck the camera/capsule. Both are restored by the in-place revive (_respawn_at_checkpoint); a full
+	# duck the camera/capsule. The FISTS need their own beat because _process is deliberately left RUNNING here
+	# (it drives the FP arm bob + torso, and the stow slide below needs the frame): _unarmed_hands_wanted()
+	# already answers false the instant `_dying` is up, but nothing RE-ASKS it — so without this refresh the
+	# raised guard stayed on screen breathing through the whole cinematic. The refresh drives the normal stow
+	# slide; a carry release earlier in die() has already hidden the same rig instantly, which settles the latch,
+	# so this is then a no-op. All three are restored by the in-place revive (_respawn_at_checkpoint); a full
 	# reload (RELOAD_* death modes) rebuilds a fresh Player instead.
 	if is_instance_valid(_fp_legs):
 		_fp_legs.visible = false
+	_refresh_unarmed_hands()
 	if crouch != null:
 		crouch.set_physics_process(false)
 	# Kill all residual motion so a death taken mid-launch (rocket-jump, explosion knock, melee-dash, ram)
@@ -3701,11 +3739,15 @@ func _respawn_at_checkpoint() -> void:
 		mouse_input.set_process(true)
 		mouse_input.set_process_unhandled_input(true)
 	_schedule_respawn_hud_restore()
-	# Restore the death lockout's body-awareness bits: show the first-person legs again and hand crouch
-	# input back (die() hid/froze both). The full-reload death modes rebuild a fresh Player, so this only
-	# matters on the in-place revive.
+	# Restore the death lockout's body-awareness bits: show the first-person legs + bare fists again and hand
+	# crouch input back (die() hid/stowed/froze all three). The fists come back through the SAME latch-driven
+	# refresh that stowed them — `_dying`/`_dead` were cleared at the top of this function, so it re-asks
+	# _unarmed_hands_wanted() and raises the guard only when the fists really are what's drawn and unholstered
+	# (a revive holding a real weapon, or mid-carry, correctly leaves them down). The full-reload death modes
+	# rebuild a fresh Player, so this only matters on the in-place revive.
 	if is_instance_valid(_fp_legs):
 		_fp_legs.visible = true
+	_refresh_unarmed_hands()
 	if crouch != null:
 		crouch.reset()                       # snap upright first: a crouched death froze crouch_t, so re-enabling alone would revive you shrunk/low
 		crouch.set_physics_process(true)

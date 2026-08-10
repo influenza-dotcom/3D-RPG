@@ -57,8 +57,8 @@ func toggle() -> void:
 func open() -> void:
 	# Block only the NON-player modals; the sibling player menus (Inventory/Stats) instead SWITCH to us via
 	# PlayerMenus.close_others — the tabs behave as one Deus Ex / Pip-Boy tab group.
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
-			or LootScreen.is_open() or InputManager.any_pausing_open() \
+	if _is_open or DialogueManager.is_active() \
+			or InputManager.any_tab_blocking_open() \
 			or not PlayerMenus.player_alive(get_tree()) \
 			or not PlayerMenus.has_player(get_tree()):  # no human player (start menu / char-creation) -> nothing to show, matching Inventory/Stats
 		return

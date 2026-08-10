@@ -26,7 +26,7 @@ extends AudioStreamPlayer
 ## because a uniform multiplier is relative, and a slider dragged mid-cinematic is honoured within a frame.
 ##
 ## A code-built child of the Player (the HurtFeedback / ScopeCoordinator idiom), given a host ref right
-## after .new(). PROCESS_MODE_ALWAYS because a pausing screen is reachable while dead and the duck must hold
+## after .new(). PROCESS_MODE_ALWAYS because FreezeFrame (and a conversation) pauses while dead and the duck must hold
 ## through it — the DialogueMusicBed precedent.
 ##
 ## NOT an AudioManager.play_2d_sfx() one-shot, deliberately: those are parented to get_tree().root with no
@@ -72,8 +72,8 @@ const SILENT_DB: float = -60.0
 
 
 func _ready() -> void:
-	# A pausing modal is reachable while dead (Player._close_open_modals runs again on the revive precisely
-	# because of that), and FreezeFrame pauses too. The duck's per-frame re-assert and the sting both have to
+	# A modal is reachable while dead (Player._close_open_modals runs again on the revive precisely
+	# because of that), and FreezeFrame pauses. The duck's per-frame re-assert and the sting both have to
 	# survive it — same reason DialogueMusicBed and the level's Music/Ambience players are ALWAYS.
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	autoplay = false

@@ -60,11 +60,12 @@ func toggle() -> void:
 		open()
 
 func open() -> void:
-	# Yield to dialogue, the settings menu, and the pausing screens (shop/heal/level-up) — never stack over a
-	# NON-player modal. Our input runs PROCESS_MODE_ALWAYS, so without these checks the inventory key would open
-	# us OVER a paused shop. The sibling player menus (Stats/Reputation) are NOT blocked: opening us SWITCHES
+	# Yield to dialogue and to any screen that owns the player's hands (settings / loot / the station screens —
+	# the registry's `blocks_tabs` rows) — never stack over a NON-player modal. Our input runs PROCESS_MODE_ALWAYS,
+	# so without these checks Tab would open us OVER an open shop, and the two would then fight over Escape and
+	# the cursor. The sibling player menus (Stats/Reputation) are NOT blocked: opening us SWITCHES
 	# off an open sibling (PlayerMenus.close_others below), so the three act as one Deus Ex / Pip-Boy tab group.
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or LootScreen.is_open() or InputManager.any_pausing_open() or not PlayerMenus.player_alive(get_tree()):  # M5: pausing modals via the shared helper; refuse mid-death (we run PROCESS_MODE_ALWAYS, so the Tab hotkey would otherwise re-open us over the death cinematic)
+	if _is_open or DialogueManager.is_active() or InputManager.any_tab_blocking_open() or not PlayerMenus.player_alive(get_tree()):  # M5/T1: the WHOLE refusal set (options/loot/the station screens) comes from the modal registry — never hand-name a screen here; refuse mid-death (we run PROCESS_MODE_ALWAYS, so the Tab hotkey would otherwise re-open us over the death cinematic)
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player) or _player.inventory == null:
@@ -210,9 +211,18 @@ func _on_grid_drop(item: Item, key: int) -> void:
 		# The coin pile IS the wallet, not an ordinary stack — spill the WHOLE purse as a collectable MoneyPickUp
 		# (drop_money debits the wallet, then MoneyPurse clears the tile). A plain drop_stack would remove the
 		# mirror stack without moving `money`, and the purse would just re-assert it a frame later.
-		_player.drop_money(_player.money)
+		var purse := _player.money
+		_player.drop_money(purse)
+		# HEAVY commit — the whole wallet leaving the bag at once, not an ordinary stack drop. Gated on the wallet
+		# ACTUALLY shrinking (drop_money returns void but no-ops on an empty purse / off-tree), so a spill that
+		# never happened stays silent.
+		if _player.money < purse:
+			MenuStyle.play_commit()
 		return
 	_player.drop_stack(item, key)  # removes THAT stack from the bag -> inventory.changed -> _rebuild refreshes
+	# A grid tile is a plain Control (GridInventoryView/GridTile extend Control, not BaseButton), so the auto-wired
+	# button click never reaches it — this is the ONLY cue on the press, no double.
+	MenuStyle.play_select()
 
 ## The hovered tile changed — show that item's name on the status line (its full breakdown), or fall back to the
 ## carry weight when nothing is hovered.
@@ -228,10 +238,13 @@ func _on_item_pressed(item: Item) -> void:
 		return
 	if item == _player.inventory.equipped_item:
 		_player.inventory.unequip()         # clicking the wielded weapon puts it away -> player falls back to fists
-	else:
-		_player.inventory.equip_item(item)  # -> equip_weapon_requested -> Player draws it (swap anim)
+		MenuStyle.play_back()               # putting the gun AWAY is a de-escalation, so it wears the back cue rather than a confirm
+	elif _player.inventory.equip_item(item):  # -> equip_weapon_requested -> Player draws it (swap anim)
+		MenuStyle.play_select()             # gated on equip_item's own bool — a refused equip (non-weapon) stays silent
 	_rebuild()                              # refresh the (equipped) marker
 
 func _on_use_pressed(item: Item) -> void:
-	if is_instance_valid(_player):
-		_player.use_consumable(item)  # heals + consumes one -> inventory.changed -> _rebuild refreshes the stack
+	# Gated on use_consumable's success bool: it refuses (and consumes nothing) at FULL HP, and a cue there would
+	# tell the player they'd just spent a health pack. A wasted click stays silent — the toast is its feedback.
+	if is_instance_valid(_player) and _player.use_consumable(item):  # heals + consumes one -> inventory.changed -> _rebuild refreshes the stack
+		MenuStyle.play_select()

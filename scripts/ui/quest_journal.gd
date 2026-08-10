@@ -3,7 +3,7 @@ extends CanvasLayer
 ## Registered as an autoload, mirroring StatsScreen / ReputationScreen, and a member of the
 ## Pip-Boy tab group (Inventory / Stats / Implants / Reputation / Journal). Lists ACTIVE quests (title + each objective with
 ## a checkbox + progress) and COMPLETED ones. Like the other player menus it does NOT pause the world; it frees
-## the mouse (restored on close). Refreshes live off GameState.quest_started / objective_advanced / quest_completed.
+## the mouse (restored on close). Refreshes live off QuestTracker.quest_started / objective_advanced / quest_completed.
 ##
 ## AUTHORED SCENE: the layout lives in scenes/ui/quest_journal.tscn (this autoload IS that scene — see
 ## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
@@ -45,18 +45,18 @@ func toggle() -> void:
 ## (start menu / character creation) — there's nothing to show then, matching Inventory/Stats' own bail.
 func open() -> void:
 	# Block only the NON-player modals; the sibling player menus instead SWITCH to us via close_others.
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
-			or LootScreen.is_open() or InputManager.any_pausing_open() \
+	if _is_open or DialogueManager.is_active() \
+			or InputManager.any_tab_blocking_open() \
 			or not PlayerMenus.player_alive(get_tree()) \
 			or not PlayerMenus.has_player(get_tree()):  # no human player (start menu / char-creation) -> nothing to show, matching Inventory/Stats
 		return
 	PlayerMenus.enter(self)  # switch off a sibling + free the cursor (preserves cursor position across switches)
 	_is_open = true
-	if not GameState.quest_started.is_connected(_on_quests_changed):
-		GameState.quest_started.connect(_on_quests_changed)
-		GameState.objective_advanced.connect(_on_objective_changed)
-		GameState.quest_completed.connect(_on_quests_changed)
-		GameState.quest_failed.connect(_on_quests_changed)
+	if not QuestTracker.quest_started.is_connected(_on_quests_changed):
+		QuestTracker.quest_started.connect(_on_quests_changed)
+		QuestTracker.objective_advanced.connect(_on_objective_changed)
+		QuestTracker.quest_completed.connect(_on_quests_changed)
+		QuestTracker.quest_failed.connect(_on_quests_changed)
 	_rebuild()
 	_root.visible = true
 	opened.emit()
@@ -66,11 +66,11 @@ func close() -> void:
 		return
 	_is_open = false
 	_root.visible = false
-	if GameState.quest_started.is_connected(_on_quests_changed):
-		GameState.quest_started.disconnect(_on_quests_changed)
-		GameState.objective_advanced.disconnect(_on_objective_changed)
-		GameState.quest_completed.disconnect(_on_quests_changed)
-		GameState.quest_failed.disconnect(_on_quests_changed)
+	if QuestTracker.quest_started.is_connected(_on_quests_changed):
+		QuestTracker.quest_started.disconnect(_on_quests_changed)
+		QuestTracker.objective_advanced.disconnect(_on_objective_changed)
+		QuestTracker.quest_completed.disconnect(_on_quests_changed)
+		QuestTracker.quest_failed.disconnect(_on_quests_changed)
 	PlayerMenus.leave()
 	closed.emit()
 

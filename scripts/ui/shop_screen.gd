@@ -1,6 +1,8 @@
 extends CanvasLayer
-## ShopScreen — the BUY / SELL overlay for trading with a Merchant. Autoload; PAUSES the world while open
-## (like dialogue — this layer is PROCESS_MODE_ALWAYS so its buttons keep working through the pause); else
+## ShopScreen — the BUY / SELL overlay for trading with a Merchant. Autoload; REAL-TIME — it does NOT pause the
+## world (the STATION-SCREEN rule, argued in full in the atm_screen.gd header: a screen you reach by walking up
+## to a thing must not stop the city; a screen you reach through a CONVERSATION is already under dialogue's
+## pause, which is why this layer stays PROCESS_MODE_ALWAYS and its buttons keep working either way); else
 ## clones the LootScreen / InventoryScreen pattern (frees the mouse on open; player control is suppressed via the
 ## is_open() gates). Two GRID columns SIDE-BY-SIDE (LootScreen-style): the MERCHANT'S STOCK on the left (click
 ## a tile to BUY one) and YOUR bag on the right (click to SELL one). DRAG a tile across into the other grid
@@ -40,6 +42,7 @@ var _stock_grid: GridInventoryView  ## the merchant's stock as a grid — click 
 var _player_grid: GridInventoryView ## your bag as a grid — click to SELL one, drag into the stock grid to sell
 var _detail: Label                  ## hovered item's breakdown + its price (a grid cell has no price column)
 var _sort_btn: Button
+var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; hidden on a cash-only merchant, and rail_changed re-prices every row
 ## The order the Sort button REPACKS both grids into. On a list this reordered rows for display only; on a grid
 ## the order IS the layout, so cycling it physically tidies the tiles (CharacterInventory.repack).
 var _sort_mode: int = ItemSort.Mode.DEFAULT
@@ -96,7 +99,11 @@ func open_shop(merchant: Node, player: Node) -> void:
 	_player_grid.bind(_player.inventory)
 	_bind(true)
 	_is_open = true
-	_prev_mouse_mode = ModalMenu.grab_mouse()
+	# ONE OPEN CUE, NEVER TWO (the station-screen idiom): a self-serve kiosk answers with its OWN diegetic
+	# StationSpeaker chirp, which beats a 2D blip in the ear, so the generic UI sting is suppressed exactly when
+	# that chirp fires and kept when the vendor is a person (no speaker). Past every refuse guard, so a shop
+	# that couldn't open never beeps.
+	_prev_mouse_mode = ModalMenu.grab_mouse(not StationSpeaker.chirp(merchant))
 	var name_v: Variant = merchant.get(&"shop_name")
 	var nm: String = name_v if name_v is String else ""
 	# Runtime re-title MUST route through title_text: make_title only cased its constructor argument, so a
@@ -104,7 +111,6 @@ func open_shop(merchant: Node, player: Node) -> void:
 	_title.text = MenuStyle.title_text(PlayerText.shop_title(nm))
 	_rebuild()
 	_root.visible = true
-	get_tree().paused = true  # freeze the world while trading, like dialogue (we're PROCESS_MODE_ALWAYS, so the buttons keep working through the pause)
 	opened.emit()
 
 ## Guard failed: we never opened, but a dialogue-hosted open (DialogueManager._suspend_for_menu) suspended the
@@ -129,7 +135,6 @@ func close() -> void:
 	_detail.text = _DEFAULT_HINT
 	_merchant = null
 	_player = null
-	get_tree().paused = false  # resume the world (we paused it on open, like dialogue)
 	closed.emit()
 
 ## (Dis)connect both inventories' `changed` so the columns + wallets refresh after every buy/sell.
@@ -162,18 +167,34 @@ func _unhandled_input(event: InputEvent) -> void:
 # ---------------------------------------------------------------------------------------------------
 
 ## Buy ONE `item` from the merchant (Merchant.buy gates on stock / price / the player's wallet).
+## SOUND: the commit cue is gated on Merchant.buy's OWN bool, so a refused sale (out of stock, can't afford,
+## backpack full) stays silent — there is no denied clip in the set, and reusing the back cue for failure would
+## collide with "back". Cueing here rather than at the call sites covers BOTH routes (tile click and cross-grid
+## drag) with one seam, mirroring how this method is already the single price/till gate for both.
 func _buy(item: Item) -> void:
 	if is_instance_valid(_merchant) and is_instance_valid(_player):
-		_merchant.buy(item, _player)  # inventories' `changed` -> _rebuild refreshes the columns + wallets
+		# No double-sound risk: a grid tile is a plain Control (GridInventoryView draws its own cells and
+		# handles input at the view level), so nothing here carries the auto-wired BaseButton click.
+		if _merchant.buy(item, _player):  # inventories' `changed` -> _rebuild refreshes the columns + wallets
+			MenuStyle.play_commit()
 
 ## Sell ONE `item` to the merchant (Merchant.sell gates on the player holding it / price / the till).
+## Commit cue gated exactly as _buy's: sell returns false when the till can't cover the price or the shelf has
+## no room (it transfers before it pays), and a trade that never happened must not sound like one that did.
 func _sell(item: Item) -> void:
 	if is_instance_valid(_merchant) and is_instance_valid(_player):
-		_merchant.sell(item, _player)
+		if _merchant.sell(item, _player):
+			MenuStyle.play_commit()
 
 func _rebuild() -> void:
 	if not is_instance_valid(_merchant) or not is_instance_valid(_player) or _player.inventory == null:
 		return
+	if _rail_btn != null:
+		# HIDE the selector on a cash-only vendor: it draws on neither savings nor credit, so the control would
+		# visibly do nothing. .get() because _merchant is Node-typed — an absent property reads as ledger-accepting.
+		var takes_ledger: Variant = _merchant.get(&"accepts_ledger")
+		_rail_btn.set_available(not (takes_ledger is bool) or bool(takes_ledger))
+		_rail_btn.refresh()
 	_money_merchant.text = PlayerText.wallet_merchant(_merchant_money())
 	_money_player.text = PlayerText.wallet_you(_player.money)
 	# Your wallet re-tints per sign (gold, or danger while in debt); the merchant till never goes negative
@@ -224,12 +245,22 @@ func _on_hover(item: Item, from_stock: bool = false) -> void:
 	var body := ItemInfo.tooltip(item, holder)
 	var price: float = _merchant.buy_price(item, _player) if from_stock else _merchant.sell_price(item, _player)
 	var affordable: bool
+	var shown_price := price
 	if from_stock:
-		affordable = price > 0.0 and _player.can_pay(price)  # the SAME predicate Merchant.buy gates on
+		# THE SAME predicate Merchant.buy gates on — and it is the MERCHANT's, not the player's, because a
+		# cash-only vendor (accepts_ledger off) can't see savings or credit. Reading player.can_pay here would
+		# light up a row this till would refuse. `_merchant` is Node-typed (class-cycle dodge), so both calls are
+		# has_method-guarded and degrade to the player's own rails for a bare stub — the RespecStation lesson.
+		affordable = price > 0.0 and (_merchant.can_afford(price, _player) \
+			if _merchant.has_method(&"can_afford") else _player.can_pay(price))
+		# Paint the ALL-IN number: a ledger-funded buy carries the account's service charge, so the sticker price
+		# alone would under-quote what actually leaves the player.
+		shown_price = _merchant.quoted_total(price, _player) \
+			if _merchant.has_method(&"quoted_total") else _player.charge_total(price)
 	else:
 		affordable = price > 0.0 and _merchant_money() >= price
 	_detail.add_theme_color_override(&"font_color", MenuStyle.text_color())
-	_detail.text = PlayerText.shop_price_line(body, price, from_stock, affordable)
+	_detail.text = PlayerText.shop_price_line(body, shown_price, from_stock, affordable)
 
 ## The merchant's stock, type-guarded: a vanished merchant, or a Node-typed merchant without a `stock`
 ## property (a stub / non-Merchant), reads as null instead of crashing a bare `.stock` access.
@@ -295,10 +326,20 @@ func _bind_ui() -> void:
 	# Sort control — cycles the repack order of BOTH grids (Default / Name / Type / Value / Weight). A FIXED min
 	# width (+ clip_text, authored in the scene alongside cap_button here) pins BOTH button edges so the
 	# footprint never shifts as the caption cycles between "Sort: Default" (longest) and "Sort: Name".
+	# The rail selector gets its OWN row under the title: TitleRow balances Title between a spacer and the sort
+	# button, so dropping a third control in there would shove the centred title off-centre.
+	_rail_btn = %RailButton as PaymentRailButton
+	MenuStyle.cap_button(_rail_btn)
+	_rail_btn.rail_changed.connect(_rebuild)
+
 	_sort_btn = MenuStyle.cap_button(%SortButton)
 	_sort_btn.text = ItemSort.button_text(_sort_mode)
 	_sort_btn.custom_minimum_size.x = float(MenuStyle.skin.sort_button_width)  # ≥ the widest ENGLISH caption ("Sort: Default") so the width never changes with the mode; per-locale skin budget
 	_sort_btn.pressed.connect(_on_sort_pressed)
+	# A sort cycle REPACKS both grids — every tile physically moves, so it reads as a sideways view swap, not a
+	# row press: it speaks with the tab cue. Re-POINTING the button (never a play_tab() in _on_sort_pressed on
+	# top) is what keeps this from firing twice, since every BaseButton under a menu root is auto-click-wired.
+	MenuStyle.set_button_sound(_sort_btn, &"tab")
 
 	# The two grid sections sit SIDE-BY-SIDE (the LootScreen layout, authored in the scene) — stock column
 	# left, your bag right. The old vertical stack split ~84px of scroll slot between grids needing 176px

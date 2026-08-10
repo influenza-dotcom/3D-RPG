@@ -56,6 +56,10 @@ func open(title: String, default_text: String, on_confirm: Callable) -> void:
 	_on_confirm = on_confirm
 	_prev_mouse = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	# The open sting sits PAST the refusal guard above, beside the mouse grab — the ModalMenu.grab_mouse rule,
+	# hand-wired here because this box keeps its own mouse bookkeeping (it restores a STASHED mode, not the
+	# gameplay capture ModalMenu assumes). A box that refused to open must never sting.
+	MenuStyle.play_open()
 	_title.text = MenuStyle.title_text(title)  # runtime re-title must re-apply the skin's casing (make_title only cases its ctor arg)
 	_line.text = default_text
 	_is_open = true
@@ -73,6 +77,11 @@ func _confirm() -> void:
 		return
 	var text := _line.text.strip_edges()
 	var cb := _on_confirm
+	# Naming a pet is a plain confirm, not a heavy commit (nothing is spent) — the select cue. It has to be
+	# paired with quiet_next_back(), because close() below cues every OTHER exit from this box and would
+	# otherwise stack its back cue on top of this one a frame later.
+	MenuStyle.play_select()
+	MenuStyle.quiet_next_back()
 	close()
 	confirmed.emit(text)
 	if cb.is_valid():
@@ -93,6 +102,10 @@ func close() -> void:
 	_root.visible = false
 	_on_confirm = Callable()
 	Input.mouse_mode = _prev_mouse
+	# The ONE exit cue for this box: Cancel, Esc and the confirm path all funnel through here (the confirm
+	# eats it with quiet_next_back so its select cue stands alone), and it sits past the _is_open guard so a
+	# double close is silent. The death/quickload sweep is silenced by InputManager's quiet latch.
+	MenuStyle.play_back()
 
 
 ## Esc cancels (consume it so OptionsMenu doesn't also open behind us). Enter is handled by the LineEdit's
@@ -146,11 +159,16 @@ func _bind_ui() -> void:
 	_line.text_submitted.connect(_on_text_submitted)
 
 	MenuStyle.style_button_row(%Buttons)
+	# BOTH buttons are muted: the cue belongs to the HANDLER, not the widget, because Enter (text_submitted /
+	# ui_accept) and Esc reach _confirm/_cancel with no press at all — a cue on the button would leave the
+	# keyboard paths silent, and leaving the generic click on would sound it twice per click.
 	var ok: Button = MenuStyle.cap_button(%ConfirmButton)
 	ok.text = PlayerText.CONFIRM
+	MenuStyle.set_button_sound(ok, &"")
 	ok.pressed.connect(_confirm)
 	var cancel: Button = MenuStyle.cap_button(%CancelButton)
 	cancel.text = PlayerText.CANCEL
+	MenuStyle.set_button_sound(cancel, &"")
 	cancel.pressed.connect(_cancel)
 
 

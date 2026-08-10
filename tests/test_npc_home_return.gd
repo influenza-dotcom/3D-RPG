@@ -91,8 +91,15 @@ func test_an_engaged_npc_is_never_teleported_by_the_off_screen_leash() -> void:
 	# the leash up for a hard-leash level can't reintroduce a vanishing enemy.
 	var src := FileAccess.get_file_as_string("res://scripts/npc/npc_home_return.gd")
 	assert_true(src.contains("func _may_blink()"), "the teleport has its own gate, separate from the view guard")
+	# GUARD THE OFFSETS BEFORE COMPARING THEM. find() answers -1 for a renamed needle, and it only ever reports the
+	# FIRST occurrence — so a vanished or duplicated needle would have the ordering assert below measure something
+	# nobody meant to pin, silently, instead of failing.
 	var gate := src.find("func _may_blink()")
+	assert_gt(gate, -1, "func _may_blink() no longer present — the pin is stale")
+	assert_eq(src.rfind("func _may_blink()"), gate,
+		"func _may_blink() must appear exactly ONCE, or the offset compared below is not the gate being pinned")
 	var refusal := src.find("if _engaged():", gate)
+	assert_gt(refusal, -1, "if _engaged(): no longer present after _may_blink() — the pin is stale")
 	assert_true(gate > -1 and refusal > gate and refusal - gate < 200,
 		"_may_blink() opens by refusing outright while the NPC has aggro")
 	assert_true(src.contains("blink_home and (ignore_view or _may_blink())"),
@@ -187,8 +194,14 @@ func test_the_heal_is_not_gated_on_the_move_exemptions() -> void:
 	# _eligible() exempts a companion / bodyguard / cutscene body from being MOVED. None of those is a reason to
 	# leave it wounded, so the death handler is only aliveness-gated and return_home() re-checks _eligible itself.
 	var src := FileAccess.get_file_as_string("res://scripts/npc/npc_home_return.gd")
+	# ⭐GUARD BOTH ENDS OF THE SLICE. This is the assert_false pin that fails OPEN: a missing needle makes find()
+	# return -1, the negative length makes substr() yield "", and `assert_false("".contains(...))` PASSES — so the
+	# day someone renames _on_player_died this test would go on reporting green while checking nothing at all.
 	var handler := src.find("func _on_player_died()")
-	var body := src.substr(handler, src.find("_death_due_msec = Time.get_ticks_msec()", handler) - handler)
+	assert_gt(handler, -1, "func _on_player_died() no longer present — the pin is stale")
+	var armed := src.find("_death_due_msec = Time.get_ticks_msec()", handler)
+	assert_gt(armed, -1, "_death_due_msec = Time.get_ticks_msec() no longer present inside the handler — the pin is stale")
+	var body := src.substr(handler, armed - handler)
 	assert_false(body.contains("_eligible()"), "the death cue does NOT gate the heal on the move exemptions")
 	assert_true(body.contains("bool(host.get(&\"_dead\"))"), "it gates on aliveness only")
 
@@ -225,9 +238,21 @@ func test_the_death_cue_fires_on_the_black_frame_not_at_death() -> void:
 		"Player broadcasts GameState.player_died so the world can reset behind the black")
 	assert_true(src.contains("tw.tween_callback(_on_death_screen_covered)"),
 		"the callback is wired into the death cinematic tween")
+	# THREE OFFSETS THAT GET ORDERED, so each needs both guards: present (a renamed tween call answers -1 and the
+	# ordering assert stops measuring the beat it names) and UNIQUE (find() reports only the first occurrence, so a
+	# second tween_callback would let the pin pass on the wrong one while the real order regressed).
 	var covered := src.find("tw.tween_callback(_on_death_screen_covered)")
+	assert_gt(covered, -1, "tw.tween_callback(_on_death_screen_covered) no longer present — the pin is stale")
+	assert_eq(src.rfind("tw.tween_callback(_on_death_screen_covered)"), covered,
+		"the death cue must be wired into the tween exactly ONCE, or this ordering pin measures the wrong one")
 	var phase_one := src.find("tw.tween_method(_death_step, 0.0, 1.0")
+	assert_gt(phase_one, -1, "tw.tween_method(_death_step, 0.0, 1.0 no longer present — the pin is stale")
+	assert_eq(src.rfind("tw.tween_method(_death_step, 0.0, 1.0"), phase_one,
+		"the vignette close must be tweened exactly ONCE, or 'the cue runs after phase 1' is measured against the wrong step")
 	var card := src.find("tw.tween_callback(_show_death_card)")
+	assert_gt(card, -1, "tw.tween_callback(_show_death_card) no longer present — the pin is stale")
+	assert_eq(src.rfind("tw.tween_callback(_show_death_card)"), card,
+		"the death card must be tweened in exactly ONCE, or 'the cue runs before the card' is measured against the wrong one")
 	assert_true(phase_one > -1 and covered > phase_one,
 		"it runs AFTER phase 1 (the vignette close) — i.e. on full black, not while the world is still readable")
 	assert_true(card > -1 and covered < card,

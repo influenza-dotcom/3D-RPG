@@ -3,7 +3,7 @@ class_name RewardStinger
 extends Node
 
 ## Drop-in REWARD "sting": plays its parent AudioStreamPlayer's one-shot on a reward moment — a quest COMPLETED
-## (GameState.quest_completed) and/or a LEVEL-UP (the player's leveled_up). The positive mirror of DetectionStinger
+## (QuestTracker.quest_completed) and/or a LEVEL-UP (the player's leveled_up). The positive mirror of DetectionStinger
 ## (the "you've been seen" cue). Signal-driven (reacts to the event, no polling), with a short cooldown so a
 ## quest-complete that also levels you up stings once, not twice. Inert until a reward actually fires.
 ##
@@ -14,7 +14,7 @@ extends Node
 
 ## Minimum seconds between stings — coalesces a simultaneous quest-complete + level-up into one cue.
 @export var cooldown: float = 0.5
-## Sting when a quest completes (GameState.quest_completed).
+## Sting when a quest completes (QuestTracker.quest_completed).
 @export var on_quest_complete: bool = true
 ## Sting on a player level-up (the player's leveled_up signal).
 @export var on_level_up: bool = true
@@ -34,8 +34,8 @@ func _ready() -> void:
 	# The reward moments fire during a PAUSE (a turn-in mid-dialogue, the level-up screen), so the audio player
 	# ITSELF must run while paused — not just this logic node. A play() on a paused INHERIT player is dropped.
 	_audio.process_mode = Node.PROCESS_MODE_ALWAYS  # mirrors MusicDirector (both the logic node + the audio node are ALWAYS)
-	if on_quest_complete and not GameState.quest_completed.is_connected(_on_quest):
-		GameState.quest_completed.connect(_on_quest)
+	if on_quest_complete and not QuestTracker.quest_completed.is_connected(_on_quest):
+		QuestTracker.quest_completed.connect(_on_quest)
 	if on_level_up:
 		_connect_level_up.call_deferred()  # the player may not be in the tree yet at our _ready
 

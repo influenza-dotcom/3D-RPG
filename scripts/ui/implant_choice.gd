@@ -153,10 +153,18 @@ func _bind_ui() -> void:
 	back.text = PlayerText.BACK
 	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	back.pressed.connect(_on_back)
+	# MUTED on purpose: Escape reaches _on_back through _input too (this overlay owns its own ui_cancel), so the
+	# back cue lives in that ONE handler — leaving the generic click here would double it up on the mouse path.
+	MenuStyle.set_button_sound(back, &"")
 	_begin_btn = %BeginButton
 	_begin_btn.text = PlayerText.BEGIN
 	_begin_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	_begin_btn.pressed.connect(_on_begin)
+	# MUTED, not cued. This press IS the heaviest commit in the game — it stamps the profile and puts the
+	# implant bill on the ledger — but the cue belongs to StartMenu._on_implant_confirmed, which fires it
+	# AFTER _start_game(); _start_game's first act is AudioManager.stop_sfx(), which would cut a cue started
+	# here. Sounding it on the button as well just stacks a second voice on the one that survives.
+	MenuStyle.set_button_sound(_begin_btn, &"")
 
 ## Fill the roster: one INDEPENDENT toggle row per distinct installable ability (a shop cart, not a radio —
 ## check as many as you can stomach the debt for; no opt-out row, since buying nothing is just Begin with
@@ -287,7 +295,10 @@ func _on_begin() -> void:
 	confirmed.emit(_picked_ids(), _total_cost())
 
 ## Back: drop this step and return to the (kept-alive) character-creation overlay. No profile change.
+## The BACK cue is fired here rather than on %BackButton (which _bind_ui mutes) because the Escape path below
+## lands on this same handler and is not a Button — one cue site keeps mouse and keyboard sounding identical.
 func _on_back() -> void:
+	MenuStyle.play_back()  # before the emit: the host frees this screen the moment it hears `cancelled`
 	cancelled.emit()
 
 ## Consume ui_cancel while this overlay is up (menu-time overlay, deliberately NOT an InputManager modal —

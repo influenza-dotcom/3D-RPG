@@ -329,10 +329,16 @@ func _take(item: Item) -> void:
 			if raw is float or raw is int:
 				_money_source.set(&"money", maxf(0.0, float(raw) - amt))
 		_player.add_money(amt)
+		MenuStyle.play_commit()  # HEAVY: cash changing hands, past the count<=0 guard above so an empty tile stays silent
 		_maybe_free_drained_corpse()
 		return
 	var want := _source_inv.count_of(item)
 	var moved := _source_inv.transfer_to(_player.inventory, item, want)
+	# Gated on the moved COUNT, not the click: a bounded (Tetris) bag can refuse the WHOLE stack, and a transfer
+	# that moved nothing isn't an action — it stays silent (the toast below is its feedback). A grid tile is a
+	# plain Control (GridInventoryView extends Control), so this is the only cue on the press — no double.
+	if moved > 0:
+		MenuStyle.play_select()
 	# A bounded (Tetris) bag may not fit everything — what didn't fit stays on the source (transfer_to rolls it
 	# back). Say so rather than letting the click look like it silently did nothing.
 	if moved < want and _player.has_method(&"notify_toast"):
@@ -408,6 +414,10 @@ func _maybe_free_drained_corpse() -> void:
 		return
 	var emptied := _free_when_empty
 	if emptied != null:
+		# The take that drained it already played its own cue (select / commit); the ModalMenu close would land a
+		# back cue a frame behind it. Eat exactly that one. Queued HERE — immediately before the close it belongs
+		# to — so a take that DOESN'T drain can never strand a token that later swallows a real Esc.
+		MenuStyle.quiet_next_back()
 		close()
 		# A standalone corpse cleans itself up here; a host that owns the cleanup keeps it: a skeleton-attached
 		# corpse is faded by its Ragdoll, a bag-attached one is freed (together with the bag) by its LootBag.
@@ -449,6 +459,8 @@ func _deposit(item: Item) -> void:
 	# Depositing the weapon you're WIELDING is allowed: the transfer clears the backpack's equipped_item,
 	# which fires equipped_item_lost -> the player falls back to bare fists. No need to swap first.
 	var moved := _player.inventory.transfer_to(_source_inv, item, count)
+	if moved > 0:
+		MenuStyle.play_select()  # same moved>0 gate as _take — an all-refused deposit (no room over there) stays silent
 	# The source now has a spatial grid (T4) — it can run out of room. transfer_to rolls back what didn't fit;
 	# say so rather than letting a click look like it did nothing.
 	if moved < count and _player.has_method(&"notify_toast"):
@@ -487,6 +499,7 @@ func _deposit_coins_to_source() -> void:
 			_player.notify_toast(PlayerText.TOAST_NO_ROOM_IN_THERE, GameSettings.hud.rep_neutral_color)
 		return
 	_player.add_money(-float(added) * Zorkmids.QUANTUM)  # debit only what fit; the rest stays in the wallet
+	MenuStyle.play_commit()  # HEAVY: cash leaving the wallet. Past the added<=0 return above, so a fully-refused stash stays silent
 	if added < want and _player.has_method(&"notify_toast"):
 		_player.notify_toast(PlayerText.TOAST_DEPOSITED_WHAT_FIT, GameSettings.hud.rep_neutral_color)
 	_rebuild()
@@ -590,6 +603,11 @@ func _on_pickpocket_caught() -> void:
 	var player := _player
 	if is_instance_valid(player) and player.has_method(&"notify_toast"):
 		player.notify_toast(PlayerText.TOAST_CAUGHT, CBPalette.loss())  # failure feedback joins the colorblind-aware pair
+	# Getting caught DISMISSES the pockets, so the moment wears the back cue — then eat the ModalMenu close's own
+	# back (close -> restore_mouse) a frame later, which would otherwise double it. ORDER IS LOAD-BEARING:
+	# quiet_next_back eats the NEXT back, so the deliberate cue has to be played BEFORE the token is queued.
+	MenuStyle.play_back()
+	MenuStyle.quiet_next_back()
 	close()
 	if not is_instance_valid(target):
 		return

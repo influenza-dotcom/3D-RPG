@@ -52,6 +52,12 @@ const PlayerMenus := preload("res://scripts/ui/player_menus.gd")
 var _root: Control
 var _tabs: TabContainer
 var _first_focus: Control
+## Suppresses the tab SOUND cue while tabs are being rebuilt or restored in code. TabContainer.tab_changed
+## can't tell a player's click from a programmatic write, and this menu does plenty of the latter: freeing
+## and re-adding every page (_rebuild_tabs, which runs on first build, on every open AND on Revert) snaps
+## current_tab back to 0, and _revert then writes the remembered index back. Unguarded, every Apply/Revert
+## would swipe twice. Set around those writes, never around a real input path.
+var _tab_cue_muted := false
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 ## Staged settings edits (setter Callable -> pending value); flushed to Settings on Apply, dropped on Revert.
@@ -121,6 +127,7 @@ func open() -> void:
 	_root.visible = true
 	if is_instance_valid(_first_focus):
 		_first_focus.grab_focus()
+	MenuStyle.play_open()  # OptionsMenu is its own screen, not a ModalMenu caller — it cues itself
 	opened.emit()
 
 func close() -> void:
@@ -136,6 +143,7 @@ func close() -> void:
 	_root.visible = false
 	_freeze_player(false)
 	Input.mouse_mode = _prev_mouse_mode
+	MenuStyle.play_back()  # silent during the death/quickload sweep — close_all_modals holds MenuStyle's quiet latch
 	closed.emit()
 
 ## Non-pausing, Dark Souls style: the menu NO LONGER freezes the player — the world AND the player keep
@@ -157,6 +165,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# also toggle the whole menu shut underneath the overlay.
 		if _quit_confirm != null and _quit_confirm.visible:
 			_quit_confirm.visible = false
+			MenuStyle.play_back()  # an Esc dismiss isn't a button press, so nothing else would cue it
 			get_viewport().set_input_as_handled()
 			return
 		toggle()
@@ -199,15 +208,23 @@ func _bind_ui() -> void:
 	title.text = MenuStyle.title_text(PlayerText.OPTIONS_TITLE)
 
 	_tabs = %Tabs
+	# A TabContainer's tab strip is an internal TabBar, NOT a BaseButton — MenuStyle's auto-wiring skips it
+	# entirely, so this strip is silent unless hooked explicitly. tab_changed (not tab_clicked) so keyboard
+	# and controller tab moves speak too; _tab_cue_muted covers the programmatic writes.
+	_tabs.tab_changed.connect(_on_tab_changed)
 	_rebuild_tabs()
 
 	var bottom: HBoxContainer = %Bottom
 	MenuStyle.style_button_row(bottom)  # END alignment is authored; only the skin's separation is adopted
 	_save_load_btn = %SaveLoadButton
 	_save_load_btn.text = PlayerText.OPTIONS_SAVE_LOAD
+	# Both handlers cue themselves (an incoming open sting / a leaving commit), so the generic click is muted
+	# on each — a 1.7s sting with a click stacked on its front reads as a glitch, not as feedback.
+	MenuStyle.set_button_sound(_save_load_btn, &"")
 	_save_load_btn.pressed.connect(_on_save_load)
 	_main_menu_btn = %MainMenuButton
 	_main_menu_btn.text = PlayerText.OPTIONS_MAIN_MENU
+	MenuStyle.set_button_sound(_main_menu_btn, &"")
 	_main_menu_btn.pressed.connect(_on_main_menu)
 	_apply_btn = %ApplyButton
 	_apply_btn.text = PlayerText.OPTIONS_APPLY
@@ -217,6 +234,8 @@ func _bind_ui() -> void:
 	revert_btn.pressed.connect(_revert)
 	var close_btn: Button = %CloseButton
 	close_btn.text = PlayerText.CLOSE
+	# close() already plays the back cue; without this the button would ALSO fire the generic click.
+	MenuStyle.set_button_sound(close_btn, &"")
 	close_btn.pressed.connect(close)
 	var quit_btn: Button = %QuitButton
 	quit_btn.text = PlayerText.OPTIONS_QUIT_GAME
@@ -234,10 +253,12 @@ func _bind_ui() -> void:
 	var confirm_btn: Button = %ConfirmButton
 	confirm_btn.text = PlayerText.CONFIRM
 	confirm_btn.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)
+	MenuStyle.set_button_sound(confirm_btn, &"commit")  # leaving the session is the heaviest button in the menu
 	confirm_btn.pressed.connect(_on_quit)
 	var cancel_btn: Button = %CancelButton
 	cancel_btn.text = PlayerText.CANCEL
 	cancel_btn.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)
+	MenuStyle.set_button_sound(cancel_btn, &"back")  # backing out of the confirm, not confirming anything
 	cancel_btn.pressed.connect(_hide_quit_confirm)
 
 # ---------------------------------------------------------------------------------------------------
@@ -250,6 +271,7 @@ func _bind_ui() -> void:
 ## row list before emitting: a dense all-value page goes two-up (see _page_columns), the rest single-column.
 ## _first_focus = the first focusable control (for keyboard/controller).
 func _rebuild_tabs() -> void:
+	_tab_cue_muted = true  # freeing every page snaps current_tab to 0 — that's bookkeeping, not a tab press
 	for c in _tabs.get_children():
 		_tabs.remove_child(c)
 		c.queue_free()
@@ -279,6 +301,13 @@ func _rebuild_tabs() -> void:
 			var control := _emit_row(columns[0] if i < split else columns[1], tab_specs[i])
 			if _first_focus == null and control != null:
 				_first_focus = control
+	_tab_cue_muted = false
+
+## The player moved to another settings page — a sideways move, so it gets the tab cue, not open/back.
+## Programmatic tab writes are suppressed by _tab_cue_muted (see its declaration).
+func _on_tab_changed(_tab: int) -> void:
+	if not _tab_cue_muted:
+		MenuStyle.play_tab()
 
 ## The column VBoxes a tab page's rows are emitted into. Most pages: [page] itself (one column). A DENSE
 ## page — more than TWO_UP_ROW_THRESHOLD rows, ALL plain value rows (a SECTION header or KEYBIND row means
@@ -657,6 +686,11 @@ func _slider_row(parent: VBoxContainer, label_text: String, min_v: float, max_v:
 
 func _on_slider_changed(value: float, slider: Control, val_label: Label, setter: Callable, formatter: Callable) -> void:
 	val_label.text = formatter.call(value)
+	# Every slider in the game funnels through here. MenuStyle quantises the drag into a fixed number of
+	# ticks, so a 0..360 Max FPS slider and a 0..1 accessibility slider feel the same instead of one buzzing.
+	# NOTE the staged-apply gotcha: dragging a VOLUME slider doesn't move the bus until Apply, so the tick
+	# auditions the volume you're leaving, not the one you're choosing.
+	MenuStyle.play_slider_step(slider as Range, value)
 	_stage(slider, setter, value)
 
 ## Choice row: an in-canvas < value > CYCLER, not an OptionButton. With embed_subwindows OFF (deliberate —
@@ -691,6 +725,11 @@ func _option_row(parent: VBoxContainer, label_text: String, items: Array, select
 	next_btn.text = MenuStyle.skin.cycler_next_glyph
 	next_btn.focus_mode = Control.FOCUS_NONE
 	box.add_child(next_btn)
+	# All three press-surfaces route through _cycle_option, which plays the directional step cue — so mute
+	# their generic click or every cycle would sound twice on the mouse path and once on the keyboard path.
+	MenuStyle.set_button_sound(prev_btn, &"")
+	MenuStyle.set_button_sound(next_btn, &"")
+	MenuStyle.set_button_sound(value_btn, &"")
 	# Bound-method Callables, not capturing lambdas (project rule: a freed-capture lambda errors before any guard).
 	prev_btn.pressed.connect(_cycle_option.bind(-1, value_btn, items, on_select))
 	next_btn.pressed.connect(_cycle_option.bind(1, value_btn, items, on_select))
@@ -708,6 +747,12 @@ func _cycle_option(dir: int, value_btn: Button, items: Array, on_select: Callabl
 	var i: int = (int(value_btn.get_meta(&"cycle_index", 0)) + dir + n) % n
 	value_btn.set_meta(&"cycle_index", i)
 	value_btn.text = str(items[i])
+	# THE funnel for every cycler step — mouse arrows, a click on the value, and the keyboard path in
+	# _on_cycler_gui_input all land here, so one call covers them all. Past the n == 0 guard and skipped for a
+	# single-entry catalog, where the wrap reselects the same value and nothing visibly moved. MenuStyle
+	# throttles the repeat, which is what tames the keyboard ECHO the gui_input handler deliberately allows.
+	if n > 1:
+		MenuStyle.play_step(dir)
 	_stage(value_btn, on_select, i)
 
 ## The focused value button eats ui_left/ui_right to step the cycler (echo allowed, so holding a key
@@ -764,7 +809,9 @@ func _revert() -> void:
 	var cur := _tabs.current_tab if _tabs != null else 0
 	_rebuild_tabs()
 	if _tabs != null:
+		_tab_cue_muted = true  # restoring the remembered tab is bookkeeping, not a player tab press
 		_tabs.current_tab = clampi(cur, 0, _tabs.get_tab_count() - 1)
+		_tab_cue_muted = false
 	_refresh_apply_state()
 
 ## Apply is enabled only while there's something staged to commit.
@@ -792,6 +839,8 @@ func _on_quit() -> void:
 ## "Main Menu": close this overlay and return to the start screen WITHOUT closing the app. Only reachable
 ## in-game — open() hides this button at the start menu.
 func _on_main_menu() -> void:
+	MenuStyle.quiet_next_back()  # the close below is part of LEAVING, not a back-out — let the commit speak alone
+	MenuStyle.play_commit()
 	close()
 	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
 
@@ -799,5 +848,8 @@ func _on_main_menu() -> void:
 ## never stacked (every screen's open() refuses over another modal via the shared registry, so closing before
 ## opening is the only order that works). Only reachable in-game — open() hides this button at the start menu.
 func _on_save_load() -> void:
+	# A page SWAP, not a close: eat this close's back cue so the incoming screen's open cue is the only one
+	# heard. Otherwise one button press fires click + back + open.
+	MenuStyle.quiet_next_back()
 	close()
 	SaveLoadScreen.open(true)

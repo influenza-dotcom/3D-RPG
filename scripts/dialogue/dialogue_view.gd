@@ -196,8 +196,13 @@ func add_extra_choice(text: String, cb: Callable) -> void:
 	b.add_theme_font_size_override("font_size", GameSettings.dialogue.choice_button_font_size)  # match the authored choice buttons' compact size
 	b.text = text
 	b.focus_mode = Control.FOCUS_NONE  # mouse-click driven, like the authored choice buttons
-	b.pressed.connect(cb)
+	# add_child BEFORE connecting, and the order matters for AUDIO: entering the tree is what lets MenuStyle's
+	# node_added hook wire the generic click, and that connection must come FIRST. These buttons open menus
+	# (Trade / Heal / Rest / Level Up / Install / Chess), whose open sting cuts a generic click from the same
+	# press — but only one already ringing, so a click connected after the handler would land on the sting's
+	# front instead of being swallowed. Goodbye/companion choices carry no cue and just click normally.
 	_choices_box.add_child(b)
+	b.pressed.connect(cb)
 	_choices_scroll.visible = true  # ensure the box shows even on an otherwise-linear line
 	_hint.visible = false        # a response menu is up — drop the "continue" prompt
 	_clamp_choices_height.call_deferred()

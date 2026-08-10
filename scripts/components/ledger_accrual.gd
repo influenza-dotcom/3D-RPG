@@ -55,7 +55,7 @@ func post_interest() -> void:
 	if is_zero_approx(delta):
 		return
 	GameState.account = snappedf(GameState.account + delta, Zorkmids.QUANTUM)
-	GameState._autosave_world_state()  # the wallet didn't move, so queue our own coalesced write
+	GameState.autosave_world_state()  # the wallet didn't move, so queue our own coalesced write
 	if player.has_method(&"notify_toast"):
 		player.notify_toast(PlayerText.ledger_interest(delta),
 			MenuStyle.danger() if delta < 0.0 else MenuStyle.gold())

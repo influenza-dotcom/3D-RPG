@@ -125,6 +125,48 @@ func test_the_fists_rest_closer_to_the_camera_than_the_carry_hold() -> void:
 		"the RIGHT arm must take the NEGATED stride — without the sign flip the 'stride' is just more symmetric bob")
 	p.free()
 
+# --- The walk-bob anti-jitter contract ---------------------------------------------------------------
+
+func test_the_bob_phase_only_advances_and_stays_bounded() -> void:
+	# This is the 2026-08-08 "the fists jitter while walking" regression, pinned.
+	#
+	# The phase used to be EASED TOWARD ZERO on any frame that wasn't "grounded and moving". A phase grows
+	# without bound while you walk, so that lerp moved it TENS OF RADIANS in a single frame — whole bob cycles.
+	# And `is_on_floor()` blips false for single frames constantly while genuinely walking (brush seams, the
+	# 0.5 m stair risers, any bump), so every blip teleported the hands to an unrelated point in the walk cycle.
+	# Measured on the shipped rig that was a 6.3 deg one-frame stride snap = 0.32 m of fist travel; the fix
+	# brings the worst single-frame step to 0.42 deg = 0.021 m, i.e. the normal walk cadence.
+	var script := load(PLAYER_SOURCE)
+	var dt := 1.0 / 60.0
+	var speed := 8.0  # GameSettings.camera.bob_speed default
+	# 60 s of walking — the phase must stay small, not drift into the hundreds.
+	var phase := 0.0
+	for i in 3600:
+		phase = script.advance_bob_phase(phase, speed, dt, true)
+	assert_between(phase, 0.0, TAU * 2.0,
+		"the walk-bob phase must stay WRAPPED inside one half-rate period (TAU*2), however long you walk")
+	# The load-bearing one: a non-advancing frame must HOLD the phase, never ease it toward zero.
+	var held: float = script.advance_bob_phase(phase, speed, dt, false)
+	assert_eq(held, phase,
+		"a non-advancing frame must HOLD the phase — easing a PHASE toward zero is what made a one-frame is_on_floor() blip teleport the fists mid-stride")
+	# And an advancing frame moves it by exactly one step (never backwards by a jump).
+	var stepped: float = script.advance_bob_phase(phase, speed, dt, true)
+	assert_almost_eq(absf(wrapf(stepped - phase, -PI, PI)), dt * speed, 0.0001,
+		"an advancing frame must move the phase by exactly delta * bob_speed")
+
+func test_the_walk_bob_amplitude_is_eased_not_stepped() -> void:
+	# The phase fix above is only half of it: the AMPLITUDE must ease too. Taking the raw
+	# grounded-and-moving gate as the amplitude meant one blip frame drove the arm-pump to zero and the next
+	# drove it back to full — a ±fp_arm_unarmed_stride_deg snap on a ~2.9 m lever. The stride write is
+	# smoothed for the same reason (it drives a lever, so degrees here are decimetres of fist on screen).
+	var src := FileAccess.get_file_as_string(PLAYER_SOURCE)
+	assert_true(src.contains("_fp_bob_amp = lerpf("),
+		"the walk-bob amplitude must be EASED into _fp_bob_amp, never assigned straight from the grounded/moving gate")
+	assert_false(src.contains("_fp_bob_time = lerpf("),
+		"the bob PHASE must never be lerped — that is the jitter bug; ease the amplitude instead (see advance_bob_phase)")
+	assert_true(src.contains("_fp_arms.arm_stride_deg = lerpf("),
+		"the arm-pump must be written SMOOTHED — a raw write pops the whole pair on any single-frame amplitude change")
+
 func test_the_fists_stay_down_while_a_real_weapon_is_mid_draw() -> void:
 	# The bare-fist FLASH fix (the H toggle's put-back): between the carry release and the rewield landing, the
 	# combat inventory still reads FISTS + unholstered — exactly the state that raises the fists — so

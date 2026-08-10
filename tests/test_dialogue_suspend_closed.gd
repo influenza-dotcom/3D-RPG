@@ -1,17 +1,18 @@
 extends GutTest
-## F-C47 — the dialogue-suspend contract for the three dialogue-hostable sub-menus (Shop / ChipInstall / Chess).
+## F-C47 — the dialogue-suspend contract for the dialogue-hostable sub-menus (Shop / ChipInstall / Chess / Atm).
 ##
 ## DialogueManager._suspend_for_menu hides the box, connects the sub-menu's `closed` as a CONNECT_ONE_SHOT resume,
-## THEN calls the open. So EVERY refuse path in ShopScreen/ChipInstallScreen/ChessScreen MUST emit `closed`, or a
-## dialogue-hosted open that hits a guard strands the conversation _suspended forever (box hidden, tree paused,
-## no way to advance). Each screen routes its guard early-returns through `_refuse_open()` -> `closed.emit()`.
+## THEN calls the open. So EVERY refuse path in ShopScreen/ChipInstallScreen/ChessScreen/AtmScreen MUST emit
+## `closed`, or a dialogue-hosted open that hits a guard strands the conversation _suspended forever (box hidden,
+## tree paused, no way to advance). Each screen routes its guard early-returns through `closed.emit()`.
 ##
 ## We drive the invalid-node guard: a bare Node lacks each screen's duck-typed surface (Shop wants a `stock`
 ## CharacterInventory, Install wants install_carried(), Chess wants ai_search_depth()), so the open refuses with a
 ## null player. Assert the screen did NOT open AND `closed` fired. On the standalone path nothing listens to
 ## `closed`, so the emit is a harmless no-op there — this contract only matters for the dialogue-hosted open.
 ## Cannot build a real Player in a unit test (Player._ready forbidden), so we pass null and let the invalid-node
-## guard fire first.
+## guard fire first. (AtmScreen has no terminal-shaped guard at all — a bare Node passes is_instance_valid — so
+## there it is the NULL PLAYER that refuses, which is exactly the path a dead/missing player takes at runtime.)
 
 func before_each() -> void:
 	# Autoloads start closed; guard against a screen leaked open by a prior test so is_open() reads true here.
@@ -21,6 +22,8 @@ func before_each() -> void:
 		ChipInstallScreen.close()
 	if ChessScreen.is_open():
 		ChessScreen.close()
+	if AtmScreen.is_open():
+		AtmScreen.close()
 
 func test_shop_refuse_emits_closed() -> void:
 	var bad: Node = Node.new()  # lacks a `stock` CharacterInventory -> the invalid-merchant guard fires
@@ -47,4 +50,13 @@ func test_chess_refuse_emits_closed() -> void:
 	ChessScreen.closed.connect(func() -> void: flag["closed"] = true, CONNECT_ONE_SHOT)
 	ChessScreen.open_match(bad, null)
 	assert_false(ChessScreen.is_open(), "ChessScreen refuses an invalid match + null player")
+	assert_true(flag["closed"], "the refuse path still emits `closed` (dialogue-suspend contract)")
+
+func test_atm_refuse_emits_closed() -> void:
+	var bad: Node = Node.new()  # a valid Node, so it is the null PLAYER that refuses this open
+	autofree(bad)
+	var flag := {"closed": false}
+	AtmScreen.closed.connect(func() -> void: flag["closed"] = true, CONNECT_ONE_SHOT)
+	AtmScreen.open_atm(bad, null)
+	assert_false(AtmScreen.is_open(), "AtmScreen refuses an open with no player")
 	assert_true(flag["closed"], "the refuse path still emits `closed` (dialogue-suspend contract)")

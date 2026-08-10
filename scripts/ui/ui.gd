@@ -64,6 +64,7 @@ var QUEST_TRACKER_COLOR: Color = GameSettings.hud.quest_tracker_color    ## top-
 var LOAD_WARNING_COLOR: Color = GameSettings.hud.load_warning_color      ## amber save-load caveat toast
 var _rep_toasts: VBoxContainer
 var _money_label: Label  ## persistent top-left zorkmid readout
+var _owed_label: Label   ## the OWED row BESIDE it — shown ONLY while GameState.account is negative (see _stamp_owed_row)
 ## The LIVE floating +N/-N money delta: rapid deltas accumulate into this one label (re-stamped, rise+fade
 ## restarted) instead of stacking unreadable copies at the same spot; a flurry that nets to zero frees it.
 var _money_delta_label: Label = null
@@ -77,7 +78,7 @@ var _dialogue_toast_colors: Array[Color] = []
 ## so terminal turn-ins still visibly announce completion; generic one-off toasts keep their existing timing.
 var _notices: Control
 var _look_name: Label  ## centered name readout under the crosshair while aiming at a talkable (FNV-style)
-var _quest_tracker: Label  ## top-right active-objective line, refreshed off the GameState quest signals (+ toasts)
+var _quest_tracker: Label  ## top-right active-objective line, refreshed off the QuestTracker quest signals (+ toasts)
 
 ## Bottom-corner gameplay HUD — bottom-LEFT: the HP+stamina bar cluster hugging the corner, ammo
 ## "clip / reserve" line just above it; bottom-RIGHT: the hotbar. Code-built so it's
@@ -149,6 +150,17 @@ var MONEY_LOSS_COLOR: Color = GameSettings.hud.money_loss_color    ## red -N on 
 var MONEY_DEBT_COLOR: Color = GameSettings.hud.money_debt_color    ## readout red while the wallet is NEGATIVE (in debt)
 var MONEY_DELTA_RISE: float = GameSettings.hud.money_delta_rise    ## pixels the +N/-N floats up as it fades
 var MONEY_DELTA_TIME: float = GameSettings.hud.money_delta_time    ## seconds for that float + fade
+## THE TOP-LEFT MONEY RAIL'S VERTICAL PADDING — the first row's inset from the top edge AND the gap between every
+## row below it, so the whole rail derives from this ONE number instead of three hand-typed y literals that can
+## drift into each other. Three rows, top to bottom:
+##   row 1  MONEY_ROW_PAD                the persistent zorkmid readout, with the OWED row BESIDE it (one HBox)
+##   row 2  _money_delta_row_y()         the transient +N/-N float, which RISES MONEY_DELTA_RISE px out of it
+##   row 3  that + MONEY_DELTA_FONT_SIZE + pad   the rep/quest toast stack, clear of the float band's bottom edge
+## The OWED row used to be hand-placed at `6 + MONEY_FONT_SIZE + 2` (y≈24) — INSIDE row 2's band, and painted in
+## money_debt_color, which ships as the SAME Color as money_loss_color: every -N spend float drew straight over
+## it in an identical red. It's HUD layout, not a gameplay number, so it stays a const here rather than a
+## HudSettings knob — the FONT SIZES the rows derive from are the designer-facing half.
+const MONEY_ROW_PAD := 6.0
 
 func _ready() -> void:
 	# PERMANENT circle reticle (the Deus Ex truth-teller): always visible, pinned each frame to the swayed
@@ -228,13 +240,15 @@ func _ready() -> void:
 	_rep_toasts = VBoxContainer.new()
 	_rep_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_rep_toasts.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	_rep_toasts.position = Vector2(8, 48)  # on the money readout's 8px rail, below the +N/-N delta's float band
+	# Row 3 of the money rail (see MONEY_ROW_PAD): same 8px left rail as the readout, one pad below the BOTTOM
+	# edge of the +N/-N delta's float band — derived, so a HudSettings font bump slides it instead of colliding.
+	_rep_toasts.position = Vector2(8, _money_delta_row_y() + float(MONEY_DELTA_FONT_SIZE) + MONEY_ROW_PAD)
 	_notices.add_child(_rep_toasts)
 	# Quest tracker: the current active objective, pinned to the FREE top-right corner (money/rep/toasts are
 	# top-left, HP/ammo bottom). A FIXED quest_tracker_width column, right-aligned: short lines still hug the
 	# right edge, long authored text word-wraps DOWNWARD over empty screen instead of marching left toward the
-	# money band. No ellipsis trim — it would eat the "(2/5)" progress tail. Refreshed off the GameState quest
-	# signals; hidden when no quest is active.
+	# money band. No ellipsis trim — it would eat the "(2/5)" progress tail. Refreshed off the QuestTracker
+	# autoload's quest signals; hidden when no quest is active.
 	_quest_tracker = Label.new()
 	_quest_tracker.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_quest_tracker.anchor_left = 1.0
@@ -252,31 +266,61 @@ func _ready() -> void:
 	_quest_tracker.add_theme_constant_override(&"outline_size", MenuStyle.hud.toast_outline_size)
 	_quest_tracker.visible = false
 	_notices.add_child(_quest_tracker)
-	# Quest feedback: tracker line + toasts, driven by the GameState quest signals (an autoload, self-wired here).
-	GameState.quest_started.connect(_on_quest_started)
-	GameState.objective_advanced.connect(_on_quest_objective)
-	GameState.quest_completed.connect(_on_quest_completed)
-	GameState.quest_failed.connect(_on_quest_failed)
+	# Quest feedback: tracker line + toasts, driven by the QuestTracker autoload's quest signals (self-wired
+	# here). The signals live on QuestTracker; the tracker line's READS still go through GameState's one-line
+	# forwarding accessors (active_quest_ids / active_quest / objective_progress — see _refresh_quest_tracker).
+	QuestTracker.quest_started.connect(_on_quest_started)
+	QuestTracker.objective_advanced.connect(_on_quest_objective)
+	QuestTracker.quest_completed.connect(_on_quest_completed)
+	QuestTracker.quest_failed.connect(_on_quest_failed)
 	_refresh_quest_tracker()  # show any already-active quest (e.g. one restored from a save) from frame one
 	# B-F40: if the last profile load dropped any quest whose .tres went missing, tell the player — otherwise that
 	# progress vanishes silently. Consume-once (take_load_warnings clears them) so a HUD rebuild on a level change
 	# doesn't re-toast old warnings. Amber = a load caveat.
 	for msg in GameState.take_load_warnings():
 		_push_toast(str(msg), LOAD_WARNING_COLOR)
-	# Persistent zorkmid readout in the very top-left; refreshed + a floating +N/-N spawned on
-	# Player.money_changed (wired in setup). Outlined like the toasts so it reads over any backdrop.
-	# On the weight carrier (it's corner furniture) but NOT under _notices — dialogue hides notifications,
-	# and this readout deliberately stays visible through a conversation.
+	# ROW 1 OF THE MONEY RAIL: the persistent zorkmid readout with the OWED row beside it, carried by ONE
+	# HBoxContainer rather than two hand-placed labels — the zorkmid text is variable-width, so only a container
+	# can put a second readout after it, and hiding the (usually hidden) OWED label collapses the gap for free.
+	# Refreshed + a floating +N/-N spawned on Player.money_changed (wired in setup). Outlined like the toasts so
+	# it reads over any backdrop. On the weight carrier (it's corner furniture) but NOT under _notices —
+	# dialogue hides notifications, and this readout deliberately stays visible through a conversation.
+	var money_row := HBoxContainer.new()
+	money_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	money_row.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	money_row.position = Vector2(8, MONEY_ROW_PAD)
+	money_row.add_theme_constant_override(&"separation", int(MONEY_ROW_PAD))
+	_weighted.add_child(money_row)
 	_money_label = Label.new()
 	_money_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_money_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	_money_label.position = Vector2(8, 6)
 	_money_label.add_theme_font_size_override(&"font_size", MONEY_FONT_SIZE)
 	_money_label.add_theme_color_override(&"font_color", MONEY_COLOR)
 	_money_label.add_theme_color_override(&"font_outline_color", MenuStyle.hud.label_outline_color)
 	_money_label.add_theme_constant_override(&"outline_size", MenuStyle.hud.toast_outline_size)
-	_stamp_money_readout(0.0)  # placeholder until the first poll/signal; the stamp owns text + debt tint
-	_weighted.add_child(_money_label)
+	money_row.add_child(_money_label)
+	# THE OWED ROW — to the RIGHT of the zorkmid readout on the same top line, and only while the ledger account
+	# is NEGATIVE. The readout beside it is CASH-ONLY (Character.money), so without this the run's debt is
+	# invisible outside the ATM screen — and it compounds daily (LedgerAccrual: 2%/day against savings' 0.5%).
+	# Hidden while solvent, so a run that never borrows never sees it. Same font/outline as the readout; always
+	# the debt tint. It must NOT go UNDER the readout: that band is row 2, reserved for the +N/-N money float,
+	# and money_debt_color ships as the same Color as money_loss_color (see MONEY_ROW_PAD).
+	_owed_label = Label.new()
+	_owed_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_owed_label.add_theme_font_size_override(&"font_size", MONEY_FONT_SIZE)
+	_owed_label.add_theme_color_override(&"font_color", MONEY_DEBT_COLOR)
+	_owed_label.add_theme_color_override(&"font_outline_color", MenuStyle.hud.label_outline_color)
+	_owed_label.add_theme_constant_override(&"outline_size", MenuStyle.hud.toast_outline_size)
+	_owed_label.visible = false
+	money_row.add_child(_owed_label)
+	_stamp_money_readout(0.0)  # placeholder until the first poll/signal; the stamp owns text + debt tint + the OWED row
+	# THE OWED ROW'S REAL DRIVER. GameState.account moves on two paths the WALLET never sees — a credit purchase
+	# that draws nothing from an empty wallet (Player.charge debits the account alone, so money_changed never
+	# fires) and the daily LedgerAccrual interest. The row currently repaints on those anyway ONLY because
+	# _process's per-frame WALLET poll routes through the same stamp: coupling, not a contract — it goes stale the
+	# moment that poll is dropped or its is_instance_valid(player) gate closes (death, pre-setup). This signal is
+	# the honest wire, and it stays a signal — never a second per-frame poll on the account.
+	if not GameState.account_changed.is_connected(_on_account_changed):
+		GameState.account_changed.connect(_on_account_changed)
 	if not Reputation.reputation_changed.is_connected(_on_reputation_changed):
 		Reputation.reputation_changed.connect(_on_reputation_changed)
 	if not Reputation.alignment_changed.is_connected(_on_alignment_changed):
@@ -925,15 +969,45 @@ func _on_quest_failed(quest: Quest) -> void:
 func _money_text(total: float) -> String:
 	return Zorkmids.money_text(total)
 
+## Row 2 of the money rail: the y the +N/-N float SPAWNS at, before it rises MONEY_DELTA_RISE px out of the band.
+## Derived from row 1's own font so a HudSettings money_font_size bump slides the band down with the readout
+## instead of letting the float draw over it (see MONEY_ROW_PAD for the whole rail).
+func _money_delta_row_y() -> float:
+	return MONEY_ROW_PAD + float(MONEY_FONT_SIZE) + MONEY_ROW_PAD
+
 ## Stamp the top-left readout — text AND tint in one seam (the build, the money_changed signal and the
-## per-frame poll all route here so the colour can never lag the number). Gold while solvent, the debt
-## red the moment the balance is negative: implants are bought on credit (implant_choice.gd) and this
-## signed readout IS the debt display — the backpack shows no coin tile while below zero.
+## per-frame _process poll all route here so the colour can never lag the number). Gold while solvent, the debt
+## red the moment the WALLET ITSELF is negative. The payment seam never does that (Player.charge spends cash then
+## the account and refuses to push `money` below zero — the wallet is cash-only), but an authored
+## DialogueChoice.give_money fee still can: it is documented as "NEGATIVE for a fee/cost" and DialogueManager
+## applies it with no affordability gate, so the branch is a live case, not dead code. The run's DEBT is a
+## different number living on the ledger account, and it is the OWED row beside this one that displays it.
 func _stamp_money_readout(total: float) -> void:
 	if _money_label == null:
 		return
 	_money_label.text = _money_text(total)
 	_money_label.add_theme_color_override(&"font_color", MONEY_COLOR if total >= 0.0 else MONEY_DEBT_COLOR)
+	_stamp_owed_row()  # rides the same stamp so the debt row can never lag the readout it sits beside
+
+## THE ONE OWED-ROW PAINTER — both drivers below route here, so the row has exactly one place that decides
+## whether it shows and what it says. It reads the LEDGER account, not the wallet: they are different money
+## (cash vs the signed savings/debt balance), and only the account can owe.
+##   1. _stamp_money_readout — keeps the row in lockstep with the readout beside it.
+##   2. _on_account_changed  — the account moves on paths the WALLET never sees (a credit purchase with an empty
+##      wallet debits the account alone; LedgerAccrual posts interest at dawn), and money_changed is blind to both.
+func _stamp_owed_row() -> void:
+	if _owed_label == null:
+		return
+	var account: float = GameState.account
+	_owed_label.visible = account < 0.0
+	if _owed_label.visible:
+		_owed_label.text = PlayerText.hud_owed(absf(account))  # absolute — Zorkmids.fmt prints its own minus
+
+## GameState.account_changed -> repaint the OWED row. The arity must match the signal EXACTLY (Godot 4 does not
+## drop extra args), so this takes the emitted balance even though the painter re-reads GameState.account itself —
+## the account is the single source of truth and no caller should be able to paint a row the ledger disagrees with.
+func _on_account_changed(_value: float) -> void:
+	_stamp_owed_row()
 
 ## Player.money changed (add_money): refresh the readout and float a colour-coded +N / -N up from it.
 ## Rapid deltas (a coin-pile vacuum, a multi-item sale) ACCUMULATE into the one live float — re-stamped and its
@@ -954,7 +1028,7 @@ func _on_money_changed(total: float, delta: float) -> void:
 			_money_delta_label = null
 			_money_delta_tw = null
 			return
-		_money_delta_label.position = Vector2(8, 26)
+		_money_delta_label.position = Vector2(8, _money_delta_row_y())  # back to the band's top for the restarted rise
 		_money_delta_label.modulate.a = 1.0
 		_money_delta_label.text = PlayerText.money_delta(_money_delta_sum)
 		_money_delta_label.add_theme_color_override(&"font_color", MONEY_GAIN_COLOR if _money_delta_sum > 0.0 else MONEY_LOSS_COLOR)
@@ -971,7 +1045,7 @@ func _on_money_changed(total: float, delta: float) -> void:
 	ind.add_theme_color_override(&"font_outline_color", MenuStyle.hud.label_outline_color)
 	ind.add_theme_constant_override(&"outline_size", MenuStyle.hud.toast_outline_size)
 	ind.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	ind.position = Vector2(8, 26)
+	ind.position = Vector2(8, _money_delta_row_y())  # row 2 of the money rail — the float's band, below the readout
 	_notices.add_child(ind)  # under the notification layer, so dialogue hides the float with the toasts
 	_money_delta_label = ind
 	_money_delta_tw = _money_delta_float(ind)

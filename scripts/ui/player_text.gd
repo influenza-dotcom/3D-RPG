@@ -100,7 +100,7 @@ const SAVE_WARN_COMPLETED_QUEST_MISSING := "[PH] Couldn't restore a completed qu
 const SAVE_WARN_FAILED_QUEST_MISSING := "[PH] Couldn't restore a failed quest record (its data is missing)."
 ## The SYNTHESIZED dialogue response-menu options — the buttons DialogueManager splices on top of a line's
 ## authored choices when the speaker carries the matching component (Merchant / Healer / Bonfire / LevelUp /
-## ChipInstaller / ChessMatch / a following companion with a backpack), plus the always-present leave option.
+## ChipInstaller / ChessMatch / Atm / a following companion with a backpack), plus the always-present leave option.
 ## DISPLAY text only: each button binds its own handler Callable, so re-wording one here can never change which
 ## menu opens — the same label-is-never-a-key rule as MENU_TAB_* and CompanionRecruiter.label_for.
 const DIALOGUE_OPTION_TRADE := "Trade"
@@ -109,6 +109,9 @@ const DIALOGUE_OPTION_REST := "Rest"
 const DIALOGUE_OPTION_LEVEL_UP := "Level Up"
 const DIALOGUE_OPTION_INSTALL := "Install"
 const DIALOGUE_OPTION_PLAY_CHESS := "Play Chess"
+## One verb for BOTH directions and both signs of the account (deposit / withdraw / pay a debt down) — the
+## terminal's own screen swaps its Deposit/Pay-down caption, so this button never has to know which you mean.
+const DIALOGUE_OPTION_BANK := "Bank"
 const DIALOGUE_OPTION_EXCHANGE_GEAR := "Exchange Gear"
 ## The generic leave option, always appended last. The trailing full stop is AUTHORED copy (it reads as a
 ## spoken line, unlike the verb-labelled service options above) — never punctuation the call site adds.
@@ -548,7 +551,7 @@ static func quest_tracker_line(title: String, objective_desc: String, progress: 
 	return TextFormat.subst(template, {"title": title, "objective": objective_desc, "progress": progress, "required": required})
 
 
-## Quest-REWARD overflow (GameState._grant_quest_rewards) — names the loss as reward items. The generic
+## Quest-REWARD overflow (QuestTracker._grant_quest_rewards) — names the loss as reward items. The generic
 ## non-quest overflow (a dialogue gift) is inventory_full below.
 static func quest_rewards_full(lost_count: int) -> String:
 	return TextFormat.subst(TextFormat.plural(lost_count,
@@ -721,6 +724,17 @@ static func implant_choice_tally(cost: float, balance: float, credit_left: float
 
 static func wallet_merchant(amount: float) -> String:
 	return TextFormat.subst(SHOP_MERCHANT_WALLET, {"money": Zorkmids.money_text(amount)})
+
+
+## The HUD's OWED row — shown under the zorkmid readout only while GameState.account is NEGATIVE, because a debt
+## that compounds daily (LedgerAccrual, 2%/day vs savings' 0.5%) is the one balance the player must not be able to
+## forget about. Solvent runs never see it, so the HUD stays clean by default. ⭐{owed} arrives as an ABSOLUTE
+## value: Zorkmids.fmt prints its own minus and "Owed -240 zm" would read as a credit — the same trap the ATM
+## statement documents.
+const HUD_OWED := "[PH] Owed  {owed}"
+
+static func hud_owed(owed_abs: float) -> String:
+	return TextFormat.subst(HUD_OWED, {"owed": Zorkmids.money_text(owed_abs)})
 
 
 static func claim_name_dialog(name: String) -> String:

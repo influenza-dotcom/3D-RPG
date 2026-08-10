@@ -446,7 +446,54 @@ func _build_tip() -> void:
 	_tip_layer.add_child(_tip_panel)
 	_style_tip()
 
-# --- button sounds ----------------------------------------------------------------------------------
+# --- menu sounds ------------------------------------------------------------------------------------
+# The menu's whole audio vocabulary lives here: MenuSkin owns WHICH clip each event plays (and how loud),
+# this block owns WHEN and on WHICH voice. Screens never preload a clip or build a player — they call the
+# play_* seams below. Three invariants hold the system together:
+#
+#  1. EVERY player is PROCESS_MODE_ALWAYS and on the "sfx" bus. Seven screens pause the tree
+#     (shop/heal/atm/respec/level-up/chip-install/chess); a play() on an INHERIT-mode player under a paused
+#     tree is silently DROPPED. The "sfx" bus is what makes the SFX volume slider apply — a bare player
+#     lands on Master and ignores it. (This is also why AudioManager.play_2d_sfx is unusable here: it
+#     parents to the root at the default process mode, so it goes silent in exactly the menus that matter.)
+#  2. NOTHING here may fire from a screen's _ready(). Every screen autoload builds at boot and a boot-time
+#     open sting would play under the splash. Be honest about what enforces this: MenuStyle is autoload #6,
+#     ahead of every screen scene, so the pool ALREADY EXISTS by the time a screen's _ready runs — the
+#     is_empty() guard below does NOT cover that case, and boot silence is held by DISCIPLINE, not by
+#     construction. What the guard really covers is an off-tree instance: a bare load(...).new() + rebuild()
+#     with no _ready (tests/test_menu_skin_art.gd's idiom) and any `-s` tool script. That is also why audio
+#     construction must stay in _build_sound() and never move into rebuild(), which those paths DO call.
+#  3. Timing uses Time.get_ticks_msec(), never a delta — a paused tree freezes delta, and these throttles
+#     have to keep working under a pause (a dialogue-hosted station screen, FreezeFrame on death).
+
+## Semantic voices for open/back/tab/commit/step. FOUR because the realistic worst case overlaps three:
+## the 1.7s open sting still ringing while the player tabs (swipe) and then commits — one spare keeps the
+## long sting from being stolen mid-ring. Hover and click deliberately keep their OWN single voices
+## (_hover_player/_click_player): self-cutting is the DESIRED behaviour for a repeated blip, and both
+## member names are pinned by tests/test_options_menu.gd.
+var _ui_players: Array[AudioStreamPlayer] = []
+var _ui_next: int = 0  ## round-robin cursor for the steal-oldest fallback when all four are busy
+
+## Throttle state (see _on_button_hovered / play_step). Instance IDs, never node refs — a list screen frees
+## its rows constantly and a stale reference to a freed Button is a crash waiting to happen.
+var _hover_last_ms: int = 0
+var _hover_last_id: int = 0
+var _step_last_ms: int = 0
+var _click_started_ms: int = -100000  ## when the generic click voice last started (see SAME_PRESS_MS)
+
+## How long after a generic click a semantic cue is still considered part of the SAME press. A press that
+## opens/closes/commits fires the auto-wired click first and its meaningful cue a hair later, in the same
+## frame — so within this window the specific cue WINS and the click is cut (see play_ui). Two frames at
+## 60fps, generous enough for a slow frame and far too short to swallow a genuine second press.
+const SAME_PRESS_MS: int = 40
+
+## Re-hover gate for the SAME button. Distinct from skin.hover_min_interval (the designer's sweep-feel
+## knob): this is a mechanism guard for rows that are REBUILT under a stationary cursor — a repainted list
+## re-fires mouse_entered without the player having moved a pixel, which blips on its own.
+const SAME_BUTTON_HOVER_MS: int = 250
+
+var _quiet: bool = false       ## latch: every play_* is a no-op (the death/quickload close-everything sweep)
+var _quiet_backs: int = 0      ## pending "eat one back cue" tokens (a commit that closes its own screen)
 
 func _build_sound() -> void:
 	_hover_player = AudioStreamPlayer.new()
@@ -457,6 +504,133 @@ func _build_sound() -> void:
 	_click_player.process_mode = Node.PROCESS_MODE_ALWAYS
 	_click_player.bus = &"sfx"
 	add_child(_click_player)
+	_ui_players.clear()
+	for _i in 4:
+		var p := AudioStreamPlayer.new()
+		p.process_mode = Node.PROCESS_MODE_ALWAYS
+		p.bus = &"sfx"
+		add_child(p)
+		_ui_players.append(p)
+
+# --- play seams (the API every screen calls) ----------------------------------------------------------
+
+## Play a semantic UI cue. `kind`: &"open" &"back" &"tab" &"select" &"commit" &"step_left" &"step_right".
+## An unknown kind, an unassigned skin slot, or a pool that doesn't exist yet (off-tree / pre-_ready) are
+## all SILENT NO-OPS, never errors — so a screen can call this unconditionally.
+func play_ui(kind: StringName) -> void:
+	if _ui_players.is_empty():
+		return  # pre-_ready or off-tree (see invariant 2) — nothing to play on
+	if kind == &"back" and _quiet_backs > 0:
+		_quiet_backs -= 1  # consumed by quiet_next_back(); see its note
+		return
+	if _quiet:
+		return
+	var stream: AudioStream = _stream_for(kind)
+	if stream == null:
+		return
+	# A SEMANTIC CUE SUPERSEDES THE GENERIC CLICK OF THE SAME PRESS. Every standalone modal's Close button
+	# (and any button whose handler opens, closes or commits) fires the auto-wired click a hair before its
+	# real cue — two sounds for one action. Muting each such button by hand across twenty screens is exactly
+	# the kind of list that drifts the moment someone adds a screen, so the rule lives here instead: if the
+	# click voice started within this same press, cut it and let the specific cue speak alone.
+	# NOTE play_select() calls _play_click directly rather than routing here, so it can never cut itself.
+	if _click_player != null and _click_player.playing and Time.get_ticks_msec() - _click_started_ms <= SAME_PRESS_MS:
+		_click_player.stop()
+	var p := _acquire_ui_player()
+	p.stream = stream
+	p.volume_db = skin.ui_sound_volume_db + _volume_for(kind)
+	p.play()
+
+## A menu came up COLD. NEVER call this for a tab/page swap inside an already-open group — that's play_tab.
+func play_open() -> void: play_ui(&"open")
+
+## Back / close / cancel: the last menu of a group closing, an Esc, a dismissed confirm.
+func play_back() -> void: play_ui(&"back")
+
+## The view swapped SIDEWAYS: tab strip, tab bar, sort cycle, payment-rail flip.
+func play_tab() -> void: play_ui(&"tab")
+
+## An ordinary confirm on a surface that is NOT a BaseButton (the inventory/loot/shop grid tiles are plain
+## Controls, so the auto-wired click never reaches them). Shares the click voice — same clip, same meaning.
+func play_select() -> void:
+	if _quiet or _click_player == null:
+		return
+	_play_click()
+
+## A HEAVY commit: money spent, a level taken, a save written, a new run stamped.
+func play_commit() -> void: play_ui(&"commit")
+
+## A value stepped: dir > 0 = up/right, dir < 0 = down/left, 0 = no-op. Throttled by
+## skin.step_min_interval, so EVERY entry point (mouse arrows, keyboard auto-repeat, slider drags)
+## inherits the same anti-machine-gun rule without repeating it per screen.
+func play_step(dir: int) -> void:
+	if dir == 0 or _quiet or _ui_players.is_empty():
+		return
+	var now := Time.get_ticks_msec()
+	if now - _step_last_ms < int(skin.step_min_interval * 1000.0):
+		return
+	_step_last_ms = now
+	play_ui(&"step_right" if dir > 0 else &"step_left")
+
+## Tick a slider toward `value`, quantised so a FULL sweep produces ~skin.slider_tick_count ticks whatever
+## the slider's own step is (Max FPS has hundreds of steps, an accessibility 0..1 slider has a handful —
+## without this one buzzes and the other barely speaks). Direction comes from the previous value stashed on
+## the slider itself, since Range.value_changed hands over only the new value.
+##
+## The FIRST call for a given slider is deliberately SILENT (it only seeds the stash). Menus write .value
+## programmatically — loading settings, Revert, rebuilding a tab — and those writes must not sound like the
+## player dragged something. Losing the first tick of a real drag is imperceptible; a tick storm on every
+## Apply is not.
+func play_slider_step(slider: Range, value: float) -> void:
+	if not is_instance_valid(slider) or _quiet or _ui_players.is_empty():
+		return
+	var seeded: bool = slider.has_meta(&"_snd_last")
+	var prev: float = float(slider.get_meta(&"_snd_last", value))
+	slider.set_meta(&"_snd_last", value)
+	if not seeded:
+		return
+	var span: float = slider.max_value - slider.min_value
+	if span <= 0.0:
+		return
+	var bucket: float = maxf(slider.step, span / float(maxi(1, skin.slider_tick_count)))
+	if bucket <= 0.0:
+		return
+	if floori((value - slider.min_value) / bucket) == floori((prev - slider.min_value) / bucket):
+		return  # still inside the same bucket — not a tick yet
+	play_step(1 if value > prev else -1)
+
+## Give ONE button a semantic cue INSTEAD of the generic click (hover is untouched). `kind` = &"" MUTES the
+## click entirely, for a button whose ENCLOSING seam owns the sound (the player-menu tab strip, whose cue
+## comes from PlayerMenus.enter so a switch sounds once rather than click+swipe).
+##
+## Order-free and idempotent by design: an authored-scene button is already click-wired by apply()'s sweep
+## before its screen's _ready runs, while a runtime-built row is wired by the node_added hook AFTER
+## construction. This disconnects an already-connected click, and _wire_button skips buttons carrying the
+## meta — so it is correct whichever ran first, and calling it again just re-points the kind.
+## THE ONLY sanctioned way to put a semantic sound on a BaseButton — never connect a play_* by hand.
+func set_button_sound(btn: BaseButton, kind: StringName) -> void:
+	if not is_instance_valid(btn):
+		return
+	btn.set_meta(&"_snd_semantic", kind)
+	if btn.pressed.is_connected(_play_click):
+		btn.pressed.disconnect(_play_click)
+	if not btn.has_meta(&"_snd_semantic_wired"):
+		btn.set_meta(&"_snd_semantic_wired", true)
+		btn.pressed.connect(_on_semantic_pressed.bind(btn))
+
+## Latch every cue to a no-op. InputManager.close_all_modals closes up to 17 screens in one loop (player
+## death, quickload) — without this, dying fires a wall of back cues at once.
+## ALWAYS pair the on/off in the same function, so an early return can't strand the UI mute.
+func set_quiet(on: bool) -> void:
+	_quiet = on
+
+## Eat exactly ONE upcoming back cue. For a commit that immediately closes its own screen (respec confirm,
+## a save/load that reloads, pickpocket-caught) — the commit cue is the one that should be heard, and the
+## close's back cue would step on it a frame later.
+func quiet_next_back() -> void:
+	_quiet_backs += 1
+
+# --- internals: wiring + voices ------------------------------------------------------------------------
 
 ## Every node added anywhere: if it's a button inside a menu root, wire its hover/click sounds. The
 ## BaseButton check is first so this is near-free for the gameplay nodes that dominate node_added.
@@ -464,6 +638,8 @@ func _build_sound() -> void:
 ## (projectiles, VFX, NPCs). The leading `node is BaseButton` early-out keeps it ~free for that common
 ## case; only the rare button walks ancestors. Kept global on purpose — buttons are built lazily under
 ## many menu roots and there's no single parent to scope a local signal to.
+## The listener COUNT is a pinned budget (tests/test_global_node_added_listeners.gd allows exactly two,
+## star_sky + this) — extend this hook, never add a third global listener.
 func _on_node_added(node: Node) -> void:
 	if not (node is BaseButton):
 		return
@@ -479,25 +655,82 @@ func _wire_button(btn: BaseButton) -> void:
 		return
 	btn.set_meta(&"_snd_wired", true)
 	btn.mouse_entered.connect(_on_button_hovered.bind(btn))  # bound-method Callable (never a capturing lambda)
+	if btn.has_meta(&"_snd_semantic"):
+		return  # set_button_sound already gave this button its own cue — never stack the generic click on top
 	btn.pressed.connect(_play_click)  # a disabled button can't be pressed, so it never click-sounds
 
 ## Hover sound only while the button can actually respond — a DISABLED button (the greyed Apply, the
 ## active tab) still fires mouse_entered, and a blip over dead chrome reads as a broken control.
+## Throttled twice over: a global floor so sweeping a 12-row list textures instead of machine-gunning, and
+## a longer SAME-button gate for rows repainted under a stationary cursor (see SAME_BUTTON_HOVER_MS).
 func _on_button_hovered(btn: BaseButton) -> void:
-	if is_instance_valid(btn) and not btn.disabled:
-		_play_hover()
+	if not is_instance_valid(btn) or btn.disabled or _quiet:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _hover_last_ms < int(skin.hover_min_interval * 1000.0):
+		return
+	var id: int = btn.get_instance_id()
+	if id == _hover_last_id and now - _hover_last_ms < SAME_BUTTON_HOVER_MS:
+		return
+	_hover_last_ms = now
+	_hover_last_id = id
+	_play_hover()
+
+## Fired by a button that set_button_sound gave its own cue. The kind is read from the meta at PRESS time,
+## so re-pointing a button's cue later just works (and &"" resolves to no stream = muted).
+func _on_semantic_pressed(btn: BaseButton) -> void:
+	if not is_instance_valid(btn):
+		return
+	play_ui(StringName(btn.get_meta(&"_snd_semantic", &"")))
+
+## First idle voice, else steal the oldest claimed one (round-robin). Overlap is normal — a step tick can
+## land while the previous one still rings — so stealing is the graceful degrade, not an error.
+func _acquire_ui_player() -> AudioStreamPlayer:
+	for p in _ui_players:
+		if not p.playing:
+			return p
+	var oldest := _ui_players[_ui_next]
+	_ui_next = (_ui_next + 1) % _ui_players.size()
+	return oldest
+
+## The skin slot a cue kind maps to. Unknown kinds (including &"", the muted marker) return null = silent.
+func _stream_for(kind: StringName) -> AudioStream:
+	match kind:
+		&"open": return skin.open_sound
+		&"back": return skin.back_sound
+		&"tab": return skin.tab_sound
+		&"select": return skin.click_sound
+		&"commit": return skin.commit_sound
+		&"step_left": return skin.step_left_sound
+		&"step_right": return skin.step_right_sound
+	return null
+
+## The per-cue trim a kind carries, ADDED to skin.ui_sound_volume_db by play_ui. The step pair shares one
+## trim on purpose so the two directions can never drift apart in loudness.
+func _volume_for(kind: StringName) -> float:
+	match kind:
+		&"open": return skin.open_volume_db
+		&"back": return skin.back_volume_db
+		&"tab": return skin.tab_volume_db
+		&"select": return skin.click_volume_db
+		&"commit": return skin.commit_volume_db
+		&"step_left", &"step_right": return skin.step_volume_db
+	return 0.0
 
 func _play_hover() -> void:
 	if skin.hover_sound != null and _hover_player != null:
 		_hover_player.stream = skin.hover_sound
-		_hover_player.volume_db = skin.ui_sound_volume_db
+		_hover_player.volume_db = skin.ui_sound_volume_db + skin.hover_volume_db
 		_hover_player.play()
 
 func _play_click() -> void:
+	if _quiet:
+		return
 	if skin.click_sound != null and _click_player != null:
 		_click_player.stream = skin.click_sound
-		_click_player.volume_db = skin.ui_sound_volume_db
+		_click_player.volume_db = skin.ui_sound_volume_db + skin.click_volume_db
 		_click_player.play()
+		_click_started_ms = Time.get_ticks_msec()  # lets play_ui recognise (and cut) this click as the same press
 
 ## (Re)apply the skin's look to the tip panel — called on build and on set_skin/rebuild.
 ## Padding matches the theme's TooltipPanel (8,6) so the cursor tip and native tooltips read as one system.

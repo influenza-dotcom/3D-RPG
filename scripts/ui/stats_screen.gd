@@ -51,12 +51,12 @@ func toggle() -> void:
 		open()
 
 func open() -> void:
-	# Never stack over a NON-player modal (incl. the pausing shop/heal/level-up — our input is PROCESS_MODE_ALWAYS).
+	# Never stack over a NON-player modal (incl. the station screens — our input is PROCESS_MODE_ALWAYS).
 	# The sibling player menus (Inventory/Reputation) are NOT blocked: opening us SWITCHES off an open sibling
 	# (PlayerMenus.close_others below), so the tabs act as one Deus Ex / Pip-Boy tab group.
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
-			or LootScreen.is_open() or InputManager.any_pausing_open() \
-			or not PlayerMenus.player_alive(get_tree()):  # M5: pausing modals via the shared helper; refuse mid-death (PROCESS_MODE_ALWAYS would else re-open over the death cinematic)
+	if _is_open or DialogueManager.is_active() \
+			or InputManager.any_tab_blocking_open() \
+			or not PlayerMenus.player_alive(get_tree()):  # M5/T1: the whole refusal set (options/loot/stations) comes from the modal registry; refuse mid-death (PROCESS_MODE_ALWAYS would else re-open over the death cinematic)
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player):
@@ -97,6 +97,7 @@ func _find_real_player() -> Node:
 
 ## Hand off to the fullscreen CharacterInspectScreen (a bigger, drag-to-rotate hero showcase with the equipped
 ## weapon in hand). Its open() closes THIS tab as it takes over, so it's a one-way hand-off, not a stacked modal.
+## It routes that takeover through PlayerMenus.enter, which owns the switch cue — hence the muted button in _bind_ui.
 func _open_inspect() -> void:
 	if is_instance_valid(_player):
 		CharacterInspectScreen.open()
@@ -158,6 +159,10 @@ func _bind_ui() -> void:
 	# "Inspect" hands off to the fullscreen hero view (full body + the equipped weapon in hand, drag to rotate).
 	var inspect_btn: Button = %InspectButton  # focus_mode NONE authored: mouse-driven; don't steal focus
 	inspect_btn.text = PlayerText.STATS_INSPECT_BUTTON
+	# Mute the generic click: the takeover routes through PlayerMenus.enter (inside CharacterInspectScreen.open),
+	# which plays the SIDEWAYS cue for the hand-off — the tab-strip idiom. Unmuted, one press would click AND
+	# swipe; muted, a refused open (mid-death, a modal that beat us to the screen) also stays correctly silent.
+	MenuStyle.set_button_sound(inspect_btn, &"")
 	inspect_btn.pressed.connect(_open_inspect)
 
 	# The stat column: six blocks in a 2x3 grid (columns + the ONE 8px gap on both axes authored on %StatGrid —

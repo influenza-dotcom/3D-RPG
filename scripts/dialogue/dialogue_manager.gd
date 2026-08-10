@@ -4,8 +4,8 @@ extends Node
 ## @seam is_engaged() (_active != null) = a conversation exists at all — the unpaused intro beat + the menu-suspension that is_active() hides — feeding world_frozen() immunity, Player.die() teardown, and _suspend_for_menu's box-hide + CONNECT_ONE_SHOT closed->resume one-shot.
 ## @risk Dropping is_engaged() from InputManager.world_frozen() loses immunity in the unpaused intro beat — an enemy shoots the frozen player with no error (C66).
 ## @risk die() gating on is_active() not is_engaged() skips abort() during a sub-menu suspension — the menu's close then re-pauses + re-opens the box over the death cinematic.
-## @risk A suspending sub-menu (Shop/Install/Chess) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
-## @risk Speaker menus are duck-typed via has_method/has_signal scans (buy/sell, do_heal, install_carried, ai_search_depth, set_in_dialogue/died); a rename silently drops the option with no compile error.
+## @risk A suspending sub-menu (Shop/Install/Chess/Atm) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
+## @risk Speaker menus are duck-typed via has_method/has_signal scans (buy/sell, do_heal, install_carried, ai_search_depth, deposit/withdraw, set_in_dialogue/died); a rename silently drops the option with no compile error.
 ## @test res://tests/test_dialogue.gd
 ## @test res://tests/test_dialogue_suspend_closed.gd
 ## @test res://tests/test_dialogue_speaker_contracts.gd
@@ -21,7 +21,7 @@ extends Node
 ## for the recruit/dismiss contract. Lines are read aloud by the SpeechTts autoload (the in-game Flite TTS).
 ##
 ## DUCK-TYPING CONTRACT (M14): this reaches into ~8 subsystems via has_method / has_signal scans (Merchant buy/sell,
-## Healer do_heal/heal_cost, Bonfire rest, LevelUp level_up_stat/level_up_cost, the NPC speaker's set_in_dialogue/
+## Healer do_heal/heal_cost, Bonfire rest, LevelUp level_up_stat/level_up_cost, Atm deposit/withdraw, the NPC speaker's set_in_dialogue/
 ## note_speaking/provoke/is_following/resolved_disposition + died signal, Player add_money/notify_toast, and the
 ## shop/heal/level-up screens' open_* + closed signal) — NOT typed refs, deliberately, to avoid the Merchant <->
 ## ShopScreen <-> DialogueManager compile cycle (a typed interface would re-form it). So a rename on any of those
@@ -41,9 +41,9 @@ const Factions = preload("res://scripts/faction/factions.gd")
 ## that reason.
 signal dialogue_started(resource: DialogueResource)
 signal dialogue_finished
-## A sub-menu (Trade / Heal / Level Up / Install / Play Chess / Exchange Gear) opened over a LIVE conversation,
-## which is now SUSPENDED (box hidden; _speaker / _index / _active kept). `reason` names the menu ("trade",
-## "heal", "level_up", "install", "chess", "exchange") so a listener can react per-menu. OBSERVABILITY ONLY:
+## A sub-menu (Trade / Heal / Level Up / Install / Play Chess / Bank / Exchange Gear) opened over a LIVE
+## conversation, which is now SUSPENDED (box hidden; _speaker / _index / _active kept). `reason` names the menu
+## ("trade", "heal", "level_up", "install", "chess", "bank", "exchange") so a listener can react per-menu. OBSERVABILITY ONLY:
 ## the resume is still driven by the sub-menu's own one-shot `closed` -> _resume_from_menu handshake (which
 ## also survives a mid-menu death), NOT by any listener of this signal — do not wire resume off it.
 signal dialogue_suspended(reason: String)
@@ -320,6 +320,8 @@ func _reveal_menu() -> void:
 		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_INSTALL, _on_install_pressed)
 	if _speaker_chess() != null:
 		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_PLAY_CHESS, _on_chess_pressed)
+	if _speaker_atm() != null:
+		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_BANK, _on_bank_pressed)
 	if _speaker_exchange_npc() != null:
 		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_EXCHANGE_GEAR, _on_exchange_pressed)
 	_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_GOODBYE, _on_goodbye_pressed)
@@ -358,7 +360,7 @@ func _apply_choice_effects(choice: DialogueChoice) -> void:
 						# Bag full — surface the shortfall instead of silently eating a (possibly quest-critical) item;
 						# a soft-lock risk if a key handed via dialogue just vanishes. Uses the NEUTRAL inventory_full
 						# line: a dialogue GIFT isn't a quest reward, so the quest_rewards_full wording (which names
-						# "quest reward items") stays exclusive to GameState._grant_quest_rewards.
+						# "quest reward items") stays exclusive to QuestTracker._grant_quest_rewards.
 						var msg := PlayerText.inventory_full(choice.give_item_count - added)
 						if player.has_method(&"notify_toast"):
 							player.notify_toast(msg, Color(1.0, 0.6, 0.3))
@@ -420,7 +422,7 @@ func _resume_from_menu() -> void:
 	if _speaker == null or not is_instance_valid(_speaker) or _active == null:
 		_finish()
 		return
-	get_tree().paused = true  # re-pause the world (a pausing sub-menu unpaused it on close; same frame, no tick)
+	get_tree().paused = true  # re-assert OUR pause. Since 2026-08-09 no sub-menu unpauses on close (the station screens are real-time), so this is normally a no-op — kept because a resumed conversation MUST be frozen, and that must not depend on what a sub-menu did or didn't do to the tree.
 	_view.set_layer_hidden(false)
 	_reveal_menu()  # back at the choices where you picked Trade / Heal / Level Up / Exchange (re-shows the cursor)
 	if _active == null:
@@ -576,6 +578,32 @@ func _speaker_chess() -> Node:
 		return null
 	for c in _speaker.get_children():
 		if c.has_method(&"ai_search_depth") and c.has_method(&"display_opponent_name"):
+			return c
+	return null
+
+## The "Bank" option (Atm component): SUSPEND the conversation and open the ledger terminal — closing it returns
+## you to the dialogue rather than ending it (mirrors _on_chess_pressed). ONE option covers both directions and
+## both signs of the account: the terminal's own screen owns deposit / withdraw / pay-down, so a teller NPC needs
+## no extra buttons here. AtmScreen.open_atm refuses while DialogueManager.is_active(), and suspension makes
+## is_active() false so it can open; every one of its refuse paths emits `closed`, which is what keeps the
+## suspension from stranding (the @risk at the top of this file).
+func _on_bank_pressed() -> void:
+	var atm := _speaker_atm()
+	var player := _find_player()
+	if atm != null and is_instance_valid(player):
+		_suspend_for_menu("bank", func() -> void: AtmScreen.open_atm(atm, player), AtmScreen.closed)
+	else:
+		_finish()
+
+## The speaker NPC's Atm child (its ledger terminal), or null. Shallow scan + DUCK-TYPED (has deposit +
+## withdraw), a bare Node like the merchant / healer scans — typing it Atm would pull this autoload into an
+## Atm <-> AtmScreen <-> DialogueManager class-compile cycle (the same cycle AtmScreen itself dodges by holding
+## its terminal as a plain Node).
+func _speaker_atm() -> Node:
+	if _speaker == null or not is_instance_valid(_speaker):
+		return null
+	for c in _speaker.get_children():
+		if c.has_method(&"deposit") and c.has_method(&"withdraw"):
 			return c
 	return null
 

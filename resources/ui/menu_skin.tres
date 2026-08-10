@@ -2,8 +2,26 @@
 
 [ext_resource type="Script" path="res://scripts/ui/menu_skin.gd" id="1"]
 [ext_resource type="Font" path="res://resources/ui/futura_system_font.tres" id="2_futura"]
+[ext_resource type="AudioStream" path="res://assets/audio/sfx/ui/menu_ver.wav" id="3_hover"]
+[ext_resource type="AudioStream" path="res://assets/audio/sfx/ui/menu_selection.wav" id="4_click"]
+[ext_resource type="AudioStream" path="res://assets/audio/sfx/ui/menu_enter.wav" id="5_open"]
+[ext_resource type="AudioStream" path="res://assets/audio/sfx/ui/menu_ret.wav" id="6_back"]
+[ext_resource type="AudioStream" path="res://assets/audio/sfx/ui/menu_swipe.wav" id="7_tab"]
+[ext_resource type="AudioStream" path="res://assets/audio/sfx/ui/menu_hor_l.wav" id="8_stepl"]
+[ext_resource type="AudioStream" path="res://assets/audio/sfx/ui/menu_hor_r.wav" id="9_stepr"]
+[ext_resource type="AudioStream" path="res://assets/audio/sfx/ui/menu_selection2.wav" id="10_commit"]
 
 [resource]
 script = ExtResource("1")
 body_font = ExtResource("2_futura")
 title_font = ExtResource("2_futura")
+hover_sound = ExtResource("3_hover")
+click_sound = ExtResource("4_click")
+open_sound = ExtResource("5_open")
+back_sound = ExtResource("6_back")
+tab_sound = ExtResource("7_tab")
+step_left_sound = ExtResource("8_stepl")
+step_right_sound = ExtResource("9_stepr")
+commit_sound = ExtResource("10_commit")
+hover_volume_db = -6.0
+step_volume_db = -3.0

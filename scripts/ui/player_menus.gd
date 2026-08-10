@@ -99,11 +99,23 @@ static func close_others(keep) -> void:
 ## open of the group, switches off any sibling WITHOUT recapturing the cursor (so it doesn't recenter), then frees
 ## the cursor for the UI. Call it while the opening screen's own is_open() is still false.
 static func enter(keep) -> void:
+	# THE cold-open vs tab-switch decision, and the only place it can be made correctly. `any_open()` is the
+	# genuine group-open test: _switching is cleared at the bottom of this function, BEFORE the incoming
+	# screen sets its own _is_open, so a screen's open() can never ask "am I a switch?" and get a useful
+	# answer. Branch here or the open sting fires on every tab press.
 	if not any_open():
 		# Pre-menu mode. If the CharacterInspectScreen TAKEOVER is up instead of a sibling tab (closed just
 		# below), the live mode is ITS freed cursor — record what its close() would have restored (CAPTURED)
 		# so the last tab close can't strand a visible cursor over gameplay.
 		_group_prev_mode = Input.MOUSE_MODE_CAPTURED if CharacterInspectScreen.is_open() else Input.mouse_mode
+		# ...and for the SAME reason it isn't a cold open when the fullscreen inspect takeover is what's
+		# already up: a tab hotkey there is switching out of it (closed below), not entering the group.
+		if CharacterInspectScreen.is_open():
+			MenuStyle.play_tab()
+		else:
+			MenuStyle.play_open()
+	else:
+		MenuStyle.play_tab()  # sibling tab swap — ONE sideways cue, never a close+open pair
 	_switching = true
 	close_others(keep)
 	# Tab hotkeys must visibly SWITCH out of the fullscreen CharacterInspectScreen takeover too: it covers the
@@ -122,6 +134,7 @@ static func leave() -> void:
 	if _switching or any_open():
 		return
 	Input.mouse_mode = _group_prev_mode
+	MenuStyle.play_back()  # past the guard, so a sibling closing mid-switch stays silent — only the LAST close speaks
 
 ## True while enter() is mid-switch (swapping one open screen for another). The CharacterInspectScreen
 ## takeover reads this in its close(): enter() closes that takeover on a tab hotkey, and without this gate
@@ -147,6 +160,9 @@ static func build_tab_strip(current_key: StringName) -> Control:
 		var b := Button.new()
 		b.text = tab_label(key)
 		b.focus_mode = Control.FOCUS_NONE
+		# Mute the generic click: pressing a tab routes through enter(), which plays the SIDEWAYS cue. Without
+		# this the press would sound twice (click + swipe) for one action.
+		MenuStyle.set_button_sound(b, &"")
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.custom_minimum_size = Vector2(MenuStyle.skin.tab_min_width, 0)
 		if key == current_key:

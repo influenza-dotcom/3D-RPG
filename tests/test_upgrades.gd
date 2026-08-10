@@ -176,12 +176,19 @@ func test_player_fall_immunity_skips_fall_damage() -> void:
 	p.free()  # frees the granted FallImmunity child too
 
 func test_player_landing_block_wires_fall_damage() -> void:
-	# Guards the exact regression that prompted this: the player landing block silently never called
-	# _apply_fall_damage, so the player took zero fall damage and the inherited knobs were dead. Source-grep so a
-	# future refactor can't quietly drop the call again.
-	var content := FileAccess.get_file_as_string("res://scripts/player/player.gd")
-	assert_true("_apply_fall_damage(-pre_landing_velocity)" in content,
-		"the player landing block must call _apply_fall_damage (it was silently never called)")
+	# Guards the exact regression that prompted this: the landing block silently never called _apply_fall_damage,
+	# so the player took zero fall damage and the inherited knobs were dead. Source-grep so a future refactor
+	# can't quietly drop the call again.
+	#
+	# The touchdown burst moved to the Landing component (M13 residual), so this now pins BOTH links of the chain
+	# — Player hands the landing off, and Landing makes the call. Checking only one end would let the other be
+	# dropped silently, which is the very failure mode this test exists for.
+	var player_src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
+	assert_true("landing.on_land(pre_landing_velocity, pre_velocity)" in player_src,
+		"the player touchdown branch must hand off to the Landing component")
+	var landing_src := FileAccess.get_file_as_string("res://scripts/player/landing.gd")
+	assert_true("_apply_fall_damage(-pre_landing_velocity)" in landing_src,
+		"Landing.on_land must call _apply_fall_damage (it was silently never called once before)")
 
 func test_player_continuous_fall_timeout_wired() -> void:
 	var content := FileAccess.get_file_as_string("res://scripts/player/player.gd")

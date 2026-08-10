@@ -1,6 +1,7 @@
 extends CanvasLayer
-## HealScreen — the PAY-TO-HEAL overlay for a Healer component. Autoload; PAUSES the world while open (like
-## ShopScreen — PROCESS_MODE_ALWAYS so its button keeps working through the pause); frees the mouse on open.
+## HealScreen — the PAY-TO-HEAL overlay for a Healer component. Autoload; REAL-TIME — it does NOT pause the
+## world (the STATION-SCREEN rule, argued in full in the atm_screen.gd header; PROCESS_MODE_ALWAYS anyway, so
+## a dialogue-hosted open keeps working under the conversation's pause); frees the mouse on open.
 ## Restores HP to FULL and clears ALL limb damage for zorkmids; the cost is LINEAR in missing HP. Opened by
 ## Healer.start_talk (standalone med-station) or the dialogue "Heal" option (open_heal).
 ##
@@ -20,6 +21,7 @@ var _root: Control
 var _title: Label
 var _status: Label
 var _heal_btn: Button
+var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; its rail_changed drives _refresh (cost + affordability move with it)
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
@@ -46,14 +48,16 @@ func open_heal(healer: Node, player: Node) -> void:
 		return
 	_healer = healer
 	_is_open = true
-	_prev_mouse_mode = ModalMenu.grab_mouse()
+	# ONE OPEN CUE, NEVER TWO (the station-screen idiom): a self-serve med-station answers with its OWN diegetic
+	# StationSpeaker chirp, so the generic UI sting is suppressed exactly when that chirp fires and kept when the
+	# healer is a person (no speaker). Past every refuse guard, so a station that couldn't open never beeps.
+	_prev_mouse_mode = ModalMenu.grab_mouse(not StationSpeaker.chirp(healer))
 	var heal_name_v: Variant = healer.get(&"heal_name")  # duck-typed: only is_instance_valid was checked, not the type
 	var heal_nm: String = heal_name_v if heal_name_v is String else ""
 	# Runtime re-title MUST route through title_text() — make_title only cases its constructor argument.
 	_title.text = MenuStyle.title_text(PlayerText.heal_title(heal_nm))
 	_refresh()
 	_root.visible = true
-	get_tree().paused = true  # freeze the world while healing, like the shop (we're PROCESS_MODE_ALWAYS)
 	opened.emit()
 
 func close() -> void:
@@ -64,7 +68,6 @@ func close() -> void:
 	ModalMenu.restore_mouse(_prev_mouse_mode)
 	_healer = null
 	_player = null
-	get_tree().paused = false
 	closed.emit()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -77,7 +80,13 @@ func _unhandled_input(event: InputEvent) -> void:
 ## Pay + heal, then refresh (the button disables once you're fully mended).
 func _on_heal_pressed() -> void:
 	if is_instance_valid(_healer) and is_instance_valid(_player):
-		_healer.do_heal(_player)
+		# Cue on the HEALER's verdict rather than on "the button was enabled": do_heal re-runs its own
+		# cost + can_pay gate and then FAIL-CLOSES if charge() refuses, so an enabled button is not a promise of
+		# a heal. A refused heal stays silent — there is no denied cue, and back already means "closed".
+		# The button is muted in _bind_ui, so this is the press's only voice.
+		var healed: bool = _healer.do_heal(_player)
+		if healed:
+			MenuStyle.play_commit()
 		_refresh()
 
 ## Update the status line + the Heal button (cost, affordability, nothing-to-heal).
@@ -85,6 +94,8 @@ func _refresh() -> void:
 	if not is_instance_valid(_healer) or not is_instance_valid(_player):
 		return
 	var cost: int = _healer.heal_cost(_player)
+	if _rail_btn != null:
+		_rail_btn.refresh()  # the rail may have been flipped at an ATM since this screen was last built
 	# The affordability wording rides the WRAPPING status line (not the button) so the button caption stays
 	# short + fixed-width — the card is pinned to skin.dialog_width and a long "can't afford" caption would
 	# otherwise be the one string long enough to clip on the button. We pass only the FACTS (limb damage on
@@ -133,8 +144,16 @@ func _bind_ui() -> void:
 	_status = %Status
 	_status.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 
+	# The DEBIT/CREDIT selector sits on its OWN row above Heal/Close, so the two-button row keeps its authored
+	# EXPAND_FILL widths. Its signal drives _refresh because the armed rail changes both the quoted cost and the
+	# affordability dim on this very card.
+	_rail_btn = %RailButton as PaymentRailButton
+	MenuStyle.cap_button(_rail_btn)
+	_rail_btn.rail_changed.connect(_refresh)
+
 	_heal_btn = MenuStyle.cap_button(%HealButton)
 	_heal_btn.pressed.connect(_on_heal_pressed)
+	MenuStyle.set_button_sound(_heal_btn, &"")  # the commit is cued CONDITIONALLY in _on_heal_pressed; the generic click would double it
 
 	var close_btn: Button = MenuStyle.cap_button(%CloseButton)
 	close_btn.text = PlayerText.CLOSE

@@ -18,7 +18,7 @@ extends CanvasLayer
 ##
 ## NON-pausing on purpose — the OptionsMenu Dark-Souls posture: the world keeps simulating and the player stays
 ## vulnerable; player CONTROL is suppressed via the InputManager modal registry instead (this screen is ONE
-## _modal_reg row there, pausing = false, which wires gameplay_suppressed / any_modal_open / close_all_modals).
+## _modal_reg row there, blocks_tabs = false, which wires gameplay_suppressed / any_modal_open / close_all_modals).
 ## These slot files are the EXACT-SNAPSHOT tier; the lean autosave/Continue profile is deliberately NOT a row
 ## here — presenting it as a manual save would blur the two products (CLAUDE.md "Save semantics must be explicit").
 ##
@@ -78,6 +78,10 @@ func open(in_game: bool, boot: Callable = Callable()) -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE   # free the cursor for the rows (restored on close)
 	_is_open = true
 	_root.visible = true
+	# This screen is NOT a ModalMenu caller (it owns its own mouse-mode save/restore), so it never inherits
+	# grab_mouse()'s open sting — it cues its own. PAST every refusal guard above on purpose: an open refused
+	# by a stacked modal / a conversation / mid-death must stay silent.
+	MenuStyle.play_open()
 	# Seed pad/keyboard focus on the first row button (the OptionsMenu _first_focus idiom) — without a focus
 	# owner, ui navigation is dead and a pad player could open the screen but press nothing on it.
 	if _focus_target != null:
@@ -87,6 +91,10 @@ func open(in_game: bool, boot: Callable = Callable()) -> void:
 func close() -> void:
 	if not _is_open:
 		return
+	# The open sting's twin (restore_mouse() gives the ModalMenu screens this for free; we restore the mouse
+	# ourselves). Past the not-open guard so the close_all_modals sweep landing on an already-shut screen is
+	# silent — and that sweep holds MenuStyle's quiet latch anyway, so a reload-driven close never sounds.
+	MenuStyle.play_back()
 	_is_open = false
 	_root.visible = false
 	_confirm.visible = false
@@ -101,6 +109,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"ui_cancel") or event.is_action_pressed(InputManager.action_pickup):
 		if _confirm.visible:
 			_confirm.visible = false
+			MenuStyle.play_back()            # a dismissed confirm IS a back; this path is keyboard-only (no button to click-cue it)
 			if _focus_target != null:
 				_focus_target.grab_focus()   # same hand-back as the Cancel button
 		else:
@@ -179,10 +188,14 @@ func _bind_ui() -> void:
 	confirm_btn.text = PlayerText.CONFIRM
 	confirm_btn.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)
 	confirm_btn.pressed.connect(_on_confirm_overwrite)
+	# An overwrite can still FAIL (a refused disk write), so the commit cue lives in _do_save's success tail —
+	# mute this button's generic click or a good overwrite would fire click+commit a frame apart.
+	MenuStyle.set_button_sound(confirm_btn, &"")
 	_confirm_cancel = %CancelButton
 	_confirm_cancel.text = PlayerText.CANCEL
 	_confirm_cancel.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)
 	_confirm_cancel.pressed.connect(_on_cancel_overwrite)
+	MenuStyle.set_button_sound(_confirm_cancel, &"back")  # a dismissed confirm is a back, not a plain click
 
 ## Repaint every row from the CURRENT disk state — on open and after any save/load attempt, so a just-written
 ## slot immediately shows its new metadata and a vanished file drops back to Empty.
@@ -224,29 +237,45 @@ func _add_row(slot: int, label_text: String, path: String) -> void:
 		cap.add_theme_color_override(&"font_color", MenuStyle.dim_color())
 	row.add_child(cap)
 	# Save: slots only (F5 owns writing the quicksave) and only in-game (menu mode has no player to capture).
-	_add_rail_cell(row, PlayerText.SAVE_LOAD_SAVE, _on_save_pressed.bind(slot), _in_game and slot != QUICKSAVE_SLOT)
+	var save_btn := _add_rail_cell(row, PlayerText.SAVE_LOAD_SAVE, _on_save_pressed.bind(slot), _in_game and slot != QUICKSAVE_SLOT)
+	# Sound, per ROW STATE — the one place the two Save outcomes are still distinguishable. An EMPTY slot's Save
+	# writes straight through to _do_save, which owns the commit cue, so mute its generic click (a good write
+	# would otherwise be click+commit). An OCCUPIED slot's Save only ARMS the confirm and never writes, so it
+	# keeps the plain click. The predicate is has_slot, NOT `exists` — that is exactly what _on_save_pressed
+	# branches on at press time (an unreadable file paints Empty but still arms the confirm). Safe to decide at
+	# paint time because rows repaint from live disk state (_rebuild) after every write, and nothing else writes
+	# a slot while this screen is up (F5 owns only the quicksave row, which carries no Save button).
+	if save_btn != null and not GameState.has_slot(slot):
+		MenuStyle.set_button_sound(save_btn, &"")
 	# Load: any EXISTING file, in both modes (has_quicksave/has_slot gate = the file's presence on disk).
-	_add_rail_cell(row, PlayerText.SAVE_LOAD_LOAD, _on_load_pressed.bind(slot), exists)
+	var load_btn := _add_rail_cell(row, PlayerText.SAVE_LOAD_LOAD, _on_load_pressed.bind(slot), exists)
+	# A load can fail (the file vanished since this paint), so its commit cue is gated on success inside
+	# _on_load_pressed — mute the click here, and a refused load stays silent (there is no "denied" cue).
+	if load_btn != null:
+		MenuStyle.set_button_sound(load_btn, &"")
 	_list.add_child(row)
 
 ## One fixed-width cell of a row's button rail: a Button when the affordance applies, else an equal-width
 ## spacer so the columns hold. Bound-method Callables, never capturing lambdas (project rule: a freed-capture
 ## lambda errors before any guard — these rows are freed on every repaint).
-func _add_rail_cell(row: HBoxContainer, caption: String, cb: Callable, present: bool) -> void:
+## Returns the Button it built (null for a spacer) so the caller can re-point or MUTE its sound — the row's
+## sound depends on the row's disk state, which only _add_row knows.
+func _add_rail_cell(row: HBoxContainer, caption: String, cb: Callable, present: bool) -> Button:
 	var w := float(MenuStyle.skin.dialog_button_min_width)
-	if present:
-		var b := Button.new()
-		b.text = caption
-		b.custom_minimum_size.x = w
-		MenuStyle.cap_button(b)  # EXACT width, not a floor — a re-worded caption must clip, not shift the rail
-		b.pressed.connect(cb)
-		row.add_child(b)
-		if _focus_target == null:
-			_focus_target = b   # first button of this paint = the pad/keyboard landing spot
-	else:
+	if not present:
 		var spacer := Control.new()
 		spacer.custom_minimum_size.x = w
 		row.add_child(spacer)
+		return null
+	var b := Button.new()
+	b.text = caption
+	b.custom_minimum_size.x = w
+	MenuStyle.cap_button(b)  # EXACT width, not a floor — a re-worded caption must clip, not shift the rail
+	b.pressed.connect(cb)
+	row.add_child(b)
+	if _focus_target == null:
+		_focus_target = b   # first button of this paint = the pad/keyboard landing spot
+	return b
 
 # ---------------------------------------------------------------------------------------------------
 # Save / Load actions
@@ -280,11 +309,15 @@ func _do_save(slot: int) -> void:
 		_status.text = PlayerText.SAVE_LOAD_SAVE_FAILED
 		return
 	_status.text = ""
+	# A written save is a HEAVY commit. THE one hook for both entry paths (an empty slot's Save and the
+	# overwrite confirm), and it sits past the failure return so a refused write stays silent — both of those
+	# buttons are muted (see _add_row / _bind_ui), so this is the only cue either press produces.
+	MenuStyle.play_commit()
 	_rebuild()
 
 ## Load clicked. In-game the GameState reload path is the whole story: it closes every modal (including this
-## screen) and reloads the scene, so success needs nothing from us — only a failure (file vanished/unreadable
-## since the paint) stays here to report + repaint. Menu mode loads the profile into memory and hands off to
+## screen) and reloads the scene, so success needs nothing from us but the commit cue — only a failure (file
+## vanished/unreadable since the paint) stays here to report + repaint. Menu mode loads the profile and hands off to
 ## the boot Callable (the Continue path: loaded = true, GameRoot consumes the parsed [world_snapshot] on boot).
 func _on_load_pressed(slot: int) -> void:
 	if _in_game:
@@ -292,15 +325,29 @@ func _on_load_pressed(slot: int) -> void:
 		if not ok:
 			_status.text = PlayerText.SAVE_LOAD_LOAD_FAILED
 			_rebuild()
+			return
+		# Restoring a run is the save's commit twin. No quiet_next_back needed on THIS branch: the reload path
+		# already closed us inside close_all_modals, which holds MenuStyle's quiet latch (and drops it before
+		# returning here) — so our own back cue was eaten and this fires clean. The scene reload is deferred and
+		# MenuStyle's players are autoload-owned, so the cue survives it.
+		MenuStyle.play_commit()
 		return
 	var path := String(GameState.QUICKSAVE_PATH) if slot == QUICKSAVE_SLOT else GameState.slot_path(slot)
 	if not GameState.load_from_disk(path):
 		_status.text = PlayerText.SAVE_LOAD_LOAD_FAILED
 		_rebuild()
 		return
+	# Nothing swept us here: close() below is OUR call, so eat the one back cue it would fire — the commit is
+	# the beat that belongs to this press, and the back would land on top of it a frame later.
+	MenuStyle.quiet_next_back()
 	# Close FIRST (restores the menu's mouse mode + lets StartMenu re-show its buttons via `closed`), THEN boot
 	# — _start_game immediately re-hides those buttons behind the black boot cover, same as Continue.
 	var boot := _boot
 	close()
 	if boot.is_valid():
 		boot.call()
+	# ⭐The commit fires AFTER the boot, never before — the boot Callable is StartMenu._start_game, whose first
+	# act is AudioManager.stop_sfx(), and that walks the tree stopping every PLAYING "sfx"-bus voice, MenuStyle's
+	# pool included. Cued ahead of the call, loading from the main menu was silent while Continue rang out for
+	# the same act. MenuStyle is an autoload, so the voice survives the scene swap.
+	MenuStyle.play_commit()

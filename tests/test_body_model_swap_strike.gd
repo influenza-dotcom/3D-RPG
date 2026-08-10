@@ -75,6 +75,29 @@ func test_the_shipped_punch_curve_has_a_real_wind_up_and_returns_home() -> void:
 		"the punch must end exactly at rest, or the hands drift a little further out on every swing")
 	c = null
 
+func test_the_shipped_punch_curve_throws_forward_far_further_than_it_pulls_back() -> void:
+	# The trap this pins (shipped 2026-08-08, "the fists vibrate when punching"): the authored curve had
+	# drifted NET-NEGATIVE — it peaked at +0.064 and dipped to -0.22 twice, so the "punch" was a
+	# back-forward-back wobble that spent most of its 0.32 s pulling the fists AWAY from the lens. The
+	# knobs it scales (fp_arm_punch_thrust / _pitch) then get cranked to make that 6% peak visible, which
+	# multiplies the much larger NEGATIVE lobes too: at the shipped thrust the lead fist swept 1.42 m and
+	# left the frame entirely, twice per punch.
+	#
+	# So a wind-up alone is not the contract — the throw has to DOMINATE it. Sampled on ELAPSED fraction,
+	# which is how BodyModelSwap reads the curve.
+	var c := load("res://resources/tuning/punch_strike_curve.tres") as Curve
+	var peak := -INF
+	var dip := INF
+	for i in 101:
+		var amp: float = c.sample_baked(float(i) / 100.0)
+		peak = maxf(peak, amp)
+		dip = minf(dip, amp)
+	assert_gt(peak, 0.8,
+		"the punch must actually THROW — the curve has to reach ~1, or the thrust/pitch knobs get scaled up to compensate")
+	assert_lt(absf(dip), peak * 0.5,
+		"the anticipation pull-back must stay well under the throw — a curve that pulls back further than it punches reads as a vibration, not a swing")
+	c = null
+
 # --- Alternation ------------------------------------------------------------------------------------
 
 func test_alternation_is_opt_in_and_actually_alternates() -> void:

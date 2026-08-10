@@ -73,7 +73,6 @@ alignment = 1
 [node name="RailButton" type="Button" parent="Root/Center/Panel/Card"]
 unique_name_in_owner = true
 layout_mode = 2
-focus_mode = 0
 clip_text = true
 
 [node name="Buttons" type="HBoxContainer" parent="Root/Center/Panel/Card"]
@@ -84,19 +83,16 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-focus_mode = 0
 clip_text = true
 
 [node name="WithdrawButton" type="Button" parent="Root/Center/Panel/Card/Buttons"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-focus_mode = 0
 clip_text = true
 
 [node name="CloseButton" type="Button" parent="Root/Center/Panel/Card/Buttons"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-focus_mode = 0
 clip_text = true

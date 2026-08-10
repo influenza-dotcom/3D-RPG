@@ -5,25 +5,17 @@
 
 [node name="Light" type="Node3D" unique_id=169281621]
 script = ExtResource("1_q86n3")
-_range = 0.0
 
 [node name="LightSource" type="OmniLight3D" parent="." unique_id=419907136]
-light_color = Color(0, 0, 0, 1)
-light_energy = 0.0
 distance_fade_enabled = true
-omni_range = 0.0
 
 [node name="LightBuzz" type="AudioStreamPlayer3D" parent="LightSource" unique_id=592430907]
 stream = ExtResource("2_taqwo")
 unit_size = 4.05
-autoplay = true
 volume_db = -6.02
 bus = &"ambient"
 
 [node name="Spotlight" type="SpotLight3D" parent="." unique_id=1136883410]
 transform = Transform3D(1, 0, 0, 0, -4.371139e-08, 1, 0, -1, -4.371139e-08, 0, 0, 0)
-light_color = Color(0, 0, 0, 1)
-light_energy = 0.0
 distance_fade_enabled = true
-spot_range = 0.0
 spot_angle = 21.893

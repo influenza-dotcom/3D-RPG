@@ -178,6 +178,9 @@ func _bind_ui() -> void:
 	var back: Button = %BackButton
 	back.text = PlayerText.BACK
 	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
+	# _on_back cues the back sound ITSELF, because Escape reaches it too (see _input) and a keyboard back must
+	# sound like a mouse one. So the button's generic click is muted here or the press would speak twice.
+	MenuStyle.set_button_sound(back, &"")
 	back.pressed.connect(_on_back)
 	# The stat build is always legal (the net can never exceed 0 — the + steppers gate on spare points, an all-zero
 	# neutral character included), so the ONLY thing Begin waits on is a NAME: it's gated OFF until the name field is
@@ -185,6 +188,10 @@ func _bind_ui() -> void:
 	_begin_btn = %BeginButton
 	_begin_btn.text = PlayerText.BEGIN
 	_begin_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
+	# Stamping a new run is the heaviest commit in the menus, but _on_begin can still REFUSE (the blank-name
+	# backstop), so the cue lives in its success branch and the button's own click is muted — a refused Begin
+	# stays silent (there is no denial clip, and the back cue would read as "you left the screen").
+	MenuStyle.set_button_sound(_begin_btn, &"")
 	_begin_btn.pressed.connect(_on_begin)
 
 ## The "Stats" tab: the spare-points banner + the one-line rule, then the zero-sum stat grid in an authored
@@ -258,6 +265,9 @@ func _make_cycler(title: String, handler: Callable) -> HBoxContainer:
 	var prev := Button.new()
 	prev.text = MenuStyle.skin.cycler_prev_glyph  # the ONE glyph home (MenuSkin) — shared with the Options cyclers
 	prev.focus_mode = Control.FOCUS_NONE
+	# The handler owns the sound: it plays the DIRECTIONAL step cue, and only when the pick actually moved
+	# (a one-entry catalog wraps onto itself). Mute the generic click on both arrows or every cycle doubles.
+	MenuStyle.set_button_sound(prev, &"")
 	prev.pressed.connect(handler.bind(-1))
 	row.add_child(prev)
 	var value_l := Label.new()
@@ -272,6 +282,7 @@ func _make_cycler(title: String, handler: Callable) -> HBoxContainer:
 	var next := Button.new()
 	next.text = MenuStyle.skin.cycler_next_glyph
 	next.focus_mode = Control.FOCUS_NONE
+	MenuStyle.set_button_sound(next, &"")
 	next.pressed.connect(handler.bind(1))
 	row.add_child(next)
 	row.set_meta("value_label", value_l)
@@ -319,16 +330,25 @@ func _on_swatch(key: String, color: Color) -> void:
 func _step_head(dir: int) -> void:
 	if _valid_heads.is_empty() or _current_body_whole():
 		return
+	var before := _head_idx
 	_head_idx = wrapi(_head_idx + dir, 0, _valid_heads.size())
 	_appearance["head"] = String(_valid_heads[_head_idx].id)
+	# Cue only a step that MOVED: a single-entry catalog wraps straight back onto the same index, and a tick
+	# with nothing changing on screen reads as a broken control. (The arrows are disabled in that case, so
+	# this only bites the direct-call paths — tests, and any future keyboard cycle.)
+	if _head_idx != before:
+		MenuStyle.play_step(dir)
 	_refresh_look()
 
 ## Step the BODY selection by `dir` (wrapping). Writes the new id, then refreshes (which re-gates the head cycler).
 func _step_body(dir: int) -> void:
 	if _valid_bodies.is_empty():
 		return
+	var before := _body_idx
 	_body_idx = wrapi(_body_idx + dir, 0, _valid_bodies.size())
 	_appearance["body"] = String(_valid_bodies[_body_idx].id)
+	if _body_idx != before:  # same one-entry wrap guard as _step_head — no tick for a pick that didn't move
+		MenuStyle.play_step(dir)
 	_refresh_look()
 
 ## True when the selected body is a whole-character model (its own head/arms/legs) — the head picker is then moot.
@@ -498,6 +518,9 @@ func _bind_shirt_tab() -> void:
 	_shirt_custom_sb.set_border_width_all(0)
 	for state in ["normal", "hover", "pressed", "disabled"]:
 		_shirt_custom_btn.add_theme_stylebox_override(state, _shirt_custom_sb)
+	# This swatch TOGGLES the wheel, so one button carries two meanings — _on_shirt_custom_open picks the cue
+	# (select on the way up, back on a dismissing second click); mute the generic click so it can't stack.
+	MenuStyle.set_button_sound(_shirt_custom_btn, &"")
 	_shirt_custom_btn.pressed.connect(_on_shirt_custom_open)
 	custom_row.add_child(_shirt_custom_btn)
 
@@ -524,13 +547,16 @@ func _on_shirt_swatch(color: Color) -> void:
 ## where the player left off. Toggles closed if it's already open (a second click of the swatch).
 func _on_shirt_custom_open() -> void:
 	if _shirt_picker_layer != null and _shirt_picker_layer.visible:
-		_shirt_picker_layer.visible = false
+		_on_shirt_picker_close()  # a second click of the swatch DISMISSES the wheel — and cues the back sound there
 		return
 	if _shirt_picker_layer == null:
 		_build_shirt_picker()
 	if _shirt_picker != null and _shirt_canvas != null:
 		_shirt_picker.color = _shirt_canvas.paint_color
 	_shirt_picker_layer.visible = true
+	# SELECT, not the open sting: this is a small tool overlay raised inside an already-open screen, and the
+	# 1.7s cold-entrance sting would still be ringing while the player drags the wheel.
+	MenuStyle.play_select()
 
 ## Build the centered wheel overlay once: a full-rect dim that closes the picker when clicked OFF the panel, and a
 ## panelled trimmed HSV wheel (presets/sampler/mode/sliders/hex hidden — the compact wheel the spray can uses). A
@@ -568,6 +594,10 @@ func _build_shirt_picker() -> void:
 	var done := Button.new()
 	done.text = PlayerText.CHARACTER_CREATE_SHIRT_PICK_DONE
 	done.focus_mode = Control.FOCUS_NONE
+	# The overlay lives under this menu root (CanvasLayer child of `self`), so MenuStyle's node_added hook
+	# already click-wired this button. _on_shirt_picker_close owns the dismiss cue for ALL its callers (Done,
+	# a click on the dim, Escape, the toggling swatch), so mute the click here rather than doubling on Done.
+	MenuStyle.set_button_sound(done, &"")
 	done.pressed.connect(_on_shirt_picker_close)
 	col.add_child(done)
 
@@ -579,9 +609,15 @@ func _on_shirt_custom_color(color: Color) -> void:
 	_sync_shirt_tool_buttons()
 	_mark_selected_shirt_swatch()
 
+## The ONE dismiss seam for the wheel (Done, a click on the dim, Escape, a second click of the Custom swatch),
+## so the back cue fires exactly once however it was closed. The already-hidden early-out keeps a stray call
+## silent — and the tab-switch / suspend() paths deliberately hide the layer DIRECTLY, without a cue: those
+## are bookkeeping (the tab cue / the implant step's own entrance already speak for them).
 func _on_shirt_picker_close() -> void:
-	if _shirt_picker_layer != null:
-		_shirt_picker_layer.visible = false
+	if _shirt_picker_layer == null or not _shirt_picker_layer.visible:
+		return
+	MenuStyle.play_back()
+	_shirt_picker_layer.visible = false
 
 ## Close the wheel when the dim behind it is clicked (a click off the panel). The panel eats its own clicks.
 func _on_shirt_picker_dim_input(event: InputEvent) -> void:
@@ -699,6 +735,12 @@ func _mark_selected_shirt_swatch() -> void:
 # --- Tab preview activation (only the visible tab's SubViewport renders) ---------------------------------------
 
 func _on_tab_changed(_tab: int) -> void:
+	# A TabContainer's strip is an internal TabBar, NOT a BaseButton — MenuStyle's auto-wiring skips it, so the
+	# sideways cue has to be explicit (and there is no generic click here to double against). No _tab_cue_muted
+	# latch like options_menu's: nothing in this screen or its scene ever WRITES current_tab, the three pages are
+	# authored (never freed and re-added), and this signal is connected only after they're populated — so
+	# tab_changed can only ever mean the player moved sideways.
+	MenuStyle.play_tab()
 	_sync_previews()
 	# Leaving the Shirt tab must not strand its colour-wheel overlay on top of Stats/Look.
 	if _shirt_picker_layer != null and _tabs != null:
@@ -730,6 +772,9 @@ func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 	var minus := Button.new()
 	minus.text = PlayerText.CHARACTER_CREATE_STAT_MINUS
 	minus.focus_mode = Control.FOCUS_NONE  # mouse-driven; don't steal focus from the name field
+	# Both steppers are muted because their handlers cue the DIRECTIONAL step, and only on a move the
+	# zero-sum allocator actually accepted (see _on_minus/_on_plus) — a refused allocation stays silent.
+	MenuStyle.set_button_sound(minus, &"")
 	minus.pressed.connect(_on_minus.bind(stat))
 	_minus_buttons[stat] = minus
 	grid.add_child(minus)
@@ -743,6 +788,7 @@ func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 	var plus := Button.new()
 	plus.text = PlayerText.CHARACTER_CREATE_STAT_PLUS
 	plus.focus_mode = Control.FOCUS_NONE
+	MenuStyle.set_button_sound(plus, &"")
 	plus.pressed.connect(_on_plus.bind(stat))
 	_plus_buttons[stat] = plus
 	grid.add_child(plus)
@@ -759,12 +805,14 @@ func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 ## Lower a stat by 1 — frees a point to spend elsewhere (StatBudget clamps at STAT_MIN). A minus is a real penalty.
 func _on_minus(stat: StringName) -> void:
 	if _budget.try_lower(stat):
+		MenuStyle.play_step(-1)  # gated on the ACCEPTED move: a stat already at STAT_MIN makes no sound
 		_refresh()
 
 ## Raise a stat by 1 — StatBudget only allows it with a spare point (net stays <= 0) AND below STAT_MAX; otherwise
 ## a no-op (free a point by lowering another stat first — "subtract from 0 to add elsewhere").
 func _on_plus(stat: StringName) -> void:
 	if _budget.try_raise(stat):
+		MenuStyle.play_step(1)  # no spare point (or already at STAT_MAX) = a refused raise = silence
 		_refresh()
 
 ## Re-stamp every value/effect label + the spare-points banner, and gate the steppers off the SAME StatBudget the
@@ -796,7 +844,7 @@ func _input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed(&"ui_cancel"):
 		if _shirt_picker_layer != null and _shirt_picker_layer.visible:
-			_shirt_picker_layer.visible = false
+			_on_shirt_picker_close()  # through the shared seam so an Escape-dismiss sounds like a Done/dim one
 		else:
 			_on_back()
 		get_viewport().set_input_as_handled()
@@ -822,7 +870,10 @@ func resume() -> void:
 	_sync_previews()
 
 ## Back: discard this build and return to the menu (StartMenu frees us + reshows its buttons). No profile change.
+## The cue lives HERE, not on the Back button (which is muted), because Escape routes through the same
+## function — one back sound whichever way the player leaves.
 func _on_back() -> void:
+	MenuStyle.play_back()
 	cancelled.emit()
 
 ## The name changed: re-gate Begin and toggle the "name required" hint. LineEdit.text_changed fires on every
@@ -858,4 +909,8 @@ func _on_begin() -> void:
 		appearance["shirt"] = _shirt_canvas.png_bytes()
 	else:
 		appearance.erase("shirt")
+	# NO cue here. Begin looks like a commit but stamps nothing — StartMenu._on_character_confirmed only
+	# stashes _pending_creation and raises the implant step (the profile is stamped on the IMPLANT confirm).
+	# It is a page turn, so that seam plays the sideways cue and owns the step's single voice; the Begin
+	# button itself is muted for the same reason.
 	confirmed.emit(character_name, _budget.to_dict(), appearance)

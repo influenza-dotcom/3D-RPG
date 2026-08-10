@@ -44,7 +44,12 @@ func test_xc1_editor_guard_hoisted_and_pure_delegates_inherit() -> void:
 	# Source-scanned because the guard is edit-time behaviour a unit test can't exercise (we never run _ready here).
 	var base := _read_source("res://scripts/components/look_at_interactable.gd")
 	assert_true(base.contains("func _ready"), "base still defines _ready")
-	var base_ready := base.substr(base.find("func _ready"))
+	# GUARD THE SLICE. find() answers -1 for a needle that has been renamed away, substr() over a bad offset yields
+	# "", and every contains() check against "" reads as "absent" — which quietly turns an assert_false into a pass
+	# and retires the pin instead of failing it. Assert the offset first so a rename fails HERE, loudly.
+	var ready_at := base.find("func _ready")
+	assert_gt(ready_at, -1, "func _ready no longer present in look_at_interactable.gd — the pin is stale")
+	var base_ready := base.substr(ready_at)
 	assert_true(base_ready.contains("Engine.is_editor_hint()"), "the @tool editor early-out is hoisted into the base _ready (XC1)")
 	# The pure delegates no longer define _ready — they inherit the base guard.
 	for path in ["res://scripts/components/switch_lever.gd", "res://scripts/components/readable.gd"]:

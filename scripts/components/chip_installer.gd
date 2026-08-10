@@ -78,6 +78,8 @@ func _ready() -> void:
 	_build_outline()  # look-at outline over the host's meshes (LookAtInteractable helper)
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
+	if standalone:
+		StationSpeaker.ensure(self)  # a self-serve install booth answers with the shared panel chirp; a data-only installer rides a talking NPC, and people don't beep
 
 ## Seed `into` from the authored chip stock. Non-weapon items (chips are MISC) stack by shared template, so a
 ## line stocks `count` of the shared Item — matching Merchant's non-weapon branch. Split out for tests.
@@ -200,14 +202,21 @@ func buy_and_install(item: Item, player_node: Node) -> bool:
 	_grant(item, player)
 	return true
 
-## Shared install tail: grant the mechanic, persist the run (an unlock is a milestone, like UpgradePickup), and
-## toast. Assumes the charge + chip-consume already happened — both transaction paths gate that charge on
-## player.can_grant_mechanic() first, so _grant is only ever reached for an ability that actually resolves.
+## Shared install tail: grant the mechanic, persist the run (an unlock is a milestone, like UpgradePickup),
+## toast, and sound the commit cue. Assumes the charge + chip-consume already happened — both transaction paths
+## gate that charge on player.can_grant_mechanic() first, so _grant is only ever reached for an ability that
+## actually resolves.
 func _grant(item: Item, player: Player) -> void:
 	player.unlock_mechanic(item.installs_ability)
 	GameState.autosave(player)
 	if player.has_method(&"notify_toast"):
 		player.notify_toast(PlayerText.installed(item.label()), Color(0.5, 0.85, 1.0))
+	# The UI commit cue belongs on this SHARED tail, not on the two ChipInstallScreen row handlers: it is the one
+	# point BOTH install paths reach, and it is reached only AFTER the charge cleared — so every refusal (broke,
+	# not held, out of stock, unresolvable ability) stays silent with no second gate to keep in sync. The only
+	# way in is a ChipInstallScreen row press, whose auto-wired generic click is muted there (set_button_sound
+	# &"") so one install sounds exactly once.
+	MenuStyle.play_commit()
 
 # ---------------------------------------------------------------------------
 # Behaviour (talk-handler surface — used only when standalone, a direct-interact mechanic)

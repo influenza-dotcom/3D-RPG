@@ -13,7 +13,7 @@ func test_quest_reward_reputation_grants_standing() -> void:
 	Reputation.reset()  # start from a known zero (independent of test ordering)
 	var q := Quest.new()
 	q.reward_reputation = {"raiders": 5.0}
-	GameState._grant_quest_rewards(q)
+	QuestTracker._grant_quest_rewards(q)
 	assert_gt(Reputation.get_reputation(fac), 0.0, "completing the quest raised raiders standing")
 	Reputation.restore(snapshot)
 	q = null
@@ -22,7 +22,7 @@ func test_quest_reward_reputation_ignores_unknown_faction() -> void:
 	var snapshot := Reputation.all_standings()
 	var q := Quest.new()
 	q.reward_reputation = {"no_such_faction": 5.0}
-	GameState._grant_quest_rewards(q)  # must not crash on an unresolvable faction id
+	QuestTracker._grant_quest_rewards(q)  # must not crash on an unresolvable faction id
 	assert_true(true, "an unknown faction id is skipped, not fatal")
 	Reputation.restore(snapshot)
 	q = null

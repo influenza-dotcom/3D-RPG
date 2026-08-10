@@ -45,6 +45,30 @@ discovered `Corpse` markers, and the set of **learned NPC names**
 (`GameState.known_names`, in `[world].known_names`) that drives the
 "Stranger until introduced" masking.
 
+**Quests live on the `QuestTracker` autoload, but persist through `GameState` (M1).**
+The tracker dicts (active / completed / failed + objective progress), the four quest
+signals, reward granting, and the `[quests_active]` / `[quests_completed]` /
+`[quests_failed]` cfg round-trip all belong to `managers/QuestTracker.gd`;
+`GameState._save_perks_and_quests` / `_load_perks_and_quests` delegate their quest
+halves to `save_into` / `load_from`, so quest progress is still part of the one
+profile save. `GameState` keeps **one-line forwarders** for the quest *function* API
+(`start_quest`, `advance_objective`, `complete_quest`, `fail_quest`, the `is_*`
+queries, and the `notify_*` world hooks) because ~70 authored call sites — dialogue
+choices, `TriggerVolume`s, `QuestStarter`s, `Readable`s — reach for them; new code
+should call `QuestTracker` directly. **The four SIGNALS did not stay behind**: connect
+to `QuestTracker.quest_started` / `objective_advanced` / `quest_completed` /
+`quest_failed`. The single inbound edge is `GameState.set_flag`, which calls
+`QuestTracker.notify_flag_set` — that one call both advances matching FLAG objectives
+and expires (auto-fails) any quest whose `expire_on_flag` matches.
+
+> ⭐ **Pairing is decided by identity, not by a default.** `GameState._qt()` returns the
+> `QuestTracker` autoload only when `self == GameState`; **any other** GameState instance
+> builds its OWN private tracker as a child (freed with it). That is what preserves unit-test
+> isolation — quest state used to live on `GameState`, so a bare `GameState.new()` gave each
+> test a private journal, and pointing every instance at the singleton leaked quest state
+> between tests. `QuestTracker.game_state` is the mirror seam. `tests/test_quest_tracker.gd`
+> pins both directions.
+
 **Stranger-until-introduced naming.** Every NPC's `display_name` is shown to the
 player as `PlayerText.STRANGER` until a `DialogueLine` with `reveals_name = true`
 plays and calls `GameState.reveal_name`, after which `known_names` carries the
@@ -213,8 +237,20 @@ The autosave is written **atomically**: `save_to_disk` writes a sibling `.tmp`,
 rotates the previous good file to `.bak`, then renames the temp over the target,
 so a crash mid-write can no longer corrupt the one-slot save. `load_from_disk`
 falls back to `.tmp` (the interrupted newest write) then `.bak` when the primary
-is unreadable. Every save stamps `[meta].version` (`SAVE_VERSION`, now **4**) —
-read into `save_version`. Three schema migrations exist. **v2** (2026-07-09)
+is unreadable — where **unreadable** means three things, because a broken file
+does not reliably fail to parse: it did not load, or it parsed but shows none of
+the recognised profile sections (a 0-byte or shredded file parses `OK` with no
+sections at all), or it parsed as one of ours but lacks the terminal `[eof]`
+marker that `save_to_disk` stamps as its **last** section — i.e. a tail-truncated
+write, which keeps `[meta]`/`[player]` and silently loses `[perks]`/`[quests]`.
+Each rung gets its own `ConfigFile`, so a rejected rung can never blend its
+residue into the one that succeeds. A save written before the marker existed
+carries none, so a marker-less primary is still kept whenever no sibling
+verifiably has one. The first write after a fallback-recovered load does **not**
+rotate that path's primary onto `.bak` (it is the file the ladder just refused);
+the exception is tracked per save path, since quicksave and the named slots write
+through the same routine. Every save stamps `[meta].version` (`SAVE_VERSION`, now
+**5**) — read into `save_version`. Four schema migrations exist. **v2** (2026-07-09)
 renamed the `persuasion` stat to `streetwise`, folding a pre-v2 save's
 `persuasion` points into `streetwise`. **v3** (2026-07-16) consolidated the
 `stealth` and `pickpocket` stats into one `larceny` stat, folding a pre-v3 save's
@@ -226,7 +262,16 @@ runs both in one load; re-saving stamps the current version and neither re-runs.
 stable identity keys and is deliberately **lazy** — no load-time fold at all
 (legacy entries stay readable via accept-either matching; see *Stable NPC
 identity* above, and the load-site comment in `GameState.gd` for why an eager
-rewrite is impossible).
+rewrite is impossible). **v5** (2026-08-09) versioned the pre-ATM negative-wallet
+fold. Saves written before the ledger carried the implant debt as a **negative
+wallet**; the wallet is cash-only now, so a negative one can only be that legacy
+debt and it moves onto `account`, where the ATM can actually repay it. The fold
+shipped unversioned on the argument that it was idempotent by construction (after
+one save `money >= 0`, so it could never fire twice) — but that rests on the
+cash-only invariant, and `DialogueChoice.give_money` is documented as accepting a
+**negative** amount and applies it unclamped. A designer authoring one fee would
+have turned a live wallet into interest-bearing bank debt on the next load, so the
+fold is now gated on `save_version < 5` instead of on the data.
 
 Level-identity restore is guarded (`respawn_level_matches`): on boot, if a loaded
 game's saved `current_level_path` can't be resolved to a scene-bearing `LevelData`
@@ -263,8 +308,9 @@ quickload `GameRoot.load_level` applies it via
 reload never re-applies it).
 
 The player-facing face of this manual tier is the **`SaveLoadScreen`** autoload
-(`scripts/ui/save_load_screen.gd`), a non-pausing slot menu registered in the
-`InputManager` modal registry: a load-only quicksave row (F5 owns writing it)
+(`scripts/ui/save_load_screen.gd`), a slot menu registered in the
+`InputManager` modal registry (like every screen it does not pause the tree —
+only `DialogueManager` still does): a load-only quicksave row (F5 owns writing it)
 plus slots 1..`SLOT_COUNT`, each showing the saved level's authored
 `LevelData.display_name` and the file's modified time. In-game it opens from the
 Options menu's *Save / Load* button (Options closes first — modals never stack)
@@ -421,12 +467,12 @@ DISTINCT from `gameplay_suppressed()`, which also counts the real-time Pip-Boy/l
 overlays that keep the player at risk and must NOT grant immunity. A cutscene that wants
 to script player damage must use a dedicated kill path, not incidental `take_damage`.
 
-**Dialogue-suspend contract.** A dialogue option that opens a sub-menu (Trade/Install/Chess)
+**Dialogue-suspend contract.** A dialogue option that opens a sub-menu (Trade/Install/Chess/Bank)
 routes through `DialogueManager._suspend_for_menu`, which hides the box and connects the
 sub-menu's `closed` as a `CONNECT_ONE_SHOT` resume BEFORE calling the open. So every one of
-those screens (`ShopScreen`/`ChipInstallScreen`/`ChessScreen`) MUST emit `closed` on EVERY
-refuse path — each funnels its guard early-returns through a private `_refuse_open()` that just
-`closed.emit()`s. A refuse that returns silently would strand the conversation `_suspended`
+those screens (`ShopScreen`/`ChipInstallScreen`/`ChessScreen`/`AtmScreen`) MUST emit `closed` on
+EVERY refuse path — each funnels its guard early-returns through a private `_refuse_open()` that just
+`closed.emit()`s (`AtmScreen` emits inline at each guard, same contract). A refuse that returns silently would strand the conversation `_suspended`
 forever (box hidden, tree paused, no way to advance). On the standalone open path nothing
 listens to `closed`, so the emit is a harmless no-op there.
 
@@ -456,6 +502,32 @@ quieter" bug inexpressible. **Consequence for authoring: an `AudioStreamPlayer` 
 `bus` set lands on Master, which is no longer ducked — it plays at full volume under the
 death card.** `tests/test_audio_bus_hygiene.gd` guards the scene side; every `.new()` site
 already assigns a bus.
+
+**Menu audio is a SEPARATE seam from `AudioManager`, and deliberately so.** Every menu cue plays on
+`MenuStyle`'s OWN pool of `AudioStreamPlayer`s, not through `AudioManager.play_2d_sfx` — because
+`AudioManager` parents its one-shots to the root at the default process mode, and seven screens
+(shop / heal / atm / respec / level-up / chip-install / chess) pause the tree, where an inherit-mode
+player's `play()` is **silently dropped**. `MenuStyle` therefore owns `_hover_player`, `_click_player`
+and a **four-voice semantic pool**, all `PROCESS_MODE_ALWAYS` and all on the `sfx` bus (so the SFX
+slider applies, and so the death cinematic's world duck covers them). Four voices because the 1.7 s open
+sting can still be ringing while the player tabs and then commits — one spare keeps the long cue from
+being stolen mid-ring; hover and click keep single self-cutting voices on purpose, which is the desired
+behaviour for a repeated blip.
+
+The vocabulary lives on `MenuSkin` (one `AudioStream` slot per semantic event, all optional), and screens
+call `MenuStyle.play_open/back/tab/select/commit/step/slider_step` — never a preload. Three invariants:
+(1) **no cue may be reachable from a `_ready()`** — every screen autoload builds at boot, and the
+structural backstop is that every `play_*` early-outs while the pool is empty, so anything firing before
+`_build_sound()` is silent by construction (which is also why audio construction must stay OUT of
+`rebuild()`, whose bare-`.new()` test path never calls `_ready`); (2) **no double-sounding** — every
+`BaseButton` under a menu root is auto-click-wired by the `node_added` hook, so a button with a more
+specific meaning must be re-pointed or muted through `MenuStyle.set_button_sound`, the one sanctioned
+way; (3) **throttles use `Time.get_ticks_msec()`, never a delta**, since a paused tree freezes delta.
+Three seams carry the whole system: `ModalMenu.grab_mouse/restore_mouse` cue open/close for all eight
+standalone modals (they sit *past* every refusal guard, unlike the `closed` signal, which fires even for
+a screen that never appeared), `PlayerMenus.enter/leave` distinguish a cold group open from a sibling tab
+swap, and `InputManager.close_all_modals` holds `MenuStyle.set_quiet` so the death/quickload sweep does
+not fire a wall of close cues at once.
 
 `EffectFactory` (autoload) is **not** a VFX registry — it is only the blood-particle
 gameplay seam (`spawn_blood_particle`) plus a generic `spawn_at(scene, pos)` helper.

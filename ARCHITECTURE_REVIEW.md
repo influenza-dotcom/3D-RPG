@@ -48,18 +48,67 @@ level; its wiring contract is pinned by `tests/test_level_door_prefab.gd`.) That
 is normal for Godot, but any cheap in-tree harness that locks a contract down
 should replace "playtested" over time.
 
-### Parked Extractions
+### Completed Extractions
 
-- **QuestTracker autoload split (M1).** Quest state still lives on `GameState`
-  (the B-F40 `_load_warnings` note in `managers/GameState.gd` even anchors it:
-  "this field would move with the tracker"). Parked because `GameState.gd` is
-  frequently user-dirty — do it in a quiet window.
-- **`Landing` component (M13 residual).** The `GroundMovement` statics half
-  shipped (`scripts/player/ground_movement.gd` + `tests/test_ground_movement.gd`);
-  the `Landing` drop-in (`scripts/player/landing.gd` — on_land / footstep
-  ticking, typed `host: Player`, null-guarded) was never created. The
-  jump/bhop/blast/slide-jump/edge-friction interleave stays on the Player root
-  in order — it is byte-order-critical.
+Both of the extractions this file used to park are done. Kept as a short record
+because each one established an idiom the next extraction should copy.
+
+- **QuestTracker autoload split (M1).** DONE. The tracker dicts, the four quest
+  signals, reward granting and the cfg round-trip live on `managers/QuestTracker.gd`;
+  `GameState` keeps one-line FORWARDERS for the function API (~70 authored call
+  sites use them) but the SIGNALS moved — connect to `QuestTracker.quest_started`
+  / `objective_advanced` / `quest_completed` / `quest_failed`.
+  - ⭐ The load-bearing detail is **bidirectional injection**
+    (`GameState.quest_tracker` ↔ `QuestTracker.game_state`). Quest state used to
+    live on `GameState`, so a bare `GameState.new()` gave a unit test a private
+    journal for free. Pointing every GameState at the singleton would have leaked
+    quest state between tests — `test_game_save` proved it within minutes. A bare
+    GameState now builds its OWN tracker as a *child* (freed with it, no orphan);
+    only the autoload pairs with the autoload. `tests/test_quest_tracker.gd` pins
+    all of this; copy the pattern for the next autoload split.
+  - Made public in passing: `GameState.autosave_world_state()` and
+    `GameState.live_player()` (both were already being called cross-file as
+    privates by `ledger_accrual.gd` / `player.gd`).
+- **`Landing` component (M13 residual).** DONE — `scripts/player/landing.gd`,
+  a scene-wired drop-in (`host = NodePath("..")` + the Player's `landing` export)
+  owning the touchdown burst and the footstep cadence. Both beats run AFTER
+  `apply_velocity()` and feed only presentation + fall damage, which is exactly
+  why they were safe to lift. The jump/bhop/blast/slide-jump/edge-friction
+  interleave still stays on the Player root **in order** — it is
+  byte-order-critical and must not follow. The two pure curves (`impact_for` /
+  `interval_for`) are statics so the feel math is testable without a Player, the
+  way `GroundMovement` already is; `tests/test_landing.gd` pins the wiring and
+  the curves.
+
+### Payment Rails
+
+The ledger's point-of-sale surface is closed. `Character.quote()` / `Player.quote()`
+expose the two-part quote (base + service charge) that ShopScreen paints as an
+all-in total; `Merchant.accepts_ledger` gives cash-only vendors a single
+`can_afford` / `take_payment` / `quoted_total` predicate trio the till and the UI
+dim share; the HUD carries an OWED row; `scenes/components/atm.tscn` is the
+drop-in world terminal; and the DEBIT/CREDIT choice is available **at every point
+of sale**, not just at an ATM.
+
+That last piece is `PaymentRailButton` (`scripts/ui/payment_rail_button.gd`) — one
+drop-in authored into all five paid screens (shop, heal, level-up, chip-install,
+respec). It owns the toggle, the caption, and the persist-on-flip; the host screen
+connects `rail_changed` to its own repaint.
+
+> ⭐ **The signal is the contract, not garnish.** The armed rail changes what
+> `Player._split` may draw on, so it changes the affordability dim and the quoted
+> total *on the same card*. A screen that carried the button but ignored
+> `rail_changed` would flip the rail and leave a row greyed out that the till would
+> now serve — exactly the divergence the payment seam exists to prevent.
+> `tests/test_payment_rail_selector.gd` pins the connection in all five screens by
+> source-grep, because it is made at runtime in `_bind_ui`.
+
+One asymmetry left deliberately: only ShopScreen paints the **all-in** total. The
+healer / level-up / chip-installer / respec cards still show the vendor's base
+price, while `charge` adds the account's service charge when the purchase is
+ledger-funded. The gate is honest everywhere (all five read `can_pay`), so nothing
+is refused unexpectedly — but a ledger-funded buy can debit slightly more than the
+card quoted. Closing it means routing four more price labels through `quote()`.
 
 ### Pending One-Time Playtest Sweep (2026-07-11 remediation)
 

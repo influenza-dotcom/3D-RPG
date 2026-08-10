@@ -64,6 +64,8 @@ func _ready() -> void:
 	_build_outline()  # look-at outline over the host's meshes (LookAtInteractable helper)
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
+	if standalone:
+		StationSpeaker.ensure(self)  # a self-serve board answers with the shared panel chirp; a data-only match rides a talking opponent, and people don't beep
 
 # ---------------------------------------------------------------------------------------------------
 # Duck-typed config surface (read by DialogueManager's finder + ChessScreen)

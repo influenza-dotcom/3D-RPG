@@ -16,9 +16,10 @@ extends Node
 ## COMBAT = any NPC in the "npc" group reporting is_in_combat(), polled on an interval, plus a short linger
 ## so music doesn't flap at a fight's ragged edge. DIALOGUE (opt-in via swell_for_dialogue) = DialogueManager.is_active().
 ## The dialogue tree-pause doesn't stall the fade — this node runs PROCESS_MODE_ALWAYS, like the music player itself.
-## That also means fades keep moving while a PAUSING screen (shop / heal / level-up) is open — which is
-## correct: the NPCs' combat state freezes with the pause, so combat music HOLDS through a mid-fight shop
-## visit instead of dropping out, and an already-running fade simply finishes.
+## The station screens (shop / heal / level-up / atm / …) no longer pause at all, so a mid-fight shop visit is
+## just gameplay as far as this node is concerned: NPC combat state keeps updating underneath and the score
+## follows the real fight, instead of holding a frozen snapshot. Only a conversation still freezes the world,
+## and an already-running fade simply finishes through it.
 
 @export var fade_in_time: float = 1.2    ## seconds, silence -> audible (combat hits fast)
 @export var fade_out_time: float = 3.0   ## seconds, audible -> silence (the fight's end breathes out)

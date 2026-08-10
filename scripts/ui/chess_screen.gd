@@ -1,7 +1,10 @@
 extends CanvasLayer
-## ChessScreen — the blindfold-chess PLAY overlay for a ChessMatch opponent. Autoload; PAUSES the world while open
-## (like ShopScreen / ChipInstallScreen — this layer is PROCESS_MODE_ALWAYS so its input + AI timer keep working
-## through the pause). The player types moves (SAN or coordinate) into a LineEdit; the ChessAi replies after a
+## ChessScreen — the blindfold-chess PLAY overlay for a ChessMatch opponent. Autoload; REAL-TIME — it does NOT
+## pause the world (the STATION-SCREEN rule, argued in full in the atm_screen.gd header; this layer is
+## PROCESS_MODE_ALWAYS anyway, so its input + AI timer keep working under a dialogue-hosted open's pause).
+## ⭐THE LONGEST-EXPOSURE SCREEN OF THE SEVEN: a match runs minutes, not one button press, and the world runs the
+## whole time — sit down at a board in a hostile street and you will be shot off it. That is a PLACEMENT rule
+## for whoever authors the table, not a bug to patch here. The player types moves (SAN or coordinate) into a LineEdit; the ChessAi replies after a
 ## beat. By DEFAULT the board is HIDDEN — you play blindfold, tracking the position from the move log alone. The
 ## board renders ONLY when the player has installed the Board Visualizer chip (Player.has_mechanic(&"chess_visualizer")),
 ## which is the whole design hook: the chip is the difference between blindfold and sighted play.
@@ -135,9 +138,11 @@ func open_match(match_node: Node, player: Node) -> void:
 	_board_box.visible = _has_board
 	_blindfold_box.visible = not _has_board
 	_is_open = true
-	_prev_mouse_mode = ModalMenu.grab_mouse()
+	# ONE OPEN CUE, NEVER TWO (the station-screen idiom): a self-serve board answers with its OWN diegetic
+	# StationSpeaker chirp, so the generic UI sting is suppressed exactly when that chirp fires and kept when the
+	# opponent is a person (no speaker). Past every refuse guard, so a table that couldn't open never beeps.
+	_prev_mouse_mode = ModalMenu.grab_mouse(not StationSpeaker.chirp(match_node))
 	_root.visible = true
-	get_tree().paused = true  # freeze the world while playing, like the shop (PROCESS_MODE_ALWAYS keeps input live)
 	_refresh()
 	opened.emit()
 	# If it's not the player's move (the opponent is White and opens), let the AI make the first move.
@@ -175,7 +180,6 @@ func close() -> void:
 	_player = null
 	_game = null
 	_ai = null
-	get_tree().paused = false  # resume the world (we paused it on open)
 	closed.emit()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -222,7 +226,7 @@ func _begin_ai_turn() -> void:
 	_think_token += 1
 	var tok := _think_token
 	_refresh()
-	# process_always so the timer ticks through the paused world; bound method (not a lambda) so a freed-capture
+	# process_always so the timer survives any pause around us (a dialogue-hosted match); bound method (not a lambda) so a freed-capture
 	# can't fire (the lambda-guard-is-useless gotcha). ~0.5s reads as the opponent considering the position.
 	get_tree().create_timer(0.5, true).timeout.connect(_ai_move.bind(tok))
 

@@ -126,12 +126,20 @@ func _bind_ui() -> void:
 	_decline_btn.text = _terms.decline_label
 	_decline_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	_decline_btn.pressed.connect(_on_decline)
+	# MUTED on purpose: Escape reaches _on_decline through _input too, so the cue lives in that ONE handler
+	# (see it for WHICH cue and why) — leaving the generic click on top would double the mouse path.
+	MenuStyle.set_button_sound(_decline_btn, &"")
 
 	_agree_btn = %AgreeButton
 	_agree_btn.text = _terms.accept_label
 	_agree_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	_agree_btn.disabled = _terms.require_scroll  # unlocks once the player scrolls to the end (or immediately if it fits)
 	_agree_btn.pressed.connect(_on_agree)
+	# Consent is a HEAVY commit — it is recorded to disk and never asked again. The cue rides the BUTTON, not
+	# the handler: agreeing is reachable ONLY from here (there is no Escape-to-accept), it maps 1:1 to the act,
+	# and it cannot fail — the scroll gate keeps the button DISABLED until it may be pressed, and a disabled
+	# Button emits no `pressed`, so the refused case is structurally silent already.
+	MenuStyle.set_button_sound(_agree_btn, &"commit")
 
 	# Gate the Agree button on scroll position. `changed` fires when the range/page updates (initial layout, resize);
 	# `value_changed` fires as the player scrolls — both re-evaluate whether the end has been reached.
@@ -172,6 +180,9 @@ func _bind_nag() -> void:
 	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	# EXPAND (authored) so a caption never grows the fixed-width card.
 	back.pressed.connect(_hide_nag)
+	# MUTED: Escape dismisses the nag through the same handler (_input's nag branch), so the back cue is fired
+	# once in _hide_nag instead of once here and never there.
+	MenuStyle.set_button_sound(back, &"")
 
 	var quit: Button = %QuitButton
 	quit.text = _terms.quit_label
@@ -179,13 +190,20 @@ func _bind_nag() -> void:
 	quit.pressed.connect(func() -> void: quit_requested.emit())
 
 ## Decline: there is no declining — raise the bare Back / Quit-to-Desktop nag. Consent is the only way forward.
+## SELECT, not back: nothing closes here, a sub-dialog RISES — so the light click voice is the honest cue, and
+## it is also the exact clip the (now muted) Decline button used to give away for free, leaving the mouse path
+## unchanged while filling the Escape path, which is not a Button and would otherwise be silent. Cued inside
+## the guard so the sound only ever means "the nag is up".
 func _on_decline() -> void:
 	if _nag_root != null:
 		_nag_root.visible = true
+		MenuStyle.play_select()
 
+## Dismiss the nag ("Reconsider" or Escape) — a genuine back-out, and the one cue site for both entry paths.
 func _hide_nag() -> void:
 	if _nag_root != null:
 		_nag_root.visible = false
+		MenuStyle.play_back()
 
 func _on_agree() -> void:
 	accepted.emit()

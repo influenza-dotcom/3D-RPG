@@ -122,12 +122,21 @@ func get_vector(neg_x: StringName, pos_x: StringName, neg_y: StringName, pos_y: 
 func get_movement_vector() -> Vector2:
 	return Input.get_vector(action_left, action_right, action_forward, action_backward)
 
-## THE single modal registry (M5 / T1). Every player-facing modal screen appears in ONE authored list tagged with
-## whether it PAUSES the tree, and all four surfaces derive from it: gameplay_suppressed (per-frame control gate),
-## any_modal_open (don't-stack-a-menu guard), any_pausing_open (Pip-Boy-tab refusal), and close_all_modals (the
-## death/quickload sweep). Registering a new screen = ONE row here + its project.godot [autoload] line — nothing else.
+## THE single modal registry (M5 / T1). Every player-facing modal screen appears in ONE authored list, and all four
+## surfaces derive from it: gameplay_suppressed (per-frame control gate), any_modal_open (don't-stack-a-menu guard),
+## any_tab_blocking_open (Pip-Boy-tab refusal), and close_all_modals (the death/quickload sweep). Registering a new
+## screen = ONE row here + its project.godot [autoload] line — nothing else.
 ## Built LAZILY: the screen autoloads register AFTER InputManager in [autoload], so they don't exist at _ready(); every
-## query runs at runtime by which point they do. Order matches the old hand-lists; `pausing` matches the old any_pausing_open.
+## query runs at runtime by which point they do.
+##
+## ⭐THE ROW FLAG IS `blocks_tabs`, NOT `pausing` (renamed 2026-08-09 when the station screens went REAL-TIME).
+## It only ever fed the Pip-Boy-tab refusal, and "freezes the tree" was a PROXY for the real question — does this
+## screen own the player's hands right now? That proxy died when shop / heal / level-up / respec / install / chess /
+## atm stopped pausing (see atm_screen.gd's header for why), so the flag now names the question it actually answers.
+## TRUE = a tab (Inventory / Stats / Implants / Reputation / Journal) refuses to open over it; the tabs still switch
+## freely among THEMSELVES via PlayerMenus.close_others. This is not cosmetic: two screens that both grabbed the
+## mouse fight over Escape, and the loser restores the CAPTURED cursor under a menu that is still up — unclickable.
+## NOTHING in this registry pauses the tree any more; the only remaining pause in the game is DialogueManager's.
 var _modal_reg: Array[Dictionary] = []
 var _modal_screens_cache: Array = []
 
@@ -135,22 +144,22 @@ func _ensure_modal_reg() -> void:
 	if not _modal_reg.is_empty():
 		return
 	_modal_reg = [
-		{screen = OptionsMenu, pausing = false},
-		{screen = InventoryScreen, pausing = false},
-		{screen = LootScreen, pausing = false},
-		{screen = ShopScreen, pausing = true},
-		{screen = StatsScreen, pausing = false},
-		{screen = ReputationScreen, pausing = false},
-		{screen = LevelUpScreen, pausing = true},
-		{screen = RespecScreen, pausing = true},
-		{screen = HealScreen, pausing = true},
-		{screen = AtmScreen, pausing = true},                # the Ledger terminal; pauses like its station siblings
-		{screen = ChipInstallScreen, pausing = true},
-		{screen = ChessScreen, pausing = true},
-		{screen = QuestJournal, pausing = false},
-		{screen = ImplantsScreen, pausing = false},          # the implants tab (rows toggle an implant off/on); real-time like its Pip-Boy siblings
-		{screen = CharacterInspectScreen, pausing = false},  # fullscreen hero-view overlay; real-time like the Pip-Boy tabs
-		{screen = SaveLoadScreen, pausing = false},          # manual save/load slot menu; non-pausing (the Options Dark-Souls posture)
+		{screen = OptionsMenu, blocks_tabs = true},              # the settings menu is a takeover, not a tab
+		{screen = InventoryScreen, blocks_tabs = false},         # ⌄ the Pip-Boy tab group: these five switch among themselves
+		{screen = LootScreen, blocks_tabs = true},               # a container/corpse you are rummaging — owns the cursor
+		{screen = ShopScreen, blocks_tabs = true},               # ⌄ the STATION screens: all real-time, all own the player's hands
+		{screen = StatsScreen, blocks_tabs = false},
+		{screen = ReputationScreen, blocks_tabs = false},
+		{screen = LevelUpScreen, blocks_tabs = true},
+		{screen = RespecScreen, blocks_tabs = true},
+		{screen = HealScreen, blocks_tabs = true},
+		{screen = AtmScreen, blocks_tabs = true},                # the Ledger terminal — the first station to go real-time (2026-08-08)
+		{screen = ChipInstallScreen, blocks_tabs = true},
+		{screen = ChessScreen, blocks_tabs = true},
+		{screen = QuestJournal, blocks_tabs = false},
+		{screen = ImplantsScreen, blocks_tabs = false},          # the implants tab (rows toggle an implant off/on)
+		{screen = CharacterInspectScreen, blocks_tabs = false},  # fullscreen hero-view; a tab hotkey takes over FROM it by design
+		{screen = SaveLoadScreen, blocks_tabs = false},          # manual save/load slot menu (the Options Dark-Souls posture)
 	]
 	for e in _modal_reg:
 		_modal_screens_cache.append(e.screen)
@@ -194,24 +203,33 @@ func any_modal_open(exclude: Object = null) -> bool:
 			return true
 	return false
 
-## True if any PAUSING screen is open (the `pausing` rows). The real-time Pip-Boy tabs (Inventory/Stats/Implants/Reputation/
-## Journal) refuse to open over these — but NOT over each other (they switch siblings via PlayerMenus.close_others).
-func any_pausing_open() -> bool:
+## True if a screen that OWNS THE PLAYER'S HANDS is open (the `blocks_tabs` rows: Options, Loot, and the seven
+## station screens). The Pip-Boy tabs (Inventory/Stats/Implants/Reputation/Journal) refuse to open over these —
+## but NOT over each other, since they switch siblings via PlayerMenus.close_others. THE WHOLE refusal set lives
+## here: a guard that hand-names one more screen beside this call is the drift this registry exists to kill.
+## (Was any_pausing_open() until 2026-08-09 — see the registry header for why the pause stopped being the test.)
+func any_tab_blocking_open() -> bool:
 	_ensure_modal_reg()
 	for e in _modal_reg:
-		if e.pausing and e.screen.is_open():
+		if e.blocks_tabs and e.screen.is_open():
 			return true
 	return false
 
 ## Close EVERY open modal (the death/respawn sweep and the quickload/quicksave chokepoint). Drives off the one
 ## registry, so a newly-registered screen is closed here automatically — no more hand-list drift (T1). Includes the
 ## NameEntryDialog (not a menu, but must not survive a death cinematic / scene reload floating over the world).
+## This is a SWEEP, not a player action: the world closed these menus, the player didn't back out of them.
+## So the whole loop runs under MenuStyle's quiet latch — otherwise dying with a menu group open fires a wall
+## of close cues at once (up to one per registered screen) through a 4-voice pool. Set/cleared in the SAME
+## function so an early return can never strand the UI mute.
 func close_all_modals() -> void:
+	MenuStyle.set_quiet(true)
 	for m in _modal_screens():
 		if m.is_open():
 			m.close()
 	if NameEntryDialog.is_open():
 		NameEntryDialog.close()
+	MenuStyle.set_quiet(false)
 
 var using_controller: bool = false  ## true when the last significant input was a gamepad — drives haptics
 

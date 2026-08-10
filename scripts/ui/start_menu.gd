@@ -135,6 +135,18 @@ func _bind_ui() -> void:
 	_setup_button(%SettingsButton, PlayerText.START_MENU_SETTINGS, _on_settings, true)
 	_setup_button(%QuitButton, PlayerText.START_MENU_QUIT, _on_quit, true)
 
+	# Menu sounds. Every button here is ALREADY click-wired (MenuStyle.apply's sweep ran in _ready, before this),
+	# so a cue is only ever a RE-POINT or a MUTE — never a second voice stacked on the generic click. Settings /
+	# Load Game / Quit deliberately keep that generic click: the screen each raises cues its own open
+	# (OptionsMenu, SaveLoadScreen), and Quit has nothing left to sound over.
+	MenuStyle.set_button_sound(%NewGameButton, &"open")  # character creation is a cold entrance, not a page swap
+	# Continue CANNOT be re-pointed the same way. Its handler boots the game, and _start_game's first act is
+	# AudioManager.stop_sfx(), which walks the whole tree and stops every PLAYING "sfx"-bus voice — MenuStyle's
+	# own UI pool sits on that bus. A cue fired from a `pressed` connection would land on whichever side of that
+	# call the connection order happens to put it, so the commit is muted here and fired BY HAND, after the boot
+	# begins, in _on_continue.
+	MenuStyle.set_button_sound(%ContinueButton, &"")
+
 	_black = %Black
 
 	# Skin-scaled side gutters on the authored quote card (see the contract comment above).
@@ -184,6 +196,10 @@ func _on_new_game() -> void:
 func _on_character_confirmed(character_name: String, stat_values: Dictionary, appearance: Dictionary) -> void:
 	if _implant_choice != null:
 		return
+	# A SIDEWAYS page swap inside one flow (creation suspends, implants resume over it) — never the open sting,
+	# which is reserved for a cold entrance. character_creation's Begin is muted (set_button_sound &"") exactly
+	# so THIS seam is the single voice for the step.
+	MenuStyle.play_tab()
 	_pending_creation = [character_name, stat_values, appearance]
 	if _char_create != null:
 		_char_create.suspend()  # hidden, not freed — also silences its ui_cancel _input while this step is up
@@ -206,17 +222,26 @@ func _on_implant_confirmed(ability_ids: Array, total_cost: float) -> void:
 	_close_implant_choice()
 	_close_character_creation()
 	_start_game(true)
+	# ⭐The commit fires AFTER _start_game, never before. _start_game's first act is AudioManager.stop_sfx(),
+	# which walks the whole tree and stops every PLAYING "sfx"-bus voice — MenuStyle's UI pool is on that bus,
+	# so a cue started ahead of the call is cut in the same frame. Placed here the stamp rings out over the
+	# black boot cover and straight through the scene swap (MenuStyle is an autoload, so the voice survives it).
+	# Requires the implant screen's own Begin button to stay muted, or the run stamps with two voices.
+	MenuStyle.play_commit()
 
 ## Drop the loaded autosave back to fresh defaults (the Player then seeds itself — loaded = false), THEN stamp
 ## the stashed name + stat build + the implant cart onto the fresh profile (reset re-seeds money and clears
 ## stat_values + unlocks, so every stamp must follow it). The seeded unlocks are applied at spawn by
 ## Player._ready's fresh-boot escape hatch (a non-empty GameState.unlocks — the stat_values idiom), and the
-## BILL is simply debited from GameState.money (reset left it at the player_starting_money base): the balance
-## may go NEGATIVE — implants are bought on credit and the run starts in debt. GameState.money is the ONE
-## home of that balance — the Player's profile_active wallet branch reads it on every loaded=false boot of a
-## created run (fresh boot, menu-and-back Continue, no-save death reload), so the goods and the bill can
-## never separate. It turns disk-real at the first autosave. An empty cart = the debt-free zero-ability
-## start. Split from _on_implant_confirmed so tests can drive the stamping without booting.
+## BILL is charged to the LEDGER ACCOUNT (GameState.account), NOT the wallet: `money` is CASH-ONLY now and is
+## left at the player_starting_money base by the reset, while `account` goes NEGATIVE — implants are bought on
+## credit and the run starts OWING. GameState.account is the ONE home of that balance (one signed number:
+## positive is savings, negative is debt), which is why depositing at an ATM IS repayment and why dying —
+## which empties only the wallet — can never clear what you owe. Nothing re-seeds the account at spawn (no
+## death path and no Player._ready branch touches it), so the goods and the bill can never separate on a
+## loaded=false boot of a created run (fresh boot, menu-and-back Continue, no-save death reload). It turns
+## disk-real at the first autosave. An empty cart = the debt-free zero-ability start. Split from
+## _on_implant_confirmed so tests can drive the stamping without booting.
 func _stamp_new_game_profile(ability_ids: Array, total_cost: float) -> void:
 	if _pending_creation.size() != 3:
 		return
@@ -239,6 +264,11 @@ func _stamp_new_game_profile(ability_ids: Array, total_cost: float) -> void:
 
 ## "Back" on the implant step: drop it and wake the kept creation overlay — the typed build survives.
 func _on_implant_cancelled() -> void:
+	# The mirror of _on_character_confirmed: a page swap BACKWARDS inside the same flow, not a menu closing, so
+	# it takes the same tab cue rather than back (back belongs to _on_character_cancelled, which really does
+	# hand the player back to the main menu). Also reached programmatically from _on_implant_confirmed's
+	# no-stashed-build edge, where "we quietly stepped back" is exactly the right read.
+	MenuStyle.play_tab()
 	_close_implant_choice()
 	if _char_create != null:
 		_char_create.resume()
@@ -253,6 +283,9 @@ func _close_implant_choice() -> void:
 
 ## "Back": discard the creation overlay and return to the menu buttons. No profile change, no load.
 func _on_character_cancelled() -> void:
+	# The creation flow genuinely closes here — a back, not a tab. character_creation's Back button is muted
+	# (it also owns the Escape path), so this is the only voice.
+	MenuStyle.play_back()
 	_close_character_creation()
 	_buttons.visible = true
 
@@ -266,6 +299,10 @@ func _close_character_creation() -> void:
 func _open_terms() -> void:
 	if _terms_screen != null:
 		return
+	# A cold entrance — the first interactive screen a first launch ever shows. Safe to sting because the
+	# warning cards' tween callback drives this, never _ready (the one authoring edge: emptying
+	# INTERNET_WARNING_CARDS makes the path synchronous and the sting would land under the boot splash).
+	MenuStyle.play_open()
 	_buttons.visible = false
 	_terms_screen = TermsScreen.instantiate()
 	_terms_screen.accepted.connect(_on_terms_accepted)
@@ -363,6 +400,13 @@ func _finish_startup_gate() -> void:
 func reveal_hosted_menu() -> void:
 	if _loading or _terms_screen != null:
 		return
+	# The main menu ARRIVING — the one true cold entrance of the boot, and the first cue a player ever hears.
+	# It fires once per launch: standalone this is reached through _finish_startup_gate (latched by
+	# _startup_gate_finished), hosted through ComputerRoom's CRT turn-on `finished` (latched on the lit
+	# monitor). ⭐MIX CHECK: in the hosted boot the sting lands ON TOP of the looping CRT whine bed
+	# ($computer/Buzz, started a frame earlier) and the fan loop — worth an ear pass on a real mix, since the
+	# sting is long (~1.7s) and the bed never stops.
+	MenuStyle.play_open()
 	# Enable BEFORE showing: the buttons must wear their final colour on the first visible frame (no
 	# disabled-grey flash popping to normal at shield release). The shield is the real input block —
 	# its full-rect STOP filter eats the mouse and _menu_input_locked swallows keys — so the disable
@@ -460,8 +504,27 @@ func _is_skip_press(event: InputEvent) -> bool:
 
 ## Continue: keep the profile loaded at boot (loaded = true) and start — the Player applies the saved build and
 ## resumes at the saved respawn point. (_start_game hides the cursor for the black boot intro.)
+##
+## ⭐That "loaded = true" is only free for the autosave GameState parsed at boot. An IN-MEMORY run arrives here
+## with loaded STILL FALSE: a New-Game session never runs a disk load, so the flag stays false for its entire
+## life, and Options -> Main Menu drops the player back onto this menu scene with that live run sitting in the
+## GameState autoload. Booting it un-promoted sent the fresh Player._ready down every fresh-game branch — it
+## re-seeded the starting loadout OVER the live backpack and skipped perks / xp / level / reputation / status
+## effects — silently discarding the run, which the next autosave then wrote to disk. (Money and installed
+## implants survived on their own `elif GameState.profile_active` fallbacks in player.gd, which is exactly why
+## it read as a glitch rather than a reset.) Promote here, in the ONE caller that knows it is resuming rather
+## than starting; do NOT widen those player.gd gates instead — that would make the wallet fallback dead code
+## and kill the has_profile_implants escape hatch.
 func _on_continue() -> void:
+	if GameState.profile_active:
+		GameState.loaded = true  # promote the in-memory run so the fresh Player APPLIES it (unlocks/xp/level/
+								 # perks/reputation/inventory) instead of reseeding a default build — the same promotion
+								 # player.gd's RELOAD_CHECKPOINT_FRESH death path makes, for the same reason (P0-2)
 	_start_game()
+	# ⭐Cue AFTER the boot begins, never before — same trap as _on_implant_confirmed: _start_game opens with
+	# AudioManager.stop_sfx(), which stops every PLAYING "sfx"-bus voice in the tree, MenuStyle's UI pool
+	# included. Resuming a run IS a heavy commit, so it takes the same clip as stamping a new one.
+	MenuStyle.play_commit()
 
 ## Does ANY manual slot file exist? Gates the "Load Game" button alongside has_quicksave (computed once, in
 ## _bind_ui — the menu re-evaluates per boot, and a save can only appear here by playing).

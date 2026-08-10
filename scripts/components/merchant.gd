@@ -12,6 +12,11 @@ extends LookAtInteractable
 ## Pricing is markup / markdown: the player BUYS at item.value × buy_mult and SELLS at item.value × sell_mult
 ## (sell_mult < 1). The merchant has its own `money` till — it can't buy what it can't pay for.
 ##
+## ⭐THE SPREAD NEVER INVERTS. Streetwise and faction favor both bend buying DOWN and selling UP, and neither
+## is capped, so left uncoupled they cross and the shop becomes a money printer. sell_price is therefore
+## clamped to buy_price - GameSettings.economy.min_vendor_spread for the same item and actor — the single
+## place that invariant lives (see sell_price), so no call site needs its own guard.
+##
 ## SETUP: drop it under the shopkeeper / counter (or assign highlight_target), size its CollisionShape3D to
 ## the body you aim at, fill `stock_counts` with what's for sale, and set `money` / the multipliers.
 
@@ -40,6 +45,14 @@ const Factions = preload("res://scripts/faction/factions.gd")
 ## the player buys at (1 - favor)x and sells at (1 + favor)x. 0 = neutral, 0.2 = 20% friendlier, NEGATIVE Y =
 ## a hostile markup. null = inert (no faction pricing — today's behaviour). Authored as a Curve over X in 0..1.
 @export var reputation_discount_curve: Curve = null
+## CASH-ONLY VENDOR when off. On (the default) this merchant takes the player's armed payment rail like every
+## other till: cash, then banked savings, then — under CREDIT — the credit line, with the account portion paying
+## the service charge. Off, the merchant takes NOTHING but coins in hand: a back-alley fence, a vending machine,
+## a black-market dealer who is not on the ledger. Turning it off is a DESIGN statement about that vendor, and it
+## is what makes carrying cash matter in a game where the bank is otherwise strictly better.
+##
+## Off also means the sale never touches `GameState.account`, so it can neither draw savings nor deepen a debt.
+@export var accepts_ledger: bool = true
 @export_group("Behavior")
 ## STANDALONE (default): sit on the talk layer so Interact opens the shop directly. Off -> DATA-ONLY: the
 ## ray won't detect us, and a dialogue NPC drives access via its "Trade" option.
@@ -84,6 +97,8 @@ func _ready() -> void:
 	_build_outline()  # look-at outline over the host's meshes (LookAtInteractable helper)
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
+	if standalone:
+		StationSpeaker.ensure(self)  # a self-serve kiosk answers with the shared panel chirp; a data-only merchant rides a talking NPC, and people don't beep
 
 ## Seed `into` from the authored stock: the COUNTED lines (stock_counts — N per entry). A weapon entry stocks one UNIQUE duplicate per count, so "2 shotguns" are two
 ## distinct objects (no shared-instance bugs); stackables stack. Split from _ready so tests can exercise
@@ -151,7 +166,8 @@ func buy_price(item: Item, buyer: Node = null) -> float:
 	return maxf(Zorkmids.QUANTUM, ceilf(snappedf(item.value * mult / Zorkmids.QUANTUM, 0.001)) * Zorkmids.QUANTUM)
 
 ## Zorkmids the player RECEIVES for selling one `item` (value marked down by sell_mult; the seller's
-## STREETWISE claws part of the markdown back — 1.0 on a baseline sheet).
+## STREETWISE claws part of the markdown back — 1.0 on a baseline sheet — but never past the arbitrage floor
+## below, so the payout can approach what the same actor would be charged and never reach it).
 func sell_price(item: Item, seller: Node = null) -> float:
 	if item == null or item.value <= 0.0:
 		return 0.0
@@ -162,7 +178,56 @@ func sell_price(item: Item, seller: Node = null) -> float:
 	mult *= maxf(0.0, 1.0 + _rep_favor())  # WR-2: a favoured faction pays you MORE (the inverse of the buy discount)
 	# Round DOWN to the smallest coin (the player's cut never rounds up past the markdown). Same float-noise
 	# scrub as buy_price, so 44.999999... cents floors to the 45 it truly is, not 44.
-	return maxf(0.0, floorf(snappedf(item.value * mult / Zorkmids.QUANTUM, 0.001)) * Zorkmids.QUANTUM)
+	var paid := floorf(snappedf(item.value * mult / Zorkmids.QUANTUM, 0.001)) * Zorkmids.QUANTUM
+	# ⭐THE ARBITRAGE FLOOR, enforced at the ONE place a payout is computed rather than guarded at each caller.
+	# Nothing else couples the two sides of the spread: streetwise bends buying down and selling up by the same
+	# 4%/point (both uncapped by design), so past ~9 points — inside what character creation hands out — the
+	# lines CROSS and a 100-value item buys for 60 and sells back for 70, forever, against a till the .tscn
+	# re-seeds every level load. Clamping HERE keeps streetwise (and the reputation_discount_curve, which pushes
+	# the same way and can cross at streetwise 0) monotonically better for the player — the spread narrows
+	# toward parity instead of inverting — and needs no special case per pricing input. The gap is a designer
+	# number, GameSettings.economy.min_vendor_spread, and the ceiling is floored onto the coin grid with the
+	# same noise scrub so a fractional spread can't round the payout back up over the buy price.
+	var spread: float = maxf(0.0, GameSettings.economy.min_vendor_spread)
+	var ceiling := floorf(snappedf((buy_price(item, seller) - spread) / Zorkmids.QUANTUM, 0.001)) * Zorkmids.QUANTUM
+	return maxf(0.0, minf(paid, ceiling))
+
+## ⭐THIS VENDOR'S ONE AFFORDABILITY PREDICATE. `buy` gates on it and ShopScreen dims on it, so a row can never
+## look dead while the till would serve it (or the reverse) — the rule the whole payment seam exists to enforce.
+## A ledger vendor defers to the player's rails (cash -> savings -> the armed line, service charge included); a
+## CASH-ONLY vendor (accepts_ledger off) counts nothing but coins in hand, so savings and credit are invisible
+## to it. A free item always clears, matching the Character.charge convention.
+func can_afford(price: float, player: Player) -> bool:
+	if player == null:
+		return false
+	if price <= 0.0:
+		return true
+	if accepts_ledger:
+		return player.can_pay(price)
+	return maxf(0.0, player.money) >= snappedf(price, Zorkmids.QUANTUM)
+
+## The matching till. FAIL-CLOSED like Character.charge: moves nothing and returns false when the funds don't
+## cover the whole price. A cash-only vendor draws straight from the wallet, never touching GameState.account,
+## so it can neither spend savings nor deepen a debt.
+func take_payment(price: float, player: Player) -> bool:
+	if not can_afford(price, player):
+		return false
+	if price <= 0.0:
+		return true
+	if accepts_ledger:
+		return player.charge(price)
+	player.add_money(-snappedf(price, Zorkmids.QUANTUM))
+	return true
+
+## THE ALL-IN price this vendor would actually take for `price` — the two-part quote's total. A cash-only vendor
+## never adds the account's service charge, so its total IS the sticker price; a ledger vendor's may be higher.
+## ShopScreen paints this so the number on the row is the number that leaves the player.
+func quoted_total(price: float, player: Player) -> float:
+	if player == null or price <= 0.0:
+		return maxf(0.0, snappedf(price, Zorkmids.QUANTUM))
+	if accepts_ledger:
+		return player.charge_total(price)
+	return snappedf(price, Zorkmids.QUANTUM)
 
 ## Player buys ONE `item` from the shop: it must be in stock, have a positive price, and the player must
 ## afford it. Moves the item into the player's backpack and the zorkmids into the till. True on success.
@@ -173,7 +238,7 @@ func buy(item: Item, player_node: Node) -> bool:
 	if not stock.has(item):
 		return false
 	var price := buy_price(item, player)
-	if price <= 0.0 or not player.can_pay(price):  # the ONE affordability predicate — cash, then savings, then the armed rail
+	if price <= 0.0 or not can_afford(price, player):  # THIS vendor's one affordability predicate (see can_afford)
 		return false
 	# Bounded-bag guard: don't charge for something the (Tetris) backpack can't hold — the transfer below would
 	# move nothing and the player would lose the coin. Refuse the sale and tell them why.
@@ -181,7 +246,7 @@ func buy(item: Item, player_node: Node) -> bool:
 		if player.has_method(&"notify_toast"):
 			player.notify_toast(PlayerText.TOAST_BACKPACK_FULL, Color(0.85, 0.85, 0.85))
 		return false
-	if not player.charge(price):  # fail-closed: moves nothing and sells nothing if the rails can't cover it
+	if not take_payment(price, player):  # fail-closed: moves nothing and sells nothing if the funds can't cover it
 		return false
 	money = snappedf(money + price, Zorkmids.QUANTUM)  # keep the till on the coin grid like every wallet (Character.add_money snaps)
 	stock.transfer_to(player.inventory, item, 1)

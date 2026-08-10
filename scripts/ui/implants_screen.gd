@@ -53,8 +53,8 @@ func toggle() -> void:
 ## (start menu / character creation) — the installed roster is read OFF the player, matching Inventory/Stats.
 func open() -> void:
 	# Block only the NON-player modals; the sibling player menus instead SWITCH to us via close_others.
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
-			or LootScreen.is_open() or InputManager.any_pausing_open() \
+	if _is_open or DialogueManager.is_active() \
+			or InputManager.any_tab_blocking_open() \
 			or not PlayerMenus.player_alive(get_tree()):  # refuse mid-death (PROCESS_MODE_ALWAYS would else re-open over the death cinematic)
 		return
 	_player = Groups.human_player(get_tree()) as Player
@@ -327,6 +327,11 @@ func _make_toggle_row(id: StringName, ability_name: String, chip_name: String, a
 		chip_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		chip_l.add_theme_color_override(&"font_color", MenuStyle.dim_color())
 		row.add_child(chip_l)
+	# MUTE the row's auto-wired generic click: the cue belongs to _on_row_toggled, which knows the DIRECTION of the
+	# flip and whether the player even accepted it. Without this the press would sound twice (click + step). Hover
+	# is untouched. Order-free — _wire_button skips a button already carrying the semantic meta, so setting it here
+	# (off-tree, before the row enters the list) is correct.
+	MenuStyle.set_button_sound(btn, &"")
 	btn.toggled.connect(_on_row_toggled.bind(id))
 	return btn
 
@@ -338,4 +343,9 @@ func _on_row_toggled(on: bool, id: StringName) -> void:
 	if not is_instance_valid(_player):
 		return
 	if _player.set_mechanic_active(id, on):
+		# Switching an implant is a state flip WITH a direction, which is exactly what the step pair says: up for
+		# on, down for off. Inside the success branch — a refused flip (the player no longer owns the implant)
+		# changes nothing and must stay silent. The row Button itself is muted in _make_toggle_row, so this is the
+		# only cue on the press.
+		MenuStyle.play_step(1 if on else -1)
 		GameState.autosave(_player)

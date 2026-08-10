@@ -152,8 +152,8 @@ func _shake(amount: float) -> void:
 func _process(delta: float) -> void:
 	if not _has_action or not character:
 		return
-	# Input is gated like MouseInput / ScopeIn: no firing or releasing through a NON-pausing menu (options /
-	# inventory / loot — the pausing screens already pause us), a conversation, or death (a corpse can't fire
+	# Input is gated like MouseInput / ScopeIn: no firing or releasing through ANY menu (options / inventory /
+	# loot / the station screens — none of them pauses the tree), a conversation, or death (a corpse can't fire
 	# the hook, and the release slingshot must never launch a dead body). The rope's visuals + an in-flight
 	# hook still advance, so opening a menu mid-throw doesn't freeze the rope. Release is LEVEL-based (key no
 	# longer held), not just_released, so letting go INSIDE a menu still detaches on the first ungated frame.

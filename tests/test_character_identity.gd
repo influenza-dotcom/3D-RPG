@@ -157,10 +157,12 @@ func test_v3_save_restamps_v4_and_keys_survive() -> void:
 	gs.save_to_disk(TMP_SAVE)
 	var reread := ConfigFile.new()
 	assert_eq(reread.load(TMP_SAVE), OK, "the re-saved file reads back")
-	assert_eq(int(reread.get_value("meta", "version", 0)), 4, "re-saving stamps the current schema (v4)")
+	# Read the constant rather than a literal: this assert is about "re-saving stamps whatever the CURRENT
+	# schema is", not about any particular number, and a hardcoded one silently goes red on every version bump.
+	assert_eq(int(reread.get_value("meta", "version", 0)), GameState.SAVE_VERSION, "re-saving stamps the current schema")
 	var gs2 = load(GAMESTATE_PATH).new()
-	assert_true(gs2.load_from_disk(TMP_SAVE), "the v4 save loads")
-	assert_true(gs2.name_is_revealed("Marcus"), "the carried-forward legacy name entry survives the v4 re-save")
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the re-saved current-schema save loads")
+	assert_true(gs2.name_is_revealed("Marcus"), "the carried-forward legacy name entry survives the re-save")
 	assert_true(gs2.name_is_revealed("Elena", &"elena_id"), "the identity-keyed reveal survives the round-trip")
 	assert_true(gs2.name_is_revealed("Elena"), "...and so does its display-compat bridge entry")
 	gs.free()

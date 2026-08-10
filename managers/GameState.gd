@@ -52,25 +52,26 @@ const SAVE_PATH := "user://gamestate.cfg"
 ## runs every fold it needs in one load). v4 is the THIRD (Slice 3, stable NPC identity): [world].known_names entries
 ## changed MEANING from raw display-name strings to identity keys (NpcData.id, falling back to the authored display
 ## name). Its migration is LAZY, not a load-time fold — see the known_names load site for the mechanism and why.
-const SAVE_VERSION := 4
+## v5 is the FOURTH: the legacy NEGATIVE-WALLET fold (a pre-ATM save carried the implant bill as negative `money`)
+## is now version-gated at <v5 like every other migration on this ladder. It used to run UNGATED, on the argument
+## that it was idempotent by construction — but that argument rests on the wallet being cash-only, and
+## DialogueChoice.give_money is documented as taking a NEGATIVE amount for a fee/cost, so a CURRENT run's wallet
+## can legitimately land below zero. Ungated, the next load would silently convert that cash shortfall into
+## interest-bearing bank debt. See the fold in load_from_disk.
+const SAVE_VERSION := 5
 ## The CharacterStats, by name — the columns of the [stats] save section. Derived from CharacterStats.STAT_NAMES
 ## (the single source; cannot drift — a stat added there becomes a save column here for free). Missing keys default
 ## to 0, so older mid-development profile saves migrate softly. A compile-time const fold (no autoload/cycle issue).
 const STAT_NAMES: Array[StringName] = CharacterStats.STAT_NAMES
-## Faction registry — resolves a quest's reward_reputation faction ids to live Faction resources for the grant.
-const Factions := preload("res://scripts/faction/factions.gd")
 ## Exact-snapshot serializer for the manual save tier (preloaded, NOT class_name — no global-class-cache
-## dependency, so headless GUT compiles GameState without a prior --import; matches Factions above / WorldSaveId).
+## dependency, so headless GUT compiles GameState without a prior --import; the same idiom as QuestTrackerScript
+## below, and as WorldSaveId in every component that keys the world_objects ledger).
 const WorldSnapshot = preload("res://scripts/world/world_snapshot.gd")
 
-## Quest signals (for the journal UI / listeners). The quest tracker lives here on GameState so it persists with
-## the rest of the run profile — the spec's sanctioned "or extend GameState", which also dodges a project.godot
-## autoload edit (that file carries the user's other uncommitted work).
-signal quest_started(quest: Quest)
-signal objective_advanced(quest: Quest, objective: QuestObjective)
-signal quest_completed(quest: Quest)
-## WR-6: a quest was FAILED (explicit fail_quest, or its expire_on_flag fired). Wire a journal strike-through / toast.
-signal quest_failed(quest: Quest)
+## QUESTS LIVE ON THE `QuestTracker` AUTOLOAD (M1 split). The four quest SIGNALS moved with the state — connect to
+## `QuestTracker.quest_started` / `objective_advanced` / `quest_completed` / `quest_failed`, not to GameState. The
+## quest *function* API is still forwarded from here (see the "Quests" region near the bottom) so authored content
+## and existing call sites keep working; new code should call QuestTracker directly.
 
 ## THE WORLD MAY RESET NOW — the player died and the death cinematic's screen has just gone FULLY BLACK, right as
 ## the "You were killed by X" card comes up (emitted from Player._on_death_screen_covered, a tween callback; NOT
@@ -101,6 +102,15 @@ var save_version: int = 0
 ## saved wallet (fractional zorkmids — see Zorkmids); fresh-game seed reads the economy tuning group
 ## (explicitly annotated, NOT ':='-inferred off the GameSettings chain). EconomySettings' default is 0.0 (the player starts broke).
 var money: float = GameSettings.economy.player_starting_money
+## Emitted whenever `account` actually CHANGES value (an equal write is swallowed by the setter, so a listener
+## can't be spammed by a no-op assignment). THE seam for reacting to the ledger balance — the HUD's OWED row, the
+## terminal screens, any future creditor: connect here rather than polling GameState.account every frame.
+signal account_changed(value: float)
+
+## Backing store for `account`. The property below is a get/set pair and an inline setter that assigned to its OWN
+## name would re-enter itself forever, so the value has to live somewhere else. NEVER write `_account` directly —
+## that skips the signal and every listener then paints a stale balance.
+var _account: float = 0.0
 ## ⭐THE LEDGER ACCOUNT — ONE SIGNED number: POSITIVE is savings, NEGATIVE is what you owe. Debt and savings
 ## are therefore the same field with opposite signs, which is why "pay off your debt" and "deposit" are the
 ## SAME operation (Atm.deposit) and why you can never hold a death-safe hoard WHILE owing — every deposit is
@@ -114,7 +124,21 @@ var money: float = GameSettings.economy.player_starting_money
 ##   * You cannot die your way out of the Ledger: the debt is not in the wallet death empties.
 ## The New Game implant bill rides THIS field (start_menu._stamp_new_game_profile), not the wallet, so
 ## `money` stays cash-only and >= 0 for a created run.
-var account: float = 0.0
+##
+## A get/set property over `_account` purely so every write fans out `account_changed`; the READ and WRITE surface
+## is unchanged, so the existing `GameState.account = snappedf(GameState.account +/- n, Zorkmids.QUANTUM)` call
+## sites (Atm.deposit/withdraw, LedgerAccrual, Player.charge, the New Game implant bill) keep working verbatim.
+var account: float:
+	get:
+		return _account
+	set(value):
+		# EXACT compare, deliberately not is_equal_approx: every writer snaps to Zorkmids.QUANTUM first so an
+		# unchanged write is bit-identical, while is_equal_approx's tolerance SCALES with magnitude (~10 zorkmids
+		# at a 1e6 balance) — it would swallow a real interest posting on a large account and drop the write.
+		if value == _account:
+			return
+		_account = value
+		account_changed.emit(_account)
 ## The armed payment RAIL for purchases: "debit" (cash then savings, never crossing zero) or "credit" (the
 ## same draw order, but allowed below zero up to the live credit line). A String KEY, never an enum ordinal
 ## (a designer reordering an enum would silently re-map every existing save) and never a display string —
@@ -237,6 +261,20 @@ var _world_snapshot_pending: bool = false
 ## timeline's state — then persist that franken-profile over the sole checkpoint. See _load_and_reload / autosave.
 var _reload_pending: bool = false
 
+## Save paths whose profile came off a FALLBACK rung (.tmp / .bak) instead of the primary. An entry is added by
+## load_from_disk and erased by the first _write_atomic to that SAME path that actually lands. While a path is
+## listed, its write must NOT rotate the file at `path` into ".bak": the file it would rotate is the primary the
+## ladder just REJECTED, so the rotation would bury the last intact checkpoint under the corrupt one — a
+## fallback-recovered run survived exactly one autosave before its only good copy was gone.
+##
+## ⭐KEYED BY PATH, NOT A SINGLE FLAG. Saves are multi-file: the autosave profile, the F5 quicksave and three
+## named slots each round-trip through save_to_disk(path) / _write_atomic(path). One shared flag is spent by
+## whichever file writes FIRST — so a boot that recovered gamestate.cfg from .bak, followed by a quicksave,
+## clears the flag on quicksave.cfg and lets the very next autosave rotate the still-corrupt gamestate.cfg
+## over the only good checkpoint. That is the exact data loss this guard exists to prevent, so the guard has
+## to be per-file. Session state, never persisted — it describes THIS boot's loads, not the profile.
+var _recovered_from_fallback: Dictionary = {}
+
 ## Public read of the quickload-in-flight latch, so a per-frame subscriber (LedgerAccrual's dawn posting) can
 ## refuse to move a balance that is about to be thrown away, without reaching into the underscore field.
 func reload_pending() -> bool:
@@ -260,18 +298,37 @@ func add_credit_standing(delta: float) -> float:
 ## deaths keep accumulating. Not persisted by the profile — it only reaches disk folded into a WorldSnapshot.
 var _dead_authored: Dictionary = {}
 
-## QUESTS — the live tracker (kept here so it persists with the profile). _quests_active: quest_id ->
-## { quest: Quest, progress: { objective_id(String): int } }; _quests_completed: a set of finished quest ids.
-var _quests_active: Dictionary = {}
-var _quests_completed: Dictionary = {}
-## WR-6: failed/expired quest ids -> the Quest resource (mirrors _quests_completed). A failed quest can't be
-## re-started or completed; a FAILED dialogue gate + the journal read this.
-var _quests_failed: Dictionary = {}
-## B-F40: user-facing warnings from the LAST profile load — one line per saved quest whose .tres failed to load
-## (the resource was moved/renamed/deleted), which would otherwise drop the quest SILENTLY (progress lost). The HUD
-## (ui.gd) consumes these on _ready via take_load_warnings() and toasts them. Repopulated each load; empty on a clean
-## one. (Composes with a later QuestTracker split — this field would move with the tracker.)
-var _load_warnings: Array[String] = []
+## QUESTS — the tracker dicts and the B-F40 load-warning array moved to the `QuestTracker` autoload (M1). They are
+## still persisted by THIS file's cfg (save_into / load_from below), because quest progress is part of the run profile.
+##
+## Script (not class_name) so there is no global-class-cache dependency and no parse cycle — QuestTracker.gd reaches
+## back for `GameState` as a runtime autoload lookup, never a preload, so the compile-time edge runs one way only.
+const QuestTrackerScript := preload("res://managers/QuestTracker.gd")
+
+## The tracker this GameState drives. Resolved lazily by `_qt()`; a test may also wire one explicitly.
+var quest_tracker: Node = null
+
+## ⭐ THE QuestTracker THIS GameState DRIVES — and the reason quest tests stayed isolated across the M1 split.
+##
+## Quest state used to live on this file, so a unit test could build a bare `GameState.new()` and get a private
+## journal for free. Moving it to an autoload would have made every such test share ONE journal: `test_game_save`
+## proved it immediately — a stale quest left in the singleton by an earlier test got written into the next test's
+## save file, whose .tres had already been deleted, and the reload hit a real engine error.
+##
+## So the pairing is decided by WHO THIS IS, exactly:
+##   • the autoload  -> the QuestTracker autoload (the real run's single journal)
+##   • anything else -> its OWN private tracker, added as a CHILD so it is freed with us and never orphans
+func _qt() -> Node:
+	if quest_tracker == null:
+		if self == GameState:
+			quest_tracker = QuestTracker
+		else:
+			var qt: Node = QuestTrackerScript.new()
+			qt.name = "PrivateQuestTracker"
+			qt.game_state = self
+			add_child(qt)  # works off-tree; ties its lifetime to ours so `gs.free()` takes it too
+			quest_tracker = qt
+	return quest_tracker
 const HOLSTER_FORGIVENESS_TUTORIAL_SEEN_FLAG := &"tutorial_holster_forgiveness_seen"
 var _holster_forgiveness_tutorial_reminder_pending: bool = false
 ## Saved PERK LEDGER — the resource_paths of unlocked perks. Their stat bonuses ride in [stats] and their granted
@@ -307,9 +364,9 @@ func _ready() -> void:
 func has_save_file() -> bool:
 	return FileAccess.file_exists(SAVE_PATH)
 
-## Load the autosave at `path` into the fields above. Returns false — leaving `loaded` UNCHANGED — if there's
-## no file / it's unreadable: at boot that's the fresh-game false it started with, and on a failed MANUAL load
-## (SaveLoadScreen / F9 on a file that vanished/corrupted since it was listed) the in-memory profile is untouched,
+## Load the autosave at `path` into the fields above. Returns false — leaving `loaded` UNCHANGED — when NO rung of
+## the recovery ladder below yields a usable profile: at boot that's the fresh-game false it started with, and on a
+## failed MANUAL load (SaveLoadScreen / F9 on a file that vanished/corrupted since it was listed) the in-memory profile is untouched,
 ## so the flag that answers for it must not flip either — flipping it silently rebooted later Continues /
 ## death reloads as fresh runs. On success sets loaded = true so the Player applies the build.
 ## Every value reads through the type-guarded _cfg_* helpers below: this runs AT BOOT (the autoload's _ready),
@@ -317,17 +374,59 @@ func has_save_file() -> bool:
 ## non-Array yields NULL (which would crash the restore loop), and a junk type hard-fails a typed assignment
 ## (respawn_position: Vector3). Junk degrades to the field's default instead of a boot crash.
 func load_from_disk(path := SAVE_PATH) -> bool:
+	# THE ATOMIC-WRITE RECOVERY LADDER (H1) — the primary, then ".tmp" (the interrupted NEWEST write, left behind when
+	# a crash struck the tiny rename window in save_to_disk), then ".bak" (the previous good checkpoint). Two things
+	# decide whether a rung counts, and BOTH are load-bearing:
+	#   * a FRESH ConfigFile per rung. ConfigFile.load() does NOT clear what the instance already holds, so one shared
+	#     instance let a successful fallback MERGE on top of whatever a half-parsed primary had already absorbed — the
+	#     .bak's money sitting beside the dead primary's inventory, a franken-profile that loads without one warning.
+	#   * the rung must LOOK like one of our saves (_cfg_is_profile). ConfigFile.load returns OK for a ZERO-LENGTH file
+	#     — zero sections, err == OK — so gating on the Error alone accepted a 0-byte primary as a pristine profile
+	#     (loaded/profile_active true, every field silently at its default) and never even consulted the .tmp/.bak that
+	#     still held the run.
+	# So what this now guarantees: we take the NEWEST rung that BOTH parses AND carries a recognisable section, we
+	# never blend two rungs, and we return false only when none of the three qualifies. A rung that parses into
+	# nothing (truncated to a line boundary, zero-length, foreign file) is SKIPPED rather than accepted or merged.
+	# A fresh game has none of the three, so it's simply unloaded.
 	var cfg := ConfigFile.new()
-	if cfg.load(path) != OK:
-		# Atomic-write recovery (H1): the primary is missing/unreadable only if a crash struck the tiny rename window in
-		# save_to_disk. Prefer a complete ".tmp" (the interrupted NEWEST write — a partial one fails to load and is
-		# skipped), then the ".bak" (the previous good checkpoint). A fresh game has none of the three, so it's unloaded.
-		if cfg.load(path + ".tmp") == OK:
-			push_warning("GameState: primary save '%s' unreadable — recovered the interrupted latest write from .tmp." % path)
-		elif cfg.load(path + ".bak") == OK:
-			push_warning("GameState: primary save '%s' unreadable — recovered from .bak (the last write may be lost)." % path)
+	var primary_ok := cfg.load(path) == OK and _cfg_is_profile(cfg)
+	# Two reasons to try a sibling: the primary is unusable (missing / 0-byte / shredded / not one of ours), OR it
+	# parses as a real profile but carries no [eof] marker — a TAIL-TRUNCATED write. The second case used to be
+	# accepted silently, which cost the run its perks and quests (those sections are written last) while money and
+	# stats survived, so it looked like a glitch rather than a corrupt save.
+	if not primary_ok or not _cfg_is_complete(cfg):
+		var tmp_cfg := ConfigFile.new()
+		var bak_cfg := ConfigFile.new()
+		var tmp_ok := tmp_cfg.load(path + ".tmp") == OK and _cfg_is_profile(tmp_cfg)
+		var bak_ok := bak_cfg.load(path + ".bak") == OK and _cfg_is_profile(bak_cfg)
+		# RUNG ORDER, newest-first within each tier: prefer a sibling we can PROVE is whole, and only then fall back
+		# to "is one of ours at all" — which is every save written before the [eof] marker existed. The two tiers must
+		# stay separate: demanding the marker outright would refuse a legacy .bak and turn a recoverable corruption
+		# into no save at all, while dropping the tier would go on silently accepting tail-truncated writes.
+		if tmp_ok and _cfg_is_complete(tmp_cfg):
+			cfg = tmp_cfg
+			_recovered_from_fallback[path] = true  # the next write TO THIS PATH must not rotate the rejected primary over this .bak
+			push_warning("GameState: primary save '%s' unusable — recovered the interrupted latest write from .tmp." % path)
+		elif bak_ok and _cfg_is_complete(bak_cfg):
+			cfg = bak_cfg
+			_recovered_from_fallback[path] = true
+			push_warning("GameState: primary save '%s' unusable — recovered from .bak (the last write may be lost)." % path)
+		elif primary_ok:
+			# The primary IS one of ours and no sibling is verifiably whole. A pre-marker save looks exactly like this,
+			# and so does every hand-built fixture in the save tests, so keep the primary and read it — precisely how
+			# this ladder behaved before the marker. Preferring an unproven sibling here would trade a good file for a
+			# guess; the marker only ever ARBITRATES, it never condemns on its own.
+			pass
+		elif tmp_ok:
+			cfg = tmp_cfg
+			_recovered_from_fallback[path] = true
+			push_warning("GameState: primary save '%s' unusable — recovered the interrupted latest write from .tmp." % path)
+		elif bak_ok:
+			cfg = bak_cfg
+			_recovered_from_fallback[path] = true
+			push_warning("GameState: primary save '%s' unusable — recovered from .bak (the last write may be lost)." % path)
 		else:
-			# No readable file: every in-memory field is untouched on this path, so `loaded` stays what it was
+			# No usable file: every in-memory field is untouched on this path, so `loaded` stays what it was
 			# (false at boot; the session profile's true after a failed manual load — see the doc above).
 			return false
 	save_version = _cfg_int(cfg, "meta", "version", 0)  # H1b: 0 = a pre-versioning save; recorded for a future migration
@@ -335,11 +434,16 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	account = _cfg_float(cfg, "player", "account", 0.0)          # the Ledger account (signed: + savings, - debt); absent in pre-ATM saves -> 0
 	payment_method = _cfg_str(cfg, "player", "payment_method", "debit")  # the armed rail KEY; absent -> the safe default
 	credit_standing = _cfg_float(cfg, "player", "credit_standing", 0.0)  # the earned record; absent -> a clean slate
-	# LEGACY FOLD: saves written BEFORE the ATM carried the implant debt as a NEGATIVE WALLET. The wallet is
-	# cash-only now (a purchase can no longer push it under zero), so a negative one can only be pre-ATM debt —
-	# move it onto the account, where the ATM can actually repay it. Idempotent by construction: after one save
-	# `money` is >= 0 and the branch can never fire again, which is precisely why this needs no SAVE_VERSION bump.
-	if money < 0.0:
+	# LEGACY FOLD, gated at <v5: saves written BEFORE the ATM carried the implant bill as a NEGATIVE WALLET. On one of
+	# those the wallet is cash-only, so a negative one can only be pre-ATM debt — move it onto the account, where the
+	# ATM can actually repay it. This used to run UNGATED, justified as idempotent by construction (after one save
+	# `money` is >= 0, so it can never fire twice). That argument silently assumed a wallet that can never go below
+	# zero, and DialogueChoice.give_money is documented as accepting a NEGATIVE amount for a fee/cost — so a CURRENT
+	# run CAN reach this line with a genuine cash shortfall, and ungated we would have converted it into
+	# interest-bearing bank debt behind the player's back. Now it is a proper version-gated migration: a separate `if`
+	# like the stat folds above, so an ancient save still runs every fold it needs in one load, and re-saving stamps
+	# v5 so it never re-runs.
+	if save_version < 5 and money < 0.0:
 		account = snappedf(account + money, Zorkmids.QUANTUM)
 		money = 0.0
 	player_name = _cfg_str(cfg, "player", "name", "")  # missing / junk-typed -> unnamed via the type guard (name is always written as a String, so this is lossless); a raw String(<Variant>) cast could raise "Invalid constructor" and abort the load
@@ -483,6 +587,30 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	_clock_apply_pending = true  # a genuine disk-load: the Player applies the saved clock ONCE (not on a respawn reload)
 	return true
 
+## The sections a parsed file must show at least ONE of before load_from_disk's ladder will accept it as a save.
+## [meta] and [player] are the two every real save_to_disk carries unconditionally (the schema stamp and the wallet),
+## so they are the sentinels that matter in the field; the rest are listed because a legitimately sparse file — a
+## pre-versioning save, a hand-authored migration fixture — can carry only one of them, and skipping such a file
+## would be a worse bug than the one this guards. Nothing here is a gameplay number, so a const is the right home.
+const PROFILE_SECTIONS := ["meta", "player", "stats", "flags", "world", "respawn", "inventory", "perks"]
+
+## Does this parsed ConfigFile look like one of OUR saves at all? An empty (0-byte) or shredded file loads with
+## err == OK and NO sections, which is indistinguishable from a pristine profile once you start reading keys —
+## so the ladder asks this before it trusts a rung. See load_from_disk.
+static func _cfg_is_profile(cfg: ConfigFile) -> bool:
+	for section in PROFILE_SECTIONS:
+		if cfg.has_section(section):
+			return true
+	return false
+
+## Did this save finish writing? save_to_disk stamps [eof] as its LAST section, so the marker's presence proves the
+## file reached its end — the one signal that separates a truncated write from a legitimately small profile (most
+## sections are conditional, so "missing [perks]" means nothing on its own). Presence is the whole test: the marker
+## is a length check, not an authenticity check, and it is deliberately NOT in PROFILE_SECTIONS so a file carrying
+## only [eof] still fails _cfg_is_profile. Saves written before this existed have no marker — the ladder keeps them.
+static func _cfg_is_complete(cfg: ConfigFile) -> bool:
+	return cfg.has_section("eof")
+
 ## --- Type-guarded ConfigFile reads (see load_from_disk): junk-typed values fall back to the default
 ## instead of erroring in a conversion or a typed assignment. Numeric kinds convert freely between each
 ## other (an int 1 read as bool/float is fine); anything else is junk. _cfg_str is the same guard for a
@@ -581,6 +709,13 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 		cfg.set_value("inventory", "stacks", inventory_stacks)
 		cfg.set_value("inventory", "equipped", equipped_index)
 	_save_perks_and_quests(cfg)
+	# ⭐THE TRUNCATION DETECTOR — KEEP THIS THE LAST set_value IN THIS FUNCTION. ConfigFile.save emits sections in
+	# INSERTION order, so this one lands at the very end of the file. Any write cut short (crash, power loss, full
+	# disk) therefore loses it by construction, whatever it managed to emit first — which is the only way to tell a
+	# truncated save from a legitimately small one, since most sections here are written CONDITIONALLY and a missing
+	# [perks] or [inventory] is perfectly normal. load_from_disk prefers a rung that carries this over one that does
+	# not; a save written before this existed carries none and is still accepted (see the ladder).
+	cfg.set_value("eof", "complete", true)
 	return _write_atomic(cfg, path)
 
 
@@ -590,6 +725,9 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 ## load_from_disk falls back to). A crash now costs at most the last write. On Windows a rename onto an EXISTING file
 ## fails, so the destination is always removed/rotated away first (guarded by file_exists so a missing sibling can't
 ## emit a stray engine error). The absolute DirAccess statics need no opened directory, so there's no dir-open edge.
+## ONE exception to the rotation, per save file, and only for the first write to that file after a
+## fallback-recovered load of it: see `_recovered_from_fallback` — rotating there would bury the checkpoint we
+## just recovered from.
 func _write_atomic(cfg: ConfigFile, path: String) -> Error:
 	var tmp_path := path + ".tmp"
 	var bak_path := path + ".bak"
@@ -600,12 +738,21 @@ func _write_atomic(cfg: ConfigFile, path: String) -> Error:
 			DirAccess.remove_absolute(tmp_path)  # don't strand a partial temp
 		return err
 	if FileAccess.file_exists(path):
-		if FileAccess.file_exists(bak_path):
-			DirAccess.remove_absolute(bak_path)     # clear the old .bak first (Windows rename fails onto an existing dest)
-		DirAccess.rename_absolute(path, bak_path)   # rotate the prior good save to .bak (recoverable prior checkpoint)
+		if _recovered_from_fallback.get(path, false):
+			# THE ONE WRITE THAT MUST NOT ROTATE: the profile in memory came off .tmp/.bak because the ladder REFUSED
+			# the file sitting at `path`. Rotating that refused file onto .bak would overwrite the last intact
+			# checkpoint with the very corruption we recovered from — the run would survive exactly one autosave.
+			# Discard it instead (the rename below still needs the destination gone on Windows) and leave .bak alone.
+			DirAccess.remove_absolute(path)
+		else:
+			if FileAccess.file_exists(bak_path):
+				DirAccess.remove_absolute(bak_path)     # clear the old .bak first (Windows rename fails onto an existing dest)
+			DirAccess.rename_absolute(path, bak_path)   # rotate the prior good save to .bak (recoverable prior checkpoint)
 	err = DirAccess.rename_absolute(tmp_path, path)  # atomically swap the new save into place
 	if err != OK:
 		push_warning("GameState: atomic swap into %s FAILED (Error %d) — the profile did NOT persist." % [path, err])
+	else:
+		_recovered_from_fallback.erase(path)  # one good write later THIS path's primary is trustworthy again — rotate normally from here
 	return err
 
 ## Read the live run off `player` into the in-memory profile (money, stats, the unlocked mechanics). The
@@ -727,7 +874,7 @@ func autosave(player: Node) -> void:
 
 ## The live HUMAN player — the non-NPC member of the Player group (companions ARE NPCs; mirrors NPC._real_player) —
 ## so world-state milestones can autosave without the caller threading a player ref. Null off-tree / pre-spawn.
-func _live_player() -> Node:
+func live_player() -> Node:
 	if not is_inside_tree() or get_tree() == null:
 		return null
 	for p in get_tree().get_nodes_in_group(Groups.PLAYER):
@@ -744,7 +891,7 @@ func _live_player() -> Node:
 ## via the autosave() guard, which the deferred flush re-checks (a player freed before the flush -> no write).
 var _world_save_queued: bool = false
 
-func _autosave_world_state() -> void:
+func autosave_world_state() -> void:
 	if _world_save_queued:
 		return
 	_world_save_queued = true
@@ -752,7 +899,7 @@ func _autosave_world_state() -> void:
 
 func _flush_world_state_save() -> void:
 	_world_save_queued = false
-	var player := _live_player()
+	var player := live_player()
 	if player != null:
 		autosave(player)
 
@@ -912,25 +1059,11 @@ func _save_perks_and_quests(cfg: ConfigFile) -> void:
 		cfg.set_value("perks", "grants", perk_grants)  # perk id -> granted ability id (String-keyed) for respec revocation
 	cfg.set_value("perks", "points", skill_points)  # always written so unspent points round-trip even with no perks yet
 	cfg.set_value("perks", "earned", points_earned)  # cumulative — needed so a respec after a reload refunds correctly
-	for qid in _quests_active:
-		var entry: Dictionary = _quests_active[qid]
-		var q: Quest = entry.get("quest")
-		if q == null or q.resource_path == "":
-			continue
-		cfg.set_value("quests_active", String(qid), {"path": q.resource_path, "progress": entry.get("progress", {})})
-	for qid in _quests_completed:
-		var qc: Quest = _quests_completed[qid]
-		if qc != null and qc.resource_path != "":
-			cfg.set_value("quests_completed", String(qid), qc.resource_path)
-	for qid in _quests_failed:  # WR-6: mirror the completed section — just the path (no progress on a closed quest)
-		var qf: Quest = _quests_failed[qid]
-		if qf != null and qf.resource_path != "":
-			cfg.set_value("quests_failed", String(qid), qf.resource_path)
+	_qt().save_into(cfg)  # the quest half — [quests_active] / [quests_completed] / [quests_failed]
 
 ## Restore the perk ledger + quest tracker from `cfg` (resource-path keyed). A renamed/removed .tres path is
 ## skipped with a warning rather than crashing the boot load — degrade, never hard-fail.
 func _load_perks_and_quests(cfg: ConfigFile) -> void:
-	_load_warnings.clear()  # B-F40: fresh warnings for THIS load (the HUD consumes them once)
 	perk_paths.clear()
 	var raw_perks = cfg.get_value("perks", "paths", [])
 	if raw_perks is Array:
@@ -943,44 +1076,13 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 			perk_grants[String(pid)] = String(raw_grants[pid])
 	skill_points = _cfg_int(cfg, "perks", "points", 0)
 	points_earned = _cfg_int(cfg, "perks", "earned", 0)
-	_quests_active.clear()
-	if cfg.has_section("quests_active"):
-		for qid in cfg.get_section_keys("quests_active"):
-			var rec = cfg.get_value("quests_active", qid, null)
-			if not (rec is Dictionary):
-				continue
-			var q := load(str(rec.get("path", ""))) as Quest
-			if q == null:
-				push_warning("GameState: active quest '%s' path didn't load — skipped" % qid)
-				_load_warnings.append(PlayerText.SAVE_WARN_ACTIVE_QUEST_MISSING)
-				continue
-			var prog = rec.get("progress", {})
-			_quests_active[StringName(qid)] = {"quest": q, "progress": (prog if prog is Dictionary else {})}
-	_quests_completed.clear()
-	if cfg.has_section("quests_completed"):
-		for qid in cfg.get_section_keys("quests_completed"):
-			var q := load(str(cfg.get_value("quests_completed", qid, ""))) as Quest
-			if q == null:
-				push_warning("GameState: completed quest '%s' path didn't load — skipped" % qid)
-				_load_warnings.append(PlayerText.SAVE_WARN_COMPLETED_QUEST_MISSING)
-				continue
-			_quests_completed[StringName(qid)] = q
-	_quests_failed.clear()  # WR-6: mirror the completed load
-	if cfg.has_section("quests_failed"):
-		for qid in cfg.get_section_keys("quests_failed"):
-			var q := load(str(cfg.get_value("quests_failed", qid, ""))) as Quest
-			if q == null:
-				push_warning("GameState: failed quest '%s' path didn't load — skipped" % qid)
-				_load_warnings.append(PlayerText.SAVE_WARN_FAILED_QUEST_MISSING)
-				continue
-			_quests_failed[StringName(qid)] = q
+	_qt().load_from(cfg)  # the quest half — also repopulates the B-F40 load warnings the HUD toasts
 
-## B-F40: hand the HUD the last load's quest-restore warnings and CLEAR them (consume-once, so a HUD rebuild on a
-## level change doesn't re-toast old warnings). Returns [] after a clean load. ui.gd calls this in _ready.
+## B-F40: hand the HUD the last load's quest-restore warnings. Forwards to QuestTracker, which owns them; kept here
+## because ui.gd has always asked GameState for them in _ready. Consume-once, so a HUD rebuild on a level change
+## doesn't re-toast old warnings. Returns [] after a clean load.
 func take_load_warnings() -> Array:
-	var w := _load_warnings.duplicate()
-	_load_warnings.clear()
-	return w
+	return _qt().take_load_warnings()
 
 ## The holster-forgiveness tutorial is shown once as a normal tutorial, but a death to the same provoked NPC queues
 ## a one-shot reminder for the next live Player (in-place respawn OR reload-style death).
@@ -1030,10 +1132,7 @@ func reset_for_new_game() -> void:
 	world_snapshot = null          # ...and any in-memory exact snapshot (matters on a RELOAD_CHECKPOINT_FRESH death,
 	_world_snapshot_pending = false #    which keeps in-memory GameState — a fresh run must never apply a stale snapshot)
 	_dead_authored.clear()
-	_quests_active.clear()
-	_quests_completed.clear()
-	_quests_failed.clear()  # WR-6
-	_load_warnings.clear()  # C44: forget any prior boot-load's quest-restore warnings so a fresh game doesn't toast them
+	_qt().reset()  # the journal + any prior boot-load's quest-restore warnings
 	_holster_forgiveness_tutorial_reminder_pending = false
 	perk_paths.clear()
 	perk_grants.clear()
@@ -1062,20 +1161,10 @@ func clear() -> void:
 func set_flag(flag: StringName, value: Variant = true) -> void:
 	flags[String(flag)] = value
 	if value:
-		_advance_flag_objectives(flag)  # a FLAG quest objective fires when its flag is set (the universal hook)
-		_expire_quests_on_flag(flag)    # WR-6: a flag can also CLOSE a quest's window (expire_on_flag -> auto-fail)
-	_autosave_world_state()  # world state changed — persist so a quit doesn't lose it (Dark-Souls-style)
-
-## WR-6: fail every ACTIVE quest whose expire_on_flag matches `flag` (the "you missed the window" trigger — e.g.
-## set the flag when the hostage dies / the timer ends). Collect ids first since fail_quest mutates _quests_active.
-func _expire_quests_on_flag(flag: StringName) -> void:
-	var to_fail: Array = []
-	for qid in _quests_active:
-		var q: Quest = _quests_active[qid].get("quest")
-		if q != null and q.expire_on_flag == flag:
-			to_fail.append(qid)
-	for qid in to_fail:
-		fail_quest(qid)
+		# Flags are the universal quest hook: a set flag can ADVANCE a FLAG objective and (WR-6) CLOSE a quest's
+		# window via expire_on_flag -> auto-fail. QuestTracker owns both halves and their ordering.
+		_qt().notify_flag_set(flag)
+	autosave_world_state()  # world state changed — persist so a quit doesn't lose it (Dark-Souls-style)
 
 ## A flag's value, or `fallback` (default false) when it was never set — so an unset bool flag reads as false.
 func get_flag(flag: StringName, fallback: Variant = false) -> Variant:
@@ -1108,7 +1197,7 @@ func mark_corpse_discovered(key: String) -> void:
 	if key.is_empty() or discovered_corpses.has(key):
 		return
 	discovered_corpses[key] = true
-	_autosave_world_state()
+	autosave_world_state()
 
 # --- "Stranger until introduced" name ledger (see known_names / stranger_names_enabled) ----------------------
 ## Learn a character — from now on public_name returns `real_name` outright instead of "Stranger", everywhere and
@@ -1134,7 +1223,7 @@ func reveal_name(real_name: String, identity: StringName = &"") -> void:
 		known_names[nm] = true  # the display-compat bridge entry (see the doc above)
 		changed = true
 	if changed:
-		_autosave_world_state()
+		autosave_world_state()
 
 ## Has the player been introduced to this character (or is masking off)? Matches the ledger on EITHER the `identity`
 ## key (when the caller supplies one) OR the `real_name` string — the latter keeps every v3 save's legacy name
@@ -1168,7 +1257,7 @@ func record_object_state(level_path: String, key: String, state: Dictionary) -> 
 	if not (world_objects.get(level_path) is Dictionary):
 		world_objects[level_path] = {}
 	world_objects[level_path][key] = state
-	_autosave_world_state()
+	autosave_world_state()
 
 ## The saved state Dictionary for `key` under `level_path`, or {} if none (never null — callers read `.get(...)`).
 func object_state(level_path: String, key: String) -> Dictionary:
@@ -1182,233 +1271,63 @@ func has_object_state(level_path: String, key: String) -> bool:
 	var per = world_objects.get(level_path)
 	return per is Dictionary and per.has(key)
 
-# --- Quests (the live tracker; see `_quests_active` / `_quests_completed`) ------------------------------------
-## Begin tracking `quest` — no-op if it's null/idless, already active, or already completed. Seeds each
-## objective's progress to 0 and emits quest_started.
+# --- Quests (FORWARDERS — the tracker itself is the `QuestTracker` autoload) -----------------------------------
+# The quest state, the four quest signals, reward granting and the cfg round-trip all live on QuestTracker now
+# (M1 split). These one-line forwarders stay because ~70 call sites — authored dialogue choices, TriggerVolumes,
+# QuestStarters, Readables, the journal — reach for GameState.<quest fn>, and because quest progress is still part
+# of THIS file's save. Prefer calling QuestTracker directly in new code. NOTE: the SIGNALS did NOT stay behind —
+# connect to QuestTracker.quest_started / objective_advanced / quest_completed / quest_failed.
+
 func start_quest(quest: Quest) -> void:
-	if quest == null or quest.id == &"" or is_quest_active(quest.id) or is_quest_completed(quest.id) or is_quest_failed(quest.id):
-		return  # WR-6: a failed quest is closed for good — it can't be re-started
-	if quest.prereq_quest_id != &"" and not is_quest_completed(quest.prereq_quest_id):
-		return  # a prerequisite quest hasn't been finished yet — this one can't start
-	var progress := {}
-	for obj in quest.objectives:
-		if obj != null and obj.id != &"":
-			progress[String(obj.id)] = 0
-	_quests_active[quest.id] = {"quest": quest, "progress": progress}
-	quest_started.emit(quest)
-	# M15: back-fill FLAG objectives whose flag is ALREADY set — a CHAINED quest that keys on a flag an earlier quest
-	# (or any trigger/dialogue) already flipped. set_flag won't fire again, so without this the objective stalls at 0.
-	# Mirror the live set_flag hook (advance_objective, same call as _advance_flag_objectives) so it advances / auto-
-	# completes identically to a flag set while active. get_flag defaults false, so a falsey/unset flag is NOT satisfied.
-	for obj in quest.objectives:
-		if obj != null and obj.id != &"" and obj.type == QuestObjective.Type.FLAG and get_flag(obj.target_id):
-			advance_objective(quest.id, obj.id, 1)
-	_autosave_world_state()  # a started quest is world state — persist it
+	_qt().start_quest(quest)
 
-## Bump an active quest's objective toward its required_count (clamped). Auto-completes the quest once every
-## non-optional objective is met (when the quest auto_completes). No-op for an unknown quest/objective.
 func advance_objective(quest_id: StringName, objective_id: StringName, amount: int = 1) -> void:
-	if not is_quest_active(quest_id):
-		return
-	var entry: Dictionary = _quests_active[quest_id]
-	var quest: Quest = entry["quest"]
-	var obj := _quest_objective(quest, objective_id)
-	if obj == null:
-		return
-	var key := String(objective_id)
-	var progress: Dictionary = entry["progress"]
-	progress[key] = mini(int(progress.get(key, 0)) + amount, obj.required_count)
-	objective_advanced.emit(quest, obj)
-	if quest.auto_complete and _all_required_done(quest, progress):
-		complete_quest(quest_id)  # this autosaves via complete_quest, so don't double-save below
-	else:
-		_autosave_world_state()  # objective progress is world state — persist it
+	_qt().advance_objective(quest_id, objective_id, amount)
 
-## Finish an active quest: move it to completed, grant its rewards, emit quest_completed. Works as an explicit
-## turn-in or via auto-complete.
 func complete_quest(quest_id: StringName) -> void:
-	if not is_quest_active(quest_id):
-		return
-	var entry: Dictionary = _quests_active[quest_id]
-	var quest: Quest = entry["quest"]
-	_quests_active.erase(quest_id)
-	_quests_completed[quest_id] = quest  # store the Quest (not just a flag) so the journal can show completed titles
-	_grant_quest_rewards(quest)
-	quest_completed.emit(quest)
-	_autosave_world_state()  # quest finished + rewards granted — a milestone; persist the run
-	if quest.next_quest != null:
-		start_quest(quest.next_quest)  # chain: finishing this quest auto-starts the next stage
+	_qt().complete_quest(quest_id)
 
-## WR-6: FAIL an active quest — move it to failed, emit quest_failed. No rewards, no chaining (a failed quest is
-## a dead end). No-op for a quest that isn't active (already completed/failed/never started). Drives the FAILED
-## dialogue gate + a journal strike-through. Called explicitly (a dialogue consequence) or by an expire_on_flag.
 func fail_quest(quest_id: StringName) -> void:
-	if not is_quest_active(quest_id):
-		return
-	var entry: Dictionary = _quests_active[quest_id]
-	var quest: Quest = entry["quest"]
-	_quests_active.erase(quest_id)
-	_quests_failed[quest_id] = quest  # store the Quest (like completed) so the journal can show failed titles
-	quest_failed.emit(quest)
-	_autosave_world_state()  # a failed quest is a permanent world-state change — persist it
+	_qt().fail_quest(quest_id)
 
 func is_quest_active(quest_id: StringName) -> bool:
-	return _quests_active.has(quest_id)
+	return _qt().is_quest_active(quest_id)
 
 func is_quest_completed(quest_id: StringName) -> bool:
-	return _quests_completed.has(quest_id)
+	return _qt().is_quest_completed(quest_id)
 
 func is_quest_failed(quest_id: StringName) -> bool:
-	return _quests_failed.has(quest_id)
+	return _qt().is_quest_failed(quest_id)
 
 func active_quest_ids() -> Array:
-	return _quests_active.keys()
+	return _qt().active_quest_ids()
 
-## The Quest resource for an ACTIVE quest id (null if it isn't active) — for the journal UI.
 func active_quest(quest_id: StringName) -> Quest:
-	var entry: Variant = _quests_active.get(quest_id)
-	return entry["quest"] if entry != null else null
+	return _qt().active_quest(quest_id)
 
-## The completed Quest resources (for the journal's "done" list).
 func completed_quests() -> Array:
-	var out: Array = []
-	for q in _quests_completed.values():
-		if q is Quest:
-			out.append(q)
-	return out
+	return _qt().completed_quests()
 
-## WR-6: the failed Quest resources (for the journal's "failed" list).
 func failed_quests() -> Array:
-	var out: Array = []
-	for q in _quests_failed.values():
-		if q is Quest:
-			out.append(q)
-	return out
+	return _qt().failed_quests()
 
-## An active objective's current count (0 when the quest/objective isn't active).
 func objective_progress(quest_id: StringName, objective_id: StringName) -> int:
-	if not is_quest_active(quest_id):
-		return 0
-	return int(_quests_active[quest_id]["progress"].get(String(objective_id), 0))
+	return _qt().objective_progress(quest_id, objective_id)
 
-## Is an objective satisfied (count >= required)? A completed quest reports all its objectives done.
 func is_objective_done(quest_id: StringName, objective_id: StringName) -> bool:
-	if is_quest_completed(quest_id):
-		return true
-	if not is_quest_active(quest_id):
-		return false
-	var obj := _quest_objective(_quests_active[quest_id]["quest"], objective_id)
-	return obj != null and int(_quests_active[quest_id]["progress"].get(String(objective_id), 0)) >= obj.required_count
+	return _qt().is_objective_done(quest_id, objective_id)
 
-func _quest_objective(quest: Quest, objective_id: StringName) -> QuestObjective:
-	if quest == null:
-		return null
-	for obj in quest.objectives:
-		if obj != null and obj.id == objective_id:
-			return obj
-	return null
-
-func _all_required_done(quest: Quest, progress: Dictionary) -> bool:
-	for obj in quest.objectives:
-		if obj == null or obj.optional:
-			continue
-		if int(progress.get(String(obj.id), 0)) < obj.required_count:
-			return false
-	return true
-
-## Grant a completed quest's rewards: faction reputation (global), then the player's money / xp / items. Requires
-## an in-tree GameState with a live player; off-tree (a bare test / no SceneTree) it early-returns and grants
-## NOTHING (not even reputation — the group lookup below needs get_tree()). In real play this always runs in-tree.
-func _grant_quest_rewards(quest: Quest) -> void:
-	if not is_inside_tree() or get_tree() == null:
-		return
-	# Reputation rewards are GLOBAL standing (faction_id -> delta), applied via the Reputation autoload.
-	for fid in quest.reward_reputation:
-		var faction := Factions.by_id(str(fid))
-		if faction != null:
-			Reputation.add_reputation(faction, float(quest.reward_reputation[fid]))
-	# The HUMAN player, not a companion (the &"Player" group also holds recruited companions, which ARE NPCs). The
-	# old &"player" lowercase group was never populated, so player was always null here and quest money/xp/item
-	# rewards never actually landed.
-	var player := _live_player()
-	if player == null:
-		return
-	if quest.reward_money != 0.0 and player.has_method(&"add_money"):
-		player.add_money(quest.reward_money)
-	if quest.reward_xp != 0.0 and player.has_method(&"add_xp"):
-		player.add_xp(quest.reward_xp)
-	if not quest.rewards.is_empty():
-		var inv: Variant = player.get(&"inventory")
-		if inv is CharacterInventory:
-			# The bag may be spatial-capped (opt-in Tetris grid) and silently drop overflow — surface the shortfall
-			# rather than vanishing reward items. Compare the placed item count before/after seeding; if fewer items
-			# landed than the rewards total, toast/log it so the player knows to make room (the items aren't refunded —
-			# seed_into stops at the first full add, matching the rest of the loot pipeline).
-			var bag := inv as CharacterInventory
-			var before := _reward_item_total(bag)
-			ItemStack.seed_into(bag, quest.rewards)
-			var wanted := 0
-			for r in quest.rewards:
-				if r != null and r.item != null and r.count > 0:
-					wanted += r.count
-			var placed := _reward_item_total(bag) - before
-			if placed < wanted:
-				var msg := PlayerText.quest_rewards_full(wanted - placed)
-				if player.has_method(&"notify_toast"):
-					player.notify_toast(msg, Color(1.0, 0.6, 0.3))
-				else:
-					push_warning("GameState: " + msg)
-
-## Total item UNITS currently in `bag` (summed stack counts) — used to measure how many quest reward items
-## actually fit after seed_into, so a spatial-capped bag's silent overflow can be surfaced to the player.
-func _reward_item_total(bag: CharacterInventory) -> int:
-	var total := 0
-	for s in bag.placed_contents():
-		total += int(s["count"])
-	return total
-
-## Advance every active objective of `obj_type` whose target_id matches `target` — the shared body behind the
-## FLAG (set_flag) / KILL / PICKUP / TALK objective hooks. Slice 3: KILL/TALK pass the STABLE identity key as
-## `target` plus the live display string as `legacy_fallback`, so a quest authored either way matches — an
-## identity-keyed objective survives display_name edits/localization, while a pre-identity .tres authored against
-## a display name (clear_the_block's &"Raider") keeps working unedited. The != target guard means an objective
-## matching BOTH forms (every id-less NPC: identity == name) still advances exactly ONCE per event.
-func _advance_objectives_matching(obj_type: int, target: StringName, legacy_fallback: StringName = &"") -> void:
-	for quest_id in _quests_active.keys():
-		var entry: Variant = _quests_active.get(quest_id)
-		if entry == null:
-			continue
-		var quest: Quest = entry["quest"]
-		for obj in quest.objectives:
-			if obj == null or obj.type != obj_type:
-				continue
-			if obj.target_id == target \
-					or (legacy_fallback != &"" and legacy_fallback != target and obj.target_id == legacy_fallback):
-				advance_objective(quest_id, obj.id, 1)
-
-## A FLAG objective fires when its flag is set — the universal hook (any trigger/lock/dialogue flag drives a quest).
-func _advance_flag_objectives(flag: StringName) -> void:
-	_advance_objectives_matching(QuestObjective.Type.FLAG, flag)
-
-## A player KILL of an NPC (from npc._on_died) advances matching KILL objectives. `target_id` is the NPC's stable
-## identity key (NPC.identity_key); `legacy_name` its live display string, kept as the authored-display fallback.
 func notify_kill(target_id: StringName, legacy_name: StringName = &"") -> void:
-	_advance_objectives_matching(QuestObjective.Type.KILL, target_id, legacy_name)
+	_qt().notify_kill(target_id, legacy_name)
 
-## The player PICKED UP an item with id `item_id` (from CanPickUp) — advance matching PICKUP objectives.
 func notify_pickup(item_id: StringName) -> void:
-	_advance_objectives_matching(QuestObjective.Type.PICKUP, item_id)
+	_qt().notify_pickup(item_id)
 
-## The player started TALKING to a character (from DialogueManager.start) — advance TALK objectives. `npc_id` is
-## the speaker's stable identity key (NPC.identity_key; an inanimate DialogueNPC passes its resolved name);
-## `legacy_name` the resolved speaker-name string, kept as the authored-display fallback.
 func notify_talk(npc_id: StringName, legacy_name: StringName = &"") -> void:
-	_advance_objectives_matching(QuestObjective.Type.TALK, npc_id, legacy_name)
+	_qt().notify_talk(npc_id, legacy_name)
 
-## The player ENTERED an area named `area_name` (from a TriggerVolume) — advance matching ENTER_AREA objectives.
 func notify_enter(area_name: StringName) -> void:
-	_advance_objectives_matching(QuestObjective.Type.ENTER_AREA, area_name)
+	_qt().notify_enter(area_name)
 
-## The player USED an item with id `item_id` (from Player.use_consumable) — advance matching USE_ITEM objectives.
 func notify_use(item_id: StringName) -> void:
-	_advance_objectives_matching(QuestObjective.Type.USE_ITEM, item_id)
+	_qt().notify_use(item_id)

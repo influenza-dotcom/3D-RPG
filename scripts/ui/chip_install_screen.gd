@@ -1,6 +1,7 @@
 extends CanvasLayer
-## ChipInstallScreen — the INSTALL overlay for a ChipInstaller mechanic. Autoload; PAUSES the world while open
-## (like ShopScreen / dialogue — this layer is PROCESS_MODE_ALWAYS so its buttons keep working through the pause).
+## ChipInstallScreen — the INSTALL overlay for a ChipInstaller mechanic. Autoload; REAL-TIME — it does NOT pause
+## the world (the STATION-SCREEN rule, argued in full in the atm_screen.gd header; this layer is
+## PROCESS_MODE_ALWAYS anyway, so a dialogue-hosted open keeps working under the conversation's pause).
 ## Two full-width sections STACKED vertically (ShopScreen-style): INSTALL YOUR CHIPS on top (chips already in the
 ## backpack — click to install for the labour fee) and FOR SALE — BUY & INSTALL below (chips the mechanic stocks
 ## that you don't carry — click to buy the chip AND fit it in one payment). Installing consumes the chip and calls
@@ -22,6 +23,7 @@ const PANEL_MARGIN := 0.12  ## shared modal inset (matches shop/loot/chess chrom
 
 var _root: Control
 var _title: Label
+var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; rail_changed drives _rebuild (both chip lists re-price)
 var _money_player: Label       ## your wallet — the header readout
 var _carried_list: VBoxContainer
 var _stock_list: VBoxContainer
@@ -63,13 +65,15 @@ func open_install(installer: Node, player: Node) -> void:
 	_installer = installer
 	_bind(true)
 	_is_open = true
-	_prev_mouse_mode = ModalMenu.grab_mouse()
+	# ONE OPEN CUE, NEVER TWO (the station-screen idiom): a self-serve install booth answers with its OWN
+	# diegetic StationSpeaker chirp, so the generic UI sting is suppressed exactly when that chirp fires and kept
+	# when the mechanic is a person (no speaker). Past every refuse guard, so a booth that couldn't open never beeps.
+	_prev_mouse_mode = ModalMenu.grab_mouse(not StationSpeaker.chirp(installer))
 	var name_v: Variant = installer.get(&"installer_name")
 	var nm: String = name_v if name_v is String else ""
 	_title.text = MenuStyle.title_text(PlayerText.install_title(nm))
 	_rebuild()
 	_root.visible = true
-	get_tree().paused = true  # freeze the world while installing, like the shop (PROCESS_MODE_ALWAYS keeps the buttons live)
 	opened.emit()
 
 ## Guard failed: we never opened, but a dialogue-hosted open (DialogueManager._suspend_for_menu) suspended the
@@ -88,7 +92,6 @@ func close() -> void:
 	ModalMenu.restore_mouse(_prev_mouse_mode)
 	_installer = null
 	_player = null
-	get_tree().paused = false  # resume the world (we paused it on open)
 	closed.emit()
 
 ## (Dis)connect the signals that should refresh the rows: the player's bag (a chip installed / consumed), the
@@ -136,6 +139,8 @@ func _buy(item: Item) -> void:
 func _rebuild() -> void:
 	if not is_instance_valid(_installer) or not is_instance_valid(_player):
 		return
+	if _rail_btn != null:
+		_rail_btn.refresh()  # the rail may have been flipped at an ATM since this screen was built
 	_money_player.text = PlayerText.wallet_you(_player.money)
 	_money_player.add_theme_color_override(&"font_color", MenuStyle.wallet_color(_player.money))  # gold, or danger while in debt
 	_fill(_carried_list, _installer.installable_carried(_player), false)  # your chips -> INSTALL (fee)
@@ -199,6 +204,10 @@ func _make_row(item: Item, price: int, affordable: bool, is_buy: bool) -> Button
 	# This IS the surface where you decide to fit a chip, so it must say what the chip unlocks, not just its [PH] name;
 	# mirrors ShopScreen._make_row (a disabled, can't-afford row tips too). `_player.inventory` feeds the shared formatter.
 	MenuStyle.attach_tip(btn, ItemInfo.tooltip(item, _player.inventory))
+	# MUTE the row's auto-wired generic click: the install's commit cue fires from ChipInstaller._grant, the shared
+	# success tail of BOTH transaction paths, so a click here as well would double up. Muted unconditionally —
+	# a can't-afford row is disabled (never emits pressed), but the mute is what makes the funnel the sole voice.
+	MenuStyle.set_button_sound(btn, &"")
 	if affordable:
 		btn.pressed.connect((_buy if is_buy else _install).bind(item))
 	return btn
@@ -235,6 +244,10 @@ func _bind_ui() -> void:
 	# re-tints danger while in debt); row-inset so its right edge lands on the rows' price column instead
 	# of overhanging it in the full panel box.
 	_money_player = %MoneyPlayer
+	# The rail selector: flipping it changes every price gate on this card, so its signal drives the rebuild.
+	_rail_btn = %RailButton as PaymentRailButton
+	MenuStyle.cap_button(_rail_btn)
+	_rail_btn.rail_changed.connect(_rebuild)
 	_money_player.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	_money_player.add_theme_color_override(&"font_color", MenuStyle.gold())
 	_style_row_inset(%MoneyInset)

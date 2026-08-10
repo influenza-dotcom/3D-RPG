@@ -12,13 +12,13 @@ extends Node
 var _markers: Array[Node] = []
 
 func _ready() -> void:
-	GameState.quest_started.connect(_on_quest_changed)
-	GameState.objective_advanced.connect(_on_objective_advanced)
-	GameState.quest_completed.connect(_on_quest_changed)
+	QuestTracker.quest_started.connect(_on_quest_changed)
+	QuestTracker.objective_advanced.connect(_on_objective_advanced)
+	QuestTracker.quest_completed.connect(_on_quest_changed)
 	# WR-6: a FAILED quest (explicit fail_quest, or its expire_on_flag firing) leaves the active set exactly like a
 	# completed one, so it needs the same rebuild — without this its beacons/pips linger for the rest of the session.
 	# quest_failed(quest) carries the same single arg as quest_started/quest_completed, so it shares the handler.
-	GameState.quest_failed.connect(_on_quest_changed)
+	QuestTracker.quest_failed.connect(_on_quest_changed)
 	_rebuild()
 
 func _on_quest_changed(_quest = null) -> void:

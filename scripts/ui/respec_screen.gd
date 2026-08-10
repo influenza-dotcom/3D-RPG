@@ -1,6 +1,7 @@
 extends CanvasLayer
-## RespecScreen — the CONFIRM overlay for a RespecStation. Autoload; PAUSES the world while open (PROCESS_MODE_ALWAYS
-## so its buttons keep working through the pause) and frees the mouse. Previews the respec COST + the perks that
+## RespecScreen — the CONFIRM overlay for a RespecStation. Autoload; REAL-TIME — it does NOT pause the world
+## (the STATION-SCREEN rule, argued in full in the atm_screen.gd header; PROCESS_MODE_ALWAYS anyway, so the
+## screen survives any pause around it) and frees the mouse. Previews the respec COST + the perks that
 ## will be refunded, then Confirm calls RespecStation.do_respec (reverse every perk, refund its skill point, charge
 ## the fee). Opened by RespecStation.start_talk. Mirrors HealScreen — the single-transaction modal shape — so a
 ## respec now asks before it wipes a build, instead of firing instantly on Interact.
@@ -23,6 +24,7 @@ var _blurb: Label   ## wrapping prose explainer (what a respec does) — split f
 var _status: Label  ## the short facts: cost + current zorkmids
 var _list: VBoxContainer
 var _confirm_btn: Button
+var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; rail_changed drives _refresh (the Confirm gate moves with it)
 var _cancel_btn: Button
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
@@ -50,14 +52,16 @@ func open_respec(station: Node, player: Node) -> void:
 		return
 	_station = station
 	_is_open = true
-	_prev_mouse_mode = ModalMenu.grab_mouse()
+	# ONE OPEN CUE, NEVER TWO (the station-screen idiom): the station answers with its OWN diegetic
+	# StationSpeaker chirp, so the generic UI sting is suppressed exactly when that chirp fires and kept when the
+	# machine is mute. Past every refuse guard, so a station that couldn't open never beeps.
+	_prev_mouse_mode = ModalMenu.grab_mouse(not StationSpeaker.chirp(station))
 	var name_v: Variant = station.get(&"station_name")  # duck-typed: only is_instance_valid was checked, not the type
 	var nm: String = name_v if name_v is String else ""
 	# Runtime re-title MUST route through title_text() — make_title only cases its constructor argument.
 	_title.text = MenuStyle.title_text(PlayerText.respec_title(nm))
 	_refresh()
 	_root.visible = true
-	get_tree().paused = true  # freeze the world while confirming, like the shop/heal/level-up (we're PROCESS_MODE_ALWAYS)
 	opened.emit()
 
 func close() -> void:
@@ -68,12 +72,11 @@ func close() -> void:
 	ModalMenu.restore_mouse(_prev_mouse_mode)
 	_station = null
 	_player = null
-	get_tree().paused = false
 	closed.emit()
 
 func _unhandled_input(event: InputEvent) -> void:
 	# Close (= Cancel) on the SAME Interact key that opens it (the ray consumes the OPENING press — see ray_cast.gd,
-	# which skips interacting while a pausing modal is open), or on Esc. Confirm is an explicit button click.
+	# which skips interacting while any modal is open), or on Esc. Confirm is an explicit button click.
 	if _is_open and (event.is_action_pressed(InputManager.action_pickup) or event.is_action_pressed(&"ui_cancel")):
 		close()
 		get_viewport().set_input_as_handled()
@@ -82,13 +85,22 @@ func _unhandled_input(event: InputEvent) -> void:
 ## so even if the Confirm button somehow fired while broke / with no perks, nothing bad happens.
 func _on_confirm_pressed() -> void:
 	if is_instance_valid(_station) and is_instance_valid(_player):
-		_station.do_respec(_player)
+		# do_respec returns the perk COUNT it actually refunded, so 0 is its "refused" answer (no perks / can't
+		# afford) and must stay silent. On a real wipe the commit is the cue that should be heard, so eat the
+		# back cue ModalMenu.restore_mouse is about to fire inside close() — otherwise the two stack a frame
+		# apart. A refusal deliberately KEEPS its back cue: with nothing committed, this is just a close.
+		var refunded: int = _station.do_respec(_player)
+		if refunded > 0:
+			MenuStyle.play_commit()
+			MenuStyle.quiet_next_back()
 	close()
 
 ## Rebuild the refund preview: the perks that will be reversed, the cost, and the Confirm button's enabled state.
 func _refresh() -> void:
 	if not is_instance_valid(_station) or not is_instance_valid(_player):
 		return
+	if _rail_btn != null:
+		_rail_btn.refresh()  # the rail may have been flipped at an ATM since this screen was built
 	var cost_v: Variant = _station.get(&"respec_cost")
 	var cost: float = float(cost_v) if (cost_v is float or cost_v is int) else 0.0
 	var pm: Object = _station.perk_manager(_player)
@@ -112,13 +124,17 @@ func _refresh() -> void:
 	# cost + funds as two short lines (the old single-label "Cost: X     Your zorkmids: Y" space-run plus
 	# no-autowrap prose was exactly what dragged the card wide).
 	_blurb.text = PlayerText.respec_blurb(perks.size())
-	_status.text = PlayerText.respec_status(cost, _player.money)
-	# Heal-screen parity (heal_screen._refresh): the facts line tints danger when the respec is refused for
-	# money — cost > 0 and the wallet under it, which is ALWAYS true in debt — so a negative balance never
-	# reads in the neutral tint. A FREE respec stays neutral even in debt: it's affordable by definition
-	# (RespecStation's zero-cost short-circuit).
-	_status.add_theme_color_override(&"font_color",
-		MenuStyle.danger() if (cost > 0.0 and float(_player.money) < cost) else MenuStyle.text_color())
+	# Heal-screen parity, for real this time (heal_screen._refresh's `cant`): ONE local feeds the danger tint AND
+	# the Confirm gate below, so the card can never paint a refusal over a live button. It has to be can_pay, not
+	# `money < cost`: the wallet is CASH-ONLY now, so the old cash-only test reddened the facts line for anyone
+	# who had banked their zorkmids (wallet 0, account 500, a 200 zm respec) above a Confirm that gated on can_pay
+	# and duly succeeded. A FREE respec stays neutral even in debt: it's affordable by definition (RespecStation's
+	# zero-cost short-circuit).
+	var cant := cost > 0.0 and not _player.can_pay(cost)  # the SAME predicate RespecStation.do_respec gates on
+	# spendable(), not `money`: the funds readout must count the account (and the armed credit line) that the
+	# Confirm gate can actually draw on, or a banked player reads "Your zorkmids: 0" under a working button.
+	_status.text = PlayerText.respec_status(cost, _player.spendable())
+	_status.add_theme_color_override(&"font_color", MenuStyle.danger() if cant else MenuStyle.text_color())
 	# The cost + affordability already read on the _status line above, so the button caption stays SHORT +
 	# fixed-width ("Respec — N zm"); can't-afford just greys it out rather than appending a long "(… — can't
 	# afford)" caption that would be the one string long enough to clip on the fixed-width card.
@@ -127,10 +143,10 @@ func _refresh() -> void:
 		_confirm_btn.disabled = true
 	else:
 		_confirm_btn.text = PlayerText.respec_button(cost)
-		# Same gate as RespecStation.do_respec (fee only when there IS one): a FREE station must stay
-		# clickable for a wallet in DEBT — without the cost > 0 guard, `money < 0` greyed the button the
-		# station itself would serve (the free-respec-refused-while-negative wart, UI half).
-		_confirm_btn.disabled = cost > 0.0 and not _player.can_pay(cost)  # the SAME predicate RespecStation.do_respec gates on
+		# The same `cant` the status line was tinted from — one predicate, two surfaces. Its cost > 0 guard is
+		# what keeps a FREE station clickable for a wallet in DEBT (the free-respec-refused-while-negative wart,
+		# UI half), matching RespecStation.do_respec's own fee-only-when-there-is-one gate.
+		_confirm_btn.disabled = cant
 
 # ---------------------------------------------------------------------------------------------------
 # UI binding (the layout is AUTHORED in scenes/ui/respec_screen.tscn — this adopts it; mirrors heal_screen.gd)
@@ -175,8 +191,14 @@ func _bind_ui() -> void:
 
 	_list = %List
 
+	# The rail selector sits on its own row above Confirm/Cancel so their authored EXPAND_FILL widths survive.
+	_rail_btn = %RailButton as PaymentRailButton
+	MenuStyle.cap_button(_rail_btn)
+	_rail_btn.rail_changed.connect(_refresh)
+
 	_confirm_btn = MenuStyle.cap_button(%ConfirmButton)
 	_confirm_btn.pressed.connect(_on_confirm_pressed)
+	MenuStyle.set_button_sound(_confirm_btn, &"")  # the commit is cued CONDITIONALLY in _on_confirm_pressed (which also eats the close's back cue); the generic click would double it
 
 	_cancel_btn = MenuStyle.cap_button(%CancelButton)
 	_cancel_btn.text = PlayerText.CANCEL
