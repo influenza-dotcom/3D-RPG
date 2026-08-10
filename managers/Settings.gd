@@ -42,6 +42,10 @@ const SENS_MIN := 0.0005
 const SENS_MAX := 0.01
 const CONTRAST_MIN := 0.5
 const CONTRAST_MAX := 1.5
+## Minimap zoom range. >1 shows FEWER metres (zooms IN); the span it divides is the author-time
+## GameSettings.hud.minimap_world_span, so this stays a player-facing multiplier and never a metre count.
+const MINIMAP_ZOOM_MIN := 0.5
+const MINIMAP_ZOOM_MAX := 3.0
 
 # --- Stored settings (defaults; seeded from the live design then overwritten by load_settings) ---
 var window_mode: int = 2                       ## index into WINDOW_MODES
@@ -75,6 +79,9 @@ var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (
 var ps1_warp_intensity: float = 1.0             ## 0..1 accessibility scale on the PS1 vertex-warp visual effect (motion comfort); 1 = full authored warp, 0 = off (level renders normally). Polled live by PS1Applier, which re-applies/rescales/restores without a level reload
 var stamina_ring_enabled: bool = true           ## ON = stamina reads as the radial ring around the crosshair (ui.gd StaminaRing); OFF = the classic bottom-left corner bar. The RING is the shipped default: stamina gates twitch verbs (sprint/dash/jump), so its readout belongs at the aim point where the eyes already are — the corner bar forces a glance away mid-fight. The bar stays as this opt-in for players who prefer a stable peripheral readout or find crosshair-adjacent motion distracting (the ring drains/refills at screen centre). Polled live by ui.gd each frame, so the Options toggle swaps modes instantly
 var hud_sway_scale: float = 1.0                 ## 0..1 accessibility scale on the diegetic HUD "weight" — the corner HUD cluster trailing camera turns, rattling under screen shake, leaning against strafe velocity, floating/pressing with vertical motion, breathing scale with the dynamic-FOV kicks, and dipping on landings (ui.gd + HudSway — this ONE dial governs every channel). A SCALE, not a bool, on purpose (the ps1_warp_intensity idiom): HUD motion is exactly the class of effect the view_bob/camera_tilt/fov_effects toggles exist for, and a dial lets a sensitive player keep a hint of it instead of all-or-nothing. 1 = full authored sway, 0 = off (panel welded static + unscaled, kicks silenced). Polled live by ui.gd each frame
+var minimap_enabled: bool = true                ## OFF = hide the top-right HUD floorplan entirely AND reflow the objective tracker back to the bare 8 px inset (the enemy_health_bar_enabled / detection_meter_enabled / loot_beacons declutter family). Polled live by ui.gd each frame, so the Options toggle bites the same frame with no rebuild; hiding it also stops the widget's gather/slice/redraw completely (Minimap._process bails on is_visible_in_tree), so OFF is a real cost win and not just a hidden node
+var minimap_rotates: bool = true                ## ON = HEADING-UP (the plan turns under a fixed caret); OFF = NORTH-UP (the plan is axis-locked and the caret spins instead). A BOOL rather than a dropdown on purpose: there are exactly two modes, and a generic DROPDOWN spec loses its options on an editor .tres re-save (SettingSpec's own @risk). Read live by Minimap._draw
+var minimap_zoom: float = 1.0                   ## Divides GameSettings.hud.minimap_world_span, so >1 shows FEWER metres (zooms IN). Clamped MINIMAP_ZOOM_MIN..MAX. Read live by Minimap._draw — a zoom change needs no re-slice, only the view matrix moves
 var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
 var heartbeat_enabled: bool = true              ## off = silence JUST the low-HP heartbeat pulse (the SFX bus volume is unaffected); read live by the player's _update_low_hp
 var difficulty_level: int = DifficultySettings.Level.NORMAL  ## 0 Easy / 1 Normal / 2 Hard -> GameSettings.difficulty.apply_level (ML-3)
@@ -383,6 +390,18 @@ func set_hud_sway_scale(f: float) -> void:
 	hud_sway_scale = clampf(f, 0.0, 1.0)
 	save_settings()  # no apply step — ui.gd polls this live each frame (_update_hud_sway)
 
+func set_minimap_enabled(on: bool) -> void:
+	minimap_enabled = on
+	save_settings()  # no apply step — ui.gd polls this live each frame (_apply_minimap_visibility)
+
+func set_minimap_rotates(on: bool) -> void:
+	minimap_rotates = on
+	save_settings()  # no apply step — Minimap reads it live in _draw
+
+func set_minimap_zoom(f: float) -> void:
+	minimap_zoom = clampf(f, MINIMAP_ZOOM_MIN, MINIMAP_ZOOM_MAX)
+	save_settings()  # no apply step — Minimap reads it live in _draw
+
 func set_debug_skip_menu(on: bool) -> void:
 	debug_skip_menu = on
 	save_settings()
@@ -461,6 +480,9 @@ func load_settings() -> void:
 	ps1_warp_intensity = clampf(float(cfg.get_value("accessibility", "ps1_warp_intensity", ps1_warp_intensity)), 0.0, 1.0)
 	stamina_ring_enabled = _cfg_bool(cfg, "accessibility", "stamina_ring_enabled", stamina_ring_enabled)
 	hud_sway_scale = clampf(float(cfg.get_value("accessibility", "hud_sway_scale", hud_sway_scale)), 0.0, 1.0)
+	minimap_enabled = _cfg_bool(cfg, "accessibility", "minimap_enabled", minimap_enabled)
+	minimap_rotates = _cfg_bool(cfg, "accessibility", "minimap_rotates", minimap_rotates)
+	minimap_zoom = clampf(float(cfg.get_value("accessibility", "minimap_zoom", minimap_zoom)), MINIMAP_ZOOM_MIN, MINIMAP_ZOOM_MAX)
 	tts_enabled = _cfg_bool(cfg, "accessibility", "tts_enabled", tts_enabled)
 	heartbeat_enabled = _cfg_bool(cfg, "accessibility", "heartbeat_enabled", heartbeat_enabled)
 	debug_skip_menu = _cfg_bool(cfg, "debug", "skip_menu", debug_skip_menu)
@@ -513,6 +535,9 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "ps1_warp_intensity", ps1_warp_intensity)
 	cfg.set_value("accessibility", "stamina_ring_enabled", stamina_ring_enabled)
 	cfg.set_value("accessibility", "hud_sway_scale", hud_sway_scale)
+	cfg.set_value("accessibility", "minimap_enabled", minimap_enabled)
+	cfg.set_value("accessibility", "minimap_rotates", minimap_rotates)
+	cfg.set_value("accessibility", "minimap_zoom", minimap_zoom)
 	cfg.set_value("accessibility", "tts_enabled", tts_enabled)
 	cfg.set_value("accessibility", "heartbeat_enabled", heartbeat_enabled)
 	cfg.set_value("debug", "skip_menu", debug_skip_menu)

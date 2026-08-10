@@ -118,3 +118,35 @@ func test_ps1_warp_intensity_default_full_and_clamps() -> void:
 	Settings.set_ps1_warp_intensity(0.5)
 	assert_eq(Settings.ps1_warp_intensity, 0.5, "an in-range intensity is stored verbatim")
 	Settings.set_ps1_warp_intensity(1.0)  # restore the default so the suite leaves it unscaled
+
+
+## The three minimap rows (Options -> Accessibility). ALL THREE are polled live — there is deliberately no
+## apply_all entry — so the only contract here is default + clamp + round-trip. A bare Settings.new() is used
+## for the defaults because the autoload's _ready has already loaded user://settings.cfg, which would report
+## whatever this machine last saved rather than the shipped default.
+func test_minimap_defaults() -> void:
+	var fresh = load("res://managers/Settings.gd").new()
+	assert_true(fresh.minimap_enabled, "the minimap ships ON — it is the shipped HUD, not an opt-in")
+	assert_true(fresh.minimap_rotates, "heading-up is the shipped mode (the plan turns under a fixed caret)")
+	assert_eq(fresh.minimap_zoom, 1.0, "zoom ships at 1x = GameSettings.hud.minimap_world_span verbatim")
+	fresh.free()
+
+func test_minimap_zoom_clamps() -> void:
+	Settings.set_minimap_zoom(9.0)
+	assert_almost_eq(Settings.minimap_zoom, Settings.MINIMAP_ZOOM_MAX, 0.0001, "zoom clamps to MINIMAP_ZOOM_MAX")
+	Settings.set_minimap_zoom(0.0)
+	assert_almost_eq(Settings.minimap_zoom, Settings.MINIMAP_ZOOM_MIN, 0.0001, "zoom clamps to MINIMAP_ZOOM_MIN")
+	Settings.set_minimap_zoom(1.5)
+	assert_almost_eq(Settings.minimap_zoom, 1.5, 0.0001, "an in-range zoom is stored verbatim")
+	assert_lt(Settings.MINIMAP_ZOOM_MIN, Settings.MINIMAP_ZOOM_MAX, "the range is the right way round")
+	Settings.set_minimap_zoom(1.0)  # restore the default so the suite leaves the HUD unzoomed
+
+func test_minimap_toggles_round_trip() -> void:
+	Settings.set_minimap_enabled(false)
+	assert_false(Settings.minimap_enabled, "the map can be turned off")
+	Settings.set_minimap_enabled(true)
+	assert_true(Settings.minimap_enabled, "...and back on")
+	Settings.set_minimap_rotates(false)
+	assert_false(Settings.minimap_rotates, "north-up is reachable")
+	Settings.set_minimap_rotates(true)
+	assert_true(Settings.minimap_rotates, "...and heading-up restores")
