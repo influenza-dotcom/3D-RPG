@@ -10,7 +10,7 @@ This index is generated from `@system` annotations in the code, so it cannot dri
 For the deep narrative see [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md); for current rough edges
 see [ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md).
 
-_16 system(s), 33 entries - scanned scripts/, managers/ + resources/._
+_16 system(s), 34 entries - scanned scripts/, managers/ + resources/._
 
 - [Audio](#audio)
 - [Control-Lock And Immunity](#control-lock-and-immunity)
@@ -162,6 +162,15 @@ view_transform() is THE single projection the HUD minimap draws through: handed 
 - **Risk:** A section cut renders ONLY the band it cuts — a mezzanine, catwalk or stair tread above the cut plane is invisible by construction, and a flight of stairs reads as a gap between two bands.
 - **Risk:** band_floor quantises the player's ORIGIN Y and never raycasts down: get_world_3d().direct_space_state returns EMPTY, silently, outside a physics frame — a previously-shipped bug class in this project.
 - **Test:** `tests/test_floorplan_section.gd`
+
+### `class FloorplanSource` - `scripts/ui/floorplan_source.gd`
+
+gather(root, hide_group) is the ONE place level geometry becomes minimap geometry: it walks a level subtree once and converts every STATIC collider into a world-space convex hull or triangle soup, which slice() then cuts at any height. Split out of FloorplanSection precisely so that file can stay pure and provable.
+
+- **Risk:** The static gate is `is StaticBody3D and not is AnimatableBody3D` — a PHYSICS LAYER cannot be used, because Player.tscn and enemy.tscn are both collision_layer 2, the same layer as level ground, so a mask would freeze every NPC in the room into the map as a wall blob.
+- **Risk:** AnimatableBody3D INHERITS StaticBody3D (verified against the engine), so the naive `is StaticBody3D` gate silently includes door leaves and bakes them shut forever. The exclusion is load-bearing, not tidiness.
+- **Risk:** CSGShape3D is NOT a CollisionObject3D — in Godot 4.7 that `is` check will not even parse — so a CollisionShape3D walk finds NOTHING on a CSG blockout level. Those need the separate bake_collision_shape() branch, and CLAUDE.md names CSG as the blockout pipeline for new levels.
+- **Test:** `tests/test_floorplan_source.gd`
 
 ### `class Minimap` - `scripts/ui/minimap.gd`
 

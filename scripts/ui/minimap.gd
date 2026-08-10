@@ -57,6 +57,10 @@ extends Control
 ## every NPC turns a floorplan into a radar. Handy while a level has no WorldMarkers placed yet.
 @export var dot_npcs: bool = false
 
+## The wall layer's geometry source, gathered ONCE per level. Preloaded BY PATH and kept untyped so this
+## file parses before the editor registers the new class_name (the STAMINA_RING_SCRIPT cache guard).
+const FLOORPLAN_SOURCE := preload("res://scripts/ui/floorplan_source.gd")
+
 @export_group("Authored underlay (optional)")
 ## LEGACY / OPTIONAL: an authored top-down MapData drawn UNDER the procedural plan and positioned through
 ## the same view matrix via its world_bounds. It is also where marker ART comes from (player_marker /
@@ -75,6 +79,7 @@ var _prev_centre: Vector2 = Vector2.ZERO
 var _prev_yaw: float = 0.0
 var _deck_dirty: bool = true        ## force one repaint (fresh deck, level swap, first frame)
 var _bake_delay_left: float = 0.0
+var _source = null                  ## FloorplanSource — the level's solids, gathered once (untyped: preload-by-path)
 
 
 func _ready() -> void:
@@ -106,6 +111,12 @@ func _process(delta: float) -> void:
 	var p := Groups.human_player(get_tree())
 	if p == null:
 		return
+	# The wall layer's geometry, gathered ONCE per level (it only changes when the level does). Deferred
+	# until after bake_delay for the same reason the deck is: func_godot brushes and CSG colliders settle
+	# over the first frames, and a gather on frame one can see a half-built level.
+	if _source == null and draw_walls:
+		_source = FLOORPLAN_SOURCE.new()
+		_source.gather(_level_root_for(region), Groups.MINIMAP_HIDE)
 	_centre_xz = Vector2(p.global_position.x, p.global_position.z)
 	_player_y = p.global_position.y
 	_yaw = _camera_yaw(p)
@@ -172,7 +183,13 @@ func _ensure_deck(region: NavigationRegion3D, y: float) -> void:
 	idx.resize(tris.size())
 	for i in tris.size():
 		idx[i] = i
-	_deck = {"fill": tris, "idx": idx, "walls": PackedVector2Array(), "y_lo": y_lo, "y_hi": y_lo + band}
+	# The wall layer: cut the level's solids at chest height above THIS band's floor. Note the cut plane is
+	# derived from the band, not from the player's exact Y — otherwise every step up a slope would re-cut.
+	var walls := PackedVector2Array()
+	if _source != null:
+		walls = _source.slice(FloorplanSection.cut_plane(y_lo, GameSettings.hud.minimap_cut_height),
+				GameSettings.hud.minimap_max_solid_span, GameSettings.hud.minimap_min_solid_span)
+	_deck = {"fill": tris, "idx": idx, "walls": walls, "y_lo": y_lo, "y_hi": y_lo + band}
 	_decks[key] = _deck
 	_touch_deck(key)
 	_evict_decks()
@@ -304,7 +321,24 @@ func rebake() -> void:
 	_decks.clear()
 	_deck_lru.clear()
 	_deck = {}
+	_source = null   # the solids are in the OLD level's world space — re-gather, never re-cut
 	_deck_dirty = true
+
+
+## The subtree the wall cut is gathered from: the ancestor named "Level" (GameRoot.load_level names the
+## instantiated level exactly that) when there is one, else the navmesh region's `owner` (an instantiated
+## scene's children carry owner == its root), else the region itself. Resolved fresh on every gather, so a
+## LevelDoor swap is picked up by the same region-instance-id staleness check that drops the deck cache —
+## which is why this widget needs no signal from GameRoot.
+func _level_root_for(region: Node) -> Node:
+	if region == null:
+		return null
+	var cur: Node = region
+	while cur != null:
+		if cur.name == &"Level":
+			return cur
+		cur = cur.get_parent()
+	return region.owner if region.owner != null else region
 
 
 ## How many floor decks are currently sliced. Introspection for tests, and the thing to check first when a

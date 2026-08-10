@@ -109,6 +109,153 @@ static func needs_redraw(prev: Vector2, now: Vector2, prev_yaw: float, yaw: floa
 	return absf(wrapf(yaw - prev_yaw, -PI, PI)) > yaw_eps
 
 
+# --- THE SECTION CUT ------------------------------------------------------------------------------------
+# A real architectural floorplan is a horizontal SECTION CUT: slice the building at chest height and draw
+# what the plane intersects. Walls become strokes; doorways become the gaps between them. These statics do
+# the cutting; FloorplanSource does the impure half (walking the tree and converting colliders to solids).
+
+## The convex cross-section of a WORLD-SPACE hull point cloud at plane `y`, as a CLOSED ring (Godot's
+## convex_hull repeats the first point at the end — verified, and ring_edges drops that duplicate). Empty
+## when the hull does not straddle `y`.
+##
+## WHY ALL PAIRS AND NOT JUST HULL EDGES: a ConvexPolygonShape3D gives POINTS, never faces — there is no
+## edge list to walk. For a CONVEX body the true cross-section is the 2D hull of every EDGE crossing, and a
+## crossing contributed by a NON-edge pair is the midpoint of a chord, which by convexity lies INSIDE the
+## body and therefore inside that same hull. So the all-pairs set is a SUPERSET whose hull is exact, which
+## is what test_slice_hull_ignores_interior_points makes executable. O(n^2) on n <= ~24 brush verts.
+static func slice_hull(world_points: PackedVector3Array, y: float) -> PackedVector2Array:
+	var n := world_points.size()
+	if n < 3:
+		return PackedVector2Array()
+	var cuts := PackedVector2Array()
+	for i in n:
+		var a := world_points[i]
+		for j in range(i + 1, n):
+			var b := world_points[j]
+			var da := a.y - y
+			var db := b.y - y
+			if (da > 0.0) == (db > 0.0):
+				continue  # both sides of the plane are the same side — no crossing
+			var denom := da - db
+			if absf(denom) < 0.000001:
+				continue
+			var t := da / denom
+			cuts.append(Vector2(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t))
+	if cuts.size() < 3:
+		return PackedVector2Array()
+	return Geometry2D.convex_hull(cuts)
+
+
+## Triangle-soup cut (ConcavePolygonShape3D.get_faces(), a CSG bake). Each straddling triangle contributes
+## exactly ONE segment. Returns FLAT PAIRS ready for draw_multiline — never a ring, because a trimesh cut is
+## an unordered set of segments and not a polygon.
+static func slice_faces(world_faces: PackedVector3Array, y: float) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	var tris := world_faces.size() / 3
+	for t in tris:
+		var v := [world_faces[t * 3], world_faces[t * 3 + 1], world_faces[t * 3 + 2]]
+		var hits := PackedVector2Array()
+		for e in 3:
+			var p: Vector3 = v[e]
+			var q: Vector3 = v[(e + 1) % 3]
+			var dp := p.y - y
+			var dq := q.y - y
+			if (dp > 0.0) == (dq > 0.0):
+				continue
+			var denom := dp - dq
+			if absf(denom) < 0.000001:
+				continue
+			var s := dp / denom
+			hits.append(Vector2(p.x + (q.x - p.x) * s, p.z + (q.z - p.z) * s))
+		if hits.size() >= 2:
+			out.append(hits[0])
+			out.append(hits[1])
+	return out
+
+
+## The 8 corners of a box of `size` centred on its origin, in world space.
+static func box_points(size: Vector3, xf: Transform3D) -> PackedVector3Array:
+	var h := size * 0.5
+	var out := PackedVector3Array()
+	for sx in [-1.0, 1.0]:
+		for sy in [-1.0, 1.0]:
+			for sz in [-1.0, 1.0]:
+				out.append(xf * Vector3(h.x * sx, h.y * sy, h.z * sz))
+	return out
+
+
+## A `sides`-gon prism standing on Y — the convex stand-in for a cylinder, capsule or sphere collider. The
+## cut only ever sees a horizontal slice, so a prism and a true cylinder differ by the polygon approximation
+## alone, which at ~2.7 px/m is invisible.
+static func prism_points(radius: float, height: float, sides: int, xf: Transform3D) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var n := maxi(sides, 3)
+	var hy := height * 0.5
+	for i in n:
+		var a := TAU * float(i) / float(n)
+		var x := cos(a) * radius
+		var z := sin(a) * radius
+		out.append(xf * Vector3(x, -hy, z))
+		out.append(xf * Vector3(x, hy, z))
+	return out
+
+
+## Local points -> world.
+static func transform_points(local: PackedVector3Array, xf: Transform3D) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	out.resize(local.size())
+	for i in local.size():
+		out[i] = xf * local[i]
+	return out
+
+
+## A closed ring -> its edges as FLAT PAIRS for draw_multiline. Godot's convex_hull repeats the first point
+## at the end (verified against the engine), so that duplicate is dropped — otherwise every solid would emit
+## one doubled edge, drawn twice at double effective opacity.
+## Returns a new array rather than filling an out-parameter: the value is easier to unit-test, and it does
+## not depend on the reader knowing whether Packed arrays alias.
+static func ring_edges(ring: PackedVector2Array) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	var n := ring.size()
+	if n >= 3 and ring[0].is_equal_approx(ring[n - 1]):
+		n -= 1
+	if n < 2:
+		return out
+	for i in n:
+		out.append(ring[i])
+		out.append(ring[(i + 1) % n])
+	return out
+
+
+## The XZ bounding box of a cut ring.
+static func ring_bounds(ring: PackedVector2Array) -> Rect2:
+	if ring.is_empty():
+		return Rect2()
+	var r := Rect2(ring[0], Vector2.ZERO)
+	for p in ring:
+		r = r.expand(p)
+	return r
+
+
+## Reject the Quake "void seal": a worldspawn brush that encloses the whole map cuts to one giant rectangle,
+## which would draw a frame around every room and swamp the plan. Both axes must exceed the span — a merely
+## long wall is legitimate geometry and must survive.
+static func ring_is_shell(ring: PackedVector2Array, max_span: float) -> bool:
+	if max_span <= 0.0:
+		return false
+	var b := ring_bounds(ring)
+	return b.size.x > max_span and b.size.y > max_span
+
+
+## Reject micro-detail (trim, sign backers, pipe collars) that reads as speckle at ~2.7 px/m. Both axes
+## again: a thin but LONG object is a wall, not noise.
+static func ring_is_noise(ring: PackedVector2Array, min_span: float) -> bool:
+	if min_span <= 0.0:
+		return false
+	var b := ring_bounds(ring)
+	return b.size.x < min_span and b.size.y < min_span
+
+
 ## THE DAY-ONE PICTURE: the walkable floor for one band, taken from the level's BAKED NavigationMesh and
 ## returned as a flat triangle-vertex list in WORLD XZ metres (three entries per triangle), ready to wrap in
 ## an ArrayMesh and draw under view_transform. Recast polygons are convex, so a fan from vertex 0 is exact.

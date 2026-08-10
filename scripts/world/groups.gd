@@ -16,6 +16,10 @@ const PLAYER := &"Player"                      ## human player + recruited compa
 const NPC := &"npc"
 const CONTAINERS := &"containers"
 const MINIMAP := &"minimap"                    ## WorldMarker dots on the minimap
+## Props whose colliders the HUD floorplan must NOT turn into walls — a chain-link fence, a market awning, a
+## parked car. FloorplanSource.gather skips the whole subtree. Joined via the MinimapHide drop-in, which adds
+## its PARENT rather than itself (the WorldMarker idiom).
+const MINIMAP_HIDE := &"minimap_hide"
 const COMPASS := &"compass"                    ## WorldMarker chevrons on the screen-edge compass
 const LIGHTS := &"lights"                       ## scene lights sampled by PlayerLightLevel (stealth)
 const PICKUP_BEACON := &"pickup_beacon"         ## pickup item lights (PickupBeacon) excluded from PlayerLightLevel
