@@ -189,6 +189,64 @@ extends Resource
 ## Amber save-load caveat toast (ui.gd).
 @export var load_warning_color: Color = Color(1.0, 0.7, 0.3)
 
+@export_group("Minimap")
+# The shipped top-right HUD minimap (scripts/ui/minimap.gd, code-built by ui.gd). A procedural VECTOR
+# floorplan: the walkable navmesh fill for the player's own floor band, plus a section cut of the level's
+# STATIC colliders at chest height. No authored texture, no per-level MapData, no second 3D pass — and a
+# canvas item cannot be touched by ps1.gdshader's vertex snap, so the plan is immune to the warp.
+# AUTHOR-TIME numbers only: the player-facing on/off, rotate mode and zoom are Options -> Accessibility rows
+# (Settings.minimap_*, polled live), and every COLOUR is artist paint on MenuStyle.hud.minimap_*.
+# THE TIGHT ONE: this corner is SHARED with the quest tracker, whose quest_tracker_width column starts at
+# x 484 on the 792x444 canvas and WRAPS DOWNWARD with no bound. ui.gd derives _quest_tracker.offset_top from
+# minimap_inset.y + minimap_size.y + minimap_tracker_gap, so these three knobs move the whole top-right stack
+# together. Keep minimap_inset.x + minimap_size.x <= 8 + quest_tracker_width (pinned by a test) or the
+# enemy-health-bar clearance maths in tests/test_enemy_health_bar.gd stops bounding this corner.
+## Drawn map box, w x h px. WHOLE pixels — fractional sizes rasterize into a ragged comb under the 792x444
+## canvas's ~2.4x nearest upscale (the same trap ui.gd's hp_display_seg_width note documents).
+@export var minimap_size: Vector2 = Vector2(108, 108)
+## Inset from the canvas's TOP-RIGHT corner: x in from the right edge, y down from the top.
+@export var minimap_inset: Vector2 = Vector2(8, 8)
+## Px between the map box's bottom edge and the quest tracker's first line.
+@export var minimap_tracker_gap: float = 6.0
+## Where the quest tracker's top sits when the minimap is OFF. Ships as 8.0 = byte-identical to the
+## pre-minimap layout, so turning the map off in Options restores the historical corner exactly rather than
+## leaving a hole where it used to be.
+@export var minimap_tracker_bare_top: float = 8.0
+## true = the map rides ui.gd's _weighted HUD-weight carrier (corner readouts carry mass — the header's
+## moved-vs-pinned rule). false = welded to the CanvasLayer. THE ESCAPE HATCH: the carrier also writes a
+## +-4% lens-breath SCALE, and a non-integer scale on 1 px vector strokes can shimmer under the nearest
+## upscale. Flipping this costs no behaviour — a direct layer child is still swept by hide_hud_for_death.
+@export var minimap_rides_hud_weight: bool = true
+## World metres across the box's SHORT axis at zoom 1.0. 40 m over 108 px = 2.7 px/m, so a 3 m corridor
+## draws ~8 px wide — about the narrowest that still reads at this canvas size.
+@export var minimap_world_span: float = 40.0
+## Section-cut plane, metres above the player's ORIGIN. Chest height cuts through walls and doorways but
+## under most desks and railings, which is what makes a plan read as rooms.
+@export var minimap_cut_height: float = 1.2
+## One cached deck's vertical validity — the navmesh band filter, the deck cache key's quantum, AND the
+## marker cross-floor fade denominator. One number so a floor can never mean three different heights.
+@export var minimap_band_height: float = 2.6
+## Wall stroke px. 0 or less = Godot's transform-INDEPENDENT hairline (the shipped look and the safe
+## default); a positive value routes through FloorplanSection.stroke_width so it does not fatten with zoom.
+@export var minimap_wall_width: float = 0.0
+## Reject the Quake "void seal" — a worldspawn brush enclosing the whole map cuts to one giant rectangle
+## that would draw a frame around every room. A cut ring wider than this on BOTH axes is dropped.
+@export var minimap_max_solid_span: float = 120.0
+## Reject micro-detail (trim, sign backers, pipe collars) that reads as speckle at ~2.7 px/m.
+@export var minimap_min_solid_span: float = 0.35
+## Alpha a marker a full band away is drawn at (0 = invisible off-floor, 1 = no fade). A beacon two storeys
+## up FADES rather than lying about being in this room.
+@export var minimap_marker_floor_alpha: float = 0.3
+## Inset (px) of the off-box marker chevron ring from the map's border — Compass.project_to_edge's margin,
+## reusing that pure projection rather than writing a second edge projector.
+@export var minimap_marker_edge_margin: float = 5.0
+## Contrast rim px around the box. 0 = no rim (the enemy_hp_outline_width idiom).
+@export var minimap_outline_width: float = 1.0
+## Metres of player motion before a repaint — a standing, still player costs literally zero.
+@export var minimap_redraw_pos_eps: float = 0.02
+## Radians of turn before a repaint (the other half of the same idle gate).
+@export var minimap_redraw_yaw_eps: float = 0.004
+
 @export_group("Centre prompts")
 ## Shared centre-screen prompt size (ui.gd's look-at name + player_hud.gd's takedown/pet/claim cues).
 @export var prompt_font_size: int = 14

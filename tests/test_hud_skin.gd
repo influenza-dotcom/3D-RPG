@@ -38,6 +38,8 @@ func test_fields_exist_per_component_group() -> void:
 		"glint_core_radius", "glint_streak_length", "glint_color", "glint_min_alpha", "glint_min_scale",
 		# Compass / minimap
 		"compass_fallback_color", "compass_marker_texture", "minimap_player_color", "minimap_npc_color",
+		"minimap_wall_color", "minimap_walkable_color", "minimap_backing_color", "minimap_outline_color",
+		"minimap_frame_texture",
 		# Label + hotbar chrome
 		"label_outline_color", "toast_outline_size", "look_name_outline_size",
 		"corner_label_outline_size", "corner_label_outline_color", "corner_label_color",
@@ -99,6 +101,24 @@ func test_artist_texture_slots_default_null() -> void:
 	assert_null(s.crosshair_texture, "crosshair art defaults null (code-drawn dot)")
 	assert_null(s.hitmarker_texture, "hitmarker art defaults null (code-drawn ticks)")
 	assert_null(s.compass_marker_texture, "compass marker art defaults null (code-drawn dot)")
+	assert_null(s.minimap_frame_texture, "minimap frame art defaults null (code-drawn corner brackets)")
+	s = null
+
+
+## The minimap PLAN's paint (walls / walkable fill / backing / rim). Deliberately NOT folded into
+## test_defaults_match_the_former_literals: that test's contract is "the default equals the literal the
+## consumer script used to hardcode", and these four slots have no former literal — the procedural
+## floorplan they paint is new. What they DO need pinning for is the relationship between them: the
+## walkable fill must stay dimmer than the wall strokes drawn over it, or the ink the plan is actually
+## read from drowns in its own ground.
+func test_minimap_plan_paint_defaults() -> void:
+	var s := _fresh()
+	assert_eq(s.minimap_wall_color, Color(0.35, 0.95, 0.85, 0.9), "wall stroke default")
+	assert_eq(s.minimap_walkable_color, Color(0.16, 0.52, 0.56, 0.35), "walkable fill default")
+	assert_eq(s.minimap_backing_color, Color(0.02, 0.04, 0.06, 0.6), "backing default")
+	assert_eq(s.minimap_outline_color, Color(0.35, 0.95, 0.85, 0.55), "rim default")
+	assert_lte(float(s.minimap_walkable_color.a), float(s.minimap_wall_color.a),
+			"the ground fill never out-inks the wall strokes drawn on top of it")
 	s = null
 
 ## MenuStyle exposes the skin (the MenuStyle.skin twin): preloaded from the authored .tres, never null

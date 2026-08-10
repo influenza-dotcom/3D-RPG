@@ -119,13 +119,28 @@ extends Resource
 @export var compass_marker_texture: Texture2D
 
 @export_group("Minimap")
-# HUD minimap markers (scripts/ui/minimap.gd). Marker ART already comes from the authored MapData
-# resource (player_marker / npc_marker textures); these are the code-drawn FALLBACK dot tints used
-# when a MapData ships without that art.
-## The player dot's fallback tint (cool blue).
+# HUD minimap (scripts/ui/minimap.gd) — the top-right procedural floorplan. Marker ART can still come from
+# an authored MapData (player_marker / npc_marker textures); the two tints below are the code-drawn
+# FALLBACK dots used when no such art is assigned, which is the shipped case. The four slots after them
+# paint the PLAN itself. GEOMETRY (box size, inset, zoom span, stroke width, cut height) is NOT here — it
+# is author-time tuning on GameSettings.hud's "Minimap" group, and the on/off + rotate + zoom the player
+# controls live on Settings. This group is paint only.
+## The player caret's fallback tint (cool blue).
 @export var minimap_player_color: Color = Color(0.4, 0.8, 1.0)
 ## Fallback tint for an NPC/marker that carries no `color` of its own (the NPC red).
 @export var minimap_npc_color: Color = Color(1.0, 0.4, 0.4)
+## The section-cut wall strokes — the map's primary read.
+@export var minimap_wall_color: Color = Color(0.35, 0.95, 0.85, 0.9)
+## The navmesh walkable-floor fill drawn UNDER the walls. Deliberately dim: it is ground, not ink, and at
+## full strength it drowns the strokes that carry the actual shape of the rooms.
+@export var minimap_walkable_color: Color = Color(0.16, 0.52, 0.56, 0.35)
+## Backing behind the plan — the "void" colour, seen wherever nothing was drawn.
+@export var minimap_backing_color: Color = Color(0.02, 0.04, 0.06, 0.6)
+## The code-drawn contrast rim / corner brackets around the box (the enemy_hp_outline_color family).
+@export var minimap_outline_color: Color = Color(0.35, 0.95, 0.85, 0.55)
+## OPTIONAL artist frame art drawn OVER the box. Null = the code-drawn rim (the shipped look) — the
+## MenuSkin widget-art fallback rule.
+@export var minimap_frame_texture: Texture2D
 
 @export_group("Label chrome")
 # The shared black-outline dialect every code-built HUD label wears (ui.gd) so text reads over any
