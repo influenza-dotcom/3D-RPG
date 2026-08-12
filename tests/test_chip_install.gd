@@ -52,7 +52,8 @@ func _teardown(m: ChipInstaller, p: Player) -> void:
 	p.inventory.free()
 	p.free()
 
-## Safety: any test that opens the overlay closes it so its modal/pause state never leaks into the next test.
+## Safety: any test that opens the overlay closes it so its modal state never leaks into the next test
+## (the screen is real-time — it never touches get_tree().paused — so the leak is purely registry/mouse state).
 func after_each() -> void:
 	if ChipInstallScreen.is_open():
 		ChipInstallScreen.close()

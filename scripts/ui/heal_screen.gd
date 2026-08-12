@@ -21,7 +21,7 @@ var _root: Control
 var _title: Label
 var _status: Label
 var _heal_btn: Button
-var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; its rail_changed drives _refresh (cost + affordability move with it)
+var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; its rail_changed drives _refresh (the Heal gate moves with it)
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
@@ -37,14 +37,18 @@ func is_open() -> bool:
 	return _is_open
 
 ## Open the heal screen for `healer`, treating `player`. Refuses to stack over another modal / dialogue, and
-## bails safely on an invalid healer or no player.
+## bails safely on an invalid healer or no player. EVERY refuse path emits `closed` (via _refuse_open) so a
+## dialogue-hosted open that suspended the conversation on our `closed` one-shot is never stranded (see below).
 func open_heal(healer: Node, player: Node) -> void:
 	if _is_open or DialogueManager.is_active() or InputManager.any_modal_open(self):  # M5: refuse over ANY other menu (incl. QuestJournal)
+		_refuse_open()
 		return
 	if not is_instance_valid(healer):
+		_refuse_open()
 		return
 	_player = player as Player
 	if not is_instance_valid(_player):
+		_refuse_open()
 		return
 	_healer = healer
 	_is_open = true
@@ -58,7 +62,21 @@ func open_heal(healer: Node, player: Node) -> void:
 	_title.text = MenuStyle.title_text(PlayerText.heal_title(heal_nm))
 	_refresh()
 	_root.visible = true
+	# Seed pad/keyboard focus on the Heal button (the OptionsMenu `_first_focus` / SaveLoadScreen / AtmScreen
+	# idiom) — AFTER the card is visible, since grab_focus on a hidden Control does nothing. Heal is the natural
+	# landing spot (the card's one transaction); a disabled Heal (fully mended / can't afford) still HOLDS focus,
+	# so ui navigation starts there and one step reaches Close either way. Without a focus owner, navigation has
+	# nowhere to start and every button on the card is pad-unreachable (the atm_screen must-not-recur rule).
+	if is_instance_valid(_heal_btn):
+		_heal_btn.grab_focus()
 	opened.emit()
+
+## Guard failed: we never opened, but a dialogue-hosted open (DialogueManager._suspend_for_menu) suspended the
+## conversation on our `closed` one-shot BEFORE calling us. Emit `closed` so _resume_from_menu re-shows the box;
+## on the standalone path (Healer.start_talk) nothing is listening, so it is harmless. Do NOT touch
+## pause/mouse/_is_open here — none of that was mutated yet.
+func _refuse_open() -> void:
+	closed.emit()
 
 func close() -> void:
 	if not _is_open:
@@ -82,11 +100,13 @@ func _on_heal_pressed() -> void:
 	if is_instance_valid(_healer) and is_instance_valid(_player):
 		# Cue on the HEALER's verdict rather than on "the button was enabled": do_heal re-runs its own
 		# cost + can_pay gate and then FAIL-CLOSES if charge() refuses, so an enabled button is not a promise of
-		# a heal. A refused heal stays silent — there is no denied cue, and back already means "closed".
-		# The button is muted in _bind_ui, so this is the press's only voice.
+		# a heal — which is exactly why the false branch needs its own voice instead of silence. The button is
+		# muted in _bind_ui, so this pair is the press's only voice.
 		var healed: bool = _healer.do_heal(_player)
 		if healed:
 			MenuStyle.play_commit()
+		else:
+			MenuStyle.play_denied()
 		_refresh()
 
 ## Update the status line + the Heal button (cost, affordability, nothing-to-heal).
@@ -96,13 +116,21 @@ func _refresh() -> void:
 	var cost: int = _healer.heal_cost(_player)
 	if _rail_btn != null:
 		_rail_btn.refresh()  # the rail may have been flipped at an ATM since this screen was last built
+	# Paint the ALL-IN number (shop-screen parity): do_heal debits through player.charge(), so a rail-funded heal
+	# carries the account's service charge and the sticker price alone would under-quote what actually leaves the
+	# player. charge_total re-derives it from the SAME split charge() draws on. The gates below stay on the RAW
+	# cost — can_pay folds the fee in itself, and the cost<=0 nothing-to-heal branch is the healer's own verdict.
+	var shown_cost := _player.charge_total(float(cost))
 	# The affordability wording rides the WRAPPING status line (not the button) so the button caption stays
 	# short + fixed-width — the card is pinned to skin.dialog_width and a long "can't afford" caption would
 	# otherwise be the one string long enough to clip on the button. We pass only the FACTS (limb damage on
 	# its own line, affordability): PlayerText.heal_status selects one of four whole authored templates —
 	# this screen never assembles line fragments (the TextFormat rule).
 	var cant := cost > 0 and not _player.can_pay(float(cost))  # the SAME predicate Healer.do_heal gates on
-	var status_text := PlayerText.heal_status(int(round(_player.hp)), int(round(_player.max_hp)), _player.has_limb_damage(), _player.money, cant)
+	# spendable(), not `money` (the RespecScreen twin documents this same wart — respec_screen.gd _refresh): the
+	# funds readout must count the account (and the armed credit line) that the do_heal gate can actually draw
+	# on, or a banked player reads "Your zorkmids: 0" beside an enabled Heal button.
+	var status_text := PlayerText.heal_status(int(round(_player.hp)), int(round(_player.max_hp)), _player.has_limb_damage(), _player.spendable(), cant)
 	# Pad the status to a CONSTANT 4 lines (HP / limb / zorkmids / note is the worst case). make_dialog pins
 	# the card's WIDTH only — its height shrink-wraps and the CenterContainer re-centers on every height
 	# change, so when a Heal click cleared the limb line the whole card (title, text, buttons) visibly hopped
@@ -115,7 +143,7 @@ func _refresh() -> void:
 		_heal_btn.text = PlayerText.HEAL_FULLY_HEALED
 		_heal_btn.disabled = true
 	else:
-		_heal_btn.text = PlayerText.heal_button(cost)  # short caption in every state; can't-afford greys it out (below)
+		_heal_btn.text = PlayerText.heal_button(shown_cost)  # the all-in quote; short caption in every state — can't-afford greys it out (below)
 		_heal_btn.disabled = cant
 
 # ---------------------------------------------------------------------------------------------------
@@ -129,6 +157,10 @@ func _refresh() -> void:
 ##    are capped (clip + "…"), the status line wraps.
 ##  * Heal + Close sit side by side EXPAND_FILL (authored in the scene): once fully healed the Heal button
 ##    DISABLES, so without Close a mouse-only player had no visible way out (Esc/Interact still close).
+##  * CONTROLLER PARITY (the atm_screen must-not-recur rule): the authored Buttons carry NO `focus_mode = 0`
+##    (Button's default FOCUS_ALL is what a pad navigates onto) and open_heal SEEDS focus on Heal once the
+##    card is visible — with no focus owner, ui navigation has nowhere to start and every button is
+##    unreachable. tests/test_heal_screen_scene.gd pins both halves.
 ##  * every string is set HERE from PlayerText — the scene ships with empty text properties.
 func _bind_ui() -> void:
 	_root = %Root
@@ -145,8 +177,9 @@ func _bind_ui() -> void:
 	_status.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 
 	# The DEBIT/CREDIT selector sits on its OWN row above Heal/Close, so the two-button row keeps its authored
-	# EXPAND_FILL widths. Its signal drives _refresh because the armed rail changes both the quoted cost and the
-	# affordability dim on this very card.
+	# EXPAND_FILL widths. Its signal drives _refresh because the armed rail changes what the till may draw on —
+	# the affordability dim moves with the flip. (The all-in quoted cost itself is rail-invariant: the service fee
+	# rides the cash shortfall whichever rail funds it — test_payment.gd pins that.)
 	_rail_btn = %RailButton as PaymentRailButton
 	MenuStyle.cap_button(_rail_btn)
 	_rail_btn.rail_changed.connect(_refresh)

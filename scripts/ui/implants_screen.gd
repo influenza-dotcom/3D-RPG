@@ -33,6 +33,11 @@ var _list: VBoxContainer
 var _is_open := false
 var _player: Player = null
 var _signature := ""  ## what the built rows depict (_roster_signature) — gates the live-refresh rebuild
+## The INSTALLED toggle rows in paint order — this tab's ONLY focusables (the tab strip is FOCUS_NONE by the
+## cross-screen contract), i.e. the pad path. The OptionsMenu `_first_focus` idiom, plural: open() seeds
+## element 0, and _rebuild re-seats focus by INDEX across a teardown (_reseat_focus). Rebuilt with the rows
+## (_make_toggle_row appends; _rebuild clears).
+var _focus_rows: Array[Button] = []
 
 func _ready() -> void:
 	layer = 120                                  # above the HUD, just under OptionsMenu (128)
@@ -65,6 +70,13 @@ func open() -> void:
 	_bind(true)
 	_rebuild()
 	_root.visible = true
+	# Seed pad/keyboard focus on the first toggle row (the OptionsMenu `_first_focus` / AtmScreen / HealScreen
+	# idiom) — AFTER the root shows, since grab_focus on a hidden Control does nothing. Without a focus owner,
+	# ui navigation has nowhere to start and every row is pad-unreachable (the atm_screen must-not-recur rule).
+	# With no rows at all — nothing installed yet — the tab legitimately opens ownerless: the toggle rows are
+	# its only focusables, and there is nothing to act on.
+	if not _focus_rows.is_empty():
+		_focus_rows[0].grab_focus()
 	opened.emit()
 
 func close() -> void:
@@ -211,6 +223,16 @@ func _bind_ui() -> void:
 	_list = %ImplantList
 
 func _rebuild() -> void:
+	# Remember the pad cursor BEFORE teardown: this list rebuilds on EVERY toggle (a flip always moves the
+	# signature), and freeing a focused row leaves the viewport with NO owner — ui navigation dies one press
+	# after it started (the atm_screen _reseat_focus_after_commit lesson). Remember the row's INDEX, never the
+	# node (it is about to be freed) — the OptionsMenu _revert remembered-tab idiom translated to rows:
+	# installed_ids order is deterministic across rebuilds, so the same index lands on the same implant, and
+	# _reseat_focus clamps when the roster shrank. Tree guard: off-tree (the scene tests) there is no viewport.
+	var focus_idx := -1
+	if _root != null and _root.is_inside_tree():
+		focus_idx = _focus_rows.find(_root.get_viewport().gui_get_focus_owner())
+	_focus_rows.clear()
 	# remove_child BEFORE queue_free: a queued-for-deletion child still counts toward the container's layout
 	# for the rest of the frame, so leaving them in would lay the fresh rows out below the doomed ones for
 	# one drawn frame.
@@ -223,6 +245,19 @@ func _rebuild() -> void:
 	_list.add_child(_make_section(PlayerText.IMPLANTS_INSTALLED_HEADING, _installed_rows()))
 	_list.add_child(_make_section(PlayerText.IMPLANTS_CARRIED_HEADING, _carried_rows()))
 	_signature = _roster_signature()  # what these rows depict — _on_changed ignores signals that don't move it
+	_reseat_focus(focus_idx)
+
+## Put pad/keyboard focus back after _rebuild freed the rows. Only while the screen is really up (open()'s
+## own pre-show _rebuild is seeded by open() itself once %Root is visible — grab_focus on a hidden Control
+## does nothing), and only when the teardown actually left the viewport OWNERLESS — a live owner is never
+## stolen (the atm_screen _reseat_focus_after_commit guard). `prev_idx` -1 (no row held focus, e.g. a
+## bag-driven repaint before the player ever navigated) seeds the first row, open()'s own landing spot.
+func _reseat_focus(prev_idx: int) -> void:
+	if not _is_open or _root == null or not _root.visible or not _root.is_inside_tree() or _focus_rows.is_empty():
+		return
+	if _root.get_viewport().gui_get_focus_owner() != null:
+		return
+	_focus_rows[clampi(prev_idx, 0, _focus_rows.size() - 1)].grab_focus()
 
 ## Rows for the INSTALLED section: one TOGGLE row per implant — the AUTHORED ability name leads in the accent,
 ## the chip that carries it dimmed on the right (chips share one model — the name is the differentiator).
@@ -299,7 +334,11 @@ func _make_row(left: String, left_color: Color, right: String, right_color: Colo
 func _make_toggle_row(id: StringName, ability_name: String, chip_name: String, active: bool) -> Button:
 	var btn := MenuStyle.size_row_button(Button.new())  # empty-text button: without the pin its rect (selection bar + hitbox) collapses above the labels
 	btn.toggle_mode = true
-	btn.focus_mode = Control.FOCUS_NONE
+	# FOCUS_ALL, NOT the FOCUS_NONE these shipped with (the atm_screen _add_chip lesson): the toggle rows ARE
+	# this tab's pad path, and a control a pad can never land on is not a path at all. Paint order = focus
+	# order — _focus_rows is how open() and _reseat_focus find the landing spot after a (re)build.
+	btn.focus_mode = Control.FOCUS_ALL
+	_focus_rows.append(btn)
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.set_pressed_no_signal(active)
 	var sb: StyleBox = MenuStyle.theme.get_stylebox(&"normal", &"Button")
@@ -344,8 +383,14 @@ func _on_row_toggled(on: bool, id: StringName) -> void:
 		return
 	if _player.set_mechanic_active(id, on):
 		# Switching an implant is a state flip WITH a direction, which is exactly what the step pair says: up for
-		# on, down for off. Inside the success branch — a refused flip (the player no longer owns the implant)
-		# changes nothing and must stay silent. The row Button itself is muted in _make_toggle_row, so this is the
-		# only cue on the press.
+		# on, down for off. The row Button itself is muted in _make_toggle_row, so this pair is the only cue on
+		# the press.
 		MenuStyle.play_step(1 if on else -1)
 		GameState.autosave(_player)
+	else:
+		# A refused flip (the implant was uninstalled out from under this paint) left the row's CheckButton
+		# toggled to a state the player doesn't own — and no mechanic_toggled fires on a refusal, so nothing
+		# upstream repaints. Cue the denial and snap the row back ourselves (_rebuild is safe mid-emission:
+		# row teardown is deferred, per _make_toggle_row's note above).
+		MenuStyle.play_denied()
+		_rebuild()

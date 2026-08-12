@@ -8,10 +8,11 @@ extends Button
 ##     _rail_btn = MenuStyle.cap_button(%RailButton) as PaymentRailButton
 ##     _rail_btn.rail_changed.connect(_refresh)
 ##
-## ⭐WHY THE HOST MUST REFRESH: the armed rail changes what `Player._split` will draw on, so it changes the
-## affordability dim AND the quoted total on the very same card. A toggle that repainted only its own caption
-## would leave a row greyed out that the till would now serve — the exact divergence the payment seam exists to
-## prevent. The signal is not optional garnish; it is how the screen stays honest.
+## ⭐WHY THE HOST MUST REFRESH: the armed rail changes what `Player._split` may draw on, so it moves the
+## affordability dim on the very same card. (The all-in quoted total is rail-invariant — the service fee rides
+## the cash shortfall whichever rail funds it; test_payment.gd pins that.) A toggle that repainted only its own
+## caption would leave a row greyed out that the till would now serve — the exact divergence the payment seam
+## exists to prevent. The signal is not optional garnish; it is how the screen stays honest.
 ##
 ## THE RAIL IS RUN STATE, NOT A PREFERENCE. It lives on `GameState.payment_method` (a String KEY) and rides the
 ## save, rather than sitting in Options — flipping it here is the same act as flipping it at an ATM, and every

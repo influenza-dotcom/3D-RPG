@@ -212,9 +212,11 @@ func _grant(item: Item, player: Player) -> void:
 	if player.has_method(&"notify_toast"):
 		player.notify_toast(PlayerText.installed(item.label()), Color(0.5, 0.85, 1.0))
 	# The UI commit cue belongs on this SHARED tail, not on the two ChipInstallScreen row handlers: it is the one
-	# point BOTH install paths reach, and it is reached only AFTER the charge cleared — so every refusal (broke,
-	# not held, out of stock, unresolvable ability) stays silent with no second gate to keep in sync. The only
-	# way in is a ChipInstallScreen row press, whose auto-wired generic click is muted there (set_button_sound
+	# point BOTH install paths reach, and it is reached only AFTER the charge cleared. The REFUSAL half of the
+	# pair is cued by ChipInstallScreen._install/_buy at the one place this installer's bool comes back — the
+	# split across two files is deliberate (see the note on _install there): duplicating the commit at the screen
+	# would double it, and duplicating the refusal here would mean four `return false` sites to keep in sync. The
+	# only way in is a ChipInstallScreen row press, whose auto-wired generic click is muted there (set_button_sound
 	# &"") so one install sounds exactly once.
 	MenuStyle.play_commit()
 

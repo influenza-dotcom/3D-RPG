@@ -1052,7 +1052,9 @@ static func heal_status(hp: int, max_hp: int, limb_damaged: bool, money: float, 
 	return TextFormat.subst(template, {"hp": hp, "max_hp": max_hp, "amount": Zorkmids.fmt(money)})
 
 
-static func heal_button(cost: int) -> String:
+## `cost` is a float because HealScreen paints the ALL-IN charge_total (the rail's service charge can land on
+## a fraction), not the healer's integer sticker price; fmt inside money_text still prints whole amounts bare.
+static func heal_button(cost: float) -> String:
 	return TextFormat.subst("[PH] Heal  —  {money}", {"money": Zorkmids.money_text(cost)})
 
 

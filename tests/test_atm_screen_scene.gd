@@ -93,11 +93,13 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 
 func test_every_authored_button_is_reachable_by_a_pad() -> void:
 	# ⭐THE HALF OF CONTROLLER PARITY THAT LIVES IN THE SCENE, and the exact state this screen shipped in: all four
-	# authored Buttons carried `focus_mode = 0`. That is the right call on HealScreen (a mouse-driven two-button
-	# dialog) and the wrong one here, because this card's other input is a LineEdit — with every Button refusing
-	# focus there is no focus owner to navigate FROM, so a pad player cannot deposit, withdraw, flip the rail, or
-	# even close. Asserted on the instance rather than by grepping the .tscn, so it reads the value that will
-	# actually exist at runtime (Button's own default is FOCUS_ALL — the regression is an authored override).
+	# authored Buttons carried `focus_mode = 0`. That is the right call on a keyboard-first dialog (NameEntryDialog
+	# keeps the keyboard in its field) and the wrong one here, because this card's other input is a LineEdit — with
+	# every Button refusing focus there is no focus owner to navigate FROM, so a pad player cannot deposit,
+	# withdraw, flip the rail, or even close. The station screens (heal / respec / shop chrome) now hold the same
+	# rule, each pinned in its own scene test. Asserted on the instance rather than by grepping the .tscn, so it
+	# reads the value that will actually exist at runtime (Button's own default is FOCUS_ALL — the regression is
+	# an authored override).
 	var inst: Node = (load(SCENE) as PackedScene).instantiate()
 	for b in ["RailButton", "DepositButton", "WithdrawButton", "CloseButton"]:
 		var btn := inst.get_node("%" + b) as Button

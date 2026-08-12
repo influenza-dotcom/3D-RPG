@@ -27,6 +27,7 @@ var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; rail_changed drives 
 var _money_player: Label       ## your wallet — the header readout
 var _carried_list: VBoxContainer
 var _stock_list: VBoxContainer
+var _first_focus: Button = null  ## first install row built by the LAST _rebuild = the pad landing spot open_install seeds (never a stale ref — the fills re-record it each rebuild, and the old rows are freed)
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
@@ -74,6 +75,17 @@ func open_install(installer: Node, player: Node) -> void:
 	_title.text = MenuStyle.title_text(PlayerText.install_title(nm))
 	_rebuild()
 	_root.visible = true
+	# Seed pad/keyboard focus on the first install row (the OptionsMenu `_first_focus` / SaveLoadScreen / AtmScreen
+	# idiom; atm_screen.gd's ⭐CONTROLLER PARITY header carries the full argument) — AFTER the card is visible,
+	# since grab_focus on a hidden Control does nothing. _rebuild above just re-recorded the landing spot; a
+	# disabled first row (can't afford it) still HOLDS focus, so ui navigation starts there either way. When the
+	# card has NO rows at all (nothing carried, nothing stocked — both lists hold hint Labels), the rail selector
+	# is the one authored Button left and takes the seed instead: without a focus owner, navigation has nowhere
+	# to start and every control on the card is pad-unreachable (the atm_screen must-not-recur rule).
+	if is_instance_valid(_first_focus):
+		_first_focus.grab_focus()
+	elif is_instance_valid(_rail_btn):
+		_rail_btn.grab_focus()
 	opened.emit()
 
 ## Guard failed: we never opened, but a dialogue-hosted open (DialogueManager._suspend_for_menu) suspended the
@@ -127,14 +139,21 @@ func _unhandled_input(event: InputEvent) -> void:
 # ---------------------------------------------------------------------------------------------------
 
 ## Install ONE carried `item` (ChipInstaller.install_carried gates on chip / not-installed / held / wallet).
+## SOUND: the SUCCESS cue lives on ChipInstaller._grant (the shared tail both transaction paths reach, past
+## the charge), so only the REFUSAL is cued here — at the one place the installer's bool actually comes back.
+## Splitting the pair across two files is deliberate: duplicating the commit here would double it, and
+## duplicating the refusal into the installer would mean four `return false` sites to keep in sync.
 func _install(item: Item) -> void:
 	if is_instance_valid(_installer) and is_instance_valid(_player):
-		_installer.install_carried(item, _player)  # the bound signals -> _rebuild refreshes the lists + wallet
+		if not _installer.install_carried(item, _player):  # the bound signals -> _rebuild refreshes the lists + wallet
+			MenuStyle.play_denied()
 
 ## Buy & install ONE stocked `item` (ChipInstaller.buy_and_install gates on chip / not-installed / stock / wallet).
+## Refusal cued here for the same reason as _install's — see its note.
 func _buy(item: Item) -> void:
 	if is_instance_valid(_installer) and is_instance_valid(_player):
-		_installer.buy_and_install(item, _player)
+		if not _installer.buy_and_install(item, _player):
+			MenuStyle.play_denied()
 
 func _rebuild() -> void:
 	if not is_instance_valid(_installer) or not is_instance_valid(_player):
@@ -143,8 +162,18 @@ func _rebuild() -> void:
 		_rail_btn.refresh()  # the rail may have been flipped at an ATM since this screen was built
 	_money_player.text = PlayerText.wallet_you(_player.money)
 	_money_player.add_theme_color_override(&"font_color", MenuStyle.wallet_color(_player.money))  # gold, or danger while in debt
+	_first_focus = null  # the fills below re-record it; holding the OLD first row would hand open_install a queue_freed Button
 	_fill(_carried_list, _installer.installable_carried(_player), false)  # your chips -> INSTALL (fee)
 	_fill(_stock_list, _installer.installable_stock(_player), true)       # shelf -> BUY & INSTALL
+	# Re-seed the pad landing spot when THIS rebuild just destroyed it (the level_up_screen idiom): every
+	# install / buy / rail flip funnels here and queue_frees the row that HELD focus, which would strand a pad
+	# after one action. Only a DYING owner is stolen from — a player parked on the rail selector keeps their
+	# place. The open-time rebuild lands here with the root still hidden, where grab_focus is a silent no-op —
+	# open_install seeds again right after showing it.
+	if _is_open and _root.is_inside_tree() and is_instance_valid(_first_focus):
+		var focus_owner: Control = _root.get_viewport().gui_get_focus_owner()
+		if focus_owner == null or _carried_list.is_ancestor_of(focus_owner) or _stock_list.is_ancestor_of(focus_owner):
+			_first_focus.grab_focus()
 
 ## The mechanic's stock inventory, type-guarded (a vanished / non-ChipInstaller node reads as null).
 func _installer_stock() -> CharacterInventory:
@@ -167,13 +196,20 @@ func _fill(list: VBoxContainer, chips: Array, is_buy: bool) -> void:
 			continue
 		var price: int = _installer.buy_and_install_cost(it) if is_buy else _installer.install_fee(it)
 		var affordable := price > 0 and _player.can_pay(float(price))  # the SAME predicate ChipInstaller gates on
-		list.add_child(_make_row(it, price, affordable, is_buy))
+		var row_btn := _make_row(it, price, affordable, is_buy)
+		list.add_child(row_btn)
+		if _first_focus == null:
+			_first_focus = row_btn  # first row of the first non-empty list (carried fills before stock) = the pad landing spot
 
 ## One install row: a full-width Button carrying an HBox of two Labels — the chip name on the left (trims with
-## "…" when long) and the PRICE as its own right-aligned column. Mirrors ShopScreen._make_row.
+## "…" when long) and the PRICE as its own right-aligned column. Mirrors ShopScreen._make_row. `price` is the
+## BASE fee from the installer; the column paints the armed rail's ALL-IN total (see the paint-site note).
 func _make_row(item: Item, price: int, affordable: bool, is_buy: bool) -> Button:
 	var btn := MenuStyle.size_row_button(Button.new())  # empty-text button: without the pin its rect (selection bar + hitbox) collapses above the labels
-	btn.focus_mode = Control.FOCUS_NONE
+	# FOCUS_ALL, NOT the FOCUS_NONE these rows shipped with (the atm_screen _add_chip lesson): the rows ARE the
+	# pad path — with them and the rail selector all refusing focus, ui navigation had no owner to start from and
+	# every action on this card was pad-unreachable. open_install seeds focus on the first row built (_first_focus).
+	btn.focus_mode = Control.FOCUS_ALL
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.disabled = not affordable
 	var sb: StyleBox = MenuStyle.theme.get_stylebox(&"normal", &"Button")
@@ -193,7 +229,11 @@ func _make_row(item: Item, price: int, affordable: bool, is_buy: bool) -> Button
 	name_l.add_theme_color_override(&"font_color", MenuStyle.text_color() if affordable else MenuStyle.skin.disabled_text_color)
 	row.add_child(name_l)
 	var price_l := Label.new()
-	price_l.text = Zorkmids.money_text(float(price))  # the whole money phrase — the "zm" word lives in Zorkmids.MONEY_TEMPLATE
+	# Paint the ALL-IN number (ShopScreen parity): a ledger-funded install carries the account's service charge,
+	# so the sticker price alone would under-quote what actually leaves the player. ChipInstaller charges via
+	# player.charge(), which re-derives this same charge_total — the label and the till can never disagree. Note
+	# can_pay above still takes the BASE price (it applies the fee itself; feeding it the total would fee the fee).
+	price_l.text = Zorkmids.money_text(_player.charge_total(float(price)))  # the whole money phrase — the "zm" word lives in Zorkmids.MONEY_TEMPLATE
 	price_l.size_flags_horizontal = Control.SIZE_SHRINK_END
 	price_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	price_l.custom_minimum_size.x = float(MenuStyle.skin.price_col_width)  # fixed-ish floor -> every row's price lands in one aligned column (skin budget, shared with ShopScreen)

@@ -6,13 +6,19 @@ extends GutTest
 ## on top. These pin the silent-when-broken seams: the autoload points at the SCENE, every %node the
 ## script binds exists, no text is authored in the scene (strings belong to PlayerText / l10n, never a
 ## .tscn), and the screen-specific layout discipline (PANEL_MARGIN band, edge-pinned header halves,
-## scroll-with-centered-body) survives the conversion. Behaviour (open/pause/level-up) is in-tree -> playtest.
+## scroll-with-centered-body) survives the conversion. Behaviour (open/level-up) is in-tree -> playtest.
+##
+## ⭐AND IT PINS CONTROLLER PARITY (the atm_screen must-not-recur rule, both halves): the authored RailButton
+## must NOT carry `focus_mode = 0`, the code-built stat/perk rows must set FOCUS_ALL, and open_level_up must
+## SEED focus on the first row once the panel is visible — with no focus owner, ui navigation has nowhere to
+## start and every row on the panel is pad-unreachable.
 
 const SCENE := "res://scenes/ui/level_up_screen.tscn"
+const SCREEN_SOURCE := "res://scripts/ui/level_up_screen.gd"
 
 ## Every unique name level_up_screen.gd binds in _bind_ui — a rename in the editor breaks the bind at boot,
 ## so pin the roster here where it fails loudly instead.
-const BOUND := ["Root", "Dim", "VBox", "Title", "Header", "LevelLabel", "MoneyLabel", "Body", "Rows", "Perks"]
+const BOUND := ["Root", "Dim", "VBox", "Title", "Header", "LevelLabel", "MoneyLabel", "RailButton", "Body", "Rows", "Perks"]
 
 
 func test_autoload_is_the_authored_scene() -> void:
@@ -91,3 +97,49 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 		assert_eq((inst.get_node("%" + n) as VBoxContainer).get_child_count(), 0,
 			"%s ships empty (rows are built at runtime from the station/player)" % n)
 	inst.free()
+
+
+func test_every_authored_button_is_reachable_by_a_pad() -> void:
+	# ⭐THE HALF OF CONTROLLER PARITY THAT LIVES IN THE SCENE (the test_atm_screen_scene.gd pin, and the exact
+	# regression class that screen once shipped): the one authored Button here — the rail selector — must NOT
+	# carry `focus_mode = 0`; Button's own default FOCUS_ALL is what a pad navigates onto, so the regression is
+	# always an authored override. Every OTHER action on this panel is a code-built row (_rebuild / _perk_row —
+	# the runtime half below pins those), so an unfocusable rail selector would leave the scene authoring zero
+	# focusable controls. Asserted on the instance rather than by grepping the .tscn, so it reads the value
+	# that will actually exist at runtime.
+	var inst: Node = (load(SCENE) as PackedScene).instantiate()
+	var btn := inst.get_node("%RailButton") as Button
+	assert_eq(btn.focus_mode, Control.FOCUS_ALL,
+		"RailButton must take focus (no `focus_mode = 0` in the .tscn) — it is this panel's only authored Button and the pad's fallback landing spot")
+	inst.free()
+
+
+func test_the_pad_landing_spot_is_seeded_when_the_panel_opens() -> void:
+	# The other half of parity is RUNTIME (rows built in _rebuild, focus grabbed in open_level_up on a live
+	# viewport), which a unit test must not run — this autoload's _ready binds real chrome and open_level_up
+	# wants a live LevelUp station and Player. So it is pinned by SOURCE, the test_atm_screen_scene.gd /
+	# test_payment_rail_selector.gd idiom.
+	#
+	# Every offset below is guarded before it is sliced or compared: find() answers -1 for a needle that has
+	# been renamed away and a bad substr yields "", over which a contains() check quietly reads as "absent" — a
+	# pin that retires itself in silence is worse than no pin.
+	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
+	assert_gt(src.length(), 0, "level_up_screen.gd must be readable")
+	assert_true(src.contains("btn.focus_mode = Control.FOCUS_ALL"),
+		"_rebuild/_perk_row must build the rows FOCUS_ALL — the rows ARE the pad path, and a control a pad can never land on is not a path")
+	assert_true(src.contains("_first_focus = btn"),
+		"the first stat row built must be recorded as the screen's landing spot")
+	var open_at := src.find("func open_level_up(")
+	assert_gt(open_at, -1, "func open_level_up( no longer present — the pin is stale")
+	assert_eq(src.rfind("func open_level_up("), open_at,
+		"open_level_up must be defined exactly ONCE, or the body sliced below is not the one that runs")
+	var open_end := src.find("\nfunc ", open_at + 1)
+	assert_gt(open_end, open_at, "open_level_up's body must end at the next function — the pin is stale")
+	var body := src.substr(open_at, open_end - open_at)
+	var shown := body.find("_root.visible = true")
+	assert_gt(shown, -1, "_root.visible = true no longer present in open_level_up — the pin is stale")
+	var grabbed := body.find("_first_focus.grab_focus()")
+	assert_gt(grabbed, -1,
+		"open_level_up must SEED focus on the first stat row — with no focus owner, ui navigation has nowhere to start and every row is unreachable")
+	assert_gt(grabbed, shown,
+		"and it must grab AFTER the panel is shown — grab_focus on a hidden Control does nothing, so seeding first would leave the pad with no owner anyway")

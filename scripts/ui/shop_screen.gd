@@ -111,6 +111,19 @@ func open_shop(merchant: Node, player: Node) -> void:
 	_title.text = MenuStyle.title_text(PlayerText.shop_title(nm))
 	_rebuild()
 	_root.visible = true
+	# Seed pad/keyboard focus on the rail selector (the OptionsMenu `_first_focus` / SaveLoadScreen / AtmScreen /
+	# HealScreen idiom) — AFTER the root shows, since grab_focus on a hidden Control does nothing. HONEST SPLIT:
+	# only the button CHROME (Rail / Sort) is pad-reachable here — the buy/sell surface itself is the two
+	# GridInventoryViews, which are deliberately mouse-driven (FOCUS_NONE in grid_inventory_view.gd _ready) —
+	# so FULL pad parity on this screen waits on a pad-navigation design for the grids. Seeding the chrome is
+	# still owed: the atm_screen must-not-recur rule is that no BUTTON may be pad-unreachable, and with no focus
+	# owner ui navigation has nowhere to start from. Rail first (it re-prices every deal), but a cash-only
+	# merchant HIDES it (_rebuild's set_available(false), already run above) and grab_focus on a hidden Control
+	# is the same silent no-op — so fall back to Sort, which every shop shows.
+	if is_instance_valid(_rail_btn) and _rail_btn.visible:
+		_rail_btn.grab_focus()
+	elif is_instance_valid(_sort_btn):
+		_sort_btn.grab_focus()
 	opened.emit()
 
 ## Guard failed: we never opened, but a dialogue-hosted open (DialogueManager._suspend_for_menu) suspended the
@@ -167,24 +180,31 @@ func _unhandled_input(event: InputEvent) -> void:
 # ---------------------------------------------------------------------------------------------------
 
 ## Buy ONE `item` from the merchant (Merchant.buy gates on stock / price / the player's wallet).
-## SOUND: the commit cue is gated on Merchant.buy's OWN bool, so a refused sale (out of stock, can't afford,
-## backpack full) stays silent — there is no denied clip in the set, and reusing the back cue for failure would
-## collide with "back". Cueing here rather than at the call sites covers BOTH routes (tile click and cross-grid
-## drag) with one seam, mirroring how this method is already the single price/till gate for both.
+## SOUND: BOTH branches speak. The commit cue is gated on Merchant.buy's OWN bool; the false branch — out of
+## stock, can't afford, backpack full — takes the denial cue. It used to take nothing at all, which made a
+## refused purchase indistinguishable from a dead button (the affordability line in the footer was the only
+## feedback, and it isn't where the eye is during a drag). Cueing here rather than at the call sites covers
+## BOTH routes (tile click and cross-grid drag) with one seam, mirroring how this method is already the single
+## price/till gate for both.
 func _buy(item: Item) -> void:
 	if is_instance_valid(_merchant) and is_instance_valid(_player):
 		# No double-sound risk: a grid tile is a plain Control (GridInventoryView draws its own cells and
 		# handles input at the view level), so nothing here carries the auto-wired BaseButton click.
 		if _merchant.buy(item, _player):  # inventories' `changed` -> _rebuild refreshes the columns + wallets
 			MenuStyle.play_commit()
+		else:
+			MenuStyle.play_denied()
 
 ## Sell ONE `item` to the merchant (Merchant.sell gates on the player holding it / price / the till).
-## Commit cue gated exactly as _buy's: sell returns false when the till can't cover the price or the shelf has
-## no room (it transfers before it pays), and a trade that never happened must not sound like one that did.
+## Both cues gated exactly as _buy's: sell returns false when the till can't cover the price or the shelf has
+## no room (it transfers before it pays), and a trade that never happened must not sound like one that did —
+## but it must still sound like SOMETHING, or a broke merchant reads as a broken screen.
 func _sell(item: Item) -> void:
 	if is_instance_valid(_merchant) and is_instance_valid(_player):
 		if _merchant.sell(item, _player):
 			MenuStyle.play_commit()
+		else:
+			MenuStyle.play_denied()
 
 func _rebuild() -> void:
 	if not is_instance_valid(_merchant) or not is_instance_valid(_player) or _player.inventory == null:

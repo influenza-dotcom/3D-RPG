@@ -5,15 +5,16 @@ extends GutTest
 ## designer/artist edits; the script binds chrome by %unique name and applies the skin-driven look on top.
 ## These are prefab WIRING contract tests (the silent-when-broken seams): the autoload points at the SCENE,
 ## every %node the script binds exists, no text is authored in the scene (strings belong to PlayerText /
-## l10n, never a .tscn), and the shop's own layout discipline holds. Behaviour (open/pause/buy/sell) stays
-## covered by test_merchant.gd's in-tree cases + playtest.
+## l10n, never a .tscn), and the shop's own layout discipline holds. Behaviour (open/buy/sell, and the
+## real-time posture) stays covered by test_merchant.gd's in-tree cases + playtest.
 
 const SCENE := "res://scenes/ui/shop_screen.tscn"
+const SCREEN_SOURCE := "res://scripts/ui/shop_screen.gd"
 
 ## Every unique name shop_screen.gd binds in _bind_ui — a rename in the editor breaks the bind at boot,
 ## so pin the roster here where it fails loudly instead.
 const BOUND := [
-	"Root", "Dim", "VBox", "TitleSpacer", "Title", "SortButton",
+	"Root", "Dim", "VBox", "TitleSpacer", "Title", "SortButton", "RailButton",
 	"Columns", "StockColumn", "StockWallet", "StockScroll",
 	"PlayerColumn", "PlayerWallet", "PlayerScroll", "Footer", "Detail",
 ]
@@ -57,7 +58,8 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 	# The shop's own layout discipline survives the scene conversion:
 	#  * root/dim span the screen; the panel keeps the 0.12 anchor band (the design-canvas geometry every
 	#    cell-size number in _bind_ui's comments is derived from);
-	#  * the Sort button clips + right-aligns and takes no focus (its FIXED width is a skin budget, code-set);
+	#  * the Sort button clips + right-aligns (its FIXED width is a skin budget, code-set; focus is pinned
+	#    separately below — the pad-parity contract);
 	#  * the two columns EXPAND_FILL side-by-side, each scroll slot expands with horizontal scroll DISABLED
 	#    (the too-short-window fallback must never scroll sideways);
 	#  * the wallet headings trim with "…" instead of widening their column (no-shift rule);
@@ -77,7 +79,6 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 	var sort_btn := inst.get_node("%SortButton") as Button
 	assert_true(sort_btn.clip_text, "the Sort button clips its caption (fixed footprint as the mode cycles)")
 	assert_eq(sort_btn.alignment, HORIZONTAL_ALIGNMENT_RIGHT, "the Sort caption right-aligns against the panel edge")
-	assert_eq(sort_btn.focus_mode, Control.FOCUS_NONE, "the Sort button takes no focus (mouse-driven screen)")
 	assert_eq((inst.get_node("%Title") as Control).size_flags_horizontal, Control.SIZE_EXPAND_FILL,
 		"the title expands between its two fixed flanks (optical centring)")
 	assert_eq((inst.get_node("%Columns") as Control).size_flags_vertical, Control.SIZE_EXPAND_FILL,
@@ -100,3 +101,48 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 	assert_eq(detail.autowrap_mode, TextServer.AUTOWRAP_WORD_SMART, "the detail line wraps within the footer")
 	assert_eq(detail.anchor_right, 1.0, "the detail label fills the clip footer (anchor_right)")
 	inst.free()
+
+
+func test_every_authored_button_is_reachable_by_a_pad() -> void:
+	# ⭐THE HALF OF CONTROLLER PARITY THAT LIVES IN THE SCENE (the test_atm_screen_scene.gd pin, and the exact
+	# state that screen once shipped in): the authored chrome Buttons must NOT carry `focus_mode = 0` — Button's
+	# own default FOCUS_ALL is what a pad navigates onto, so the regression is always an authored override.
+	# HONEST SPLIT: this pins the CHROME only. The buy/sell surface is the two GridInventoryViews, which are
+	# deliberately mouse-driven (FOCUS_NONE in grid_inventory_view.gd _ready — test_loot_drop pins that side),
+	# so this test does NOT claim the shop is fully pad-playable; it claims no BUTTON is pad-unreachable, which
+	# is the atm must-not-recur rule. Asserted on the instance rather than by grepping the .tscn, so it reads
+	# the value that will actually exist at runtime.
+	var inst: Node = (load(SCENE) as PackedScene).instantiate()
+	for b in ["SortButton", "RailButton"]:
+		var btn := inst.get_node("%" + b) as Button
+		assert_eq(btn.focus_mode, Control.FOCUS_ALL,
+			"%s must take focus (no `focus_mode = 0` in the .tscn) — a pad reaches this screen's chrome through the Buttons alone" % b)
+	inst.free()
+
+
+func test_the_pad_landing_spot_is_seeded_when_the_shop_opens() -> void:
+	# The other half of parity is RUNTIME (focus grabbed in open_shop on a live viewport), which a unit test
+	# must not run — this autoload's _ready binds real chrome and open_shop wants a live Merchant and Player.
+	# So it is pinned by SOURCE, the test_atm_screen_scene.gd / test_payment_rail_selector.gd idiom.
+	#
+	# Every offset below is guarded before it is sliced or compared: find() answers -1 for a needle that has
+	# been renamed away and a bad substr yields "", over which a contains() check quietly reads as "absent" — a
+	# pin that retires itself in silence is worse than no pin.
+	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
+	assert_gt(src.length(), 0, "shop_screen.gd must be readable")
+	var open_at := src.find("func open_shop(")
+	assert_gt(open_at, -1, "func open_shop( no longer present — the pin is stale")
+	assert_eq(src.rfind("func open_shop("), open_at,
+		"open_shop must be defined exactly ONCE, or the body sliced below is not the one that runs")
+	var open_end := src.find("\nfunc ", open_at + 1)
+	assert_gt(open_end, open_at, "open_shop's body must end at the next function — the pin is stale")
+	var body := src.substr(open_at, open_end - open_at)
+	var shown := body.find("_root.visible = true")
+	assert_gt(shown, -1, "_root.visible = true no longer present in open_shop — the pin is stale")
+	var grabbed := body.find("_rail_btn.grab_focus()")
+	assert_gt(grabbed, -1,
+		"open_shop must SEED focus on the rail selector — with no focus owner, ui navigation has nowhere to start and every chrome button is pad-unreachable")
+	assert_gt(grabbed, shown,
+		"and it must grab AFTER the root is shown — grab_focus on a hidden Control does nothing, so seeding first would leave the pad with no owner anyway")
+	assert_gt(body.find("_sort_btn.grab_focus()"), grabbed,
+		"and a cash-only merchant (rail selector hidden by _rebuild) must fall back to seeding Sort — a hidden Control's grab_focus is a silent no-op, so rail-only seeding strands exactly those shops")

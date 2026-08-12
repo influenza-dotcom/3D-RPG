@@ -5,13 +5,20 @@ extends GutTest
 ## seams): the autoload points at the SCENE, every %node the script binds exists, no text is authored in the
 ## scene (strings belong to PlayerText / l10n, never a .tscn), and the screen-specific layout discipline
 ## (PANEL_MARGIN band, twin expanding section scrolls, right-aligned wallet) survives the conversion.
-## Behaviour (open/pause/install/buy) is in-tree -> playtest + test_chip_install.gd.
+## Behaviour (open/install/buy) is in-tree -> playtest + test_chip_install.gd.
+##
+## ⭐AND IT PINS CONTROLLER PARITY (the test_atm_screen_scene pair), which this screen shipped without: the
+## authored rail selector carried `focus_mode = 0` and _make_row stripped every runtime row to FOCUS_NONE, so
+## the card had NO focusable control at all — ui navigation had nowhere to start and a pad player could not
+## install, buy, flip the rail, or reach anything. The scene half and the runtime half are pinned separately
+## below.
 
 const SCENE := "res://scenes/ui/chip_install_screen.tscn"
+const SCREEN_SOURCE := "res://scripts/ui/chip_install_screen.gd"
 
 ## Every unique name chip_install_screen.gd binds in _bind_ui — a rename in the editor breaks the bind at
 ## boot, so pin the roster here where it fails loudly instead.
-const BOUND := ["Root", "Dim", "Content", "Title", "MoneyInset", "MoneyPlayer",
+const BOUND := ["Root", "Dim", "Content", "Title", "MoneyInset", "MoneyPlayer", "RailButton",
 	"CarriedInset", "CarriedHeading", "CarriedList", "StockInset", "StockHeading", "StockList"]
 
 
@@ -60,7 +67,7 @@ func test_authored_chrome_keeps_the_layout_contracts() -> void:
 		assert_eq(c.anchor_bottom, 1.0, "%s spans the screen (anchor_bottom)" % full)
 	assert_false((inst.get_node("%Root") as Control).visible, "the screen ships hidden until open_install")
 	# The modal inset band — authored anchors must match the script's PANEL_MARGIN pin.
-	var margin: float = load("res://scripts/ui/chip_install_screen.gd").PANEL_MARGIN
+	var margin: float = load(SCREEN_SOURCE).PANEL_MARGIN
 	var panel := (inst.get_node("%Content") as Control).get_parent() as PanelContainer
 	assert_not_null(panel, "%Content sits in the anchored PanelContainer band")
 	assert_almost_eq(panel.anchor_left, margin, 0.0001, "Panel's left anchor is the shared PANEL_MARGIN inset")
@@ -83,3 +90,48 @@ func test_authored_chrome_keeps_the_layout_contracts() -> void:
 	assert_eq(money.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "the wallet readout spans the row to reach that edge")
 	assert_true(inst.get_node("%MoneyInset") is MarginContainer, "the wallet rides a row-inset MarginContainer (margins applied at runtime from the theme)")
 	inst.free()
+
+
+func test_every_authored_button_is_reachable_by_a_pad() -> void:
+	# ⭐THE HALF OF CONTROLLER PARITY THAT LIVES IN THE SCENE (the test_atm_screen_scene pin, same argument): the
+	# rail selector is this screen's ONE authored Button, and it shipped `focus_mode = 0` — combined with the
+	# focus-stripped runtime rows, the card had no focus owner to navigate FROM. Asserted on the instance rather
+	# than by grepping the .tscn, so it reads the value that will actually exist at runtime (Button's own default
+	# is FOCUS_ALL — the regression is an authored override).
+	var inst: Node = (load(SCENE) as PackedScene).instantiate()
+	var btn := inst.get_node("%RailButton") as Button
+	assert_eq(btn.focus_mode, Control.FOCUS_ALL,
+		"RailButton must take focus (no `focus_mode = 0` in the .tscn) — a pad reaches this screen's actions through the Buttons alone")
+	inst.free()
+
+
+func test_the_pad_landing_spot_is_seeded_when_the_card_opens() -> void:
+	# The other half of parity is RUNTIME (rows built in _fill/_make_row, focus grabbed in open_install on a live
+	# viewport), which a unit test must not run — this autoload's _ready binds real chrome and open_install wants
+	# a live ChipInstaller and Player. So it is pinned by SOURCE, the tests/test_payment_rail_selector.gd idiom.
+	#
+	# Every offset below is guarded before it is sliced or compared: find() answers -1 for a needle that has been
+	# renamed away and a bad substr yields "", over which a contains() check quietly reads as "absent" — a pin
+	# that retires itself in silence is worse than no pin.
+	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
+	assert_gt(src.length(), 0, "chip_install_screen.gd must be readable")
+	assert_true(src.contains("btn.focus_mode = Control.FOCUS_ALL"),
+		"_make_row must build the install rows FOCUS_ALL — the rows ARE the pad path, and a control a pad can never land on is not a path")
+	assert_true(src.contains("_first_focus = row_btn"),
+		"the first row built must be recorded as the screen's landing spot (re-recorded every _rebuild — the old rows are freed)")
+	var open_at := src.find("func open_install(")
+	assert_gt(open_at, -1, "func open_install( no longer present — the pin is stale")
+	assert_eq(src.rfind("func open_install("), open_at,
+		"open_install must be defined exactly ONCE, or the body sliced below is not the one that runs")
+	var open_end := src.find("\nfunc ", open_at + 1)
+	assert_gt(open_end, open_at, "open_install's body must end at the next function — the pin is stale")
+	var body := src.substr(open_at, open_end - open_at)
+	var shown := body.find("_root.visible = true")
+	assert_gt(shown, -1, "_root.visible = true no longer present in open_install — the pin is stale")
+	var grabbed := body.find("_first_focus.grab_focus()")
+	assert_gt(grabbed, -1,
+		"open_install must SEED focus on the first install row — with no focus owner, ui navigation has nowhere to start and every control is pad-unreachable")
+	assert_gt(grabbed, shown,
+		"and it must grab AFTER the card is shown — grab_focus on a hidden Control does nothing, so seeding first would leave the pad with no owner anyway")
+	assert_true(body.contains("_rail_btn.grab_focus()"),
+		"and when the mechanic offers NOTHING (both lists empty — hint Labels only), the rail selector — the one authored Button — must take the seed instead")

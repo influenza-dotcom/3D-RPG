@@ -129,12 +129,17 @@ func pickpocket(npc: Node, player: Node) -> void:
 ## EXCHANGE GEAR with a FOLLOWING ALLY (the "Exchange Gear" dialogue option, offered only to companions
 ## actively following you — the gate lives in DialogueManager._speaker_exchange_npc): the same two-way
 ## transfer screen, no sneaking required — equipment only (no wallet button; robbing a friend's cash isn't
-## "exchanging"), and what you GIVE is capped by their carry capacity.
+## "exchanging"), and what you GIVE is capped by their carry capacity. This is the screen's one dialogue-HOSTED
+## entry (DialogueManager._suspend_for_menu suspends the conversation on our `closed` one-shot BEFORE calling
+## us), so EVERY refuse path — here and in the shared _open below — emits `closed` via _refuse_open; a silent
+## bail would strand the conversation suspended forever (box hidden, tree paused, soft-lock, no error).
 func exchange(npc: Node, player: Node) -> void:
 	if not is_instance_valid(npc):
+		_refuse_open()
 		return
 	var inv: Variant = npc.get(&"inventory")
 	if not (inv is CharacterInventory):
+		_refuse_open()
 		return
 	var name_v: Variant = npc.get(&"display_name")
 	var nm: String = name_v if name_v is String else ""
@@ -159,16 +164,22 @@ func open_container(container: Node, player: Node) -> void:
 	_open(inv, null, player, who, PlayerText.LOOT_CONTAINER_HEADING, null, null, false, true, null, WALLET_TILE)
 
 ## Shared open: bind the source + player inventories, free the mouse, show the title + columns. Refuses to
-## stack over another modal / dialogue, and bails on no source / no player.
+## stack over another modal / dialogue, and bails on no source / no player. EVERY refuse path emits `closed`
+## (via _refuse_open) so a dialogue-hosted open (the gear exchange) that suspended the conversation on our
+## `closed` one-shot is never stranded; on the standalone opens (corpse / pickpocket / container) nothing
+## listens, so the emit is a harmless no-op (see _refuse_open below).
 func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, title: String, source_heading: String, money_source: Node = null, capacity_owner: Node = null, lock_equipped: bool = false, container_source: bool = false, pickpocket_target: Node = null, wallet_mode: int = WALLET_NONE) -> void:
 	# Refuse to stack over another modal / dialogue — derives from the shared InputManager registry (the old inline
 	# list omitted Stats/Reputation/Journal/ChipInstall/Chess); any_modal_open(self) excludes this screen. T1.
 	if _is_open or DialogueManager.is_active() or InputManager.any_modal_open(self):
+		_refuse_open()
 		return
 	if source_inv == null:
+		_refuse_open()
 		return
 	_player = player as Player
 	if not is_instance_valid(_player) or _player.inventory == null:
+		_refuse_open()
 		return
 	_source_inv = source_inv
 	_free_when_empty = free_when_empty
@@ -216,6 +227,14 @@ func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, 
 	_rebuild()
 	_root.visible = true
 	opened.emit()
+
+## Guard failed: we never opened, but a dialogue-hosted open (DialogueManager._suspend_for_menu — the gear
+## EXCHANGE option) suspended the conversation on our `closed` one-shot BEFORE calling us. Emit `closed` so
+## _resume_from_menu re-shows the box; on the standalone paths (LootableCorpse / Talkable / Container
+## start_talk) nothing is listening, so it is harmless. Do NOT touch mouse/_is_open here — none of that was
+## mutated yet.
+func _refuse_open() -> void:
+	closed.emit()
 
 func close() -> void:
 	if not _is_open:
@@ -292,6 +311,8 @@ func _take(item: Item) -> void:
 	# You can't lift the weapon a live NPC is actively HOLDING (pickpocket only — see _lock_equipped). Refuse the
 	# take with a hint; ammo, wallet, and everything else in their pockets is still fair game.
 	if _equipped_locked(item, _source_inv, _lock_equipped):
+		MenuStyle.play_denied()  # every player-facing refusal in this method says so out loud (the validity guard
+		# above is a wiring fault, not a refusal — silent by design; the caught path cues inside _on_pickpocket_caught)
 		if _player.has_method(&"notify_toast"):
 			_player.notify_toast(PlayerText.TOAST_CANT_LIFT_EQUIPPED, GameSettings.hud.rep_neutral_color)
 		return
@@ -304,6 +325,7 @@ func _take(item: Item) -> void:
 	if is_instance_valid(_pickpocket_target):
 		var sheet: CharacterStats = _player.stats_or_default() if _player.has_method(&"stats_or_default") else null
 		if not _pickpocket_can_lift(item, _source_inv.equipped_item, sheet, GameSettings.pickpocket):
+			MenuStyle.play_denied()
 			if _player.has_method(&"notify_toast"):
 				_player.notify_toast(PlayerText.TOAST_CANT_LIFT_EQUIPPED, GameSettings.hud.rep_neutral_color)
 			return
@@ -321,6 +343,7 @@ func _take(item: Item) -> void:
 	if item.id == Zorkmids.ITEM_ID:
 		var count := _source_inv.count_of(item)
 		if count <= 0:
+			MenuStyle.play_denied()  # an empty coin tile the grid is still rendering — a click on it did nothing
 			return
 		var amt := float(count) * Zorkmids.QUANTUM
 		_source_inv.remove(item, count)
@@ -335,10 +358,13 @@ func _take(item: Item) -> void:
 	var want := _source_inv.count_of(item)
 	var moved := _source_inv.transfer_to(_player.inventory, item, want)
 	# Gated on the moved COUNT, not the click: a bounded (Tetris) bag can refuse the WHOLE stack, and a transfer
-	# that moved nothing isn't an action — it stays silent (the toast below is its feedback). A grid tile is a
+	# that moved nothing isn't an action — it takes the denial cue, matching the toast below (which used to be its
+	# ONLY feedback). A PARTIAL take still reads as a take: something moved, so the confirm wins. A grid tile is a
 	# plain Control (GridInventoryView extends Control), so this is the only cue on the press — no double.
 	if moved > 0:
 		MenuStyle.play_select()
+	else:
+		MenuStyle.play_denied()
 	# A bounded (Tetris) bag may not fit everything — what didn't fit stays on the source (transfer_to rolls it
 	# back). Say so rather than letting the click look like it silently did nothing.
 	if moved < want and _player.has_method(&"notify_toast"):
@@ -441,9 +467,11 @@ func _deposit(item: Item) -> void:
 	# session — frozen on open, thawed on close — so planting cash on it just adds to that tile.)
 	if item.id == Zorkmids.ITEM_ID:
 		if _wallet_mode == WALLET_TILE:
-			_deposit_coins_to_source()
-		elif _player.has_method(&"notify_toast"):
-			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, GameSettings.hud.rep_neutral_color)
+			_deposit_coins_to_source()  # owns its own commit/denied pair
+		else:
+			MenuStyle.play_denied()  # a NONE-source exchange refuses cash outright
+			if _player.has_method(&"notify_toast"):
+				_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, GameSettings.hud.rep_neutral_color)
 		return
 	var count := _player.inventory.count_of(item)
 	if _capacity_owner != null and is_instance_valid(_capacity_owner):
@@ -453,6 +481,7 @@ func _deposit(item: Item) -> void:
 		if cap is float or cap is int:
 			count = _fits_under_capacity(item, count, _source_inv.total_weight(), float(cap))
 			if count <= 0:
+				MenuStyle.play_denied()
 				if _player.has_method(&"notify_toast"):
 					_player.notify_toast(PlayerText.TOAST_THEY_CANT_CARRY_MORE, GameSettings.hud.rep_neutral_color)
 				return
@@ -460,7 +489,9 @@ func _deposit(item: Item) -> void:
 	# which fires equipped_item_lost -> the player falls back to bare fists. No need to swap first.
 	var moved := _player.inventory.transfer_to(_source_inv, item, count)
 	if moved > 0:
-		MenuStyle.play_select()  # same moved>0 gate as _take — an all-refused deposit (no room over there) stays silent
+		MenuStyle.play_select()
+	else:
+		MenuStyle.play_denied()  # same moved>0 gate as _take — an all-refused deposit (no room over there) says no
 	# The source now has a spatial grid (T4) — it can run out of room. transfer_to rolls back what didn't fit;
 	# say so rather than letting a click look like it did nothing.
 	if moved < count and _player.has_method(&"notify_toast"):
@@ -482,24 +513,29 @@ func _deposit(item: Item) -> void:
 func _deposit_coins_to_source() -> void:
 	if not is_instance_valid(_player) or not is_instance_valid(_source_inv):
 		return
+	# All three early returns below are refusals — each says so, so an empty wallet / a full container never
+	# reads as a dead tile. Only the last line commits.
 	var amount := snappedf(maxf(0.0, _player.money), Zorkmids.QUANTUM)
 	if amount <= 0.0:
+		MenuStyle.play_denied()
 		if _player.has_method(&"notify_toast"):
 			_player.notify_toast(PlayerText.TOAST_NO_ZORKMIDS_TO_DEPOSIT, GameSettings.hud.rep_neutral_color)
 		return
 	var coin := ItemDb.item_by_id(Zorkmids.ITEM_ID)
 	if coin == null:  # zorkmids unregistered (shouldn't happen — the player wouldn't have a coin tile either)
+		MenuStyle.play_denied()
 		if _player.has_method(&"notify_toast"):
 			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, GameSettings.hud.rep_neutral_color)
 		return
 	var want := int(round(amount / Zorkmids.QUANTUM))
 	var added := _source_inv.add(coin, want)
 	if added <= 0:
+		MenuStyle.play_denied()
 		if _player.has_method(&"notify_toast"):
 			_player.notify_toast(PlayerText.TOAST_NO_ROOM_IN_THERE, GameSettings.hud.rep_neutral_color)
 		return
 	_player.add_money(-float(added) * Zorkmids.QUANTUM)  # debit only what fit; the rest stays in the wallet
-	MenuStyle.play_commit()  # HEAVY: cash leaving the wallet. Past the added<=0 return above, so a fully-refused stash stays silent
+	MenuStyle.play_commit()  # HEAVY: cash leaving the wallet. Past the added<=0 return above, so a fully-refused stash never gets here
 	if added < want and _player.has_method(&"notify_toast"):
 		_player.notify_toast(PlayerText.TOAST_DEPOSITED_WHAT_FIT, GameSettings.hud.rep_neutral_color)
 	_rebuild()
@@ -603,10 +639,13 @@ func _on_pickpocket_caught() -> void:
 	var player := _player
 	if is_instance_valid(player) and player.has_method(&"notify_toast"):
 		player.notify_toast(PlayerText.TOAST_CAUGHT, CBPalette.loss())  # failure feedback joins the colorblind-aware pair
-	# Getting caught DISMISSES the pockets, so the moment wears the back cue — then eat the ModalMenu close's own
-	# back (close -> restore_mouse) a frame later, which would otherwise double it. ORDER IS LOAD-BEARING:
-	# quiet_next_back eats the NEXT back, so the deliberate cue has to be played BEFORE the token is queued.
-	MenuStyle.play_back()
+	# Getting caught is the loudest FAILURE in the game's menus — a lift that not only didn't happen but turned
+	# the mark hostile — so it wears the denial cue, not the ordinary back it used to. (Back said "pockets
+	# closed", which is the same thing the player hears when they walk away clean; the two outcomes must not
+	# sound alike.) Then eat the ModalMenu close's own back (close -> restore_mouse) a frame later, which would
+	# otherwise follow it. ORDER IS LOAD-BEARING: quiet_next_back eats the NEXT back, so the deliberate cue has
+	# to be played BEFORE the token is queued.
+	MenuStyle.play_denied()
 	MenuStyle.quiet_next_back()
 	close()
 	if not is_instance_valid(target):

@@ -42,13 +42,18 @@ func is_open() -> bool:
 
 ## Open the confirm modal for `station`, respec-ing `player`. Refuses to stack over another modal / dialogue, and
 ## bails safely on an invalid station or no player. Nothing is charged or reversed until the player clicks Confirm.
+## EVERY refuse path emits `closed` (via _refuse_open) — the dialogue-suspend contract all the station screens
+## keep; see _refuse_open below for why a silent refuse is a soft-lock waiting to happen.
 func open_respec(station: Node, player: Node) -> void:
 	if _is_open or DialogueManager.is_active() or InputManager.any_modal_open(self):  # M5: refuse over ANY other menu (incl. QuestJournal)
+		_refuse_open()
 		return
 	if not is_instance_valid(station):
+		_refuse_open()
 		return
 	_player = player as Player
 	if not is_instance_valid(_player):
+		_refuse_open()
 		return
 	_station = station
 	_is_open = true
@@ -62,7 +67,25 @@ func open_respec(station: Node, player: Node) -> void:
 	_title.text = MenuStyle.title_text(PlayerText.respec_title(nm))
 	_refresh()
 	_root.visible = true
+	# Seed pad/keyboard focus on Confirm (the OptionsMenu `_first_focus` / SaveLoadScreen idiom; atm_screen.gd's
+	# ⭐CONTROLLER PARITY header carries the full argument) — AFTER the card is visible, since grab_focus on a
+	# hidden Control does nothing. Without a focus owner, ui navigation has nowhere to start and every button on
+	# the card is pad-unreachable. Confirm is the emphasized action, so it is the landing spot; when _refresh
+	# just disabled it (no perks / can't afford), a disabled Button still takes focus, so the pad simply steps
+	# off it to the rail selector or Cancel.
+	if is_instance_valid(_confirm_btn):
+		_confirm_btn.grab_focus()
 	opened.emit()
+
+## Guard failed: we never opened. Emit `closed` anyway — the dialogue-suspend contract (dialogue_manager.gd's
+## @risk header + atm_screen.gd line ~81 star it): a dialogue-hosted open suspends the conversation on our
+## `closed` one-shot BEFORE calling the open, so a refuse that returns silently strands it suspended forever
+## (box hidden, tree paused, soft-lock, no error). Today this screen's only caller is RespecStation.start_talk
+## (standalone — nothing listens, so the emit is a harmless no-op), which makes this the cheap insurance that
+## wiring a "Respec" dialogue option later can't soft-lock. Do NOT touch pause/mouse/_is_open here — none of
+## that was mutated yet.
+func _refuse_open() -> void:
+	closed.emit()
 
 func close() -> void:
 	if not _is_open:
@@ -86,13 +109,16 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_confirm_pressed() -> void:
 	if is_instance_valid(_station) and is_instance_valid(_player):
 		# do_respec returns the perk COUNT it actually refunded, so 0 is its "refused" answer (no perks / can't
-		# afford) and must stay silent. On a real wipe the commit is the cue that should be heard, so eat the
-		# back cue ModalMenu.restore_mouse is about to fire inside close() — otherwise the two stack a frame
-		# apart. A refusal deliberately KEEPS its back cue: with nothing committed, this is just a close.
+		# afford). EITHER verdict is the cue that should be heard, so both eat the back cue that
+		# ModalMenu.restore_mouse is about to fire inside close() — otherwise the two stack a frame apart. The
+		# refusal used to fall through to that back cue alone, which was a lie by omission: pressing Confirm and
+		# hearing the ordinary close sound reads as "done", not as "you can't afford this".
 		var refunded: int = _station.do_respec(_player)
 		if refunded > 0:
 			MenuStyle.play_commit()
-			MenuStyle.quiet_next_back()
+		else:
+			MenuStyle.play_denied()
+		MenuStyle.quiet_next_back()
 	close()
 
 ## Rebuild the refund preview: the perks that will be reversed, the cost, and the Confirm button's enabled state.
@@ -131,9 +157,14 @@ func _refresh() -> void:
 	# and duly succeeded. A FREE respec stays neutral even in debt: it's affordable by definition (RespecStation's
 	# zero-cost short-circuit).
 	var cant := cost > 0.0 and not _player.can_pay(cost)  # the SAME predicate RespecStation.do_respec gates on
+	# Paint the ALL-IN number (shop-screen parity): do_respec debits through charge(), so a ledger-funded respec
+	# carries the account's service charge and the sticker price alone would under-quote what actually leaves the
+	# player. charge_total re-derives it from the SAME split charge() draws on — and its base<=0 short-circuit
+	# keeps a FREE station quoting 0, so the free-for-debtors wording reads exactly as before.
+	var shown_cost := _player.charge_total(cost)
 	# spendable(), not `money`: the funds readout must count the account (and the armed credit line) that the
 	# Confirm gate can actually draw on, or a banked player reads "Your zorkmids: 0" under a working button.
-	_status.text = PlayerText.respec_status(cost, _player.spendable())
+	_status.text = PlayerText.respec_status(shown_cost, _player.spendable())
 	_status.add_theme_color_override(&"font_color", MenuStyle.danger() if cant else MenuStyle.text_color())
 	# The cost + affordability already read on the _status line above, so the button caption stays SHORT +
 	# fixed-width ("Respec — N zm"); can't-afford just greys it out rather than appending a long "(… — can't
@@ -142,7 +173,7 @@ func _refresh() -> void:
 		_confirm_btn.text = PlayerText.RESPEC_NOTHING
 		_confirm_btn.disabled = true
 	else:
-		_confirm_btn.text = PlayerText.respec_button(cost)
+		_confirm_btn.text = PlayerText.respec_button(shown_cost)  # the same all-in number the status line quotes
 		# The same `cant` the status line was tinted from — one predicate, two surfaces. Its cost > 0 guard is
 		# what keeps a FREE station clickable for a wallet in DEBT (the free-respec-refused-while-negative wart,
 		# UI half), matching RespecStation.do_respec's own fee-only-when-there-is-one gate.

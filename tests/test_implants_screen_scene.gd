@@ -9,9 +9,11 @@ extends GutTest
 ## contracts hold — incl. the PlayerMenus seam: the tab strip is CODE-BUILT into %TabSlot (its
 ## one-Button-per-tab structure is test_player_menus.gd's contract), so the scene must ship the slot
 ## EMPTY with zero authored Buttons. Roster behaviour is in tests/test_implants_screen.gd; the on/off toggle
-## (installed-vs-active + persistence) is tests/test_implant_toggle.gd.
+## (installed-vs-active + persistence) is tests/test_implant_toggle.gd. CONTROLLER PARITY (rows FOCUS_ALL,
+## focus seeded on open, re-seated across rebuilds) is pinned at the bottom, the test_atm_screen_scene idiom.
 
 const SCENE := "res://scenes/ui/implants_screen.tscn"
+const SCREEN_SOURCE := "res://scripts/ui/implants_screen.gd"
 
 ## Every unique name the screen depends on: the ones implants_screen.gd binds in _bind_ui (Root/Dim/VBox/
 ## TabSlot/ImplantList — a rename in the editor breaks the bind at boot) plus %Scroll, which only the
@@ -92,3 +94,53 @@ func test_layout_contracts_for_the_player_menu_group() -> void:
 	assert_eq(list.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "the list fills the scroll width")
 	assert_eq(list.get_theme_constant("separation"), 14, "the authored 14px section-block gap survives")
 	inst.free()
+
+
+func test_toggle_rows_are_reachable_by_a_pad() -> void:
+	# ⭐CONTROLLER PARITY, the runtime-built half (the atm_screen _add_chip lesson): the INSTALLED toggle rows
+	# are this tab's ONLY focusables (the tab strip is FOCUS_NONE by test_player_menus.gd's cross-screen
+	# contract), so rows built FOCUS_NONE — the exact state this screen shipped in — leave a pad player with
+	# no focus owner and nothing to move: every implant is unreachable. Drive the REAL builder off-tree
+	# (instantiate, never add_child — _ready doesn't run; the test_implant_toggle idiom) and read the value
+	# that will actually exist at runtime.
+	var inst: Node = (load(SCENE) as PackedScene).instantiate()
+	var row: Button = inst._make_toggle_row(&"air_dash", "Air Dash", "Air Dash Chip", true)
+	assert_eq(row.focus_mode, Control.FOCUS_ALL,
+		"a toggle row must take focus — the rows ARE the pad path, and a control a pad can never land on is not a path")
+	assert_eq(inst._focus_rows.back(), row,
+		"...and register itself in _focus_rows, the paint-order list open()/_reseat_focus seed the pad cursor from")
+	row.free()
+	inst.free()
+
+
+func test_the_pad_landing_spot_is_seeded_on_open_and_across_rebuilds() -> void:
+	# The other halves of parity are RUNTIME (focus grabbed in open() on a live viewport; every rebuild
+	# freeing whichever row holds focus), which a unit test must not run — open() wants the live autoload
+	# family and an in-tree Player. So they are pinned by SOURCE, the test_atm_screen_scene idiom, guards and
+	# all: find() answers -1 for a needle that has been renamed away and a bad substr yields "", over which a
+	# contains() check quietly reads as "absent" — a pin that retires itself in silence is worse than no pin.
+	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
+	assert_gt(src.length(), 0, "implants_screen.gd must be readable")
+	var open_at := src.find("func open(")
+	assert_gt(open_at, -1, "func open( no longer present — the pin is stale")
+	assert_eq(src.rfind("func open("), open_at,
+		"open must be defined exactly ONCE, or the body sliced below is not the one that runs")
+	var open_end := src.find("\nfunc ", open_at + 1)
+	assert_gt(open_end, open_at, "open's body must end at the next function — the pin is stale")
+	var body := src.substr(open_at, open_end - open_at)
+	var shown := body.find("_root.visible = true")
+	assert_gt(shown, -1, "_root.visible = true no longer present in open — the pin is stale")
+	var grabbed := body.find("_focus_rows[0].grab_focus()")
+	assert_gt(grabbed, -1,
+		"open must SEED focus on the first toggle row — with no focus owner, ui navigation has nowhere to start and every row is pad-unreachable")
+	assert_gt(grabbed, shown,
+		"and it must grab AFTER the root is shown — grab_focus on a hidden Control does nothing, so seeding first would leave the pad with no owner anyway")
+	# This screen rebuilds its rows on EVERY toggle (a flip always moves the signature) AND on the refused-flip
+	# repaint — each rebuild frees the focused row, so _rebuild must hand the pad cursor back or ui navigation
+	# dies one press after it started.
+	var rebuild_at := src.find("func _rebuild(")
+	assert_gt(rebuild_at, -1, "func _rebuild( no longer present — the pin is stale")
+	var rebuild_end := src.find("\nfunc ", rebuild_at + 1)
+	assert_gt(rebuild_end, rebuild_at, "_rebuild's body must end at the next function — the pin is stale")
+	assert_true(src.substr(rebuild_at, rebuild_end - rebuild_at).contains("_reseat_focus("),
+		"_rebuild must re-seat pad focus after freeing the rows (index-preserving, the OptionsMenu _revert remembered-tab idiom) — a rebuild that strands a freed focus owner kills ui navigation")

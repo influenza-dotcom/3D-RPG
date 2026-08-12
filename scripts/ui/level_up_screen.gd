@@ -36,6 +36,7 @@ var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; rail_changed drives 
 var _money_label: Label     ## the zorkmid half — only it wears the wallet tint (gold, or danger while in debt)
 var _rows: VBoxContainer
 var _perks: VBoxContainer  ## rank 29 perk-pick section (hidden when the station authored no available_perks)
+var _first_focus: Button = null  ## first raise-stat row of the LATEST _rebuild = the pad/keyboard landing spot (open_level_up seeds it; _rebuild re-seeds after freeing a focused row)
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
@@ -50,14 +51,19 @@ func _ready() -> void:
 func is_open() -> bool:
 	return _is_open
 
-## Open the level-up menu for `station`, leveling `player`. Refuses to stack over another modal / dialogue.
+## Open the level-up menu for `station`, leveling `player`. Refuses to stack over another modal / dialogue, and
+## bails safely on an invalid station or no player. EVERY refuse path emits `closed` (via _refuse_open) so a
+## dialogue-hosted open that suspended the conversation on our `closed` one-shot is never stranded (see below).
 func open_level_up(station: Node, player: Node) -> void:
 	if _is_open or DialogueManager.is_active() or InputManager.any_modal_open(self):  # M5: refuse over ANY other menu (incl. QuestJournal + Respec, both omitted before)
+		_refuse_open()
 		return
 	if not is_instance_valid(station):
+		_refuse_open()
 		return
 	_player = player as Player
 	if not is_instance_valid(_player):
+		_refuse_open()
 		return
 	_station = station
 	_is_open = true
@@ -72,7 +78,25 @@ func open_level_up(station: Node, player: Node) -> void:
 	_title.text = MenuStyle.title_text(PlayerText.level_up_title(station_nm))
 	_rebuild()
 	_root.visible = true
+	# Seed pad/keyboard focus on the FIRST raise-stat row (the OptionsMenu `_first_focus` / AtmScreen /
+	# HealScreen idiom; atm_screen.gd's ⭐CONTROLLER PARITY header carries the full argument) — AFTER the panel
+	# is visible, since grab_focus on a hidden Control does nothing. The first row always exists here (_rebuild
+	# just built one per STAT_ORDER past the guards above), and a can't-afford row is disabled but still HOLDS
+	# focus, so ui navigation starts there either way; the rail selector is the belt-and-braces fallback (this
+	# screen authors no Close button — Esc/Interact close it). Without a focus owner, ui navigation has nowhere
+	# to start and every row on the panel is pad-unreachable (the atm_screen must-not-recur rule).
+	if is_instance_valid(_first_focus):
+		_first_focus.grab_focus()
+	elif is_instance_valid(_rail_btn):
+		_rail_btn.grab_focus()
 	opened.emit()
+
+## Guard failed: we never opened, but a dialogue-hosted open (DialogueManager._suspend_for_menu) suspended the
+## conversation on our `closed` one-shot BEFORE calling us. Emit `closed` so _resume_from_menu re-shows the box;
+## on the standalone path (LevelUp.start_talk) nothing is listening, so it is harmless. Do NOT touch
+## pause/mouse/_is_open here — none of that was mutated yet.
+func _refuse_open() -> void:
+	closed.emit()
 
 func close() -> void:
 	if not _is_open:
@@ -95,13 +119,16 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_raise(stat: StringName) -> void:
 	if is_instance_valid(_station) and is_instance_valid(_player):
 		# Cue on the STATION's verdict, never on the row's affordability dim — those two gates have drifted before
-		# (the free-raise-while-in-debt wart the _rebuild comment documents), and a raise the station refused must
-		# stay silent: there is no denied cue in this set, and the back cue already means "this screen closed".
-		# This is MENU feedback (the click landed), NOT the reward sting seam — scripts/components/reward_stinger.gd
-		# is the diegetic "you earned something" surface and stays separate; don't merge the two later.
+		# (the free-raise-while-in-debt wart the _rebuild comment documents), which is exactly why the refused
+		# branch needs a voice of its own: when the dim and the verdict disagree, an enabled-looking row that
+		# makes no sound is the worst possible answer. This is MENU feedback (the click landed), NOT the reward
+		# sting seam — scripts/components/reward_stinger.gd is the diegetic "you earned something" surface and
+		# stays separate; don't merge the two later.
 		var raised: bool = _station.level_up_stat(_player, stat)
 		if raised:
 			MenuStyle.play_commit()
+		else:
+			MenuStyle.play_denied()
 		_rebuild()
 
 ## Rebuild the header (level / wallet / next cost) + one button per stat (its value + the +1 cost).
@@ -116,10 +143,13 @@ func _rebuild() -> void:
 	# and — the inverse, which the zero-cost branch below covers — a raise the station WOULD serve must never look dead).
 	var level: int = _station.total_level(_player)
 	_level_label.text = PlayerText.level_label(level)
-	_money_label.text = PlayerText.your_zorkmids(_player.money)
-	_money_label.add_theme_color_override(&"font_color", MenuStyle.wallet_color(_player.money))  # gold, or danger while in debt
+	# spendable(), not `money`: the readout must count the pot the rows' can_pay gate can actually draw on, or a
+	# banked player reads "Your zorkmids: 0" under raise buttons that work — the heal/respec twins made the same fix.
+	_money_label.text = PlayerText.your_zorkmids(_player.spendable())
+	_money_label.add_theme_color_override(&"font_color", MenuStyle.wallet_color(_player.spendable()))  # gold, or danger while the pot is negative
 	for c in _rows.get_children():
 		c.queue_free()
+	_first_focus = null  # the old rows die with the rebuild — re-record the landing spot from the fresh build below
 	var s := _player.stats_or_default()
 	for stat in STAT_ORDER:
 		var cost: float = _station.level_up_cost(_player, stat)  # flat total-level cost (identical for every stat), floored at 0
@@ -137,7 +167,12 @@ func _rebuild() -> void:
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var btn := Button.new()
 		btn.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		btn.focus_mode = Control.FOCUS_NONE
+		# FOCUS_ALL (the atm_screen must-not-recur rule): these code-built rows ARE the panel's actions, so they
+		# are the pad path — a control a pad can never land on is not a path. A can't-afford row is disabled but
+		# still takes focus, so navigation walks the whole list instead of skipping the dimmed rungs.
+		btn.focus_mode = Control.FOCUS_ALL
+		if _first_focus == null:
+			_first_focus = btn  # first row built this rebuild = the landing spot open_level_up (and the re-seed below) grabs
 		btn.disabled = not affordable
 		# Hover a stat to see what it does + its current effect (a disabled, can't-afford row tips too).
 		MenuStyle.attach_tip(btn, StatInfo.tooltip(stat, s))
@@ -158,13 +193,27 @@ func _rebuild() -> void:
 		cols.add_child(_stat_col(StatInfo.title(stat), float(MenuStyle.skin.stat_name_col_width), HORIZONTAL_ALIGNMENT_LEFT))    # name (authored StatText title; English-measured skin budget)
 		cols.add_child(_stat_col(str(s.get_stat(stat)), 22, HORIZONTAL_ALIGNMENT_LEFT))  # current value
 		cols.add_child(_stat_col("+1", 20, HORIZONTAL_ALIGNMENT_LEFT))                   # the increment
-		var cost_col := _stat_col(PlayerText.level_up_cost_cell(cost), 0, HORIZONTAL_ALIGNMENT_RIGHT)  # cost fills the group's remainder; the whole parenthesised money phrase (incl. "zm") comes from PlayerText / Zorkmids.money_text
+		# Paint the ALL-IN number (_player.charge_total — the SAME formula the station's player.charge() debits): a
+		# rail-funded raise carries the account's service charge, so the sticker price alone would under-quote what
+		# actually leaves the player (the shop_screen pattern). The affordability gate above stays on the RAW cost —
+		# can_pay folds the fee in itself, so gating on the all-in number would double-charge the predicate.
+		var cost_col := _stat_col(PlayerText.level_up_cost_cell(_player.charge_total(cost)), 0, HORIZONTAL_ALIGNMENT_RIGHT)  # cost fills the group's remainder; the whole parenthesised money phrase (incl. "zm") comes from PlayerText / Zorkmids.money_text
 		cost_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cols.add_child(cost_col)
 		center.add_child(cols)
 		row.add_child(center)
 		_rows.add_child(row)
 	_rebuild_perks()
+	# Re-seed the pad landing spot when THIS rebuild just destroyed it: every raise / perk pick / rail flip
+	# funnels here and queue_frees the row that HELD focus, which would strand a pad with no owner to navigate
+	# from (the open_level_up seed runs once, and no static-button sibling — heal / respec / atm — rebuilds its
+	# focusable controls per action, so only this screen needs this). Only a DYING owner is stolen from: a
+	# player parked on the rail selector keeps their place. The open-time _rebuild lands here with the root
+	# still hidden, where grab_focus is a silent no-op — open_level_up seeds again right after it shows it.
+	if _is_open and _root.is_inside_tree() and is_instance_valid(_first_focus):
+		var focus_owner: Control = _root.get_viewport().gui_get_focus_owner()
+		if focus_owner == null or _rows.is_ancestor_of(focus_owner) or _perks.is_ancestor_of(focus_owner):
+			_first_focus.grab_focus()
 
 ## ONE row height for stat AND perk rows — they sit in the same scrolled list and must read as one grid
 ## (they previously drifted: body_size+5 vs body_size+8). Derived from the skin so a reskin scales both.
@@ -221,7 +270,7 @@ func _perk_row(perk: Perk, pm: PerkManager, points: int) -> Control:
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var btn := Button.new()
 	btn.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	btn.focus_mode = Control.FOCUS_NONE
+	btn.focus_mode = Control.FOCUS_ALL  # same parity contract as the stat rows — the rank-29 perk picks must be pad-reachable too
 	btn.disabled = not pickable
 	if perk.description != "":
 		MenuStyle.attach_tip(btn, perk.description)
@@ -254,10 +303,13 @@ func _perk_row(perk: Perk, pm: PerkManager, points: int) -> Control:
 func _on_pick_perk(perk: Perk) -> void:
 	if is_instance_valid(_station) and is_instance_valid(_player):
 		# Conditional commit, same contract as _on_raise (and the same reward_stinger distinction): unlock_perk
-		# refuses — spending nothing — with no point left or prereqs unmet, and a refusal must stay silent.
+		# refuses — spending nothing — with no point left or prereqs unmet, and says so on the denial cue. An
+		# unmet PREREQ is the case that most needed a sound: the row looks identical to a takeable one.
 		var unlocked: bool = _station.unlock_perk(_player, perk)
 		if unlocked:
 			MenuStyle.play_commit()
+		else:
+			MenuStyle.play_denied()
 		_rebuild()
 
 ## The player's PerkManager child, or null — for reading skill_points / has_perk in the picker.
@@ -295,6 +347,12 @@ func _player_perk_manager() -> PerkManager:
 ##  * %Rows / %Perks are the DYNAMIC containers _rebuild / _rebuild_perks fill per stat/perk at runtime —
 ##    the scene authors only the empty VBoxes (row separation 2 is authored; it's a fixed rhythm, not a
 ##    skin knob). The perk section's divider + header are rebuilt INSIDE %Perks so they hide with it.
+##  * CONTROLLER PARITY (the atm_screen must-not-recur rule): the authored RailButton carries NO
+##    `focus_mode = 0` (Button's default FOCUS_ALL is what a pad navigates onto), the code-built stat/perk
+##    rows set FOCUS_ALL (_rebuild / _perk_row — they ARE the panel's actions), and open_level_up SEEDS focus
+##    on the first stat row once the panel is visible (_rebuild re-seeds after it frees a focused row) — with
+##    no focus owner, ui navigation has nowhere to start and every row is unreachable.
+##    tests/test_level_up_screen_scene.gd pins both halves.
 ##  * every string is set HERE from PlayerText — the scene ships with empty text properties.
 func _bind_ui() -> void:
 	_root = %Root

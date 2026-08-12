@@ -2,8 +2,9 @@ extends GutTest
 
 ## THE DEBIT/CREDIT SELECTOR AT EVERY POINT OF SALE.
 ##
-## The armed rail (`GameState.payment_method`) decides what `Player._split` may draw on, so it changes both the
-## quoted total and the affordability dim. It used to be reachable ONLY from the ATM screen, which meant a player
+## The armed rail (`GameState.payment_method`) decides what `Player._split` may draw on, so it moves the
+## affordability dim (the all-in quoted total is rail-invariant — the service fee rides the cash shortfall
+## whichever rail funds it; test_payment.gd pins that). It used to be reachable ONLY from the ATM screen, which meant a player
 ## standing at a shop could see a price they couldn't afford under DEBIT and had no way to arm CREDIT without
 ## walking back to a terminal. `PaymentRailButton` is the shared drop-in that fixes that.
 ##
