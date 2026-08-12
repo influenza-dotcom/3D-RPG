@@ -34,7 +34,7 @@ static var _switching: bool = false  ## true while enter() swaps screens (suppre
 
 ## The screen autoload for a tab KEY, resolved at CALL TIME (never cached) so it's safe even before every
 ## autoload has registered. Returns null for an unknown key or a not-yet-registered autoload.
-static func _screen_for(key: StringName):
+static func _screen_for(key: StringName) -> Variant:
 	match key:
 		&"inventory": return InventoryScreen
 		&"stats": return StatsScreen

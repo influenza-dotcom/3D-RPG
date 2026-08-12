@@ -80,7 +80,7 @@ func _ready() -> void:
 ## rocket). Called from _on_body_entered on every hit. Concrete subclasses implement.
 @abstract func particles(_body, _last_velocity) -> void
 
-func _on_body_entered(body):
+func _on_body_entered(body: Node) -> void:
 	if _consumed:
 		return
 	_consumed = true

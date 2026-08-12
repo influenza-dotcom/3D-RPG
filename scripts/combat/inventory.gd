@@ -13,7 +13,7 @@ signal weapon_changed(_weapon: WeaponData)
 ## Set this to author the starting weapon; equip() swaps it at runtime and fires weapon_changed.
 @export var equipped_weapon: WeaponData
 
-func equip(_weapon: WeaponData):
+func equip(_weapon: WeaponData) -> void:
 	# Ignore re-equipping the same weapon so listeners don't re-run swap logic
 	# (which would reset ammo/anim) on a no-op selection.
 	if _weapon == equipped_weapon:

@@ -121,7 +121,7 @@ func _ready() -> void:
 		base_spread = current_weapon.pellet_spread
 		current_spread = base_spread
 
-func _on_weapon_changed(_weapon: WeaponData):
+func _on_weapon_changed(_weapon: WeaponData) -> void:
 	current_weapon = _weapon
 	base_spread = _weapon.pellet_spread
 	current_spread = base_spread
@@ -165,7 +165,7 @@ func suppress_fire_for_carry_release() -> void:
 		_drew_on_press = true
 
 ## Which fist / hand threw the most recent attack: true = the ALT button (right click), false = primary.
-## Read by Player._on_attack_play_animation to lead with the matching hand.
+## Read by FirstPersonBody.on_attack_play_animation to lead with the matching hand.
 var last_attack_alt: bool = false
 
 ## The action bound to alt fire. Set by Player when it wires MouseInput.alt_attack, so the semi-auto

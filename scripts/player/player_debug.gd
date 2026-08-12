@@ -10,7 +10,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventKey and event.pressed and (event as InputEventKey).keycode == KEY_HOME:
 		audit_null_material_meshes()
 
-func reset():
+func reset() -> void:
 	get_tree().reload_current_scene()
 
 ## Dev audit (press Home): walks every MeshInstance3D under the root and reports any that casts

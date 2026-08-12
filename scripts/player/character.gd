@@ -234,7 +234,7 @@ func _validate_property(property: Dictionary) -> void:
 		property.hint = PROPERTY_HINT_RESOURCE_TYPE
 		property.hint_string = ModelResourceUtil.HINT
 
-func _ready():
+func _ready() -> void:
 	_apply_stats()  # ENDURANCE/STRENGTH stamp max_hp + carry_capacity BEFORE hp seeds from max_hp
 	_build_mesh_asset()
 	hp = max_hp
@@ -353,7 +353,7 @@ func _build_flash_tween(mat: ShaderMaterial) -> Tween:
 	t.tween_property(mat, "shader_parameter/flash_strength", 0.0, fx.hit_flash_down_time)
 	return t
 
-func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF):
+func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF) -> void:
 	# Guard: prevents multi-hit kills (e.g. shotgun's 9 pellets in one frame)
 	# from triggering gore/die multiple times. queue_free is deferred so the
 	# body still exists in the same frame and would otherwise receive every
@@ -432,7 +432,7 @@ func _begin_death() -> void:
 	gore()
 	die()
 
-func die():
+func die() -> void:
 	died.emit()
 	queue_free()
 
@@ -569,7 +569,7 @@ func _bequeath_wallet(_killer: Node) -> void:
 func _on_killed_by(_killer: Node) -> void:
 	pass
 
-func heal(_amount: float):
+func heal(_amount: float) -> void:
 	hp = min(hp + _amount, max_hp)
 	damaged.emit(hp, max_hp)
 
@@ -876,7 +876,7 @@ func _apply_fall_damage(fall_speed: float) -> void:
 	if dmg > 0:
 		take_damage(dmg)
 
-func gravity(delta: float):
+func gravity(delta: float) -> void:
 	if !is_on_floor():
 		velocity += get_gravity() * delta
 
@@ -893,7 +893,7 @@ func _has_live_physics_space() -> bool:
 ## of the blast so it bleeds off over subsequent frames instead of persisting.
 ## pre_move_velocity is captured BEFORE move_and_slide because the slide response
 ## zeroes velocity into surfaces, and _push_interactables needs the original speed.
-func apply_velocity():
+func apply_velocity() -> void:
 	# move_and_slide needs a live physics space; bail when we're not in one (e.g. a unit
 	# test instantiates the actor outside a World3D yet still ticks _physics_process).
 	if not _has_live_physics_space():
@@ -969,7 +969,7 @@ func _push_interactables(pre_move_velocity: Vector3) -> void:
 ## hard-zeroed (so you don't keep sliding after landing). While airborne or within
 ## grace it eases toward zero frame-rate-independently, snapping to zero below a min
 ## magnitude to avoid an endless tiny residual.
-func apply_blast():
+func apply_blast() -> void:
 	if explosion_velocity.length() > GameSettings.physics_damage.blast_min_magnitude:
 		_blast_timer = GameSettings.physics_damage.blast_grace_timer
 

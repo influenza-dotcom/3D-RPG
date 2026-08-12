@@ -40,7 +40,7 @@ func _ready() -> void:
 
 ## On swap: bank the outgoing weapon's remaining ammo, then restore the incoming
 ## weapon's saved count — or fill to max the first time that weapon is seen.
-func _on_weapon_changed(_weapon: WeaponData):
+func _on_weapon_changed(_weapon: WeaponData) -> void:
 	if current_weapon:
 		_ammo_per_weapon[current_weapon] = current_ammo
 	current_weapon = _weapon
@@ -49,7 +49,7 @@ func _on_weapon_changed(_weapon: WeaponData):
 	else:
 		set_to_max_ammo()
 
-func set_to_max_ammo():
+func set_to_max_ammo() -> void:
 	# Startup race: an enemy add_child's its Weapon (firing Ammo._ready) a beat BEFORE it equips a
 	# WeaponData, so current_weapon can still be null here. Skip — the equip fires weapon_changed a
 	# moment later, which refills correctly.
@@ -80,7 +80,7 @@ func consume_ammo() -> bool:
 		return true
 	return false
 
-func reload():
+func reload() -> void:
 	current_ammo = _refilled_clip(current_weapon, current_ammo)
 	finished_reloading.emit()
 

@@ -137,12 +137,12 @@ func _is_saved_weapon_property(prop: Dictionary) -> bool:
 func _is_weapon_delta_type(t: int) -> bool:
 	return t in [TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STRING, TYPE_STRING_NAME, TYPE_VECTOR2, TYPE_VECTOR3, TYPE_COLOR]
 
-func _store_weapon_delta_value(value, t: int):
+func _store_weapon_delta_value(value, t: int) -> Variant:
 	if t == TYPE_STRING_NAME:
 		return String(value)
 	return value
 
-func _coerce_weapon_delta_value(value, t: int):
+func _coerce_weapon_delta_value(value, t: int) -> Variant:
 	match t:
 		TYPE_BOOL:
 			if value is bool or value is int or value is float:
