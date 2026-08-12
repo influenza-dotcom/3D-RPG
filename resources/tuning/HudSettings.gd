@@ -15,6 +15,12 @@ extends Resource
 @export var hud_font_size: int = 32
 ## Reticle box size (px); a shader discs it.
 @export var crosshair_size: Vector2 = Vector2(4, 4)
+## Hide the reticle whenever the weapon is HOLSTERED (FNV/Deus Ex: nothing is aimed, so nothing annotates
+## the aim point). The player still spawns holstered, so this is what the game OPENS on. Everything else
+## about bare-handed play is untouched — the interaction ray, the look-at name readout under the reticle
+## and the talk/pickup prompts all still work; only the dot goes away. OFF restores the old permanent
+## reticle. Composed with the dialogue hide in ui.gd's _apply_crosshair_visibility (the single writer).
+@export var hide_crosshair_when_holstered: bool = true
 ## Bottom-left clip/reserve ammo readout font (ui.gd) — NOT hud_font_size (that stays the big centred
 ## message font).
 @export var ammo_font_size: int = 18

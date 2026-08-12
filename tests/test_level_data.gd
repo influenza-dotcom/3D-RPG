@@ -10,6 +10,7 @@ func test_level_data_defaults() -> void:
 	assert_eq(d.display_name, "", "no display name by default")
 	assert_null(d.music, "no music override by default -> the scene's own autoplay is kept")
 	assert_null(d.ambience, "no ambience override by default")
+	assert_null(d.map_data, "no authored minimap underlay by default -> the procedural floorplan is the whole map")
 	d = null
 
 

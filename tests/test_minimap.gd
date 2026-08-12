@@ -4,12 +4,18 @@ extends GutTest
 ## playtest-verified and its geometry maths lives in FloorplanSection (pinned in test_floorplan_section.gd);
 ## what is pinned HERE is the part that can silently rot: the off-tree construction contract, the
 ## marker_color fallback that test_hud_skin.gd also leans on, the component defaults a designer sees in the
-## inspector, and the deck cache's LRU bound.
+## inspector, the deck cache's LRU bound, the level-swap drop (BOTH halves of rebake — the deck cache AND
+## the FloorplanSource wall gather — plus the region-instance-id check that is its only shipped trigger),
+## and the LevelData.map_data underlay stamp (rebake pulls the active level's authored map off
+## Groups.GAME_ROOT — the consumption seam that makes the Content dock's Maps scaffolds reachable).
 ##
 ## Loaded BY PATH, not by class_name, so the suite survives a stale global class cache (the ui.gd
 ## STAMINA_RING_SCRIPT idiom).
 
 const MINIMAP_SCRIPT := "res://scripts/ui/minimap.gd"
+## The wall layer's gather (RefCounted). Only ever constructed here to SEED a fake "level A already
+## gathered" state on the widget's _source — loaded by path for the same cache reason as above.
+const FLOORPLAN_SOURCE_SCRIPT := "res://scripts/ui/floorplan_source.gd"
 
 
 ## A bare .new() with no tree must be completely safe: test_hud_skin.gd constructs one exactly this way to
@@ -25,6 +31,9 @@ func test_new_off_tree_does_not_crash() -> void:
 	assert_eq(mm.deck_count(), 0, "a process tick off-tree still slices nothing")
 	mm.rebake()
 	assert_eq(mm.deck_count(), 0, "rebake is safe with nothing cached")
+	# rebake also resolves the level underlay, which needs a tree to find the GameRoot — off-tree it must
+	# degrade to "no underlay", never touch get_tree().
+	assert_null(mm.active_map_data(), "off-tree there is no level, so there is no underlay either")
 
 
 ## THE CONTRACT test_hud_skin.gd:159-174 depends on. Re-asserted locally so a change here fails in the
@@ -48,7 +57,9 @@ func test_marker_color_honours_an_authored_color() -> void:
 
 
 ## The inspector surface a designer actually sees. map_data staying an @export (and defaulting null) is the
-## backward-compatibility promise: the authored MapData path is demoted to an optional underlay, not removed.
+## per-instance OVERRIDE half of the underlay seam: the normal authoring surface is LevelData.map_data
+## (stamped by rebake — see the underlay section below), and this export wins over it only when a designer
+## sets it on a specific widget.
 func test_component_defaults() -> void:
 	var mm = load(MINIMAP_SCRIPT).new()
 	autofree(mm)
@@ -108,19 +119,54 @@ func test_active_band_follows_the_player_between_storeys() -> void:
 	assert_almost_eq(mm.active_band_floor(), -band, 0.0001, "a basement floors DOWN, not toward zero")
 
 
-## rebake() must drop everything, or a LevelDoor transition would keep drawing the previous level's
+## rebake() must drop BOTH caches, or a LevelDoor transition would keep drawing the previous level's
 ## geometry in the new level's world space — the failure this widget's instance-id staleness check exists
-## to prevent.
-func test_rebake_drops_every_deck() -> void:
+## to prevent. The two halves rot independently: the deck dictionary is the loud one, but the
+## FloorplanSource wall gather holds the old level's solids in WORLD space too, and if it survived the
+## swap every FRESH deck would re-CUT the old level's walls into the new level's plan ("re-gather, never
+## re-cut" — the comment on the line this pins). Before this test only the deck half was pinned, so
+## deleting the _source null left the whole suite green.
+func test_rebake_drops_every_deck_and_the_wall_source() -> void:
 	var mm = load(MINIMAP_SCRIPT).new()
 	autofree(mm)
 	var band: float = GameSettings.hud.minimap_band_height
 	mm._ensure_deck(null, 0.5)
 	mm._ensure_deck(null, band + 0.5)
+	mm._source = load(FLOORPLAN_SOURCE_SCRIPT).new()   # stands in for a completed level-A wall gather
 	assert_gt(mm.deck_count(), 0, "decks exist before the swap")
 	mm.rebake()
 	assert_eq(mm.deck_count(), 0, "a level swap drops every deck")
+	assert_null(mm._source, "and the wall gather with them — old-level solids must never be re-cut")
 	assert_almost_eq(mm.active_band_floor(), 0.0, 0.0001, "and clears the active band")
+
+
+## THE TRIGGER for the drop above, with real regions: in the shipped game nothing calls rebake() on a swap
+## except _process noticing the Groups.NAVMESH region's INSTANCE ID changed (deliberately no GameRoot
+## signal — a freed region leaves the group by itself, the self-healing claim in the widget's header).
+## Three ticks pin the three behaviours: the boot frame trips the seeded -1 check, the SAME region across
+## frames must NOT re-trip it (or every frame would throw away every deck), and a DIFFERENT region — level
+## B's, after level A's is freed exactly as a LevelDoor swap frees it — must drop the decks AND the wall
+## source. No player is in the tree, so every tick stops at the bake-delay gate directly after the
+## staleness check — which is precisely the code under test and nothing more.
+func test_a_new_region_instance_id_triggers_the_swap_drop() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	add_child_autofree(mm)
+	var region_a := NavigationRegion3D.new()
+	region_a.add_to_group(Groups.NAVMESH)
+	add_child_autofree(region_a)
+	mm._process(0.016)                                 # boot: -1 -> region A trips the check once
+	mm._ensure_deck(null, 0.5)                         # level A's deck...
+	mm._source = load(FLOORPLAN_SOURCE_SCRIPT).new()   # ...and its wall gather
+	mm._process(0.016)
+	assert_gt(mm.deck_count(), 0, "the SAME region across frames must not re-trip the swap drop")
+	assert_not_null(mm._source, "...nor re-gather the walls every frame")
+	region_a.free()                                    # the LevelDoor case: the old level, region included, is freed
+	var region_b := NavigationRegion3D.new()
+	region_b.add_to_group(Groups.NAVMESH)
+	add_child_autofree(region_b)
+	mm._process(0.016)
+	assert_eq(mm.deck_count(), 0, "a new region identity is a level swap: every deck drops")
+	assert_null(mm._source, "and the wall source drops with them — level B re-gathers, never re-cuts")
 
 
 # --- the "map flips when I jump" fix --------------------------------------------------------------------
@@ -195,6 +241,99 @@ class AirborneStub extends Node3D:
 	var grounded: bool = true
 	func is_on_floor() -> bool:
 		return grounded
+
+
+# --- the authored level underlay (LevelData.map_data -> the widget) ---------------------------------------
+
+## THE CONSUMPTION SEAM (2026-08-11): a designer authors a MapData .tres (the Content dock's New Map row),
+## assigns it to a LevelData's map_data, and the code-built HUD minimap picks it up on level load — rebake()
+## pulls Groups.GAME_ROOT's `level` and stamps its map_data. Driven here through rebake() directly, exactly
+## the call the region-instance-id staleness check makes on a swap. The stub stands in for GameRoot (whose
+## _ready would resolve boot levels off the live GameState); the `level` property name it mirrors is pinned
+## on the REAL GameRoot by test_level_data.gd's load_level assertions.
+func test_rebake_stamps_the_active_levels_authored_underlay() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	add_child_autofree(mm)
+	var root := GameRootStub.new()
+	add_child_autofree(root)
+	var map := MapData.new()
+	root.level = LevelData.new()
+	root.level.map_data = map
+	mm.rebake()
+	assert_eq(mm.active_map_data(), map, "rebake stamps the active level's authored MapData onto the widget")
+	map = null
+
+
+## The regression this seam must never grow: a swap into a level WITHOUT an authored map has to CLEAR the
+## previous level's art, or the old image keeps drawing in the new level's world space (the exact failure
+## the deck cache's drop-on-swap exists to prevent, underlay edition).
+func test_rebake_clears_the_underlay_when_the_next_level_has_none() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	add_child_autofree(mm)
+	var root := GameRootStub.new()
+	add_child_autofree(root)
+	root.level = LevelData.new()
+	root.level.map_data = MapData.new()
+	mm.rebake()
+	assert_not_null(mm.active_map_data(), "the first level's map is up")
+	root.level = LevelData.new()  # the next level ships no authored map
+	mm.rebake()
+	assert_null(mm.active_map_data(), "a level without an authored map CLEARS the previous level's art")
+
+
+## Precedence: a map_data authored ON a widget instance pins that widget's underlay regardless of level —
+## the level's map fills the (shipped) null case only. This is what keeps the export test-pinned above from
+## being clobbered into meaninglessness by every level swap.
+func test_widget_authored_map_data_wins_over_the_levels() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	add_child_autofree(mm)
+	var own := MapData.new()
+	mm.map_data = own
+	var root := GameRootStub.new()
+	add_child_autofree(root)
+	root.level = LevelData.new()
+	root.level.map_data = MapData.new()
+	mm.rebake()
+	assert_eq(mm.active_map_data(), own, "the widget's own authored export wins over the level's map")
+	own = null
+
+
+## No GameRoot in the tree (a bare level scene, a test harness): the resolve degrades to "no underlay"
+## rather than crashing — the same soft-fail rule every other lookup in this widget follows.
+func test_underlay_resolves_null_with_no_game_root() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	add_child_autofree(mm)
+	mm.rebake()
+	assert_null(mm.active_map_data(), "no GameRoot in the tree -> no underlay, no crash")
+
+
+## THE DELIVERY PATH: in the shipped game nothing calls rebake() but _process's region-staleness check, so
+## that branch — not just the resolver it calls — must be pinned. _source_region_id is seeded -1 (an id
+## neither a region nor the ABSENCE of one can produce) precisely so the FIRST processed frame trips the
+## check even when the level has NO NavigationRegion3D (rid 0): without the seed a region-less boot would
+## compare 0 == 0 forever and an authored underlay would silently never stamp. This drives the real
+## _process branch — in-tree, visible, no region in Groups.NAVMESH, a stubbed GameRoot — and one tick must
+## resolve the underlay.
+func test_first_process_frame_stamps_the_underlay_without_a_region() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	add_child_autofree(mm)
+	var root := GameRootStub.new()
+	add_child_autofree(root)
+	var map := MapData.new()
+	root.level = LevelData.new()
+	root.level.map_data = map
+	mm._process(0.016)
+	assert_eq(mm.active_map_data(), map,
+			"the first frame's staleness check fires even with no region — a region-less boot still stamps")
+	map = null
+
+
+## Minimal stand-in for GameRoot: the widget only reads `level` (duck-typed .get) off the Groups.GAME_ROOT
+## member, so a test needs none of game_root.gd's _ready (which resolves boot levels off the live GameState).
+class GameRootStub extends Node:
+	var level: LevelData = null
+	func _ready() -> void:
+		add_to_group(Groups.GAME_ROOT)
 
 
 # --- NPC dots -------------------------------------------------------------------------------------------

@@ -4,6 +4,7 @@ extends Control
 ## @system Minimap
 ## @seam Code-built by ui.gd into the _weighted carrier (top-right corner, shared with the quest tracker). Geometry comes from the level's baked NavigationMesh via FloorplanSection, paint from MenuStyle.hud.minimap_*, layout from GameSettings.hud.minimap_*, and the player's choices are polled LIVE off Settings.minimap_enabled / _rotates / _zoom so an Options change bites the same frame with no rebuild.
 ## @seam The level swap is detected from the Groups.NAVMESH region's INSTANCE ID, not a GameRoot signal — a freed region leaves the group by itself, so the deck cache self-heals across a LevelDoor transition and this widget needs no new wiring in game_root.gd.
+## @seam The authored underlay is per-level: LevelData.map_data, PULLED (never pushed) by _resolve_level_underlay inside rebake() — the same region-instance-id hook — via Groups.GAME_ROOT's `level`. The widget's own map_data export is a per-instance override that wins when set, and a level without an authored map CLEARS the previous level's art (the stamp writes null too).
 ## @risk Renders ONLY the player's own floor band, so a mezzanine or catwalk above the cut is invisible and a staircase reads as a gap between two decks.
 ## @risk An unbaked level has no walkable fill and a level with no static colliders has no walls; either degrades to a partial map in silence, because both are legitimate states. Minimap.deck_count() is the introspection seam when a level looks blank.
 ## @test res://tests/test_minimap.gd
@@ -28,9 +29,11 @@ extends Control
 ## rather than lying about being in this room, and off-box ones pin to the rim through the compass's own
 ## project_to_edge — the same pure projection, not a second copy of it.
 ##
-## The optional `map_data` underlay keeps the authored MapData path alive: assign one and its image is drawn
-## UNDER the procedural plan, positioned by its own world_bounds through the SAME matrix, so the picture and
-## the dots can never fork projections. Leaving it null — the shipped case — just means the plan is the
+## The optional authored underlay: a MapData's image is drawn UNDER the procedural plan, positioned by its
+## own world_bounds through the SAME matrix, so the picture and the dots can never fork projections. It is
+## authored PER LEVEL — LevelData.map_data, stamped by _resolve_level_underlay through Groups.GAME_ROOT on
+## the same staleness hook that drops the deck cache — with this widget's own `map_data` export kept as a
+## per-instance override that wins when set. Both null — the shipped case — just means the plan is the
 ## whole map.
 
 @export_group("Geometry")
@@ -64,16 +67,22 @@ extends Control
 const FLOORPLAN_SOURCE := preload("res://scripts/ui/floorplan_source.gd")
 
 @export_group("Authored underlay (optional)")
-## LEGACY / OPTIONAL: an authored top-down MapData drawn UNDER the procedural plan and positioned through
-## the same view matrix via its world_bounds. It is also where marker ART comes from (player_marker /
-## npc_marker). Null — the shipped HUD case — means the procedural plan is the whole picture.
+## PER-INSTANCE OVERRIDE: an authored top-down MapData drawn UNDER the procedural plan and positioned
+## through the same view matrix via its world_bounds. It is also where marker ART comes from (player_marker /
+## npc_marker). The normal authoring surface is LevelData.map_data (resolved per level into
+## _level_map_data); set THIS only to pin one widget's underlay regardless of level — when set it WINS over
+## the level's (see active_map_data). Null — the shipped HUD case — defers to the level.
 @export var map_data: MapData
 
 ## deck_key -> {fill: PackedVector2Array, idx: PackedInt32Array, walls: PackedVector2Array, y_lo, y_hi}
 var _decks: Dictionary = {}
 var _deck_lru: Array[int] = []      ## deck keys, least-recently-used first
 var _deck: Dictionary = {}          ## the ACTIVE deck (empty until one is built)
-var _source_region_id: int = 0      ## instance id of the NavigationRegion3D the decks were sliced from
+## Instance id of the NavigationRegion3D the decks were sliced from. Seeded -1 — an id no region (and no
+## ABSENCE of a region, which reads 0) can ever produce — so the FIRST processed frame always trips the
+## staleness check below: even a REGION-LESS boot must rebake once, or an authored level underlay would
+## silently never resolve on a level with no NavigationRegion3D.
+var _source_region_id: int = -1
 var _centre_xz: Vector2 = Vector2.ZERO
 var _yaw: float = 0.0
 ## THE FLOOR THE PLAYER IS STANDING ON, not their live altitude — the reference every vertical decision here
@@ -88,6 +97,7 @@ var _prev_yaw: float = 0.0
 var _deck_dirty: bool = true        ## force one repaint (fresh deck, level swap, first frame)
 var _bake_delay_left: float = 0.0
 var _source = null                  ## FloorplanSource — the level's solids, gathered once (untyped: preload-by-path)
+var _level_map_data: MapData = null ## the ACTIVE level's authored underlay (LevelData.map_data), re-stamped — even to null — on every rebake
 
 
 func _ready() -> void:
@@ -247,9 +257,10 @@ func _draw() -> void:
 	# fill, the walls and (via `view` passed down) the markers all share it, which is the whole reason the
 	# image and the dots cannot drift apart.
 	draw_set_transform_matrix(view)
-	if map_data != null and map_data.map_texture != null:
+	var underlay := active_map_data()
+	if underlay != null and underlay.map_texture != null:
 		# world_bounds IS the draw rect under this matrix — it is already in world X/Z metres.
-		draw_texture_rect(map_data.map_texture, map_data.world_bounds, false)
+		draw_texture_rect(underlay.map_texture, underlay.world_bounds, false)
 	if not _deck.is_empty():
 		var fill: PackedVector2Array = _deck["fill"]
 		if draw_walkable and not fill.is_empty():
@@ -274,7 +285,8 @@ func _draw() -> void:
 ## POI dots. Markers are painted in SCREEN space (the matrix is already reset) but positioned through
 ## `view`, so they sit exactly on the plan they annotate.
 func _paint_markers(view: Transform2D, hud: HudSettings) -> void:
-	var art: Texture2D = map_data.npc_marker if map_data != null else null
+	var md := active_map_data()
+	var art: Texture2D = md.npc_marker if md != null else null
 	# POI markers PIN to the rim when off-box: a quest objective's whole job is to point you at something you
 	# cannot see yet.
 	for n in get_tree().get_nodes_in_group(Groups.MINIMAP):
@@ -360,7 +372,8 @@ func _npc_is_live(npc: Node) -> bool:
 func _paint_player_caret() -> void:
 	var c := size * 0.5
 	var col: Color = MenuStyle.hud.minimap_player_color
-	var art: Texture2D = map_data.player_marker if map_data != null else null
+	var md := active_map_data()
+	var art: Texture2D = md.player_marker if md != null else null
 	if art != null:
 		draw_texture(art, c - art.get_size() * 0.5, col)
 		return
@@ -391,7 +404,34 @@ func rebake() -> void:
 	_deck = {}
 	_band_keyed = false   # nothing drawn -> the next band choice takes the raw answer, not a stale sticky one
 	_source = null   # the solids are in the OLD level's world space — re-gather, never re-cut
+	_resolve_level_underlay()   # the level changed (or might have): re-stamp its authored underlay, even to null
 	_deck_dirty = true
+
+
+## The underlay actually drawn: this widget's own authored export when set (a per-instance override), else
+## the ACTIVE level's LevelData.map_data (stamped by _resolve_level_underlay on every rebake). Null means
+## the procedural plan is the whole picture. Instance method so tests can pin the precedence off-tree.
+func active_map_data() -> MapData:
+	return map_data if map_data != null else _level_map_data
+
+
+## THE CONSUMPTION SEAM for authored maps: read the active level's LevelData.map_data off the GameRoot
+## (Groups.GAME_ROOT — the LevelDoor lookup idiom) and stamp it, POSSIBLY WITH NULL — a level without an
+## authored map must CLEAR the previous level's art, or a swap would keep drawing the old image in the new
+## level's world space. Rides rebake(), so the same region-instance-id staleness check that drops the deck
+## cache re-resolves the underlay too, and neither game_root.gd nor ui.gd needs any wiring for it. The
+## `.get()` read is the house rule for duck-typed host property reads; no tree, no GameRoot, or a
+## non-LevelData `level` all degrade to "no underlay". (Edge: a SWAP between two region-less levels never
+## trips the staleness check, so the second keeps the first's underlay — the boot half of that gap is
+## closed by _source_region_id's -1 seed, and every shipped level carries a region; the LevelRoot
+## validator flags a missing one, though only on LevelRoot-rooted scenes.)
+func _resolve_level_underlay() -> void:
+	if not is_inside_tree():
+		_level_map_data = null
+		return
+	var gr := get_tree().get_first_node_in_group(Groups.GAME_ROOT)
+	var ld := (gr.get(&"level") if gr != null else null) as LevelData
+	_level_map_data = ld.map_data if ld != null else null
 
 
 ## The subtree the wall cut is gathered from: the ancestor named "Level" (GameRoot.load_level names the
