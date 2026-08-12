@@ -52,3 +52,39 @@ func test_throwable_impacts_route_real_loss_into_damage_numbers() -> void:
 	# thrown-knife headshot its crit colour.
 	assert_true(src.contains("DamageNumberPopupScript.show(character, real_loss, global_position, was_crit, attacker)"),
 		"thrown prop impacts (zorkmids, dogs, crates) should show the same post-mitigation damage numbers, and forward the SAME crit flag take_damage was given so a thrown-weapon headshot paints the crit colour")
+
+
+func test_effects_settings_damage_number_fields_mirror_const_anchors() -> void:
+	# PARITY (the NpcBarkSettings idiom): the "Damage Numbers" group on GameSettings.effects is the
+	# designer surface show() actually reads; the popup's const bank stays the shipped baseline + these
+	# anchors. Every field must DEFAULT to its const so the resource extraction is byte-identical until
+	# a designer tunes EffectsSettings.tres. (MIN_LOSS and RENDER_PRIORITY deliberately have NO mirror:
+	# gameplay policy and a draw-order contract stay const-only on the popup.)
+	var fx := EffectsSettings.new()
+	assert_eq(fx.damage_number_hit_offset_y, DamageNumberPopupScript.HIT_OFFSET_Y,
+		"damage_number_hit_offset_y mirrors HIT_OFFSET_Y — the lift above the impact point")
+	assert_eq(fx.damage_number_body_offset_y, DamageNumberPopupScript.BODY_OFFSET_Y,
+		"damage_number_body_offset_y mirrors BODY_OFFSET_Y — the no-impact-point fallback height")
+	assert_eq(fx.damage_number_rise, DamageNumberPopupScript.RISE,
+		"damage_number_rise mirrors RISE — how far the number floats up over its life")
+	assert_eq(fx.damage_number_spread, DamageNumberPopupScript.SPREAD,
+		"damage_number_spread mirrors SPREAD — the horizontal anti-overprint drift")
+	assert_eq(fx.damage_number_lifetime, DamageNumberPopupScript.LIFETIME,
+		"damage_number_lifetime mirrors LIFETIME — the rise + fade duration")
+	assert_eq(fx.damage_number_font_size, DamageNumberPopupScript.FONT_SIZE,
+		"damage_number_font_size mirrors FONT_SIZE")
+	assert_eq(fx.damage_number_pixel_size, DamageNumberPopupScript.PIXEL_SIZE,
+		"damage_number_pixel_size mirrors PIXEL_SIZE — world metres per font pixel")
+	assert_eq(fx.damage_number_outline_size, DamageNumberPopupScript.OUTLINE_SIZE,
+		"damage_number_outline_size mirrors OUTLINE_SIZE — the readability rim")
+	assert_eq(fx.damage_number_start_scale, DamageNumberPopupScript.START_SCALE,
+		"damage_number_start_scale mirrors START_SCALE — the crit pop-in size")
+	assert_eq(fx.damage_number_end_scale, DamageNumberPopupScript.END_SCALE,
+		"damage_number_end_scale mirrors END_SCALE — the shrink as it fades")
+	assert_eq(fx.damage_number_body_color, DamageNumberPopupScript.BODY_COLOR,
+		"damage_number_body_color mirrors BODY_COLOR — the ordinary-hit tint")
+	assert_eq(fx.damage_number_crit_color, DamageNumberPopupScript.CRIT_COLOR,
+		"damage_number_crit_color mirrors CRIT_COLOR — the crit payoff tint")
+	assert_eq(fx.damage_number_outline_color, DamageNumberPopupScript.OUTLINE_COLOR,
+		"damage_number_outline_color mirrors OUTLINE_COLOR — the dark rim")
+	fx = null

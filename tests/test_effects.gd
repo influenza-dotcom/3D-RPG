@@ -115,6 +115,14 @@ func test_gun_mesh_raise_constant() -> void:
 	var n = load("res://scripts/effects/gun_mesh.gd").new()
 	assert_eq(n.GUN_RAISE_MS, 500,
 		"GUN_RAISE_MS 500 is the post-swap/reload raise window the laser sight gates on (no laser while the gun tweens in)")
+	# COUPLING: the live window AND the raise tween both derive from the designer knob
+	# GameSettings.effects.gun_raise_time via int(t * 1000) (the unholster() derivation); the const
+	# above stays as the baseline/anchor, so the field's DEFAULT must match it or the shipped
+	# laser-gate window silently splits from the raise animation.
+	var fx := EffectsSettings.new()
+	assert_eq(fx.gun_raise_time, n.GUN_RAISE_MS / 1000.0,
+		"gun_raise_time must default to GUN_RAISE_MS / 1000 — one knob drives both the post-reload raise tween and the laser-sight gate window")
+	fx = null
 	n.free()
 
 

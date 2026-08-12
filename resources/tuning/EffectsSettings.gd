@@ -2,8 +2,10 @@ class_name EffectsSettings
 extends Resource
 
 ## Visual-FX tuning, grouped below: decal fade/placement, dust puffs (jump/land/slide),
-## the on-screen blood overlay (BloodSplatter), and explosion/muzzle-flash visuals.
-## Consumed across the effects scripts, bloody_mess, the decals, and Explosion.
+## the on-screen blood overlay (BloodSplatter), explosion/muzzle-flash visuals, the
+## floating damage numbers, and the first-person view-model pose feel (kick / holster /
+## reload / landing). Consumed across the effects scripts, bloody_mess, the decals,
+## Explosion, DamageNumberPopup, and GunMesh.
 
 @export_group("Decals")
 ## How fast a bullet-hole / blood decal fades its alpha toward 0 each frame (higher = decals vanish sooner).
@@ -237,6 +239,40 @@ extends Resource
 ## Seconds the hit flash fades back out (slower, so it lingers).
 @export var hit_flash_down_time: float = 0.3
 
+@export_group("Damage Numbers")
+## The floating world-space number a player hit pops off an enemy (DamageNumberPopup — the combat
+## callers pass the post-mitigation HP loss, so it shows what the enemy actually lost). The popup's
+## const bank stays as the shipped baseline + GUT anchors; every field below DEFAULTS to its const,
+## so the feel is byte-identical until tuned here (test_damage_number_popup.gd pins the mirror). The
+## show-at-all threshold (MIN_LOSS) and the draw order (RENDER_PRIORITY) deliberately STAY consts on
+## the popup — gameplay policy and a render contract, not feel.
+## Metres above the impact point the number spawns, so it clears the wound instead of starting inside it.
+@export var damage_number_hit_offset_y: float = 0.25
+## Fallback spawn height (metres above the victim's origin) when the hit has no finite impact point.
+@export var damage_number_body_offset_y: float = 1.35
+## Metres the number floats UP over its lifetime — the classic rising-damage read.
+@export var damage_number_rise: float = 0.75
+## Horizontal random drift (± metres on X and Z) so rapid hits don't overprint into one blob.
+@export var damage_number_spread: float = 0.18
+## Seconds the number lives — the whole rise + shrink + fade plays inside this window.
+@export var damage_number_lifetime: float = 0.65
+## Label3D font size of the number; with pixel_size below this sets its world footprint.
+@export var damage_number_font_size: int = 48
+## World metres per font pixel (Label3D.pixel_size) — the other half of the number's world footprint.
+@export var damage_number_pixel_size: float = 0.004
+## Outline thickness (font pixels) — the dark rim that keeps the number readable over any backdrop.
+@export var damage_number_outline_size: int = 20
+## Scale a CRIT number pops in at (>1 = crits land visibly bigger before settling toward end_scale).
+@export var damage_number_start_scale: float = 1.12
+## Scale every number shrinks to as it fades — the recede that sells "drifting away".
+@export var damage_number_end_scale: float = 0.88
+## Hot orange-red an ordinary hit's number wears.
+@export var damage_number_body_color: Color = Color(1.0, 0.33, 0.2, 1.0)
+## Bright yellow a CRIT's number wears instead — the payoff colour.
+@export var damage_number_crit_color: Color = Color(1.0, 0.92, 0.22, 1.0)
+## The number's outline tint (semi-opaque black rim).
+@export var damage_number_outline_color: Color = Color(0.0, 0.0, 0.0, 0.78)
+
 @export_group("Muzzle & Impact FX")
 ## World-space radius (metres) of the spray-can muzzle flash — kept tiny because it sits right at the camera (the impact-spark radius would read as screen-filling up close).
 @export var muzzle_flash_radius: float = 0.06
@@ -277,3 +313,30 @@ extends Resource
 @export var gun_holster_position_offset: Vector3 = Vector3(0.0, -1.4, 0.2)
 ## Rotation OFFSET (degrees) the gun tilts to while holstered — barrel pitched down as it's put away.
 @export var gun_holster_rotation_offset: Vector3 = Vector3(-70.0, 0.0, 0.0)
+
+@export_group("Gun Reload & Landing (view model)")
+## The remaining GunMesh one-shot pose tweens (fire and holster already read this resource): the
+## reload/swap "hands are busy" dip, the post-reload raise, and the touchdown dip. Same convention as
+## the kick group — offsets are Camera3D-local metres/degrees added on top of the rest pose.
+## Local offset (metres) the whole view model drops to while a reload/swap plays — down and back,
+## out of the player's face (GunMesh.reload()).
+@export var gun_reload_dip_position: Vector3 = Vector3(0.0, -0.9, 0.4)
+## Rotation offset (degrees) during the reload dip — negative X pitches the barrel down as it drops.
+@export var gun_reload_dip_rotation: Vector3 = Vector3(-25.0, 0.0, 0.0)
+## Seconds to swing down into the reload dip.
+@export var gun_reload_dip_time: float = 0.5
+## Seconds the gun takes to raise back to ready after a reload/swap finishes. COUPLED to the laser
+## sight: GunMesh derives its is_raised() gate window from THIS field (int(t * 1000), the same
+## derivation unholster() uses), so the laser appears exactly when the gun settles — one knob moves
+## both. GunMesh.GUN_RAISE_MS (= this × 1000) stays as the const baseline + test anchor; keep the
+## default matching it (test_effects.gd asserts the pair).
+@export var gun_raise_time: float = 0.5
+## How far the gun dips DOWN (metres, negative) on a full-strength landing — scaled by the same
+## impact value the camera dip uses, so heavier falls dip the gun further (GunMesh.land()).
+@export var gun_land_dip: float = -0.08
+## Barrel pitch (degrees, at full impact) as the gun "absorbs" the landing — also intensity-scaled.
+@export var gun_land_pitch: float = 4.0
+## Seconds to sink into the landing dip (the absorb).
+@export var gun_land_in_time: float = 0.08
+## Seconds to recover back to rest afterward — slower than the sink so the settle reads soft.
+@export var gun_land_out_time: float = 0.18

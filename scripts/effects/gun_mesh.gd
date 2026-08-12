@@ -23,9 +23,14 @@ extends MeshInstance3D
 var tween: Tween
 ## The gun is mid-raise (settling back into view after a swap/reload) until this real-time stamp.
 ## The laser sight gates on this so it doesn't draw while the gun is still tweening in.
+## BASELINE + test anchor (pinned in test_effects.gd), no longer the live read: the raise window AND
+## the raise tween both derive from the ONE designer knob GameSettings.effects.gun_raise_time (which
+## defaults to this / 1000 — test_effects.gd asserts the pair) via the same `int(t * 1000.0)`
+## derivation unholster() uses, so the laser gate can never drift apart from the raise animation.
 const GUN_RAISE_MS: int = 500
-# Holster swing timing + the put-away pose are designer knobs on GameSettings.effects
-# (gun_holster_animation_time / gun_holster_position_offset / gun_holster_rotation_offset).
+# Every one-shot pose tween's numbers are designer knobs on GameSettings.effects: the holster swing
+# + put-away pose (gun_holster_*), the reload/swap dip (gun_reload_dip_*), the post-reload raise
+# (gun_raise_time — see GUN_RAISE_MS above), and the landing dip (gun_land_*).
 var _raise_until_msec: int = 0
 ## The procedural rest pose, captured from the editor transform in _ready; the GunPose child reads these to
 ## seed and centre its sway/ADS solve, and the ADS marker eases off base_position.
@@ -62,7 +67,7 @@ var aim_pos_marker: Node3D:
 					return c as Node3D
 		return null
 
-func _ready():
+func _ready() -> void:
 	base_position = position
 	base_rotation = rotation_degrees
 	# Build the children FIRST (GunPose seeds its smoothed pose off base_position above; MuzzleRig captures
@@ -148,7 +153,7 @@ func setup(p_player: Character, p_inventory: Inventory, p_attack: Attack, p_ammo
 ## own face while the arm thrusts out reads as mush. That flag ALSO asks the mounted model to play its own
 ## strike, if it has one — the unarmed hands do (BodyModelSwap.strike), a gun mesh doesn't, and the
 ## has_method() guard is what lets one call site serve both.
-func fire():
+func fire() -> void:
 	if tween:
 		tween.kill()
 	var fx := GameSettings.effects
@@ -172,7 +177,7 @@ func fire():
 	if vm != null and vm.has_method(&"strike"):
 		vm.call(&"strike")
 
-func reload():
+func reload() -> void:
 	# A holstered weapon must stay parked off-screen (same invariant as land() / _on_ammo_finished_reloading()).
 	# reload() is wired to swap_started too, and a swap fired while the draw is LOCKED — carrying a prop — keeps
 	# holstered=true (Attack refuses the set_holstered(false)) yet still emits swap_started. Without this guard the
@@ -183,10 +188,12 @@ func reload():
 		return
 	if tween:
 		tween.kill()
+	# Down-and-back "hands are busy" dip; pose + timing are designer knobs on GameSettings.effects.
+	var fx := GameSettings.effects
 	tween = create_tween().set_parallel()
 	tween.set_trans(Tween.TRANS_CUBIC)
-	tween.tween_property(self, "_recoil_pos", Vector3(0.0, -0.9, 0.4), 0.5)
-	tween.tween_property(self, "_recoil_rot", Vector3(-25.0, 0.0, 0.0), 0.5)
+	tween.tween_property(self, "_recoil_pos", fx.gun_reload_dip_position, fx.gun_reload_dip_time)
+	tween.tween_property(self, "_recoil_rot", fx.gun_reload_dip_rotation, fx.gun_reload_dip_time)
 
 func land(intensity: float = 1.0) -> void:
 	# Brief downward dip + slight barrel rise so the gun "absorbs" the landing
@@ -208,14 +215,16 @@ func land(intensity: float = 1.0) -> void:
 	# something like a downward shot recoil would otherwise stop those mid-anim.
 	if tween and tween.is_running():
 		return
-	var dip := -0.08 * intensity
-	var pitch := 4.0 * intensity
+	# Dip depth/pitch (per unit of impact) + in/out timing are designer knobs on GameSettings.effects.
+	var fx := GameSettings.effects
+	var dip: float = fx.gun_land_dip * intensity
+	var pitch: float = fx.gun_land_pitch * intensity
 	tween = create_tween().set_parallel()
 	tween.set_trans(Tween.TRANS_CUBIC)
-	tween.tween_property(self, "_recoil_pos", Vector3(0.0, dip, 0.0), 0.08)
-	tween.tween_property(self, "_recoil_rot", Vector3(pitch, 0.0, 0.0), 0.08)
-	tween.chain().tween_property(self, "_recoil_pos", Vector3.ZERO, 0.18)
-	tween.chain().tween_property(self, "_recoil_rot", Vector3.ZERO, 0.18)
+	tween.tween_property(self, "_recoil_pos", Vector3(0.0, dip, 0.0), fx.gun_land_in_time)
+	tween.tween_property(self, "_recoil_rot", Vector3(pitch, 0.0, 0.0), fx.gun_land_in_time)
+	tween.chain().tween_property(self, "_recoil_pos", Vector3.ZERO, fx.gun_land_out_time)
+	tween.chain().tween_property(self, "_recoil_rot", Vector3.ZERO, fx.gun_land_out_time)
 
 func _on_ammo_finished_reloading() -> void:
 	# A holstered weapon must stay put away (same invariant as land()): this raise tweens _recoil_pos back to zero,
@@ -226,13 +235,17 @@ func _on_ammo_finished_reloading() -> void:
 	# in _on_swap_finished still lands, but the pose stays stowed until an explicit unholster() draws it.
 	if attack and attack.holstered:
 		return
-	_raise_until_msec = Time.get_ticks_msec() + GUN_RAISE_MS
+	# The laser-gate window and the raise tween share the ONE designer knob (gun_raise_time, default
+	# GUN_RAISE_MS / 1000 — the const stays as the baseline/test anchor), derived the same way
+	# unholster() derives its window, so the laser unlocks exactly as the gun settles even after a retune.
+	var t: float = GameSettings.effects.gun_raise_time
+	_raise_until_msec = Time.get_ticks_msec() + int(t * 1000.0)
 	if tween:
 		tween.kill()
 	tween = create_tween().set_parallel()
 	tween.set_trans(Tween.TRANS_CUBIC)
-	tween.tween_property(self, "_recoil_pos", Vector3.ZERO, 0.5)
-	tween.tween_property(self, "_recoil_rot", Vector3.ZERO, 0.5)
+	tween.tween_property(self, "_recoil_pos", Vector3.ZERO, t)
+	tween.tween_property(self, "_recoil_rot", Vector3.ZERO, t)
 
 ## FNV-style put-away: swing the gun down + barrel-down out of view, then hide it once it's offscreen.
 func holster() -> void:

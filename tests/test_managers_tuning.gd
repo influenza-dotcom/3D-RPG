@@ -469,6 +469,24 @@ func test_effects_settings_defaults() -> void:
 		"gun_holster_position_offset must drop the gun BELOW view (negative Y) while holstered")
 	assert_ne(s.gun_holster_rotation_offset, Vector3.ZERO,
 		"gun_holster_rotation_offset must tilt the gun (barrel down) while holstered")
+	# "Gun Reload & Landing (view model)" — the GunMesh reload/land dip + raise knobs. Range/ordering
+	# only, per this file's charter: the gun_raise_time EXACT anchor (== GUN_RAISE_MS/1000, the
+	# laser-gate coupling) lives in test_effects.gd, and the damage_number_* exact mirrors live in
+	# test_damage_number_popup.gd.
+	assert_lt(s.gun_reload_dip_position.y, 0.0,
+		"gun_reload_dip_position must drop the gun DOWN (negative Y) while a reload/swap plays")
+	assert_gt(s.gun_reload_dip_time, 0.0,
+		"gun_reload_dip_time must be > 0 so the reload dip swings instead of snapping")
+	assert_gt(s.gun_raise_time, 0.0,
+		"gun_raise_time must be > 0 — it drives both the post-reload raise tween and the laser-sight gate window")
+	assert_lt(s.gun_land_dip, 0.0,
+		"gun_land_dip must be negative — the gun absorbs a landing by dipping DOWN")
+	assert_gt(s.gun_land_pitch, 0.0,
+		"gun_land_pitch must be > 0 so the barrel rises as the gun absorbs the landing")
+	assert_gt(s.gun_land_in_time, 0.0,
+		"gun_land_in_time must be > 0 so the landing dip animates in instead of teleporting the pose")
+	assert_gt(s.gun_land_out_time, 0.0,
+		"gun_land_out_time must be > 0 so the gun recovers from the landing dip instead of snapping")
 	s = null
 
 
