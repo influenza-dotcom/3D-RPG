@@ -23,7 +23,8 @@ extends Resource
 ## Without this the mutter fired on the very first INVESTIGATING frame, so losing line-of-sight for a second read as
 ## an instant "where are you?". 0 = fire immediately (the pre-delay behaviour). Paces only the FIRST line; the bark
 ## cooldown paces the rest. The give-up lines (combat_end / lost_interest) are unaffected — they fire on search expiry.
-## INTERACTION: an NPC whose forget_time (npc.gd, default 4.0) is SHORTER than this gives up a STATIONARY search before
+## INTERACTION: an NPC whose forget_time (npc.gd's @export, default 4.0 — the designer-facing knob, mirrored onto
+## the code-built Perception in _build_perception) is SHORTER than this gives up a STATIONARY search before
 ## the grace elapses, so it won't mutter on a point-blank loss — only during a longer chase, where walking to the
 ## last-known spot keeps the search alive (travel refreshes the give-up clock). Intended: a short-attention NPC (e.g.
 ## NPC.tscn / a civilian at forget_time 1.0) searches briefly and quietly. Keep this < a hostile's forget_time to hear it.

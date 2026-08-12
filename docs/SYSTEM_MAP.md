@@ -60,11 +60,11 @@ Static is_active() is the cutscene control-lock read by gameplay_suppressed() an
 
 ### `autoload DialogueManager` - `scripts/dialogue/dialogue_manager.gd`
 
-is_engaged() (_active != null) = a conversation exists at all — the unpaused intro beat + the menu-suspension that is_active() hides — feeding world_frozen() immunity, Player.die() teardown, and _suspend_for_menu's box-hide + CONNECT_ONE_SHOT closed->resume one-shot.
+is_engaged() (_active != null) = a conversation exists at all — the unpaused intro beat + the menu-suspension that is_active() hides — feeding world_frozen() immunity, Player.die() + _on_speaker_died teardown, _suspend_for_menu's box-hide + CONNECT_ONE_SHOT closed->resume one-shot, UI._push_quest_toast's toast queue, and Radio's dialogue duck.
 
 - **Risk:** Dropping is_engaged() from InputManager.world_frozen() loses immunity in the unpaused intro beat — an enemy shoots the frozen player with no error (C66).
 - **Risk:** die() gating on is_active() not is_engaged() skips abort() during a sub-menu suspension — the menu's close then re-pauses + re-opens the box over the death cinematic.
-- **Risk:** A suspending sub-menu (Shop/Install/Chess/Atm) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
+- **Risk:** A suspending sub-menu (Shop/Install/Chess/Atm/Heal/LevelUp/Loot-exchange) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
 - **Risk:** Speaker menus are duck-typed via has_method/has_signal scans (buy/sell, do_heal, install_carried, ai_search_depth, deposit/withdraw, set_in_dialogue/died); a rename silently drops the option with no compile error.
 - **Test:** `tests/test_dialogue.gd` `tests/test_dialogue_suspend_closed.gd` `tests/test_dialogue_speaker_contracts.gd`
 
@@ -83,7 +83,7 @@ restamp_derived is the one strength/endurance re-stamp path LevelUp/PerkManager/
 
 ### `class Atm` - `scripts/components/atm.gd`
 
-deposit()/withdraw() are the ONLY writers of GameState.account outside LedgerAccrual; both are self-guarding and callable off-tree, so AtmScreen stays a pure view with no rules of its own.
+deposit()/withdraw() are the only BANKING writers of GameState.account — purchases also draw it down through Player.charge (the credit rail deliberately crosses below zero, so these clamps do not bound it) and the New Game implant bill stamps it in StartMenu._stamp_new_game_profile; audit all four plus LedgerAccrual before touching the clamps. Both are self-guarding and callable off-tree, so AtmScreen stays a pure view with no rules of its own.
 
 - **Risk:** A deposit path that does not clamp to maxf(0.0, player.money) lets a debtor mint money.
 - **Risk:** A withdraw path that does not clamp to maxf(0.0, GameState.account) opens a cash advance — and with it the draw-the-line / redeposit / earn-savings-interest arbitrage that the single clamp closes today.
@@ -174,7 +174,7 @@ gather(root, hide_group) is the ONE place level geometry becomes minimap geometr
 
 ### `class Minimap` - `scripts/ui/minimap.gd`
 
-Code-built by ui.gd into the _weighted carrier (top-right corner, shared with the quest tracker). Geometry comes from the level's baked NavigationMesh via FloorplanSection, paint from MenuStyle.hud.minimap_*, layout from GameSettings.hud.minimap_*, and the player's choices are polled LIVE off Settings.minimap_enabled / _rotates / _zoom so an Options change bites the same frame with no rebuild. The level swap is detected from the Groups.NAVMESH region's INSTANCE ID, not a GameRoot signal — a freed region leaves the group by itself, so the deck cache self-heals across a LevelDoor transition and this widget needs no new wiring in game_root.gd.
+Code-built by ui.gd into the _weighted carrier (top-right corner, shared with the quest tracker). Geometry comes from the level's baked NavigationMesh via FloorplanSection, paint from MenuStyle.hud.minimap_*, layout from GameSettings.hud.minimap_*, and the player's choices are polled LIVE off Settings.minimap_enabled / _rotates / _zoom so an Options change bites the same frame with no rebuild. The level swap is detected from the Groups.NAVMESH region's INSTANCE ID, not a GameRoot signal — a freed region leaves the group by itself, so the deck cache self-heals across a LevelDoor transition and this widget needs no new wiring in game_root.gd. The authored underlay is per-level: LevelData.map_data, PULLED (never pushed) by _resolve_level_underlay inside rebake() — the same region-instance-id hook — via Groups.GAME_ROOT's `level`. The widget's own map_data export is a per-instance override that wins when set, and a level without an authored map CLEARS the previous level's art (the stamp writes null too).
 
 - **Risk:** Renders ONLY the player's own floor band, so a mezzanine or catwalk above the cut is invisible and a staircase reads as a gap between two decks.
 - **Risk:** An unbaked level has no walkable fill and a level with no static colliders has no walls; either degrades to a partial map in silence, because both are legitimate states. Minimap.deck_count() is the introspection seam when a level looks blank.
@@ -306,7 +306,7 @@ GameRoot is game.tscn's level-load seam: resolve_boot_level picks the boot level
 
 ### `class LevelData` - `scripts/world/level_data.gd`
 
-resource_path persists as GameState.current_level_path for Continue; a non-null `scene` gates boot-viability, else GameRoot uses the exported level.
+resource_path persists as GameState.current_level_path for Continue; a non-null `scene` gates boot-viability, else GameRoot uses the exported level. map_data (the authored minimap underlay) is PULLED by the HUD's code-built Minimap, never pushed: Minimap._resolve_level_underlay reads Groups.GAME_ROOT's `level` inside rebake() on every region swap, so the underlay needs no wiring in game_root.gd or ui.gd.
 
 - **Risk:** A LevelData with a blank/unstable resource_path persists no resolvable path, so Continue silently boots the export, losing the saved level (GameRoot.load_level's set_current_level, read back by resolve_boot_level).
 - **Risk:** A saved LevelData whose `scene` is null is rejected by resolve_boot_level, which silently boots the export instead of the saved level (GameRoot.saved_level_is_bootable's scene != null check).

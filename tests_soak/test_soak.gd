@@ -6,7 +6,7 @@ extends GutTest
 ## heavy harness where running the real brain over time IS the point (it catches nav-grind / stranding / node
 ## leaks that no off-tree assertion can).
 ##
-## Run it explicitly:  tests_soak/run_soak.cmd   (godot --headless -s gut_cmdln -gdir=res://tests_soak)
+## Run it explicitly:  tests_soak/run_soak.cmd   (godot --headless -s gut_cmdln -gconfig=res://tests_soak/soak.gutconfig.json)
 ##
 ## Default target is NavSandbox.tscn — the clean-bake baseline (CLAUDE.md), so this committed test is GREEN and
 ## proves the HARNESS works end to end. To AUDIT a real level for nav health, point LEVEL at it (or bump the

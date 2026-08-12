@@ -7,7 +7,7 @@ extends GutTest
 ## (perceive -> acquire -> plan -> aim -> fire -> hit -> take_damage) works end to end — the widest-coverage gate for
 ## the Wave 5/6 npc.gd extractions (NpcCombat / NpcOutline).
 ##
-## Run it explicitly:  tests_soak/run_soak.cmd   (godot --headless -s gut_cmdln -gdir=res://tests_soak)
+## Run it explicitly:  tests_soak/run_soak.cmd   (godot --headless -s gut_cmdln -gconfig=res://tests_soak/soak.gutconfig.json)
 ##
 ## Target is NavSandbox.tscn — the clean-bake baseline (CLAUDE.md), so this committed test is GREEN and proves the
 ## harness works. Nav-not-synced (a headless reimport in flight) => INCONCLUSIVE (pending), not a failure.

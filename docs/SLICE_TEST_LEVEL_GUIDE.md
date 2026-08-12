@@ -333,7 +333,9 @@ The relevant script is `res://scripts/ui/ui.gd`:
 
 - `_on_quest_completed` pushes `PlayerText.quest_complete(quest.title)` (the
   `[PH] Quest complete: {title}` template)
-- `_push_quest_toast` queues quest toasts while `DialogueManager.is_active()`
+- `_push_quest_toast` queues quest toasts while `DialogueManager.is_engaged()`
+  (engaged, not active: notices stay hidden even while a sub-menu suspends the
+  conversation, e.g. buying a quest-objective item in Trade)
 - `_flush_dialogue_toasts` shows the queued messages on `dialogue_finished`
 
 For the slice, this means choosing the terminal's transmit choice shows the

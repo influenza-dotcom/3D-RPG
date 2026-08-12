@@ -12,7 +12,7 @@ The established idiom is the **`LookAtInteractable` family** — the base suppli
 hitbox + look-at outline, and each subclass writes only its own behaviour (`start_talk` /
 `can_be_talked_to` / `look_name`): `CanPickUp`, `MoneyPickUp`, `ItemContainer`, `Merchant`,
 `LootableCorpse`, the service stations (`Healer`, `Bonfire`, `LevelUp`, `PerkStation`, `RespecStation`), `Door`,
-`Radio`, and more — **19 scripts extend `LookAtInteractable`** (see the full tree below). Plus standalone
+`Radio`, and more — **20 scripts extend `LookAtInteractable`** (see the full tree below). Plus standalone
 drop-ins: `Lock`, `SpawnOnDestroy`, `CanDestroy`, `Throwable`, `Pettable`, `NoisePulser`, `Locomotor`, `NavBlocker`, `NavLink`,
 `AmbientSound`, `AudioZone`, `IndoorAmbienceDucker`, and more — that list is a sampler, not the roster; the full
 designer-facing catalogue (every drop-in with its knobs) is `docs/AUTHORING_GUIDE.md` §11, *The drop-in component
@@ -62,6 +62,7 @@ LookAtInteractable            look_at_interactable.gd   (extends Area3D)
 ├─ RespecStation              respec_station.gd     — E: pay to reverse every perk and refund the points, re-pick from scratch
 ├─ ChipInstaller              chip_installer.gd     — E / dialogue "Install": pay to install an ability microchip
 ├─ ChessMatch                 chess_match.gd        — E / dialogue "Play Chess": blindfold-chess minigame vs a ChessAi
+├─ Atm                        atm.gd                — E / dialogue "Bank": deposit / withdraw on the signed ledger account (GameState.account)
 ├─ Door                       door.gd               — E: swing a door open/closed (lockable: built-in key/lockpick gate, or a child Lock)
 ├─ LevelDoor                  level_door.gd         — E: travel to another level (GameRoot.load_level → matching PlayerSpawn)
 ├─ Radio                      radio.gd              — E: play / cycle a folder of music tracks (takes precedence over the score)
@@ -70,7 +71,7 @@ LookAtInteractable            look_at_interactable.gd   (extends Area3D)
 └─ QuestStarter               quest_starter.gd      — E: accept a Quest (a quest board / giver)
 ```
 
-The six **dual-mode** subclasses (`Merchant`, `Healer`, `Bonfire`, `LevelUp`, `ChipInstaller`, `ChessMatch`)
+The seven **dual-mode** subclasses (`Merchant`, `Healer`, `Bonfire`, `LevelUp`, `ChipInstaller`, `ChessMatch`, `Atm`)
 run standalone by default (aim + E) OR, with `standalone = false`, sit as a data-only child of a `DialogueNPC`
 whose conversation offers the action ("Trade" / "Install" / "Play Chess") — the NPC's `Talkable` owns the ray
 in that mode. `_on_dialogue_host()` on the base powers their config warning against stealing the ray.
@@ -300,7 +301,8 @@ split `AudioZone` uses. (2) MUFFLE (`enable_muffle`, on by default): sweeps a lo
 `outdoor_cutoff_hz` (transparent) down to `indoor_cutoff_hz` (default ~2500 Hz — a clearly-audible "stepped indoors" roll-off). A low-pass is per-BUS, so the
 bed sits on its own **`ambient_bed`** bus (in `default_bus_layout.tres`, carrying an `AudioEffectLowPassFilter`,
 sending into `ambient` so the slider still applies) — the same shape as the `radio` bus's low-pass. (The full bus
-set is `ambient`, `sfx`, `music`, `voice`, `radio` → `music`, `ambient_bed` → `ambient`, and `sting` → Master,
+set is `ambient`, `sfx`, `music`, `voice`, `radio` → `music`, `ambient_bed` → `ambient`, `speaker` → `sfx` (the
+tinny `StationSpeaker` kiosk chain — `docs/AUTHORING_GUIDE.md` §2a), and `sting` → Master,
 which is reserved for the death sting: the death cinematic ducks the world buses rather than Master, so `sting`
 is exempt by routing. Anything left on Master therefore escapes BOTH the volume sliders and that duck — see
 `scripts/player/death_mix.gd`.) The up-ray fan

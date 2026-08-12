@@ -5,7 +5,7 @@ extends LookAtInteractable
 ## @system Economy
 ## NOTE: each @seam/@risk below must stay on ONE line — ArchScan only reads lines that start with a @tag, so a
 ## wrapped continuation line is DROPPED and the statement renders truncated in docs/SYSTEM_MAP.md.
-## @seam deposit()/withdraw() are the ONLY writers of GameState.account outside LedgerAccrual; both are self-guarding and callable off-tree, so AtmScreen stays a pure view with no rules of its own.
+## @seam deposit()/withdraw() are the only BANKING writers of GameState.account — purchases also draw it down through Player.charge (the credit rail deliberately crosses below zero, so these clamps do not bound it) and the New Game implant bill stamps it in StartMenu._stamp_new_game_profile; audit all four plus LedgerAccrual before touching the clamps. Both are self-guarding and callable off-tree, so AtmScreen stays a pure view with no rules of its own.
 ## @risk A deposit path that does not clamp to maxf(0.0, player.money) lets a debtor mint money.
 ## @risk A withdraw path that does not clamp to maxf(0.0, GameState.account) opens a cash advance — and with it the draw-the-line / redeposit / earn-savings-interest arbitrage that the single clamp closes today.
 ## @test res://tests/test_atm.gd
@@ -76,7 +76,7 @@ func _ready() -> void:
 		StationSpeaker.ensure(self)
 
 
-# --- Transactions — the ONLY writers of GameState.account outside the interest posting -------------------
+# --- Transactions — the BANKING writers of GameState.account (Player.charge and StartMenu's implant bill also write it; LedgerAccrual posts interest) ---
 
 ## Move `amount` from the player's POCKET into the account. Returns what actually moved (0.0 = nothing).
 ## ⭐Clamped to cash ON HAND: you cannot deposit money you do not physically carry, so a broke player deposits

@@ -214,7 +214,12 @@ that every caller duck-types, and keeps only the three typed hot-path refs (`_wa
 `_slide` / `_grapple_ability`) its physics step drives each frame — those stay on the Player
 because the movement feel depends on their exact call order. A runtime grant is rebuilt from
 the id by the shared `AbilityRegistry` snake_case naming convention (scene ↔ `ability_id()` ↔
-script), so there is no hand-maintained id→script table.
+script), so there is no hand-maintained id→script table. The player's cosmetic first-person
+body (the FP legs+torso rig, the carry-hands / bare-fists rig and their motion) is likewise a
+component, not `player.gd` code: **`FirstPersonBody`** (`scripts/player/first_person_body.gd`),
+a scene-wired Player.tscn child on the Landing `host = NodePath("..")` idiom, which also
+carries the authored `fp_*` pose overrides (see `ARCHITECTURE_REVIEW.md`, Completed
+Extractions, for the ordering invariants).
 
 **Installed vs active (the Implants tab's on/off switch).** An `Ability` node's presence is
 INSTALLED; its `enabled` flag is ACTIVE. The player switches an installed implant off from
@@ -438,11 +443,11 @@ interaction base is `LookAtInteractable` (`extends Area3D`), which supplies the
 talk-layer hitbox and look-at outline contract, and a duck-typed talk-handler
 surface — `look_name()` / `start_talk()` / `can_be_talked_to()` / `host_npc()` —
 that the player's interaction ray (`PickupRay`) calls by name, so a new subclass
-needs zero ray changes. Nineteen scripts extend it (plus `DogPickup`, which
+needs zero ray changes. Twenty scripts extend it (plus `DogPickup`, which
 extends `CanPickUp`, so the tree is three levels deep): pickups (`CanPickUp`,
 `MoneyPickUp`, `UpgradePickup`), loot/trade screens (`ItemContainer`,
 `LootableCorpse`, `Merchant`), service stations (`Healer`, `Bonfire`, `LevelUp`,
-`PerkStation`, `RespecStation`, `ChipInstaller`, `ChessMatch`), and world objects
+`PerkStation`, `RespecStation`, `ChipInstaller`, `ChessMatch`, `Atm`), and world objects
 (`Door`, `LevelDoor`, `Radio`, `Readable`, `Switch`, `QuestStarter`). The full
 inheritance tree, base contract, and "add a new interactable" recipe live in
 [`scripts/components/README.md`](../scripts/components/README.md#the-lookatinteractable-hierarchy);
@@ -467,14 +472,16 @@ DISTINCT from `gameplay_suppressed()`, which also counts the real-time Pip-Boy/l
 overlays that keep the player at risk and must NOT grant immunity. A cutscene that wants
 to script player damage must use a dedicated kill path, not incidental `take_damage`.
 
-**Dialogue-suspend contract.** A dialogue option that opens a sub-menu (Trade/Install/Chess/Bank)
-routes through `DialogueManager._suspend_for_menu`, which hides the box and connects the
-sub-menu's `closed` as a `CONNECT_ONE_SHOT` resume BEFORE calling the open. So every one of
-those screens (`ShopScreen`/`ChipInstallScreen`/`ChessScreen`/`AtmScreen`) MUST emit `closed` on
-EVERY refuse path — each funnels its guard early-returns through a private `_refuse_open()` that just
-`closed.emit()`s (`AtmScreen` emits inline at each guard, same contract). A refuse that returns silently would strand the conversation `_suspended`
-forever (box hidden, tree paused, no way to advance). On the standalone open path nothing
-listens to `closed`, so the emit is a harmless no-op there.
+**Dialogue-suspend contract.** A dialogue option that opens a sub-menu (Trade/Exchange/Heal/
+Level Up/Install/Chess/Bank) routes through `DialogueManager._suspend_for_menu`, which hides
+the box and connects the sub-menu's `closed` as a `CONNECT_ONE_SHOT` resume BEFORE calling the
+open. So every one of those screens (`ShopScreen`/`LootScreen`/`HealScreen`/`LevelUpScreen`/
+`ChipInstallScreen`/`ChessScreen`/`AtmScreen`) MUST emit `closed` on EVERY refuse path — each
+funnels its guard early-returns through a private `_refuse_open()` that just `closed.emit()`s
+(`AtmScreen` emits inline at each guard, same contract; `RespecScreen` keeps the same funnel
+as insurance although nothing dialogue-hosts it yet). A refuse that returns silently would
+strand the conversation `_suspended` forever (box hidden, tree paused, no way to advance). On
+the standalone open path nothing listens to `closed`, so the emit is a harmless no-op there.
 
 ## Effect And Audio Seams
 
@@ -490,10 +497,11 @@ death cinematic's MIX. The cinematic used to fade the global **Master** bus to s
 because every bus chain in Godot terminates at Master, that left no route for a sound to
 survive the player's own death. The duck therefore moved down onto the four **world** buses
 (`GameSettings.player_feedback.death_cinematic_buses` = `ambient` / `sfx` / `music` /
-`voice`, which covers all authored audio since `radio` sends into `music` and `ambient_bed`
-into `ambient`), and the death sting plays on `sting` — a bus deliberately absent from that
-list, sending straight to Master. The Player's cinematic reaches it through exactly four
-seams (`begin` / `set_world_duck` / `restore_world` / `begin_revive`), one on each
+`voice`, which covers all authored audio since `radio` sends into `music`, `ambient_bed`
+into `ambient`, and `speaker` into `sfx`), and the death sting plays on `sting` — a bus
+deliberately absent from that list, sending straight to Master. The Player's cinematic
+reaches it through exactly four seams (`begin` / `set_world_duck` / `restore_world` /
+`begin_revive`), one on each
 death-exit path; `restore_world` iterates the designer's bus list rather than a captured
 snapshot, so adding a bus can never leave one death mode stale. No level is captured
 anywhere: every write recomputes from `Settings.current_bus_db(bus)` scaled by one duck
@@ -505,17 +513,32 @@ already assigns a bus.
 
 **Menu audio is a SEPARATE seam from `AudioManager`, and deliberately so.** Every menu cue plays on
 `MenuStyle`'s OWN pool of `AudioStreamPlayer`s, not through `AudioManager.play_2d_sfx` — because
-`AudioManager` parents its one-shots to the root at the default process mode, and seven screens
-(shop / heal / atm / respec / level-up / chip-install / chess) pause the tree, where an inherit-mode
-player's `play()` is **silently dropped**. `MenuStyle` therefore owns `_hover_player`, `_click_player`
+`AudioManager` parents its one-shots to the root at the default process mode, and menu cues have to
+survive a **tree-pause**: the station screens (shop / heal / atm / respec / level-up / chip-install /
+chess) are real-time themselves, but one opened out of a **conversation** runs under `DialogueManager`'s
+pause — as does anything reached through `FreezeFrame` on death — where an inherit-mode player's `play()`
+is **silently dropped**. `MenuStyle` therefore owns `_hover_player`, `_click_player`, `_denied_player`
 and a **four-voice semantic pool**, all `PROCESS_MODE_ALWAYS` and all on the `sfx` bus (so the SFX
 slider applies, and so the death cinematic's world duck covers them). Four voices because the 1.7 s open
 sting can still be ringing while the player tabs and then commits — one spare keeps the long cue from
-being stolen mid-ring; hover and click keep single self-cutting voices on purpose, which is the desired
-behaviour for a repeated blip.
+being stolen mid-ring; hover, click and denied keep single self-cutting voices on purpose, which is the
+desired behaviour for a repeated blip (and, for the denial, stops a spam-clicked refusal stacking four
+overlapping buzzes and then stealing the open sting's voice).
+
+**Refusal is a first-class cue.** `denied` answers "the game did not do what you asked": can't afford it,
+out of stock, bag full, nothing to withdraw, an illegal move, a failed save. It is the only slot with a
+**derived fallback** — leave `denied_sound` null (as the shipped skin does; there is no ninth clip) and
+`_stream_for` resolves it to `back_sound`, detuned by `denied_pitch_scale`. That derivation is deliberate
+policy: a refusal cue that only exists once an artist ships a clip is a cue nobody wires, and until it
+existed roughly twenty screens gated a commit on a success bool and answered the false branch with
+silence — a refused purchase was indistinguishable from a dead button. **`denied` is never a substitute
+for `back`**: back means "this closed / I honoured your cancel", which is exactly the confusion the
+denial ends. `pitch_scale` is written on *every* play, not only the pitched one, because pool voices are
+reused round-robin and a stray detune would silently transpose the next cue.
 
 The vocabulary lives on `MenuSkin` (one `AudioStream` slot per semantic event, all optional), and screens
-call `MenuStyle.play_open/back/tab/select/commit/step/slider_step` — never a preload. Three invariants:
+call `MenuStyle.play_open/back/tab/select/commit/denied/hover/step/slider_step` — never a preload. Three
+invariants:
 (1) **no cue may be reachable from a `_ready()`** — every screen autoload builds at boot, and the
 structural backstop is that every `play_*` early-outs while the pool is empty, so anything firing before
 `_build_sound()` is silent by construction (which is also why audio construction must stay OUT of
@@ -528,6 +551,21 @@ standalone modals (they sit *past* every refusal guard, unlike the `closed` sign
 a screen that never appeared), `PlayerMenus.enter/leave` distinguish a cold group open from a sibling tab
 swap, and `InputManager.close_all_modals` holds `MenuStyle.set_quiet` so the death/quickload sweep does
 not fire a wall of close cues at once.
+
+Two things those seams cannot reach, so they are covered explicitly. **Non-`BaseButton` surfaces** get
+`MenuStyle.play_hover(id)` — the same throttles the auto-wired button hover uses, exposed for a widget
+that paints its own hover state; `GridInventoryView` (the shared surface of backpack / loot / shop, which
+contains no button at all) uses it plus its own lift / land / refused-landing / rotate / cancel cues, and
+deliberately stays silent on everything it merely *reports* — a click, a right-click drop and a
+cross-grid transfer are the host's to sound, because only the host knows whether the action was honoured,
+refused, or cost money. And **the pairing rule is enforced, not remembered**: `if act(): play_commit()
+else: play_denied()`. A branch-gated success cue with no denial anywhere in its function is a *silent
+refusal path*, scanned as audit Domain E
+(`addons/cybersunday_tools/panel_audit/scan_menu_sound.gd`), reported by
+`godot --headless -s scripts/tools/menu_sound_debt.gd`, and held at **zero** by
+`tests/test_menu_sound_coverage.gd`. An unconditional cue at a function's base indent is exempt by
+construction — it already fires on every path — which is what lets a shared success tail
+(`ChipInstaller._grant`) and a never-gated act (StartMenu's run stamp) pass with no exemption list.
 
 `EffectFactory` (autoload) is **not** a VFX registry — it is only the blood-particle
 gameplay seam (`spawn_blood_particle`) plus a generic `spawn_at(scene, pos)` helper.
@@ -849,9 +887,20 @@ Layout: the top-right corner is SHARED with the objective tracker, and the minim
 reflow — `ui.gd.quest_tracker_top_for` derives the tracker's top from the map's footprint and
 returns it to the historical 8 px when the map is off (`tests/test_minimap_hud_layout.gd`).
 Geometry knobs are on `GameSettings.hud`, paint on `MenuStyle.hud`, and the player's own
-on/off + rotate + zoom + NPC dots on `Settings`, polled live. `MapData` is NOT orphaned: it
-survives as the optional authored underlay, drawn through the same matrix via its
-`world_bounds`.
+on/off + rotate + zoom + NPC dots on `Settings`, polled live. **The `MapData` underlay is
+authored per level** — `LevelData.map_data` (an authored image drawn under the plan through
+the same matrix via its `world_bounds`) is PULLED by the widget itself, never pushed:
+`Minimap.rebake()` calls `_resolve_level_underlay()`, which reads `Groups.GAME_ROOT`'s
+`level` and stamps the result EVEN WHEN NULL, so a swap into a level without an authored
+map clears the previous level's art instead of drawing it in the new world space. Because
+`rebake()` rides the same region-instance-id staleness hook as the deck cache, the
+underlay self-heals across a LevelDoor transition with no wiring in `game_root.gd` or
+`ui.gd`. `Minimap.map_data` (the widget export) stays a per-instance override that wins
+when set; the shipped code-built HUD widget leaves it null, and `active_map_data()` is
+the one precedence seam every draw site reads. The CYBER SUNDAY Content dock's New Map
+row scaffolds `MapData` `.tres` into `resources/maps/`; assigning one to a `LevelData`
+is the whole authoring workflow. `tests/test_minimap.gd` pins the stamp, the clear, the
+precedence, and the off-tree degrade; `tests/test_level_data.gd` pins the null default.
 
 `scripts/tools/menu_qa_shots.tscn` is the menu screenshot harness: one windowed run
 opens every menu screen (faking merchant/healer/corpse context off-tree like the GUT
