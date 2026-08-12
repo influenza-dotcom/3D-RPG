@@ -44,7 +44,9 @@ func _detonate() -> Explosion:
 	explosion.max_explosion_force = blast_force
 	explosion.explosion_radius = blast_radius
 	explosion.upward_bias = blast_upward_bias
-	explosion.instigator = _last_attacker
+	# The attacker can be freed before we detonate (same trap as projectile.gd's shooter) — collapse a
+	# freed ref to null = an unattributed blast, instead of erroring at the typed Node assignment.
+	explosion.instigator = _last_attacker if is_instance_valid(_last_attacker) else null
 	get_tree().root.add_child(explosion)
 	explosion.global_position = global_position
 	return explosion

@@ -150,7 +150,9 @@ var payment_method: String = "debit"
 ## events: repaying debt at a terminal (Atm.deposit), sitting in arrears when interest posts (LedgerAccrual),
 ## and the Ledger's undisclosed conduct dividend (Character._award_kill — it likes headshots and declines to
 ## explain why). A fresh character has NO history, which is why credit_rating_for defaults it to 0 and New
-## Game rates the build alone. Persisted; add through add_credit_standing so the clamp is never bypassed.
+## Game rates the build alone. Persisted; add through add_credit_standing so the clamp is never bypassed —
+## and load_from_disk re-applies the SAME clamp, so a hand-edited save (or one written before a designer
+## lowered credit_standing_max) can't carry a score past the live knob either.
 var credit_standing: float = 0.0
 ## The character's chosen NAME (set once at character creation; "" for an unnamed or pre-naming save). Persisted in
 ## the [player] save section and applied to the live Player (Player.player_name) for display on the Stats screen.
@@ -433,7 +435,12 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	money = _cfg_float(cfg, "player", "money", GameSettings.economy.player_starting_money)  # missing/junk -> the fresh-game knob; older saves stored ints, _cfg_float casts them
 	account = _cfg_float(cfg, "player", "account", 0.0)          # the Ledger account (signed: + savings, - debt); absent in pre-ATM saves -> 0
 	payment_method = _cfg_str(cfg, "player", "payment_method", "debit")  # the armed rail KEY; absent -> the safe default
-	credit_standing = _cfg_float(cfg, "player", "credit_standing", 0.0)  # the earned record; absent -> a clean slate
+	# The earned record; absent -> a clean slate. Clamped to EXACTLY add_credit_standing's rails (its
+	# maxf(0.0, …) cap floor included): this load is the one writer outside that mutator, and the file is the
+	# one place a value past the LIVE cap can come from (a hand-edit, or a save written before a designer
+	# lowered credit_standing_max).
+	var standing_cap: float = maxf(0.0, GameSettings.economy.credit_standing_max)
+	credit_standing = clampf(_cfg_float(cfg, "player", "credit_standing", 0.0), -standing_cap, standing_cap)
 	# LEGACY FOLD, gated at <v5: saves written BEFORE the ATM carried the implant bill as a NEGATIVE WALLET. On one of
 	# those the wallet is cash-only, so a negative one can only be pre-ATM debt — move it onto the account, where the
 	# ATM can actually repay it. This used to run UNGATED, justified as idempotent by construction (after one save
@@ -1051,7 +1058,8 @@ func _perk_manager_of(player: Node) -> PerkManager:
 	return null
 
 ## Write the perk ledger + quest tracker to `cfg`, keyed by resource_path (a code-built quest/perk with no path
-## can't round-trip and is skipped). Active quests carry their objective progress; completed carry just the path.
+## can't round-trip and is skipped — the quest-side skip warns, see QuestTracker.save_into). Active quests carry
+## their objective progress; completed carry just the path.
 func _save_perks_and_quests(cfg: ConfigFile) -> void:
 	if not perk_paths.is_empty():
 		cfg.set_value("perks", "paths", perk_paths)

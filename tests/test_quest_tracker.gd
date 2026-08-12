@@ -174,6 +174,25 @@ func test_load_from_restores_progress_and_clears_prior_state() -> void:
 		"load_from must CLEAR prior state, or loading a save would merge into the previous run's journal")
 	qt.free()
 
+func test_load_from_drops_a_junk_progress_value_instead_of_erroring() -> void:
+	# Mirrors test_world_snapshot's junk-count degrade: guarding the SHAPE of the progress dict is not enough — a
+	# hand-edited save can hold any Variant under a progress key, and int([3]) at advance_objective is a hard
+	# runtime ERROR (not a coercion) that aborts BEFORE the assignment, bricking the objective for good. load_from
+	# must DROP the junk value (that objective degrades to 0) while a numeric sibling restores intact — the
+	# loader's own "degrade, never hard-fail" contract. An authored .tres (whose existence test_sample_resources.gd
+	# already pins) stands in for the restored quest; objective_progress reads the progress dict directly, so the
+	# keys need not match its authored objectives.
+	var qt = load(QUESTTRACKER_PATH).new()
+	var cfg := ConfigFile.new()
+	cfg.set_value("quests_active", "q_junk",
+		{"path": "res://resources/quests/clear_the_block.tres", "progress": {"broken": [3], "fine": 2.0}})
+	qt.load_from(cfg)
+	assert_true(qt.is_quest_active(&"q_junk"), "the quest itself still restores — only the junk VALUE is dropped")
+	assert_eq(qt.objective_progress(&"q_junk", &"broken"), 0, "a junk-typed progress value degrades to 0 progress")
+	assert_eq(qt.objective_progress(&"q_junk", &"fine"), 2,
+		"a numeric sibling survives the rebuild (float coerces, per the _cfg_int accept-list)")
+	qt.free()
+
 func test_reset_clears_every_bucket() -> void:
 	var gs = load(GAMESTATE_PATH).new()
 	var qt = gs._qt()

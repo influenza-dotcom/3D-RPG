@@ -25,8 +25,9 @@ extends Node
 ## touches GameState during _ready.
 ##
 ## PERSISTENCE: a quest round-trips by `resource_path`, so a code-built Quest with no path cannot be saved and is
-## skipped. A path that no longer loads (the .tres was moved/renamed/deleted) is skipped with a warning rather than
-## crashing the boot load — degrade, never hard-fail — and appends a player-facing line to _load_warnings.
+## skipped with a warning naming it. A path that no longer loads (the .tres was moved/renamed/deleted) is skipped
+## with a warning rather than crashing the boot load — degrade, never hard-fail — and appends a player-facing
+## line to _load_warnings.
 
 ## Faction registry — resolves a quest's reward_reputation faction ids to live Faction resources for the grant.
 ## Preloaded, NOT a class_name reference: no global-class-cache dependency, so headless GUT compiles this autoload
@@ -339,13 +340,16 @@ func notify_use(item_id: StringName) -> void:
 # --- Persistence ----------------------------------------------------------------------------------------------
 
 ## Write the tracker to `cfg`, keyed by resource_path (a code-built quest with no path can't round-trip and is
-## skipped). Active quests carry their objective progress; completed and failed carry just the path.
+## skipped with a warning). Active quests carry their objective progress; completed and failed carry just the path.
 ## Called by GameState._save_perks_and_quests — the quest half of the same cfg.
 func save_into(cfg: ConfigFile) -> void:
 	for qid in _quests_active:
 		var entry: Dictionary = _quests_active[qid]
 		var q: Quest = entry.get("quest")
 		if q == null or q.resource_path == "":
+			# The skip is by design (a code-built Quest can't round-trip) but it must not be SILENT — every
+			# load-side degrade in this file pairs the drop with a push_warning; the save side gets the same.
+			push_warning("QuestTracker: active quest '%s' has no resource_path — it will NOT survive this save" % qid)
 			continue
 		cfg.set_value("quests_active", String(qid), {"path": q.resource_path, "progress": entry.get("progress", {})})
 	for qid in _quests_completed:
@@ -373,8 +377,19 @@ func load_from(cfg: ConfigFile) -> void:
 				push_warning("QuestTracker: active quest '%s' path didn't load — skipped" % qid)
 				_load_warnings.append(PlayerText.SAVE_WARN_ACTIVE_QUEST_MISSING)
 				continue
+			# Per-VALUE junk guard, not just the dict-shape check: a hand-edited save can hold any Variant under
+			# a progress key, and int([3]) is a hard runtime ERROR, not a coercion (player.gd's bag loader
+			# documents the same trap) — at advance_objective it would abort BEFORE the assignment, bricking the
+			# objective for good. Same accept-list as GameState._cfg_int (int/float/bool convert freely; anything
+			# else is junk): a junk value is DROPPED, so that objective degrades to 0 progress — never hard-fail.
 			var prog = rec.get("progress", {})
-			_quests_active[StringName(qid)] = {"quest": q, "progress": (prog if prog is Dictionary else {})}
+			var progress := {}
+			if prog is Dictionary:
+				for k in prog:
+					var v = prog[k]
+					if v is int or v is float or v is bool:
+						progress[str(k)] = int(v)
+			_quests_active[StringName(qid)] = {"quest": q, "progress": progress}
 	_quests_completed.clear()
 	if cfg.has_section("quests_completed"):
 		for qid in cfg.get_section_keys("quests_completed"):

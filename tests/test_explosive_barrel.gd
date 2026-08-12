@@ -47,3 +47,19 @@ func test_detonation_forwards_blast_config_and_instigator() -> void:
 		assert_almost_eq(ex.explosion_radius, 3.0, 0.01, "blast_radius -> the explosion's radius")
 		assert_eq(ex.instigator, shooter, "the attacker rides as the blast instigator (player kill-credit through a chain)")
 		ex.queue_free()
+
+
+func test_detonation_collapses_a_freed_attacker_to_null() -> void:
+	# The attacker can die (and be freed) between the hit that recorded them and the detonation — same trap
+	# as projectile.gd's shooter. A freed ref must collapse to null (unattributed blast), not error the
+	# typed instigator assignment and dud the explosion.
+	var b := ExplosiveBarrel.new()
+	add_child_autofree(b)
+	var shooter := Node.new()
+	b._last_attacker = shooter
+	shooter.free()  # freed BEFORE detonation — _last_attacker now holds a dead reference
+	var ex := b._detonate()
+	assert_not_null(ex, "detonation still spawns the blast when the attacker is gone")
+	if ex != null:
+		assert_null(ex.instigator, "a freed attacker collapses to null = an unattributed blast")
+		ex.queue_free()

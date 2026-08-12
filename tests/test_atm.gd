@@ -361,7 +361,7 @@ func test_the_announcer_is_inert_at_a_zero_interval() -> void:
 
 # --- PERSISTENCE -------------------------------------------------------------------------------------------
 
-## Off the singleton from here down (see the header): these three drive the whole-profile methods, so they run on
+## Off the singleton from here down (see the header): these drive the whole-profile methods, so they run on
 ## bare instances. A FRESH instance also makes the round-trip honest for free — its account/rail/standing start at
 ## the shipped defaults, so every assert below proves the LOAD wrote them rather than that a reset was skipped.
 func test_the_banking_fields_round_trip_through_a_save() -> void:
@@ -377,6 +377,26 @@ func test_the_banking_fields_round_trip_through_a_save() -> void:
 	assert_eq(gs2.payment_method, "credit", "the armed rail survives as its KEY")
 	assert_eq(gs2.credit_standing, 42.25, "…and so does the earned record")
 	gs.free()
+	gs2.free()
+
+
+func test_a_loaded_credit_record_is_clamped_to_the_live_cap() -> void:
+	# ⭐load_from_disk is the ONE credit_standing writer outside add_credit_standing, so it applies the SAME
+	# +/- maxf(0.0, credit_standing_max) rails — a hand-edited save (or one written before a designer lowered
+	# the cap) must not carry a score the live tuning no longer allows.
+	var cap: float = maxf(0.0, GameSettings.economy.credit_standing_max)
+	var cfg := ConfigFile.new()
+	cfg.set_value("player", "credit_standing", cap + 1234.5)
+	assert_eq(cfg.save(TMP_SAVE), OK, "the over-cap save writes")
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "…and loads")
+	assert_eq(gs.credit_standing, cap, "an over-cap record loads clamped to credit_standing_max")
+	gs.free()
+	cfg.set_value("player", "credit_standing", -cap - 1234.5)
+	assert_eq(cfg.save(TMP_SAVE), OK, "the past-the-floor save writes")
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "…and loads")
+	assert_eq(gs2.credit_standing, -cap, "…and one past the floor clamps to the mirror — add_credit_standing's exact rails")
 	gs2.free()
 
 
