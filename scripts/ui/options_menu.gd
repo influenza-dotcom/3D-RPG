@@ -746,7 +746,7 @@ func _option_row(parent: VBoxContainer, label_text: String, items: Array, select
 
 ## Step a cycler row by `dir` (+1/-1, wrapping): repaint the value caption and STAGE the new index —
 ## keyed by the value button, so repeated cycling keeps exactly one pending entry (the dropdown's contract).
-func _cycle_option(dir: int, value_btn: Button, items: Array, on_select: Callable) -> void:
+func _cycle_option(dir: int, value_btn: Button, items: Array, on_select: Callable, is_echo: bool = false) -> void:
 	var n := items.size()
 	if n == 0:
 		return
@@ -755,11 +755,14 @@ func _cycle_option(dir: int, value_btn: Button, items: Array, on_select: Callabl
 	value_btn.text = str(items[i])
 	# THE funnel for every cycler step — mouse arrows, a click on the value, and the keyboard path in
 	# _on_cycler_gui_input all land here, so one call covers them all. Past the n == 0 guard and skipped for a
-	# single-entry catalog, where the wrap reselects the same value and nothing visibly moved. MenuStyle
-	# throttles the repeat, which is what tames the keyboard ECHO the gui_input handler deliberately allows.
+	# single-entry catalog, where the wrap reselects the same value and nothing visibly moved. The STEP branch
+	# is echo-safe via the skin's step_min_interval throttle; the DENIED branch has NO global throttle (its
+	# self-cutting voice is deliberately retriggerable on click spam — test_menu_sound pins that), so the
+	# keyboard path flags echoes and only the INITIAL press cues — a held key on a single-entry catalog would
+	# otherwise machine-gun the buzz at echo rate.
 	if n > 1:
 		MenuStyle.play_step(dir)
-	else:
+	elif not is_echo:
 		MenuStyle.play_denied()  # single-entry catalog: the wrap reselected the same value, nothing moved
 	_stage(value_btn, on_select, i)
 
@@ -775,7 +778,10 @@ func _on_cycler_gui_input(event: InputEvent, value_btn: Button, items: Array, on
 	if dir == 0:
 		return
 	value_btn.accept_event()
-	_cycle_option(dir, value_btn, items, on_select)
+	# Echo presses still STEP (the slider-drag feel this handler exists for) but must not re-cue a DENIAL —
+	# see _cycle_option's branch note. Joypad events have no echo concept and read false here.
+	var is_echo := event is InputEventKey and (event as InputEventKey).echo
+	_cycle_option(dir, value_btn, items, on_select, is_echo)
 
 ## Checkbox row. Returns the CheckButton (focus target). Shrunk onto the right rail — a full-width
 ## CheckButton renders as a row-wide focus/hover bar with the switch stranded at its far end.

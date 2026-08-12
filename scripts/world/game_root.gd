@@ -144,7 +144,12 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	# never applies one. Deferred so every NPC's _ready has settled (hp = max_hp, spawn anchor, target acquire) before
 	# we overwrite it. Consumed synchronously here (a latch) so a later load_level can't double-apply.
 	if GameState.consume_world_snapshot():
-		_apply_world_snapshot.call_deferred()
+		# The snapshot REFERENCE is bound at queue time, not read when the deferred call runs: the reload freeze
+		# lifted at set_current_level (top of this func), so an autosave queued deferred by a level node's _ready
+		# would run FIRST in the FIFO deferred queue and null GameState.world_snapshot before the apply reached
+		# it. Nothing in-repo records world state from _ready today — the bound argument makes that a non-event
+		# instead of an unstated invariant.
+		_apply_world_snapshot.call_deferred(GameState.world_snapshot)
 	# In-session persistence (Phase 2): on EVERY level load (boot, a LevelDoor swap, a death/quickload reload), suppress
 	# authored NPCs the player has already KILLED — driven by the live GameState death ledger, INDEPENDENT of any one-shot
 	# [world_snapshot]. So a door A->B->A return finds a cleared level still cleared (in-session), and a quickload restores
@@ -162,11 +167,10 @@ func load_assigned_level() -> void:
 	load_level(level)
 
 ## Exact-snapshot tier: apply the loaded WorldSnapshot to the just-reloaded level (deferred from load_level after a
-## manual quickload consumed the pending flag). No-op if there's no snapshot in memory or we're off-tree. The
-## snapshot itself frees dead authored NPCs, repositions live ones, and restores every captured container's
-## contents (WorldSnapshot.apply). Runtime-only.
-func _apply_world_snapshot() -> void:
-	var snap: WorldSnapshot = GameState.world_snapshot
+## manual quickload consumed the pending flag; `snap` was bound at queue time — see load_level's note). No-op on a
+## null snapshot or off-tree. The snapshot itself frees dead authored NPCs, repositions live ones, and restores
+## every captured container's contents (WorldSnapshot.apply). Runtime-only.
+func _apply_world_snapshot(snap: WorldSnapshot) -> void:
 	if snap == null or not is_inside_tree() or get_tree() == null:
 		return
 	snap.apply(get_tree(), GameState.current_level_path)

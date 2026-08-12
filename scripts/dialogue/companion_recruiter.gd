@@ -31,7 +31,9 @@ static func label_for(speaker: Node) -> String:
 	var recruitable: bool = speaker.has_method(&"can_recruit") and speaker.can_recruit()
 	if not is_follow and not recruitable:
 		return ""
-	return "Wait here" if is_follow else "Follow me"
+	# The strings live on PlayerText with the other dialogue options (the tr()-sweep single-file guarantee);
+	# this helper only PICKS between them.
+	return PlayerText.DIALOGUE_OPTION_WAIT_HERE if is_follow else PlayerText.DIALOGUE_OPTION_FOLLOW
 
 ## Apply the recruit/dismiss action the button represents. Calls the matching contract method on the
 ## speaker — stop_following() when it was following, else start_following(player) with the player resolved

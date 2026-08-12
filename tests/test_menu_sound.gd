@@ -150,7 +150,10 @@ func test_denied_cue_resolves_on_the_shipped_skin() -> void:
 ## "menu closed" (the confusion the cue exists to end), and — the nastier one — a non-denial reported as
 ## pitched would mean play_ui leaves a detune on a POOL voice, silently transposing whatever cue reuses it.
 func test_only_the_denial_is_pitched() -> void:
-	assert_lt(MenuStyle._pitch_for(&"denied"), 1.0, "the denial is transposed down")
+	# NOT-UNITY, not below-unity: the invariant is "distinguishable from back", and denied_pitch_scale's export
+	# range (0.25..2.0) legitimately allows an UP-tune on an authored denied clip. The shipped down-transpose
+	# DEFAULT is pinned on the bare skin above (test_skin_exposes_volume_trims_and_retrigger_limits).
+	assert_ne(MenuStyle._pitch_for(&"denied"), 1.0, "the denial must not play at unity — at 1.0 it is indistinguishable from back / 'menu closed'")
 	for kind in [&"open", &"back", &"tab", &"select", &"commit", &"step_left", &"step_right", &""]:
 		assert_eq(MenuStyle._pitch_for(kind), 1.0,
 			"'%s' must play at unity — play_ui writes pitch_scale on EVERY play, so a stray non-1.0 here detunes a reused pool voice" % kind)

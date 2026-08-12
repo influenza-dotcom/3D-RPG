@@ -50,4 +50,8 @@ func test_barrel_does_not_override_explosion_damage() -> void:
 	# ExplosiveBarrel is an ENVIRONMENTAL blast (no WeaponData) — it must NOT set explosion_damage, so its blast keeps
 	# the -1 sentinel and uses the global fallback (it still sets max_explosion_force + explosion_radius).
 	var src := FileAccess.get_file_as_string("res://scripts/components/explosive_barrel.gd")
+	# Positive anchor FIRST: a moved/renamed file reads as "" and "".contains() is false, so the negative pin
+	# below would retire itself in silence (the test_atm_screen_scene rule: an unanchored negative pin is worse
+	# than no pin). The barrel DOES set explosion_radius, so this line proves the read landed.
+	assert_true(src.contains("explosion_radius"), "explosive_barrel.gd must be readable at this path — an empty read would vacuously pass the negative pin below")
 	assert_false(src.contains(".explosion_damage"), "ExplosiveBarrel must leave explosion_damage at the -1 sentinel (environmental blast -> global fallback)")

@@ -64,6 +64,7 @@ var _pending_end: bool = false    ## the next advance ends the conversation (the
 var _suspended: bool = false      ## conversation paused behind a sub-menu (trade/level-up/heal/exchange); resumes on its close
 var _pending_menu_closed: Signal  ## the suspended sub-menu's `closed` signal, tracked so _finish() can drop the one-shot if the conversation ends BEFORE the menu does (the player dies mid-menu) — else that stale `closed` would fire _resume_from_menu into a torn-down / next conversation
 var _line_token: int = 0          ## bumped on every spoken line; a pending auto-advance timer only fires if its token still matches (so a manual click / new line cancels it)
+var _convo_token: int = 0         ## bumped per start() before the intro await; the intro guards compare THIS as well as `_active != dialogue`, because two conversations can share one authored DialogueResource .tres (NPCs of a type) — resource identity alone would let a torn-down intro's continuation fire into its successor
 var _speech_finished_callable: Callable = Callable()  ## current TTS completion hook, disconnected when a line is skipped before its generated audio finishes
 var _face_tween: Tween  ## turns the speaker to face the player at dialog start; owned here so it runs while the speaker is frozen
 var _view: DialogueView          ## the box + letterbox visuals (code-built child)
@@ -189,14 +190,19 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 	_sync_dialogue_cursor()
 	dialogue_started.emit(_active)  # _active == dialogue (set above); hand listeners the resource being played
 	# Slight beat before they speak: the NPC turn / camera focus / zoom / letterbox play first, THEN
-	# the box opens with the first line (+ TTS). Bail if the conversation ended during the wait.
+	# the box opens with the first line (+ TTS). Bail if the conversation ended during the wait — by TOKEN as
+	# well as resource identity: `_active != dialogue` alone can't tell two conversations playing the SAME
+	# authored .tres apart, so a kill-then-retalk inside the intro window would double-run the reveal below
+	# (the _line_token idiom, one level up).
+	_convo_token += 1
+	var intro_token := _convo_token
 	await get_tree().create_timer(GameSettings.dialogue.dialogue_intro_delay).timeout
-	if _active != dialogue:
+	if _active != dialogue or intro_token != _convo_token:
 		return
 	_intro_playing = false
 	_view.reveal_panel()  # box opens with the first line
 	_show_line()
-	if _active != dialogue:
+	if _active != dialogue or intro_token != _convo_token:
 		return
 	# Intro's done + the box is open: pause the world (enemies, particles, physics). DialogueManager
 	# is PROCESS_MODE_ALWAYS so the box / choices / advancing keep working; TTS is OS-level and shaders
@@ -389,11 +395,11 @@ func _on_companion_pressed(was_following: bool) -> void:
 	if was_following:
 		_reveal_menu()  # dismissed — re-show the menu with the button flipped back to "Follow me"
 		return
-	# Recruited: acknowledge with "Alright." and end on the next advance.
+	# Recruited: acknowledge (PlayerText.DIALOGUE_RECRUIT_ACK) and end on the next advance.
 	_choices_shown = false
 	_pending_end = true
-	_view.show_line("Alright.", _displayed_speaker_name(), _speaker_name_color())
-	_begin_line_speech("Alright.")
+	_view.show_line(PlayerText.DIALOGUE_RECRUIT_ACK, _displayed_speaker_name(), _speaker_name_color())
+	_begin_line_speech(PlayerText.DIALOGUE_RECRUIT_ACK)
 	_view.show_continue_hint()
 	_sync_dialogue_cursor()  # back to reading a line -> hide the cursor
 

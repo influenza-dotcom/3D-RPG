@@ -113,6 +113,13 @@ const DIALOGUE_OPTION_PLAY_CHESS := "Play Chess"
 ## terminal's own screen swaps its Deposit/Pay-down caption, so this button never has to know which you mean.
 const DIALOGUE_OPTION_BANK := "Bank"
 const DIALOGUE_OPTION_EXCHANGE_GEAR := "Exchange Gear"
+## The companion follow/dismiss toggle pair — CompanionRecruiter.label_for picks by following(), and the
+## handler binds the BEHAVIOUR predicate, so rewording either can never flip recruit into dismiss (the
+## label-is-never-a-key rule this block's header states). RECRUIT_ACK is the spoken acknowledgement the
+## box shows when "Follow me" lands — a full sentence like GOODBYE below, not a verb label.
+const DIALOGUE_OPTION_FOLLOW := "Follow me"
+const DIALOGUE_OPTION_WAIT_HERE := "Wait here"
+const DIALOGUE_RECRUIT_ACK := "Alright."
 ## The generic leave option, always appended last. The trailing full stop is AUTHORED copy (it reads as a
 ## spoken line, unlike the verb-labelled service options above) — never punctuation the call site adds.
 const DIALOGUE_OPTION_GOODBYE := "Goodbye."
