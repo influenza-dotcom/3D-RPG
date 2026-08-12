@@ -111,6 +111,10 @@ func open_match(match_node: Node, player: Node) -> void:
 	# so a credit-funded stake would be a pure-profit loop: borrow the stake, win and keep the winnings, lose and
 	# the debt survives your death anyway (the account is death-safe in both directions). You bet what you carry.
 	if _wager > 0 and _player.money < float(_wager):
+		# The one PLAYER-FACING refuse path in open() (the others above are wiring faults), and it happens BEFORE
+		# grab_mouse — so no open sting has fired and the denial is the whole answer. Without it, walking up to a
+		# table you can't afford did nothing at all: no screen, no sound, just a toast in the corner.
+		MenuStyle.play_denied()
 		if _player.has_method(&"notify_toast"):
 			_player.notify_toast(PlayerText.chess_cant_cover(float(_wager)), GameSettings.hud.money_loss_color)
 		_match = null
@@ -170,6 +174,11 @@ func close() -> void:
 		var delta := forfeit_delta(_wager, _player_moved)
 		if delta != 0 and is_instance_valid(_player):
 			_player.add_money(float(delta))
+			# Walking out of a wagered game COSTS the stake — that is a loss, not a close, so it takes the denial
+			# and eats the back cue restore_mouse fires two lines down (the loot-caught idiom; the deliberate cue
+			# must be played BEFORE the token is queued). A free walk-away keeps the ordinary back cue.
+			MenuStyle.play_denied()
+			MenuStyle.quiet_next_back()
 			if _player.has_method(&"notify_toast"):
 				_player.notify_toast(PlayerText.chess_forfeit_loss(float(-delta)), GameSettings.hud.money_loss_color)
 	_is_open = false
@@ -206,11 +215,17 @@ func _submit_move() -> void:
 		return
 	var m := _game.parse_move(text)
 	if m.is_empty():
+		# Rejected input. The red hint alone was the entire feedback, which is the wrong sense entirely for a
+		# BLINDFOLD game — the mode where the player is least able to check the screen is the mode where they most
+		# need to hear that the move didn't take. (Via the Move button this supersedes the auto-wired click; via
+		# Enter it is the only sound the keystroke makes.)
+		MenuStyle.play_denied()
 		_error_hint = true
 		_hint.text = PlayerText.chess_illegal_move(text)
 		_hint.add_theme_color_override(&"font_color", MenuStyle.danger())
 		return
 	_apply_and_log(m)
+	MenuStyle.play_select()    # YOUR piece landed — the confirm half of the pair the illegal branch denies
 	_player_moved = true       # arm the forfeit — from here on, abandoning a wagered game costs the stake
 	_move_input.clear()
 	_refresh()
@@ -241,6 +256,10 @@ func _ai_move(tok: int) -> void:
 		_end_game()  # no legal reply -> the position is already terminal
 		return
 	_apply_and_log(m)
+	# THE OPPONENT MOVED. Deliberately the step tick and not the confirm the player's own move wears: this is the
+	# one event in the game the player did not cause, and in blindfold mode (no _has_board) it is also the one they
+	# cannot see. A distinct short cue is what tells them the log has a new line to read.
+	MenuStyle.play_step(-1)
 	_refresh()
 	if _game.is_game_over():
 		_end_game()
@@ -263,6 +282,14 @@ func _end_game() -> void:
 	# Settle the decided game ONCE (guarded by _finished above): win +wager, loss -wager, draw 0. The pure
 	# decided_delta routes both directions so the payout can't drift from _status_text's win/lose classification.
 	var res := _game.status()
+	# THE RESULT, in sound. Keyed off the RESULT SIGN and not off `delta`, so a FRIENDLY game (wager 0, delta
+	# always 0) still announces how it ended — the money is a consequence of the outcome, not the outcome.
+	# Win = the heavy commit, loss = the denial, draw = the sideways tab: three outcomes, three cues, no reading
+	# required. This whole method used to end in silence, wager included.
+	match player_result_sign(res, _player_color):
+		1: MenuStyle.play_commit()
+		-1: MenuStyle.play_denied()
+		_: MenuStyle.play_tab()
 	var delta := decided_delta(res, _player_color, _wager)
 	if delta != 0 and is_instance_valid(_player):
 		_player.add_money(float(delta))

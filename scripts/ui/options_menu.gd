@@ -556,8 +556,14 @@ func _input(event: InputEvent) -> void:
 	if captured == null:
 		return
 	get_viewport().set_input_as_handled()
+	# ARMING the rebind clicks (the row is an ordinary Button); the CAPTURE — the moment the binding is actually
+	# written — used to be the silent half, which is backwards: this is the commit, and it is a keystroke, so it
+	# can never inherit a button's cue. Esc aborts the capture without writing anything, so it backs out.
 	if not (captured is InputEventKey and (captured as InputEventKey).physical_keycode == KEY_ESCAPE):
 		Settings.rebind_action(_rebinding_action, _normalize_event(captured))
+		MenuStyle.play_commit()
+	else:
+		MenuStyle.play_back()
 	_end_rebind()
 
 ## Strip an event down to just its binding identity (no position / pressed-state noise) for storage.
@@ -753,6 +759,8 @@ func _cycle_option(dir: int, value_btn: Button, items: Array, on_select: Callabl
 	# throttles the repeat, which is what tames the keyboard ECHO the gui_input handler deliberately allows.
 	if n > 1:
 		MenuStyle.play_step(dir)
+	else:
+		MenuStyle.play_denied()  # single-entry catalog: the wrap reselected the same value, nothing moved
 	_stage(value_btn, on_select, i)
 
 ## The focused value button eats ui_left/ui_right to step the cycler (echo allowed, so holding a key

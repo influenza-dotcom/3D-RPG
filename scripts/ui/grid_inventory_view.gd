@@ -32,6 +32,13 @@ extends Control
 ## drag machinery untouched). This is what lets a loot-only coin too big for a full corpse grid still be TAKEN, so
 ## the corpse drains to empty and its ragdoll can fade instead of soft-locking as lootable-but-unlootable.
 ##
+## SOUND: this widget cues its own MOTION — hover, lift, land, refused-landing, rotate, cancel — because it
+## contains no BaseButton for MenuStyle's node_added hook to wire, and it is the shared surface of the three
+## most-used menus (backpack / loot / shop). It deliberately does NOT cue anything it merely REPORTS: a click
+## (activate_requested), a right-click drop, and a cross-grid transfer_requested are the HOST's to sound,
+## because only the host knows whether the action was honoured, refused, or cost money. Adding a cue here for
+## those would double every one of them.
+##
 ## Cells size to fit the available WIDTH and, when the host hands over a height budget (max_view_height), the
 ## available HEIGHT too — the real UI canvas is 792x444 at 16:9 (792x432..495+ across monitor shapes), and an
 ## 8-row loot column only fits whole when cells shrink to the SLOT, not just to the width. Width-only sizing
@@ -409,6 +416,11 @@ func _release(pos: Vector2) -> void:
 			return
 		if _drag_valid:
 			_inv.move_stack(_drag_key, _drag_cell.x, _drag_cell.y, _drag_w, _drag_h)  # commit (fires changed)
+			MenuStyle.play_select()   # LANDED — the closing half of the pair _start_drag opened
+		else:
+			MenuStyle.play_denied()   # the footprint didn't fit / the cursor was off the grid: the tile snaps back,
+									  # and a snap-back that sounds exactly like a successful move is the whole
+									  # reason drag-and-drop felt unresponsive here
 		_end_drag()  # clear _dragging BEFORE refreshing so the settled tile draws normally, not as the skipped drag
 		refresh()    # re-read placements + redraw (an invalid drop just snaps the tile back to its unchanged spot)
 	elif _pressed_key >= 0:
@@ -443,6 +455,10 @@ func _start_drag(pos: Vector2) -> void:
 		# DIM the source tile rather than hide it: the moving preview only ghosts BAKED icons, so a live-mesh-only
 		# item would vanish entirely mid-drag. The art stays anchored at the origin cell while the footprint travels.
 		_tiles[_drag_key].modulate.a = MenuStyle.skin.drag_source_dim_alpha
+	# LIFTED. Past the empty-row guard above, so a press that never became a real drag is silent — and a plain
+	# click can't reach here at all (it never crosses DRAG_THRESHOLD), so this never doubles with the host's
+	# activate cue. The matching "landed" cue is in _release.
+	MenuStyle.play_select()
 	_set_hovered(-1, null)  # not hovering while dragging
 	_update_drag_target(pos)
 
@@ -608,6 +624,13 @@ func _set_hovered(key: int, item: Item) -> void:
 		hover_changed.emit(item)
 	if key_changed and _overlay != null:
 		_overlay.queue_redraw()  # the hover ring follows the hovered STACK (by key)
+	# Blip on arriving at a tile — the same cue every menu BUTTON gets from MenuStyle's node_added hook, which a
+	# grid tile can never receive (tiles are plain Controls and all input is handled at the VIEW level, so there
+	# is no BaseButton anywhere in this widget). Only on ARRIVAL: leaving for empty grid (key -1) is silent, as is
+	# the clear on hide / drag-start. The throttle id mixes the view's instance id with the stack key so the loot
+	# screen's two columns don't share ids — crossing between them at the same key must still blip.
+	if key_changed and key >= 0:
+		MenuStyle.play_hover(get_instance_id() ^ key)
 
 func _on_mouse_exited() -> void:
 	if not _dragging:
@@ -632,6 +655,10 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed(&"ui_cancel"):
 		_end_drag()  # Esc cancels the drag (rather than closing the whole screen) — snap back
+		# BACK, not denied: the game honoured the cancel. It also has to be audible for a second reason — this
+		# Esc is SWALLOWED (set_input_as_handled below) and does NOT close the screen, so without a cue the key
+		# reads as having done nothing at all.
+		MenuStyle.play_back()
 		_set_hovered(-1, null)  # dragging cleared the hover; keep it clear until the cursor moves again
 		queue_redraw()
 		get_viewport().set_input_as_handled()
@@ -645,6 +672,14 @@ func _rotate_drag() -> void:
 	var t := _drag_w
 	_drag_w = _drag_h
 	_drag_h = t
+	# A SQUARE footprint rotates to an identical shape — nothing on screen changes, so nothing sounds (the same
+	# "a no-op makes no noise" rule the refused stat step follows). Otherwise the step pair carries the turn, and
+	# direction is read off the NEW orientation so repeated R alternates left/right instead of ticking one way
+	# forever. play_step's own throttle covers held auto-repeat.
+	if _drag_w != _drag_h:
+		MenuStyle.play_step(1 if _drag_w > _drag_h else -1)
+	else:
+		MenuStyle.play_denied()  # a square turns into itself — R pressed, nothing to turn
 	# Mid-flight over the OTHER column: re-aim against THEIR grid instead of ours, so R works the same on both
 	# sides of a cross-grid drag (and the landing preview turns with it).
 	if _partner_active:

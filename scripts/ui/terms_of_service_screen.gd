@@ -194,10 +194,14 @@ func _bind_nag() -> void:
 ## it is also the exact clip the (now muted) Decline button used to give away for free, leaving the mouse path
 ## unchanged while filling the Escape path, which is not a Button and would otherwise be silent. Cued inside
 ## the guard so the sound only ever means "the nag is up".
+## An EARLY-RETURN guard, not an `if node != null:` wrapper: a missing %NagRoot is a broken scene, never a
+## player-facing refusal, so the cue below must read as UNCONDITIONAL for this press (which is what keeps the
+## menu-sound blindspot scanner honest — a branch-gated cue there would look like an unanswered refusal).
 func _on_decline() -> void:
-	if _nag_root != null:
-		_nag_root.visible = true
-		MenuStyle.play_select()
+	if _nag_root == null:
+		return
+	_nag_root.visible = true
+	MenuStyle.play_select()
 
 ## Dismiss the nag ("Reconsider" or Escape) — a genuine back-out, and the one cue site for both entry paths.
 func _hide_nag() -> void:

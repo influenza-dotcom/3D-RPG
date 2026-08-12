@@ -55,6 +55,16 @@ Acceptance:
   judgement change. The same scanner backs the shrink-only baseline in
   `tests/test_player_text.gd`, so any change to its paint-site regexes must
   keep that suite green.
+- The menu-sound blindspot domain (`panel_audit/scan_menu_sound.gd`) is
+  findings-only for the same reason: whether a refused branch wants
+  `play_denied()`, a restructure, or an `EXEMPT_FUNCS` entry is a judgement
+  call, and an auto-inserted cue would fire in the wrong place. It backs
+  `tests/test_menu_sound_coverage.gd`, whose baseline is EMPTY and whose
+  high-water mark is 0 — so any change to the nesting rule, `SUCCESS_CUES`,
+  `DENIAL_CUE` or `EXEMPT_FUNCS` must keep that suite green, and the suite's
+  synthetic-source tests exist to catch a "passes at zero because it stopped
+  detecting anything" regression. Re-measure headlessly with
+  `godot --headless -s scripts/tools/menu_sound_debt.gd`.
 - After fixing, Re-scan should remove fixed findings or report why they remain.
 - The result summary lists changed, skipped, and failed items.
 - Resource and file writes preserve valid Godot serialization.

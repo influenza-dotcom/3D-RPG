@@ -160,18 +160,20 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## ⭐THE COMMIT CUE IS GATED ON WHAT ACTUALLY MOVED, never on the press. Atm.deposit returns 0.0 on a
 ## deposit-blocked terminal, on an amount under GameSettings.economy.bank_min_transaction, and on an empty
-## pocket — none of those are transactions, and there is no "denied" clip in the vocabulary (the back cue means
-## CLOSED, so borrowing it here would lie). A refusal stays silent. Both buttons are MUTED in _bind_ui so this
-## is the only sound the press makes; see the note there.
-## _refresh DISABLES the button for all three cases ahead of the press, so a silent refusal is no longer
-## something the player can trigger by clicking — this gate is the backstop for the gap between the last paint
-## and the press (the world keeps moving behind this card), not the primary answer.
+## pocket — none of those are transactions, so none of them may sound like one. They now take the DENIAL cue
+## rather than nothing (the back cue still means CLOSED, so borrowing it here would still be a lie). Both
+## buttons are MUTED in _bind_ui so this pair is the only sound the press makes; see the note there.
+## _refresh DISABLES the button for all three cases ahead of the press, so the denial is the backstop for the
+## gap between the last paint and the press (the world keeps moving behind this card) plus the controller path
+## that can commit while standing on a stale button — not the primary answer.
 func _on_deposit() -> void:
 	if not _live():
 		return
 	if _atm.deposit(_player, _amount()) > 0.0:
 		MenuStyle.play_commit()  # money left the pocket — the heavy cue, same as any till
 		_set_amount(0.0)
+	else:
+		MenuStyle.play_denied()
 	_refresh()
 	_reseat_focus_after_commit()
 
@@ -181,6 +183,8 @@ func _on_withdraw() -> void:
 	if _atm.withdraw(_player, _amount()) > 0.0:
 		MenuStyle.play_commit()  # gated on the moved amount exactly as the deposit above
 		_set_amount(0.0)
+	else:
+		MenuStyle.play_denied()
 	_refresh()
 	_reseat_focus_after_commit()
 

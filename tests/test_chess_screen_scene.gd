@@ -5,8 +5,8 @@ extends GutTest
 ## scenes"). Pins the silent-when-broken seams: the autoload points at the SCENE, every %node _bind_ui
 ## binds exists, no text is authored in the scene (strings belong to PlayerText / l10n, never a .tscn),
 ## and the screen-specific layout contracts (single-line hint, self-scrolling move log, atr opt-outs on
-## the player-typed surfaces, the 0.12 panel band). Behaviour (turn loop / wager / pause) is in-tree ->
-## playtest + tests/test_chess_wager.gd.
+## the player-typed surfaces, the 0.12 panel band). Behaviour (turn loop / wager / the real-time posture —
+## a match runs while the world keeps moving) is in-tree -> playtest + tests/test_chess_wager.gd.
 
 const SCENE := "res://scenes/ui/chess_screen.tscn"
 

@@ -209,6 +209,10 @@ func _chip_roster() -> Array[Item]:
 func _make_row(text: String, ability_name: String, price_text: String) -> Button:
 	var btn := MenuStyle.size_row_button(Button.new())  # empty-text button: without the pin its rect (selection bar + hitbox) collapses above the labels
 	btn.toggle_mode = true
+	# MUTE the auto-wired generic click: the cue belongs to _on_row_toggled, which knows the DIRECTION of the
+	# flip. Same contract as implants_screen._make_toggle_row — order-free, since _wire_button skips a button
+	# already carrying the semantic meta. Hover is untouched.
+	MenuStyle.set_button_sound(btn, &"")
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var sb: StyleBox = MenuStyle.theme.get_stylebox(&"normal", &"Button")
@@ -246,8 +250,13 @@ func _make_row(text: String, ability_name: String, price_text: String) -> Button
 		row.add_child(price_l)
 	return btn
 
-## Any row flipped either way (independent toggles — no ButtonGroup): just re-tally the bill.
-func _on_row_toggled(_on: bool) -> void:
+## Any row flipped either way (independent toggles — no ButtonGroup): re-tally the bill and say WHICH WAY the
+## chip went. The step pair carries the direction here exactly as it does on the in-game Implants tab
+## (implants_screen._on_row_toggled) — the two implant toggles are the same verb and must sound the same. The
+## rows are muted in _make_row so this is the press's only voice. No denied branch: a row that no longer fits
+## the credit is DISABLED by _refresh_tally and never emits, and un-checking is always allowed.
+func _on_row_toggled(on: bool) -> void:
+	MenuStyle.play_step(1 if on else -1)
 	_refresh_tally()
 
 ## The checked rows' ability ids, in list order — the confirmed payload.

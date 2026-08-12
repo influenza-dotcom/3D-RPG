@@ -5,8 +5,10 @@ extends GutTest
 ## What actually breaks in the field, and is therefore what's pinned here:
 ##  * a cue slot renamed on the skin -> that event goes silent with no error (every play_* treats a null
 ##    stream as a no-op ON PURPOSE, so audio can land one cue at a time);
-##  * a voice built without PROCESS_MODE_ALWAYS or off the "sfx" bus -> silent inside the seven PAUSING
-##    screens, or deaf to the SFX volume slider (see menu_style.gd's invariant 1);
+##  * a voice built without PROCESS_MODE_ALWAYS or off the "sfx" bus -> silent under the only tree-pause
+##    left in the game (DialogueManager's — which a station screen opened FROM a conversation runs under,
+##    as does anything reached through FreezeFrame on death), or deaf to the SFX volume slider (see
+##    menu_style.gd's invariant 1);
 ##  * audio construction drifting from _build_sound() into rebuild() -> a bare .new() + rebuild() (the
 ##    idiom tests/test_menu_skin_art.gd uses, which never runs _ready) would start spawning players
 ##    off-tree, and a play_* reachable at boot would sting under the splash;
@@ -28,6 +30,10 @@ const CUE_TO_SLOT := {
 	&"step_left": &"step_left_sound",
 	&"step_right": &"step_right_sound",
 }
+## &"denied" is deliberately ABSENT from CUE_TO_SLOT: it is the one cue whose slot may be null and still
+## SOUND, because _stream_for falls back to back_sound (detuned by denied_pitch_scale). Its own contract is
+## pinned by test_denied_cue_* below, and keeping it out of this table is what stops
+## test_shipped_skin_assigns_every_cue from demanding a ninth clip that deliberately does not exist.
 
 
 # --- MenuSkin: the designer surface -------------------------------------------------------------------
@@ -45,7 +51,7 @@ func test_skin_exposes_every_cue_slot() -> void:
 	var skin := MenuSkin.new()
 	var props := _property_names(skin)
 	for slot in [&"hover_sound", &"click_sound", &"open_sound", &"back_sound", &"tab_sound",
-			&"step_left_sound", &"step_right_sound", &"commit_sound"]:
+			&"step_left_sound", &"step_right_sound", &"commit_sound", &"denied_sound"]:
 		assert_true(props.has(slot), "MenuSkin must expose the '%s' cue slot — MenuStyle resolves cues by this exact name" % slot)
 		assert_null(skin.get(slot), "'%s' must default to null so a bare skin is SILENT, not noisy" % slot)
 	skin = null
@@ -58,6 +64,13 @@ func test_skin_exposes_volume_trims_and_retrigger_limits() -> void:
 			&"back_volume_db", &"tab_volume_db", &"step_volume_db", &"commit_volume_db"]:
 		assert_true(props.has(trim), "MenuSkin must expose the '%s' trim (per-cue levelling is a designer job)" % trim)
 		assert_eq(float(skin.get(trim)), 0.0, "'%s' must default to 0 dB — the shipped level is the artist's, not a code guess" % trim)
+	# denied_volume_db is the ONE trim with a non-zero default, and deliberately so: its default voice is a
+	# BORROWED clip (back_sound), levelled for a different job, so it needs pulling down out of the box.
+	assert_true(props.has(&"denied_volume_db"), "MenuSkin must expose denied_volume_db")
+	assert_eq(skin.denied_volume_db, -2.0, "denied_volume_db default (the derived cue borrows a clip levelled for 'close')")
+	assert_true(props.has(&"denied_pitch_scale"), "MenuSkin must expose denied_pitch_scale")
+	assert_lt(skin.denied_pitch_scale, 1.0,
+		"the denial must default BELOW unity pitch — detuning is the only thing separating a derived refusal from the close cue it borrows")
 	# The anti-machine-gun thresholds are designer knobs, not consts (CLAUDE.md: never hardcode a tunable).
 	assert_eq(skin.hover_min_interval, 0.05, "hover_min_interval default")
 	assert_eq(skin.step_min_interval, 0.08, "step_min_interval default")
@@ -80,8 +93,8 @@ func test_shipped_skin_assigns_every_cue() -> void:
 # --- MenuStyle: the voices ----------------------------------------------------------------------------
 
 func test_every_voice_is_always_mode_on_the_sfx_bus() -> void:
-	# The two named players are pinned by tests/test_options_menu.gd as well — do not rename them.
-	var voices: Array = [MenuStyle._hover_player, MenuStyle._click_player]
+	# The first two named players are pinned by tests/test_options_menu.gd as well — do not rename them.
+	var voices: Array = [MenuStyle._hover_player, MenuStyle._click_player, MenuStyle._denied_player]
 	voices.append_array(MenuStyle._ui_players)
 	assert_eq(MenuStyle._ui_players.size(), 4,
 		"the semantic pool is 4 voices — the open sting can overlap a tab swap and a commit, plus one spare")
@@ -94,9 +107,74 @@ func test_every_voice_is_always_mode_on_the_sfx_bus() -> void:
 
 
 func test_play_seams_exist() -> void:
-	for m in ["play_ui", "play_open", "play_back", "play_tab", "play_select", "play_commit",
-			"play_step", "play_slider_step", "set_button_sound", "set_quiet", "quiet_next_back"]:
+	for m in ["play_ui", "play_open", "play_back", "play_tab", "play_select", "play_commit", "play_denied",
+			"play_hover", "play_step", "play_slider_step", "set_button_sound", "set_quiet", "quiet_next_back"]:
 		assert_true(MenuStyle.has_method(m), "MenuStyle.%s() is the seam screens call — renaming it silently un-sounds them" % m)
+
+
+# --- the denial cue: the refusal half of every gated commit ---------------------------------------------
+
+## The DERIVED fallback, which is the whole reason a refusal is audible at all today: with denied_sound
+## unassigned (as the shipped skin leaves it — there is no ninth clip), the cue must still resolve, to
+## back_sound. If this ever returns null, ~30 refusal sites across the UI go quiet again in one stroke and
+## nothing errors.
+## Asserted on a BARE instance carrying a FIXTURE skin (never the autoload's), so the pin is about the
+## resolution RULE and not about what the artist happens to have assigned today.
+func test_denied_cue_falls_back_to_the_back_clip() -> void:
+	var bare: Node = load(STYLE_SCRIPT).new()
+	var skin := MenuSkin.new()
+	var back_clip := AudioStreamWAV.new()
+	skin.back_sound = back_clip
+	assert_null(skin.denied_sound, "the fixture leaves the denial slot unassigned — the shipped state")
+	bare.skin = skin
+	assert_eq(bare._stream_for(&"denied"), back_clip,
+		"an unassigned denied_sound must DERIVE from back_sound — otherwise every refusal site in the UI goes quiet at once, with no error")
+	# ...and an AUTHORED clip still wins, so the fallback is a floor and not a ceiling.
+	var own_clip := AudioStreamWAV.new()
+	skin.denied_sound = own_clip
+	assert_eq(bare._stream_for(&"denied"), own_clip, "an authored denied_sound overrides the fallback")
+	bare.free()
+	skin = null
+	back_clip = null
+	own_clip = null
+
+
+## The same contract asserted against the LIVE autoload skin, which is the one that actually plays: whatever
+## the artist has (or hasn't) assigned, &"denied" must resolve to a real stream.
+func test_denied_cue_resolves_on_the_shipped_skin() -> void:
+	assert_not_null(MenuStyle._stream_for(&"denied"),
+		"the shipped skin must be able to SPEAK a refusal — either an authored denied_sound or the back_sound fallback")
+
+
+## The pitch table. Two things break if this drifts: a denial detuned to 1.0 becomes indistinguishable from
+## "menu closed" (the confusion the cue exists to end), and — the nastier one — a non-denial reported as
+## pitched would mean play_ui leaves a detune on a POOL voice, silently transposing whatever cue reuses it.
+func test_only_the_denial_is_pitched() -> void:
+	assert_lt(MenuStyle._pitch_for(&"denied"), 1.0, "the denial is transposed down")
+	for kind in [&"open", &"back", &"tab", &"select", &"commit", &"step_left", &"step_right", &""]:
+		assert_eq(MenuStyle._pitch_for(kind), 1.0,
+			"'%s' must play at unity — play_ui writes pitch_scale on EVERY play, so a stray non-1.0 here detunes a reused pool voice" % kind)
+
+
+## The denial owns a DEDICATED voice instead of a pool slot, so spam-clicking a button the game keeps
+## refusing restarts one buzz rather than stacking four and then stealing the open sting's voice.
+func test_denial_has_its_own_voice_outside_the_pool() -> void:
+	assert_not_null(MenuStyle._denied_player, "the denial voice must be built in _build_sound()")
+	assert_false(MenuStyle._ui_players.has(MenuStyle._denied_player),
+		"the denial voice must sit OUTSIDE the semantic pool — self-cutting is the point")
+
+
+# --- play_hover: the non-Button surface seam ------------------------------------------------------------
+
+## Tile hovers reach the SAME throttles as button hovers. The id argument is what makes the same-target gate
+## work for a list that repaints under a stationary cursor; passing 0 opts out of that gate (but not the
+## interval floor). Asserted through the public seam only — the internals are free to move.
+func test_play_hover_accepts_a_target_id_and_stays_silent_while_quiet() -> void:
+	MenuStyle.set_quiet(true)
+	MenuStyle.play_hover(12345)   # must be a no-op, not an error, during the close-everything sweep
+	MenuStyle.set_quiet(false)
+	assert_false(MenuStyle._hover_player.playing,
+		"a hover fired under the quiet latch must not sound — close_all_modals holds it across ~17 screens")
 
 
 # --- The boot / off-tree structural guard --------------------------------------------------------------
@@ -115,6 +193,8 @@ func test_bare_instance_builds_no_voices_and_survives_every_cue() -> void:
 	bare.play_tab()
 	bare.play_commit()
 	bare.play_select()
+	bare.play_denied()   # the denial voice is built alongside the pool, so it must no-op here too
+	bare.play_hover(1)   # the non-Button hover seam has its own null guard
 	bare.play_step(1)
 	bare.play_step(-1)
 	bare.play_ui(&"nonsense_kind")

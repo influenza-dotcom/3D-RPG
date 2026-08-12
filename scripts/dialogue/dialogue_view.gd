@@ -104,8 +104,14 @@ func set_choices(choices: Array, cb: Callable) -> void:
 		# mouse-click driven (the mouse is MOUSE_MODE_VISIBLE once the response menu is revealed —
 		# _reveal_menu -> _sync_dialogue_cursor; start() itself leaves it HIDDEN for the listen-first line).
 		b.focus_mode = Control.FOCUS_NONE
-		b.pressed.connect(cb.bind(choice, passed))
+		# add_child BEFORE connecting — the SAME audio-ordering rule add_extra_choice documents at length. Entering
+		# the tree is what lets MenuStyle's node_added hook wire the generic click, and that connection must come
+		# FIRST: a choice whose handler fires a cue (a consequence that opens Trade / Level Up, or hands out money)
+		# has its click swallowed only while the click is ALREADY RINGING, so a click connected second lands on the
+		# front of the cue instead of being cut. These two builders were split on this — extra choices were fixed,
+		# authored ones were not.
 		_choices_box.add_child(b)
+		b.pressed.connect(cb.bind(choice, passed))
 	_clamp_choices_height.call_deferred()  # cap at ~half-screen so many choices SCROLL rather than clip off the top
 
 ## The stat-gate choice label ("[Strength 6] Threaten him") shown on a choice the player QUALIFIES for. The stat

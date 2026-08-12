@@ -492,17 +492,27 @@ func test_shop_opens_and_closes() -> void:
 	_teardown(m, p)
 
 
-func test_shop_pauses_the_world_while_open() -> void:
-	# Trading freezes the world like dialogue (get_tree().paused) so combat / physics don't run while you
-	# shop. open + close are synchronous here, so the tree is paused and unpaused within this one call —
-	# GUT (blocked awaiting this test) never tries to process mid-pause, and after_each closes any leak.
+## ⭐TRADING IS REAL-TIME. This test used to assert the opposite (it pinned get_tree().paused while the shop was
+## open) — that was a stale source pin, not a guarantee: on 2026-08-09 every station screen went real-time. A
+## screen you reach by WALKING UP to a merchant must not stop the city, and one reached through a CONVERSATION is
+## already frozen by dialogue's pause, which is the ONLY pause left in the game (shop_screen.gd / atm_screen.gd
+## carry the full argument). What replaced the pause as the "this screen owns you" signal is the InputManager
+## modal registry: the row flag `pausing` became `blocks_tabs`, and `any_pausing_open()` became
+## `any_tab_blocking_open()`. So the shop's posture is pinned from BOTH sides here — real-time world, blocked
+## hands. tests/test_modal_registry.gd owns the registry-wide version of the same contract.
+func test_shop_is_real_time_and_owns_the_players_hands() -> void:
 	var m := _merchant()
 	var p := _player()
 	ShopScreen.open_shop(m, p)
-	assert_true(get_tree().paused,
-		"opening the shop pauses the world, like dialogue (combat / physics freeze while trading)")
+	assert_false(get_tree().paused,
+		"the shop must NOT pause the world — combat, physics and the clock keep running while you trade")
+	assert_true(InputManager.any_tab_blocking_open(),
+		"an open shop owns the player's hands: a Pip-Boy tab must refuse to open over it (the blocks_tabs row)")
+	assert_true(InputManager.any_modal_open(),
+		"...and it is a modal, so gameplay input stays suppressed while you trade")
 	ShopScreen.close()
-	assert_false(get_tree().paused, "closing the shop resumes the world")
+	assert_false(get_tree().paused, "and closing it still leaves the world running (it was never frozen)")
+	assert_false(InputManager.any_tab_blocking_open(), "closing the shop releases the tab block")
 	_teardown(m, p)
 
 

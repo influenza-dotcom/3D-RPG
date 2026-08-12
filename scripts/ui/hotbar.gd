@@ -212,10 +212,17 @@ func _cycle(dir: int) -> void:
 ## Manually place `item` in slot `slot` (New Vegas style: hover it in the bag, press the slot key). Swaps
 ## with whatever already occupies the slot; the placement STICKS — _sync_slots keeps slotted items put.
 ## Weapons / consumables / HOLDABLE props (the dog, a crate) can be slotted; ammo / junk are ignored.
+## SOUND: this is the ONE hotbar verb that is a MENU action rather than a gameplay one — it fires only while
+## the backpack is open (the sole caller is the InventoryScreen branch of _unhandled_input), and it is a
+## KEYSTROKE, so it can never inherit a button's auto-wired click. Every branch answers: a placement confirms,
+## a refusal denies. Deliberately NOT extended to _activate/_cycle — those run during live gameplay, where the
+## weapon draw/holster and consumable audio already speak, and a menu blip over combat would be the opposite
+## mistake.
 func assign(item: Item, slot: int) -> void:
 	if item == null or slot < 0 or slot >= SLOTS:
-		return
+		return  # a programming-level bad call, not a player action — no cue
 	if not (item.is_weapon() or item.is_consumable() or item.is_holdable()):
+		MenuStyle.play_denied()  # junk / quest items can't go on the bar
 		return
 	# Refuse to overwrite the slot RESERVED by a prop you're currently holding from the bag: that slot's item is out
 	# of the bag with nowhere else to live, so displacing it here would orphan it (the re-press-to-stash + gold tint
@@ -223,15 +230,18 @@ func assign(item: Item, slot: int) -> void:
 	# not blocked — but it can't be hovered in the bag while held anyway, so item == held never reaches here.)
 	var held: Item = _player.held_inventory_item() if _player != null else null
 	if held != null and _items[slot] == held and item != held:
+		MenuStyle.play_denied()  # that slot is reserved by the prop in your hands
 		return
 	var from := _items.find(item)  # its current slot, or -1 if it wasn't on the bar
 	if from == slot:
-		return  # already there
+		MenuStyle.play_denied()  # already there — the keypress changed nothing
+		return
 	var displaced := _items[slot]
 	_items[slot] = item
 	if from >= 0:
 		_items[from] = displaced  # swap the two slots
 	# else: `item` was unslotted; `displaced` (if any) drops off the bar — _sync_slots re-homes it right now
+	MenuStyle.play_select()
 	_wake()
 	_sync_slots()  # re-home any bumped item into a free slot immediately (also refreshes the display)
 

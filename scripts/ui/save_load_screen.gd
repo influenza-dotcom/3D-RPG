@@ -306,12 +306,15 @@ func _on_cancel_overwrite() -> void:
 func _do_save(slot: int) -> void:
 	var player := Groups.human_player(get_tree())  # the ONE non-companion human-player filter (Groups consts enforced)
 	if player == null or not GameState.save_to_slot(player, slot):
+		# A FAILED WRITE is the one place in the game where silence is actively dangerous: the player believes
+		# their run is on disk. The status line said so and nothing else did.
+		MenuStyle.play_denied()
 		_status.text = PlayerText.SAVE_LOAD_SAVE_FAILED
 		return
 	_status.text = ""
 	# A written save is a HEAVY commit. THE one hook for both entry paths (an empty slot's Save and the
-	# overwrite confirm), and it sits past the failure return so a refused write stays silent — both of those
-	# buttons are muted (see _add_row / _bind_ui), so this is the only cue either press produces.
+	# overwrite confirm), and it sits past the failure return so the two verdicts can't be confused — both of
+	# those buttons are muted (see _add_row / _bind_ui), so this pair is the only cue either press produces.
 	MenuStyle.play_commit()
 	_rebuild()
 
@@ -323,6 +326,7 @@ func _on_load_pressed(slot: int) -> void:
 	if _in_game:
 		var ok := GameState.quickload() if slot == QUICKSAVE_SLOT else GameState.load_from_slot(slot)
 		if not ok:
+			MenuStyle.play_denied()  # the file vanished or won't parse since the row was painted
 			_status.text = PlayerText.SAVE_LOAD_LOAD_FAILED
 			_rebuild()
 			return
@@ -334,6 +338,7 @@ func _on_load_pressed(slot: int) -> void:
 		return
 	var path := String(GameState.QUICKSAVE_PATH) if slot == QUICKSAVE_SLOT else GameState.slot_path(slot)
 	if not GameState.load_from_disk(path):
+		MenuStyle.play_denied()  # menu-mode twin of the in-game failure above
 		_status.text = PlayerText.SAVE_LOAD_LOAD_FAILED
 		_rebuild()
 		return

@@ -39,14 +39,16 @@ var _tip_panel: PanelContainer
 var _tip_label: Label
 var _tip_target: Control = null
 
-# UI sound players (PROCESS_MODE_ALWAYS so they play through a paused menu). Every button under a menu root
+# UI sound players (PROCESS_MODE_ALWAYS so they play through a tree-pause — dialogue's, or FreezeFrame's on
+# death; the menus themselves are real-time). Every button under a menu root
 # auto-plays the skin's hover/click sounds — wired by the node_added hook, no per-button code.
 var _hover_player: AudioStreamPlayer
 var _click_player: AudioStreamPlayer
 
 func _ready() -> void:
-	# Process through a paused tree: the shop / level-up / heal screens pause the world, and _process is what
-	# makes the hover tooltip FOLLOW the cursor — without this it freezes at a stale spot in those menus.
+	# Process through a paused tree: a station screen opened FROM a conversation runs under dialogue's pause
+	# (the screens themselves are real-time), and _process is what makes the hover tooltip FOLLOW the cursor —
+	# without this it freezes at a stale spot in exactly those menus.
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	rebuild()
 	_build_tip()
@@ -451,8 +453,9 @@ func _build_tip() -> void:
 # this block owns WHEN and on WHICH voice. Screens never preload a clip or build a player — they call the
 # play_* seams below. Three invariants hold the system together:
 #
-#  1. EVERY player is PROCESS_MODE_ALWAYS and on the "sfx" bus. Seven screens pause the tree
-#     (shop/heal/atm/respec/level-up/chip-install/chess); a play() on an INHERIT-mode player under a paused
+#  1. EVERY player is PROCESS_MODE_ALWAYS and on the "sfx" bus. The station screens are real-time now, but a
+#     TREE-PAUSE still happens around them — DialogueManager's (a Trade / Heal / Install screen opened out of a
+#     conversation runs under it) and FreezeFrame's on death; a play() on an INHERIT-mode player under a paused
 #     tree is silently DROPPED. The "sfx" bus is what makes the SFX volume slider apply — a bare player
 #     lands on Master and ignores it. (This is also why AudioManager.play_2d_sfx is unusable here: it
 #     parents to the root at the default process mode, so it goes silent in exactly the menus that matter.)
@@ -468,11 +471,17 @@ func _build_tip() -> void:
 
 ## Semantic voices for open/back/tab/commit/step. FOUR because the realistic worst case overlaps three:
 ## the 1.7s open sting still ringing while the player tabs (swipe) and then commits — one spare keeps the
-## long sting from being stolen mid-ring. Hover and click deliberately keep their OWN single voices
-## (_hover_player/_click_player): self-cutting is the DESIRED behaviour for a repeated blip, and both
-## member names are pinned by tests/test_options_menu.gd.
+## long sting from being stolen mid-ring. Hover, click and DENIED deliberately keep their OWN single voices
+## (_hover_player/_click_player/_denied_player): self-cutting is the DESIRED behaviour for a repeated blip,
+## and the first two member names are pinned by tests/test_options_menu.gd.
 var _ui_players: Array[AudioStreamPlayer] = []
 var _ui_next: int = 0  ## round-robin cursor for the steal-oldest fallback when all four are busy
+
+## The refusal voice. Its OWN player rather than a pool slot for one reason: spam-clicking a button the game
+## keeps refusing (Buy with an empty wallet) would otherwise stack four overlapping buzzes and then start
+## stealing voices from the open sting. A denial is the sound of NOTHING happening — one at a time, always
+## restarting, never piling up. It is also the only voice that runs off 1.0 pitch (skin.denied_pitch_scale).
+var _denied_player: AudioStreamPlayer
 
 ## Throttle state (see _on_button_hovered / play_step). Instance IDs, never node refs — a list screen frees
 ## its rows constantly and a stale reference to a freed Button is a crash waiting to happen.
@@ -497,13 +506,17 @@ var _quiet_backs: int = 0      ## pending "eat one back cue" tokens (a commit th
 
 func _build_sound() -> void:
 	_hover_player = AudioStreamPlayer.new()
-	_hover_player.process_mode = Node.PROCESS_MODE_ALWAYS  # play even while a paused menu (shop/heal/level-up) holds the tree
+	_hover_player.process_mode = Node.PROCESS_MODE_ALWAYS  # play even while dialogue (a Trade/Heal screen opened mid-conversation) or FreezeFrame holds the tree
 	_hover_player.bus = &"sfx"
 	add_child(_hover_player)
 	_click_player = AudioStreamPlayer.new()
 	_click_player.process_mode = Node.PROCESS_MODE_ALWAYS
 	_click_player.bus = &"sfx"
 	add_child(_click_player)
+	_denied_player = AudioStreamPlayer.new()
+	_denied_player.process_mode = Node.PROCESS_MODE_ALWAYS
+	_denied_player.bus = &"sfx"
+	add_child(_denied_player)
 	_ui_players.clear()
 	for _i in 4:
 		var p := AudioStreamPlayer.new()
@@ -514,7 +527,8 @@ func _build_sound() -> void:
 
 # --- play seams (the API every screen calls) ----------------------------------------------------------
 
-## Play a semantic UI cue. `kind`: &"open" &"back" &"tab" &"select" &"commit" &"step_left" &"step_right".
+## Play a semantic UI cue. `kind`: &"open" &"back" &"tab" &"select" &"commit" &"denied" &"step_left"
+## &"step_right".
 ## An unknown kind, an unassigned skin slot, or a pool that doesn't exist yet (off-tree / pre-_ready) are
 ## all SILENT NO-OPS, never errors — so a screen can call this unconditionally.
 func play_ui(kind: StringName) -> void:
@@ -536,9 +550,15 @@ func play_ui(kind: StringName) -> void:
 	# NOTE play_select() calls _play_click directly rather than routing here, so it can never cut itself.
 	if _click_player != null and _click_player.playing and Time.get_ticks_msec() - _click_started_ms <= SAME_PRESS_MS:
 		_click_player.stop()
-	var p := _acquire_ui_player()
+	# A denial speaks on its own dedicated, self-cutting voice (see _denied_player); everything else takes a
+	# pool slot. pitch_scale is written on EVERY play, never only for the pitched cue — pool voices are reused
+	# round-robin, so a detune left behind by a denial would silently transpose the next open sting.
+	var p: AudioStreamPlayer = _denied_player if kind == &"denied" else _acquire_ui_player()
+	if p == null:
+		return
 	p.stream = stream
 	p.volume_db = skin.ui_sound_volume_db + _volume_for(kind)
+	p.pitch_scale = _pitch_for(kind)
 	p.play()
 
 ## A menu came up COLD. NEVER call this for a tab/page swap inside an already-open group — that's play_tab.
@@ -559,6 +579,36 @@ func play_select() -> void:
 
 ## A HEAVY commit: money spent, a level taken, a save written, a new run stamped.
 func play_commit() -> void: play_ui(&"commit")
+
+## The game REFUSED the action: can't afford it, out of stock, no room in the bag, nothing to withdraw, an
+## illegal move, a stat already at its floor. THE COMPANION TO EVERY GATED CUE — the older screens gated
+## their commit on a success bool and then said nothing at all on the false branch, which is why a failed
+## purchase used to be indistinguishable from a dead button. Pair them: `if act(): play_commit() else:
+## play_denied()`. Never for an action the game HONOURED (putting a weapon away, dismissing a confirm) —
+## that is play_back.
+func play_denied() -> void: play_ui(&"denied")
+
+## Hover blip for a surface that is NOT a BaseButton — a grid tile, a map pin, a custom-drawn row. Buttons
+## get this for free from the node_added hook; anything that paints its own hover state has to say so, and
+## before this existed the whole Tetris-grid family (backpack / loot / shop) was the one place in the UI
+## where moving the cursor over a live target made no sound at all.
+##
+## `id` identifies WHICH surface is being hovered, so the same-target re-hover gate (SAME_BUTTON_HOVER_MS)
+## works for a list that REPAINTS under a stationary cursor — pass something stable per target and unique
+## across concurrent views (the grids pass their view's instance id mixed with the stack key; two side-by-side
+## loot columns must not share an id or crossing between them eats a blip). 0 = unkeyed: throttled by
+## hover_min_interval alone.
+func play_hover(id: int = 0) -> void:
+	if _quiet or _hover_player == null:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _hover_last_ms < int(skin.hover_min_interval * 1000.0):
+		return
+	if id != 0 and id == _hover_last_id and now - _hover_last_ms < SAME_BUTTON_HOVER_MS:
+		return
+	_hover_last_ms = now
+	_hover_last_id = id
+	_play_hover()
 
 ## A value stepped: dir > 0 = up/right, dir < 0 = down/left, 0 = no-op. Throttled by
 ## skin.step_min_interval, so EVERY entry point (mouse arrows, keyboard auto-repeat, slider drags)
@@ -660,21 +710,13 @@ func _wire_button(btn: BaseButton) -> void:
 	btn.pressed.connect(_play_click)  # a disabled button can't be pressed, so it never click-sounds
 
 ## Hover sound only while the button can actually respond — a DISABLED button (the greyed Apply, the
-## active tab) still fires mouse_entered, and a blip over dead chrome reads as a broken control.
-## Throttled twice over: a global floor so sweeping a 12-row list textures instead of machine-gunning, and
-## a longer SAME-button gate for rows repainted under a stationary cursor (see SAME_BUTTON_HOVER_MS).
+## active tab) still fires mouse_entered, and a blip over dead chrome reads as a broken control. That
+## disabled check is the ONLY thing this adds over the public play_hover seam (which owns both throttles):
+## a custom-drawn surface has no `disabled` to consult, so it decides for itself whether the target is live.
 func _on_button_hovered(btn: BaseButton) -> void:
-	if not is_instance_valid(btn) or btn.disabled or _quiet:
+	if not is_instance_valid(btn) or btn.disabled:
 		return
-	var now := Time.get_ticks_msec()
-	if now - _hover_last_ms < int(skin.hover_min_interval * 1000.0):
-		return
-	var id: int = btn.get_instance_id()
-	if id == _hover_last_id and now - _hover_last_ms < SAME_BUTTON_HOVER_MS:
-		return
-	_hover_last_ms = now
-	_hover_last_id = id
-	_play_hover()
+	play_hover(btn.get_instance_id())  # the throttles live there, shared with the non-Button surfaces
 
 ## Fired by a button that set_button_sound gave its own cue. The kind is read from the meta at PRESS time,
 ## so re-pointing a button's cue later just works (and &"" resolves to no stream = muted).
@@ -694,6 +736,12 @@ func _acquire_ui_player() -> AudioStreamPlayer:
 	return oldest
 
 ## The skin slot a cue kind maps to. Unknown kinds (including &"", the muted marker) return null = silent.
+##
+## &"denied" is the ONE kind with a DERIVED fallback: an unassigned denied_sound resolves to back_sound,
+## which _pitch_for then detunes. That is deliberate policy, not a shortcut — a refusal cue that only exists
+## once an artist ships a ninth clip is a cue nobody wires, and "the action was refused" is the single most
+## common thing the menus needed to say and couldn't. Every OTHER slot stays honestly silent when null, so
+## the skin can still land one clip at a time.
 func _stream_for(kind: StringName) -> AudioStream:
 	match kind:
 		&"open": return skin.open_sound
@@ -701,6 +749,7 @@ func _stream_for(kind: StringName) -> AudioStream:
 		&"tab": return skin.tab_sound
 		&"select": return skin.click_sound
 		&"commit": return skin.commit_sound
+		&"denied": return skin.denied_sound if skin.denied_sound != null else skin.back_sound
 		&"step_left": return skin.step_left_sound
 		&"step_right": return skin.step_right_sound
 	return null
@@ -714,8 +763,16 @@ func _volume_for(kind: StringName) -> float:
 		&"tab": return skin.tab_volume_db
 		&"select": return skin.click_volume_db
 		&"commit": return skin.commit_volume_db
+		&"denied": return skin.denied_volume_db
 		&"step_left", &"step_right": return skin.step_volume_db
 	return 0.0
+
+## Playback pitch for a cue kind. Only the denial is transposed — that detune is what keeps a DERIVED
+## refusal (back_sound speaking for an unassigned denied_sound) from sounding exactly like a menu closing.
+func _pitch_for(kind: StringName) -> float:
+	if kind == &"denied":
+		return maxf(0.01, skin.denied_pitch_scale)  # 0 would hang the voice forever; the skin range-clamps too
+	return 1.0
 
 func _play_hover() -> void:
 	if skin.hover_sound != null and _hover_player != null:

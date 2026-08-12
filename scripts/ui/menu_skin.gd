@@ -274,10 +274,11 @@ extends Resource
 ## "menu sounds" block). That is what keeps the vocabulary consistent across 20 screens and reskinnable from
 ## this one resource.
 ##
-## THE GRAMMAR (why there are seven cues and not one click): the player should be able to tell what happened
-## with their eyes shut. Sideways moves (tab/step) sound different from depth moves (open/back), and a cue
-## that SPENDS something (money, a level, a save slot) is heavier than an ordinary confirm. Keep new cues
-## inside that grammar rather than adding a per-screen one-off.
+## THE GRAMMAR (why there are several cues and not one click): the player should be able to tell what
+## happened with their eyes shut. Sideways moves (tab/step) sound different from depth moves (open/back), a
+## cue that SPENDS something (money, a level, a save slot) is heavier than an ordinary confirm, and an action
+## the game REFUSED must never sound like one it accepted. Keep new cues inside that grammar rather than
+## adding a per-screen one-off.
 ## ------------------------------------------------------------------------------------------------------
 
 @export_group("Sounds")
@@ -303,6 +304,14 @@ extends Resource
 ## Played on a HEAVY commit: money spent, a level taken, a save written, a new run stamped. Deliberately
 ## NOT for ordinary confirms — if everything is heavy, nothing is.
 @export var commit_sound: AudioStream
+## Played when the game REFUSED what the player just asked for: can't afford it, out of stock, backpack
+## full, nothing to withdraw, an illegal chess move, a stat already at its floor. This is the ONE cue with a
+## DERIVED fallback — leave it null and MenuStyle plays back_sound at denied_pitch_scale instead, so a
+## refusal is audible out of the box without a ninth clip to author. Assign a real clip to override.
+##
+## Its whole job is to be the sound of NOTHING HAPPENING, which is why it must never be reused for a
+## de-escalation the game did honour (putting a weapon away, dismissing a confirm) — those are back_sound.
+@export var denied_sound: AudioStream
 
 @export_subgroup("Volume")
 ## MASTER trim (dB) for every menu sound. Each per-cue trim below is ADDED to this, so one knob moves the
@@ -325,6 +334,13 @@ extends Resource
 @export var step_volume_db: float = 0.0
 ## Per-cue trim for commit_sound.
 @export var commit_volume_db: float = 0.0
+## Per-cue trim for denied_sound (or for the pitched back_sound it falls back to).
+@export var denied_volume_db: float = -2.0
+## Playback pitch for the DERIVED denial cue — only consulted while denied_sound is null, i.e. when the
+## refusal is being spoken by back_sound. Detuning it is what stops "you can't do that" from sounding
+## identical to "menu closed": below 1.0 the same clip reads as a wrong-buzzer, not as a door shutting.
+## Applies to an assigned denied_sound too, so an authored clip can be tuned here without re-exporting it.
+@export_range(0.25, 2.0, 0.01) var denied_pitch_scale: float = 0.75
 
 @export_subgroup("Retrigger limits")
 ## Minimum seconds between two hover ticks. Sweeping the cursor down a 12-row list fires a dozen

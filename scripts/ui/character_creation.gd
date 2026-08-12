@@ -334,10 +334,12 @@ func _step_head(dir: int) -> void:
 	_head_idx = wrapi(_head_idx + dir, 0, _valid_heads.size())
 	_appearance["head"] = String(_valid_heads[_head_idx].id)
 	# Cue only a step that MOVED: a single-entry catalog wraps straight back onto the same index, and a tick
-	# with nothing changing on screen reads as a broken control. (The arrows are disabled in that case, so
-	# this only bites the direct-call paths — tests, and any future keyboard cycle.)
+	# with nothing changing on screen reads as a broken control — so that case DENIES instead. (The arrows are
+	# disabled then, so this only bites the direct-call paths — tests, and any future keyboard cycle.)
 	if _head_idx != before:
 		MenuStyle.play_step(dir)
+	else:
+		MenuStyle.play_denied()
 	_refresh_look()
 
 ## Step the BODY selection by `dir` (wrapping). Writes the new id, then refreshes (which re-gates the head cycler).
@@ -347,8 +349,10 @@ func _step_body(dir: int) -> void:
 	var before := _body_idx
 	_body_idx = wrapi(_body_idx + dir, 0, _valid_bodies.size())
 	_appearance["body"] = String(_valid_bodies[_body_idx].id)
-	if _body_idx != before:  # same one-entry wrap guard as _step_head — no tick for a pick that didn't move
+	if _body_idx != before:  # same one-entry wrap guard as _step_head — a pick that didn't move denies instead
 		MenuStyle.play_step(dir)
+	else:
+		MenuStyle.play_denied()
 	_refresh_look()
 
 ## True when the selected body is a whole-character model (its own head/arms/legs) — the head picker is then moot.
@@ -803,17 +807,24 @@ func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 	grid.add_child(effect_l)
 
 ## Lower a stat by 1 — frees a point to spend elsewhere (StatBudget clamps at STAT_MIN). A minus is a real penalty.
+## Both steppers cue on the ACCEPTED move and DENY on the refused one: _refresh disables an arrow that can't move,
+## so a refusal here means the widget state and StatBudget momentarily disagreed (or a pad player pressed a
+## just-disabled arrow) — precisely the case that must not pass as a silent success.
 func _on_minus(stat: StringName) -> void:
 	if _budget.try_lower(stat):
-		MenuStyle.play_step(-1)  # gated on the ACCEPTED move: a stat already at STAT_MIN makes no sound
+		MenuStyle.play_step(-1)
 		_refresh()
+	else:
+		MenuStyle.play_denied()  # already at STAT_MIN
 
 ## Raise a stat by 1 — StatBudget only allows it with a spare point (net stays <= 0) AND below STAT_MAX; otherwise
 ## a no-op (free a point by lowering another stat first — "subtract from 0 to add elsewhere").
 func _on_plus(stat: StringName) -> void:
 	if _budget.try_raise(stat):
-		MenuStyle.play_step(1)  # no spare point (or already at STAT_MAX) = a refused raise = silence
+		MenuStyle.play_step(1)
 		_refresh()
+	else:
+		MenuStyle.play_denied()  # no spare point, or already at STAT_MAX
 
 ## Re-stamp every value/effect label + the spare-points banner, and gate the steppers off the SAME StatBudget the
 ## rules live in (so the widget state can never drift from the allocator): + off with no spare point OR at

@@ -192,7 +192,7 @@ func _show_weight() -> void:
 	_detail.text = PlayerText.inventory_weight(_player.inventory.total_weight(), _player.carry_capacity, enc)
 	_detail.add_theme_color_override(&"font_color", MenuStyle.danger() if enc else MenuStyle.dim_color())
 
-## A grid tile was clicked (no drag) — route by type: equip/unequip a weapon, use a consumable, ignore the rest.
+## A grid tile was clicked (no drag) — route by type: equip/unequip a weapon, use a consumable, refuse the rest.
 func _on_grid_activate(item: Item) -> void:
 	if item == null:
 		return
@@ -200,6 +200,11 @@ func _on_grid_activate(item: Item) -> void:
 		_on_item_pressed(item)
 	elif item.is_consumable():
 		_on_use_pressed(item)
+	else:
+		# "ignore the rest" used to mean ignore it SILENTLY — clicking junk, a quest item or a holdable prop
+		# was the one tile press in the bag that produced nothing at all, which reads as the grid being broken
+		# rather than the item being inert. Both branches above answer on every path, so this is the last one.
+		MenuStyle.play_denied()
 
 ## A grid tile was right-clicked — drop JUST THE CLICKED STACK to the world (dropping the wielded weapon falls
 ## back to fists). Passes the stack's `key` so the player removes THAT exact stack (remove-BY-KEY) — NOT
@@ -214,10 +219,12 @@ func _on_grid_drop(item: Item, key: int) -> void:
 		var purse := _player.money
 		_player.drop_money(purse)
 		# HEAVY commit — the whole wallet leaving the bag at once, not an ordinary stack drop. Gated on the wallet
-		# ACTUALLY shrinking (drop_money returns void but no-ops on an empty purse / off-tree), so a spill that
-		# never happened stays silent.
+		# ACTUALLY shrinking (drop_money returns void but no-ops on an empty purse / off-tree); a spill that never
+		# happened takes the denial cue instead, so right-clicking a coin tile always answers.
 		if _player.money < purse:
 			MenuStyle.play_commit()
+		else:
+			MenuStyle.play_denied()
 		return
 	_player.drop_stack(item, key)  # removes THAT stack from the bag -> inventory.changed -> _rebuild refreshes
 	# A grid tile is a plain Control (GridInventoryView/GridTile extend Control, not BaseButton), so the auto-wired
@@ -240,11 +247,16 @@ func _on_item_pressed(item: Item) -> void:
 		_player.inventory.unequip()         # clicking the wielded weapon puts it away -> player falls back to fists
 		MenuStyle.play_back()               # putting the gun AWAY is a de-escalation, so it wears the back cue rather than a confirm
 	elif _player.inventory.equip_item(item):  # -> equip_weapon_requested -> Player draws it (swap anim)
-		MenuStyle.play_select()             # gated on equip_item's own bool — a refused equip (non-weapon) stays silent
+		MenuStyle.play_select()             # gated on equip_item's own bool
+	else:
+		MenuStyle.play_denied()             # a refused equip (non-weapon, or a bag that won't hand it over)
 	_rebuild()                              # refresh the (equipped) marker
 
 func _on_use_pressed(item: Item) -> void:
-	# Gated on use_consumable's success bool: it refuses (and consumes nothing) at FULL HP, and a cue there would
-	# tell the player they'd just spent a health pack. A wasted click stays silent — the toast is its feedback.
+	# Gated on use_consumable's success bool: it refuses (and consumes nothing) at FULL HP. The confirm cue must
+	# not fire there — it would tell the player they'd just spent a health pack — but the press can't be silent
+	# either, or a medkit click at full health is indistinguishable from a broken tile. The denial says "kept it".
 	if is_instance_valid(_player) and _player.use_consumable(item):  # heals + consumes one -> inventory.changed -> _rebuild refreshes the stack
 		MenuStyle.play_select()
+	else:
+		MenuStyle.play_denied()
