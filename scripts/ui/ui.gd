@@ -37,7 +37,7 @@ extends CanvasLayer
 ## dies near the player. Point it at the BloodSplatter node in the HUD scene.
 @export var blood_splatter: BloodSplatter
 
-var crosshair: ColorRect  ## PERMANENT circle reticle, pinned each frame to the TRUE (swayed) aim point by Player._update_crosshair
+var crosshair: ColorRect  ## circle reticle, re-pinned each frame by Player._update_crosshair (to SCREEN CENTRE — the swaying laser dot is what carries aim truth); shown/hidden ONLY by _apply_crosshair_visibility
 var _crosshair_bbc: BackBufferCopy  ## full-screen back-buffer copy so the scoped inverting reticle samples a fresh screen (else it washes white)
 var _crosshair_art: TextureRect  ## OPTIONAL artist reticle (MenuStyle.hud.crosshair_texture): replaces the flat dot while UNSCOPED; null skin slot = never shown
 var _flat_reticle_mat: ShaderMaterial    ## the permanent cheap dot (no screen sampling — no back-buffer cost)
@@ -169,8 +169,10 @@ var MONEY_DELTA_TIME: float = GameSettings.hud.money_delta_time    ## seconds fo
 const MONEY_ROW_PAD := 6.0
 
 func _ready() -> void:
-	# PERMANENT circle reticle (the Deus Ex truth-teller): always visible, pinned each frame to the swayed
-	# aim point by Player._update_crosshair via set_crosshair_screen_pos. Unscoped it wears a cheap flat-dot
+	# The circle reticle, re-pinned each frame by Player._update_crosshair via set_crosshair_screen_pos —
+	# to SCREEN CENTRE, a FIXED reticle (Deus Ex): it deliberately does NOT track the shot, the swaying
+	# laser dot does. (This said "the swayed aim point" for a long while; it never did.) It is not
+	# permanent either — see the suppression latches. Unscoped it wears a cheap flat-dot
 	# material; scoping swaps in the inverting disc + its back-buffer copy (set_scoped). MOUSE_FILTER_IGNORE
 	# so it never eats clicks (HUD gotcha). Plain top-left anchors: position IS the absolute screen pixel.
 	crosshair = ColorRect.new()
@@ -373,6 +375,11 @@ func _ready() -> void:
 	add_child(_look_name)
 	_build_hud()
 	_set_gameplay_hud_visible(not DialogueManager.is_engaged())
+	# Boot the reticle from the LIVE world state rather than assuming "shown": this HUD is rebuilt on every
+	# level load / respawn reload, which can land mid-conversation. The HOLSTER half is stamped by the Player
+	# (its _ready runs AFTER ours — we're its child), which both connects holster_changed and seeds the latch
+	# from the final holster state.
+	set_crosshair_visible(not DialogueManager.is_engaged())
 
 ## Build one full-rect, input-ignoring HUD overlay carrying `shader`, hidden by default.
 func _make_scope_overlay(shader: Shader) -> ColorRect:
@@ -533,6 +540,11 @@ func restore_hud_after_death() -> void:
 		if is_instance_valid(ci):
 			ci.visible = true
 	_death_hidden_hud.clear()
+	# Re-derive the reticle rather than trusting the snapshot: the blanket restore above would show a
+	# crosshair that was up at the killing blow even though the fresh life starts with the weapon stowed
+	# (and _apply_crosshair_visibility bailed for every holster/dialogue change made during the cinematic).
+	# Must run AFTER the clear — the apply no-ops while the death list is non-empty.
+	_apply_crosshair_visibility()
 
 ## Free every transient top-left notification that predates this restore — the toast labels under _rep_toasts
 ## and the +N/-N money float. Their hold/fade tweens are deliberately NOT ignore_time_scale, so the death
@@ -806,10 +818,10 @@ func _make_flat_circle_shader() -> Shader:
 	sh.code = "shader_type canvas_item;\nvoid fragment() {\n\tfloat d = distance(UV, vec2(0.5));\n\tfloat disc = 1.0 - smoothstep(0.38, 0.5, d);\n\tfloat rim = smoothstep(0.18, 0.42, d);\n\tvec3 col = mix(vec3(1.0), vec3(0.05), rim);\n\tCOLOR = vec4(col, disc * 0.85);\n}"
 	return sh
 
-## Swap the (now permanent) reticle between its cheap flat dot and the scoped inverting disc. Visibility no
-## longer changes — the crosshair is a permanent HUD element tracking the true aim point; scoping upgrades
-## its material and turns on the back-buffer copy the inverting shader needs. Null-guarded so it is safe to
-## call before _ready has built the dot (mirrors the is_instance_valid defensiveness in _process).
+## Swap the reticle between its cheap flat dot and the scoped inverting disc. This does NOT touch visibility
+## — that's _apply_crosshair_visibility's alone (and scoping implies a drawn weapon anyway: ScopeIn refuses
+## to ADS a holstered one). Scoping only upgrades the material and turns on the back-buffer copy the
+## inverting shader needs. Null-guarded so it is safe to call before _ready has built the dot.
 func set_scoped(scoped: bool) -> void:
 	_apply_crosshair_look(scoped)
 	# Only pay for the full-screen back-buffer copy while the inverting disc is actually up.
@@ -847,11 +859,43 @@ func set_crosshair_screen_pos(p: Vector2) -> void:
 		# frame (the sway update refreshes it each process frame with the freshly-stepped spring).
 		crosshair.position = p - crosshair.size * 0.5 + _sway.offset * GameSettings.hud.hud_sway_aim_scale
 
-## Show / hide the reticle — driven by dialogue start/end (a conversation hides it). Guarded for a freed
-## crosshair. The parent HUD's own `visible` (cleared on death) still wins, so this never un-hides a dead HUD.
+## THE RETICLE'S TWO SUPPRESSION LATCHES. Two owners hide the crosshair — a conversation, and the weapon
+## being HOLSTERED — and they OVERLAP: dialogue force-holsters the weapon (DialogueController) and restores
+## that state on finish, so an imperative show/hide would let the conversation's closing `show` un-hide the
+## reticle over a weapon that is still put away (and a hold-R holster taken mid-conversation would do the
+## mirror on the un-holster). Latch per REASON and derive; _apply_crosshair_visibility is the SINGLE writer
+## of crosshair.visible. Order-independent — whichever owner settles last, the answer is the same.
+var _crosshair_hidden_dialogue: bool = false
+var _crosshair_hidden_holstered: bool = false
+
+## Show / hide the reticle for a CONVERSATION — the historical name + contract (vis=false hides), now one
+## latch of two. The parent HUD's own `visible` (cleared on death) still wins, so this never un-hides a dead HUD.
 func set_crosshair_visible(vis: bool) -> void:
-	if is_instance_valid(crosshair):
-		crosshair.visible = vis
+	_crosshair_hidden_dialogue = not vis
+	_apply_crosshair_visibility()
+
+## The weapon was put away / brought back out — driven by Attack.holster_changed, connected in Player._ready
+## (which also seeds it, since set_holstered emits nothing when the value is unchanged). Nothing is aimed
+## while it's stowed, so the aim-point annotation goes with it; gated on the designer knob, read HERE so
+## flipping it in the inspector applies without a holster round-trip.
+func set_crosshair_holstered(holstered: bool) -> void:
+	_crosshair_hidden_holstered = holstered
+	_apply_crosshair_visibility()
+
+## The one place crosshair.visible is written. BAILS during the death cinematic for the same reason
+## _apply_stamina_mode does: hide_hud_for_death has hidden these nodes and remembered exactly which, so a
+## write here would resurrect the reticle over the fade — restore_hud_after_death re-applies this instead.
+## The latches keep updating while it bails, so the revive adopts whatever the world settled on meanwhile.
+func _apply_crosshair_visibility() -> void:
+	if not is_instance_valid(crosshair) or not _death_hidden_hud.is_empty():
+		return
+	crosshair.visible = crosshair_shown(_crosshair_hidden_dialogue, _crosshair_hidden_holstered,
+			GameSettings.hud.hide_crosshair_when_holstered)
+
+## PURE composition rule (the StaminaRing/HudSway static idiom): tests/test_crosshair_visibility.gd pins the
+## truth table off-tree, without building this CanvasLayer or the autoloads its _ready needs.
+static func crosshair_shown(hidden_by_dialogue: bool, holstered: bool, hide_when_holstered: bool) -> bool:
+	return not hidden_by_dialogue and not (holstered and hide_when_holstered)
 
 ## Show/hide the look-at name readout (FNV-style) under the crosshair. Empty text hides it; a colour tints
 ## the name (e.g. green for a friendly NPC). Driven by Player.on_look_target_changed via the interaction ray.
@@ -941,8 +985,11 @@ func push_toast(text: String, color: Color) -> void:
 
 ## Quest transitions often fire from a dialogue choice (e.g. a terminal turn-in). Dialogue hides notices, so queue
 ## those toasts until the conversation closes instead of starting their fade timer behind the letterbox.
+## Gate on is_engaged(), NOT is_active(): the notices layer is hidden for the whole dialogue_started ->
+## dialogue_finished span (nothing listens to suspended/resumed), but is_active() reads FALSE while a sub-menu
+## suspends the conversation (e.g. buying a quest-objective item in Trade) — that toast must queue too.
 func _push_quest_toast(text: String, color: Color) -> void:
-	if DialogueManager.is_active():
+	if DialogueManager.is_engaged():
 		_dialogue_toast_texts.append(text)
 		_dialogue_toast_colors.append(color)
 		return
