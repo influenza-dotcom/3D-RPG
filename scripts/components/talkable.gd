@@ -200,12 +200,24 @@ func _can_pickpocket(player: Node, npc: NPC) -> bool:
 	return npc.is_off_guard()
 
 ## Open the actual conversation. Deferred until the NPC has acknowledged + walked into frame (or the
-## fallback buffer elapsed). Guards against the component being freed mid-buffer (scene reload / death)
-## and a dialogue cleared since the prompt. Passes the host as speaker so DialogueManager freezes it,
-## plus the resolved speaker name (this component's display_name, else the host NPC's).
+## fallback buffer elapsed). Guards against the component being freed mid-buffer (scene reload / death),
+## a dialogue cleared since the prompt, and the HOST dying inside that buffer. Passes the host as speaker
+## so DialogueManager freezes it, plus the resolved speaker name (this component's display_name, else the
+## host NPC's).
 func _begin_dialogue(host: Node3D, player: Node3D) -> void:
 	var convo := _dialogue()
 	if not is_instance_valid(self) or convo == null:
+		return
+	# Buffered-open window: prompt_talk's in-range shortcut arms a TREE-owned SceneTreeTimer, so this
+	# delivery still lands after the host was KILLED in the beat (the death freeze only disables the body's
+	# process_mode — the timer fires regardless). A dead host must not open a conversation: DialogueManager.start
+	# would fire GameState.notify_talk and complete a TALK objective on the corpse. is_instance_valid runs
+	# FIRST (`as`/`is` on a freed instance crashes); a non-Character host (car / terminal) can't be dead and
+	# passes through — the same duck-tolerant liveness rule as NpcTargeting._is_live.
+	if not is_instance_valid(host):
+		return
+	var character := host as Character  # null for an inanimate host -> nothing to be dead
+	if character != null and not character.is_alive():
 		return
 	# Swing + zoom the player's camera onto the speaker AS the box opens, so the focus/zoom land
 	# together with the letterbox bars (DialogueManager.start) — not back when the player interacted.

@@ -1,10 +1,10 @@
 extends Node
 
 ## @system Control-Lock And Immunity
-## @seam is_engaged() (_active != null) = a conversation exists at all — the unpaused intro beat + the menu-suspension that is_active() hides — feeding world_frozen() immunity, Player.die() teardown, and _suspend_for_menu's box-hide + CONNECT_ONE_SHOT closed->resume one-shot.
+## @seam is_engaged() (_active != null) = a conversation exists at all — the unpaused intro beat + the menu-suspension that is_active() hides — feeding world_frozen() immunity, Player.die() + _on_speaker_died teardown, _suspend_for_menu's box-hide + CONNECT_ONE_SHOT closed->resume one-shot, UI._push_quest_toast's toast queue, and Radio's dialogue duck.
 ## @risk Dropping is_engaged() from InputManager.world_frozen() loses immunity in the unpaused intro beat — an enemy shoots the frozen player with no error (C66).
 ## @risk die() gating on is_active() not is_engaged() skips abort() during a sub-menu suspension — the menu's close then re-pauses + re-opens the box over the death cinematic.
-## @risk A suspending sub-menu (Shop/Install/Chess/Atm) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
+## @risk A suspending sub-menu (Shop/Install/Chess/Atm/Heal/LevelUp/Loot-exchange) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
 ## @risk Speaker menus are duck-typed via has_method/has_signal scans (buy/sell, do_heal, install_carried, ai_search_depth, deposit/withdraw, set_in_dialogue/died); a rename silently drops the option with no compile error.
 ## @test res://tests/test_dialogue.gd
 ## @test res://tests/test_dialogue_suspend_closed.gd
@@ -646,8 +646,11 @@ func _speaker_name_color() -> Color:
 	return Color.WHITE
 
 ## The speaker was killed mid-conversation (#5) — end immediately rather than leave the box on a corpse.
+## is_ENGAGED, not is_active: the conversation still EXISTS while suspended behind a sub-menu (is_active()
+## reads false there), and a speaker death mid-suspension must still tear it down — mirrors the player-side
+## death gate in Player.die(), and _finish() already drops the pending menu-closed one-shot for this case.
 func _on_speaker_died() -> void:
-	if is_active():
+	if is_engaged():
 		_finish()
 
 ## Jump the cursor to `target` (an index into _active.lines) and re-render, or continue/finish the convo.

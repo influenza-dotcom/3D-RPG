@@ -23,8 +23,10 @@ extends GutTest
 ##     default null; class/Node3D identity.
 ##   - Talkable (class_name, Area3D): the reusable drop-on-anything talk component -- exported
 ##     dialogue/highlight_target default null, highlight_color/width have white/1.0 defaults,
-##     and class/Area3D identity. Inspected the same null-add_child way as DialogueNPC (its
-##     _ready wires its own body signals + _setup_highlight, and _process hits the autoload).
+##     class/Area3D identity, and the _begin_dialogue dead-host liveness bail (the buffered
+##     talk-prompt delivery must not open a conversation on a corpse). Inspected the same
+##     null-add_child way as DialogueNPC (its _ready wires its own body signals +
+##     _setup_highlight, and _process hits the autoload).
 ##
 ## DELIBERATELY SKIPPED (unsafe or untestable as units):
 ##   - DialogueManager.start() with a VALID non-empty resource: passes the guard then sets
@@ -478,6 +480,30 @@ func test_player_death_tears_down_suspended_conversation_and_closes_install_scre
 		"_close_open_modals() must route through InputManager.close_all_modals() -- the registry sweep closes ChipInstallScreen (and every other modal) on death, so the 'Install' suspend target can't be missed")
 
 
+func test_speaker_death_teardown_gates_on_engaged_not_active() -> void:
+	# Source-string contract -- the MANAGER-side mirror of the Player.die() pin above. _on_speaker_died's
+	# teardown runs through _finish() (autoloads + _ready-built children), so it can't be unit-invoked on a
+	# bare instance. The gate must be is_engaged(), not is_active(): a speaker dying while the conversation is
+	# SUSPENDED behind a sub-menu reads is_active()==false, which would silently drop the teardown and leave
+	# the box primed to resume over a corpse (_finish() already drops the pending menu-closed one-shot).
+	var src := FileAccess.get_file_as_string(DIALOGUE_MANAGER_PATH)
+	assert_string_contains(src, "func _on_speaker_died() -> void:\n\tif is_engaged():",
+		"_on_speaker_died must gate its teardown on is_engaged(), not is_active() -- a speaker death during a sub-menu suspension must still end the conversation (mirrors Player.die()'s is_engaged() gate)")
+
+
+func test_quest_toast_queue_gates_on_engaged_not_active() -> void:
+	# Source-string contract -- the HUD-side member of the is_engaged()-not-is_active() family above. UI hides
+	# its notices layer for the whole dialogue_started -> dialogue_finished span (nothing listens to
+	# suspended/resumed), but is_active() reads FALSE while a sub-menu suspends the conversation -- so a quest
+	# toast raised from that sub-menu (e.g. buying a quest-objective item in Trade) would be pushed straight
+	# into the invisible layer and burn its fade timer unseen. The queue gate must match the hide span exactly:
+	# is_engaged(). (_push_quest_toast reads the DialogueManager autoload, so the branch can't be unit-driven
+	# without mutating shared autoload state -- pin the source instead, like the two tests above.)
+	var src := FileAccess.get_file_as_string("res://scripts/ui/ui.gd")
+	assert_string_contains(src, "func _push_quest_toast(text: String, color: Color) -> void:\n\tif DialogueManager.is_engaged():",
+		"UI._push_quest_toast must queue on DialogueManager.is_engaged(), not is_active() -- the notices layer stays hidden through a sub-menu suspension, so a suspension-time quest toast must queue too")
+
+
 func test_dialogue_manager_branching_api_exists() -> void:
 	# Surface-only: these members read _active and call _show_line()/_finish() (CanvasLayer + mouse
 	# recapture), so they are NOT invoked here -- _active is only set by the forbidden start(). We
@@ -742,4 +768,35 @@ func test_talkable_is_area3d_and_typed() -> void:
 		"Talkable must extend Area3D so it IS its own proximity trigger -- dropped under any node, it detects the player without a separate range Area3D")
 	assert_true(t is Talkable,
 		"Talkable.new() must produce a Talkable (class_name registered) so scenes can type it and reference the component")
+	t.free()
+
+
+## Player stand-in for the dead-host bail test below: _begin_dialogue types `player: Node3D` and, once past
+## its guards, calls focus_camera_on() BEFORE DialogueManager.start -- so a recorded call is the observable
+## that the liveness bail leaked (we never drive the forbidden non-empty start(); see DELIBERATELY SKIPPED).
+class _FocusRecorder extends Node3D:
+	var focus_calls: int = 0
+	func focus_camera_on(_point) -> void:
+		focus_calls += 1
+
+
+func test_talkable_begin_dialogue_refuses_a_dead_host() -> void:
+	# The talk-prompt buffer (TalkApproach.prompt_talk's in-range shortcut) arms a TREE-owned SceneTreeTimer
+	# whose callback is _begin_dialogue -- so the delivery still lands when the host is KILLED during the beat
+	# (the death freeze only disables the body's process_mode, never the timer). Pin the liveness bail: a DEAD
+	# Character host must return BEFORE the camera focus + DialogueManager.start (which would fire
+	# GameState.notify_talk, letting a TALK quest objective complete on the corpse). The convo is EMPTY on
+	# purpose: if the bail regressed, start(empty) stays the documented safe no-op while the recorder catches
+	# the leak -- the runner's tree/mouse state is never at risk.
+	var t = load(TALKABLE_PATH).new()
+	t.dialogue = DialogueResource.new()  # non-null so the convo guard passes and LIVENESS is what returns
+	var host = load("res://scripts/npc/npc.gd").new()
+	host.hp = 5.0
+	host._dead = true  # the latch take_damage sets the moment the kill lands (before the freeze / free)
+	var player := _FocusRecorder.new()
+	t._begin_dialogue(host, player)
+	assert_eq(player.focus_calls, 0,
+		"a host that died inside the talk-prompt buffer must not open a conversation -- _begin_dialogue bails before the camera focus / DialogueManager.start, so no notify_talk ever fires on a corpse")
+	player.free()
+	host.free()
 	t.free()

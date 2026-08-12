@@ -147,6 +147,19 @@ func test_dialogue_duck_is_opt_in() -> void:
 	assert_false(r._dialogue_suppresses(false), "no conversation -> no dialogue duck regardless of the toggle")
 	r.free()
 
+
+func test_dialogue_duck_feeds_on_engaged_not_active() -> void:
+	# Source-string contract -- the radio-side member of the is_engaged()-not-is_active() family (test_dialogue.gd
+	# pins Player.die() / _on_speaker_died / _push_quest_toast the same way). Radio._process runs the duck through
+	# the dialogue tree-pause (PROCESS_MODE_ALWAYS), so it TICKS during a sub-menu suspension (Trade / Heal /
+	# Level Up / Install) -- where is_active() reads false mid-conversation. Feeding is_active() would fade a
+	# duck_for_dialogue radio back UP mid-menu and re-duck it on resume, flapping across every suspension.
+	# Engaged-span is the conversation-scoped-audio semantic (DialogueMusicBed's "the conversation still EXISTS
+	# (is_engaged())" lifecycle).
+	var src := FileAccess.get_file_as_string(RADIO_SCRIPT)
+	assert_string_contains(src, "_dialogue_suppresses(DialogueManager.is_engaged())",
+		"Radio._process must feed the dialogue duck the ENGAGED span (is_engaged()), not is_active() -- a sub-menu suspension must hold a duck_for_dialogue radio ducked instead of fading it up mid-Trade")
+
 # --- Folder playlist (Slice B) ---
 
 func test_music_source_defaults() -> void:

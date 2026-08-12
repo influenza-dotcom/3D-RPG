@@ -63,7 +63,9 @@ func prompt_talk(player: Node3D, on_ready: Callable) -> void:
 			host.get_tree().create_timer(GameSettings.dialogue.talk_prompt_buffer_duration).timeout.connect(on_ready)
 		return
 	# Close enough (or framing disabled) AND grounded: hold the buffer beat, then speak from here. The timer
-	# is created on the tree (not the host) so it survives even if the host's processing is otherwise quiet.
+	# is created on the tree (not the host) so it survives even if the host's processing is otherwise quiet —
+	# including the death freeze, so a host KILLED in the beat still gets the callback; Talkable._begin_dialogue's
+	# liveness bail is what refuses that posthumous open.
 	# is_on_floor() is checked FIRST (short-circuit): an AIRBORNE NPC (knocked up / mid-fall) never opens
 	# dialogue from this shortcut — it defers to the tick() wait below, which already holds the opening
 	# until the NPC has landed (and squared up). So dialogue only ever starts with both feet on the ground.

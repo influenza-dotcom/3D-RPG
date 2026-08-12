@@ -45,8 +45,9 @@ func set_playing(on: bool) -> void:
 func is_playing() -> bool:
 	return _playing
 
-## Advance one frame. combat_now = any nearby NPC hunting/fighting; dialogue_active = a conversation or pausing
-## menu is open; away = the listener walked out of the radio's range. Combat arms a settle linger; dialogue +
+## Advance one frame. combat_now = any nearby NPC hunting/fighting; dialogue_active = a conversation is up (the
+## Radio gates that behind its opt-in `duck_for_dialogue`); away = the listener walked out of the radio's range.
+## Combat arms a settle linger; dialogue +
 ## away suppress immediately (no linger). Recomputes the audible decision + its rising/falling edge and eases
 ## current_db toward the target.
 func tick(delta: float, combat_now: bool, dialogue_active: bool, away: bool = false) -> void:

@@ -11,7 +11,7 @@ extends LookAtInteractable
 ## radio ducks fully OUT for the conversation and breathes back in when it ends). Set `duck_for_combat` to flip
 ## combat back too: the radio ducks for combat (same poll/linger as MusicDirector — any "npc" hunting) and the
 ## combat bed plays over it. Like MusicDirector this node runs PROCESS_MODE_ALWAYS so its ducks (the opt-in
-## dialogue/combat ones) keep moving through a pausing menu.
+## dialogue/combat ones) keep moving through a tree-pause (dialogue's — menus are real-time).
 ## ONLY the audio duck runs through a pause, though: the note particles and the bounce (visual offset + rigid-body
 ## impulse) FREEZE with the world while the tree is paused. Emitting notes through a pause looked like a bug, and
 ## — worse — pumping upward impulses into a RigidBody the physics server has frozen makes them PILE UP in its
@@ -176,7 +176,7 @@ func _ready() -> void:
 	_build_outline()
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
-	# Keep ducking through a pausing menu / dialogue tree-pause, exactly like MusicDirector (music_director.gd:43).
+	# Keep ducking through a dialogue tree-pause / freeze-frame, exactly like MusicDirector (music_director.gd:43).
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if audio_player == null:
 		audio_player = AudioStreamPlayer3D.new()
@@ -216,15 +216,19 @@ func _process(delta: float) -> void:
 		_combat_now = false
 	# Dialogue duck is OPT-IN (duck_for_dialogue): by default the radio plays THROUGH a conversation and only dips
 	# with the music bus (MusicDucker), so it never abruptly vanishes. Opt in to restore the old full duck-out.
-	var dialogue_active: bool = _dialogue_suppresses(DialogueManager.is_active())
-	_state.tick(delta, _combat_now, dialogue_active, false)
+	# Feed the ENGAGED span, not is_active(): a conversation merely SUSPENDED behind a sub-menu (Trade / Heal /
+	# Level Up / Install) reads is_active()==false, which would fade a ducked radio back UP mid-menu and re-duck it
+	# on resume — flapping across every suspension. Conversation-scoped audio keys on "the conversation still
+	# EXISTS (is_engaged())", the same call DialogueMusicBed's LIFECYCLE holds its bed on (dialogue_music_bed.gd).
+	var dialogue_engaged: bool = _dialogue_suppresses(DialogueManager.is_engaged())
+	_state.tick(delta, _combat_now, dialogue_engaged, false)
 	if audio_player != null:
 		audio_player.volume_db = _state.current_db
 		# Fully stop a switched-off radio once it's faded down, so "off" isn't a silent running stream.
 		if not _state.is_playing() and _state.at_silent() and audio_player.playing:
 			audio_player.stop()
 	# The audio duck above rides through a pause (PROCESS_MODE_ALWAYS); the COSMETIC layers must not. While the
-	# world is frozen (dialogue tree-pause / a pausing menu / a freeze-frame) hold the note particles and the
+	# world is frozen (a dialogue tree-pause / a freeze-frame) hold the note particles and the
 	# visual bounce in place — spawning notes through a pause reads as a bug. Already-launched note tweens live on
 	# pausable nodes, so they freeze with the world too; we just stop launching new ones.
 	if not _effects_frozen():
@@ -241,7 +245,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_update_physics_vibration(delta)
 
-## True while the world is frozen (a dialogue tree-pause, a pausing NPC-transaction menu, or a freeze-frame). We
+## True while the world is frozen (a dialogue tree-pause or a freeze-frame — menus are real-time and never pause). We
 ## run _process / _physics_process THROUGH a pause (PROCESS_MODE_ALWAYS) only for the audio duck; the note particles
 ## and the bounce (visual offset + rigid-body impulse) gate on this so they freeze with the world. is_inside_tree()
 ## FIRST: off-tree unit tests drive _process/_physics_process directly, and there is no tree to be paused there
