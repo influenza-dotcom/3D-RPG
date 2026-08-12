@@ -815,7 +815,7 @@ func _animate_limbs(delta: float, sitting: bool) -> void:
 		if is_instance_valid(_arm_right):
 			_arm_right.transform = _reflect() * _arm_pose(arm_rotation + Vector3(_mode_pitch + arm_strike_pitch * amp_off - a - s, 0.0, 0.0), arm_strike_thrust * amp_off)
 	# STRIKE-ONLY path — how an animate_arms-OFF rig punches. The player's unarmed view-model hands
-	# (Player._build_first_person_arms, animate_arms = false) live here: they must NOT walk-swing, mode-pitch or fists-sway just
+	# (FirstPersonBody._build_first_person_arms, animate_arms = false) live here: they must NOT walk-swing, mode-pitch or fists-sway just
 	# because they can throw a punch, so instead of enabling all of that we write rest pose + the strike terms
 	# and nothing else. Reachable only when animate_arms is false, so no NPC ever takes it.
 	#

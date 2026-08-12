@@ -7,7 +7,8 @@ extends Node3D
 ## muzzle via MuzzleRig, and hides the rig's built-in placeholder gun. A weapon with NO view_model shows
 ## NOTHING — matching the NPC hand mount — because that placeholder is a silenced pistol, so falling back to
 ## it handed an unarmed player a gun. UNARMED is the real case: fists.tres has no view model at all, and the
-## bare hands are drawn by the Player's own first-person arms rig instead (Player._build_first_person_arms).
+## bare hands are drawn by the Player's own first-person arms rig instead (FirstPersonBody._build_first_person_arms,
+## on the Player's FirstPersonBody child).
 ##
 ## Host-coupled: GunMesh builds it in _ready, sets `host` right after .new() (the model is added under the
 ## host so the rim/outline/shadow passes and the laser's marker search all see it in the gun subtree), and

@@ -229,7 +229,7 @@ func power_score() -> float:
 @export var view_model: PackedScene
 ## TRUE when this weapon's first-person visual is NOT a mounted view model at all — the player's OWN body
 ## draws it. **fists.tres is the case**: unarmed shows the Player's first-person arms rig (the same hands you
-## see when carrying a prop, `Player._build_first_person_arms`), which lives under the camera rather than
+## see when carrying a prop, `FirstPersonBody._build_first_person_arms`), which lives under the camera rather than
 ## under the gun rig, so it keeps the character's arm colour and does not tip 45° into the gun's holster park.
 ##
 ## Two effects. It suppresses the "this weapon has no view_model" authoring warning in WeaponModelSwapper —

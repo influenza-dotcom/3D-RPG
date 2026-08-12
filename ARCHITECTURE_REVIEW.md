@@ -50,7 +50,7 @@ should replace "playtested" over time.
 
 ### Completed Extractions
 
-Both of the extractions this file used to park are done. Kept as a short record
+The extractions this file used to park are done. Kept as a short record
 because each one established an idiom the next extraction should copy.
 
 - **QuestTracker autoload split (M1).** DONE. The tracker dicts, the four quest
@@ -79,6 +79,38 @@ because each one established an idiom the next extraction should copy.
   `interval_for`) are statics so the feel math is testable without a Player, the
   way `GroundMovement` already is; `tests/test_landing.gd` pins the wiring and
   the curves.
+- **`FirstPersonBody` component.** DONE — `scripts/player/first_person_body.gd`,
+  a scene-wired drop-in on the Landing idiom (`host = NodePath("..")` + the
+  Player's `fp_body` back-export) owning the whole cosmetic first-person self:
+  the FP legs+torso rig, the carry-hands / bare-fists rig, the draw / stow /
+  guard / punch machinery and the fists' procedural bob. The Player KEEPS the
+  weapon-lock half of the carry dance (`_on_carry_changed`: the `_carrying`
+  latch, holster capture/restore, `draw_locked`, release bookkeeping),
+  `_rewield_in_flight`, the `FISTS` fallback const, and the death/revive ORDER
+  (die() / the revive call `set_legs_visible` + `refresh_unarmed_hands` at
+  their authored beats). Three ⭐ invariants:
+  - The 11 authored `fp_*` overrides in Player.tscn moved onto the new node
+    **byte-exact** — every historic FP bug (the stow mis-anchor, the guard
+    framing) was invisible at script defaults and only real at the authored
+    pose. `tests/test_first_person_body_wiring.gd` pins them on the child AND
+    their absence from the root (a move, not a copy).
+  - The carry relay is **ONE connection**: the Player's `_on_carry_changed`
+    tails into `fp_body.on_carry_changed`, so the synchronous holster restore
+    always precedes the fists decision reading `attack.holstered`. Splitting it
+    into two connections on `carry_changed` re-opens a connection-order
+    dependency (children connect in `_ready` before their parent — the wrong
+    side would win).
+  - `process_priority = -1` (plus authoring the node before Head) keeps the
+    component's pose ease ahead of the arms rig's strike re-pose — the
+    setter-ordering fix the monolith got free from parent-before-child ticking.
+  The four pure statics (`fp_arm_stow_target` / `bob_cadence` / `bob_lean` /
+  `advance_bob_phase`) moved whole with their contract comments;
+  `tests/test_fists_view_model.gd` and `tests/test_fp_torso.gd` re-pin against
+  the component. One deliberate non-shipped-config behavior change: the
+  `carry_changed` connect is now unconditional (made in `Player._ready`, not
+  inside the arms build), so `first_person_arms = false` still holsters + locks
+  the gun mid-carry — the intent the relay's comment always documented; shipped
+  Player.tscn has arms ON, so shipped behavior is identical.
 
 ### Payment Rails
 

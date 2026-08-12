@@ -91,154 +91,6 @@ const GROUND_SNAP_RETRY_FRAMES := 120  ## ~2 s at 60 fps — long enough for any
 ## revive keeps your pre-death stance. Turn OFF for a gun-out start (e.g. a combat test level). Designer knob.
 @export var start_holstered: bool = true
 
-@export_group("First-Person Body")
-## Show your own legs in first person (body-awareness). They reuse the NPC leg model + walk gait, rendered with
-## REAL world depth on the main camera (the gun keeps its separate view-model layer). Tune the offset/scale
-## live on this node. The TORSO rides this same rig (first_person_torso below); the HEAD is never shown — it
-## sits exactly where the camera is.
-@export var first_person_legs: bool = true
-## The leg model shown in first person (defaults to the same leg mesh the NPCs use).
-@export var fp_leg_model: PackedScene = preload("res://assets/models/leg.blend")
-## Uniform scale of each first-person leg.
-@export var fp_leg_scale: float = 0.44
-## Where the leg rig sits relative to the player origin -- lower Y drops the legs toward your feet. PLAYTEST + TUNE.
-@export var fp_leg_offset: Vector3 = Vector3(0.0, -0.55, 0.0)
-## Show your own TORSO under the camera too — look down and you see your chest, not just legs. Resolved from
-## your character-creation appearance through the SAME catalog slice the customizer uses (chosen body model;
-## a drawn shirt planar-projects untinted, else the skin tint), but BODY-ONLY: no head (it would sit inside
-## the camera) and no catalog arms (the hands are the separate view-model rig). A whole_body appearance skips
-## the FP torso — a one-piece character model can't have its head chopped off. Rides the legs rig.
-@export var first_person_torso: bool = true
-## FP-specific nudge ADDED to the catalog body's authored position (rig-local metres; the rig already hangs
-## fp_leg_offset below the camera). Tune STANDING so the shoulder line sits below the camera — crouching then
-## stays clip-safe automatically (_update_fp_torso sinks the torso by the head's own live drop). LIVE-tunable:
-## tracked every frame, so drag it in the editor's Remote inspector while playing.
-@export var fp_torso_offset: Vector3 = Vector3(0.0, -0.1, 0.0)
-## RESTING see-through of the FP torso while it's simply in view (0 = solid, the shipped look; raise it for a
-## permanent Odyssey-style ghost). The look-down fade below ADDS to this: the deeper you bury your look, the
-## more the chest would block your view of the ground, so it dissolves as it gets in the way. All of it draws
-## as a DITHERED screen-door — the retro stipple, never smooth alpha. Crouching overrides to fully hidden.
-@export_range(0.0, 1.0, 0.01) var fp_torso_transparency: float = 0.0
-## The torso starts DISSOLVING (dithering out) once your look passes this many degrees below the horizon.
-## Deliberately DEEP: the chest enters frame around ~40°, and it must read fully SOLID through that whole
-## normal look-down stretch — the dissolve begins only once you're burying the view into yourself...
-@export_range(0.0, 89.0, 0.5, "degrees") var fp_torso_fade_start_deg: float = 65.0
-## ...and is FULLY hidden by this angle (just shy of straight down, so a 100%-down look shows the ground,
-## not your chest). The band between fades it out riding the look itself — no pop.
-@export_range(0.0, 89.0, 0.5, "degrees") var fp_torso_fade_full_deg: float = 88.0
-## Tint for both legs (WHITE = the model's own colour). Character creation will override this per-save later.
-@export var fp_leg_color: Color = Color(0.486, 0.184, 0.224)
-## How far (degrees) the first-person legs LEAN toward the wall they're clinging to, at a full wall-climb cling.
-## Keep it SMALL — the rig pivots at the hip, so a big angle drives the FEET through the wall (75° buried them).
-## The direction comes from the actual wall normal, so they angle at the real surface no matter which way you look;
-## this only sets how far. Lower it toward 0 if the feet still clip into the wall. PLAYTEST + TUNE.
-@export var fp_leg_wall_pitch: float = 20.0
-var _fp_legs: BodyModelSwap = null
-## Show your own HANDS holding a carried object in first person. They appear ONLY while you're carrying a physics
-## prop (PickupRay.held_object): grabbing one HOLSTERS the weapon first, then the hands come out; dropping it hides
-## the hands and restores the weapon. Rendered in the gun's view-model camera pass (no wall clipping), parented to
-## the camera. PLAYTEST + TUNE the offset/spread/rotation/scale below to frame the held object.
-@export var first_person_arms: bool = true
-## The arm model for the hands (defaults to the same arm mesh the NPCs use).
-@export var fp_arm_model: PackedScene = preload("res://assets/models/arm.blend")
-## Uniform scale of each hand/arm.
-@export var fp_arm_scale: float = 1.0
-## Where the arm rig sits relative to the camera -- forward + down, toward where a held prop floats. This is the
-## CARRY rest; while the bare fists are up the rig rests fp_arm_unarmed_nudge away from here instead. TUNE.
-@export var fp_arm_offset: Vector3 = Vector3(0.0, -0.16, -0.4)
-## Sideways spread of the pair (the LEFT hand's shoulder X; the RIGHT mirrors across X). Bigger = hands further apart.
-@export var fp_arm_spread: float = 0.2
-## Rotation (degrees) of the arms -- pitch the forearms forward to reach the object. TUNE alongside the offset.
-@export var fp_arm_rotation: Vector3 = Vector3(-35.0, 0.0, 0.0)
-## Tint for the arms (WHITE = the model's own colour). Defaults to match the first-person legs' skin.
-@export var fp_arm_color: Color = Color(0.486, 0.184, 0.224)
-## Seconds to wait after the weapon holsters before the hands appear, so the holster reads first. TUNE.
-@export var fp_arm_draw_delay: float = 0.18
-## Seconds the hands take to SLIDE up into frame on draw (and back down out of frame on stow), instead of popping
-## in/out instantly. Paired with fp_arm_draw_rise below. 0 -> effectively instant. TUNE.
-@export var fp_arm_draw_time: float = 0.22
-## How far (m) BELOW the carry rest (fp_arm_offset — the LOWER of the two rests) the hands start a hidden draw and
-## end the stow — the bottom of the slide, just out of frame under the camera. Bigger = they rise from / sink to
-## further down. TUNE with fp_arm_draw_time.
-@export var fp_arm_draw_rise: float = 0.35
-## Show the SAME hands as your permanent UNARMED "weapon" — bare fists when nothing is equipped, instead of a
-## mounted weapon mesh. Off = unarmed shows nothing in first person. The punch knobs below shape the swing.
-@export var fp_arm_unarmed: bool = true
-## How the hands' REST moves off fp_arm_offset while the bare fists are up (camera-local metres). The guard's
-## geometry is counter-intuitive and was tuned by RENDERING it (the fists-frame probe, 2026-08-05): the
-## shoulders DROP (negative Y) while fp_arm_unarmed_tilt_deg swings the arms steeply up, so the fists rise into
-## the lower third FORESHORTENED — which is what actually reads as "fists close to your face". Raising Y
-## instead lifts the whole extended arm and reads as reaching into the distance (the mistake this replaces).
-## RELATIVE on purpose — re-tuning the carry rest moves both poses together. Framed so the fists FLANK the
-## crosshair just below it, aim always visible in the gap between them.
-@export var fp_arm_unarmed_nudge: Vector3 = Vector3(0.0, -0.13, 0.12)
-## Upward pitch (degrees, about the camera's X axis) of the whole rig while the bare fists are up. THE load-
-## bearing "closer" knob: at steep angles the arms FORESHORTEN and the fists swing up toward the lens — big,
-## near, knuckles-first. Shallow values (~10) read as reaching, not guarding. Zero while carrying a prop.
-## LIVE-TUNABLE: the up pose tracks this every frame (see _update_fp_arm_bob), so drag it in the editor's
-## REMOTE inspector while playing and the guard follows — same for the nudge/scale/spread knobs around it.
-@export_range(0.0, 80.0, 0.5, "degrees") var fp_arm_unarmed_tilt_deg: float = 45.0
-## Uniform scale MULTIPLIER on the arms while the bare fists are up — a final size boost on top of the
-## foreshortening. Eased at the slide's pace from _update_fp_arm_bob (never property-tweened — the setter
-## ordering would stomp punches). 1 = same size as the carry hands.
-@export_range(0.7, 2.0, 0.01) var fp_arm_unarmed_scale_mult: float = 1.15
-## Sideways spread of the fist pair while the bare fists are up (the carry hold keeps fp_arm_spread). Wider
-## than the carry reach, so the two fists read as distinct and the crosshair stays visible in the gap between
-## them. Eased alongside the scale — same setter-ordering rule, see _update_fp_arm_bob.
-@export_range(0.05, 0.5, 0.005, "suffix:m") var fp_arm_unarmed_spread: float = 0.28
-## Walk-bob travel (metres) for the bare fists — how far they trace the footstep figure-eight as you run, the
-## same motion (same phase rate, speed scaling and view_bob_enabled accessibility gate) GunPose gives every
-## mounted weapon. Fists-only: the carry hold stays planted on the held prop. 0 = rock steady.
-@export var fp_arm_unarmed_bob_pos: float = 0.007
-## Walk-bob roll (degrees): how much the fists rock left/right with each footstep. Scales with speed, like the travel.
-@export var fp_arm_unarmed_bob_roll_deg: float = 0.6
-## ASYMMETRIC walk-stride (degrees): the fists ALTERNATE — left rises as right falls, the natural arm-pump —
-## on top of the whole-rig bob, at the footstep cadence. Scales with speed like the bob; 0 = the pair moves
-## strictly together. Fists-only (the carry hold stays planted on the prop).
-@export_range(0.0, 30.0, 0.5, "degrees") var fp_arm_unarmed_stride_deg: float = 7.0
-## How fast the bob's amplitude blends in on a fists draw and back out on a stow / carry grab (per-second
-## exponential rate; higher = snappier). Also paces the walk↔idle crossfade between the bob and the breathing.
-@export var fp_arm_unarmed_bob_fade: float = 8.0
-## Idle BREATHING rise/fall (metres) for the fists while you stand still — the hands lift and settle with the
-## breath, plus a slower quarter-strength sideways drift at an offset frequency so they wander a little instead
-## of pumping like a metronome. Fades out while walking (the walk-bob takes over) and back in when you stop.
-## Runs even with View Bobbing off, exactly like the gun's breathing — micro-motion, not travel. 0 = statue hands.
-@export var fp_arm_unarmed_breath_pos: float = 0.006
-## Breathing pitch (degrees): how much the fists tip forward/back with each breath cycle.
-@export var fp_arm_unarmed_breath_deg: float = 1.0
-## Breathing pace (phase advance per second — GunPose's breath_speed idiom). Higher = quicker, more worked-up.
-@export var fp_arm_unarmed_breath_speed: float = 1.6
-## Pitch (degrees) the punching fist swings through, on top of fp_arm_rotation. Negative throws it forward/up.
-@export var fp_arm_punch_pitch: float = -35.0
-## Seconds one punch takes, start to fully settled. Must stay under the weapon's attack_speed (fists: 1.2 s) or
-## spamming attack restarts the swing before it ever completes.
-@export var fp_arm_punch_duration: float = 0.32
-## How far the punching fist THRUSTS, in camera space: -Z is forward (AWAY from the lens), -X pulls it inward
-## toward screen centre. From the steep guard the swing pitches the fist down-forward toward the crosshair.
-## Keep the reach PROPORTIONATE to the guard's rig depth (fp_arm_offset.z + fp_arm_unarmed_nudge.z, ~0.23 m
-## shipped) — an over-deep lunge can swing arm geometry through the near clip plane. After any big guard
-## retune, sanity-check a punch by eye (or re-run the frame probe) rather than trusting the numbers.
-@export var fp_arm_punch_thrust: Vector3 = Vector3(-0.03, 0.02, -0.14)
-## Amplitude shape over the punch's ELAPSED fraction (x 0 = the swing's start, x 1 = settled; y = amplitude,
-## and y BELOW zero is an anticipation pull-back). Null = a flat snap-out-then-ease with no wind-up.
-@export var fp_arm_punch_curve: Curve = preload("res://resources/tuning/punch_strike_curve.tres")
-## Auto-alternate the leading fist. OFF by default because the MOUSE picks the hand — left click throws the
-## left fist, right click the right. Turn it on only if you unbind the second attack button.
-@export var fp_arm_punch_alternate: bool = false
-## How much the NON-punching hand joins in (0 = it holds its guard, 1 = both fists swing together).
-@export var fp_arm_punch_offhand: float = 0.12
-var _fp_arms: BodyModelSwap = null
-var _unarmed_hands_up: bool = false  ## latch: the fists are up as the unarmed "weapon" (NOT the carry hold — see _refresh_unarmed_hands)
-var _fp_arm_tween: Tween = null  ## the in-flight hands slide (draw up / stow down); killed before starting a new one
-var _fp_arm_stowing: bool = false  ## a stow slide is running: FREEZE the pose ease (tilt/scale/spread) so the fists sink out AS fists instead of morphing into the carry reach on screen
-var _fp_arm_bob_mount: Node3D = null  ## camera-child wrapper the fists' walk-bob writes — the rig's OWN position stays the tweens'
-var _fp_bob_time: float = 0.0  ## footstep bob phase, advanced at GameSettings.camera.bob_speed while moving (GunPose parity); WRAPPED to TAU*2 — see _update_fp_arm_bob
-var _fp_bob_amp: float = 0.0   ## eased walk-bob amplitude (speed × grounded). EASED, never stepped: a one-frame is_on_floor() blip must not snap the arm-pump
-var _fp_bob_gate: float = 0.0  ## eased 0→1 "fists are up" amplitude gate so the bob fades in/out instead of snapping
-var _fp_breath_time: float = 0.0  ## breathing sine phase, advanced at fp_arm_unarmed_breath_speed (GunPose parity)
-var _fp_breath_t: float = 0.0  ## eased 0→1 idle-breathing blend — fades out while walking/airborne, like GunPose's
-var _fp_torso_catalog_pos: Vector3 = Vector3.ZERO  ## the catalog body's authored position — fp_torso_offset and the crouch sink ADD to it
-var _fp_head_standing_y: float = 0.0  ## Head's standing local Y, cached at rig build — the live delta below it IS the crouch drop the torso mirrors
 var _carrying: bool = false  ## true while a physics prop is held (PickupRay)
 var _holster_before_carry: bool = false  ## weapon holster state to restore when the prop is dropped
 ## The BACKPACK item currently pulled out into your hands via the hotbar's "hold" action (Player.hold_item), or
@@ -261,7 +113,8 @@ var _held_inv_prev_destructible: bool = true
 var _held_from_weapon_slot: bool = false
 ## Up for the span of a put-back that immediately REWIELDS the weapon (stash_held_item, the H toggle's second
 ## stage): armed before the carry release, dropped once the rewield's equip request has gone out. While armed,
-## _unarmed_hands_wanted() refuses — the release's synchronous holster restore reads "FISTS equipped, unholstered"
+## FirstPersonBody._unarmed_hands_wanted() refuses (it READS this latch off its host; the latch itself is pure
+## weapon-flow state and stays here) — the release's synchronous holster restore reads "FISTS equipped, unholstered"
 ## (the real weapon is only re-equipped afterwards), and without this the bare fists rise into the weapon's own
 ## re-draw. Never armed by a genuine drop/throw or a non-weapon stash, so the carry→fists handoff stays seamless.
 var _rewield_in_flight: bool = false
@@ -316,6 +169,12 @@ var _rewield_in_flight: bool = false
 ## The Landing component (M13 residual): owns the touchdown burst + the footstep cadence, both POST-move.
 ## Wire to the player's Landing child. Null (an off-tree test Player) simply means no landing FX / no footsteps.
 @export var landing: Landing
+## The FirstPersonBody component: the whole cosmetic first-person self — the FP legs + torso rig, the carry
+## hands / bare-fists rig, and all their draw/stow/guard/punch/bob machinery (scripts/player/first_person_body.gd,
+## the Landing idiom; its authored fp_* pose overrides live on that node in Player.tscn). Wire to the player's
+## FirstPersonBody child. Null (an off-tree test Player) simply means no first-person body — every forward
+## below null-guards, and the weapon half of the carry dance (_on_carry_changed) works without it.
+@export var fp_body: FirstPersonBody
 ## The MouseInput component that turns mouse motion into look/aim and feeds this player's yaw. Wire to the player's MouseInput child.
 @export var mouse_input: MouseInput
 
@@ -415,7 +274,7 @@ var _dialogue: DialogueController
 ## this factor for a shorter hop — tap for a low hop, hold for the full jump_velocity arc. 1.0 = no cut.
 @export var jump_cut_factor: float = 0.4
 
-func gravity(delta: float):
+func gravity(delta: float) -> void:
 	if is_on_floor():
 		return
 	var fall_mult := maxf(GameSettings.player_movement.fall_gravity_mult, 0.0) if velocity.y < 0.0 else 1.0
@@ -506,170 +365,12 @@ func _enter_tree() -> void:
 	bunnyhop.character = self
 	mouse_input.player = self
 
-## Build the first-person BODY rig (legs + optional torso, never a head): a BodyModelSwap parented to the
-## Player so it reads our `velocity` / `is_on_floor()` for the walk gait and inherits body yaw (not camera
-## pitch, which lives on Head). Rendered on the default layer with real depth, so looking down shows your own
-## body and world geometry occludes it correctly. The gun's separate view-model layer is untouched. Per-leg
-## hip pose comes from the shipped NPC rig; the whole rig's drop is the tunable `fp_leg_offset`; the torso is
-## stamped by _configure_fp_torso and crouch-follows in _update_fp_torso.
-func _build_first_person_legs() -> void:
-	if (not first_person_legs or fp_leg_model == null) and not first_person_torso:
-		return
-	var legs := BodyModelSwap.new()
-	legs.name = "FirstPersonLegs"
-	legs.casts_shadow = false  # FP body would cast a shadow from under the camera — looks wrong; suppress it
-	legs.leg_model = fp_leg_model if first_person_legs else null  # torso can show without legs, and vice versa
-	legs.leg_scale = fp_leg_scale
-	legs.leg_position = Vector3(0.095, -0.265, -0.02)  # per-leg hip offset, from scenes/enemies/enemy.tscn
-	legs.leg_rotation = Vector3(0.0, -90.0, 0.0)
-	# Tint the first-person legs with the character customizer's chosen LEG colour so the body parts you actually
-	# see in first person (looking down) reflect your customisation — falling back to the authored fp_leg_color when
-	# un-customised. Never run the catalog's whole configure_swap here — it would also mount a HEAD, which sits
-	# exactly where the camera is. The torso gets the catalog's body-only slice in _configure_fp_torso instead.
-	# See CharacterAppearanceCatalog / [[character customizer]].
-	legs.leg_color = _appearance_fp_color("leg", fp_leg_color)
-	legs.animate_legs = true
-	legs.legs_follow_movement = true
-	legs.legs_square_when_idle = false  # on STOP, the feet HOLD your last travel direction instead of snapping back to camera-forward
-	legs.velocity_driven_legs = true  # your legs track your velocity (run gait in the air), not the NPC mid-air flail
-	legs.velocity_leg_ref_speed = GameSettings.player_movement.max_speed  # walk-cycle cadence matches your real run speed
-	add_child(legs)
-	legs.position = fp_leg_offset
-	_fp_legs = legs
-	if head != null:
-		_fp_head_standing_y = head.position.y  # built in _ready, before any crouch — this IS the standing Y
-	_configure_fp_torso(legs)
-	if legs.leg_model == null and legs.body_model == null:
-		# Nothing resolved (legs off + a whole_body / catalog-less look): don't tick an empty rig for the whole
-		# life of the Player — free it and let the FP body simply be absent.
-		legs.queue_free()
-		_fp_legs = null
-
-## Build the first-person HANDS (a mirrored arm pair) for carrying objects: a BodyModelSwap parented to the CAMERA
-## and forced onto the view-model render layer so the gun's dedicated camera draws it over the world with no wall
-## clipping. Built HIDDEN -- the hands only show while a physics prop is held (see _on_carry_changed), and grabbing
-## one holsters the weapon first. Held STEADY (no NPC walk/flail swing). No-op if disabled / no model / no camera yet.
-func _build_first_person_arms() -> void:
-	if not first_person_arms or fp_arm_model == null or camera_effects == null:
-		return
-	var arms := BodyModelSwap.new()
-	arms.name = "FirstPersonArms"
-	arms.casts_shadow = false  # view-model hands under the camera shouldn't cast a world shadow
-	arms.animate_arms = false  # held steady on the object, not the NPC walk/flail swing
-	arms.view_model_layer = ViewModelCamera.VIEW_MODEL_LAYER  # draw in the gun pass: over the world, no clipping
-	arms.arm_model = fp_arm_model
-	arms.arm_scale = fp_arm_scale
-	arms.arm_position = Vector3(fp_arm_spread, 0.0, 0.0)  # LEFT shoulder offset; the RIGHT arm mirrors across X
-	arms.arm_rotation = fp_arm_rotation
-	arms.arm_color = _appearance_fp_color("arm", fp_arm_color)  # carry-hands reflect the customizer's ARM colour (colour only — see the FP-legs note)
-	# Punch shaping. These ride the SAME rig, because unarmed reuses the carry hands rather than mounting a
-	# copy under the gun: that is what keeps the fists on the character's arm colour, centred on the camera
-	# instead of offset to the gun's side, and out of the holster park's 45° tip.
-	arms.arm_strike_pitch = fp_arm_punch_pitch
-	arms.arm_strike_duration = fp_arm_punch_duration
-	arms.arm_strike_thrust = fp_arm_punch_thrust
-	arms.arm_strike_curve = fp_arm_punch_curve
-	arms.arm_strike_alternate = fp_arm_punch_alternate
-	arms.arm_strike_offhand_scale = fp_arm_punch_offhand
-	# Mount the rig on a dedicated bob node: _update_fp_arm_bob writes the MOUNT's transform each frame while the
-	# draw/stow tweens own the rig's own position, so the two never fight over a single property.
-	var bob_mount := Node3D.new()
-	bob_mount.name = "FirstPersonArmsBobMount"
-	camera_effects.add_child(bob_mount)
-	bob_mount.add_child(arms)
-	arms.position = fp_arm_offset
-	arms.visible = false  # hands appear only while carrying an object
-	_fp_arms = arms
-	_fp_arm_bob_mount = bob_mount
-	# The WEAPON look on your bare hands: the same GunVisuals dress pass every view model gets — shadows off,
-	# rim light chained per-surface (or onto the tint override), black inverted-hull outline — so the fists
-	# read as first-class view-model gear beside an outlined gun, for the carry hold and the guard alike.
-	# Code-built child; tune its rim/outline live on the Remote tree (FirstPersonArms/FistVisuals).
-	var visuals := GunVisuals.new()
-	visuals.name = "FistVisuals"
-	visuals.host = arms  # duck-typed: the rig exposes no `layers`, so meshes keep the view-model layer it forced
-	# Probe-calibrated for the fists: the gun's 0.02 default is SUB-PIXEL at fist distance (invisible), ~2
-	# draws a clean one-edge comic outline, ~8 shatters the hull into shards. Set BEFORE add_child — _ready
-	# bakes it into the shared outline material.
-	visuals.outline_width = 2.0
-	arms.add_child(visuals)  # _ready builds the shared rim/outline materials...
-	visuals.dress(arms)  # ...then the dress stamps them onto the already-instanced arm pair
-	# Drive show/hide off the carry ray. The PickupRay lives under the camera (Head/ScreenShake/Camera3D/RayCast).
-	var ray := camera_effects.get_node_or_null(^"RayCast") as PickupRay
-	if ray != null and not ray.carry_changed.is_connected(_on_carry_changed):
-		ray.carry_changed.connect(_on_carry_changed)
-
-## Stamp the player's OWN torso onto the FP body rig — the catalog's BODY slice only (the same resolution
-## configure_swap runs for the customizer/portrait: chosen body model + authored transform; a player-DRAWN
-## shirt planar-projects UNTINTED, else the skin colour tints the body) — deliberately without the head (it
-## sits exactly where the camera is) or the catalog arms (the hands are the separate view-model rig). Skips
-## whole_body appearances: a one-piece character model can't have its head chopped off, so those stay
-## legs-only. body_model is set LAST so the rig rebuilds once with everything above already stamped.
-func _configure_fp_torso(rig: BodyModelSwap) -> void:
-	if not first_person_torso:
-		return
-	var catalog := CharacterAppearanceCatalog.get_catalog()
-	if catalog == null:
-		return
-	var body := catalog.body_option(String(appearance.get("body", "")))
-	if body == null:
-		body = catalog.default_body()
-	if body == null or body.whole_body:
-		return
-	var shirt := catalog.shirt_texture(appearance)
-	rig.body_model_scale = body.scale
-	# +180 yaw on the catalog rotation: body options are authored to face the NPC's +Z forward (see
-	# body_model_rotation's own doc), but the player faces -Z — without the flip you wear the torso backwards.
-	rig.body_model_rotation = body.rotation + Vector3(0.0, 180.0, 0.0)
-	rig.body_texture_planar = shirt != null  # BEFORE body_texture — the texture setter reads the projection mode
-	rig.body_texture = shirt if shirt != null else body.texture
-	var skin: Variant = appearance.get("skin")
-	rig.body_color = Color.WHITE if shirt != null else (skin if skin is Color else catalog.default_skin_color)
-	_fp_torso_catalog_pos = body.position
-	rig.body_model_position = _fp_torso_catalog_pos + fp_torso_offset
-	rig.body_model = body.model
-	# The rig's default breathe stays ON deliberately: the chest pulses gently (±3% scale, the NPC torso's
-	# idle breath) — it pairs with the fists' breathing sway, and the pulse sits well inside the probed
-	# near-clip margin. Set legs.breathe = false here if a dead-still chest is ever wanted.
-
-## Keep the FP torso glued to its authored rest + the LIVE fp_torso_offset (Remote-inspector tunable) and sunk
-## by the head's CURRENT drop below its standing height — so chest-to-eye spacing stays constant while the
-## camera lowers. Crouching ALSO fades the torso out entirely (dithered, riding the already-eased crouch_t)
-## and back in on stand: crouched, your chest would fill the whole lowered view, so it hides for your ease of
-## viewing; the resting state keeps fp_torso_transparency's see-through. Epsilon-skipped writes throughout.
-func _update_fp_torso() -> void:
-	if not first_person_torso or not is_instance_valid(_fp_legs) or _fp_legs.body_model == null:
-		return
-	var sink := 0.0
-	if head != null:
-		sink = maxf(0.0, _fp_head_standing_y - head.position.y)
-	var target := _fp_torso_catalog_pos + fp_torso_offset - Vector3(0.0, sink, 0.0)
-	if _fp_legs.body_model_position.distance_squared_to(target) > 0.000001:
-		_fp_legs.body_model_position = target
-	# LOOK-DOWN dissolve: solid (well, fp_torso_transparency) while merely in view, dithering progressively
-	# out as the look buries past the fade band, fully hidden just shy of straight down — the chest gets out
-	# of the way exactly when it would block what you're looking at. Head owns the look pitch (rotate_x;
-	# negative = down). Crouching then overrides toward fully hidden regardless.
-	var down_deg := (maxf(0.0, -head.rotation_degrees.x) if head != null else 90.0)
-	var fade := clampf(
-		inverse_lerp(fp_torso_fade_start_deg, maxf(fp_torso_fade_full_deg, fp_torso_fade_start_deg + 0.1), down_deg),
-		0.0, 1.0)
-	var see := lerpf(fp_torso_transparency, 1.0, fade)
-	see = lerpf(see, 1.0, crouch.crouch_t if crouch != null else 0.0)
-	if absf(_fp_legs.body_transparency - see) > 0.002:
-		_fp_legs.body_transparency = see
-
-## The customizer's chosen colour for a first-person limb (`&"arm"` / `&"leg"`) from the mirrored appearance dict,
-## or `fallback` (the authored fp_*_color) when un-customised or the stored value isn't a Colour. Keeps the FP
-## view-model tint in step with the Stats/creation portrait for the same character.
-func _appearance_fp_color(key: String, fallback: Color) -> Color:
-	var c: Variant = appearance.get(key)  # String keys throughout (GameState/creation/configure_swap all use "arm"/"leg")
-	return c if c is Color else fallback
-
 ## Grabbing/dropping a carried prop drives the weapon AND the view-model hands. On grab: holster + LOCK the weapon
 ## away (you can't take a gun out with your hands full), then (after a short beat so the holster reads) bring the hands
 ## out. On drop: unlock + restore the weapon's prior holster state (so a manual hold-R holster before the grab is
 ## respected) and hide the hands. Mirrors the holster-stashing the dialogue camera does.
+## This handler keeps the GAMEPLAY half (the `_carrying` latch, the holster capture/restore, `draw_locked`,
+## the release bookkeeping) and TAILS into the FirstPersonBody's cosmetic half at the end — see the relay note there.
 func _on_carry_changed(holding: bool) -> void:
 	_carrying = holding
 	# A prop pulled from the backpack (Hotbar hold) that gets DROPPED/THROWN (E/Z/left-click) rather than stashed
@@ -682,10 +383,11 @@ func _on_carry_changed(holding: bool) -> void:
 		_held_inv_item = null
 		_held_inv_prop = null
 		_held_from_weapon_slot = false  # it's on the floor / in flight now — the H toggle has nothing left to put back
-	# WEAPON STATE first, and INDEPENDENT of whether the cosmetic FP-arms rig was built (first_person_arms off / no
-	# camera / no model). Carrying always puts the gun away and LOCKS it there; dropping unlocks and restores the
-	# pre-carry holster. Kept ABOVE the _fp_arms guard so the lock can never get stuck if the arms rig is absent or
-	# torn down mid-carry — the "no gun while your hands are full" rule doesn't depend on the hands being drawn.
+	# WEAPON STATE first, and INDEPENDENT of whether the cosmetic FP-arms rig was built (first_person_arms off /
+	# no camera / no model — the component's own guards). Carrying always puts the gun away and LOCKS it there;
+	# dropping unlocks and restores the pre-carry holster. Kept ABOVE the fp_body relay so the lock can never get
+	# stuck if the arms rig is absent or torn down mid-carry — the "no gun while your hands are full" rule
+	# doesn't depend on the hands being drawn (the connect in _ready is unconditional for the same reason).
 	if weapon_system != null and weapon_system.attack != null:
 		if holding:
 			_holster_before_carry = weapon_system.attack.holstered
@@ -702,290 +404,13 @@ func _on_carry_changed(holding: bool) -> void:
 				# (FNV draw-click rule). No-op unless the fire button is actually held now, so Z/E throws are unaffected.
 				weapon_system.attack.suppress_fire_for_carry_release()
 				weapon_system.attack.set_holstered(_holster_before_carry)
-	# COSMETIC view-model hands: only if the arms rig exists.
-	if not is_instance_valid(_fp_arms):
-		return
-	if holding:
-		await get_tree().create_timer(fp_arm_draw_delay).timeout
-		# Still holding after the holster beat AND not dead — don't pop hands into the death cinematic
-		# (dying mid-carry would otherwise show the FP arms over the keel-over/fade-to-black).
-		if _carrying and not _dying and not _dead and is_instance_valid(_fp_arms):
-			_slide_fp_arms(true)  # RISE up into frame instead of popping in
-	else:
-		# Dropped: mid-death-cinematic hide INSTANTLY (a slide-down would linger over the keel-over/fade); otherwise
-		# lower the hands back out of frame, then hide once they're fully down (see _slide_fp_arms).
-		if _dying or _dead:
-			_kill_fp_arm_tween()
-			_fp_arms.visible = false
-			_unarmed_hands_up = false
-		elif _unarmed_hands_wanted():
-			# UNARMED: these are the same hands. Don't stow them — they simply stop holding a prop and become
-			# your fists, so the transition is seamless instead of a stow followed immediately by a re-draw.
-			_unarmed_hands_up = true
-			_ease_fp_arms_to_rest()  # ...but the fists REST closer than the carry hold — pull them into the guard
-		else:
-			_unarmed_hands_up = false
-			_slide_fp_arms(false)
-
-## Slide the first-person carry hands into frame (into_view true) or out of it (false) with a vertical tween, so they RISE into
-## view on draw and LOWER back out on stow rather than popping. Rest is _fp_arm_rest() — the carry hold, or the
-## closer unarmed guard while the fists are up. The out-of-frame bottom is always anchored fp_arm_draw_rise below
-## the LOWER (carry) rest, so a stow fully exits frame no matter which rest the hands left from. A draw only
-## RESETS to that bottom when the rig is currently hidden — hands already on screen (the carry→fists handoff,
-## where the synchronous holster-restore refresh lands here, or a mid-stow re-draw) tween from where they are,
-## so they never teleport off-frame mid-view. On hide the arms
-## switch off only once they've slid all the way down (a tween_callback), so you never catch them vanishing
-## mid-frame. Any in-flight slide is killed first so a fast grab/drop can't leave two tweens fighting over the
-## position. No-op with no arms rig.
-func _slide_fp_arms(into_view: bool) -> void:
-	if not is_instance_valid(_fp_arms):
-		return
-	_kill_fp_arm_tween()
-	var rest := _fp_arm_rest()  # read live so an inspector tune of the rest offsets is honoured
-	var low := fp_arm_offset - Vector3(0.0, fp_arm_draw_rise, 0.0)
-	if into_view:
-		_fp_arm_stowing = false
-		if not _fp_arms.visible:
-			_fp_arms.position = low  # hidden: start just out of frame...
-			_fp_arms.rotation_degrees.x = 0.0  # ...untilted, so the guard's pitch reads as part of the raise...
-			_fp_arms.arm_scale = fp_arm_scale  # ...and at the carry baseline, so a guard draw GROWS in (and a death mid-guard can't leak the guard scale into the next carry draw)
-			_fp_arms.arm_position = Vector3(fp_arm_spread, 0.0, 0.0)  # same for the guard's wider fist spread
-		_fp_arms.visible = true
-		_fp_arm_tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-		_fp_arm_tween.tween_property(_fp_arms, ^"position", rest, fp_arm_draw_time)  # ...rise to rest
-		_fp_arm_tween.parallel().tween_property(_fp_arms, ^"rotation_degrees:x", _fp_arm_rest_tilt(), fp_arm_draw_time)  # tipping up into the guard (0 for the carry hold)
-	else:
-		# Stow: sink in the CURRENT pose. No tilt/scale/spread retarget here and the per-frame pose ease is
-		# frozen (_fp_arm_stowing) — the latch has already flipped to the next mode, and easing toward it
-		# while still on screen morphed the sinking fists into the flat carry reach for a beat (the reported
-		# "holding-items arm flash" on holster). The next draw's hidden-reset re-poses from scratch.
-		_fp_arm_stowing = true
-		_fp_arm_tween = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_CUBIC)
-		_fp_arm_tween.tween_property(_fp_arms, ^"position", low, fp_arm_draw_time)  # sink from wherever it is...
-		_fp_arm_tween.tween_callback(_hide_fp_arms)  # ...then switch off, fully out of frame
-
-## The hands' current rest offset: the carry hold (fp_arm_offset), or — while the bare fists are the thing on
-## screen — that hold nudged up toward the lens (fp_arm_unarmed_nudge) so the fists frame as a raised guard.
-## Keyed on the _unarmed_hands_up latch, which every caller settles BEFORE sliding.
-func _fp_arm_rest() -> Vector3:
-	return fp_arm_offset + fp_arm_unarmed_nudge if _unarmed_hands_up else fp_arm_offset
-
-## The rig's rest pitch (degrees about the camera's X axis): tipped up into the guard while the bare fists are
-## up, flat for the carry hold. Same latch key as _fp_arm_rest, settled by every caller before sliding.
-func _fp_arm_rest_tilt() -> float:
-	return fp_arm_unarmed_tilt_deg if _unarmed_hands_up else 0.0
-
-## The arms' rest scale: the authored carry scale, multiplied up while the bare fists are up so they read
-## bigger/closer without the rig moving into the near plane. Same latch key as the other _fp_arm_rest_* helpers.
-func _fp_arm_rest_scale() -> float:
-	return fp_arm_scale * fp_arm_unarmed_scale_mult if _unarmed_hands_up else fp_arm_scale
-
-## The fist pair's rest spread (the LEFT shoulder X; the right mirrors): wider for the guard so the fists read
-## distinct and never cover the crosshair, the authored carry spread otherwise. Same latch key as the others.
-func _fp_arm_rest_spread() -> float:
-	return fp_arm_unarmed_spread if _unarmed_hands_up else fp_arm_spread
-
-## Ease the already-visible hands to their current rest WITHOUT the full off-frame draw slide — the carry→fists
-## handoff, where the rig stays on screen but the fists' guard rests closer to the lens than the carry hold it
-## just left. Also retargets (harmlessly, same destination) any draw slide the holster-restore refresh started.
-func _ease_fp_arms_to_rest() -> void:
-	if not is_instance_valid(_fp_arms):
-		return
-	_kill_fp_arm_tween()
-	_fp_arm_stowing = false
-	_fp_arms.visible = true
-	_fp_arm_tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	_fp_arm_tween.tween_property(_fp_arms, ^"position", _fp_arm_rest(), fp_arm_draw_time)
-	_fp_arm_tween.parallel().tween_property(_fp_arms, ^"rotation_degrees:x", _fp_arm_rest_tilt(), fp_arm_draw_time)
-
-## True when the bare fists should be up: nothing but the FISTS fallback equipped, not carrying a prop (those
-## are the SAME hands, driven by the carry slide), not holstered, alive, and no REAL weapon mid-draw.
-##
-## Compared by resource identity first with a resource_path fallback — the same test
-## CharacterInspectScreen._is_unarmed_fallback uses, because a duplicated resource still means "unarmed".
-func _unarmed_hands_wanted() -> bool:
-	if not fp_arm_unarmed or _carrying or _dying or _dead:
-		return false
-	# A REAL weapon is mid-draw: the H put-back reads "FISTS equipped, unholstered" for the beat between the
-	# carry release and its rewield landing (Attack's swap unholsters BEFORE it swaps the weapon hub), and the
-	# fists would flash up into the weapon's own raise. _rewield_in_flight spans stash_held_item's
-	# release→equip call; the BACKPACK's optimistic equipped_item (set before the combat inventory switches,
-	# and held through a request QUEUED behind a mid-flight swap) covers the draw until equipped_weapon stops
-	# reading FISTS. Neither is ever set on a genuine drop/throw — that handoff still raises the fists below.
-	if _rewield_in_flight or (inventory != null and inventory.equipped_item != null):
-		return false
-	if weapon_system == null or not is_instance_valid(_fp_arms):
-		return false
-	var wd: WeaponData = weapon_system.inventory.equipped_weapon if weapon_system.inventory != null else null
-	if wd == null or not (wd == FISTS or wd.resource_path == FISTS.resource_path):
-		return false
-	return weapon_system.attack == null or not weapon_system.attack.holstered
-
-## Bring the bare fists up / put them away to match the current weapon + holster + carry state. Latched on
-## _unarmed_hands_up rather than on `visible`, because during the stow slide the rig is still visible for the
-## length of the tween — comparing against `visible` would re-fire the slide every time this is called.
-func _refresh_unarmed_hands() -> void:
-	if not is_instance_valid(_fp_arms):
-		return
-	var want := _unarmed_hands_wanted()
-	if want == _unarmed_hands_up:
-		return
-	_unarmed_hands_up = want
-	_slide_fp_arms(want)
-
-## Punch: throw the fists' own strike. Gated on the fists actually being the thing on screen — while CARRYING,
-## the same rig is holding a prop and must not swing, and with a real weapon out the gun's recoil is the swing.
-func _on_attack_play_animation() -> void:
-	if not (_unarmed_hands_up and is_instance_valid(_fp_arms)):
-		return
-	# Which fist threw it: the ALT button (right click) leads with the RIGHT hand, the primary with the LEFT.
-	# Attack banks the button on the swing that actually got through its gates, so a refused click never poses
-	# the arms. -1 = right, +1 = left (see BodyModelSwap.strike).
-	_fp_arms.strike(-1.0 if weapon_system.attack.last_attack_alt else 1.0)
-
-## Switch the FP carry hands off — the tail of the stow slide (a tween_callback), fired only once they're fully out
-## of frame. A bound method Callable (NOT a lambda) so a freed player never fires a dangling capture.
-func _hide_fp_arms() -> void:
-	_fp_arm_stowing = false  # the stow finished — pose easing may resume (the next draw re-poses from hidden anyway)
-	if is_instance_valid(_fp_arms):
-		_fp_arms.visible = false
-
-## Kill any in-flight hands slide so a new draw/stow (or a death hide) doesn't get overwritten by the old tween.
-func _kill_fp_arm_tween() -> void:
-	if _fp_arm_tween != null and _fp_arm_tween.is_valid():
-		_fp_arm_tween.kill()
-	_fp_arm_tween = null
-
-func _process(delta: float) -> void:
-	_update_fp_arm_bob(delta)
-	_update_fp_torso()
-
-## Per-frame procedural motion for the bare fists: the footstep walk-bob GunPose gives every mounted weapon
-## (cos-half-rate X / sin-full-rate Y / half-rate roll, phase advanced at GameSettings.camera.bob_speed, scaled
-## by run speed, climbing counting as walking, behind the view_bob_enabled accessibility toggle) CROSSFADED with
-## an idle BREATHING sway while you stand still (GunPose's breath envelope + a slight lateral hand-wander).
-## Needed for the same reason GunPose exists: the rig is a CHILD of the camera, so it inherits the head-bob and
-## reads glued to the screen without its own counter-motion. Written onto the rig's dedicated MOUNT, never the rig — the
-## draw/stow tweens own the rig's position, and the two must not fight over one property. Fists-only by design
-## (the carry hold stays planted on the held prop): amplitude rides a gate eased at fp_arm_unarmed_bob_fade on
-## _unarmed_hands_up — so a carry grab fades the bob out through the hand-off (a sub-millimetre remnant decays
-## over the first second) rather than snapping — and once the gate fully closes the mount parks exactly at zero.
-func _update_fp_arm_bob(delta: float) -> void:
-	# GUARD SCALE, eased per-frame from HERE rather than tweened. Deliberate ordering fix: a property tween's
-	# setter runs AFTER node _process each frame, and BodyModelSwap.arm_scale's setter re-poses the arms to
-	# REST — so a tween stomped any punch whose strike envelope overlapped a slide. Player._process runs
-	# BEFORE its descendant rig's _process (parents first), so easing from here lets the strike path re-pose
-	# a mid-punch arm afterwards, every frame. Rate is derived from fp_arm_draw_time (~settled in one slide),
-	# and converged scale skips the write entirely so a steady-state punch is never touched at all.
-	if is_instance_valid(_fp_arms) and not _fp_arm_stowing:
-		var pace := 1.0 - exp(-delta * 3.0 / maxf(fp_arm_draw_time, 0.01))
-		var scale_target := _fp_arm_rest_scale()
-		if absf(_fp_arms.arm_scale - scale_target) > 0.0005:
-			_fp_arms.arm_scale = lerpf(_fp_arms.arm_scale, scale_target, pace)
-		# The guard's wider fist spread, eased under the same ordering rule (arm_position's setter also re-poses).
-		var spread_target := _fp_arm_rest_spread()
-		if absf(_fp_arms.arm_position.x - spread_target) > 0.0005:
-			_fp_arms.arm_position = Vector3(lerpf(_fp_arms.arm_position.x, spread_target, pace), 0.0, 0.0)
-		# Rest position + tilt track their exports CONTINUOUSLY while the hands are on screen and no slide is
-		# in flight (a live tween owns the transform during draw/stow). This is what makes the pose knobs
-		# LIVE-tunable from the editor's Remote inspector mid-game — drag fp_arm_unarmed_* and the guard
-		# follows — and it converges to the same rest the slide would have landed on, so it is invisible in
-		# normal play (epsilon-skipped once settled).
-		if _fp_arms.visible and (_fp_arm_tween == null or not _fp_arm_tween.is_valid()):
-			var rest := _fp_arm_rest()
-			if _fp_arms.position.distance_squared_to(rest) > 0.000001:
-				_fp_arms.position = _fp_arms.position.lerp(rest, pace)
-			var tilt := _fp_arm_rest_tilt()
-			if absf(_fp_arms.rotation_degrees.x - tilt) > 0.01:
-				_fp_arms.rotation_degrees.x = lerpf(_fp_arms.rotation_degrees.x, tilt, pace)
-	if not is_instance_valid(_fp_arm_bob_mount):
-		return
-	var want := 1.0 if (_unarmed_hands_up and is_instance_valid(_fp_arms) and _fp_arms.visible) else 0.0
-	_fp_bob_gate = lerpf(_fp_bob_gate, want, 1.0 - exp(-fp_arm_unarmed_bob_fade * delta))
-	if _fp_bob_gate < 0.001:
-		_fp_arm_bob_mount.position = Vector3.ZERO
-		_fp_arm_bob_mount.rotation_degrees = Vector3.ZERO
-		if is_instance_valid(_fp_arms) and absf(_fp_arms.arm_stride_deg) > 0.01:
-			_fp_arms.arm_stride_deg = 0.0  # park the arm-pump too — the carry hold's hands stay planted
-		_fp_bob_amp = 0.0  # and drop the eased amplitude, so the next draw fades the pump back IN from rest
-		return
-	var horizontal_speed := Vector2(velocity.x, velocity.z).length()
-	# Climbing counts as walking for the bob (vertical motion while scaling a wall) — the GunPose parity rule.
-	var climbing := is_climbing()
-	if climbing:
-		horizontal_speed = maxf(horizontal_speed, absf(velocity.y))
-	var moving := horizontal_speed > GameSettings.player_movement.footstep_min_horizontal_speed
-	# AMPLITUDE is EASED, never stepped — this is the fix for the 2026-08-08 "fists jitter while walking" report.
-	# `is_on_floor()` blips false for single frames all the time while actually walking (brush seams, the 0.5 m
-	# stair risers, any bump), and horizontal_speed dips under the threshold between strides. Taking the raw gate
-	# as the amplitude meant one such frame drove the arm-pump to ZERO and the next drove it back to full: a
-	# ±fp_arm_unarmed_stride_deg snap, which on this rig's ~2.9 m arm swinging from a shoulder ~2 m behind the
-	# lens is ~0.35 m of fist travel in ONE FRAME. The mount's own bob hid it (it is lerped below, so it only
-	# ever moved 15% of the step) — the STRIDE was written raw, so the whole pair popped.
-	var amp_target := 0.0
-	if Settings.view_bob_enabled and (is_on_floor() or climbing) and moving:
-		amp_target = clampf(horizontal_speed / GameSettings.player_movement.max_speed, 0.0, 1.0)
-	_fp_bob_amp = lerpf(_fp_bob_amp, amp_target, 1.0 - exp(-fp_arm_unarmed_bob_fade * delta))
-	# PHASE only ever advances (while moving) and is WRAPPED — never eased toward zero. Easing a phase is what
-	# turned the blip above into a random jump: the phase grows without bound while you walk (bob_speed rad/s, so
-	# hundreds of radians within a minute), and lerping THAT toward 0 moves it tens of radians in one frame —
-	# several whole bob cycles, i.e. the fists teleport to an unrelated point in the walk cycle. The settle-to-
-	# centre this used to serve is already done properly by the eased amplitude above plus the mount lerp below.
-	# TAU * 2 is the period of the HALF-rate terms (cos/sin of _fp_bob_time * 0.5), so the wrap is continuous for
-	# every consumer — the full-rate sin, the half-rate bob/roll, and the stride.
-	_fp_bob_time = advance_bob_phase(_fp_bob_time, GameSettings.camera.bob_speed, delta, amp_target > 0.0)
-	var amp := _fp_bob_amp * _fp_bob_gate
-	# BREATHING — the idle half of the motion, GunPose's exact envelope (sin Y + half-rate pitch, fading out
-	# while moving or airborne so the walk-bob takes over), plus a slower quarter-strength lateral drift at an
-	# offset frequency so the hands wander organically instead of pumping like a metronome. Deliberately NOT
-	# behind view_bob_enabled: the gun breathes with bobbing off too — comfort-safe micro-motion, not travel.
-	var idle_target := 0.0 if (moving or not is_on_floor()) else 1.0
-	_fp_breath_t = lerpf(_fp_breath_t, idle_target, 1.0 - exp(-fp_arm_unarmed_bob_fade * delta))
-	_fp_breath_time += delta * fp_arm_unarmed_breath_speed
-	var breath := _fp_breath_t * _fp_bob_gate
-	var breath_x := sin(_fp_breath_time * 0.63) * fp_arm_unarmed_breath_pos * 0.25 * breath
-	var breath_y := sin(_fp_breath_time) * fp_arm_unarmed_breath_pos * breath
-	var breath_pitch := sin(_fp_breath_time * 0.5) * fp_arm_unarmed_breath_deg * breath
-	var target_pos := Vector3(
-		cos(_fp_bob_time * 0.5) * fp_arm_unarmed_bob_pos * amp + breath_x,
-		sin(_fp_bob_time) * fp_arm_unarmed_bob_pos * amp + breath_y,
-		0.0)
-	var target_rot := Vector3(breath_pitch, 0.0, sin(_fp_bob_time * 0.5) * fp_arm_unarmed_bob_roll_deg * amp)
-	# Smooth toward the target (GunPose's motion_smooth-default feel) so a hard stop mid-stride settles instead
-	# of snapping the fists to dead centre.
-	var s := 1.0 - exp(-10.0 * delta)
-	# ASYMMETRIC stride: ± pitch on the arm PAIR (left +, right − inside the rig) at the half-rate footstep
-	# cadence — one full left-right alternation per two footfalls, the natural arm-pump. Written through the
-	# rig's arm_stride_deg setter under the arm_scale ordering idiom (our write lands before the rig's strike
-	# re-pose, so punches stay authoritative over a mid-walk swing).
-	# SMOOTHED with the same `s` as the mount, and for the same reason: this drives a LEVER (the arm swings from
-	# a shoulder ~2 m behind the lens), so degrees here are decimetres of fist on screen. Writing it raw made the
-	# pair pop on any single-frame amplitude change — the mount, being lerped, never showed it. Keep the two on
-	# one smoothing constant: they are the same motion, and a stride that leads or lags the bob reads as a limp.
-	if is_instance_valid(_fp_arms):
-		var stride_target := sin(_fp_bob_time * 0.5) * fp_arm_unarmed_stride_deg * amp
-		if absf(_fp_arms.arm_stride_deg - stride_target) > 0.01:
-			_fp_arms.arm_stride_deg = lerpf(_fp_arms.arm_stride_deg, stride_target, s)
-	_fp_arm_bob_mount.position = _fp_arm_bob_mount.position.lerp(target_pos, s)
-	_fp_arm_bob_mount.rotation_degrees = _fp_arm_bob_mount.rotation_degrees.lerp(target_rot, s)
-
-## One step of the fists' walk-bob PHASE — pure + static so the anti-jitter contract is unit-testable without a
-## Player, a rig, a floor or a physics tick (tests/test_fists_view_model.gd). `advancing` is "the walk-bob has
-## amplitude this frame" (grounded/climbing AND moving AND View Bobbing on).
-##
-## THE CONTRACT, and why it is shaped like this — this function IS the 2026-08-08 "the fists jitter while
-## walking" fix:
-##   - The phase ONLY EVER ADVANCES; when not advancing it HOLDS. It must NEVER be eased toward zero. A phase
-##     grows without bound while you walk (bob_speed rad/s — ~240 rad after 30 s), so `lerpf(phase, 0, ~0.15)`
-##     moves it ~37 radians in ONE FRAME: six whole bob cycles, i.e. the hands teleport to an unrelated point
-##     in the walk cycle. Settling to centre is the AMPLITUDE's job (see _fp_bob_amp), not the phase's.
-##   - It is WRAPPED to TAU * 2 — the period of the HALF-rate consumers (the cos/sin of phase * 0.5 that drive
-##     the horizontal bob, the roll and the arm stride). Wrapping there is continuous for the full-rate sin too,
-##     and keeps the value small forever instead of drifting into the thousands.
-static func advance_bob_phase(phase: float, bob_speed: float, delta: float, advancing: bool) -> float:
-	if not advancing:
-		return phase
-	return fposmod(phase + delta * bob_speed, TAU * 2.0)
+	# COSMETIC view-model hands: the FirstPersonBody's half of this same event, called as this handler's TAIL —
+	# ONE connection on carry_changed, relayed, so the holster restore above has always landed synchronously by
+	# the time the component's _unarmed_hands_wanted() reads attack.holstered. A second connection on the signal
+	# would re-open a connection-order dependency (children's _ready runs before the parent's — the component
+	# would have connected first and read the STALE holster).
+	if fp_body != null:
+		fp_body.on_carry_changed(holding)
 
 ## The character's chosen name, from character creation (mirrors GameState.player_name). Display-only — the Stats
 ## screen shows it; the save's source of truth is GameState.player_name. "" for an unnamed / older character.
@@ -1110,10 +535,23 @@ func _ready() -> void:
 	_hud.host = self
 	add_child(_hud)
 	_hud.build(ui, camera_effects)
-	# First-person legs (body-awareness): build the legs-only rig so looking down shows your own legs.
-	_build_first_person_legs()
-	# First-person hands: built hidden; they appear only while carrying a physics prop (weapon holsters first).
-	_build_first_person_arms()
+	# First-person body (legs + torso + the carry hands / bare fists): built by the FirstPersonBody component,
+	# but called from HERE, not its own _ready — a child's _ready runs BEFORE the parent's, and `appearance` is
+	# only mirrored from GameState near the top of THIS _ready, so a self-building component would tint the
+	# legs and stamp the torso from an empty appearance dict. Legs show on look-down; the hands are built
+	# hidden and appear while carrying a physics prop (weapon holsters first) or as the bare fists.
+	if fp_body != null:
+		fp_body.build()
+	# Drive the carry dance off the pickup ray (PickupRay lives under the camera: Head/ScreenShake/Camera3D/RayCast).
+	# ONE connection, on the PLAYER: _on_carry_changed keeps the weapon-state half (holster + draw-lock) and
+	# tails into the component's cosmetic half, so the holster restore always lands before the fists decision.
+	# UNCONDITIONAL — deliberately NOT gated on the cosmetic arms rig having been built (it used to live inside
+	# _build_first_person_arms, so first_person_arms = false skipped the connect entirely and a carried crate
+	# left the gun drawable; the "no gun while your hands are full" rule must not depend on the hands existing).
+	if camera_effects != null:
+		var carry_ray := camera_effects.get_node_or_null(^"RayCast") as PickupRay
+		if carry_ray != null and not carry_ray.carry_changed.is_connected(_on_carry_changed):
+			carry_ray.carry_changed.connect(_on_carry_changed)
 	# (The grapple hook moved into the Grapple ABILITY node — it builds + owns the GrappleHook when granted,
 	# reading grapple_resource/grapple_hook_origin off us. The pull still runs at its _physics_process beat.)
 	# Conversation camera/weapon handling: focus-on-target zoom + holster-for-dialogue + the holster
@@ -1123,18 +561,30 @@ func _ready() -> void:
 	add_child(_dialogue)
 	# Holster: hide the gun mesh whenever Attack reports holstered (hold-R toggle / dialogue).
 	weapon_system.attack.holster_changed.connect(_dialogue.on_weapon_holstered)
-	# UNARMED HANDS: the bare fists are the SAME rig as the carry hands, so they follow the same three state
-	# changes — putting the weapon away, swapping to/from a real weapon, and picking a prop up or dropping it
-	# (that last one is handled inside _on_carry_changed). Punching drives the rig's own strike.
-	weapon_system.attack.holster_changed.connect(func(_on: bool) -> void: _refresh_unarmed_hands())
-	weapon_system.attack.swap_finished.connect(_refresh_unarmed_hands)
-	weapon_system.attack.play_animation.connect(_on_attack_play_animation)
+	# ...and the RETICLE goes away with it (GameSettings.hud.hide_crosshair_when_holstered): nothing is
+	# aimed, so nothing annotates the aim point. Connected straight to the HUD's own latch — the signal's
+	# `on: bool` matches the setter 1:1, and routing it there (rather than writing crosshair.visible here)
+	# is what lets it COMPOSE with the dialogue hide instead of fighting it. See ui.gd's two latches.
+	if ui != null:
+		weapon_system.attack.holster_changed.connect(ui.set_crosshair_holstered)
+	# UNARMED HANDS: the bare fists are the SAME rig as the carry hands (FirstPersonBody), so they follow the
+	# same three state changes — putting the weapon away, swapping to/from a real weapon, and picking a prop up
+	# or dropping it (that last one rides the carry relay in _on_carry_changed). Punching drives the rig's own
+	# strike. Wired HERE, not in the component: Weapon/Attack readiness and the holster_changed connection
+	# ORDER (dialogue → crosshair → this fists refresh) are established in this _ready.
+	weapon_system.attack.holster_changed.connect(func(_on: bool) -> void:
+		if fp_body != null:
+			fp_body.refresh_unarmed_hands())
+	if fp_body != null:
+		weapon_system.attack.swap_finished.connect(fp_body.refresh_unarmed_hands)
+		weapon_system.attack.play_animation.connect(fp_body.on_attack_play_animation)
 	# TWO-FISTED input: left click throws the LEFT fist, right click the RIGHT. MouseInput polls the second
 	# button; Attack refuses it for anything that isn't a punch weapon, so right-click stays ADS for guns.
 	if mouse_input != null:
 		weapon_system.attack.alt_attack_action = mouse_input.alt_attack_action
 		mouse_input.alt_attack.connect(weapon_system.attack._on_mouse_input_attack.bind(false, true))
-	_refresh_unarmed_hands.call_deferred()  # deferred so the inventory has equipped its first weapon
+	if fp_body != null:
+		fp_body.refresh_unarmed_hands.call_deferred()  # deferred so the inventory has equipped its first weapon
 	# Put the weapon away for conversations (restored on finish), reusing the holster.
 	DialogueManager.dialogue_started.connect(_dialogue.on_dialogue_started)
 	DialogueManager.dialogue_finished.connect(_dialogue.on_dialogue_finished)
@@ -1231,6 +681,12 @@ func _ready() -> void:
 	# now bails while holstered, mirroring GunMesh.land).
 	if start_holstered and weapon_system != null and weapon_system.attack != null:
 		weapon_system.attack.set_holstered(true)
+	# Seed the HUD's holster latch from the FINAL state, once all of the above has settled. The signal alone
+	# can't do it: set_holstered early-returns (emitting nothing) when the value is unchanged, so a restore
+	# that was already holstered — or a Player authored start_holstered = false — would leave the reticle
+	# stuck on the latch's `false` default. Cheap and idempotent; the connection above carries it from here.
+	if ui != null and weapon_system != null and weapon_system.attack != null:
+		ui.set_crosshair_holstered(weapon_system.attack.holstered)
 	_consume_pending_holster_forgiveness_tutorial.call_deferred()
 
 ## Spare CLIPS to start with per DISTINCT caliber the loadout uses ("start with some reserve").
@@ -2131,31 +1587,6 @@ func _update_wall_shadow(delta: float) -> void:
 		wall_global = Transform3D(wall_basis, global_position - up * 0.1)  # sit on the wall, by the body
 	_shadow.global_transform = ground_global.interpolate_with(wall_global, _shadow_wall_blend)
 
-## Point the first-person legs AT the wall they're clinging to (not just "ahead") while climbing, so they press the
-## real surface instead of dangling. Takes the WALL DIRECTION (-wall_normal) into the rig's local frame, flattens it,
-## and pitches the whole rig from straight-DOWN toward it — eased by the wall-climb blend the shadow already computes
-## (_shadow_wall_blend: 0 grounded -> 1 clinging). So it orients to the actual wall regardless of where you're
-## looking. The gait is separately told (via is_climbing()) not to air-flail. Null-safe.
-func _update_fp_leg_wall_pose() -> void:
-	if _fp_legs == null:
-		return
-	# Off the wall (or no real wall normal this frame -- it reads ~zero as contact drops): legs rest (hang down).
-	var wn := get_wall_normal()
-	if _shadow_wall_blend <= 0.001 or not is_on_wall() or wn.length_squared() < 0.0001:
-		_fp_legs.transform.basis = Basis()
-		return
-	# Bring the wall direction into the rig's local frame. The player basis is an orthonormal yaw, so
-	# orthonormalized().transposed() equals its inverse() but can NEVER raise a det==0 invert on a transient
-	# degenerate transform (the engine error this guards against).
-	var into_local := global_transform.basis.orthonormalized().transposed() * (-wn.normalized())  # toward the wall, local space
-	into_local.y = 0.0  # flatten — pitch the legs toward the wall horizontally, not up/down it
-	var axis := Vector3.DOWN.cross(into_local)  # horizontal pitch axis, perpendicular to the wall direction
-	if axis.length() < 0.001:
-		_fp_legs.transform.basis = Basis()
-		return
-	# Swing the rig's local-DOWN (where the legs extend) toward the wall by up to fp_leg_wall_pitch, eased by the cling.
-	_fp_legs.transform.basis = Basis(axis.normalized(), deg_to_rad(fp_leg_wall_pitch) * _shadow_wall_blend)
-
 func on_weapon_fired(weapon: WeaponData) -> void:
 	note_combat()
 	if _aim_sway != null:
@@ -2330,11 +1761,13 @@ func _update_save_input() -> void:
 		# now toasts the failure instead of a false "Quicksaved". (We're always in-tree here, so false == write error.)
 		if GameState.quicksave(self):
 			# Same HEAVY-commit class as a slot write (save_load_screen._do_save) — a hotkey, so there is no
-			# button click to collide with. Gated on the write, so the failure branch below stays SILENT: there
-			# is no "denied" cue in the set and the toast already carries the bad news.
+			# button click to collide with. Gated on the write; the failure branch takes the DENIAL, because a
+			# corner toast is the wrong channel for "your run is not on disk" — the player's eyes are on the
+			# world, not the HUD, exactly when they press F5.
 			MenuStyle.play_commit()
 			notify_toast(PlayerText.TOAST_QUICKSAVED, Color.WHITE)
 		else:
+			MenuStyle.play_denied()
 			notify_toast(PlayerText.TOAST_QUICKSAVE_FAILED, Color(1.0, 0.5, 0.4))
 	elif Input.is_action_just_pressed("Quickload"):
 		if GameState.has_quicksave():
@@ -2345,11 +1778,15 @@ func _update_save_input() -> void:
 			# has_quicksave gate so an F9 with no file on disk stays a true no-op (no phantom picker dismissal).
 			_close_open_modals()
 		# Reloads the scene on success; no toast — the reload IS the feedback. The commit cue is the audible
-		# half of that, gated on the same return so an F9 with no file on disk stays a true no-op. Safe to fire
-		# here: _close_open_modals' sweep already dropped MenuStyle's quiet latch, the reload is deferred, and
-		# MenuStyle's players are autoload-owned so the cue rings across the scene swap.
+		# half of that. An F9 with no file on disk is no longer a SILENT no-op: it carries no toast at all (the
+		# reload was supposed to be the feedback and there is no reload), so the denial is its only possible
+		# answer — otherwise the key reads as unbound. Safe to fire here: _close_open_modals' sweep already
+		# dropped MenuStyle's quiet latch, the reload is deferred, and MenuStyle's players are autoload-owned so
+		# the cue rings across the scene swap.
 		if GameState.quickload():
 			MenuStyle.play_commit()
+		else:
+			MenuStyle.play_denied()
 
 func _force_release_carried_prop() -> void:
 	if head != null and head.pickup_ray != null:
@@ -2455,7 +1892,7 @@ func stash_held_item() -> bool:
 	# Decide the rewield NOW and arm the fists suppression BEFORE the release below: force_release's synchronous
 	# holster restore fires holster_changed while the combat inventory still reads FISTS (the real weapon is only
 	# re-equipped at the end), and without _rewield_in_flight that refresh raises the bare fists over the
-	# weapon's re-draw (see _unarmed_hands_wanted). Mid-death stays unarmed — the equip is skipped there.
+	# weapon's re-draw (see FirstPersonBody._unarmed_hands_wanted). Mid-death stays unarmed — the equip is skipped there.
 	var rewield_now := rewield and item.is_weapon() and not _dying and not _dead
 	_rewield_in_flight = rewield_now
 	# Clear the reservation FIRST so the carry_changed(false) that force_release fires below is treated as our
@@ -2486,7 +1923,7 @@ func stash_held_item() -> bool:
 	if rewield_now:
 		inventory.equip_item(item)
 	# Suppression over: the equip request is out, and from here the backpack's equipped_item (set optimistically
-	# by equip_item, even when the swap QUEUES) keeps _unarmed_hands_wanted() false until the weapon is truly up.
+	# by equip_item, even when the swap QUEUES) keeps FirstPersonBody._unarmed_hands_wanted() false until the weapon is truly up.
 	_rewield_in_flight = false
 	return true
 
@@ -2862,7 +2299,12 @@ func _physics_process(delta: float) -> void:
 	# Swing the blob shadow onto the wall while climbing, back to the ground otherwise.
 	_update_wall_shadow(delta)
 	# ...and pitch the first-person legs onto the wall too, so they plant against it instead of dangling.
-	_update_fp_leg_wall_pose()
+	# HOST-called on purpose (the FirstPersonBody does not tick this itself): it must run AFTER
+	# _update_wall_shadow wrote _shadow_wall_blend this frame, and it must FREEZE with the death cinematic —
+	# die()'s set_physics_process(false) stops this beat with the rest of the step, where a component
+	# _physics_process would keep pitching the legs through the keel-over.
+	if fp_body != null:
+		fp_body.update_leg_wall_pose()
 
 	# Grapple yank — overrides the velocity we just built from input/gravity, before the move. The Grapple
 	# ability owns the hook; absent = no grapple at all.
@@ -2940,7 +2382,7 @@ func _update_stealth_hud(delta: float) -> void:
 	_hud.set_stealth_level(_stealth_hud_snap[&"level"], is_crouching())
 	_hud.set_detection_meter(_stealth_hud_snap[&"meter"], is_crouching())
 
-## Keep the permanent crosshair pinned to SCREEN CENTRE — a fixed reticle (Deus Ex). It deliberately does
+## Keep the crosshair pinned to SCREEN CENTRE — a fixed reticle (Deus Ex). It deliberately does
 ## NOT track the shot: the swaying LASER DOT (flash_light, aimed along get_aim_direction) is what shows where
 ## a shot will truly land — drifting wide on the move, settling back toward centre as you stand still. Re-set
 ## each frame so a viewport resize keeps it centred. No-op without a HUD.
@@ -3250,12 +2692,15 @@ func _death_wallet_loss() -> float:
 func _death_purse_anchor() -> Variant:
 	if not is_inside_tree() or get_parent() == null:
 		return null
-	# PHYSICS-FRAME GATE on the two ray probes. A hazard zone (hazard_zone.gd) and a bleed/poison tick
-	# (status_effect_manager.gd) both deal their damage from _process — IDLE time, where direct_space_state refuses
-	# queries and only pushes an error. Those are not edge cases: an ambient hazard passes a null attacker, so it is
-	# one of the commonest deaths that reaches this ground-spill branch at all. It costs us nothing to skip the
-	# probes there, because a hazard or a DoT kills you standing on the floor — the last-grounded rung below IS the
-	# spot you died. Shots, blasts, thrown props and the fall death all resolve in physics and still get the probes.
+	# PHYSICS-FRAME GATE on the two ray probes — caution, not a hard engine rule. A hazard zone (hazard_zone.gd)
+	# and a bleed/poison tick (status_effect_manager.gd) both deal their damage from _process — IDLE time — and an
+	# ambient hazard passes a null attacker, so those are among the commonest deaths reaching this ground-spill
+	# branch. Idle-frame space queries are not flat-out refused (the gun's hitscan fires from _process via
+	# MouseInput and demonstrably hits), but this project has also shipped an idle-frame probe that returned EMPTY
+	# with no error (the thrown-knife pin kill — fixed by probing at strike time), so a result here can't be
+	# trusted off-physics. Skipping the probes costs nothing: a hazard or a DoT kills you standing on the floor —
+	# the last-grounded rung below IS the spot you died. Shots, blasts, thrown props and the fall death all resolve
+	# in physics and still get the probes.
 	if Engine.is_in_physics_frame():
 		var space := get_world_3d().direct_space_state
 		var hit := space.intersect_ray(_drop_probe_ray(_drop_probe_origin(), DROP_PROBE_DEPTH))
@@ -3376,8 +2821,8 @@ func die() -> void:
 	if DialogueManager.is_engaged():
 		DialogueManager.abort()
 	# Slam any open modal shut so the cinematic plays clean and the respawn doesn't sit under stale UI
-	# (the non-pausing ones — options / inventory / loot — leave the world live, so dying with them open
-	# is perfectly reachable).
+	# (EVERY registered modal is real-time — dialogue owns the only tree-pause left — so the world keeps
+	# running under any of them and dying with one open is perfectly reachable, not a corner case).
 	_close_open_modals()
 	# Carry-teardown that PRESERVES a bag-pulled prop: a hotbar-held item is stashed back into the bag (folded into the
 	# death-milestone autosave) rather than dropped into the non-persisted world — see _release_or_stash_carried_prop.
@@ -3437,19 +2882,20 @@ func die() -> void:
 		mouse_input.set_process(false)
 		mouse_input.set_process_unhandled_input(false)
 	# Hide your own first-person BODY (legs + bare fists) and freeze the crouch driver for the death cinematic.
-	# The legs (body-awareness rig, _build_first_person_legs) would otherwise hang in view as the camera keels
+	# The legs (the FirstPersonBody's body-awareness rig) would otherwise hang in view as the camera keels
 	# over; and the Crouch node runs its OWN _physics_process, which the player's set_physics_process(false)
 	# above does NOT stop — so without this it keeps reading the Crouch action, letting a dead player still
-	# duck the camera/capsule. The FISTS need their own beat because _process is deliberately left RUNNING here
-	# (it drives the FP arm bob + torso, and the stow slide below needs the frame): _unarmed_hands_wanted()
-	# already answers false the instant `_dying` is up, but nothing RE-ASKS it — so without this refresh the
-	# raised guard stayed on screen breathing through the whole cinematic. The refresh drives the normal stow
-	# slide; a carry release earlier in die() has already hidden the same rig instantly, which settles the latch,
-	# so this is then a no-op. All three are restored by the in-place revive (_respawn_at_checkpoint); a full
-	# reload (RELOAD_* death modes) rebuilds a fresh Player instead.
-	if is_instance_valid(_fp_legs):
-		_fp_legs.visible = false
-	_refresh_unarmed_hands()
+	# duck the camera/capsule. The FISTS need their own beat because the COMPONENT's _process is deliberately
+	# left RUNNING here (set_physics_process(false) freezes only the PLAYER's physics step — a child's idle
+	# processing is untouched; it keeps driving the FP arm bob + torso, and the stow slide below needs the
+	# frame): _unarmed_hands_wanted() already answers false the instant `_dying` is up, but nothing RE-ASKS
+	# it — so without this refresh the raised guard stayed on screen breathing through the whole cinematic.
+	# The refresh drives the normal stow slide; a carry release earlier in die() has already hidden the same
+	# rig instantly, which settles the latch, so this is then a no-op. All three are restored by the in-place
+	# revive (_respawn_at_checkpoint); a full reload (RELOAD_* death modes) rebuilds a fresh Player instead.
+	if fp_body != null:
+		fp_body.set_legs_visible(false)
+		fp_body.refresh_unarmed_hands()
 	if crouch != null:
 		crouch.set_physics_process(false)
 	# Kill all residual motion so a death taken mid-launch (rocket-jump, explosion knock, melee-dash, ram)
@@ -3745,9 +3191,9 @@ func _respawn_at_checkpoint() -> void:
 	# _unarmed_hands_wanted() and raises the guard only when the fists really are what's drawn and unholstered
 	# (a revive holding a real weapon, or mid-carry, correctly leaves them down). The full-reload death modes
 	# rebuild a fresh Player, so this only matters on the in-place revive.
-	if is_instance_valid(_fp_legs):
-		_fp_legs.visible = true
-	_refresh_unarmed_hands()
+	if fp_body != null:
+		fp_body.set_legs_visible(true)
+		fp_body.refresh_unarmed_hands()
 	if crouch != null:
 		crouch.reset()                       # snap upright first: a crouched death froze crouch_t, so re-enabling alone would revive you shrunk/low
 		crouch.set_physics_process(true)

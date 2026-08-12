@@ -138,7 +138,7 @@ func _process(delta: float) -> void:
 ## eased out so a still player has a still camera. Horizontal bob runs at half the
 ## vertical rate (figure-8 feel). This is the CAMERA bob — the gun and the bare fists run their own
 ## separate, independently-integrated bobs (GunPose._process in scripts/effects/gun_pose.gd and
-## Player._update_fp_arm_bob), both of which advance on the RENDER delta because they run in _process.
+## FirstPersonBody._update_fp_arm_bob), both of which advance on the RENDER delta because they run in _process.
 ##
 ## TIMEBASE CONTRACT — bob() is called from _physics_process ONLY (player.gd's ground-movement arm and
 ## WallClimb.tick, which the same _physics_process drives), so every integrator in here MUST use the
