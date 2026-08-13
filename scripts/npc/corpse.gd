@@ -22,7 +22,7 @@ const WorldSaveId = preload("res://scripts/world/world_save_id.gd")
 ## hand-placed story bodies when you want the discovery state to survive node renames or layout edits.
 @export var save_id: StringName = &""
 
-## Once true, NPCs stop reacting to this body. Flipped by the FIRST NPC that notices it (NPC._discover_corpse),
+## Once true, NPCs stop reacting to this body. Flipped by the FIRST NPC that notices it (NpcDistraction.discover_corpse),
 ## so a single body draws ONE investigator rather than spooking every passer-by off the same spot. This one-shot
 ## marker is persisted by GameState so an already-investigated authored body does not re-spook after Continue.
 var discovered: bool = false

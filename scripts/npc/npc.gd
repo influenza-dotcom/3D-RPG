@@ -9,7 +9,16 @@
 class_name NPC
 extends Character
 
-##TODO -- THIS FILE IS TOO DAMN LONG. IT MUST BE REFACTORED INTO NODES AS COMPONENTS
+##TODO (extraction ledger) -- npc.gd is the HOST: the @export designer surface, the NpcData profile stamp, and
+## 1-line facades over code-built components (see scripts/npc/README.md for the full component <-> host contract).
+## Extracted so far: outline / audio cues / talk approach / companion follow / voice triggers + bark EMISSION
+## (NpcVoice.emit) / bark UI / targeting / locomotion (+ the Locomotor nav brain) / scavenge / combat dispatch /
+## mortality / senses / home leash / cripple callout / distraction+unaware reactions (NpcDistraction).
+## REMAINING ON THE ROOT BY CONTRACT (deliberate — do NOT re-extract): aim computation (_aim_point /
+## get_aim_origin / get_aim_direction — DEFER verdict, see ARCHITECTURE_REVIEW.md "NPC Gravity"), the charge-sting
+## scheduling (_on_locked_on / _on_aim / _last_aim_msec — bare-instance test-poked), the bark DATA + host-owned
+## latches + *_LINES consts (test anchors), and the _physics_process branch ORDER (the @risk lines above).
+## New behaviour goes on a component / Resource with a thin facade here — never a new branch on the root.
 
 ## Faction registry (preloaded, NOT class_name -> no test-suite global-class-cache dependency): resolves the
 ## faction_id dropdown to a Faction resource in _ready.
@@ -408,8 +417,9 @@ var _saw_combat: bool = false      # has been ALERTED since the last all-clear; 
 var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state) since the last all-clear; drives the give-up barks
 @warning_ignore("unused_private_class_variable")  # not used in npc.gd itself — the GOAP search action (goap_action_search.gd) reads/advances it off the host
 var _search_sweep_t: float = 0.0   ## the search head-sweep phase — accumulates; only its derivative matters
-var _was_distracted: bool = false  ## true while a NO-target NPC is investigating a noise/body (drives the give-up "lost interest" bark)
-var _distraction_scan_t: float = 0.0  ## throttles the noise/corpse group scans — shared by _react_unaware (no-target) AND _react_distraction (has-target while UNAWARE), both via _scan_distractions (GameSettings.npc_ai.distraction_scan_interval)
+var _was_distracted: bool = false  ## true while a NO-target NPC is investigating a noise/body (drives the give-up "lost interest" bark); written by NpcDistraction, cleared here (has-target branch + reset)
+## The noise/corpse scan throttle (_distraction_scan_t) moved to NpcDistraction (npc_distraction.gd) with the scan
+## bodies — component-owned, reset by its own reset_for_reuse in the pool cascade.
 var _fire_timer: float = 0.0       # shared attack wind-up timer: gun shots AND unarmed punches (see _shot_interval)
 @warning_ignore("unused_private_class_variable")  # host-owned; NpcCombat reads/writes host._charging (npc_combat.gd)
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
@@ -488,6 +498,12 @@ var _senses: NpcSenses         # no-target environmental SCAN primitives: loudes
 ## been off-screen for a while. Node-typed and built by SCRIPT PATH (never the bare class_name — see _build_components)
 ## so this @tool root doesn't name a newly-added class at parse time. Null off-tree / before _build_components.
 var _home_return: Node = null
+## The idle-brain distraction/UNAWARE reaction bodies (npc_distraction.gd): _react_unaware / _scan_distractions /
+## _react_distraction / _react_music moved onto this child (npc.gd keeps the 1-line facades at their original
+## _physics_process positions — the branch ORDER is the @risk contract). Node-typed and built by SCRIPT PATH (never
+## the bare class_name — see _build_components) so this @tool root doesn't name a newly-added class at parse time.
+## Null off-tree / before _build_components, so the facades no-op on a bare unit-test NPC.
+var _distraction: Node = null
 
 ## Editor-only: populate the faction_id dropdown from the factions on disk (resources/factions/*.tres) so a new
 ## faction .tres appears automatically -- no hand-maintained suggestion string. @tool makes the editor honor this;
@@ -929,11 +945,21 @@ func _build_components() -> void:
 	_mortality.host = self
 	add_child(_mortality)
 	# No-target environmental scans (loudest noise / nearest radio / visible corpse). Pure queries the stateful
-	# reactions (_react_unaware / _react_music) call via the _loudest_noise / _nearest_audible_radio /
+	# reaction bodies (on NpcDistraction, built next) call via the _loudest_noise / _nearest_audible_radio /
 	# _nearest_visible_corpse facades. Host-coupled internal helper (Node-typed).
 	_senses = NpcSenses.new()
 	_senses.host = self
 	add_child(_senses)
+	# The stateful no-target REACTIONS those scans feed (npc_distraction.gd): the _react_unaware / _react_music /
+	# _react_distraction / corpse-discovery bodies + their scan throttles moved onto this child; the cross-consumed
+	# state they write (_alerted_allies / _was_distracted / _scripted_investigating / _attending_radio /
+	# _desired_velocity) stays HOST-owned. Built by SCRIPT PATH — never a bare-type `.new()` — like CrippleCallout /
+	# NpcHomeReturn above: a bare-type ref to a not-yet-reimported class can fail this @tool root's parse in the
+	# live editor (new-classname cascade). No designer surface (all tuning lives on GameSettings.npc_ai + the host
+	# exports), so unlike the leash there is no configured dropped-in-scene variant to match first.
+	_distraction = load("res://scripts/npc/npc_distraction.gd").new()
+	_distraction.host = self
+	add_child(_distraction)
 	# The GOAP brain — drives every NPC's AI as the sole decision layer. Plain
 	# RefCounted, not a child Node. See _build_goap_actions/_goals for the library it plans over.
 	_executor = GoapExecutor.new()
@@ -1575,15 +1601,13 @@ func reset_for_reuse() -> void:
 	_charging = false
 	_warned = false
 	_shot_miss = false
-	# Aim-sting de-dup, music attend, and the scan throttles.
+	# Aim-sting de-dup + the music-attend head-look target (host-owned; the scan throttles + the once-per-attend
+	# music-comment latch moved to NpcDistraction and reset in the child cascade below).
 	_last_aim_msec = 0
 	_aim_sfx_delay = -1.0
 	_aim_targeting_player = false
 	_attending_radio = null
-	_music_commented_radio = null
-	_music_scan_t = 0.0
 	_search_sweep_t = 0.0
-	_distraction_scan_t = 0.0
 	_retarget_timer = 0.0
 	# Velocity intents + the stranded-nav diagnostic.
 	_desired_velocity = Vector3.ZERO
@@ -1645,6 +1669,8 @@ func reset_for_reuse() -> void:
 		_talk.reset_for_reuse()         # drop a leftover pre-talk walk-up
 	if _home_return != null:
 		_home_return.call(&"reset_for_reuse")  # clear the off-screen clock + any pending player-death return
+	if _distraction != null:
+		_distraction.call(&"reset_for_reuse")  # zero the noise/music scan throttles + drop the once-per-attend music-comment latch
 	# Re-scan for a target now, mirroring the _acquire_target() at the tail of _ready.
 	_acquire_target()
 
@@ -2017,16 +2043,16 @@ const PARDON_FLEEING_LINES: Array[String] = []
 ## audible_radius) turns to face it and comments ONCE on the song/playlist QUALITY (a deterministic MusicQuality
 ## score of the radio's text, bucketed into a tier). Routed through NpcVoice.music_comment, so each NPC self-filters
 ## (out-of-combat, has a Talkable) + shares the bark cooldown — but a hostile idle NPC is NO LONGER filtered out
-## (unlike react_remark). Ships ON (GameSettings.npc_ai.music_reactions). preload (not the bare class_name) so the
+## (unlike react_remark). Ships ON (GameSettings.npc_ai.music_reactions). The per-frame reaction BODY (scan / face /
+## one-shot comment) lives on NpcDistraction (npc_distraction.gd) behind the _react_music facade; react_music(tier)
+## below is the host seam it calls back into. preload (not the bare class_name) so the
 ## suite resolves it before the editor scans the new script.
 const MQ = preload("res://scripts/components/music_quality.gd")
 const MUSIC_AWFUL_LINES: Array[String] = []
 const MUSIC_MEH_LINES: Array[String] = []
 const MUSIC_GOOD_LINES: Array[String] = []
 const MUSIC_GREAT_LINES: Array[String] = []
-var _attending_radio: Node3D = null        ## the playing radio an idle NPC is enjoying (its head-look target); null = none
-var _music_commented_radio: Node3D = null  ## the radio we last commented on, so the bark fires once per attend
-var _music_scan_t: float = 0.0             ## throttle for the &"music" scan (paced like the distraction scan)
+var _attending_radio: Node3D = null        ## the playing radio an idle NPC is enjoying (its head-look target); null = none. HOST-owned (the head-look reads it as its lowest-priority target; reset here) — WRITTEN by NpcDistraction.react_music
 
 ## Resolve a bark pool: a profile's per-category override if it has any lines, else the built-in default.
 static func _bark_pool(fallback: Array[String], override: Array[String]) -> Array[String]:
@@ -2038,7 +2064,8 @@ static func _pick_bark(fallback: Array[String], override: Array[String]) -> Stri
 	return pool[randi() % pool.size()] if not pool.is_empty() else ""
 
 ## How long (ms) a bark's bubble stays on screen — its text-length-scaled hold beat plus the fade (matching
-## _popup_text's tween) — so _emit_bark can suppress a second bark until this one has cleared.
+## _popup_text's tween) — so the emitter (NpcVoice.emit, behind the _emit_bark facade) can suppress a second bark
+## until this one has cleared.
 func _bark_duration_ms(line: String) -> int:
 	# Match the ACTUAL bubble lifetime (NpcBarkUi.show_text's tween, which uses the instance's @exports) so the
 	# no-overlap gate lasts exactly as long as the bubble shows — a designer who tunes the hold on the _bark_ui child
@@ -2051,32 +2078,15 @@ func _bark_duration_ms(line: String) -> int:
 	var hold := maxf(hold_min, hold_base + float(line.length()) * hold_per)
 	return int((hold + fade) * 1000.0)
 
-## Emit a bark — float the bubble + (when near the player) speak it — after a tiny RANDOM reaction delay
-## so NPCs don't react instantly (reads more natural). The bubble is world-space (distance-limits itself);
-## the spoken line is gated on proximity to the player so a distant NPC's shout isn't synthesized inaudibly.
-## Bails if we die during the brief delay; suppressed while a prior bark OF OURS is still showing.
+## Emit a bark — the SINGLE bark emitter every path (combat, greet, witness, cripple, music, ...) routes through.
+## Facade onto NpcVoice.emit, which owns the awaited body (reaction delay -> bubble -> TTS); the no-overlap latch
+## it stamps (_bark_until_msec) and the duration math (_bark_duration_ms) stay HOST-owned. Deliberate ROUND-TRIP:
+## the NpcVoice triggers call back into THIS facade (host._emit_bark) rather than their own emit(), so stub hosts
+## that implement _emit_bark (test_bark_gates) count emissions and this stays the one seam. No-op off-tree (no
+## _voice until _build_components) — a bare NPC's bark request is dropped instead of crashing at get_tree().
 func _emit_bark(line: String, voice: VoiceData) -> void:
-	# Unauthored speech is SILENT: the *_LINES consts ship empty (bark text is authored content — fill a
-	# BarkSet .tres per archetype, or the consts), and _pick_bark returns "" from an empty pool. Skip here
-	# so no path shows an empty bubble or feeds empty text to TTS.
-	if line.is_empty():
-		return
-	# One bark at a time: while our previous bubble is still on screen, drop the new one rather than stacking
-	# two balloons / talking over ourselves. Gates EVERY bark path (combat, greet, witness, ...) since they all
-	# funnel through here. Set before the reaction delay so two requests in the same beat can't both pass.
-	var start := Time.get_ticks_msec()
-	if start < _bark_until_msec:
-		return
-	_bark_until_msec = start + _bark_duration_ms(line)
-	await get_tree().create_timer(randf_range(0.05, 0.08)).timeout
-	if _dead or hp <= 0.0 or not is_inside_tree():
-		return
-	_popup_text(line)
-	note_speaking(float(_bark_duration_ms(line)) / 1000.0)  # bob the head + flap the mouth for the bark's duration
-	var player := _real_player()
-	if player == null or global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
-		return
-	_speak_bark(line, voice)  # no shared throttle: different NPCs speak simultaneously (the Voice bus mixes them)
+	if _voice != null:
+		_voice.emit(line, voice)
 
 ## Detection bark — facade onto NpcVoice. No-op off-tree (no _voice until _build_components).
 func _try_detection_bark() -> void:
@@ -2248,14 +2258,6 @@ func _find_talkable() -> Talkable:
 func greet() -> void:
 	if _voice != null:
 		_voice.greet()
-
-## Speak a one-off bark via the in-game TTS (SpeechTts) — POSITIONAL, coming from this NPC and routed through
-## the Voice bus, in the Talkable's VoiceData voice when set. Interrupts any prior bark; a no-op while dead.
-## SpeechTts gates on Settings.tts_enabled and tracks the source so only OUR death cuts our shout.
-func _speak_bark(text: String, voice: VoiceData) -> void:
-	if _dead:
-		return  # dead enemies don't talk
-	SpeechTts.speak_bark(global_position, text, voice, self)
 
 ## Pulse the talking presentation — the head-bob + Tomodachi mouth-flap on this NPC's BodyModelSwap — for
 ## `seconds`, the length of the utterance. Called whenever the NPC speaks: a dialogue line (DialogueManager
@@ -2514,148 +2516,41 @@ func _settle_engagement_barks() -> void:
 	_was_aware = false
 	_alerted_allies = false  # GA-1: engagement over — re-arm the ally broadcast for the next one
 
-## No-enemy environmental SENSING (the stealth distraction + body-discovery feeler): with NO acquired target,
-## scan the &"noise" channel (if hearing_initiates) and bodies (if body_discovery) and, on a stimulus, point
-## Perception at it (-> INVESTIGATING) + age/expire the give-up clock. It NO LONGER walks: the GOAP executor's
-## Investigate action drives the move+search off the INVESTIGATING state this sets, so stealth investigation is a
-## planner decision. When NO sensing applies (both features off, or we're
-## dead / fleeing / a follower / have no Perception) it FORGETs any stale alert from a just-lost target, so the
-## no-target executor picks the Hold idle floor rather than a targetless combat action. In-tree (group scans +
-## LOS) -> playtest-verified; the pure gates (Corpse.noticeable, NoiseSource.audible) carry the unit tests.
+## No-enemy environmental SENSING (the stealth distraction + body-discovery feeler) — facade onto NpcDistraction
+## (npc_distraction.gd), which owns the stateful reaction body; the cross-consumed give-up/latch state it writes
+## (_alerted_allies / _was_distracted / _scripted_investigating) stays HOST-owned. MUST stay called BEFORE the
+## no-target _executor.tick (the executor reads the Perception state it sets/decays — the header @risk). No-op
+## off-tree (no _distraction until _build_components).
 func _react_unaware(delta: float) -> void:
-	_alerted_allies = false  # GA-1: no acquired target here -> any engagement is over, so re-arm the ally broadcast
-	var noise_on: bool = _noise_initiates_on() and _perception != null and _perception.hearing
-	var corpse_on: bool = _body_discovery_on() and _perception != null
-	if _perception == null or _dead or hp <= 0.0 or is_fleeing() or is_following() or (not noise_on and not corpse_on):
-		# No ambient sensing. A SCRIPTED investigate() (investigate()) winds down naturally over forget_time —
-		# sense() with no target only decays the clock while the executor walks/searches the spot. Any OTHER
-		# leftover (a stale ALERTED from a just-lost target) is a phantom: clear it instantly so the no-target
-		# executor selects the Hold idle floor, not a targetless combat action.
-		if _perception != null:
-			# Wind an alert DOWN naturally (ALERTED coasts the pursuit grace, then INVESTIGATING drains over forget_time)
-			# instead of HARD-forgetting it, for two cases: a scripted investigation, AND a FLEEING NPC. A fleer that
-			# hard-forgets the frame it loses its attacker (attacker out of sight_range, or simply behind the running NPC)
-			# drops to UNAWARE, which makes its Survive/Flee goal infeasible — so it stops dead and strolls calmly back
-			# past its would-be killer. Decaying keeps it scared while it runs, then calms over forget_time (raise the
-			# NPC's forget_time to make fear last longer). A non-fleeing, non-scripted leftover still hard-forgets below.
-			var decay_not_forget := (_scripted_investigating and _perception.state == Perception.State.INVESTIGATING) \
-					or (is_fleeing() and _perception.state != Perception.State.UNAWARE)
-			if decay_not_forget:
-				_perception.is_hostile = false
-				_perception.sense(delta)
-				if _perception.state != Perception.State.INVESTIGATING:
-					_scripted_investigating = false
-			else:
-				_scripted_investigating = false
-				_perception.forget()
-		return
-	# Age the give-up clock EVERY frame: sense() with no target reports nothing from either sense, so it only
-	# winds an in-progress investigation down toward UNAWARE (a brand-new or refreshed one stays put below); it
-	# also decays a stale alert from a just-lost target the same way (so it can't linger as a phantom combat state).
-	_perception.is_hostile = false
-	_perception.sense(delta)
-	# (Re)point the investigation at the strongest LIVE stimulus (throttled scan). Shared with the has-target
-	# branch via _react_distraction so a decoy/body registers while a hostile holds the player as a proximity
-	# target but hasn't actually noticed them (UNAWARE) — see _scan_distractions / _react_distraction (P0-4).
-	_scan_distractions(delta, noise_on, corpse_on)
-	# Investigating now -> the executor's GoapActionSearch walks + searches off last_known_position (same
-	# move it always did); we only keep the give-up bookkeeping so we mutter "must've been nothing" on expiry.
-	if _perception.state == Perception.State.INVESTIGATING:
-		_was_distracted = true
-		_try_search_bark()  # mutter "where are you?" while hunting (the bark cooldown paces it)
-	elif _was_distracted:
-		_was_distracted = false
-		_try_lost_interest_bark()  # the investigation just expired with nothing found
+	if _distraction != null:
+		_distraction.call(&"react_unaware", delta)
 
-## The throttled &"noise"/body-discovery scan: (re)point Perception at the strongest LIVE stimulus. Noise first (an
-## ongoing sound outranks a static body); a heard source re-points each scan it persists (investigate_point refreshes
-## the clock) so we track a moving decoy. Shared by _react_unaware (no-target) and _react_distraction (has-target,
-## UNAWARE) so a thrown decoy / hidden body registers in BOTH branches. Assumes _perception != null (both callers gate).
+## The throttled &"noise"/body-discovery scan — facade onto NpcDistraction, kept so the seam stays greppable +
+## off-tree-callable (the component's own bodies call scan_distractions directly). Shared by _react_unaware
+## (no-target) AND _react_distraction (has-target while UNAWARE) so a decoy/body registers in BOTH branches (P0-4).
 func _scan_distractions(delta: float, noise_on: bool, corpse_on: bool) -> void:
-	_distraction_scan_t -= delta
-	if _distraction_scan_t <= 0.0:
-		_distraction_scan_t = GameSettings.npc_ai.distraction_scan_interval
-		if noise_on:
-			var src := _loudest_noise()
-			if src != null:
-				# alerting "!" — the player wants to see the lure land; seed the search ring from how LOUD it was
-				# (a crash searches a wider area than a faint step), scaled by SearchSettings.noise_radius_scale.
-				_perception.investigate_point(src.global_position, true, src.radius * GameSettings.search.noise_radius_scale)
-		# Corpse discovery is PERSISTED (_discover_corpse -> GameState.mark_corpse_discovered) — so gate it on a
-		# GENUINELY idle NPC (UNAWARE), not merely "not INVESTIGATING": a stale DETECTING/ALERTED beat from a
-		# just-lost target must NOT permanently mark a body discovered with zero real investigation. sense() (called
-		# by both callers this frame) decays that stale state toward UNAWARE, so discovery is DEFERRED (not lost)
-		# until the NPC truly stands down. Noise (above) also outranks a body: if it set INVESTIGATING this scan,
-		# state != UNAWARE, so the body waits for the noise to wind down. (C7)
-		if _perception.state == Perception.State.UNAWARE and corpse_on:
-			var corpse := _nearest_visible_corpse()
-			if corpse != null:
-				_discover_corpse(corpse)
+	if _distraction != null:
+		_distraction.call(&"scan_distractions", delta, noise_on, corpse_on)
 
-## Distraction sensing for the HAS-target branch. _acquire_target locks the nearest foe by pure PROXIMITY (no
-## LOS/perception gate — NpcTargeting), so a hostile holds the player as _target the instant they enter sight_range
-## even while perception-UNAWARE. Without this, thrown decoys and hidden bodies did NOTHING exactly when the player
-## was in range (P0-4). Mirrors _react_music: self-gates on state == UNAWARE, so a decoy only distracts a not-yet-
-## noticing guard (escalating it to INVESTIGATING peels it toward the lure via GoapActionSearch); a foe it's already
-## detecting/alerted-on always wins. sense() already ran this frame (has-target branch) — do NOT call it again here.
+## Distraction sensing for the HAS-target branch — facade onto NpcDistraction, which self-gates on
+## Perception.State.UNAWARE there (like _react_music): a hostile holds the player as a PROXIMITY target before
+## noticing them, so decoys/bodies must register in this branch too (P0-4). No-op off-tree (the bare-NPC
+## unit-test call no-ops at the null guard).
 func _react_distraction(delta: float) -> void:
-	if _perception == null or _dead or hp <= 0.0 or is_fleeing() or is_following():
-		return
-	if _perception.state != Perception.State.UNAWARE:
-		return
-	var noise_on: bool = _noise_initiates_on() and _perception.hearing
-	var corpse_on: bool = _body_discovery_on()
-	if noise_on or corpse_on:
-		_scan_distractions(delta, noise_on, corpse_on)
+	if _distraction != null:
+		_distraction.call(&"react_distraction", delta)
 
 ## The loudest &"noise" source reaching us — facade onto NpcSenses (npc_senses.gd). Null off-tree (no _senses).
 func _loudest_noise() -> NoiseSource:
 	return _senses.loudest_noise() if _senses != null else null
 
-## Passive MUSIC reaction: a calm, idle NPC — friendly OR hostile — that can HEAR a playing radio TURNS TO FACE it
-## (a visible "look at the radio" beat) and comments ONCE on the song/playlist quality. Ships ON
-## (GameSettings.npc_ai.music_reactions). Called from BOTH the no-target idle path AND the has-target branch (a
-## hostile NPC locks the player as a proximity target the moment it's in sight_range, so gating on "no target" would
-## hide the reaction the instant the player walked up); it self-gates on _perception.state == UNAWARE, so it only
-## reacts while genuinely not-yet-noticing, and a foe or noise it's chasing always wins (it never abandons its post
-## to walk over — the turn is a stationary body yaw, no locomotion). The radio SCAN is throttled like the distraction
-## scan, but the FACE runs EVERY frame off the cached _attending_radio (the head-look's lowest-priority target) so
-## the turn eases smoothly; it yields to an active schedule/patrol route (a guard mid-patrol keeps walking,
-## head-tracking only). The bark self-throttles. In-tree only.
+## Passive MUSIC reaction (face + one-shot comment on a nearby playing radio) — facade onto NpcDistraction, which
+## owns the scan / face / comment body; _attending_radio (the head-look's lowest-priority target) stays HOST-owned
+## and is written through us. Called from BOTH physics branches AFTER the executor (the face overrides the idle
+## facing); the body self-gates on _perception.state == UNAWARE. No-op off-tree.
 func _react_music(delta: float) -> void:
-	if not GameSettings.npc_ai.music_reactions or _dead or hp <= 0.0 or is_following():
-		_attending_radio = null
-		return
-	# Only a relaxed NPC enjoys music -- detecting / investigating / alerted all outrank it.
-	if _perception != null and _perception.state != Perception.State.UNAWARE:
-		_attending_radio = null
-		return
-	# (Re)scan for the nearest audible radio on the distraction-scan throttle; the FACE below + the one-shot comment
-	# run off the cached _attending_radio, so a between-scan frame keeps facing (NO early-return before the turn).
-	_music_scan_t -= delta
-	if _music_scan_t <= 0.0:
-		_music_scan_t = GameSettings.npc_ai.distraction_scan_interval
-		var radio := _nearest_audible_radio()
-		_attending_radio = radio
-		if radio == null:
-			_music_commented_radio = null  # out of range / switched off -> a fresh comment when we next attend one
-		elif radio != _music_commented_radio:
-			_music_commented_radio = radio
-			react_music(MQ.tier(str(radio.call(&"quality_text")),
-				GameSettings.npc_ai.music_tier_meh, GameSettings.npc_ai.music_tier_good, GameSettings.npc_ai.music_tier_great))
-	# Turn the BODY to face the radio we're enjoying and hold still to listen — the visible "look at the radio" the
-	# head-look (cone-clamped, so a radio BEHIND us never gets tracked) can't deliver on its own. Runs AFTER the idle
-	# executor (so it overrides the wander/post facing) but YIELDS to a directed schedule/patrol route, so attending a
-	# radio never freezes a guard mid-patrol. Gated by music_turn_body so a designer can keep the reaction head-only.
-	# INTENDED SIDE EFFECT (design-signed-off): Perception inherits the body transform, so its view cone is the body's
-	# forward. A HOSTILE posted sentry that turns to face the radio therefore also swings its DETECTION cone off its
-	# authored watch spot — a deliberate "distracted by music" stealth opening the player can create by switching on a
-	# radio behind a guard. This is NOT a player-awareness telegraph (the turn keys on _attending_radio, a radio, never
-	# on _target / the player). The only opt-outs are global: music_turn_body off (all reactions head-only) or
-	# music_reactions off (no reactions at all).
-	if GameSettings.npc_ai.music_turn_body and is_instance_valid(_attending_radio) and not _on_directed_route():
-		_desired_velocity = Vector3.ZERO  # stop roaming — stand and enjoy the song
-		_face_point(_attending_radio.global_position, delta)
+	if _distraction != null:
+		_distraction.call(&"react_music", delta)
 
 ## The nearest PLAYING radio audible to us — facade onto NpcSenses. Null off-tree (no _senses).
 func _nearest_audible_radio() -> Node3D:
@@ -2664,19 +2559,6 @@ func _nearest_audible_radio() -> Node3D:
 ## Nearest fresh, undiscovered body this NPC can SEE — facade onto NpcSenses. Null off-tree (no _senses).
 func _nearest_visible_corpse() -> Corpse:
 	return _senses.nearest_visible_corpse() if _senses != null else null
-
-## React to discovering a body: CLAIM it (so the neighbourhood doesn't pile onto one corpse), CALL OUT
-## ("Hey — a body!"), and INVESTIGATE the spot QUIETLY. Reached from the no-target distraction pass
-## (_react_unaware). The bark fires FIRST and the investigate is non-alerting (investigate_point's
-## `alerting=false`), so a corpse never mislabels as an enemy "!" sighting and the combat "Enemy spotted!"
-## detection bark can't win the bark cooldown and swallow the body line.
-func _discover_corpse(c: Corpse) -> void:
-	c.discovered = true
-	GameState.mark_corpse_discovered(c.save_key())
-	_try_check_body_bark()
-	# quiet (NOT a fire-ready ALERTED); a body carries no radius of its own, so seed the search from how far the
-	# NPC can see (the range it spotted the body at), scaled by SearchSettings.corpse_radius_frac.
-	_perception.investigate_point(c.global_position, false, _perception.sight_range * GameSettings.search.corpse_radius_frac)
 
 ## Alerted (combatant only) ARMED body — thin facade onto NpcCombat (H2). The GOAP FireArmed action calls this on the
 ## host; the whole pursue/aim/telegraph/reload/charge/fire/dodge cluster lives in npc_combat.gd. No-op off-tree /

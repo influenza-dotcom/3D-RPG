@@ -342,8 +342,8 @@ and instead OVERRIDES `_fade_out_for_despawn`, because `GeometryInstance3D.trans
 children and its visual is a mounted subtree. Pinned by `tests/test_gore_gib_prefab.gd`.
 
 **New drop-in components go here.** Internal helpers composed in code with `.new()` under the
-Player/NPC (HurtFeedback, NpcVoice, AimSway, PassiveItemBuffs, …) are NOT editor-attached and stay with their owning
-subsystem — this folder is only for things a designer drags onto a node.
+Player/NPC (HurtFeedback, NpcVoice, NpcDistraction, AimSway, PassiveItemBuffs, …) are NOT editor-attached and stay
+with their owning subsystem — this folder is only for things a designer drags onto a node.
 
 > The drop-in component family was moved here from `scripts/world/` + `scripts/combat/`. Because some
 > scenes referenced these scripts **by path** (e.g. `merchant.tscn`, `container.tscn` had no UID

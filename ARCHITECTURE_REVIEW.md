@@ -19,13 +19,15 @@ GOAP, bark UI, audio cues, scavenge helpers), but new NPC behaviour should avoid
 adding more branches to the root script. Prefer a Resource, component, or helper
 with a narrow facade back into `NPC`.
 
-Aim computation is the remaining section with a clear noun and contract
-(`_aim_point` / `get_aim_origin` / `get_aim_direction` still live on the root).
-Melee strike handling and the combat firing dispatch already moved out into
-`NpcCombat`; stuck steering and the give-up machine moved to `Locomotor`
-(`scripts/components/locomotor.gd`, Phase B); damage visuals moved to
-`NpcOutline` (`scripts/npc/npc_outline.gd`) — `npc.gd` keeps only thin
-forwarding facades for those.
+Aim computation (`_aim_point` / `get_aim_origin` / `get_aim_direction`) stays on
+the root **by contract** (the DEFER verdict of the 2026-08 extraction review),
+not as debt — do not re-flag it. Melee strike handling and the combat firing
+dispatch already moved out into `NpcCombat`; stuck steering and the give-up
+machine moved to `Locomotor` (`scripts/components/locomotor.gd`, Phase B);
+damage visuals moved to `NpcOutline` (`scripts/npc/npc_outline.gd`); bark
+EMISSION moved into `NpcVoice.emit`, and the unaware/distraction reaction bodies
+onto `NpcDistraction` (`scripts/npc/npc_distraction.gd`) — `npc.gd` keeps only
+thin forwarding facades for all of those.
 
 ### Test Noise
 
@@ -111,6 +113,49 @@ because each one established an idiom the next extraction should copy.
   inside the arms build), so `first_person_arms = false` still holsters + locks
   the gun mid-carry — the intent the relay's comment always documented; shipped
   Player.tscn has arms ON, so shipped behavior is identical.
+- **NpcVoice bark EMISSION (`emit`).** DONE — the awaited `_emit_bark` body
+  (empty-line skip → no-overlap latch stamp → reaction-delay await → dead/hp/
+  in-tree bail → bubble → earshot-gated TTS) moved onto
+  `scripts/npc/npc_voice.gd` as `emit()`, with `_speak()` private beside it
+  (the old `NPC._speak_bark`, which had no other consumer); `NPC._emit_bark` is
+  now the null-guarded 1-line facade.
+  - ⭐ The NpcVoice triggers must KEEP routing `host._emit_bark(...)` — never
+    `self.emit()`. `tests/test_bark_gates.gd`'s stub hosts implement
+    `_emit_bark` to count emissions and `tests/test_npc.gd` pins `_emit_bark`
+    as the single bark emitter — a future "simplification" of the round-trip
+    breaks ~6 stub tests and the seam.
+  - ⭐ `_speak` passes the HOST as the SpeechTts source. `NPC._on_died` stops
+    our bark via `SpeechTts.stop_bark_from(self)` keyed on the NPC node — pass
+    the child instead and the stop silently never matches (dead NPCs keep
+    talking).
+  - ⭐ The latch (`host._bark_until_msec` — still host-owned and bare-NPC
+    test-poked) is stamped BEFORE the reaction-delay await, so two same-beat
+    bark requests can't both pass (stacked bubbles). The post-await
+    dead/hp/in-tree guard order covers the POOLED host (reused in place); a
+    non-pooled host frees the child (and the coroutine) with itself.
+    `tests/test_npc_facade_contract.gd` pins the facade + the source identity
+    by source-grep.
+- **`NpcDistraction` (unaware/distraction reactions).** DONE —
+  `scripts/npc/npc_distraction.gd` owns the `_react_unaware` /
+  `_scan_distractions` / `_react_distraction` / `_react_music` bodies plus
+  corpse discovery, with the scan throttles and the once-per-attend
+  music-comment latch as component state (its own `reset_for_reuse` joins the
+  pool cascade). Built BY SCRIPT PATH into a Node-typed `_distraction`
+  (the CrippleCallout / NpcHomeReturn @tool-parse idiom).
+  - ⭐ The `_physics_process` call sites stayed put in byte order:
+    `_react_unaware` BEFORE the no-target `_executor.tick` (the executor reads
+    the Perception state it sets/decays), `_react_distraction` / `_react_music`
+    AFTER the tick (the face overrides the idle facing) — the facades must not
+    shift position, and `_react_unaware`'s first line
+    (`host._alerted_allies = false`, the GA-1 re-arm) travels with the body.
+  - ⭐ Host-owned vs component-owned state split: `_alerted_allies` /
+    `_was_distracted` / `_scripted_investigating` / `_attending_radio` /
+    `_desired_velocity` stay on the host (cross-consumed by the settle-barks
+    helper, the has-target branch, `investigate()`, the head-look, and bare-NPC
+    test pokes); only `_distraction_scan_t` / `_music_scan_t` /
+    `_music_commented_radio` moved. `tests/test_npc_pool.gd` pins the component
+    reset; `tests/test_npc_facade_contract.gd` pins the path build and the
+    facade surface.
 
 ### Payment Rails
 

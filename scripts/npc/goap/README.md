@@ -14,8 +14,9 @@ engagement, and fleeing.
 The per-frame `NPC._physics_process` flow is:
 
 1. Acquire or retarget, then poll outline state.
-2. Sense the environment. With no valid target, `_react_unaware` records
-   stealth/body stimuli or clears invalid alerts before planning.
+2. Sense the environment. With no valid target, `_react_unaware` (its body now
+   on `NpcDistraction`, behind the npc.gd facade) records stealth/body stimuli
+   or clears invalid alerts before planning.
 3. Tick `_executor.tick(self, delta)` when the executor exists.
 4. The selected action delegates to the relevant NPC method.
 

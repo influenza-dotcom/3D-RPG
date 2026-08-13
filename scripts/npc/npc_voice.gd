@@ -6,10 +6,14 @@ extends Node
 ## reload / combat-over / lost-interest shouts, the FNV hover greeting, and the death-witness social
 ## ("Murderer!" / "Good riddance.").
 ##
-## The bark DATA + EMISSION stay on the NPC — the line constants, _pick_bark / _bark_pool, _bark_duration_ms,
-## _emit_bark / _speak_bark, and the speech-bubble visuals — because they're pure / presentation and pinned by
-## the test suite; this component reaches back into `host` for them. NPC keeps a 1-line facade per public
-## trigger (greet / react_remark / thank_for_assist / _cry_wounded / _try_*_bark / _witness_death /
+## The bark DATA stays on the NPC — the *_LINES consts, _pick_bark / _bark_pool, _bark_duration_ms, the host-owned
+## _bark_until_msec no-overlap latch, the _music_lines / _pardon_lines pool resolution, and the speech-bubble
+## visuals (NpcBarkUi) — because it's pure / bare-instance test-pinned on the root; this component reaches back
+## into `host` for it. The EMISSION channel lives HERE: emit() — the awaited body behind the NPC._emit_bark
+## facade — and its private _speak(). DELIBERATE ROUND-TRIP: every trigger below still calls host._emit_bark(...),
+## NEVER self.emit() — test_bark_gates' stub hosts implement _emit_bark to count emissions, and test_npc pins
+## _emit_bark as the single bark emitter, so "simplifying" the hop away breaks both. NPC keeps a 1-line facade per
+## public trigger (greet / react_remark / thank_for_assist / _cry_wounded / _try_*_bark / _witness_death /
 ## _announce_death_to_witnesses) so its call-sites + the has_method tests are unchanged.
 ##
 ## `host` is typed Node (not NPC) to break the NpcVoice <-> NPC class-reference cycle (NPC creates this), so
@@ -58,6 +62,53 @@ func _combat_voice() -> VoiceData:
 		return null
 	var talkable = host._find_talkable()
 	return talkable.voice if talkable != null else null
+
+
+## Emit a bark — float the bubble + (when near the player) speak it — after a tiny RANDOM reaction delay
+## so NPCs don't react instantly (reads more natural). The bubble is world-space (distance-limits itself);
+## the spoken line is gated on proximity to the player so a distant NPC's shout isn't synthesized inaudibly.
+## Bails if the host dies during the brief delay; suppressed while a prior bark of the host's is still showing.
+## This is the awaited BODY of NPC._emit_bark (the 1-line facade every trigger round-trips through — header
+## above); the no-overlap latch (host._bark_until_msec) and the duration math (host._bark_duration_ms) stay
+## HOST-owned — a bare NPC is poked there by tests, and _clear_bark_bubble zeroes the latch host-side.
+func emit(line: String, voice: VoiceData) -> void:
+	# Unauthored speech is SILENT: the *_LINES consts ship empty (bark text is authored content — fill a
+	# BarkSet .tres per archetype, or the consts), and _pick_bark returns "" from an empty pool. Skip here
+	# so no path shows an empty bubble or feeds empty text to TTS.
+	if line.is_empty():
+		return
+	# One bark at a time: while the host's previous bubble is still on screen, drop the new one rather than
+	# stacking two balloons / talking over ourselves. Gates EVERY bark path (combat, greet, witness, ...) since
+	# they all funnel through here. Set before the reaction delay so two requests in the same beat can't both pass.
+	var start := Time.get_ticks_msec()
+	if start < host._bark_until_msec:
+		return
+	host._bark_until_msec = start + host._bark_duration_ms(line)
+	await get_tree().create_timer(randf_range(0.05, 0.08)).timeout
+	# Post-await lifecycle guard, in this order: a POOLED host survives its death in-tree (the body is reused), so
+	# dead/hp must be checked, and a de-spawned one has left the tree. A non-pooled host frees this child WITH
+	# itself, which simply kills the coroutine here.
+	if host._dead or host.hp <= 0.0 or not host.is_inside_tree():
+		return
+	host._popup_text(line)
+	host.note_speaking(float(host._bark_duration_ms(line)) / 1000.0)  # bob the head + flap the mouth for the bark's duration
+	var player = host._real_player()  # plain = : dynamic host call returns Variant (no := inference off a Node-typed host)
+	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
+		return
+	_speak(line, voice)  # no shared throttle: different NPCs speak simultaneously (the Voice bus mixes them)
+
+
+## Speak a one-off bark via the in-game TTS (SpeechTts) — POSITIONAL, coming from the HOST NPC and routed through
+## the Voice bus, in the Talkable's VoiceData voice when set. Interrupts any prior bark; a no-op while dead.
+## SpeechTts gates on Settings.tts_enabled and tracks the source so only OUR death cuts our shout.
+## ⭐ The source arg MUST stay the HOST (the NPC node), never `self`: NPC._on_died stops our shout via
+## SpeechTts.stop_bark_from(self) keyed on the NPC — pass this child instead and the stop never matches, so dead
+## NPCs keep talking. Sole caller is emit() above (the old NPC._speak_bark had no other consumer, so it moved
+## here PRIVATE, with no host facade).
+func _speak(text: String, voice: VoiceData) -> void:
+	if host._dead:
+		return  # dead enemies don't talk
+	SpeechTts.speak_bark(host.global_position, text, voice, host)
 
 
 ## Detection bark: when this NPC spots a HOSTILE (player or enemy NPC) and is a speaking character, it calls

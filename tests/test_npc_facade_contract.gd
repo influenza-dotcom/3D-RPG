@@ -23,6 +23,7 @@ const COMPONENTS := [
 	"res://scripts/npc/npc_mortality.gd",
 	"res://scripts/npc/npc_senses.gd",
 	"res://scripts/npc/npc_home_return.gd",
+	"res://scripts/npc/npc_distraction.gd",
 ]
 
 
@@ -69,6 +70,35 @@ func test_react_distraction_is_null_safe_off_tree() -> void:
 	assert_true(npc.has_method("_scan_distractions"), "NPC exposes _scan_distractions")
 	npc._react_distraction(0.1)  # must not error with _perception null (short-circuit guard)
 	npc.free()
+
+
+func test_bark_emission_facade_round_trips_through_npc_voice() -> void:
+	# The bark EMISSION body moved onto NpcVoice.emit; NPC._emit_bark is now the 1-line facade forwarding into it.
+	# Pin BOTH sides by source (the emit body awaits a tree timer -> in-tree only, so it can't be driven here):
+	# the facade must forward (npc.gd), and NpcVoice._speak must keep the HOST as the SpeechTts source identity —
+	# NPC._on_died stops OUR bark via SpeechTts.stop_bark_from(self) keyed on the NPC node; passing the child there
+	# would never match and dead NPCs would keep talking. Mirrors the contains("host.set_last_attacker(") idiom above.
+	var npc_src := FileAccess.get_file_as_string("res://scripts/npc/npc.gd")
+	assert_true(npc_src.contains("_voice.emit("), "NPC._emit_bark forwards into NpcVoice.emit (the facade round-trip seam)")
+	var voice_src := FileAccess.get_file_as_string("res://scripts/npc/npc_voice.gd")
+	assert_true(voice_src.contains("func emit("), "NpcVoice owns the bark emission body (emit)")
+	assert_true(voice_src.contains("SpeechTts.speak_bark(host.global_position"), "the TTS speaks from the HOST's position")
+	assert_true(voice_src.contains(", host)"), "the TTS source identity is the HOST NPC (stop_bark_from(self) in _on_died must keep matching)")
+
+
+func test_npc_builds_distraction_by_script_path_not_by_bare_type() -> void:
+	# npc.gd is a @tool root: naming a newly-added class_name at parse time can fail its parse in the live editor
+	# (the new-classname reimport cascade) — the same reason CrippleCallout / NpcHomeReturn are built by path
+	# (mirrors tests/test_npc_home_return.gd's leash pin).
+	var src := FileAccess.get_file_as_string("res://scripts/npc/npc.gd")
+	assert_true(src.contains("res://scripts/npc/npc_distraction.gd"),
+		"NPC builds the distraction brain by script path")
+	assert_false(src.contains("NpcDistraction.new()"),
+		"NPC must NOT name the class at parse time — build it via load(path).new()")
+	assert_true(src.contains("_distraction.host = self"),
+		"the host is bound on the code-built instance")
+	assert_true(src.contains("_distraction.call(&\"reset_for_reuse\")"),
+		"pool reuse resets the distraction scan state with the other stateful children")
 
 
 func test_weapon_stance_gates_out_of_combat_reload_on_supply() -> void:

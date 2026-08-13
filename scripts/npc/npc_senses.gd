@@ -3,9 +3,10 @@ extends Node
 
 ## The environmental SCAN primitives an unaware NPC runs each idle frame, split off npc.gd: find the loudest audible
 ## &"noise" source, the nearest playing radio, and the nearest fresh body it can SEE. These are pure QUERIES (group
-## scans + a line-of-sight ray) with NO host-state mutation — the stateful REACTIONS that consume them
-## (NPC._react_unaware / _react_music / _discover_corpse and all their bookkeeping: _attending_radio,
-## _scripted_investigating, the give-up clocks, the GA-1 alert latch) stay on the root, calling these via the
+## scans + a line-of-sight ray) with NO host-state mutation — the stateful REACTIONS that consume them now live on
+## NpcDistraction (npc_distraction.gd: react_unaware / react_music / discover_corpse; npc.gd keeps the 1-line
+## facades), while their cross-consumed bookkeeping (_attending_radio, _scripted_investigating, the give-up clocks,
+## the GA-1 alert latch) stays HOST-owned. Both reach these scans through NPC's
 ## _loudest_noise / _nearest_audible_radio / _nearest_visible_corpse facades.
 ##
 ## host is Node-typed to break the NpcSenses <-> NPC class cycle, so every host member is read DYNAMICALLY (a rename
@@ -61,7 +62,7 @@ func nearest_audible_radio() -> Node3D:
 	return best
 
 ## Nearest fresh, undiscovered body this NPC can SEE (range gate + a line-of-sight ray), or null. The SCAN half of
-## stealth body-discovery; the caller (NPC._discover_corpse) decides the reaction. Null when the feature is off
+## stealth body-discovery; the caller (NpcDistraction.discover_corpse, via NPC's facades) decides the reaction. Null when the feature is off
 ## (host._body_discovery_on()) or we can't sense (dead / fleeing / no Perception).
 func nearest_visible_corpse() -> Corpse:
 	if not host._body_discovery_on():

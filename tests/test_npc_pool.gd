@@ -171,6 +171,22 @@ func test_voice_reset_rewinds_bark_cooldowns() -> void:
 	assert_eq(v._last_search_msec, -100000, "search-mutter cooldown rewound")
 	v.free()
 
+func test_distraction_reset_clears_scan_state() -> void:
+	# NpcDistraction owns the noise/music scan throttles + the once-per-attend music-comment latch; a reused body
+	# must not inherit them (a stale _music_commented_radio would silently swallow the same-radio music comment for
+	# the whole next life). Path-loaded, not the bare class_name — mirroring how npc.gd builds it (@tool parse /
+	# new-classname cascade), same as the home-return leash.
+	var d = load("res://scripts/npc/npc_distraction.gd").new()
+	var radio := Node3D.new()
+	d._distraction_scan_t = 1.2
+	d._music_scan_t = 0.7
+	d._music_commented_radio = radio
+	d.reset_for_reuse()
+	assert_almost_eq(d._distraction_scan_t, 0.0, 0.0001, "the noise/corpse scan throttle is reset")
+	assert_almost_eq(d._music_scan_t, 0.0, 0.0001, "the music scan throttle is reset")
+	assert_null(d._music_commented_radio, "the once-per-attend comment latch is dropped (a reused body comments again)")
+	d.free(); radio.free()
+
 func test_self_healer_reset_rewinds_heal_cooldown() -> void:
 	var h := SelfHealer.new()
 	h._last_heal_msec = 999999
