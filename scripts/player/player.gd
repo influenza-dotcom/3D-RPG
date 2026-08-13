@@ -31,11 +31,24 @@ var _wall_climb: WallClimb = null    ## hot-path refs resolved in _register_abil
 var _slide: Slide = null
 var _grapple_ability: Grapple = null  ## owns the GrappleHook; pull forwarded at the physics beat
 
+## The STAMINA / SPRINT subsystem: the pool, spend/drain, the regen curve + post-spend delay, and the sprint
+## lockout live in StaminaManager (scripts/player/stamina_manager.gd) on the AbilityManager idiom — RefCounted,
+## built at var-init, wired in _init — so the bare-Player unit tests (no _ready) can drive it. The Player keeps
+## THIS signal (the public seam — the manager's own stamina_changed is relayed out via _on_stamina_changed), the
+## raw `stamina` property alias below, is_sprinting()'s one-line body, and 1-line forwarders for the whole old
+## surface; the physics-step drive beats stay in _physics_process at their exact positions.
 signal stamina_changed(current: float, maximum: float)
-var stamina: float = GameSettings.player_movement.max_stamina
-var _stamina_regen_delay_left: float = 0.0
-var _sprint_lockout_left: float = 0.0
-const STAMINA_EPS := 0.001
+## Preloaded BY PATH (the manager has no class_name — the StatBudgetRef idiom below).
+const StaminaManagerRef := preload("res://scripts/player/stamina_manager.gd")
+var _stamina_mgr := StaminaManagerRef.new()
+## RAW alias into the manager's pool — a bare read/write exactly like the old `var stamina` (no clamp, no emit):
+## ui.gd's per-frame player.get(&"stamina") poll hits this getter (Object.get() invokes property getters), and
+## the white-box tests write it raw (overdraw below zero included). Never route this through _set_stamina.
+var stamina: float:
+	get:
+		return _stamina_mgr.stamina
+	set(value):
+		_stamina_mgr.stamina = value
 
 ## The zero-sum allocator, for its STAT_MIN/STAT_MAX pair ONLY — the bounds the Ledger's credit rating
 ## normalizes against, so the live re-rating can never drift from the builder that produced the sheet.
@@ -307,7 +320,9 @@ var is_indoors: bool = false
 var target_speed: float = GameSettings.player_movement.max_speed
 
 # Host-owned ADS flag: ScopeCoordinator WRITES host._is_scoped; GroundMovement reads it off the host for the
-# scope slow, and sprint_blocked_by_scope() reads it here for the run lockout.
+# scope slow, and the StaminaManager reads it (host.get, behind the sprint_blocked_by_scope forwarder) for the
+# run lockout. It stays HERE — not on the manager — because those writers/readers (and the scope tests) all
+# address it on the Player.
 var _is_scoped: bool = false
 # Stealth HUD throttle: the full nearby-NPC awareness scan is heavy, so run it ~10x/sec and reuse the last
 # snapshot on the in-between frames (the HUD readout doesn't need per-frame precision). Behaviour-preserving —
@@ -1101,20 +1116,27 @@ func _flush_autosave() -> void:
 ## a pickup / a loaded save. wall_climb + slide own their logic in their node (driven via the typed refs below);
 ## air_dash / laser_sight / grapple still read has_mechanic (their logic lives in the weapon/gun systems). ---
 
-## Wire the ability subsystem at CONSTRUCTION (before _ready), so the white-box unit tests — which build a bare
-## Player.new() and never run _ready — can drive unlock/grant/has immediately. host = self (a member initializer
-## can't reference self); the manager's unlock signal is relayed out as the Player's own mechanic_unlocked so
-## existing listeners (ChipInstallScreen at chip_install_screen.gd:94) keep connecting to player.mechanic_unlocked.
+## Wire the ability + stamina subsystems at CONSTRUCTION (before _ready), so the white-box unit tests — which
+## build a bare Player.new() and never run _ready — can drive unlock/grant/has and spend/drain/regen immediately.
+## host = self (a member initializer can't reference self); each manager's signals are relayed out as the Player's
+## own (mechanic_unlocked / mechanic_toggled / stamina_changed) so existing listeners (ChipInstallScreen at
+## chip_install_screen.gd:94) keep connecting to the Player. The relays are synchronous connect()s, so emission
+## order and count are exactly the pre-extraction behaviour.
 func _init() -> void:
 	_abilities_mgr.host = self
 	_abilities_mgr.mechanic_unlocked.connect(_on_mechanic_unlocked)
 	_abilities_mgr.mechanic_toggled.connect(_on_mechanic_toggled)
+	_stamina_mgr.host = self
+	_stamina_mgr.stamina_changed.connect(_on_stamina_changed)
 
 func _on_mechanic_unlocked(id: StringName) -> void:
 	mechanic_unlocked.emit(id)
 
 func _on_mechanic_toggled(id: StringName, active: bool) -> void:
 	mechanic_toggled.emit(id, active)
+
+func _on_stamina_changed(current: float, maximum: float) -> void:
+	stamina_changed.emit(current, maximum)
 
 ## Scan our children for Ability nodes (a designer drag-drops them in) and register each. Called once in _ready
 ## before the unlock seed/load, so an editor-placed ability isn't duplicated by the seed.
@@ -1429,124 +1451,62 @@ func note_combat() -> void:
 func seconds_since_combat() -> float:
 	return float(Time.get_ticks_msec() - _last_combat_msec) / 1000.0
 
+## --- STAMINA / SPRINT economy: the state and function bodies live in StaminaManager
+## (scripts/player/stamina_manager.gd — the AbilityManager idiom; see the signal + `stamina` alias up top).
+## Everything below is a 1-line typed forwarder with the OLD name + signature, so every caller — attack.gd's
+## melee/air-dash duck-types, wall_climb/grapple drains, GroundMovement's typed sprint gates,
+## character_stats.restamp_derived's has_method probe, the white-box tests, and the _physics_process drive
+## beats — stays byte-identical. is_sprinting() keeps its REAL body: it reads the host's input_dir. ---
+
 func stamina_max() -> float:
-	return maxf(1.0, GameSettings.player_movement.max_stamina + stats_or_default().stamina_bonus(status_stat_modifier(&"endurance")))
+	return _stamina_mgr.stamina_max()
 
 func apply_stamina_max_delta(old_max: float) -> void:
-	var new_max := stamina_max()
-	var target := stamina
-	if new_max > old_max:
-		target += new_max - old_max
-	var before := stamina
-	_set_stamina(target)
-	if is_equal_approx(before, stamina) and not is_equal_approx(old_max, new_max):
-		stamina_changed.emit(stamina, new_max)
+	_stamina_mgr.apply_stamina_max_delta(old_max)
 
 func stamina_fraction() -> float:
-	var maximum := stamina_max()
-	if maximum <= STAMINA_EPS:
-		return 1.0
-	return clampf(stamina / maximum, 0.0, 1.0)
+	return _stamina_mgr.stamina_fraction()
 
 func can_spend_stamina(cost: float) -> bool:
-	return cost <= 0.0 or stamina > STAMINA_EPS
+	return _stamina_mgr.can_spend_stamina(cost)
 
 func is_sprint_locked_out() -> bool:
-	return _sprint_lockout_left > STAMINA_EPS
+	return _stamina_mgr.is_sprint_locked_out()
 
 func can_sprint() -> bool:
-	return stamina > STAMINA_EPS and not is_sprint_locked_out()
+	return _stamina_mgr.can_sprint()
 
-## Aiming down sights locks out the run tier — the ONE gate both sprint consumers share: _wants_sprint()
-## (stamina drain + is_sprinting()'s FOV widen) and GroundMovement.compute_target_speed (the walk-tier
-## fallback). While scoped you're pinned to the walk tier and THEN slowed again by scope_speed_mult, so
-## ADS is a committed, planted stance rather than a sprint you can keep holding. Designer opt-out:
-## GameSettings.weapon_general.allow_sprint_while_scoped.
 func sprint_blocked_by_scope() -> bool:
-	return _is_scoped and not GameSettings.weapon_general.allow_sprint_while_scoped
+	return _stamina_mgr.sprint_blocked_by_scope()
 
 func is_sprinting() -> bool:
 	return can_sprint() and _wants_sprint(input_dir)
 
 func spend_stamina(cost: float) -> bool:
-	if cost <= 0.0:
-		return true
-	if not can_spend_stamina(cost):
-		return false
-	_set_stamina(stamina - cost)
-	_stamina_regen_delay_left = maxf(_stamina_regen_delay_left, GameSettings.player_movement.stamina_regen_delay_after_spend)
-	return true
+	return _stamina_mgr.spend_stamina(cost)
 
 func drain_stamina(rate: float, delta: float) -> bool:
-	if rate <= 0.0:
-		return true
-	if stamina <= STAMINA_EPS:
-		return false
-	_set_stamina(stamina - rate * maxf(delta, 0.0))
-	_stamina_regen_delay_left = maxf(_stamina_regen_delay_left, GameSettings.player_movement.stamina_regen_delay_after_spend)
-	return stamina > STAMINA_EPS
+	return _stamina_mgr.drain_stamina(rate, delta)
 
+## No remaining player.gd caller (the sprint-empty trigger moved into the manager's _drain_sprint_stamina) —
+## kept as a test seam: test_ground_movement drives the lockout through it (the NpcVoice _emit_bark precedent).
 func _begin_sprint_lockout() -> void:
-	_sprint_lockout_left = maxf(_sprint_lockout_left, GameSettings.player_movement.stamina_sprint_lockout)
+	_stamina_mgr._begin_sprint_lockout()
 
 func _update_sprint_lockout(delta: float) -> void:
-	if _sprint_lockout_left > 0.0:
-		_sprint_lockout_left = maxf(_sprint_lockout_left - maxf(delta, 0.0), 0.0)
+	_stamina_mgr._update_sprint_lockout(delta)
 
 func _wants_sprint(input_vector: Vector2) -> bool:
-	if input_vector.length() <= 0.1:
-		return false
-	if not is_on_floor():
-		return false
-	if is_climbing() or is_sliding() or is_grappling():
-		return false
-	if crouch != null and crouch.crouch_t >= 0.5:
-		return false
-	if sprint_blocked_by_scope():
-		return false
-	return Input.is_action_pressed(InputManager.action_run)
+	return _stamina_mgr._wants_sprint(input_vector)
 
 func _drain_sprint_stamina(delta: float) -> bool:
-	if not can_sprint():
-		return false
-	var still_has_stamina := drain_stamina(GameSettings.player_movement.stamina_sprint_drain, delta)
-	if not still_has_stamina:
-		_begin_sprint_lockout()
-	return still_has_stamina
+	return _stamina_mgr._drain_sprint_stamina(delta)
 
 func _set_stamina(value: float, emit_change: bool = true) -> void:
-	var maximum := stamina_max()
-	var next := clampf(value, -maximum, maximum)
-	if is_equal_approx(stamina, next):
-		return
-	stamina = next
-	if emit_change:
-		stamina_changed.emit(stamina, maximum)
-
-func _stamina_recovery_rate() -> float:
-	var horiz_speed := Vector2(velocity.x, velocity.z).length()
-	var moving := input_dir.length() > 0.1 or horiz_speed > GameSettings.player_movement.footstep_min_horizontal_speed
-	if is_climbing() or is_sliding() or is_grappling():
-		return GameSettings.player_movement.stamina_regen_active
-	if not is_on_floor():
-		return GameSettings.player_movement.stamina_regen_airborne
-	if moving:
-		return GameSettings.player_movement.stamina_regen_moving
-	return GameSettings.player_movement.stamina_regen_idle
+	_stamina_mgr._set_stamina(value, emit_change)
 
 func _update_stamina_recovery(delta: float) -> void:
-	if _stamina_regen_delay_left > 0.0:
-		_stamina_regen_delay_left = maxf(_stamina_regen_delay_left - delta, 0.0)
-		return
-	var maximum := stamina_max()
-	if stamina > maximum + STAMINA_EPS:
-		_set_stamina(stamina)
-		return
-	if stamina >= maximum - STAMINA_EPS:
-		return
-	var rate := _stamina_recovery_rate()
-	if rate > 0.0:
-		_set_stamina(stamina + rate * delta)
+	_stamina_mgr._update_stamina_recovery(delta)
 
 ## True while scaling a wall (wall-climb). The camera + view model read this to treat the climb as
 ## "walking" — running the walk-bob and the grounded FOV rules instead of the airborne/rising ones. Backed by
@@ -3147,7 +3107,7 @@ func _respawn_at_checkpoint() -> void:
 	_continuous_fall_time = 0.0
 	hp = max_hp
 	_set_stamina(stamina_max())
-	_sprint_lockout_left = 0.0
+	_stamina_mgr.clear_sprint_lockout()                  # the fresh life sprints immediately — the lockout doesn't outlive death
 	heal_limbs()
 	damaged.emit(hp, max_hp)                             # refresh the HUD HP readout
 	global_position = GameState.respawn_position

@@ -39,6 +39,7 @@ extends GutTest
 ## suite (matching test_smoke.gd) — null is asserted via assert_true(x == null, ...).
 
 const PLAYER_SCRIPT_PATH := "res://scripts/player/player.gd"
+const STAMINA_SCRIPT_PATH := "res://scripts/player/stamina_manager.gd"
 const HEAD_SCRIPT_PATH := "res://scripts/player/head.gd"
 const GRAPPLE_SCRIPT_PATH := "res://scripts/player/grapple_hook.gd"
 const PLAYER_DEBUG_SCRIPT_PATH := "res://scripts/player/player_debug.gd"
@@ -498,7 +499,7 @@ func test_sprint_stamina_lockout_blocks_partial_recharge() -> void:
 	p.stamina = 1.0
 	assert_false(p._drain_sprint_stamina(1.0),
 		"sprint drain returns false on the tick that empties the stamina bar")
-	assert_almost_eq(p._sprint_lockout_left, GameSettings.player_movement.stamina_sprint_lockout, 0.001,
+	assert_almost_eq(p._stamina_mgr._sprint_lockout_left, GameSettings.player_movement.stamina_sprint_lockout, 0.001,
 		"emptying stamina from sprint starts the full sprint lockout")
 	p.stamina = p.stamina_max() * 0.5
 	assert_false(p.can_sprint(),
@@ -536,7 +537,9 @@ func test_aiming_down_sights_blocks_sprint() -> void:
 	assert_false(p.sprint_blocked_by_scope(),
 		"allow_sprint_while_scoped is the designer opt-out that restores run-while-scoped")
 	GameSettings.weapon_general.allow_sprint_while_scoped = prior
-	var src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
+	# _wants_sprint's body lives on the StaminaManager now (player.gd keeps a 1-line forwarder), so the
+	# source pin greps the MANAGER script; the fragment itself is unchanged.
+	var src := FileAccess.get_file_as_string(STAMINA_SCRIPT_PATH)
 	assert_true(src.contains("if sprint_blocked_by_scope():"),
 		"_wants_sprint must consult the ADS gate so scoping in also stops the sprint stamina drain and FOV widen")
 	p.free()
@@ -546,6 +549,41 @@ func test_player_jump_path_spends_stamina() -> void:
 	var src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
 	assert_true(src.contains("spend_stamina(GameSettings.player_movement.stamina_jump_cost)"),
 		"the buffered/coyote jump launch path must spend the configured stamina_jump_cost")
+
+
+func test_bare_stamina_manager_null_guards_and_pure_regen_curve() -> void:
+	# The StaminaManager's null-guard contract: the Player builds it at var-init and wires host in _init, but a
+	# BARE manager (host == null, straight load().new()) must degrade to the bare off-tree Player's defaults —
+	# no sheet, not on the floor, standing, unscoped — and never crash. RefCounted: released with `= null`.
+	var m = load(STAMINA_SCRIPT_PATH).new()
+	assert_almost_eq(m.stamina_max(), maxf(1.0, GameSettings.player_movement.max_stamina), 0.001,
+		"a bare manager's stamina_max is the base tuning max (no endurance sheet), still floored at 1.0")
+	assert_true(m.can_sprint(),
+		"a bare manager starts with a full pool and no lockout, so can_sprint reads true")
+	assert_false(m.sprint_blocked_by_scope(),
+		"a bare manager reads _is_scoped false through the null-guard — hip-fire semantics, no crash")
+	assert_false(m._wants_sprint(Vector2(0, -1)),
+		"a bare manager is never on the floor (host is_on_floor -> false), so _wants_sprint refuses without crashing")
+	m._update_sprint_lockout(0.016)
+	m._update_stamina_recovery(0.016)
+	assert_almost_eq(m.stamina, m.stamina_max(), 0.001,
+		"the bare lockout/recovery ticks no-op safely against the null host (a full pool stays put)")
+	# The pure static regen curve (the Landing impact_for idiom): tier ordering mirrors test_settings_load's
+	# knob pins — resting recovers fastest, special movement slowest, airborne bypasses the moving predicate.
+	var idle: float = m.recovery_rate_for(false, false, 0.0, 0.0)
+	var moving: float = m.recovery_rate_for(false, false, 1.0, 0.0)
+	var active: float = m.recovery_rate_for(true, false, 0.0, 0.0)
+	var airborne: float = m.recovery_rate_for(false, true, 0.0, 0.0)
+	assert_gt(idle, moving,
+		"the pure regen curve keeps idle > moving (standing still recovers fastest)")
+	assert_gt(moving, active,
+		"the pure regen curve keeps moving > active (climb/slide/grapple recovers slowest)")
+	assert_almost_eq(airborne, GameSettings.player_movement.stamina_regen_airborne, 0.001,
+		"airborne picks the airborne tier ahead of the moving/idle predicates")
+	var drift: float = m.recovery_rate_for(false, false, 0.0, GameSettings.player_movement.footstep_min_horizontal_speed + 0.1)
+	assert_almost_eq(drift, GameSettings.player_movement.stamina_regen_moving, 0.001,
+		"real horizontal speed with no stick input still counts as moving (the footstep threshold)")
+	m = null
 
 
 func test_player_apply_velocity_runs_step_assist() -> void:

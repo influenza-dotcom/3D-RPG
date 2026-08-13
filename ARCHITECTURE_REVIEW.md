@@ -156,6 +156,45 @@ because each one established an idiom the next extraction should copy.
     `_music_commented_radio` moved. `tests/test_npc_pool.gd` pins the component
     reset; `tests/test_npc_facade_contract.gd` pins the path build and the
     facade surface.
+- **`StaminaManager` (stamina/sprint economy).** DONE —
+  `scripts/player/stamina_manager.gd`, a `RefCounted` on the AbilityManager
+  idiom (built at the Player's var-init, host + signal relay wired in
+  `Player._init`, so bare-`Player.new()` tests drive it with no `_ready`). The
+  pool, spend/drain, the regen curve + post-spend delay, and the sprint lockout
+  moved; the Player keeps the `stamina_changed` signal (the manager's same-shape
+  signal is relayed by `_on_stamina_changed`), a RAW `stamina` property alias
+  (no clamp/emit — ui.gd's `player.get(&"stamina")` poll and the tests' raw
+  overdraw writes keep bare-var semantics), `is_sprinting()`'s verbatim one-line
+  body (it reads the host's `input_dir`), and 1-line forwarders for the whole
+  old surface — public and private names unchanged, so every duck-typed caller
+  and white-box test line survived. One pure static, `recovery_rate_for` (the
+  Landing `impact_for` precedent), carries the regen tier pick hostlessly.
+  - ⭐ The drive beats stayed in `Player._physics_process` **byte-identical at
+    their positions**: `_update_sprint_lockout` before the dialogue gate, and
+    `_update_stamina_recovery` in BOTH branches — the dialogue-frozen early-out
+    AND the live tail (the NPC idle/UNAWARE both-branches rule, player
+    edition). Do not "simplify" them into a manager-side tick: `die()`'s
+    `set_physics_process(false)` must freeze regen and the lockout countdown.
+    `die()` writes no stamina state; the revive beats (the `_set_stamina`
+    refill at its authored position — it EMITS for the HUD ring — then
+    `clear_sprint_lockout()`, the one rewritten beat line) stay in
+    `_respawn_at_checkpoint`.
+  - ⭐ `host: Character`, never `Player` — a preload-by-path script naming the
+    Player class is the class_name↔preload parse-cycle trap. Character covers
+    the hot path typed; the Player-script-only surface (`input_dir`, `crouch`,
+    `_is_scoped`, the climb/slide/grapple predicates) is read dynamically with
+    null-guards, so a bare manager degrades to bare-Player defaults instead of
+    crashing (`tests/test_player_core.gd` pins the table).
+  - ⭐ NO `class_name`, by choice: player.gd is the sole runtime consumer and
+    preloads it by path (`StaminaManagerRef`, the StatBudget idiom) — a fresh
+    class_name is the stale-class-cache cascade in the next headless run. All
+    tuning stays on `GameSettings.player_movement` / `weapon_general`; the
+    manager holds zero knobs.
+  - Two `tests/test_player_core.gd` migrations only: the `_sprint_lockout_left`
+    white-box read now goes through `p._stamina_mgr`, and the
+    `"if sprint_blocked_by_scope():"` source pin greps the manager file (the
+    fragment is unchanged). Every other stamina pin — including
+    `is_sprinting()`'s body grep against player.gd — survived untouched.
 
 ### Payment Rails
 

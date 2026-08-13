@@ -219,7 +219,12 @@ body (the FP legs+torso rig, the carry-hands / bare-fists rig and their motion) 
 component, not `player.gd` code: **`FirstPersonBody`** (`scripts/player/first_person_body.gd`),
 a scene-wired Player.tscn child on the Landing `host = NodePath("..")` idiom, which also
 carries the authored `fp_*` pose overrides (see `ARCHITECTURE_REVIEW.md`, Completed
-Extractions, for the ordering invariants).
+Extractions, for the ordering invariants). The stamina/sprint economy lives in a
+**Player-owned `StaminaManager`** (`scripts/player/stamina_manager.gd`, a `RefCounted` on
+the same built-at-var-init / wired-in-`_init` idiom, preloaded by path — no class_name):
+the Player keeps the `stamina_changed` signal, a raw `stamina` property alias, and 1-line
+forwarders for the whole old surface, while its `_physics_process` drive beats stay at
+their exact positions; ALL stamina tuning remains on `GameSettings.player_movement`.
 
 **Installed vs active (the Implants tab's on/off switch).** An `Ability` node's presence is
 INSTALLED; its `enabled` flag is ACTIVE. The player switches an installed implant off from
