@@ -308,3 +308,42 @@ func can_be_talked_to() -> bool:
 ## Hover readout: "Trade: <name>" (or just "Merchant" when unnamed).
 func look_name() -> String:
 	return PlayerText.trade_prompt(shop_name)
+
+# ---------------------------------------------------------------------------
+# Dialogue-station contract (drives the "Trade" option when this rides a dialogue NPC)
+# ---------------------------------------------------------------------------
+
+## Where "Trade" sits among a speaker's station options. DialogueManager discovers every station child by the
+## two-method contract below and sorts on THIS (tie-broken by child index), so the authored child order in the
+## scene never matters. The shipped seven are spaced by 10 (Merchant 10 .. Atm 70 — the fixed Trade→Bank
+## sequence); a new station picks a free slot between two without renumbering. A const, NOT an @export: the
+## order is a UI contract pinned by tests/test_dialogue_speaker_contracts.gd, and an export would let two
+## authored instances collide silently.
+const DIALOGUE_ORDER := 10
+
+## THE DIALOGUE-STATION CONTRACT, half 1 of 2 — availability + presentation. DialogueManager scans the
+## speaker's DIRECT children for has_method of BOTH halves (keyed on the pair so a half-implemented component
+## never paints a dead button) and paints one option per station from this dict:
+##   "label"  — the button text, a PlayerText const, never a raw literal (the text-debt ratchet is at zero).
+##   "order"  — DIALOGUE_ORDER above.
+##   "reason" — _suspend_for_menu's reason arg (feeds dialogue_suspended); present iff "closed" is.
+##   "closed" — the sub-menu's resume Signal; OMITTING it marks an act-and-close station (see Bonfire).
+## Returning {} withholds the option; a Merchant never does — the required_flag gate deliberately covers the
+## STANDALONE path only (see open_dialogue_station), exactly as before this contract existed.
+## ADD-A-STATION RECIPE: author a component with these two methods + a free DIALOGUE_ORDER slot and the
+## dialogue grows the option with zero DialogueManager edits; then add its roster row to
+## tests/test_dialogue_speaker_contracts.gd (roster-as-spec) — see scripts/components/README.md.
+func dialogue_station_option() -> Dictionary:
+	return {
+		"label": PlayerText.DIALOGUE_OPTION_TRADE,
+		"order": DIALOGUE_ORDER,
+		"reason": "trade",
+		"closed": ShopScreen.closed,
+	}
+
+## THE DIALOGUE-STATION CONTRACT, half 2 of 2 — the press. DialogueManager suspends the conversation
+## (via _suspend_for_menu, awaiting the `closed` above) and then calls this. Deliberately NOT start_talk:
+## the dialogue path has ALWAYS bypassed the standalone-only required_flag gate and Restocker.notify_visit
+## (a talking shopkeeper vouches for you; a vending machine doesn't), and behaviour stays identical.
+func open_dialogue_station(player: Node) -> void:
+	ShopScreen.open_shop(self, player)

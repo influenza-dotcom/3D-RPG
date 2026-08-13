@@ -153,3 +153,26 @@ func can_be_talked_to() -> bool:
 
 func look_name() -> String:
 	return "Level Up: %s" % station_name if not station_name.is_empty() else "Level Up"
+
+# ---------------------------------------------------------------------------
+# Dialogue-station contract (drives the "Level Up" option when this rides a dialogue NPC)
+# ---------------------------------------------------------------------------
+
+## Sort key for the speaker's station options (Merchant 10 .. Atm 70; see merchant.gd for the full contract
+## description). A const, not an @export — the order is a UI contract pinned by tests/test_dialogue_speaker_contracts.gd.
+const DIALOGUE_ORDER := 40
+
+## Dialogue-station contract, half 1 — DialogueManager discovers this + open_dialogue_station on the speaker's
+## direct children (both methods required) and paints the "Level Up" option. Unconditional, like the rest.
+func dialogue_station_option() -> Dictionary:
+	return {
+		"label": PlayerText.DIALOGUE_OPTION_LEVEL_UP,
+		"order": DIALOGUE_ORDER,
+		"reason": "level_up",
+		"closed": LevelUpScreen.closed,
+	}
+
+## Dialogue-station contract, half 2 — the press. DialogueManager suspends the conversation and calls this;
+## closing the level-up screen (every refuse path emits `closed`) resumes the dialogue.
+func open_dialogue_station(player: Node) -> void:
+	LevelUpScreen.open_level_up(self, player)

@@ -40,9 +40,11 @@ costs nothing. `player_plays_white` false = the opponent opens and you reply bli
 
 ## Contracts (what a rename would silently break)
 
-- **Dialogue seam** — `DialogueManager._speaker_chess()` duck-scans the speaker's children for `ai_search_depth` +
-  `display_opponent_name`, and `_on_chess_pressed()` suspends into `ChessScreen.open_match(...)`, awaiting its
-  `closed` signal to restore the box. Pinned by `tests/test_dialogue_speaker_contracts.gd`.
+- **Dialogue seam** — `DialogueManager` discovers the `ChessMatch` via the dialogue-station contract
+  (`dialogue_station_option()` / `open_dialogue_station()`, scanned on the speaker's direct children) and suspends
+  into `ChessScreen.open_match(...)`, awaiting its `closed` signal to restore the box. `ChessScreen` still
+  duck-reads the five config getters (`ai_search_depth` / `display_opponent_name` / `ai_blunder` /
+  `player_is_white` / `wager_amount`). Both surfaces are pinned by `tests/test_dialogue_speaker_contracts.gd`.
 - **Ability registry** — `ChessVisualizer.tscn`'s filename snake-cases to its `ability_id()` (`chess_visualizer`),
   the convention `AbilityRegistry` + the drift test in `tests/test_upgrades.gd` enforce. The same snake_case
   convention resolves the ability SCRIPT (`chess_visualizer.gd`), so a save/load or a fresh install can rebuild the

@@ -66,3 +66,26 @@ func can_be_talked_to() -> bool:
 ## Hover readout: "Rest: <name>" (or "Rest at bonfire" when unnamed).
 func look_name() -> String:
 	return PlayerText.rest_prompt(bonfire_name)
+
+# ---------------------------------------------------------------------------
+# Dialogue-station contract (drives the "Rest" option when this rides a dialogue NPC)
+# ---------------------------------------------------------------------------
+
+## Sort key for the speaker's station options (Merchant 10 .. Atm 70; see merchant.gd for the full contract
+## description). A const, not an @export — the order is a UI contract pinned by tests/test_dialogue_speaker_contracts.gd.
+const DIALOGUE_ORDER := 30
+
+## Dialogue-station contract, half 1 — DialogueManager discovers this + open_dialogue_station on the speaker's
+## direct children (both methods required) and paints the "Rest" option. The ONLY act-and-close station of the
+## shipped seven: no "reason"/"closed" keys, so DialogueManager calls open_dialogue_station then _finish()es
+## with no suspension — resting ends the conversation, exactly as the old _on_rest_pressed handler always did.
+func dialogue_station_option() -> Dictionary:
+	return {
+		"label": PlayerText.DIALOGUE_OPTION_REST,
+		"order": DIALOGUE_ORDER,
+	}
+
+## Dialogue-station contract, half 2 — the press. No screen and no suspension: rest here (full heal + respawn
+## point + autosave); DialogueManager _finish()es the conversation right after.
+func open_dialogue_station(player: Node) -> void:
+	rest(player)

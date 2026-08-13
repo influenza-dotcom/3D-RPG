@@ -149,3 +149,29 @@ func start_talk(player: Node) -> void:
 	if player == null:
 		return
 	AtmScreen.open_atm(self, player)
+
+# ---------------------------------------------------------------------------
+# Dialogue-station contract (drives the "Bank" option when this rides a dialogue teller NPC)
+# ---------------------------------------------------------------------------
+
+## Sort key for the speaker's station options (Merchant 10 .. Atm 70; see merchant.gd for the full contract
+## description). A const, not an @export — the order is a UI contract pinned by tests/test_dialogue_speaker_contracts.gd.
+const DIALOGUE_ORDER := 70
+
+## Dialogue-station contract, half 1 — DialogueManager discovers this + open_dialogue_station on the speaker's
+## direct children (both methods required) and paints the "Bank" option. ONE option covers both directions and
+## both signs of the account: the terminal's own screen owns deposit / withdraw / pay-down, so a teller NPC
+## needs no extra buttons here.
+func dialogue_station_option() -> Dictionary:
+	return {
+		"label": PlayerText.DIALOGUE_OPTION_BANK,
+		"order": DIALOGUE_ORDER,
+		"reason": "bank",
+		"closed": AtmScreen.closed,
+	}
+
+## Dialogue-station contract, half 2 — the press. DialogueManager suspends the conversation and calls this;
+## AtmScreen.open_atm refuses while a dialogue is ACTIVE, and the suspension flips is_active() false so it can
+## open. Every one of its refuse paths emits `closed`, which is what keeps the suspension from stranding.
+func open_dialogue_station(player: Node) -> void:
+	AtmScreen.open_atm(self, player)

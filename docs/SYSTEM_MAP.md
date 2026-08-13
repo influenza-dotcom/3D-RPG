@@ -65,7 +65,7 @@ is_engaged() (_active != null) = a conversation exists at all — the unpaused i
 - **Risk:** Dropping is_engaged() from InputManager.world_frozen() loses immunity in the unpaused intro beat — an enemy shoots the frozen player with no error (C66).
 - **Risk:** die() gating on is_active() not is_engaged() skips abort() during a sub-menu suspension — the menu's close then re-pauses + re-opens the box over the death cinematic.
 - **Risk:** A suspending sub-menu (Shop/Install/Chess/Atm/Heal/LevelUp/Loot-exchange) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
-- **Risk:** Speaker menus are duck-typed via has_method/has_signal scans (buy/sell, do_heal, install_carried, ai_search_depth, deposit/withdraw, set_in_dialogue/died); a rename silently drops the option with no compile error.
+- **Risk:** Station options (Trade/Heal/Rest/Level Up/Install/Play Chess/Bank) are discovered by a has_method scan of the speaker's direct children for the dialogue_station_option + open_dialogue_station pair, and the speaker/player surfaces stay duck-typed (set_in_dialogue/note_speaking/is_following/resolved_disposition + died); a rename on either side silently drops the option/handshake with no compile error — pinned by tests/test_dialogue_speaker_contracts.gd.
 - **Test:** `tests/test_dialogue.gd` `tests/test_dialogue_suspend_closed.gd` `tests/test_dialogue_speaker_contracts.gd`
 
 ## Derived Stats
@@ -262,7 +262,7 @@ An enabled Ability child grants the mechanic keyed by ability_id(); has_mechanic
 Paid-install chokepoint: a chip Item (installs_ability) -> permanent mechanic via can_grant guard -> charge -> consume -> unlock_mechanic + autosave.
 
 - **Risk:** Drop the pre-charge can_grant_mechanic guard (in install_carried + buy_and_install): a typo'd installs_ability then silently takes money + eats the chip for nothing.
-- **Risk:** Rename install_carried/install_fee: the DialogueManager/ChipInstallScreen has_method duck-type check fails silently and the 'Install' option just vanishes.
+- **Risk:** Rename install_carried/install_fee: ChipInstallScreen's has_method duck-calls fail silently (the screen's sections go dead); the dialogue's 'Install' OPTION itself now rides the dialogue_station_option/open_dialogue_station station contract, where a rename likewise silently drops the button — both surfaces pinned by tests/test_dialogue_speaker_contracts.gd.
 - **Test:** `tests/test_chip_install.gd`
 
 ## PS1 Warp

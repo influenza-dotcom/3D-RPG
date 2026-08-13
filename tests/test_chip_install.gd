@@ -285,11 +285,13 @@ func test_seed_stock_keeps_only_chips() -> void:
 	e_junk = null
 
 func test_installer_exposes_dialogue_duck_type_surface() -> void:
-	# DialogueManager._speaker_installer finds the mechanic by has_method(install_carried) + has_method(install_fee).
-	# Pin that surface so a rename can't silently drop the "Install" dialogue option.
+	# ChipInstallScreen duck-calls install_carried() + install_fee() once it is open (its rows price and commit
+	# through them); the "Install" dialogue OPTION itself rides the dialogue-station contract
+	# (dialogue_station_option / open_dialogue_station), pinned in tests/test_dialogue_speaker_contracts.gd.
+	# Pin the screen-side surface here so a rename can't silently kill the install rows.
 	var m := ChipInstaller.new()
-	assert_true(m.has_method(&"install_carried"), "DialogueManager keys the Install option on install_carried()")
-	assert_true(m.has_method(&"install_fee"), "...and on install_fee()")
+	assert_true(m.has_method(&"install_carried"), "ChipInstallScreen prices/commits installs through install_carried()")
+	assert_true(m.has_method(&"install_fee"), "...and through install_fee()")
 	m.free()
 
 

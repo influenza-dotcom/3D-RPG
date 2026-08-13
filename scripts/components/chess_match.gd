@@ -14,10 +14,12 @@ extends LookAtInteractable
 ##   2. ON A DIALOGUE NPC: set `standalone` = false so the ray IGNORES it (the NPC's Talkable drives the
 ##      conversation); the dialogue then offers a "Play Chess" option that opens THIS match (open_match).
 ##
-## DUCK-TYPED SURFACE: DialogueManager finds this by `opponent_name` + `ai_search_depth` (see _speaker_chess in
-## dialogue_manager.gd), and ChessScreen reads its config through the same getters — Node-typed on both sides to
-## avoid a ChessMatch <-> ChessScreen <-> DialogueManager class-compile cycle. A rename here silently drops the
-## dialogue option, so the pairing is pinned by tests/test_dialogue_speaker_contracts.gd.
+## DUCK-TYPED SURFACE: DialogueManager discovers the "Play Chess" option via the dialogue-station contract at the
+## bottom of this file (dialogue_station_option / open_dialogue_station), and ChessScreen.open_match still
+## duck-reads the five config getters (ai_search_depth / display_opponent_name / ai_blunder / player_is_white /
+## wager_amount) — Node-typed on both sides to avoid a ChessMatch <-> ChessScreen <-> DialogueManager
+## class-compile cycle. A rename on either surface silently drops the option / breaks match start, so both are
+## pinned by tests/test_dialogue_speaker_contracts.gd.
 ##
 ## SETUP: drop it under the opponent (or assign highlight_target), size its CollisionShape3D (or set
 ## auto_fit_collider), and tune the exports. For a dialogue NPC, set `standalone` = false and wire nothing else —
@@ -68,14 +70,14 @@ func _ready() -> void:
 		StationSpeaker.ensure(self)  # a self-serve board answers with the shared panel chirp; a data-only match rides a talking opponent, and people don't beep
 
 # ---------------------------------------------------------------------------------------------------
-# Duck-typed config surface (read by DialogueManager's finder + ChessScreen)
+# Duck-typed config surface (read by ChessScreen.open_match; the dialogue option rides the station contract below)
 # ---------------------------------------------------------------------------------------------------
 
 ## The opponent's display name for the match title / move log (PlayerText.DEFAULT_CHESS_OPPONENT when unnamed).
 func display_opponent_name() -> String:
 	return opponent_name if not opponent_name.is_empty() else PlayerText.DEFAULT_CHESS_OPPONENT
 
-## The AI search depth this opponent plays at (>= 1). Also the primary duck-type key DialogueManager scans for.
+## The AI search depth this opponent plays at (>= 1). Also the duck-type key ChessScreen.open_match validates.
 func ai_search_depth() -> int:
 	return maxi(1, ai_depth)
 
@@ -103,3 +105,27 @@ func can_be_talked_to() -> bool:
 ## Hover readout: "Play Chess: <name>" (or just "Play Chess" when unnamed).
 func look_name() -> String:
 	return PlayerText.chess_prompt(opponent_name)
+
+# ---------------------------------------------------------------------------------------------------
+# Dialogue-station contract (drives the "Play Chess" option when this rides a dialogue NPC)
+# ---------------------------------------------------------------------------------------------------
+
+## Sort key for the speaker's station options (Merchant 10 .. Atm 70; see merchant.gd for the full contract
+## description). A const, not an @export — the order is a UI contract pinned by tests/test_dialogue_speaker_contracts.gd.
+const DIALOGUE_ORDER := 60
+
+## Dialogue-station contract, half 1 — DialogueManager discovers this + open_dialogue_station on the speaker's
+## direct children (both methods required) and paints the "Play Chess" option. Unconditional: an unaffordable
+## wager is ChessScreen's refusal (which emits `closed`, resuming the dialogue), not a withheld option.
+func dialogue_station_option() -> Dictionary:
+	return {
+		"label": PlayerText.DIALOGUE_OPTION_PLAY_CHESS,
+		"order": DIALOGUE_ORDER,
+		"reason": "chess",
+		"closed": ChessScreen.closed,
+	}
+
+## Dialogue-station contract, half 2 — the press. DialogueManager suspends the conversation and calls this;
+## closing the board (every refuse path emits `closed`) resumes the dialogue.
+func open_dialogue_station(player: Node) -> void:
+	ChessScreen.open_match(self, player)

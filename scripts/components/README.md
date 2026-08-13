@@ -76,6 +76,17 @@ run standalone by default (aim + E) OR, with `standalone = false`, sit as a data
 whose conversation offers the action ("Trade" / "Install" / "Play Chess") — the NPC's `Talkable` owns the ray
 in that mode. `_on_dialogue_host()` on the base powers their config warning against stealing the ray.
 
+Each dual-mode station also implements the two-method **dialogue-station contract** that grows the option:
+`dialogue_station_option() -> Dictionary` (`label`: a `PlayerText` const, `order`: the script's `DIALOGUE_ORDER`
+const, `reason`: `_suspend_for_menu`'s reason string, `closed`: the sub-menu's resume `Signal`) and
+`open_dialogue_station(player)` (the press). `DialogueManager` scans the speaker's **direct** children by
+`has_method` of **both** names (a half-implemented pair paints no button) and sorts by the explicit `order` key —
+`10..70` is today's Trade → Bank sequence, so authored child order never matters. `Bonfire` omits
+`reason`/`closed` = an **act-and-close** station (rest, then the conversation ends — no suspension). Adding a
+station = author the component (pick a free order slot; the consts are spaced by 10) plus one roster row in
+`tests/test_dialogue_speaker_contracts.gd`, which pins the labels, orders, reasons, and the roster itself —
+no `DialogueManager` edit.
+
 Per-component **knobs / `@export` fields** are the designer-facing source of truth in
 `docs/AUTHORING_GUIDE.md` → *The "look-at interactable" family* — this tree does not repeat them.
 
@@ -144,6 +155,12 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
 7. If it is a self-serve station, give it a voice in one line: `StationSpeaker.ensure(self)` in `_ready`,
    gated on `standalone` (a data-only station rides a talking NPC, and a person who beeps is a bug). The
    screen sounds it with `StationSpeaker.chirp(station)` and suppresses the generic UI sting when it fires.
+8. If it is **dual-mode** (a `standalone` flag + a dialogue-NPC option), implement the dialogue-station
+   contract pair — `dialogue_station_option()` / `open_dialogue_station(player)` (see the dual-mode paragraph
+   above) — with a free `DIALOGUE_ORDER` slot, and add its roster row to
+   `tests/test_dialogue_speaker_contracts.gd`. The dialogue grows the option automatically; if the station
+   suspends into a NEW screen, that screen still owes the modal-registry row (step 6), a `closed` emit on
+   every refuse path (`tests/test_dialogue_suspend_closed.gd`), and its own suspend-contract test row.
 
 **Dual item** — a `CanPickUp` parented under a `Throwable` makes one prop both stashable (E → backpack)
 and throwable (Z → carry/throw). `ray_cast.gd` resolves E-vs-Z by ancestry, so the `CanPickUp` MUST be a

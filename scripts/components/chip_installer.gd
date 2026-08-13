@@ -2,7 +2,7 @@
 ## @system Player Abilities
 ## @seam Paid-install chokepoint: a chip Item (installs_ability) -> permanent mechanic via can_grant guard -> charge -> consume -> unlock_mechanic + autosave.
 ## @risk Drop the pre-charge can_grant_mechanic guard (in install_carried + buy_and_install): a typo'd installs_ability then silently takes money + eats the chip for nothing.
-## @risk Rename install_carried/install_fee: the DialogueManager/ChipInstallScreen has_method duck-type check fails silently and the 'Install' option just vanishes.
+## @risk Rename install_carried/install_fee: ChipInstallScreen's has_method duck-calls fail silently (the screen's sections go dead); the dialogue's 'Install' OPTION itself now rides the dialogue_station_option/open_dialogue_station station contract, where a rename likewise silently drops the button — both surfaces pinned by tests/test_dialogue_speaker_contracts.gd.
 ## @test res://tests/test_chip_install.gd
 class_name ChipInstaller
 extends LookAtInteractable
@@ -30,7 +30,9 @@ extends LookAtInteractable
 ##
 ## SETUP: drop it under the mechanic / workbench (or assign highlight_target), size its CollisionShape3D to the
 ## body you aim at (or set auto_fit_collider), fill `stock_counts` with the chips it sells, and tune the fees.
-## DUCK-TYPED SURFACE: DialogueManager + ChipInstallScreen find this by `install_carried` + `install_fee`.
+## DUCK-TYPED SURFACE: ChipInstallScreen duck-calls `install_carried` + `install_fee`; DialogueManager discovers
+## the "Install" option via the dialogue-station contract at the bottom of this file (dialogue_station_option /
+## open_dialogue_station).
 
 @export_group("Stock")
 ## The CHIPS this mechanic sells (buy & install in one stop) — one StockEntry per line (a chip Item + how many).
@@ -235,3 +237,26 @@ func can_be_talked_to() -> bool:
 ## Hover readout: "Upgrades: <name>" (or just "Mechanic" when unnamed).
 func look_name() -> String:
 	return PlayerText.chip_installer_prompt(installer_name)
+
+# ---------------------------------------------------------------------------
+# Dialogue-station contract (drives the "Install" option when this rides a dialogue NPC)
+# ---------------------------------------------------------------------------
+
+## Sort key for the speaker's station options (Merchant 10 .. Atm 70; see merchant.gd for the full contract
+## description). A const, not an @export — the order is a UI contract pinned by tests/test_dialogue_speaker_contracts.gd.
+const DIALOGUE_ORDER := 50
+
+## Dialogue-station contract, half 1 — DialogueManager discovers this + open_dialogue_station on the speaker's
+## direct children (both methods required) and paints the "Install" option. Unconditional, like the rest.
+func dialogue_station_option() -> Dictionary:
+	return {
+		"label": PlayerText.DIALOGUE_OPTION_INSTALL,
+		"order": DIALOGUE_ORDER,
+		"reason": "install",
+		"closed": ChipInstallScreen.closed,
+	}
+
+## Dialogue-station contract, half 2 — the press. DialogueManager suspends the conversation and calls this;
+## closing the install screen (every refuse path emits `closed`) resumes the dialogue.
+func open_dialogue_station(player: Node) -> void:
+	ChipInstallScreen.open_install(self, player)

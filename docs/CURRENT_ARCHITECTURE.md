@@ -456,7 +456,10 @@ extends `CanPickUp`, so the tree is three levels deep): pickups (`CanPickUp`,
 (`Door`, `LevelDoor`, `Radio`, `Readable`, `Switch`, `QuestStarter`). The full
 inheritance tree, base contract, and "add a new interactable" recipe live in
 [`scripts/components/README.md`](../scripts/components/README.md#the-lookatinteractable-hierarchy);
-per-component `@export` knobs are in `docs/AUTHORING_GUIDE.md`. Note `Corpse`
+per-component `@export` knobs are in `docs/AUTHORING_GUIDE.md`. The seven dual-mode
+stations also carry the two-method dialogue-station contract
+(`dialogue_station_option()` / `open_dialogue_station()`) that grows their dialogue
+option — documented in that same README. Note `Corpse`
 (`scripts/npc/corpse.gd`, `extends Node3D`) is a separate AI discovery marker,
 NOT this loot interactable — the lootable body is `LootableCorpse`.
 
@@ -477,10 +480,16 @@ DISTINCT from `gameplay_suppressed()`, which also counts the real-time Pip-Boy/l
 overlays that keep the player at risk and must NOT grant immunity. A cutscene that wants
 to script player damage must use a dedicated kill path, not incidental `take_damage`.
 
-**Dialogue-suspend contract.** A dialogue option that opens a sub-menu (Trade/Exchange/Heal/
-Level Up/Install/Chess/Bank) routes through `DialogueManager._suspend_for_menu`, which hides
-the box and connects the sub-menu's `closed` as a `CONNECT_ONE_SHOT` resume BEFORE calling the
-open. So every one of those screens (`ShopScreen`/`LootScreen`/`HealScreen`/`LevelUpScreen`/
+**Dialogue-suspend contract.** The station options themselves (Trade/Heal/Rest/Level Up/
+Install/Chess/Bank) are discovered via the **dialogue-station contract**: `DialogueManager`
+scans the speaker's direct children by `has_method` for the
+`dialogue_station_option()`/`open_dialogue_station()` pair and paints the options sorted by
+each component's explicit `DIALOGUE_ORDER` key (`10..70` = the fixed Trade → Bank sequence;
+see `scripts/components/README.md`). Six of the seven suspend through the unchanged
+`DialogueManager._suspend_for_menu`, which hides the box and connects the sub-menu's `closed`
+as a `CONNECT_ONE_SHOT` resume BEFORE calling the open; `Bonfire` is the one act-and-close
+station (its contract omits `closed` — rest, then the conversation ends, no suspension).
+So every suspending screen (`ShopScreen`/`LootScreen`/`HealScreen`/`LevelUpScreen`/
 `ChipInstallScreen`/`ChessScreen`/`AtmScreen`) MUST emit `closed` on EVERY refuse path — each
 funnels its guard early-returns through a private `_refuse_open()` that just `closed.emit()`s
 (`AtmScreen` emits inline at each guard, same contract; `RespecScreen` keeps the same funnel

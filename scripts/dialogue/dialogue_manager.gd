@@ -5,7 +5,7 @@ extends Node
 ## @risk Dropping is_engaged() from InputManager.world_frozen() loses immunity in the unpaused intro beat — an enemy shoots the frozen player with no error (C66).
 ## @risk die() gating on is_active() not is_engaged() skips abort() during a sub-menu suspension — the menu's close then re-pauses + re-opens the box over the death cinematic.
 ## @risk A suspending sub-menu (Shop/Install/Chess/Atm/Heal/LevelUp/Loot-exchange) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
-## @risk Speaker menus are duck-typed via has_method/has_signal scans (buy/sell, do_heal, install_carried, ai_search_depth, deposit/withdraw, set_in_dialogue/died); a rename silently drops the option with no compile error.
+## @risk Station options (Trade/Heal/Rest/Level Up/Install/Play Chess/Bank) are discovered by a has_method scan of the speaker's direct children for the dialogue_station_option + open_dialogue_station pair, and the speaker/player surfaces stay duck-typed (set_in_dialogue/note_speaking/is_following/resolved_disposition + died); a rename on either side silently drops the option/handshake with no compile error — pinned by tests/test_dialogue_speaker_contracts.gd.
 ## @test res://tests/test_dialogue.gd
 ## @test res://tests/test_dialogue_suspend_closed.gd
 ## @test res://tests/test_dialogue_speaker_contracts.gd
@@ -20,12 +20,16 @@ extends Node
 ## the looping dialogue music track under the conversation) — plus the CompanionRecruiter static
 ## for the recruit/dismiss contract. Lines are read aloud by the SpeechTts autoload (the in-game Flite TTS).
 ##
-## DUCK-TYPING CONTRACT (M14): this reaches into ~8 subsystems via has_method / has_signal scans (Merchant buy/sell,
-## Healer do_heal/heal_cost, Bonfire rest, LevelUp level_up_stat/level_up_cost, Atm deposit/withdraw, the NPC speaker's set_in_dialogue/
-## note_speaking/provoke/is_following/resolved_disposition + died signal, Player add_money/notify_toast, and the
-## shop/heal/level-up screens' open_* + closed signal) — NOT typed refs, deliberately, to avoid the Merchant <->
-## ShopScreen <-> DialogueManager compile cycle (a typed interface would re-form it). So a rename on any of those
-## SILENTLY drops the option/handshake with no compile error — the contract is pinned by tests/test_dialogue_speaker_contracts.gd.
+## DUCK-TYPING CONTRACT (M14): NOT typed refs, deliberately, to avoid the Merchant <-> ShopScreen <->
+## DialogueManager compile cycle (a typed interface would re-form it). The station options (Trade / Heal / Rest /
+## Level Up / Install / Play Chess / Bank) are discovered by ONE has_method scan of the speaker's direct children
+## for the dialogue_station_option + open_dialogue_station pair (_station_options below — the components carry
+## their own label/order/reason/closed, so a new station needs zero edits here). The screens keep their own
+## duck-typed reads of the components (ShopScreen buy/sell, HealScreen do_heal/heal_cost, ChessScreen's five
+## getters, AtmScreen deposit/withdraw, ...), and this file still duck-scans the NPC speaker's set_in_dialogue/
+## note_speaking/provoke/is_following/resolved_disposition + died signal and the Player's add_money/notify_toast.
+## So a rename on any of those SILENTLY drops the option/handshake with no compile error — the contract is pinned
+## by tests/test_dialogue_speaker_contracts.gd.
 ## The children are PROCESS_MODE_ALWAYS so the box / choices / advancing keep running while the tree is paused.
 ##
 ## SETUP: register this script as an autoload named exactly "DialogueManager" (Project Settings →
@@ -314,20 +318,14 @@ func _reveal_menu() -> void:
 		# Bind the BEHAVIOUR predicate, not a comparison against the label text: the label is display-only
 		# (rewording/localizing "Wait here" must never flip recruit into dismiss).
 		_view.add_extra_choice(follow_label, _on_companion_pressed.bind(CompanionRecruiter.following(_speaker)))
-	if _speaker_merchant() != null:
-		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_TRADE, _on_trade_pressed)
-	if _speaker_healer() != null:
-		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_HEAL, _on_heal_pressed)
-	if _speaker_bonfire() != null:
-		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_REST, _on_rest_pressed)
-	if _speaker_levelup() != null:
-		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_LEVEL_UP, _on_level_up_pressed)
-	if _speaker_installer() != null:
-		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_INSTALL, _on_install_pressed)
-	if _speaker_chess() != null:
-		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_PLAY_CHESS, _on_chess_pressed)
-	if _speaker_atm() != null:
-		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_BANK, _on_bank_pressed)
+	# STATION OPTIONS (Trade / Heal / Rest / Level Up / Install / Play Chess / Bank): discovered from the
+	# speaker's direct children via the two-method dialogue-station contract and painted in each component's
+	# DIALOGUE_ORDER (10..70 — the fixed Trade→Bank sequence regardless of authored child order). The labels are
+	# PlayerText consts supplied by the components; press behaviour + re-validation live in _on_station_pressed.
+	# Buttons ride DialogueView.add_extra_choice exactly like the fixed options around them, so the menu-SFX
+	# add_child-before-connect ordering (the no-double rule) is untouched.
+	for entry: Dictionary in _station_options():
+		_view.add_extra_choice(entry.label as String, _on_station_pressed.bind(entry.station as Node))
 	if _speaker_exchange_npc() != null:
 		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_EXCHANGE_GEAR, _on_exchange_pressed)
 	_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_GOODBYE, _on_goodbye_pressed)
@@ -435,26 +433,73 @@ func _resume_from_menu() -> void:
 		return
 	dialogue_resumed.emit()  # mirror of dialogue_suspended; only the successful-resume path reaches here (the vanished path _finish()ed above)
 
-## The "Trade" option (Merchant component): SUSPEND the conversation and open the shop — closing the shop
-## returns you to the dialogue rather than ending it.
-func _on_trade_pressed() -> void:
-	var merchant := _speaker_merchant()
-	var player := _find_player()
-	if merchant != null and is_instance_valid(player):
-		_suspend_for_menu("trade", func() -> void: ShopScreen.open_shop(merchant, player), ShopScreen.closed)
-	else:
-		_finish()
-
-## The speaker NPC's Merchant child (its shop), or null. Shallow scan — it sits as a direct child, like
-## Talkable. DUCK-TYPED (has buy + sell) + returned as a bare Node deliberately: typing it `Merchant` would
-## pull this autoload into a Merchant <-> ShopScreen <-> DialogueManager class-compile cycle.
-func _speaker_merchant() -> Node:
+## The speaker's dialogue-station options, sorted for painting. Discovery mirrors the old per-service resolvers
+## exactly: a SHALLOW scan of the speaker's DIRECT children (stations sit as direct children, like Talkable) for
+## has_method of BOTH contract names — dialogue_station_option + open_dialogue_station, keyed on the pair so a
+## half-implemented component never paints a dead button. Everything stays bare-Node typed with no component
+## class_name references, deliberately: typing a station would pull this autoload into the Merchant <-> ShopScreen
+## <-> DialogueManager class-compile cycle (the Signal / Node ride the returned Dictionary as Variants instead).
+## Note the scan does NOT check `standalone` — the old resolvers never did either, so a standalone=true station
+## on a dialogue NPC still offers its option (the @tool config warning is what polices that authoring mistake).
+## Each entry: {station, label, order, idx}. Sorted by (order, child idx): order is the component's
+## DIALOGUE_ORDER const (10..70 reproduces the pre-contract Trade, Heal, Rest, Level Up, Install, Play Chess,
+## Bank sequence), and the child-index tie-break is MANDATORY — Array.sort_custom is documented UNSTABLE, so
+## equal orders would otherwise paint in a nondeterministic order.
+## DUPLICATE SIBLINGS (paint-time half of the drift the press handler documents): two same-type stations under
+## one speaker each paint their own row now (old per-kind resolvers painted at most one and only ever reached
+## the first). No shipped scene authors duplicates; if a designer does, both become reachable — intended.
+func _station_options() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
 	if _speaker == null or not is_instance_valid(_speaker):
-		return null
-	for c in _speaker.get_children():
-		if c.has_method(&"buy") and c.has_method(&"sell"):
-			return c
-	return null
+		return out
+	var children := _speaker.get_children()
+	for i in children.size():
+		var c := children[i]
+		if not (c.has_method(&"dialogue_station_option") and c.has_method(&"open_dialogue_station")):
+			continue
+		var opt: Dictionary = c.dialogue_station_option()
+		if opt.is_empty():
+			continue  # {} withholds the option (none of the shipped seven ever does; the seam exists for future gating)
+		var label: String = str(opt.get("label", ""))
+		if label.is_empty():
+			push_warning("DialogueManager: station '%s' returned no label from dialogue_station_option() — option skipped" % c.name)
+			continue
+		out.append({"station": c, "label": label, "order": int(opt.get("order", 0)), "idx": i})
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return (a.order as int) < (b.order as int) if a.order != b.order else (a.idx as int) < (b.idx as int))
+	return out
+
+## A station option was pressed. Press-time RE-RESOLUTION (the _speaker_exchange_npc precedent): the bound
+## station must still be alive AND still a direct child of the still-valid speaker, its dialogue_station_option()
+## is re-called (an empty dict NOW → _finish(), mirroring the old null-resolver → _finish()), and a live player
+## must exist. Then either SUSPEND through _suspend_for_menu — the game's single pause-ownership seam, unchanged:
+## same reason strings, same CONNECT_ONE_SHOT closed→_resume_from_menu handshake, same suspended-before-open emit
+## order (a synchronously-refusing screen still sees suspended→resumed in order) — or, when the contract omits
+## `closed` (an act-and-close station: Bonfire), call the open then _finish() with no suspension, exactly as the
+## old _on_rest_pressed did. Every else-branch is _finish(), today's handler shape. One accepted drift vs the old
+## handlers: they re-SCANNED for any matching child at press time, so a station freed mid-menu with a DUPLICATE
+## sibling would have opened the duplicate; the bound node instead _finish()es (degenerate authoring, safer end).
+func _on_station_pressed(station: Node) -> void:
+	if station == null or not is_instance_valid(station) or _speaker == null or not is_instance_valid(_speaker) or station.get_parent() != _speaker:
+		_finish()
+		return
+	var opt: Dictionary = station.dialogue_station_option()
+	var player := _find_player()
+	if opt.is_empty() or not is_instance_valid(player):
+		_finish()
+		return
+	if opt.has("closed"):
+		# The resume Signal travels out of the dict as a Variant and binds to _suspend_for_menu's typed
+		# `closed: Signal` param at runtime — no signature change on the central seam.
+		_suspend_for_menu(str(opt.get("reason", "")), Callable(station, &"open_dialogue_station").bind(player), opt.get("closed"))
+		return
+	if opt.has("reason"):
+		# Contract misuse must be LOUD: a suspender that forgot its resume signal falls to this act-and-close
+		# branch, so the screen would open AND the conversation would _finish() under it (the header's @risk on
+		# stranded suspensions is the sibling failure). Warn so a dev catches it before a designer does.
+		push_warning("DialogueManager: station '%s' supplied `reason` without `closed` — treating it as act-and-close" % station.name)
+	station.open_dialogue_station(player)
+	_finish()
 
 ## The "Exchange Gear" option (any conversational NPC with a backpack): SUSPEND the conversation and open the
 ## two-way transfer screen on their gear — the consensual sibling of pickpocketing, with the NPC's carry
@@ -471,7 +516,7 @@ func _on_exchange_pressed() -> void:
 
 ## The speaker when it's an ALLY actively FOLLOWING the player and carrying a backpack — gear exchange is
 ## a companion privilege (you kit out your crew), not something every stranger in the street offers. Same
-## duck-typed shape as the merchant/healer scans (is_following lives on NPC; an inanimate Talkable speaker
+## duck-typed idiom as the station-contract scan (is_following lives on NPC; an inanimate Talkable speaker
 ## has neither it nor an `inventory`). Re-checked at press time too, so a companion dismissed from this
 ## same menu can't still open the exchange.
 func _speaker_exchange_npc() -> Node:
@@ -481,137 +526,6 @@ func _speaker_exchange_npc() -> Node:
 		return null
 	var inv: Variant = _speaker.get(&"inventory")
 	return _speaker if inv is CharacterInventory else null
-
-## The "Heal" option (shown when the speaker has a Healer component): SUSPEND the conversation and open the
-## heal screen — closing it returns you to the dialogue rather than ending it. HealScreen.open_heal refuses
-## while DialogueManager.is_active(), and suspension makes is_active() false so it can open; the else branch
-## (missing healer / no player) _finish()es instead.
-func _on_heal_pressed() -> void:
-	var healer := _speaker_healer()
-	var player := _find_player()
-	if healer != null and is_instance_valid(player):
-		_suspend_for_menu("heal", func() -> void: HealScreen.open_heal(healer, player), HealScreen.closed)
-	else:
-		_finish()
-
-## The speaker NPC's Healer child (its medic), or null. Shallow scan + DUCK-TYPED (has do_heal + heal_cost),
-## returned as a bare Node like _speaker_merchant — typing it Healer would form a class-compile cycle.
-func _speaker_healer() -> Node:
-	if _speaker == null or not is_instance_valid(_speaker):
-		return null
-	for c in _speaker.get_children():
-		if c.has_method(&"do_heal") and c.has_method(&"heal_cost"):
-			return c
-	return null
-
-## The "Rest" option (shown when the speaker has a Bonfire component): rest at it (full heal + set the
-## respawn point), then close the conversation.
-func _on_rest_pressed() -> void:
-	var bonfire := _speaker_bonfire()
-	var player := _find_player()
-	if bonfire != null and is_instance_valid(player):
-		bonfire.rest(player)
-	_finish()
-
-## The speaker NPC's Bonfire child (its checkpoint), or null. Shallow scan + DUCK-TYPED (has rest), returned
-## as a bare Node like the merchant / healer scans.
-func _speaker_bonfire() -> Node:
-	if _speaker == null or not is_instance_valid(_speaker):
-		return null
-	for c in _speaker.get_children():
-		if c.has_method(&"rest"):
-			return c
-	return null
-
-## The "Level Up" option (shown when the speaker has a LevelUp component): SUSPEND the conversation and open
-## the level-up menu — closing it returns you to the dialogue rather than ending it. LevelUpScreen refuses
-## while DialogueManager.is_active(), and suspension makes is_active() false so it can open; the else branch
-## (missing station / no player) _finish()es instead.
-func _on_level_up_pressed() -> void:
-	var station := _speaker_levelup()
-	var player := _find_player()
-	if station != null and is_instance_valid(player):
-		_suspend_for_menu("level_up", func() -> void: LevelUpScreen.open_level_up(station, player), LevelUpScreen.closed)
-	else:
-		_finish()
-
-## The speaker NPC's LevelUp child (its level-up station), or null. Shallow scan + DUCK-TYPED (has
-## level_up_stat + level_up_cost), a bare Node like the merchant / healer / bonfire scans.
-func _speaker_levelup() -> Node:
-	if _speaker == null or not is_instance_valid(_speaker):
-		return null
-	for c in _speaker.get_children():
-		if c.has_method(&"level_up_stat") and c.has_method(&"level_up_cost"):
-			return c
-	return null
-
-## The "Install" option (ChipInstaller component): SUSPEND the conversation and open the install screen — closing
-## it returns you to the dialogue rather than ending it (mirrors _on_trade_pressed).
-func _on_install_pressed() -> void:
-	var installer := _speaker_installer()
-	var player := _find_player()
-	if installer != null and is_instance_valid(player):
-		_suspend_for_menu("install", func() -> void: ChipInstallScreen.open_install(installer, player), ChipInstallScreen.closed)
-	else:
-		_finish()
-
-## The speaker NPC's ChipInstaller child (its upgrade mechanic), or null. Shallow scan + DUCK-TYPED (has
-## install_carried + install_fee), a bare Node like the merchant / healer scans — typing it ChipInstaller would
-## pull this autoload into a ChipInstaller <-> ChipInstallScreen <-> DialogueManager class-compile cycle.
-func _speaker_installer() -> Node:
-	if _speaker == null or not is_instance_valid(_speaker):
-		return null
-	for c in _speaker.get_children():
-		if c.has_method(&"install_carried") and c.has_method(&"install_fee"):
-			return c
-	return null
-
-## The "Play Chess" option (ChessMatch component): SUSPEND the conversation and open the blindfold-chess board —
-## closing the match returns you to the dialogue rather than ending it (mirrors _on_install_pressed).
-func _on_chess_pressed() -> void:
-	var match_node := _speaker_chess()
-	var player := _find_player()
-	if match_node != null and is_instance_valid(player):
-		_suspend_for_menu("chess", func() -> void: ChessScreen.open_match(match_node, player), ChessScreen.closed)
-	else:
-		_finish()
-
-## The speaker NPC's ChessMatch child (its blindfold-chess opponent), or null. Shallow scan + DUCK-TYPED (has
-## ai_search_depth + display_opponent_name), a bare Node like the merchant / healer scans — typing it ChessMatch
-## would pull this autoload into a ChessMatch <-> ChessScreen <-> DialogueManager class-compile cycle.
-func _speaker_chess() -> Node:
-	if _speaker == null or not is_instance_valid(_speaker):
-		return null
-	for c in _speaker.get_children():
-		if c.has_method(&"ai_search_depth") and c.has_method(&"display_opponent_name"):
-			return c
-	return null
-
-## The "Bank" option (Atm component): SUSPEND the conversation and open the ledger terminal — closing it returns
-## you to the dialogue rather than ending it (mirrors _on_chess_pressed). ONE option covers both directions and
-## both signs of the account: the terminal's own screen owns deposit / withdraw / pay-down, so a teller NPC needs
-## no extra buttons here. AtmScreen.open_atm refuses while DialogueManager.is_active(), and suspension makes
-## is_active() false so it can open; every one of its refuse paths emits `closed`, which is what keeps the
-## suspension from stranding (the @risk at the top of this file).
-func _on_bank_pressed() -> void:
-	var atm := _speaker_atm()
-	var player := _find_player()
-	if atm != null and is_instance_valid(player):
-		_suspend_for_menu("bank", func() -> void: AtmScreen.open_atm(atm, player), AtmScreen.closed)
-	else:
-		_finish()
-
-## The speaker NPC's Atm child (its ledger terminal), or null. Shallow scan + DUCK-TYPED (has deposit +
-## withdraw), a bare Node like the merchant / healer scans — typing it Atm would pull this autoload into an
-## Atm <-> AtmScreen <-> DialogueManager class-compile cycle (the same cycle AtmScreen itself dodges by holding
-## its terminal as a plain Node).
-func _speaker_atm() -> Node:
-	if _speaker == null or not is_instance_valid(_speaker):
-		return null
-	for c in _speaker.get_children():
-		if c.has_method(&"deposit") and c.has_method(&"withdraw"):
-			return c
-	return null
 
 ## The real human player (NOT a companion — companions join the &"Player" group for targeting but are NPCs).
 func _find_player() -> Player:
