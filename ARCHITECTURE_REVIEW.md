@@ -232,9 +232,31 @@ The 2026-07-11 review remediation shipped (GUT-verified, commit `aa0fdd0`), but
 these in-tree behaviours were never play-verified. Drive `game.tscn` (New Game),
 check each once, then delete this section.
 
-- [ ] New Game → ~~NO abilities beyond implants bought on credit (empty cart = zero;
-  since 2026-08-05 creation's Begin leads to the purchase screen)~~ **covered by tests**
-  (`test_new_game_contract.gd:25-29`, `test_implant_choice.gd:209-216,257-262`);
+> **Measured 2026-08-14 — do not re-run this analysis.** The 13 bullets below pack **45 distinct
+> sub-checks**. Every one was searched against `tests/`, and every "already covered" answer was then
+> adversarially re-checked by opening the cited assertion. The result:
+>
+> | | |
+> | --- | --- |
+> | Genuinely closed by a test | **6** |
+> | Partially covered (inputs pinned, outcome not) | **10** |
+> | Genuinely need a driven game | **29** |
+>
+> **24 of the 45 first-pass answers were downgraded on re-check** — the common failure was treating a
+> source-string grep, or an assertion on an off-tree helper, as coverage of live per-frame behaviour.
+> So `REMEDIATION_PLAN.md` 5.3's "verifying is cheap" is **wrong**: this list is mostly not
+> automatable, largely because `CLAUDE.md` forbids running `Player._ready()` / `NPC._ready()` under
+> GUT by design. Timing, audio mixing, visual fades and input feel are the bulk of what remains.
+> **Play the game to close these.** Where a sub-check IS covered, it is annotated inline below.
+
+- [ ] New Game → NO abilities beyond implants bought on credit. **Inputs pinned, outcome not:**
+  `test_new_game_contract.gd:25-26` and `test_implant_choice.gd:261-262` assert
+  `starting_unlocks` and `GameState.unlocks` are empty, but ⚠ **`starting_unlocks` is not the
+  only grant surface** — `ability_manager.gd:6` says an editor-placed `Ability` child of the
+  Player is itself the grant ("presence + `enabled` IS the grant"), and nothing pins that none
+  exists. `Player.tscn` has none today; a designer dropping one in leaves every assertion green
+  while the run boots with a free ability. ~~since 2026-08-05 creation's Begin leads to the
+  purchase screen~~ **covered** (`test_implant_choice.gd:209-216`, on a real StartMenu instance);
   ~~the bill starts the wallet NEGATIVE~~ **STALE — do not look for this.** The ledger
   refactor moved the bill off `money` onto the one signed `GameState.account`;
   `test_implant_choice.gd:249-252` pins that the wallet is untouched and stays ≥ 0.
