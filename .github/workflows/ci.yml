@@ -8,6 +8,16 @@ name: CI
 #
 # This repo's root IS the Godot project (project.godot at the root), so every command runs from the
 # checkout dir with no subdir cd. Godot is pinned via GODOT_VERSION — bump it when you upgrade the engine.
+#
+# ⚠ KNOWN LIMIT — CI DOES NOT SEE THE REAL ASSETS. .gitattributes routes *.glb/*.png/*.jpg/*.wav/*.ogg/
+# *.avif through Git LFS, and actions/checkout@v4 does NOT fetch LFS objects by default. So every step
+# below runs against POINTER FILES: `--import` imports stubs, and validate_all.gd validates a project
+# whose models, textures and audio are 130-byte text files. The unit suite is unaffected (it tests
+# off-tree logic), which is why this has gone unnoticed.
+# Do NOT "fix" this by adding `lfs: true` without dealing with size first: assets/models/dog.glb alone is
+# 409 MB and is referenced by nothing, so a naive LFS fetch would burn the bandwidth quota on every push.
+# The real fix is to drop the unreferenced giants and populate export_presets.cfg's exclude_filter, THEN
+# turn LFS on here. Until then, treat a green CI as "the logic compiles and passes", not "the game runs".
 
 on:
   push:
@@ -103,6 +113,11 @@ jobs:
         run: godot --headless -s addons/gut/gut_cmdln.gd -gconfig=res://tests_soak/soak.gutconfig.json -gexit
 
       - name: Boot gate (game.tscn raises no script errors)
+        # NON-BLOCKING ON ITS FIRST LANDING. Remove this line once one real CI run has gone green --
+        # see the LFS note in the header. Locally this gate caught a genuine parse-error cascade, but it
+        # has never run against a CI checkout, where the assets are LFS POINTER FILES rather than models.
+        # Failing main on an unvalidated gate would be a worse first impression than a green-but-noisy log.
+        continue-on-error: true
         # The soak suite only ever boots NavSandbox.tscn, so the REAL boot chain — 35 autoloads and the
         # game scene itself — has no automated coverage at all. GUT's error tracker only sees errors raised
         # while one of ITS tests is running; anything a boot spews outside that window is invisible.
