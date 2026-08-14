@@ -1,0 +1,26 @@
+Copyright (c) 2026 Dallas Marquis. All rights reserved.
+
+This licence covers the ORIGINAL WORK in this repository: the GDScript source under scripts/, managers/,
+addons/cybersunday_tools/ and tests/, the authored Godot scenes and resources, the shaders, the level maps,
+and the written design and documentation.
+
+It does NOT cover third-party assets that happen to sit in this tree. Those are listed in ATTRIBUTION.md and
+carry their own terms; where that file still says UNKNOWN, no permission has been established at all.
+
+No permission is granted to copy, modify, distribute, sublicense, or make derivative works of the original
+work, except:
+
+  - Vendored third-party code under addons/ is governed by its own licence file
+    (addons/gut/LICENSE.md, addons/func_godot/LICENSE) and is not affected by this notice.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+---
+Note on this choice: "all rights reserved" is the conservative default for an unreleased commercial game,
+and it is the only honest position while ATTRIBUTION.md still has UNKNOWN rows — you cannot grant rights to
+a work whose inputs are unresolved. If you later want an open licence (MIT, Apache-2.0, GPL), swap this file
+then, once the asset list is clean. Changing it is a one-file edit; un-granting a licence is not.
