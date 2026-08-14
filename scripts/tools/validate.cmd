@@ -7,4 +7,9 @@ REM   validate.cmd res://scenes/levels/MyLevel.tscn   -> audit specific level(s)
 REM The "-- %*" forwards trailing args as Godot USER args (OS.get_cmdline_user_args()).
 pushd "%~dp0\..\.."
 godot --headless -s scripts/tools/validate_all.gd -- %*
+REM A .cmd exits with the status of its LAST command, so a bare trailing `popd` (which always succeeds)
+REM silently swallows a failing validation and reports success — which defeats the point of "CI-gateable".
+REM Capture first, restore the directory, re-raise.
+set "_rc=%ERRORLEVEL%"
 popd
+exit /b %_rc%

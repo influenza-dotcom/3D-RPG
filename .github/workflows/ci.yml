@@ -1,10 +1,10 @@
 name: CI
 
 # Headless Godot CI for the RPG. Two gates run on every push to main + every PR:
-#   1. the fast GUT suite (res://tests) — the ~1800 unit/integration tests
+#   1. the fast GUT suite (res://tests) — ~3700 unit/integration tests
 #   2. validate_all.gd — content/wiring/navmesh validation (exit 1 on real breakage)
-# The heavy SOAK suite (real wandering NPCs, ~15-20s) is a SEPARATE manual job — run it from the
-# Actions tab via "Run workflow", not on every push (it's slow and grows with the level set).
+# A third gate, the SOAK job (real wandering NPCs + a game.tscn boot check), also runs on every push: it
+# is the only automated thing that drives the real runtime, and it finishes in well under a minute.
 #
 # This repo's root IS the Godot project (project.godot at the root), so every command runs from the
 # checkout dir with no subdir cd. Godot is pinned via GODOT_VERSION — bump it when you upgrade the engine.
@@ -13,7 +13,7 @@ on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch:  # enables the manual "Run workflow" button (the soak job keys off this)
+  workflow_dispatch:  # enables the manual "Run workflow" button — both jobs also run on push
 
 # A newer push to the same ref cancels the in-flight run — saves Actions minutes on a solo project.
 concurrency:
@@ -21,7 +21,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GODOT_VERSION: "4.6.3"
+  # Keep the MAJOR.MINOR in step with project.godot's `config/features`. The "Engine pin matches
+  # project.godot" step below fails the build if they drift, because a CI that silently tests a different
+  # engine than the game ships on reports engine breakage as a code bug.
+  GODOT_VERSION: "4.7.1"
 
 jobs:
   test-and-validate:
@@ -29,6 +32,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Engine pin matches project.godot
+        # config/features carries the engine major.minor the project is authored against. If the CI pin
+        # drifts from it, every job silently tests an engine the game does not ship on — and the resulting
+        # breakage reads as a code bug, which is the expensive way to find out. Cheap to check, so check.
+        run: |
+          set -euo pipefail
+          declared="$(sed -n 's/^config\/features=PackedStringArray("\([0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' project.godot)"
+          if [ -z "$declared" ]; then
+            echo "::error::could not read config/features out of project.godot"
+            exit 1
+          fi
+          if [ "$declared" != "${GODOT_VERSION%.*}" ]; then
+            echo "::error::CI pins Godot ${GODOT_VERSION} but project.godot declares ${declared} — bump GODOT_VERSION in this file"
+            exit 1
+          fi
+          echo "project.godot declares ${declared}; CI pins ${GODOT_VERSION}. OK."
 
       - name: Install Godot ${{ env.GODOT_VERSION }} (headless)
         run: |
@@ -58,9 +78,8 @@ jobs:
         run: godot --headless -s scripts/tools/validate_all.gd
 
   soak:
-    name: Soak (manual only)
+    name: Soak (real runtime)
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'  # never on push/PR — run it on demand from the Actions tab
     steps:
       - uses: actions/checkout@v4
 
@@ -82,3 +101,23 @@ jobs:
         # -gconfig points at the soak-only config so the default res://.gutconfig.json (res://tests) is NOT
         # loaded — only res://tests_soak runs.
         run: godot --headless -s addons/gut/gut_cmdln.gd -gconfig=res://tests_soak/soak.gutconfig.json -gexit
+
+      - name: Boot gate (game.tscn raises no script errors)
+        # The soak suite only ever boots NavSandbox.tscn, so the REAL boot chain — 35 autoloads and the
+        # game scene itself — has no automated coverage at all. GUT's error tracker only sees errors raised
+        # while one of ITS tests is running; anything a boot spews outside that window is invisible.
+        # Two traps this step is shaped around:
+        #   - `--quit-after` exits 0 no matter what the engine printed, so the exit code proves nothing.
+        #   - Godot writes script errors to STDERR, so the log must be captured with 2>&1 before grepping.
+        # The grep IS the gate. Match ONLY "SCRIPT ERROR" — it already prefixes the parse/compile failures
+        # that matter ("SCRIPT ERROR: Parse Error: ..."), while broader patterns like "Cannot open file"
+        # also fire on benign missing-import noise and would make this gate flaky on a fresh checkout.
+        run: |
+          set -uo pipefail
+          godot --headless scenes/game.tscn --quit-after 300 > boot.log 2>&1 || true
+          tail -n 40 boot.log
+          if grep -q "SCRIPT ERROR" boot.log; then
+            echo "::error::game.tscn boot produced script errors — see the log above"
+            exit 1
+          fi
+          echo "game.tscn booted clean."

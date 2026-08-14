@@ -7,4 +7,8 @@ pushd "%~dp0\.."
 REM -gconfig points at the soak-only config so the default res://.gutconfig.json (dirs=res://tests) is NOT loaded
 REM — otherwise GUT would run the whole fast suite too.
 godot --headless -s addons/gut/gut_cmdln.gd -gconfig=res://tests_soak/soak.gutconfig.json -gexit
+REM A .cmd exits with the status of its LAST command, so a bare trailing `popd` (which always succeeds)
+REM silently swallows a failing soak and reports success. Capture first, restore the directory, re-raise.
+set "_rc=%ERRORLEVEL%"
 popd
+exit /b %_rc%
