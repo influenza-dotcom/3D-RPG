@@ -232,11 +232,16 @@ The 2026-07-11 review remediation shipped (GUT-verified, commit `aa0fdd0`), but
 these in-tree behaviours were never play-verified. Drive `game.tscn` (New Game),
 check each once, then delete this section.
 
-- [ ] New Game → NO abilities beyond implants bought on credit (empty cart = zero;
-  since 2026-08-05 creation's Begin leads to the purchase screen, and the bill
-  starts the wallet NEGATIVE — check the HUD reads a signed balance); install a
-  chip → it grants. Die under RELOAD_CHECKPOINT_FRESH → respawn keeps the run
-  (stats/unlocks/money, debt included).
+- [ ] New Game → ~~NO abilities beyond implants bought on credit (empty cart = zero;
+  since 2026-08-05 creation's Begin leads to the purchase screen)~~ **covered by tests**
+  (`test_new_game_contract.gd:25-29`, `test_implant_choice.gd:209-216,257-262`);
+  ~~the bill starts the wallet NEGATIVE~~ **STALE — do not look for this.** The ledger
+  refactor moved the bill off `money` onto the one signed `GameState.account`;
+  `test_implant_choice.gd:249-252` pins that the wallet is untouched and stays ≥ 0.
+  **Still needs a human:** check the HUD's OWED row actually paints a signed balance
+  (`ui.gd:1175-1187 _stamp_owed_row` has zero test coverage). ~~install a chip → it
+  grants~~ **covered** (`test_chip_install.gd:119-129`). Die under
+  RELOAD_CHECKPOINT_FRESH → respawn keeps the run (stats/unlocks/money, debt included).
 - [ ] Loot a corpse whose coin tile overflows a full grid → coin shows in the
   overflow strip (click to take); corpse drains and the ragdoll fades.
 - [ ] Guard has you in sight-range but unnoticed: throw a decoy → it
