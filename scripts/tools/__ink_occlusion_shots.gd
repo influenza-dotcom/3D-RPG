@@ -34,6 +34,7 @@ var _shot := 0
 var _wait := 0
 var _dir := "user://ink_occlusion_shots"
 var _ink: MeshInstance3D = null
+var _hidden: MeshInstance3D = null  ## the actor behind the wall; unmasked for the reference shot
 
 func _process(_delta: float) -> bool:
 	_frame += 1
@@ -59,6 +60,14 @@ func _process(_delta: float) -> bool:
 			_ink.set(&"occlusion_aware_mask", true)
 		2:
 			_shoot("1_occlusion_ON")
+			# THE REFERENCE: take the hidden actor OFF the mask layer entirely, so the mask has nothing to
+			# say about it and the world's ink comes out whole. That is what the frame SHOULD look like, and
+			# comparing the occlusion-on shot against it is the only measurement that can prove the fix is
+			# complete rather than merely better — a partial fix (the rim ring, the "O shape") shows up here
+			# as a residual difference and nowhere else.
+			_hidden.layers = 1
+		3:
+			_shoot("2_reference_actor_unmasked")
 		_:
 			print("[ink-shots] wrote both frames to %s" % _dir)
 			quit()
@@ -117,7 +126,8 @@ func _build() -> void:
 
 	# HIDDEN: dead behind the wall, 3 m further out, right where those step lines cross the frame.
 	# Nothing of it can be seen — but its silhouette used to bite a person-shaped hole in every one.
-	root.add_child(_actor(Vector3(0.0, 0.0, -9.0), Vector3(3.0, 3.4, 0.6), Color.BLACK))
+	_hidden = _actor(Vector3(0.0, 0.0, -9.0), Vector3(3.0, 3.4, 0.6), Color.BLACK)
+	root.add_child(_hidden)
 	# VISIBLE control, out in the open in FRONT of the wall — its rim must stay clean and un-doubled in
 	# BOTH shots. This is the half of the contract the fix must not break.
 	root.add_child(_actor(Vector3(-3.4, -0.6, -4.0), Vector3(1.2, 2.6, 0.6), Color.BLACK))

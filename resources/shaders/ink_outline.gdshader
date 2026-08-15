@@ -166,6 +166,13 @@ uniform float mask_depth_far = 300.0;
 // LOWER = catches thinner cover, at the risk of an actor at grazing contact with the floor flickering
 // back to a doubled line. HIGHER = safer, but leaves a halo around actors tucked close behind cover.
 uniform float mask_occlusion_bias = 0.012;
+// How far (in pixels OF THIS BUFFER) to look for the body's depth when a covered pixel has none of its
+// own — the hull rim, which writes no depth at all. See searched_depth(). Generous is CHEAP here: unlike
+// spreading depth in the resolve pass, widening this search cannot widen the mask's coverage, so it
+// costs taps and nothing else. Must out-reach the widest rim on screen: the rim is `outline_width * 2`
+// pixels of the MASK viewport, which at the shipped half-resolution mask is `outline_width * 4` of this
+// one, so the project's widest authored rim (2.0) spans 8 px here.
+uniform float mask_rim_search_px = 12.0;
 
 // Stand-in depth for "nothing was drawn here" (sky / cleared far plane). Big enough that any real
 // geometry beside it registers as a discontinuity, finite so it can never poison the arithmetic.
@@ -217,34 +224,78 @@ float encode_actor_depth(float d, float near_m, float far_m) {
 	return 1.0 - clamp(log(clamp(d, lo, hi) / lo) / log(hi / lo), 0.0, 1.0);
 }
 
-// How strongly the actor mask suppresses ink at `uv`, given the depth of what the main pass actually
-// draws there. This is the mask's plain coverage — EXCEPT where the mask can prove the actor is hidden
-// behind that geometry, in which case it stops claiming the pixel entirely.
-//
-// EVERY early return here hands back the FULL coverage, i.e. the pre-fix behaviour. That direction is
-// deliberate and load-bearing: suppressing ink around a visible actor costs at most a pixel of line,
-// while failing to suppress it puts a second black outline around an actor the hull already outlines —
-// the complaint this whole system exists to answer. So the occlusion test only ever REMOVES suppression
-// where it has positive evidence, and anything it cannot vouch for is left exactly as it was.
-float actor_coverage(vec2 uv, float world_depth) {
-	float cover = texture(actor_mask, uv).a;
-	if (cover <= 0.0 || !use_mask_occlusion) {
-		return cover;
-	}
+// The mask's encoded depth at `uv` if the resolve pass claimed that pixel, else -1. It writes its marker
+// (B) and full alpha only where it had real depth to offer, so this is the "can I trust this?" test.
+float claimed_depth(vec2 uv) {
 	vec4 m = texture(actor_mask_data, uv);
-	// Did the resolve pass CLAIM this pixel? It writes its marker (B) and full alpha only where it had
-	// real depth to offer; where it stayed silent the mask still holds whatever the actors rendered.
-	// Unclaimed covers the cases the resolve pass structurally cannot see — a prop faded out through
-	// GeometryInstance3D.transparency (transparent, so it writes no depth, and its alpha is under 1 by
-	// definition), or a rim inflated wider than the resolve's dilation.
-	if (m.b < 0.5 || m.a < 0.99) {
-		return cover;
+	return (m.b >= 0.5 && m.a >= 0.99) ? m.g : -1.0;
+}
+
+// ⭐⭐ THE RIM RING, and why this search exists. The hull (outline.gdshader) is a TRANSPARENT material —
+// it assigns ALPHA in a branch, and Godot flags a material `uses_alpha` from that assignment EXISTING
+// rather than from the branch being taken — so it writes NO depth, and neither the depth texture nor the
+// screen texture (both PRE-transparent snapshots) can see it. An actor's inflated rim therefore reaches
+// the mask's COVERAGE but not its DEPTH: a ring of pixels that say "somebody is here" and cannot say how
+// far. Left unresolved those pixels keep their ink suppressed while the body's is released, so a hidden
+// actor stops punching a solid hole in the world's lines and starts punching an OUTLINE of itself. The
+// user's words, and the whole reason for this function: "it's like an O shape around it."
+//
+// So when a pixel has no depth of its own, look OUTWARD for the body it belongs to. Doing it here rather
+// than in the resolve pass is the point: the resolve pass could only spread depth by ALSO spreading
+// COVERAGE — and coverage is suppressed ink, i.e. a halo — whereas this reads a wider neighbourhood and
+// changes nothing about how much of the frame the mask claims. The radius can be generous for free.
+//
+// MAX, not min or nearest-found: the largest encoding is the NEAREST actor, which biases every ambiguous
+// pixel toward "still visible, keep suppressing". That is the safe direction — see actor_visibility.
+// `r` is the search radius already converted to UV units by the caller — VIEWPORT_SIZE is a fragment()
+// built-in and is NOT reachable from a helper function in Godot's shading language (the whole shader
+// fails to compile with "Unknown identifier in expression", which headless never notices).
+float searched_depth(vec2 uv, vec2 r) {
+	float best = claimed_depth(uv);
+	if (best >= 0.0) {
+		return best;
+	}
+	// Two rings rather than one: the inner ring catches thin rims, the outer catches the widest authored
+	// one, and neither has to know which is in play. Written out longhand — a shading-language slip is
+	// invisible to the test suite (headless never compiles a shader), so this file prefers the boring
+	// spelling.
+	for (int i = 0; i < 2; i++) {
+		vec2 s = (i == 0) ? r : r * 0.5;
+		vec2 d = s * 0.70710678;
+		best = max(best, claimed_depth(uv + vec2(s.x, 0.0)));
+		best = max(best, claimed_depth(uv - vec2(s.x, 0.0)));
+		best = max(best, claimed_depth(uv + vec2(0.0, s.y)));
+		best = max(best, claimed_depth(uv - vec2(0.0, s.y)));
+		best = max(best, claimed_depth(uv + vec2(d.x, d.y)));
+		best = max(best, claimed_depth(uv + vec2(-d.x, d.y)));
+		best = max(best, claimed_depth(uv + vec2(d.x, -d.y)));
+		best = max(best, claimed_depth(uv + vec2(-d.x, -d.y)));
+	}
+	return best;
+}
+
+// 1.0 = the mask's actors still suppress ink here; 0.0 = the world in front of them is what the player is
+// actually looking at, so the mask has no business speaking for this pixel.
+//
+// EVERY early return hands back 1.0, i.e. the pre-fix behaviour. That direction is deliberate and
+// load-bearing: suppressing ink around a visible actor costs at most a pixel of line, while failing to
+// suppress it puts a second black outline around an actor the hull already outlines — the complaint this
+// whole system exists to answer. The test only ever REMOVES suppression where it has positive evidence,
+// and anything it cannot vouch for is left exactly as it was (a prop faded out through
+// GeometryInstance3D.transparency, an actor past the encoding window, a frame before the mask is built).
+float actor_visibility(vec2 uv, float world_depth, vec2 search_r) {
+	if (!use_mask_occlusion) {
+		return 1.0;
+	}
+	float e_actor = searched_depth(uv, search_r);
+	if (e_actor < 0.0) {
+		return 1.0;
 	}
 	// Both sides in encoded space, so the tolerance is a fraction of the distance rather than a fixed
 	// number of metres — the mask sits at half this buffer's resolution, and a metre of slack at 40 m is
 	// the same sampling wobble as a centimetre at arm's length.
 	float e_world = encode_actor_depth(world_depth, mask_depth_near, mask_depth_far);
-	return (e_world - m.g > mask_occlusion_bias) ? 0.0 : cover;
+	return (e_world - e_actor > mask_occlusion_bias) ? 0.0 : 1.0;
 }
 
 void fragment() {
@@ -275,9 +326,11 @@ void fragment() {
 	//   `near` — is a visible actor's edge within HALF A LINE of this pixel? Then the line the edge
 	//     detect is about to draw would straddle that actor's silhouette, which is the doubled outline
 	//     the hull already owns. Fade it out.
-	// Each tap is tested against the depth AT THAT TAP, not at the centre — an actor's silhouette is
-	// exactly where the two disagree, so borrowing the centre's depth would mis-judge the one pixel that
-	// matters most.
+	// The occlusion verdict is computed ONCE, at the centre, and applied to all five taps. They sit within
+	// half a line-width of each other — under two pixels — and "is this actor behind the world?" cannot
+	// meaningfully change across that, while the outward rim search below is much too expensive to run
+	// five times. Evaluating it at the centre works even where the centre has no coverage: the search
+	// finds the neighbouring actor and answers for it.
 	// `near` is the STRONGEST of the four half-width taps, not their sum, and the offsets are the LINE's
 	// half-width `o` — never the mask's texel size. The first version did both of those wrong (summed
 	// five taps against a 0.05 threshold, offset by a whole mask texel), which scaled the suppression
@@ -288,10 +341,11 @@ void fragment() {
 	float actor_here = 0.0;
 	float actor_near = 0.0;
 	if (use_actor_mask) {
-		actor_here = actor_coverage(SCREEN_UV, d_c);
-		actor_near = max(actor_coverage(tl, d_tl), actor_coverage(tr, d_tr));
-		actor_near = max(actor_near, max(actor_coverage(bl, d_bl), actor_coverage(br, d_br)));
-		actor_near = max(actor_near, actor_here);
+		float vis = actor_visibility(SCREEN_UV, d_c, max(mask_rim_search_px, 0.0) / VIEWPORT_SIZE);
+		actor_here = texture(actor_mask, SCREEN_UV).a * vis;
+		actor_near = max(texture(actor_mask, tl).a, texture(actor_mask, tr).a);
+		actor_near = max(actor_near, max(texture(actor_mask, bl).a, texture(actor_mask, br).a));
+		actor_near = max(actor_near, texture(actor_mask, SCREEN_UV).a) * vis;
 		if (actor_here > 0.25 || actor_near >= 0.5) {
 			discard;
 		}

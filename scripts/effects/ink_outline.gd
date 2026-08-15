@@ -6,7 +6,7 @@ extends MeshInstance3D
 ## @risk Actor exclusion rests on the ACTOR_INK_MASK_LAYER stamp riding the overlay walks (Character._apply_overlay_to_meshes / NpcOutline.apply_part_overlays / Throwable._setup_overlay_chain / body_part_gib strip) — a new actor path that skips those walks gets inked over its hull rim (the doubled-outline complaint) with no error anywhere.
 ## @risk The mask viewport SHARES the main World3D, so anything visual parented inside it is registered with the MAIN scenario too and the main camera would draw it; the resolve quad only stays invisible because it sits on MASK_INTERNAL_LAYER, a render bit above the 20 a default cull_mask carries. Give it an ordinary layer and it paints its raw depth encoding over the whole screen.
 ## @risk The mask's depth channel is a NUMBER encoded in an 8-bit sRGB colour target — it survives only because the resolve shader pre-compensates for that transfer and the mask camera's Environment is pinned to the LINEAR tonemapper. A filmic tonemap, an exposure change, glow or colour adjustments on that Environment all corrupt it silently, and the symptom is actors flickering back to a doubled outline.
-## @risk The hull rim (outline.gdshader) is a TRANSPARENT material and writes NO depth, so the mask's depth stops at the actor's opaque body and mask_rim_dilate_px is what carries it out over the rim. Raise an actor's outline_width past half that and its rim loses trustworthy depth — it degrades to the old always-suppress behaviour rather than breaking, but the halo comes back on it.
+## @risk The hull rim (outline.gdshader) is a TRANSPARENT material and writes NO depth, so the mask's depth stops at the actor's opaque body and the ink shader has to SEARCH outward (mask_rim_search_px) for it. Author an outline_width whose rim out-reaches that search and the rim degrades to the old always-suppress behaviour — not a break, but the hidden actor's ring-shaped halo comes back on it.
 ## @risk The quad is culled by its real AABB before the vertex shader can fill the screen, so losing extra_cull_margin makes the whole effect vanish at certain camera angles rather than fail loudly.
 ## @risk The mask is a SECOND scene render — it costs a full extra pass over every masked actor/prop. It is deliberately stripped to coverage-only (no AA/TAA/shadow atlas, coarse LOD); re-enabling any of that, or letting it inherit the project's 3D supersample again, doubles the frame cost of a level full of props with no visual gain.
 ## @risk The ink's suppression window must be sized off width_px, NEVER off the mask's resolution — scaling it off the mask texel erases world ink several px out from every actor, a distance-invariant bare halo you can spot people by. Nothing resolution-derived may reach the shader; mask_resolution below 1.0 widens that band and is the one saving here that is not free.
@@ -250,18 +250,23 @@ const MASK_MIN_SIZE := 2
 ## LOWER catches thinner cover, at the risk of an actor in grazing contact with a wall or floor flickering
 ## back to a doubled line. HIGHER is safer and leaves a halo around actors tucked tight behind cover.
 @export_range(0.002, 0.2, 0.001) var mask_occlusion_bias: float = 0.012
-## ⭐ How far (in pixels OF THE MASK VIEWPORT) the resolve pass spreads valid depth outward from an actor's
-## opaque body. This exists because the hull rim writes NO depth — outline.gdshader assigns ALPHA inside a
-## branch, which puts the whole material in the transparent pass — so an actor's rim ring has coverage but
-## nothing to compare, and would keep its ink suppressed while the body's was released. An occluded NPC
-## would then stop punching a solid hole in the world's lines and start punching a person-shaped OUTLINE,
-## which is worse than what we set out to fix.
-## The rim is `outline_width * 2` pixels wide (the hull divides its offset by VIEWPORT_SIZE, so it is a
-## constant pixel count of whichever viewport draws it, independent of mask_resolution), and the widest
-## rim authored in this project is 2.0 — hence 4.0 here. It must stay >= the widest authored rim; past
-## that it is pure cost, because the spread widens the mask's COVERAGE by the same amount and coverage is
-## suppressed ink. test_ink_outline.gd pins it against the authored widths.
-@export_range(0.0, 16.0, 0.5) var mask_rim_dilate_px: float = 4.0
+## ⭐ How far (in pixels of the ink's own 3D buffer) to look for the body's depth when a covered pixel has
+## none of its own. That is the hull RIM: outline.gdshader assigns ALPHA inside a branch, which flags the
+## whole material `uses_alpha` and puts it in the TRANSPARENT pass, and transparent materials write no
+## depth — so an actor's rim reaches the mask's COVERAGE but not its DEPTH. Left unresolved, that ring
+## keeps its ink suppressed while the body's is released, and a hidden actor punches an OUTLINE of itself
+## through the world's lines instead of a solid hole ("an O shape around it").
+##
+## ⭐⭐ WHY THE SEARCH LIVES IN THE INK SHADER AND NOT IN THE RESOLVE PASS. The resolve pass could only
+## spread depth outward by ALSO spreading the mask's alpha — and the mask's alpha is coverage, and coverage
+## is suppressed ink. Every pixel of ring it repaired bought a pixel of bare halo around every VISIBLE
+## actor, which is the artefact this pass has already been burned by twice. Searching here reads a wider
+## neighbourhood and claims not one extra pixel of the frame, so the radius is generous for free.
+##
+## Must out-reach the widest rim ON SCREEN. The rim is `outline_width * 2` pixels of the MASK viewport,
+## and the mask renders at half this buffer's resolution, so the project's widest authored rim (2.0)
+## spans 8 px here. 12 leaves margin for a designer who nudges one up.
+@export_range(0.0, 48.0, 1.0) var mask_rim_search_px: float = 12.0
 
 ## ⭐⭐ TRIED AND FULLY REMOVED 2026-08-13 — a CPU occluded-actor cull (raycast camera->actor, then strip
 ## ACTOR_INK_MASK_LAYER off a hidden actor's meshes) meant to kill the soft-wallhack tell above. It did not
@@ -408,7 +413,6 @@ func _build_resolve_quad() -> MeshInstance3D:
 	_mask_resolve_material.shader = MASK_RESOLVE_SHADER
 	_mask_resolve_material.set_shader_parameter("depth_near", MASK_DEPTH_NEAR)
 	_mask_resolve_material.set_shader_parameter("depth_far", MASK_DEPTH_FAR)
-	_mask_resolve_material.set_shader_parameter("dilate_px", mask_rim_dilate_px)
 	quad.material_override = _mask_resolve_material
 	return quad
 
@@ -461,10 +465,8 @@ func _sync_mask_camera() -> void:
 		_mask_viewport.size = want
 	if _mask_resolve_material != null:
 		# camera_far is what tells the resolve pass that an untouched depth texel means EMPTY rather than
-		# "geometry at the far plane" — it mirrors the camera every frame because ADS/scope work can move
-		# it. dilate_px rides along so the rim knob is live-authorable like everything else here.
+		# "geometry at the far plane" — it mirrors the camera every frame because ADS/scope work can move it.
 		_mask_resolve_material.set_shader_parameter("camera_far", _mask_camera.far)
-		_mask_resolve_material.set_shader_parameter("dilate_px", mask_rim_dilate_px)
 
 func _main_viewport_size() -> Vector2i:
 	var vp := get_viewport()
@@ -588,6 +590,7 @@ func _params(t: float) -> Dictionary:
 	scaled["mask_depth_near"] = MASK_DEPTH_NEAR
 	scaled["mask_depth_far"] = MASK_DEPTH_FAR
 	scaled["mask_occlusion_bias"] = mask_occlusion_bias
+	scaled["mask_rim_search_px"] = mask_rim_search_px
 	# NOTE: the mask's resolution is deliberately NOT pushed. The shader sizes its suppression window off
 	# width_px alone (filter_linear makes the mask a sub-texel coverage field), because scaling that
 	# window off the mask's texel size is exactly what put a halo around every actor. See the exclusion

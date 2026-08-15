@@ -370,22 +370,41 @@ func test_both_shaders_encode_depth_identically() -> void:
 	assert_eq(ink.get_string(2).strip_edges(), resolve.get_string(2).strip_edges(),
 		"the two encode_actor_depth BODIES must match exactly — one encodes what the other decodes")
 
-func test_rim_dilation_out_reaches_every_authored_outline_width() -> void:
-	# ⭐ The hull is a TRANSPARENT material and writes no depth (measured on 4.7.1), so an actor's rim ring
-	# has coverage but nothing to compare — mask_rim_dilate_px is what carries the body's depth out over
-	# it. The rim is `outline_width * 2` pixels of the mask viewport (the hull divides its offset by
-	# VIEWPORT_SIZE, so it is a fixed pixel count whatever the resolution). Fall short of the widest
-	# authored rim and an occluded actor stops punching a solid hole in the world's lines and starts
-	# punching a person-shaped OUTLINE instead — worse than the bug this was written to fix.
+func test_the_ink_shader_searches_outward_for_the_hull_rims_depth() -> void:
+	# ⭐⭐ THE ONE THAT KILLS THE "O SHAPE". outline.gdshader assigns ALPHA inside a branch, and Godot flags
+	# a material `uses_alpha` from that assignment EXISTING rather than from the branch being taken — so
+	# the rim renders in the TRANSPARENT pass and writes no depth. Measured on 4.7.1: a box wearing the
+	# real hull covered 23 px of mask ALPHA but only 19 px of mask DEPTH. That 4 px ring has coverage and
+	# nothing to compare, so without a search the ink keeps suppressing it and a hidden actor punches an
+	# OUTLINE of itself through the world's lines instead of a solid hole.
+	# The search MUST live in the ink shader, not the resolve pass: the resolve pass can only widen the
+	# mask's depth by widening its ALPHA, and the mask's alpha is coverage, and coverage is suppressed ink
+	# — so repairing the ring there buys a bare halo around every VISIBLE actor instead (measured: a faint
+	# doubled line along the top edge of the control actor). Searching here claims no extra pixels.
+	var src := _read(SHADER_PATH)
+	assert_true(src.contains("float searched_depth("),
+		"ink_outline.gdshader must search outward for the rim's depth, or hidden actors keep a ring-shaped halo")
+	assert_true(_shader_uniform_names().has("mask_rim_search_px"),
+		"the search radius must be a uniform the script pushes, not a baked-in constant")
+	# And the resolve pass must NOT have grown its own spreading back.
+	var resolve := _read(RESOLVE_SHADER_PATH)
+	assert_false(resolve.contains("dilate_px"),
+		"actor_mask_resolve.gdshader must not spread depth outward — it can only do so by widening COVERAGE, which is a halo")
+
+func test_rim_search_out_reaches_every_authored_outline_width() -> void:
+	# The rim is `outline_width * 2` pixels of the MASK viewport, and the mask renders at half the ink
+	# buffer's resolution, so a rim spans `outline_width * 4` pixels of the buffer the search works in.
+	# Fall short of the widest authored rim and its outermost ring loses trustworthy depth — it degrades
+	# to always-suppress rather than breaking, but the hidden actor's O-shaped halo comes back on it.
 	var ink = load(INK_PATH).new()
 	var npc_data = load("res://scripts/npc/npc_data.gd").new()
 	var npc = load("res://scripts/npc/npc.gd").new()      # off-tree: _ready never runs
 	var ragdoll = load("res://scripts/components/ragdoll.gd").new()
 	var widest: float = maxf(maxf(float(npc_data.outline_width), float(npc.outline_width)),
 		float(ragdoll.outline_width))
-	assert_gte(ink.mask_rim_dilate_px, widest * 2.0,
-		"mask_rim_dilate_px (%.1f) must be at least the widest authored rim in pixels (outline_width %.1f x 2 = %.1f)"
-			% [ink.mask_rim_dilate_px, widest, widest * 2.0])
+	assert_gte(ink.mask_rim_search_px, widest * 4.0,
+		"mask_rim_search_px (%.1f) must out-reach the widest authored rim (outline_width %.1f x 4 = %.1f px of the ink buffer)"
+			% [ink.mask_rim_search_px, widest, widest * 4.0])
 	npc_data = null      # NpcData is a Resource — release by dropping the ref
 	ragdoll.free()       # ragdoll.gd extends Node3D, so it needs freeing, not nulling
 	npc.free()

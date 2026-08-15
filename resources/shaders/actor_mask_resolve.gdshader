@@ -6,13 +6,13 @@ render_mode unshaded, blend_mix, depth_draw_never, depth_test_disabled, cull_dis
 // so the ink pass can tell a VISIBLE actor from one standing behind a wall.
 //
 // WHAT IT WRITES, and only where it has something to say:
-//     ALPHA = 1 where an actor's opaque geometry is at (or within dilate_px of) this pixel, else 0.
+//     ALPHA = 1 where an actor's OPAQUE geometry is at this pixel, else 0.
 //     G     = that actor's distance, log-encoded (see encode_actor_depth).
 //     B     = 1, the "this pixel's depth was authored by the resolve pass" marker.
 // Where it has no depth it writes ALPHA 0, which under blend_mix leaves the mask completely
 // untouched — the actors' own render passes straight through, exactly as before this pass existed.
-// So the mask's alpha stays what it always was (a coverage field, now unioned with the dilated
-// opaque coverage) and ink_outline.gdshader still reads coverage from `.a`.
+// So the mask's alpha stays exactly what it always was — a coverage field — and ink_outline.gdshader
+// still reads coverage from `.a`. This pass adds information; it never takes a pixel away.
 //
 // WHY IT EXISTS: the mask pass renders ONLY actors, so nothing in it can occlude them — an NPC
 // behind a wall still stamped its full silhouette into the mask and bit that shape out of every ink
@@ -36,16 +36,21 @@ render_mode unshaded, blend_mix, depth_draw_never, depth_test_disabled, cull_dis
 // The mask camera's Environment must stay on the LINEAR tonemapper at exposure 1 / white 1 for the
 // same reason — InkOutline._build_mask_environment pins that; a filmic curve would eat the encoding.
 //
-// ⭐⭐ THE HULL WRITES NO DEPTH, so the rim needs dilate_px. outline.gdshader assigns ALPHA inside a
-// branch, which flags the whole material `uses_alpha` and puts it in the TRANSPARENT pass — and
-// transparent materials write neither depth nor normals. Probed: a box wearing the real hull covers
-// 23 px of mask ALPHA but only 19 px of mask DEPTH. So an actor's opaque body has depth and its
-// inflated rim ring does not, and without dilate_px that ring would be left saying "an actor is here,
-// no idea how far", read as untrustworthy, and keep its ink suppressed — an occluded NPC would stop
-// punching a solid hole in the world's lines and start punching a person-shaped OUTLINE instead,
-// which is worse. Spreading the nearest depth outward by the rim's width hands the ring the body it
-// belongs to. (This is also why nothing here reads hint_screen_texture for coverage: that copy is
-// taken BEFORE the transparent pass, so it cannot see the rim either.)
+// ⭐⭐ THE HULL WRITES NO DEPTH, WHICH LEAVES ITS RIM WITHOUT ANY.
+// outline.gdshader assigns ALPHA inside a branch, which flags the whole material `uses_alpha` (Godot
+// decides that from the assignment EXISTING, not from the branch being taken) and puts the rim in the
+// TRANSPARENT pass, where it writes neither depth nor normals. Probed: a box wearing the real hull
+// covered 23 px of mask ALPHA but only 19 px of mask DEPTH. That 4 px ring had coverage but nothing to
+// compare, and a pixel this pass cannot vouch for is one the ink keeps suppressing — so a hidden actor
+// stopped punching a solid hole in the world's lines and started punching an OUTLINE of itself. The
+// user's words: "it's like an O shape around it."
+// THAT RING IS NOT THIS PASS'S TO FIX. Spreading depth outward from here was tried and removed: this
+// shader can only widen the mask's DEPTH by also widening its ALPHA, and the mask's alpha is coverage,
+// and coverage is suppressed ink — so every pixel of ring it repaired bought a pixel of halo around every
+// VISIBLE actor. ink_outline.gdshader searches outward instead (see searched_depth there), which reads a
+// wider neighbourhood without claiming one extra pixel of the frame.
+// (The same blind spot is why nothing here reads hint_screen_texture for coverage: that copy is taken
+// BEFORE the transparent pass too, so it cannot see the rim either.)
 //
 // ⭐ A CLEARED DEPTH BUFFER IS NOT "FAR AWAY", IT IS NOTHING. Unprojecting an untouched depth texel
 // yields the camera's far plane — a perfectly finite 4000 m — so a naive `d < SKY_DEPTH` test called
@@ -63,15 +68,6 @@ uniform float depth_far = 300.0;
 // The mask camera's own far plane, in metres — the distance a pixel nothing was drawn into reports.
 // Pushed live because the mask camera mirrors the main camera's far.
 uniform float camera_far = 4000.0;
-
-// Radius, in pixels OF THE MASK VIEWPORT, that valid depth is spread outward so the depthless hull rim
-// inherits the body it wraps (see THE HULL WRITES NO DEPTH above). The rim is `outline_width * 2`
-// pixels wide — the hull divides its offset by VIEWPORT_SIZE, so that is a constant number of pixels
-// of whatever viewport draws it, independent of the mask's resolution — and the widest rim authored in
-// this project is 2.0 (NpcData/NPC/ragdoll), i.e. 4 px. Keep this at least that wide, and no wider
-// than it needs to be: the spread also widens the mask's COVERAGE by the same amount, and coverage is
-// suppressed ink. test_ink_outline.gd pins it against the authored rim widths.
-uniform float dilate_px = 4.0;
 
 // Stand-in for "nothing was drawn here" — matches ink_outline.gdshader's SKY_DEPTH.
 const float SKY_DEPTH = 1.0e6;
@@ -109,27 +105,6 @@ float to_target(float v) {
 	return (c <= 0.04045) ? (c / 12.92) : pow((c + 0.055) / 1.055, 2.4);
 }
 
-// Nearest depth on a ring of 8 taps at `radius` UV units around `uv`. MIN, never an average: an
-// average across a silhouette invents a depth that belongs to no surface, while nearest biases every
-// ambiguous pixel toward "this actor is visible" — the safe direction, because guessing that way
-// costs nothing and guessing "occluded" wrongly puts a second black line around an actor, which is
-// the exact bug this whole system exists to prevent.
-// Written out longhand rather than looped over a const array on purpose: a shading-language syntax
-// slip cannot be caught by the suite (headless never compiles a shader), so this file prefers the
-// boring spelling.
-float ring_min(vec2 uv, vec2 radius, float d, mat4 inv_proj, float far_m) {
-	d = min(d, linear_depth(uv + vec2(radius.x, 0.0), inv_proj, far_m));
-	d = min(d, linear_depth(uv - vec2(radius.x, 0.0), inv_proj, far_m));
-	d = min(d, linear_depth(uv + vec2(0.0, radius.y), inv_proj, far_m));
-	d = min(d, linear_depth(uv - vec2(0.0, radius.y), inv_proj, far_m));
-	vec2 diag = radius * 0.70710678;
-	d = min(d, linear_depth(uv + vec2(diag.x, diag.y), inv_proj, far_m));
-	d = min(d, linear_depth(uv + vec2(-diag.x, diag.y), inv_proj, far_m));
-	d = min(d, linear_depth(uv + vec2(diag.x, -diag.y), inv_proj, far_m));
-	d = min(d, linear_depth(uv + vec2(-diag.x, -diag.y), inv_proj, far_m));
-	return d;
-}
-
 void vertex() {
 	// Clip space written straight from the unit QuadMesh's corners — the ink quad's idiom, so the quad
 	// covers exactly the viewport whatever transform, FOV or aspect it is handed, which leaves its node
@@ -141,10 +116,7 @@ void vertex() {
 
 void fragment() {
 	float far_m = max(camera_far, 0.001) * 0.999;  // 0.1% short of the far plane = "nothing was drawn"
-	vec2 radius = max(dilate_px, 0.0) / VIEWPORT_SIZE;
 	float d = linear_depth(SCREEN_UV, INV_PROJECTION_MATRIX, far_m);
-	d = ring_min(SCREEN_UV, radius, d, INV_PROJECTION_MATRIX, far_m);
-	d = ring_min(SCREEN_UV, radius * 0.5, d, INV_PROJECTION_MATRIX, far_m);
 	// An actor past the encoding window is left alone rather than encoded as "infinitely far": beyond
 	// it the ink has faded out anyway, and a saturated encoding would be indistinguishable from a wall.
 	float valid = (d < min(far_m, depth_far)) ? 1.0 : 0.0;
