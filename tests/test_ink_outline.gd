@@ -410,6 +410,23 @@ func test_rim_search_out_reaches_every_authored_outline_width() -> void:
 	npc.free()
 	ink.free()
 
+func test_depth_is_packed_and_unpacked_across_the_same_two_channels() -> void:
+	# ⭐⭐ The depth is a 16-bit value split over two 8-bit colour channels — G coarse, R fine — because one
+	# channel spends a step every ~3% of the distance, and that alone meant an NPC had to stand a full
+	# METRE behind a wall at 6 m before the ink noticed (measured; 0.5 m went undetected). The pack and the
+	# unpack live in different files and MUST agree: swap the two channels, or change the 255 on one side
+	# only, and every comparison silently answers with a garbage depth. Nothing else can catch that —
+	# headless never compiles a shader, and a wrong depth looks like an intermittent halo, not an error.
+	var resolve := _read(RESOLVE_SHADER_PATH)
+	assert_true(resolve.contains("floor(e * 255.0) / 255.0"),
+		"the resolve pass must put the COARSE byte in its own channel, exactly representable so it round-trips whole")
+	assert_true(resolve.contains("fract(e * 255.0)"),
+		"the resolve pass must put the remainder in the FINE channel")
+	assert_true(resolve.contains("ALBEDO = vec3(to_target(fine), to_target(coarse), 1.0)"),
+		"the pack order is R = fine, G = coarse — the ink shader's decode assumes exactly this")
+	assert_true(_read(SHADER_PATH).contains("(m.g + m.r / 255.0)"),
+		"the ink shader must decode G + R/255 — the mirror of the resolve pass's split")
+
 func test_shader_declares_the_occlusion_uniforms() -> void:
 	var uniforms := _shader_uniform_names()
 	assert_true(uniforms.has("actor_mask_data"),

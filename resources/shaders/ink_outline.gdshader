@@ -160,12 +160,16 @@ uniform bool use_mask_occlusion = true;
 uniform float mask_depth_near = 0.1;
 uniform float mask_depth_far = 300.0;
 // How much NEARER (in encoded units, so a fixed FRACTION of the depth) the world has to be before the
-// actor behind it stops suppressing ink. One 8-bit step of the encoding is ~3% of the depth, so the
-// shipped 0.012 is about four steps — comfortably past quantisation and past the half-resolution mask's
-// sampling wobble, while still catching anything more than ~4% of its own distance behind a wall.
-// LOWER = catches thinner cover, at the risk of an actor at grazing contact with the floor flickering
-// back to a doubled line. HIGHER = safer, but leaves a halo around actors tucked close behind cover.
-uniform float mask_occlusion_bias = 0.012;
+// actor behind it stops suppressing ink. This used to be the thing that limited the whole test: at one
+// 8-bit channel a step was ~3% of the distance, the bias had to clear a few of them, and an NPC needed
+// to stand a FULL METRE behind a wall at 6 m before anything happened — which is why hidden NPCs still
+// showed faintly indoors. The depth is now packed across two channels (~0.01% precision) and the tight
+// gather in searched_depth() cancels the sampling noise, so what is left for this to cover is real
+// geometry. Measured with a gap sweep at 0.003: an actor is recognised as hidden with as little as 2 cm
+// of clear air behind cover, at 6 m out.
+// LOWER buys nothing measurable now — the sweep is flat below this. HIGHER goes back to letting actors
+// tucked close behind cover keep their halo.
+uniform float mask_occlusion_bias = 0.003;
 // How far (in pixels OF THIS BUFFER) to look for the body's depth when a covered pixel has none of its
 // own — the hull rim, which writes no depth at all. See searched_depth(). Generous is CHEAP here: unlike
 // spreading depth in the resolve pass, widening this search cannot widen the mask's coverage, so it
@@ -226,9 +230,22 @@ float encode_actor_depth(float d, float near_m, float far_m) {
 
 // The mask's encoded depth at `uv` if the resolve pass claimed that pixel, else -1. It writes its marker
 // (B) and full alpha only where it had real depth to offer, so this is the "can I trust this?" test.
+// ⭐ The depth is packed across TWO bytes — G coarse, R fine — because one byte spends a step every ~3%
+// of the distance, and that alone kept an NPC standing less than a metre behind a wall from registering
+// as hidden. KEEP THIS DECODE IN STEP WITH actor_mask_resolve.gdshader's split.
 float claimed_depth(vec2 uv) {
 	vec4 m = texture(actor_mask_data, uv);
-	return (m.b >= 0.5 && m.a >= 0.99) ? m.g : -1.0;
+	return (m.b >= 0.5 && m.a >= 0.99) ? (m.g + m.r / 255.0) : -1.0;
+}
+
+// Nearest claimed depth on a ring of 8 taps at `s` around `uv`, or -1 if none of them is claimed.
+float ring_max(vec2 uv, vec2 s) {
+	vec2 d = s * 0.70710678;
+	float best = max(claimed_depth(uv + vec2(s.x, 0.0)), claimed_depth(uv - vec2(s.x, 0.0)));
+	best = max(best, max(claimed_depth(uv + vec2(0.0, s.y)), claimed_depth(uv - vec2(0.0, s.y))));
+	best = max(best, max(claimed_depth(uv + vec2(d.x, d.y)), claimed_depth(uv + vec2(-d.x, d.y))));
+	best = max(best, max(claimed_depth(uv + vec2(d.x, -d.y)), claimed_depth(uv + vec2(-d.x, -d.y))));
+	return best;
 }
 
 // ⭐⭐ THE RIM RING, and why this search exists. The hull (outline.gdshader) is a TRANSPARENT material —
@@ -250,27 +267,24 @@ float claimed_depth(vec2 uv) {
 // `r` is the search radius already converted to UV units by the caller — VIEWPORT_SIZE is a fragment()
 // built-in and is NOT reachable from a helper function in Godot's shading language (the whole shader
 // fails to compile with "Unknown identifier in expression", which headless never notices).
-float searched_depth(vec2 uv, vec2 r) {
-	float best = claimed_depth(uv);
+float searched_depth(vec2 uv, vec2 px) {
+	// ⭐ THE TIGHT GATHER, and it is what lets the tolerance below be small. The mask renders at HALF this
+	// buffer's resolution and its depth is point-sampled, so the texel covering a pixel can describe a
+	// spot a little further round a shoulder or an arm than the pixel itself — and reading an actor as
+	// slightly FARTHER than it is looks exactly like being occluded, which would put a second outline
+	// back on a plainly visible actor. Taking the NEAREST claimed depth within a couple of pixels removes
+	// that failure direction entirely, so what remains for the tolerance to cover is real geometry, not
+	// sampling noise.
+	float best = max(claimed_depth(uv), ring_max(uv, px * 2.0));
 	if (best >= 0.0) {
 		return best;
 	}
-	// Two rings rather than one: the inner ring catches thin rims, the outer catches the widest authored
-	// one, and neither has to know which is in play. Written out longhand — a shading-language slip is
-	// invisible to the test suite (headless never compiles a shader), so this file prefers the boring
-	// spelling.
-	for (int i = 0; i < 2; i++) {
-		vec2 s = (i == 0) ? r : r * 0.5;
-		vec2 d = s * 0.70710678;
-		best = max(best, claimed_depth(uv + vec2(s.x, 0.0)));
-		best = max(best, claimed_depth(uv - vec2(s.x, 0.0)));
-		best = max(best, claimed_depth(uv + vec2(0.0, s.y)));
-		best = max(best, claimed_depth(uv - vec2(0.0, s.y)));
-		best = max(best, claimed_depth(uv + vec2(d.x, d.y)));
-		best = max(best, claimed_depth(uv + vec2(-d.x, d.y)));
-		best = max(best, claimed_depth(uv + vec2(d.x, -d.y)));
-		best = max(best, claimed_depth(uv + vec2(-d.x, -d.y)));
-	}
+	// Nothing claimed nearby: this is the hull RIM, which writes no depth at all (see above). Look
+	// further out for the body it wraps. Two rings — the inner catches thin rims, the outer the widest
+	// authored one — and neither has to know which is in play.
+	vec2 r = px * max(mask_rim_search_px, 0.0);
+	best = max(best, ring_max(uv, r));
+	best = max(best, ring_max(uv, r * 0.5));
 	return best;
 }
 
@@ -283,11 +297,11 @@ float searched_depth(vec2 uv, vec2 r) {
 // whole system exists to answer. The test only ever REMOVES suppression where it has positive evidence,
 // and anything it cannot vouch for is left exactly as it was (a prop faded out through
 // GeometryInstance3D.transparency, an actor past the encoding window, a frame before the mask is built).
-float actor_visibility(vec2 uv, float world_depth, vec2 search_r) {
+float actor_visibility(vec2 uv, float world_depth, vec2 px) {
 	if (!use_mask_occlusion) {
 		return 1.0;
 	}
-	float e_actor = searched_depth(uv, search_r);
+	float e_actor = searched_depth(uv, px);
 	if (e_actor < 0.0) {
 		return 1.0;
 	}
@@ -341,20 +355,23 @@ void fragment() {
 	float actor_here = 0.0;
 	float actor_near = 0.0;
 	if (use_actor_mask) {
-		float vis = actor_visibility(SCREEN_UV, d_c, max(mask_rim_search_px, 0.0) / VIEWPORT_SIZE);
-		actor_here = texture(actor_mask, SCREEN_UV).a * vis;
-		actor_near = max(texture(actor_mask, tl).a, texture(actor_mask, tr).a);
-		actor_near = max(actor_near, max(texture(actor_mask, bl).a, texture(actor_mask, br).a));
-		actor_near = max(actor_near, texture(actor_mask, SCREEN_UV).a) * vis;
-		if (actor_here > 0.25 || actor_near >= 0.5) {
-			discard;
+		// Coverage first, and cheaply — five linear taps. The occlusion test below costs a small search,
+		// and on a frame that is mostly world there is nothing for it to answer about, so it runs only
+		// where the mask actually claims something.
+		float c_here = texture(actor_mask, SCREEN_UV).a;
+		float c_near = max(texture(actor_mask, tl).a, texture(actor_mask, tr).a);
+		c_near = max(c_near, max(texture(actor_mask, bl).a, texture(actor_mask, br).a));
+		c_near = max(c_near, c_here);
+		if (c_near > 0.0) {
+			float vis = actor_visibility(SCREEN_UV, d_c, 1.0 / VIEWPORT_SIZE);
+			actor_here = c_here * vis;
+			actor_near = c_near * vis;
+			if (actor_here > 0.25 || actor_near >= 0.5) {
+				discard;
+			}
 		}
 	}
 
-	// Reference depth = the NEAREST of the five taps, not the centre one. Two reasons, both visible:
-	// a sky pixel next to a rooftop would otherwise be thresholded (and faded) as if it were 4 km away
-	// and the roofline would only get inked on its inner half; and a near object against a far wall
-	// would be judged by the wall's depth instead of its own.
 	float d_ref = min(d_c, min(min(d_tl, d_tr), min(d_bl, d_br)));
 
 	// Grazing relief, from the centre normal. A missing normal (sky, or no prepass) means no relief

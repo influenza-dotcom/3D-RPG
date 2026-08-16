@@ -126,7 +126,9 @@ const MASK_INTERNAL_LAYER: int = 1 << 20
 ## here so the encoder and the comparer cannot drift apart. Deliberately the game's own scale rather than
 ## the camera's near/far: a 0.05..4000 window would spend a third of its precision on distances no actor
 ## is ever at, and the encoding's resolution is what sets how thin a wall can be before an actor behind it
-## stops registering as hidden. Across this window one 8-bit step is ~3% of the depth.
+## stops registering as hidden. The resolve pass packs this window across TWO channels (~0.01% of the
+## distance per step); on one channel it was ~3%, which alone kept anyone under a metre behind cover from
+## registering.
 const MASK_DEPTH_NEAR: float = 0.1
 const MASK_DEPTH_FAR: float = 300.0
 ## Frustum culling runs on the node's REAL AABB (a 1x1 quad) long before the vertex shader gets to
@@ -244,12 +246,14 @@ const MASK_MIN_SIZE := 2
 ## comparison ever misbehaves, and the A/B for judging it.
 @export var occlusion_aware_mask: bool = true
 ## How much NEARER the world has to be, as a FRACTION of the distance, before the actor behind it stops
-## suppressing ink — expressed in the depth encoding's own units, where one 8-bit step is ~3%. 0.012 is
-## about four steps: past quantisation and past the half-resolution mask's sampling wobble, while still
-## catching anyone more than ~4% of their own distance behind cover (40 cm at 10 m).
-## LOWER catches thinner cover, at the risk of an actor in grazing contact with a wall or floor flickering
-## back to a doubled line. HIGHER is safer and leaves a halo around actors tucked tight behind cover.
-@export_range(0.002, 0.2, 0.001) var mask_occlusion_bias: float = 0.012
+## suppressing ink, in the depth encoding's own units. This was the ceiling on the whole test until the
+## depth went to two channels: at one 8-bit channel a step was ~3% of the distance, so an NPC had to stand
+## a FULL METRE behind a wall at 6 m before anything happened, and hidden NPCs kept showing faintly
+## indoors. With ~0.01% precision and the tight gather cancelling sampling noise, a gap sweep
+## (`scripts/tools/__ink_gap_probe.gd`) puts detection at **2 cm of clear air at 6 m** with this value.
+## LOWER buys nothing measurable — the sweep is flat below here. HIGHER goes back to leaving a halo
+## around actors tucked close behind cover.
+@export_range(0.0005, 0.2, 0.0005) var mask_occlusion_bias: float = 0.003
 ## ⭐ How far (in pixels of the ink's own 3D buffer) to look for the body's depth when a covered pixel has
 ## none of its own. That is the hull RIM: outline.gdshader assigns ALPHA inside a branch, which flags the
 ## whole material `uses_alpha` and puts it in the TRANSPARENT pass, and transparent materials write no

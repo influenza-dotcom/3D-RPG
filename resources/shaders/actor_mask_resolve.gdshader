@@ -7,7 +7,8 @@ render_mode unshaded, blend_mix, depth_draw_never, depth_test_disabled, cull_dis
 //
 // WHAT IT WRITES, and only where it has something to say:
 //     ALPHA = 1 where an actor's OPAQUE geometry is at this pixel, else 0.
-//     G     = that actor's distance, log-encoded (see encode_actor_depth).
+//     G + R = that actor's distance, log-encoded across SIXTEEN bits (see encode_actor_depth and the
+//             SPLIT note below) — G is the coarse byte, R the fine one.
 //     B     = 1, the "this pixel's depth was authored by the resolve pass" marker.
 // Where it has no depth it writes ALPHA 0, which under blend_mix leaves the mask completely
 // untouched — the actors' own render passes straight through, exactly as before this pass existed.
@@ -51,6 +52,18 @@ render_mode unshaded, blend_mix, depth_draw_never, depth_test_disabled, cull_dis
 // wider neighbourhood without claiming one extra pixel of the frame.
 // (The same blind spot is why nothing here reads hint_screen_texture for coverage: that copy is taken
 // BEFORE the transparent pass too, so it cannot see the rim either.)
+//
+// ⭐⭐ WHY THE DEPTH IS SPLIT ACROSS TWO CHANNELS. One 8-bit channel spends a step every ~3% of the
+// distance, and the ink pass has to allow a couple of steps of slack before it dares call an actor
+// hidden — so at 6 m an NPC had to stand a FULL METRE behind a wall before it noticed (measured with a
+// gap sweep; 0.5 m went undetected). Indoors that is the common case, and it is why hidden NPCs still
+// showed faintly. No bias setting fixes it: the precision was the ceiling.
+// The split is the standard fixed-point pack — G takes floor(e * 255)/255 and R the remainder — and it
+// works here only because the write path is EXACT: to_target() inverts the target's sRGB transfer, so a
+// value lands as round(v * 255)/255 and nothing else. G is already a multiple of 1/255 and survives
+// verbatim; R's own rounding costs at most half a step OF R, i.e. 1/130050 of the window. That takes the
+// depth from ~3% precision to ~0.01%, and the ink pass's tolerance can then be set by real sampling
+// noise instead of by quantisation. Decode is `G + R / 255.0` — keep it in step with ink_outline.gdshader.
 //
 // ⭐ A CLEARED DEPTH BUFFER IS NOT "FAR AWAY", IT IS NOTHING. Unprojecting an untouched depth texel
 // yields the camera's far plane — a perfectly finite 4000 m — so a naive `d < SKY_DEPTH` test called
@@ -121,7 +134,10 @@ void fragment() {
 	// it the ink has faded out anyway, and a saturated encoding would be indistinguishable from a wall.
 	float valid = (d < min(far_m, depth_far)) ? 1.0 : 0.0;
 
-	ALBEDO = vec3(0.0, to_target(encode_actor_depth(d, depth_near, depth_far)), 1.0);
+	float e = encode_actor_depth(d, depth_near, depth_far);
+	float coarse = floor(e * 255.0) / 255.0;   // exactly representable in 8 bits, so it round-trips whole
+	float fine = fract(e * 255.0);             // the remainder, given its own byte
+	ALBEDO = vec3(to_target(fine), to_target(coarse), 1.0);
 	// THE WHOLE POINT: 0 here means blend_mix leaves this pixel of the mask exactly as the actors
 	// rendered it — no depth to offer, no opinion given, and the ink pass falls back to suppressing
 	// as it always did. 1 claims the pixel, so G and B above are the resolve pass's own values.
