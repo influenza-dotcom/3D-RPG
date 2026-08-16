@@ -235,6 +235,90 @@ func test_throwable_overlay_chain_stamps_the_mask_layer() -> void:
 		"_setup_overlay_chain must register prop meshes with the ink actor mask")
 	t.free()
 
+# --- The fifth stamper: BodyModelSwap.actor_outline (2026-08-15) ------------------------------------
+# Added for the PLAYER'S OWN first-person body, which sat outside this contract entirely: Character's walk
+# is scoped to `mesh`, and the Player's `mesh` is the GunMesh, so the legs/torso/body-arms rig — a sibling
+# subtree childed straight to the Player — was never reached by any of the four walks above. It wore no
+# hull and carried no mask bit, so the ink pass edge-detected the player's own chest like a wall while
+# every NPC beside them wore a rim. ⭐The rim and the bit are ONE operation here, which is why this lives
+# on the rig instead of in a caller: BodyModelSwap re-instances every part on any model reassignment and
+# RESETS their layers, so a stamp applied from outside is silently lost on the next appearance swap.
+
+func test_body_swap_actor_outline_stamps_the_mask_layer_and_the_rim() -> void:
+	var swap := BodyModelSwap.new()
+	var mi := MeshInstance3D.new()
+	mi.mesh = BoxMesh.new()
+	mi.layers = 1
+	swap._body = mi          # stand in for an instanced part, so character_parts() reports it
+	swap.add_child(mi)       # (off-tree: _ready never runs, so nothing rebuilds over the top of it)
+	swap.actor_outline = true
+	assert_true((mi.layers & InkOutlineScript.ACTOR_INK_MASK_LAYER) != 0,
+		"actor_outline must register the rig's parts with the ink actor mask")
+	assert_true((mi.layers & 1) != 0, "the stamp is an OR — the mesh must keep its original layers")
+	assert_not_null(mi.material_overlay,
+		"...and it must wear the hull rim in the same operation — a masked mesh with no rim has NO outline at all")
+	swap.free()
+
+func test_body_swap_actor_outline_strips_what_it_owns_and_nothing_else() -> void:
+	# The @tool half: un-ticking the box in the editor has to visibly remove the rim. It may only clear an
+	# overlay it recognises as its own (the bms_actor_rim meta), never one another system put there.
+	var swap := BodyModelSwap.new()
+	var mine := MeshInstance3D.new()
+	mine.mesh = BoxMesh.new()
+	swap._body = mine
+	swap.add_child(mine)
+	swap.actor_outline = true
+	swap.actor_outline = false
+	assert_eq(mine.layers & InkOutlineScript.ACTOR_INK_MASK_LAYER, 0,
+		"turning actor_outline off must give the mask bit back")
+	assert_null(mine.material_overlay, "...and clear the rim it stamped")
+	var foreign := ShaderMaterial.new()  # somebody else's overlay (a talk highlight, an NPC's combat rim)
+	mine.material_overlay = foreign
+	swap.actor_outline = false
+	assert_eq(mine.material_overlay, foreign,
+		"the strip must leave an overlay it does not own alone — it keys on the bms_actor_rim meta, not on the slot")
+	swap.free()
+
+func test_body_swap_rim_fades_with_the_part_it_wraps() -> void:
+	# ⭐A rim that stays opaque while its geometry dithers out leaves a solid black silhouette of your own chest
+	# hanging under the camera through the whole crouch hide and look-down fade — strictly worse than either
+	# extreme. The alpha is DRIVEN from the same see-through the part itself takes.
+	var swap := BodyModelSwap.new()
+	swap.actor_outline = true
+	swap.body_transparency = 0.0
+	assert_almost_eq(swap._outline_color_for("torso").a, 1.0, 0.0001,
+		"a solid chest wears a solid rim")
+	swap.body_transparency = 1.0
+	assert_almost_eq(swap._outline_color_for("torso").a, 0.0, 0.0001,
+		"a fully dissolved chest must take its outline with it")
+	assert_almost_eq(swap._outline_color_for("leg_l").a, 1.0, 0.0001,
+		"...without touching the legs, which have no fade channel of their own")
+	swap.arm_transparency = 1.0
+	assert_almost_eq(swap._outline_color_for("arm_l").a, 0.0, 0.0001,
+		"the arms follow arm_transparency, their own third curve (they also hide when the view model owns your hands)")
+	swap.free()
+
+# --- The sixth stamper: ExplosionMesh — and the first that is not an actor (2026-08-16) -------------
+# The explosion / bullet-impact flash is an OPAQUE emissive sphere: its fallback StandardMaterial3D has
+# transparency DISABLED (the alpha pulse only bites on a transparent authored base like bulletmat), so it
+# writes depth exactly like a wall and the edge detect ringed every blast and hit spark in black. No walk
+# above could ever have reached it — an Explosion is added under the SCENE ROOT, not under any actor's
+# `mesh`. ⭐The half-set failure reads DIFFERENTLY here than it does on an actor: a flash that carries the
+# bit with no rim is asking for no line at all, and for something meant to read as light that is the right
+# answer, not the "masked mesh with no outline" bug the player's own body had.
+
+func test_explosion_flash_stamps_the_mask_layer() -> void:
+	# Off-tree, the file's idiom: _ready stamps BEFORE its mesh-less early return and touches no autoload.
+	var flash = load("res://scripts/components/explosion_mesh.gd").new()
+	flash.layers = 3  # what both explosion_area .tscn files author on the flash node
+	flash._ready()
+	assert_true((flash.layers & InkOutlineScript.ACTOR_INK_MASK_LAYER) != 0,
+		"ExplosionMesh must register the flash with the ink actor mask — a blast is light, not geometry to outline")
+	assert_eq(flash.layers & 3, 3, "the stamp is an OR — the flash keeps the layers its scene authored")
+	assert_false(flash.has_outline,
+		"...and it defaults to no rim, so the mask leaves an explosion with no outline at all (the muzzle flash opts in)")
+	flash.free()
+
 func test_hull_rest_rims_are_black_again() -> void:
 	# With the mask in place the classic black rims are CORRECT (they cannot double with the ink).
 	# History guard: they briefly shipped transparent as a doubling dodge — that regressed the actor
@@ -426,6 +510,28 @@ func test_depth_is_packed_and_unpacked_across_the_same_two_channels() -> void:
 		"the pack order is R = fine, G = coarse — the ink shader's decode assumes exactly this")
 	assert_true(_read(SHADER_PATH).contains("(m.g + m.r / 255.0)"),
 		"the ink shader must decode G + R/255 — the mirror of the resolve pass's split")
+
+func test_the_hull_rim_is_the_same_width_in_both_passes() -> void:
+	# ⭐⭐ outline.gdshader runs in TWO viewports — the frame the player sees (the 3D buffer) and InkOutline's
+	# actor mask, which renders at HALF that. Sizing the extrusion by VIEWPORT_SIZE therefore drew the rim
+	# TWICE as wide in the mask, so the mask claimed a silhouette fatter than the visible one and the ink
+	# stopped short of every actor. Measured: suppression reached 4 px past a visible actor whose rim was
+	# 2 px; pinning the reference brought it to 2 px, exactly the rim. That 2 px of bare band hugged every
+	# actor at every distance and traced each limb of a humanoid — the "scattered around the body" report.
+	# Put VIEWPORT_SIZE back in the offset and the band returns, silently.
+	var src := _read("res://resources/shaders/outline.gdshader")
+	assert_true(src.contains("uniform float rim_reference_width"),
+		"outline.gdshader must size its extrusion off a fixed reference width, not the viewport it happens to be drawn in")
+	# Plain string work rather than a RegEx: a backslash class in a GDScript literal has to be double-
+	# escaped, and getting that wrong is a PARSE error that takes the whole file out of the suite.
+	var line := ""
+	for raw in src.split("\n"):
+		if raw.strip_edges().begins_with("vec2 offset ="):
+			line = raw
+			break
+	assert_ne(line, "", "outline.gdshader must still compute a vec2 offset for the hull extrusion")
+	assert_false(line.contains("VIEWPORT_SIZE"),
+		"the extrusion must not divide by VIEWPORT_SIZE — that is what made the mask's rim twice the visible one")
 
 func test_shader_declares_the_occlusion_uniforms() -> void:
 	var uniforms := _shader_uniform_names()

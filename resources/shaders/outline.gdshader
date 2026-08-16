@@ -16,15 +16,31 @@ render_mode cull_front, unshaded;
 
 uniform vec4 outline_color : source_color;
 uniform float outline_width = 1.0;
+// ⭐⭐ THE RIM MUST BE THE SAME WIDTH IN EVERY VIEWPORT THAT DRAWS IT, and dividing by VIEWPORT_SIZE is
+// not that. This shader runs in TWO passes: the frame the player sees (the 3D buffer, 1584x888 here) and
+// InkOutline's actor mask, which renders at HALF that (792x444) because a coverage mask has no business
+// costing four times the pixels. Same `outline_width`, half the viewport, DOUBLE the rim — so the mask
+// claimed a silhouette twice as fat as the one on screen, and the ink pass dutifully stopped short of it.
+// Measured against a reference frame: suppression reached 4 px past a visible actor where its rim was
+// only 2 px. That 2 px of bare band hugged every actor at every distance, and on a humanoid it traces
+// each limb and the gaps between them — subtle, scattered, and impossible to screenshot.
+// Referencing a FIXED width instead makes the extrusion a constant fraction of the SCREEN, which is the
+// same in both passes by construction. VIEWPORT_SIZE still supplies the ASPECT, so the rim stays even on
+// x and y at any window shape; only its scale is pinned. At this project's 1584-wide 3D buffer the frame
+// the player sees is unchanged to the pixel — this only shrinks the mask's copy to the truth.
+// Consequence worth knowing: the rim is now a constant fraction of the image rather than a constant
+// number of buffer pixels, so Options -> Video -> Render Scale no longer changes its apparent thickness.
+uniform float rim_reference_width = 1584.0;
 
 void vertex() {
 	vec4 clip_position = PROJECTION_MATRIX * (MODELVIEW_MATRIX * vec4(VERTEX, 1.0));
 	vec3 clip_normal = mat3(PROJECTION_MATRIX) * (mat3(MODELVIEW_MATRIX) * NORMAL);
-	
-	vec2 offset = normalize(clip_normal.xy) / VIEWPORT_SIZE * clip_position.w * outline_width * 4.0;
-	
+
+	vec2 reference = VIEWPORT_SIZE * (max(rim_reference_width, 1.0) / max(VIEWPORT_SIZE.x, 1.0));
+	vec2 offset = normalize(clip_normal.xy) / reference * clip_position.w * outline_width * 4.0;
+
 	clip_position.xy += offset;
-	
+
 	POSITION = clip_position;
 }
 
