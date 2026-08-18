@@ -216,6 +216,7 @@ Each option = a typed var + a set_* setter that applies live (DisplayServer/Audi
 - **Risk:** A field left out of apply_all (or a setter skipping apply) persists but never takes effect on boot; nothing round-trips save->load (tests set _loaded=false).
 - **Risk:** A bus fade/duck that samples the live AudioServer bus instead of current_bus_db() ratchets volume down on rapid re-trigger — silent audio drift; every duck in the project (death world duck, dialogue, ADS) now derives its restore target from current_bus_db, so re-introducing a live-bus snapshot is the regression to watch for.
 - **Risk:** Moving a typed field into a Variant dict silently breaks gameplay's direct Settings.<field> reads and the bare-instance test that reads them.
+- **Risk:** mouse_sensitivity is radians per SCREEN pixel (MouseInput reads screen_relative; `relative` is pre-scaled by canvas/window width under the viewport stretch mode, so it made look speed ride the window size). It persists under the cfg key mouse_sensitivity_screen; a pre-switch cfg carries the OLD key mouse_sensitivity in canvas-px units and read_mouse_sensitivity rescales it ONCE by LEGACY_MOUSE_SENS_SCALE (792/1920). Writing the old key again, or reading `relative` again, hands returning players a ~2.4x faster look.
 - **Test:** `tests/test_settings.gd` `tests/test_difficulty.gd`
 
 ### `class SettingSpec` - `resources/settings/SettingSpec.gd`

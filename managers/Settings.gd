@@ -4,6 +4,7 @@ extends Node
 ## @risk A field left out of apply_all (or a setter skipping apply) persists but never takes effect on boot; nothing round-trips save->load (tests set _loaded=false).
 ## @risk A bus fade/duck that samples the live AudioServer bus instead of current_bus_db() ratchets volume down on rapid re-trigger — silent audio drift; every duck in the project (death world duck, dialogue, ADS) now derives its restore target from current_bus_db, so re-introducing a live-bus snapshot is the regression to watch for.
 ## @risk Moving a typed field into a Variant dict silently breaks gameplay's direct Settings.<field> reads and the bare-instance test that reads them.
+## @risk mouse_sensitivity is radians per SCREEN pixel (MouseInput reads screen_relative; `relative` is pre-scaled by canvas/window width under the viewport stretch mode, so it made look speed ride the window size). It persists under the cfg key mouse_sensitivity_screen; a pre-switch cfg carries the OLD key mouse_sensitivity in canvas-px units and read_mouse_sensitivity rescales it ONCE by LEGACY_MOUSE_SENS_SCALE (792/1920). Writing the old key again, or reading `relative` again, hands returning players a ~2.4x faster look.
 ## @test res://tests/test_settings.gd
 ## @test res://tests/test_difficulty.gd
 ## Settings — the player-facing OPTIONS layer + persistence. Distinct from GameSettings (the live
@@ -38,8 +39,27 @@ const FOV_MIN := 60.0
 const FOV_MAX := 120.0
 const RENDER_SCALE_MIN := 0.5
 const RENDER_SCALE_MAX := 2.0
-const SENS_MIN := 0.0005
-const SENS_MAX := 0.01
+## Mouse look range, in radians per SCREEN pixel: MouseInput reads InputEventMouseMotion.screen_relative (raw OS
+## pixels), never `relative`, which the project's `viewport` stretch mode pre-scales by canvas/window width (792/1920
+## = 0.41 in 1080p fullscreen, 792/1280 = 0.62 in a 720p window, 792/3840 = 0.21 at 4K — the same hand motion used
+## to turn the view 1.5x further in a small window and half as far at 4K). This is the old canvas-px range
+## (0.0005..0.01) re-expressed at the 1080p-fullscreen factor and rounded, so the Options slider's 1..100 readout
+## (OptionsMenu remaps SENS_MIN..SENS_MAX) means what it always did — the design default 0.000825 still reads "17".
+## Keep the SettingsCatalog.tres row's min/max the SAME numbers (tests/test_settings.gd pins it).
+const SENS_MIN := 0.0002
+const SENS_MAX := 0.004
+## Canvas pixels per screen pixel at 1080p fullscreen — the scaling every pre-screen_relative sensitivity was tuned
+## against (792 = the 396 px base viewport / stretch scale 0.5; 1920 = the fullscreen width). A legacy settings.cfg
+## value (the OLD `mouse_sensitivity` key, canvas-px units) is multiplied by this ONCE on load, see
+## read_mouse_sensitivity. A CONSTANT on purpose: it describes the historical config those values were tuned
+## against, so it must not follow a later viewport/stretch change.
+const LEGACY_MOUSE_SENS_SCALE := 792.0 / 1920.0
+## settings.cfg [input] keys for mouse look. The unit change re-KEYED the row rather than versioning the file: the
+## new key holds screen-px values verbatim, the old key is only ever READ (and rescaled) — save_settings writes a
+## fresh file with just the new key, so the migration is one-shot by construction and can never compound, even if
+## an older build (which knows only the old key) runs in between.
+const MOUSE_SENS_KEY := "mouse_sensitivity_screen"
+const MOUSE_SENS_LEGACY_KEY := "mouse_sensitivity"
 const CONTRAST_MIN := 0.5
 const CONTRAST_MAX := 1.5
 ## Minimap zoom range. >1 shows FEWER metres (zooms IN); the span it divides is the author-time
@@ -57,7 +77,7 @@ var fov: float = 75.0                          ## -> GameSettings.camera.default
 var contrast: float = 1.0                      ## post-process contrast around mid-gray; 1.0 = the authored look (read live by the player's post-process driver, like colorblind_mode)
 var volumes: Dictionary = {}                   ## StringName bus -> float (0..1; 1.0 = authored level)
 var music_folder: String = ""                  ## the player's OWN music folder (user:// or an OS path) for in-world radios; blank = each radio uses its curated res:// folder. Read live by Radio to override its music_folder export.
-var mouse_sensitivity: float = 0.002           ## -> GameSettings.camera.mouse_sensitivity
+var mouse_sensitivity: float = 0.000825        ## -> GameSettings.camera.mouse_sensitivity; radians per SCREEN pixel (see SENS_MIN)
 var controller_look_sensitivity: float = 3.0   ## right-stick look speed (rad/s-ish), read live by MouseInput
 var invert_look_y: bool = false                ## invert vertical look (mouse + controller)
 var keybinds: Dictionary = {}                  ## action name (String) -> Array of serialized event dicts (rebinds only)
@@ -305,6 +325,7 @@ func set_music_folder(path: String) -> void:
 	music_folder = path.strip_edges()
 	save_settings()
 
+## Radians per SCREEN pixel (see SENS_MIN) — the Options slider hands in this unit; the 1..100 readout is cosmetic.
 func set_mouse_sensitivity(f: float) -> void:
 	mouse_sensitivity = clampf(f, SENS_MIN, SENS_MAX)
 	GameSettings.camera.mouse_sensitivity = mouse_sensitivity
@@ -462,7 +483,9 @@ func load_settings() -> void:
 	for bus in VOLUME_BUSES:
 		volumes[bus] = float(cfg.get_value("audio", String(bus), volumes.get(bus, 1.0)))
 	music_folder = str(cfg.get_value("audio", "music_folder", music_folder))
-	mouse_sensitivity = float(cfg.get_value("input", "mouse_sensitivity", mouse_sensitivity))
+	# Clamped on load (like contrast / ps1_warp_intensity): a legacy value at the old ceiling rescales to ~3% over
+	# SENS_MAX, and a hand-edited number outside the slider must not drive the camera faster than the slider allows.
+	mouse_sensitivity = clampf(read_mouse_sensitivity(cfg, mouse_sensitivity), SENS_MIN, SENS_MAX)
 	controller_look_sensitivity = float(cfg.get_value("input", "controller_look_sensitivity", controller_look_sensitivity))
 	invert_look_y = _cfg_bool(cfg, "input", "invert_look_y", invert_look_y)
 	# Same guard: a corrupt cfg could store a non-Dictionary under "binds", which would hard-fail this
@@ -498,6 +521,24 @@ func load_settings() -> void:
 	tos_accepted = _cfg_bool(cfg, "legal", "tos_accepted", tos_accepted)
 	_loaded = true
 
+## Pure: the mouse sensitivity a settings.cfg carries, in the CURRENT unit (radians per SCREEN pixel). Unit-tested
+## off-tree with an in-memory ConfigFile (tests/test_settings.gd), so load_settings never has to touch user:// under GUT.
+##  - MOUSE_SENS_KEY present -> that value, verbatim (it was saved in screen-px units).
+##  - else the OLD MOUSE_SENS_LEGACY_KEY present -> a cfg from before MouseInput switched from `relative` (canvas px,
+##    pre-scaled by the window->canvas stretch) to `screen_relative` (raw OS px): the value is multiplied ONCE by
+##    LEGACY_MOUSE_SENS_SCALE, the 1080p-fullscreen factor every legacy value was tuned against, so a returning
+##    player's 1080p feel is unchanged instead of ~2.4x faster (0.002 -> 0.000825, the new design default).
+##  - neither -> `fallback` (the design default seeded in _ready).
+## NOT clamped here — the caller clamps to SENS_MIN..SENS_MAX like every other loader/setter (a legacy value at the
+## old ceiling lands ~3% over the new one). A junk (non-numeric) value degrades through float() like every other
+## float row in load_settings; the old key is never written back, so this can never run twice on one value.
+static func read_mouse_sensitivity(cfg: ConfigFile, fallback: float) -> float:
+	if cfg.has_section_key("input", MOUSE_SENS_KEY):
+		return float(cfg.get_value("input", MOUSE_SENS_KEY, fallback))
+	if cfg.has_section_key("input", MOUSE_SENS_LEGACY_KEY):
+		return float(cfg.get_value("input", MOUSE_SENS_LEGACY_KEY, fallback)) * LEGACY_MOUSE_SENS_SCALE
+	return fallback
+
 ## bool() has NO String constructor in Godot 4 (bool(<String>) throws "Invalid call. Nonexistent 'bool'
 ## constructor"), yet a hand-edited / legacy / corrupt settings.cfg can persist a bool key as a String. Mirror the
 ## windowed_size / binds Variant-guards in load_settings (and GameState._cfg_bool) so a junk-typed flag degrades to
@@ -521,7 +562,7 @@ func save_settings() -> void:
 	for bus in VOLUME_BUSES:
 		cfg.set_value("audio", String(bus), float(volumes.get(bus, 1.0)))
 	cfg.set_value("audio", "music_folder", music_folder)
-	cfg.set_value("input", "mouse_sensitivity", mouse_sensitivity)
+	cfg.set_value("input", MOUSE_SENS_KEY, mouse_sensitivity)  # screen-px units; the legacy key is deliberately NOT written (read_mouse_sensitivity)
 	cfg.set_value("input", "controller_look_sensitivity", controller_look_sensitivity)
 	cfg.set_value("input", "invert_look_y", invert_look_y)
 	cfg.set_value("controls", "binds", keybinds)

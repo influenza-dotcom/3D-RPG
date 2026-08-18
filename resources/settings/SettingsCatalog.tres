@@ -162,9 +162,9 @@ control = 2
 label = "Mouse Sensitivity"
 getter = &"mouse_sensitivity"
 setter = &"set_mouse_sensitivity"
-min_value = 0.0005
-max_value = 0.01
-step = 0.0001
+min_value = 0.0002
+max_value = 0.004
+step = 0.000025
 value_format = 4
 
 [sub_resource type="Resource" id="controller_look"]

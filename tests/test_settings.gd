@@ -37,6 +37,105 @@ func test_set_mouse_sensitivity_clamps_and_writes_through() -> void:
 	Settings.set_mouse_sensitivity(99.0)
 	assert_eq(Settings.mouse_sensitivity, Settings.SENS_MAX, "sensitivity clamps to max")
 	assert_eq(GameSettings.camera.mouse_sensitivity, Settings.SENS_MAX, "sensitivity writes through")
+	Settings.set_mouse_sensitivity(0.0)
+	assert_eq(Settings.mouse_sensitivity, Settings.SENS_MIN, "sensitivity clamps to min (0 would freeze the look)")
+	Settings.set_mouse_sensitivity(_sens)  # restore the live camera value (after_each restores GameSettings too)
+
+
+# --- Mouse look: radians per SCREEN pixel -------------------------------------------------------------------
+# MouseInput reads InputEventMouseMotion.screen_relative (raw OS pixels), never `relative`, which the project's
+# `viewport` stretch mode pre-scales by canvas/window width (792/1920 = 0.41 in 1080p fullscreen, 792/1280 = 0.62
+# in a 720p window) — so the OLD 0.002 default turned the view 1.5x further the moment the game went windowed. The
+# whole sensitivity domain (design default, SENS_MIN/MAX, the catalog slider, and a saved cfg) moved to the new unit
+# at the 1080p-fullscreen factor, so THAT setup feels exactly as it did. These pin the retune + the migration.
+
+## The design default is the old canvas-px 0.002 re-expressed per screen pixel at 1080p fullscreen — a re-tune to
+## any other number is a FEEL change and must be deliberate. CameraSettings.new() reads the script default (the live
+## GameSettings.camera has already been overwritten by this machine's settings.cfg); a bare Settings seeds the same.
+func test_mouse_sensitivity_default_is_the_1080p_fullscreen_retune() -> void:
+	assert_almost_eq(Settings.LEGACY_MOUSE_SENS_SCALE, 792.0 / 1920.0, 0.000001,
+		"the legacy factor is the 792 px canvas (396 viewport / 0.5 stretch scale) over the 1920 px 1080p fullscreen width")
+	var cs := CameraSettings.new()
+	assert_almost_eq(cs.mouse_sensitivity, 0.002 * Settings.LEGACY_MOUSE_SENS_SCALE, 0.000001,
+		"CameraSettings.mouse_sensitivity must be 0.002 canvas-px x 792/1920 = 0.000825 rad per screen px, so 1080p fullscreen feels identical after the screen_relative switch")
+	var fresh = load("res://managers/Settings.gd").new()
+	assert_almost_eq(fresh.mouse_sensitivity, cs.mouse_sensitivity, 0.000001,
+		"a bare Settings seeds the same default as CameraSettings (the field default only matters off-tree, but it must not drift)")
+	fresh.free()
+	cs = null
+
+## SENS_MIN..SENS_MAX brackets the default and is the SAME range the catalog slider carries: OptionsMenu's SENSITIVITY
+## readout remaps SENS_MIN..SENS_MAX onto 1..100, so a .tres range that drifted from the constants would label the
+## slider's left end "37" (or clamp the row short of the constants). The default also has to sit ON the step grid —
+## Range snaps every value to min + n*step, so an off-grid default would move the moment the slider is touched.
+func test_mouse_sensitivity_range_matches_the_catalog_slider() -> void:
+	var def: float = CameraSettings.new().mouse_sensitivity
+	assert_lt(Settings.SENS_MIN, Settings.SENS_MAX, "the range is the right way round")
+	assert_lt(Settings.SENS_MIN, def, "the design default sits above the slider floor")
+	assert_gt(Settings.SENS_MAX, def, "the design default sits below the slider ceiling")
+	var readout := int(round(remap(def, Settings.SENS_MIN, Settings.SENS_MAX, 1.0, 100.0)))
+	assert_eq(readout, 17,
+		"the default must still read '17' on the 1..100 slider — the old range 0.0005..0.01 put 0.002 there, and the retune shifted both ends by the same factor")
+	var cat := load("res://resources/settings/SettingsCatalog.tres") as SettingsCatalog
+	assert_not_null(cat, "the settings catalog must load")
+	if cat == null:
+		return
+	var found: SettingSpec = null
+	for spec in cat.specs:
+		if spec.key == &"mouse_sensitivity":
+			found = spec
+			break
+	assert_not_null(found, "Options -> Game must carry the 'Mouse Sensitivity' row")
+	if found == null:
+		return
+	assert_almost_eq(found.min_value, Settings.SENS_MIN, 0.0000001,
+		"the catalog slider floor must equal Settings.SENS_MIN (the readout remap + the setter clamp assume it)")
+	assert_almost_eq(found.max_value, Settings.SENS_MAX, 0.0000001,
+		"the catalog slider ceiling must equal Settings.SENS_MAX")
+	assert_gt(found.step, 0.0, "the slider needs a positive step")
+	var steps: float = (def - found.min_value) / found.step
+	assert_almost_eq(steps, round(steps), 0.001,
+		"the design default must lie on the slider's step grid (min + n*step), or the row snaps it to a neighbour the first time it is dragged")
+
+## A settings.cfg from before the switch carries the OLD key in canvas-px units; it is rescaled ONCE by the 1080p
+## factor so a returning player's look is unchanged (not ~2.4x faster). The new key wins verbatim; neither = fallback.
+## Driven through the pure static rule with an in-memory ConfigFile so the real user://settings.cfg is never touched.
+func test_mouse_sensitivity_legacy_cfg_value_is_rescaled_once_on_load() -> void:
+	assert_ne(Settings.MOUSE_SENS_KEY, Settings.MOUSE_SENS_LEGACY_KEY,
+		"the unit change re-keyed the row — same key would make the rescale compound on every boot")
+	var legacy := ConfigFile.new()
+	legacy.set_value("input", Settings.MOUSE_SENS_LEGACY_KEY, 0.002)  # the old shipped default, canvas-px units
+	assert_almost_eq(Settings.read_mouse_sensitivity(legacy, 9.0), 0.002 * Settings.LEGACY_MOUSE_SENS_SCALE, 0.000001,
+		"a legacy 0.002 must load as 0.000825 rad per screen px — the same 1080p-fullscreen feel, not 2.4x faster")
+	assert_almost_eq(Settings.read_mouse_sensitivity(legacy, 9.0), CameraSettings.new().mouse_sensitivity, 0.000001,
+		"...which is exactly the new design default, so a returning player and a new one feel the same")
+	# The old ceiling rescales to ~3% over SENS_MAX; load_settings clamps (mirrors contrast / ps1_warp_intensity).
+	legacy.set_value("input", Settings.MOUSE_SENS_LEGACY_KEY, 0.01)
+	var top := clampf(Settings.read_mouse_sensitivity(legacy, 9.0), Settings.SENS_MIN, Settings.SENS_MAX)
+	assert_almost_eq(top, Settings.SENS_MAX, 0.0000001, "a legacy value at the old slider ceiling lands on the new ceiling")
+	# The new key wins verbatim, even beside a stale old key (a build that wrote both would still read the right unit).
+	var current := ConfigFile.new()
+	current.set_value("input", Settings.MOUSE_SENS_LEGACY_KEY, 0.002)
+	current.set_value("input", Settings.MOUSE_SENS_KEY, 0.003)
+	assert_almost_eq(Settings.read_mouse_sensitivity(current, 9.0), 0.003, 0.000001,
+		"the screen-px key is authoritative and is NOT rescaled")
+	var empty := ConfigFile.new()
+	assert_almost_eq(Settings.read_mouse_sensitivity(empty, 0.000825), 0.000825, 0.000001,
+		"no key at all -> the fallback (the design default seeded in _ready)")
+
+## save_settings must persist ONLY the new key: writing the legacy key again would hand the next boot a screen-px
+## number to rescale as canvas-px (2.4x slower every launch). Source-text pin: save_settings writes the real
+## user://settings.cfg, so it is never invoked under GUT.
+func test_mouse_sensitivity_persists_under_the_screen_key_only() -> void:
+	var src := FileAccess.get_file_as_string("res://managers/Settings.gd")
+	assert_true(src.contains('cfg.set_value("input", MOUSE_SENS_KEY, mouse_sensitivity)'),
+		"save_settings must write mouse_sensitivity under MOUSE_SENS_KEY (screen-px units)")
+	assert_false(src.contains('cfg.set_value("input", MOUSE_SENS_LEGACY_KEY'),
+		"save_settings must never write the legacy key — read_mouse_sensitivity would rescale it again next boot")
+	assert_false(src.contains('cfg.set_value("input", "mouse_sensitivity"'),
+		"...nor its literal spelling")
+	assert_true(src.contains("read_mouse_sensitivity(cfg, mouse_sensitivity)"),
+		"load_settings must go through the pure migration rule, not a bare get_value on either key")
 
 func test_set_volume_clamps_to_unit_range() -> void:
 	Settings.set_volume(&"Master", 5.0)

@@ -16,6 +16,9 @@ extends GutTest
 ##       monotonic falloff (the no-player==1.0 and at-max==sens_min cases are
 ##       ALREADY in test_smoke and are NOT duplicated here).
 ##     - rotate / attack signals exist (Head/body/GunMesh + attack.gd wire to them).
+##     - SOURCE PIN: mouse look reads InputEventMouseMotion.screen_relative, never
+##       `relative` (which the viewport stretch mode pre-scales by canvas/window
+##       width, so look speed used to ride the window size).
 ##     All MouseInput instances are .new() WITHOUT add_child so _ready never runs
 ##     and the real cursor is never captured.
 ##   InputManager (managers/InputManager.gd, live autoload)
@@ -306,6 +309,30 @@ func test_mouse_input_exposes_rotate_and_attack_signals() -> void:
 	assert_true(mi.has_signal("attack"),
 		"MouseInput must declare the 'attack' signal: attack.gd wires firing to this exact name — a rename silently breaks shooting")
 	mi.free()
+
+
+## Mouse look must read InputEventMouseMotion.screen_relative (raw OS pixels), NEVER `relative`. project.godot runs the
+## 396x216 viewport at stretch mode "viewport" / scale 0.5 (a 792 px canvas), and under that mode the engine basis-
+## transforms `relative` by canvas/window width before _unhandled_input sees it: 792/1920 = 0.41 in 1080p fullscreen,
+## 792/1600 = 0.50 in the 1600x900 window, 792/1280 = 0.62 at 720p, 792/3840 = 0.21 at 4K. So the same hand motion
+## turned the view 1.2-1.5x further the moment the game went WINDOWED and half as far on a 4K screen (the sensitivity
+## default was tuned against 1080p fullscreen). screen_relative is unscaled, so one sensitivity means one thing
+## everywhere; GameSettings.camera.mouse_sensitivity + Settings.SENS_MIN/MAX moved to that unit (x 792/1920) and a
+## legacy settings.cfg is migrated by Settings.read_mouse_sensitivity — tests/test_settings.gd pins those. Source-text
+## pin (the handler needs a captured cursor + a live viewport, so it is never driven under GUT); comment lines are
+## masked so this prose can name the forbidden read.
+func test_mouse_input_reads_screen_relative_not_relative() -> void:
+	var src := FileAccess.get_file_as_string("res://scripts/components/mouse_input.gd")
+	var code_lines: Array[String] = []
+	for line in src.split("\n"):
+		var body: String = line.get_slice("#", 0)  # drop trailing comments; a whole-line comment leaves only indent
+		if not body.strip_edges().is_empty():
+			code_lines.append(body)
+	var code := "\n".join(code_lines)
+	assert_true(code.contains("mm.screen_relative.x") and code.contains("mm.screen_relative.y"),
+		"MouseInput._unhandled_input must turn BOTH look axes from screen_relative (unscaled OS pixels) so look speed is window/resolution independent")
+	assert_false(code.contains(".relative"),
+		"MouseInput must not read InputEventMouseMotion.relative anywhere — the viewport stretch mode pre-scales it by canvas/window width, so mouse look would ride the window size again (1.5x faster in a 720p window, 0.5x at 4K)")
 
 
 # ---------------------------------------------------------------------------

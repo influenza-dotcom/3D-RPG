@@ -3,6 +3,16 @@ extends Node3D
 
 ## Mouse-look + fire input source. Captures the cursor and turns motion into a
 ## `rotate` signal; emits `attack` continuously while the fire button is held.
+##
+## UNITS: mouse look is radians per SCREEN pixel — the motion read is InputEventMouseMotion.screen_relative
+## (raw OS pixels), NEVER `relative`. Under the project's `viewport` stretch mode the engine pre-scales
+## `relative` by canvas/window width (792/1920 = 0.41 in 1080p fullscreen, 792/1600 = 0.50 in the 1600x900
+## window, 792/1280 = 0.62 at 720p, 792/3840 = 0.21 at 4K), so the same hand motion used to turn the view
+## 1.2-1.5x further the moment the game went windowed and half as far on a 4K screen. screen_relative is
+## window/resolution independent; GameSettings.camera.mouse_sensitivity (+ Settings.SENS_MIN/MAX and the
+## Options slider) are tuned in that unit — 0.002 canvas-px x 792/1920 = 0.000825, so 1080p fullscreen
+## feels exactly as it did. tests/test_camera_input_ui.gd pins the read; a legacy settings.cfg value is
+## rescaled once by Settings.read_mouse_sensitivity.
 
 ## Look delta, ALREADY scaled by sensitivity. NOTE the axis mapping: .x = PITCH delta
 ## (from vertical mouse motion), .y = YAW delta (from horizontal) — swapped vs the
@@ -31,10 +41,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var mm := event as InputEventMouseMotion
 		var sensitivity := GameSettings.camera.mouse_sensitivity * speed_sensitivity_multiplier()
-		var pitch := -mm.relative.y * sensitivity
+		# screen_relative (unscaled OS pixels), not `relative` — see the header: `relative` rides the window size.
+		var pitch := -mm.screen_relative.y * sensitivity
 		if Settings.invert_look_y:
 			pitch = -pitch
-		rotate.emit(Vector2(pitch, -mm.relative.x * sensitivity))
+		rotate.emit(Vector2(pitch, -mm.screen_relative.x * sensitivity))
 
 func _process(delta: float) -> void:
 	if not InputManager.gameplay_suppressed():

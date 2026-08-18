@@ -6,8 +6,13 @@ extends Resource
 ## landing-dip recovery, and strafe tilt.
 
 @export_group("Look")
-## Radians of view rotation per pixel of mouse movement — the master look speed (the in-game slider scales this). Higher = faster aim.
-@export var mouse_sensitivity: float = 0.002
+## Radians of view rotation per SCREEN pixel of mouse movement — the master look speed (the in-game slider scales this). Higher = faster aim.
+## The unit is raw OS pixels (MouseInput reads InputEventMouseMotion.screen_relative, never `relative`, which the `viewport`
+## stretch mode pre-scales by canvas/window width), so one value feels the same fullscreen, windowed, 1080p or 4K. The default
+## is the old canvas-px 0.002 re-expressed at 1080p fullscreen (x 792/1920) so that setup feels exactly as it did — retune
+## it and Settings.SENS_MIN/SENS_MAX + the SettingsCatalog slider range together (Settings.read_mouse_sensitivity migrates
+## a pre-switch settings.cfg by the same factor).
+@export var mouse_sensitivity: float = 0.000825
 ## Normal up/down look limit (degrees) — how far the view can tilt before it clamps. 89 = just shy of straight up/down.
 @export var pitch_max_deg: float = 89.0
 ## Tighter pitch limit (degrees) while HOLDING a pickup, so a carried object stays in frame instead of swinging past the camera.
