@@ -89,13 +89,13 @@ func test_guards_route_through_the_shared_helpers() -> void:
 	# Drift guard: station screens guard via any_modal_open(self); tab-group screens via any_tab_blocking_open();
 	# ray_cast's interact gate via gameplay_suppressed(). One place (InputManager) registers a screen, not every guard.
 	for path in ["res://scripts/ui/shop_screen.gd", "res://scripts/ui/heal_screen.gd", "res://scripts/ui/level_up_screen.gd", "res://scripts/ui/respec_screen.gd"]:
-		assert_string_contains(FileAccess.get_file_as_string(path), "InputManager.any_modal_open(self)", "%s (station) should guard via InputManager.any_modal_open(self)" % path)
+		assert_true(FileAccess.get_file_as_string(path).contains("InputManager.any_modal_open(self)"), "%s (station) should guard via InputManager.any_modal_open(self)" % path)
 	# ⭐The tab guards must name NOTHING but the registry predicate. Hand-naming a screen beside it is exactly the
 	# drift this registry exists to kill: the refusal set changed twice in two days (the ATM, then every station),
 	# and a guard carrying its own list would have silently missed both.
 	for path in ["res://scripts/ui/stats_screen.gd", "res://scripts/ui/reputation_screen.gd", "res://scripts/ui/inventory_screen.gd", "res://scripts/ui/quest_journal.gd", "res://scripts/ui/implants_screen.gd", "res://scripts/ui/character_inspect_screen.gd"]:
 		var tab_src := FileAccess.get_file_as_string(path)
-		assert_string_contains(tab_src, "InputManager.any_tab_blocking_open()", "%s (tab group) should guard via InputManager.any_tab_blocking_open()" % path)
+		assert_true(tab_src.contains("InputManager.any_tab_blocking_open()"), "%s (tab group) should guard via InputManager.any_tab_blocking_open()" % path)
 		assert_false(tab_src.contains("LootScreen.is_open()"), "%s should NOT hand-name LootScreen — it is a blocks_tabs row in the registry now" % path)
 		assert_false(tab_src.contains("AtmScreen.is_open()"), "%s should NOT hand-name AtmScreen — it is a blocks_tabs row in the registry now" % path)
 	# ⭐NOTHING in the registry pauses the tree any more. A walk-up station must not stop the city (atm_screen.gd's
@@ -106,11 +106,11 @@ func test_guards_route_through_the_shared_helpers() -> void:
 			"res://scripts/ui/chip_install_screen.gd", "res://scripts/ui/chess_screen.gd"]:
 		assert_false(FileAccess.get_file_as_string(path).contains("get_tree().paused"),
 			"%s must NOT touch get_tree().paused — the station screens are real-time; the only pause left in the game is DialogueManager's" % path)
-	assert_string_contains(FileAccess.get_file_as_string("res://scripts/components/ray_cast.gd"), "InputManager.gameplay_suppressed()", "ray_cast interact gate should route through InputManager.gameplay_suppressed() (T2 hardened it from any_modal_open to also cover cutscenes + the name-entry dialog; gameplay_suppressed still derives from the modal registry)")
+	assert_true(FileAccess.get_file_as_string("res://scripts/components/ray_cast.gd").contains("InputManager.gameplay_suppressed()"), "ray_cast interact gate should route through InputManager.gameplay_suppressed() (T2 hardened it from any_modal_open to also cover cutscenes + the name-entry dialog; gameplay_suppressed still derives from the modal registry)")
 	# The weapon hotbar's slot-key gate is the same class of raw-input consumer, but it EXCLUDES the backpack
 	# (InventoryScreen) — a slot key ASSIGNS the hovered item there instead of activating, so that path must fall
 	# through the gate. Assert the exclusion arg, not just the routing (a bare any_modal_open() would swallow assign-mode).
-	assert_string_contains(FileAccess.get_file_as_string("res://scripts/ui/hotbar.gd"), "InputManager.any_modal_open(InventoryScreen)", "hotbar slot-key gate should route through InputManager.any_modal_open(InventoryScreen)")
+	assert_true(FileAccess.get_file_as_string("res://scripts/ui/hotbar.gd").contains("InputManager.any_modal_open(InventoryScreen)"), "hotbar slot-key gate should route through InputManager.any_modal_open(InventoryScreen)")
 
 
 ## Every screen a PLAYER can summon on their own — a hotkey, Escape, or the Options row — must ALSO consult the
@@ -136,7 +136,7 @@ func test_self_opening_screens_all_gate_on_the_mid_death_predicate() -> void:
 		"res://scripts/ui/character_inspect_screen.gd", # fullscreen hero-view takeover
 		"res://scripts/ui/save_load_screen.gd",         # reached from the Options bottom row
 	]:
-		assert_string_contains(FileAccess.get_file_as_string(path), "PlayerMenus.player_alive(",
+		assert_true(FileAccess.get_file_as_string(path).contains("PlayerMenus.player_alive("),
 			"%s opens from a player hotkey while PROCESS_MODE_ALWAYS, so its open() must refuse mid-death via PlayerMenus.player_alive() — else the key re-opens it over the death cinematic / in-place revive" % path)
 
 
@@ -197,10 +197,10 @@ func test_close_sweep_and_gates_route_through_registry() -> void:
 	# T1 drift guard: the death sweep, the two surviving inline open-gates, and the quicksave/reload chokepoint all
 	# derive from the one registry — a new screen is covered without editing any of these by hand.
 	var player_src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
-	assert_string_contains(player_src, "InputManager.close_all_modals()", "_close_open_modals delegates to the registry sweep")
-	assert_string_contains(player_src, "if InputManager.gameplay_suppressed()", "quicksave/quickload is gated on gameplay_suppressed()")
+	assert_true(player_src.contains("InputManager.close_all_modals()"), "_close_open_modals delegates to the registry sweep")
+	assert_true(player_src.contains("if InputManager.gameplay_suppressed()"), "quicksave/quickload is gated on gameplay_suppressed()")
 	var im_src := FileAccess.get_file_as_string("res://managers/InputManager.gd")
-	assert_string_contains(im_src, "NameEntryDialog.close()", "close_all_modals also closes the name-entry box")
-	assert_string_contains(FileAccess.get_file_as_string("res://scripts/ui/options_menu.gd"), "InputManager.any_modal_open(self)", "OptionsMenu open-gate routes through the registry")
-	assert_string_contains(FileAccess.get_file_as_string("res://scripts/ui/loot_screen.gd"), "InputManager.any_modal_open(self)", "LootScreen open-gate routes through the registry")
-	assert_string_contains(FileAccess.get_file_as_string("res://managers/GameState.gd"), "close_all_modals()", "_load_and_reload closes modals before the scene reload")
+	assert_true(im_src.contains("NameEntryDialog.close()"), "close_all_modals also closes the name-entry box")
+	assert_true(FileAccess.get_file_as_string("res://scripts/ui/options_menu.gd").contains("InputManager.any_modal_open(self)"), "OptionsMenu open-gate routes through the registry")
+	assert_true(FileAccess.get_file_as_string("res://scripts/ui/loot_screen.gd").contains("InputManager.any_modal_open(self)"), "LootScreen open-gate routes through the registry")
+	assert_true(FileAccess.get_file_as_string("res://managers/GameState.gd").contains("close_all_modals()"), "_load_and_reload closes modals before the scene reload")

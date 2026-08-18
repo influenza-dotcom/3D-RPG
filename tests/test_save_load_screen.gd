@@ -79,7 +79,7 @@ func test_slot_label_template_substitutes() -> void:
 	# never error) and the composed label carries the number, with no unfilled token left visible.
 	var label := PlayerText.save_slot_label(2)
 	assert_eq(label, TextFormat.subst(PlayerText.SAVE_LOAD_SLOT, {"n": 2}), "save_slot_label IS the whole SAVE_LOAD_SLOT template")
-	assert_string_contains(label, "2", "the slot number lands in the label")
+	assert_true(label.contains("2"), "the slot number lands in the label")
 	assert_false(label.contains("{n}"), "the {n} token was substituted, not left visible")
 
 
@@ -89,8 +89,8 @@ func test_slot_caption_selects_whole_templates() -> void:
 	var full := PlayerText.save_slot_caption("Downtown", "2026-07-29 12:00:00")
 	assert_eq(full, TextFormat.subst(PlayerText.SAVE_SLOT_CAPTION, {"level": "Downtown", "time": "2026-07-29 12:00:00"}),
 		"a resolvable level name selects the level+time template")
-	assert_string_contains(full, "Downtown", "the level name lands in the caption")
-	assert_string_contains(full, "2026-07-29 12:00:00", "the time lands in the caption")
+	assert_true(full.contains("Downtown"), "the level name lands in the caption")
+	assert_true(full.contains("2026-07-29 12:00:00"), "the time lands in the caption")
 	var bare := PlayerText.save_slot_caption("", "2026-07-29 12:00:00")
 	assert_eq(bare, TextFormat.subst(PlayerText.SAVE_SLOT_CAPTION_NO_LEVEL, {"time": "2026-07-29 12:00:00"}),
 		"a blank level name selects the time-only whole template (no orphaned separator)")

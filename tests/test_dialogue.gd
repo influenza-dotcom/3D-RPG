@@ -474,9 +474,9 @@ func test_player_death_tears_down_suspended_conversation_and_closes_install_scre
 	# closes EVERY modal (incl. the "Install" suspend target, Chess, and the name-entry box), so a newly-added
 	# screen can't be forgotten from a hand-list and left open through the death cinematic (T1).
 	var src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
-	assert_string_contains(src, "DialogueManager.is_engaged()",
+	assert_true(src.contains("DialogueManager.is_engaged()"),
 		"Player.die() must gate its dialogue abort on DialogueManager.is_engaged() (is_active() reads false during a sub-menu suspension, which skipped the abort)")
-	assert_string_contains(src, "close_all_modals()",
+	assert_true(src.contains("close_all_modals()"),
 		"_close_open_modals() must route through InputManager.close_all_modals() -- the registry sweep closes ChipInstallScreen (and every other modal) on death, so the 'Install' suspend target can't be missed")
 
 
@@ -487,7 +487,7 @@ func test_speaker_death_teardown_gates_on_engaged_not_active() -> void:
 	# SUSPENDED behind a sub-menu reads is_active()==false, which would silently drop the teardown and leave
 	# the box primed to resume over a corpse (_finish() already drops the pending menu-closed one-shot).
 	var src := FileAccess.get_file_as_string(DIALOGUE_MANAGER_PATH)
-	assert_string_contains(src, "func _on_speaker_died() -> void:\n\tif is_engaged():",
+	assert_true(src.contains("func _on_speaker_died() -> void:\n\tif is_engaged():"),
 		"_on_speaker_died must gate its teardown on is_engaged(), not is_active() -- a speaker death during a sub-menu suspension must still end the conversation (mirrors Player.die()'s is_engaged() gate)")
 
 
@@ -500,7 +500,7 @@ func test_quest_toast_queue_gates_on_engaged_not_active() -> void:
 	# is_engaged(). (_push_quest_toast reads the DialogueManager autoload, so the branch can't be unit-driven
 	# without mutating shared autoload state -- pin the source instead, like the two tests above.)
 	var src := FileAccess.get_file_as_string("res://scripts/ui/ui.gd")
-	assert_string_contains(src, "func _push_quest_toast(text: String, color: Color) -> void:\n\tif DialogueManager.is_engaged():",
+	assert_true(src.contains("func _push_quest_toast(text: String, color: Color) -> void:\n\tif DialogueManager.is_engaged():"),
 		"UI._push_quest_toast must queue on DialogueManager.is_engaged(), not is_active() -- the notices layer stays hidden through a sub-menu suspension, so a suspension-time quest toast must queue too")
 
 
@@ -565,9 +565,9 @@ func test_dialogue_auto_advance_waits_for_tts_completion_when_available() -> voi
 		"DialogueManager needs a token-checked TTS completion path so long spoken lines advance only after the real audio finishes")
 	m.free()
 	var src := FileAccess.get_file_as_string(DIALOGUE_MANAGER_PATH)
-	assert_string_contains(src, "SpeechTts.dialogue_speech_finished.connect",
+	assert_true(src.contains("SpeechTts.dialogue_speech_finished.connect"),
 		"auto-advance must connect to SpeechTts.dialogue_speech_finished when speech_token > 0 instead of relying only on the clamped text estimate")
-	assert_string_contains(src, "speech_token > 0",
+	assert_true(src.contains("speech_token > 0"),
 		"DialogueManager must use TTS completion only when SpeechTts actually started audio; text-only dialogue keeps the estimated timer fallback")
 
 

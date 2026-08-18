@@ -159,8 +159,8 @@ func test_expected_drops_clamps_chance_and_count_like_roll() -> void:
 
 func test_summary_text_empty_and_null() -> void:
 	var lt := LootTable.new()
-	assert_string_contains(Ops.summary_text(lt), "Empty", "empty table summary mentions Empty")
-	assert_string_contains(Ops.summary_text(null), "Empty", "null table summary is the empty line")
+	assert_true(Ops.summary_text(lt).contains("Empty"), "empty table summary mentions Empty")
+	assert_true(Ops.summary_text(null).contains("Empty"), "null table summary is the empty line")
 	lt = null
 
 
@@ -172,9 +172,9 @@ func test_summary_text_totals_and_flags_dead_rows() -> void:
 	var dead := _make_entry(1.0, 1, 1)  # no item -> 0, a dead row
 	lt.entries = [good, dead]
 	var s := Ops.summary_text(lt)
-	assert_string_contains(s, "2 row", "summary reports the row count")
-	assert_string_contains(s, "1.00", "summary reports ~1.00 expected per roll")
-	assert_string_contains(s, "drop nothing", "summary flags the dead row")
+	assert_true(s.contains("2 row"), "summary reports the row count")
+	assert_true(s.contains("1.00"), "summary reports ~1.00 expected per roll")
+	assert_true(s.contains("drop nothing"), "summary flags the dead row")
 	lt = null
 	good = null
 	dead = null

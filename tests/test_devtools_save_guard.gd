@@ -34,10 +34,10 @@ func test_overwrite_backs_up_prior_bytes() -> void:
 	assert_eq(err, OK, "the overwrite save should succeed")
 	assert_true(FileAccess.file_exists(TMP + ".bak"), "overwriting an existing file backs the prior bytes up to .bak")
 	var bak_text := FileAccess.get_file_as_string(TMP + ".bak")
-	assert_string_contains(bak_text, "alpha", "the .bak holds the PRIOR content (id = alpha), not the new one")
+	assert_true(bak_text.contains("alpha"), "the .bak holds the PRIOR content (id = alpha), not the new one")
 	assert_false(bak_text.contains("beta"), "the .bak must NOT contain the new content — it's the pre-overwrite copy")
 	var live_text := FileAccess.get_file_as_string(TMP)
-	assert_string_contains(live_text, "beta", "the live .tres holds the NEW content")
+	assert_true(live_text.contains("beta"), "the live .tres holds the NEW content")
 	first = null
 	second = null
 

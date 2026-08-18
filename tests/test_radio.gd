@@ -157,7 +157,7 @@ func test_dialogue_duck_feeds_on_engaged_not_active() -> void:
 	# Engaged-span is the conversation-scoped-audio semantic (DialogueMusicBed's "the conversation still EXISTS
 	# (is_engaged())" lifecycle).
 	var src := FileAccess.get_file_as_string(RADIO_SCRIPT)
-	assert_string_contains(src, "_dialogue_suppresses(DialogueManager.is_engaged())",
+	assert_true(src.contains("_dialogue_suppresses(DialogueManager.is_engaged())"),
 		"Radio._process must feed the dialogue duck the ENGAGED span (is_engaged()), not is_active() -- a sub-menu suspension must hold a duck_for_dialogue radio ducked instead of fading it up mid-Trade")
 
 # --- Folder playlist (Slice B) ---

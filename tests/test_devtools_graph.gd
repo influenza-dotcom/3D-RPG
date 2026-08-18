@@ -59,7 +59,7 @@ func test_dialogue_flags_out_of_range_target() -> void:
 	var problems: Array = g["problems"]
 	assert_eq(problems.size(), 1, "exactly one dangling/out-of-range target flagged")
 	assert_eq(String(problems[0]["node"]), "line2", "the problem points at the offending line")
-	assert_string_contains(String(problems[0]["message"]), "99", "the message names the bad index")
+	assert_true(String(problems[0]["message"]).contains("99"), "the message names the bad index")
 	res = null
 
 

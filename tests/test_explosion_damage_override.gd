@@ -30,7 +30,7 @@ func test_weapon_data_default_explosion_damage_is_sentinel() -> void:
 func test_projectile_spawner_forwards_weapon_explosion_damage() -> void:
 	# The forward seam: a weapon's projectile blast must carry the weapon's explosion_damage onto its Explosion node.
 	var src := FileAccess.get_file_as_string("res://scripts/projectiles/projectile_spawner.gd")
-	assert_string_contains(src, "explosion_damage = current_weapon.explosion_damage", "ProjectileSpawner must forward WeaponData.explosion_damage to the Explosion")
+	assert_true(src.contains("explosion_damage = current_weapon.explosion_damage"), "ProjectileSpawner must forward WeaponData.explosion_damage to the Explosion")
 
 
 func test_explosion_bridge_has_and_forwards_explosion_damage() -> void:
@@ -42,8 +42,8 @@ func test_explosion_bridge_has_and_forwards_explosion_damage() -> void:
 	assert_almost_eq(bridge.explosion_damage, -1.0, 0.001, "the explosion bridge must expose explosion_damage so ProjectileSpawner's write lands (not a phantom set)")
 	bridge.free()
 	var src := FileAccess.get_file_as_string("res://scripts/effects/explosion.gd")
-	assert_string_contains(src, "explosion.explosion_damage = _damage", "the bridge's _spawn_at must forward explosion_damage onto the spawned Explosion")
-	assert_string_contains(src, "explosion_radius, explosion_damage)", "the rock/rocket path must pass explosion_damage into _spawn_at (the spark path stays at the -1 fallback)")
+	assert_true(src.contains("explosion.explosion_damage = _damage"), "the bridge's _spawn_at must forward explosion_damage onto the spawned Explosion")
+	assert_true(src.contains("explosion_radius, explosion_damage)"), "the rock/rocket path must pass explosion_damage into _spawn_at (the spark path stays at the -1 fallback)")
 
 
 func test_barrel_does_not_override_explosion_damage() -> void:

@@ -104,5 +104,5 @@ func test_maybe_dodge_skips_a_degenerate_direction() -> void:
 func test_goap_fire_actions_call_the_host_facades() -> void:
 	# Drift guard: the GOAP FireArmed/FireUnarmed actions must keep calling host._act_alerted / host._act_unarmed so
 	# the extraction stays invisible to the planner (the bodies moved to NpcCombat, but the entry points didn't).
-	assert_string_contains(FileAccess.get_file_as_string("res://scripts/npc/goap/actions/goap_action_fire_armed.gd"), "host._act_alerted(", "FireArmed action must call host._act_alerted")
-	assert_string_contains(FileAccess.get_file_as_string("res://scripts/npc/goap/actions/goap_action_fire_unarmed.gd"), "host._act_unarmed(", "FireUnarmed action must call host._act_unarmed")
+	assert_true(FileAccess.get_file_as_string("res://scripts/npc/goap/actions/goap_action_fire_armed.gd").contains("host._act_alerted("), "FireArmed action must call host._act_alerted")
+	assert_true(FileAccess.get_file_as_string("res://scripts/npc/goap/actions/goap_action_fire_unarmed.gd").contains("host._act_unarmed("), "FireUnarmed action must call host._act_unarmed")

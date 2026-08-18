@@ -38,7 +38,7 @@ func test_diff_flags_type_change_and_identical() -> void:
 	var b := SceneDiff.parse_scene("[node name=\"Root\" type=\"Node3D\"]\n[node name=\"N\" type=\"StaticBody3D\" parent=\".\"]\n")
 	var d := SceneDiff.diff_scenes(a, b)
 	assert_eq((d["changed"] as Array).size(), 1, "the retyped node is a change")
-	assert_string_contains(String(d["changed"][0]["type_change"]), "Area3D -> StaticBody3D", "the type change is reported")
+	assert_true(String(d["changed"][0]["type_change"]).contains("Area3D -> StaticBody3D"), "the type change is reported")
 	var same := SceneDiff.diff_scenes(a, a)
 	assert_true(same["added"].is_empty() and same["removed"].is_empty() and same["changed"].is_empty(), "a scene vs itself has no differences")
 

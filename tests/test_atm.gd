@@ -208,7 +208,7 @@ func test_the_terminal_chirps_through_the_shared_drop_in_and_survives_having_no_
 	assert_false(StationSpeaker.chirp(atm), "an off-tree terminal has no speaker — chirp() reports it, it doesn't crash")
 	assert_null(StationSpeaker.find_speaker(atm), "…and there is nothing to find on it")
 	assert_false(StationSpeaker.chirp(null), "a null station is a no-op too (the refuse paths call through freely)")
-	assert_string_contains(FileAccess.get_file_as_string("res://scripts/components/atm.gd"), "StationSpeaker.ensure(self)",
+	assert_true(FileAccess.get_file_as_string("res://scripts/components/atm.gd").contains("StationSpeaker.ensure(self)"),
 		"a standalone terminal must build its own default voice at _ready — a bare atm.tscn dropped in a level chirps with zero authoring")
 	atm.free()
 

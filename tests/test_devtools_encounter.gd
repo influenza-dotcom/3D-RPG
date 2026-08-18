@@ -45,7 +45,7 @@ func test_summarize_handles_null_def_and_markers() -> void:
 	assert_eq((s["rows"] as Array).size(), 2, "the null definition still gets a row")
 	assert_eq(int(s["total"]), 2, "the null definition contributes no count")
 	assert_eq(int(s["marker_count"]), 2, "spawn_points are counted")
-	assert_string_contains(String(s["placement"]), "markers (2", "markers drive placement when present")
+	assert_true(String(s["placement"]).contains("markers (2"), "markers drive placement when present")
 	sp.free()
 
 

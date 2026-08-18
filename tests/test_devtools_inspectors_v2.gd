@@ -79,7 +79,7 @@ func test_weapon_lines_are_nonempty_and_mention_hp_anchors() -> void:
 	wd.damage = 1.0
 	var lines := Calc.weapon_lines(wd)
 	assert_gte(lines.size(), 6, "the readout has the DPS line, 4 multiplier lines, the clip line + recoil line")
-	assert_string_contains(lines[0], "DPS", "the first line is the DPS/burst summary")
+	assert_true(lines[0].contains("DPS"), "the first line is the DPS/burst summary")
 
 
 # ── WeaponData: amber warnings ─────────────────────────────────────────────────────────────────────────────

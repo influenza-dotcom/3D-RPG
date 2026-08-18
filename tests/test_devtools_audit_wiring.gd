@@ -67,14 +67,14 @@ func test_flag_findings_dead_gate_when_read_without_writer() -> void:
 	var out := Wiring.flag_findings(writers, readers)
 	assert_eq(out.size(), 1, "a flag read with no writer is exactly one finding (a dead gate)")
 	assert_eq(out[0]["severity"], "WARN", "a dead gate is a WARN, not an ERROR")
-	assert_string_contains(out[0]["message"], "dead gate", "the dead-gate finding should name the problem")
+	assert_true(out[0]["message"].contains("dead gate"), "the dead-gate finding should name the problem")
 
 func test_flag_findings_typo_when_write_without_reader() -> void:
 	var writers := {"orphan_write": true}
 	var readers := {}
 	var out := Wiring.flag_findings(writers, readers)
 	assert_eq(out.size(), 1, "a flag written with no reader is exactly one finding (a likely typo)")
-	assert_string_contains(out[0]["message"], "typo", "the write-no-reader finding should mention a typo")
+	assert_true(out[0]["message"].contains("typo"), "the write-no-reader finding should mention a typo")
 
 func test_flag_findings_clean_when_paired() -> void:
 	var both := {"alarm": true}
@@ -97,7 +97,7 @@ func test_resolve_quest_id_blank_is_ok() -> void:
 func test_resolve_quest_id_unknown_reports() -> void:
 	var msg := Wiring.resolve_quest_id("typo_quest", {"real_quest": true})
 	assert_ne(msg, "", "an unknown quest id must produce a non-empty error message")
-	assert_string_contains(msg, "typo_quest", "the message should name the offending id")
+	assert_true(msg.contains("typo_quest"), "the message should name the offending id")
 
 func test_resolve_objective_id_known_passes() -> void:
 	var by_quest := {"q1": {"o1": true, "o2": true}}
@@ -106,12 +106,12 @@ func test_resolve_objective_id_known_passes() -> void:
 func test_resolve_objective_id_missing_quest() -> void:
 	var msg := Wiring.resolve_objective_id("ghost", "o1", {"q1": {"o1": true}})
 	assert_ne(msg, "", "advancing an objective of a non-existent quest is an error")
-	assert_string_contains(msg, "ghost", "the message should name the missing quest")
+	assert_true(msg.contains("ghost"), "the message should name the missing quest")
 
 func test_resolve_objective_id_missing_objective() -> void:
 	var msg := Wiring.resolve_objective_id("q1", "no_such", {"q1": {"o1": true}})
 	assert_ne(msg, "", "advancing an objective the quest doesn't declare is an error")
-	assert_string_contains(msg, "no_such", "the message should name the missing objective")
+	assert_true(msg.contains("no_such"), "the message should name the missing objective")
 
 func test_resolve_objective_id_blank_is_ok() -> void:
 	assert_eq(Wiring.resolve_objective_id("", "", {}), "", "a blank advance pair is an unset export, not an error")
@@ -157,7 +157,7 @@ func test_resolve_faction_id_blank_is_ok() -> void:
 func test_resolve_faction_id_unknown_reports() -> void:
 	var msg := Wiring.resolve_faction_id("raidres", {"raiders": true})
 	assert_ne(msg, "", "a misspelled faction id must report")
-	assert_string_contains(msg, "raidres", "the message should name the offending id")
+	assert_true(msg.contains("raidres"), "the message should name the offending id")
 
 func test_unknown_dict_keys_flags_only_bad_keys() -> void:
 	var d := {&"raiders": -1.0, &"ghosts": 1.0}  # StringName keys, as Faction.relations uses
@@ -175,8 +175,8 @@ func test_faction_id_filename_match() -> void:
 func test_faction_id_filename_mismatch_reports() -> void:
 	var msg := Wiring.faction_id_filename_mismatch("raidrs", "raiders")
 	assert_ne(msg, "", "an internal id that differs from the filename must report")
-	assert_string_contains(msg, "raidrs", "the message should show the internal id")
-	assert_string_contains(msg, "raiders", "the message should show the filename")
+	assert_true(msg.contains("raidrs"), "the message should show the internal id")
+	assert_true(msg.contains("raiders"), "the message should show the filename")
 
 func test_collect_faction_id_refs_finds_fields() -> void:
 	var text := "alarm_faction_id = \"raiders\"\nfaction_id = \"townsfolk\"\n"
