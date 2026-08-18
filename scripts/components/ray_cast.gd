@@ -136,6 +136,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		# the prop across a cutscene when you can't even shoot. (gameplay_suppressed omits dialogue, so keep that.)
 		if DialogueManager.is_active() or InputManager.gameplay_suppressed():
 			return
+		# The click that RE-FOCUSES the game window is not a throw either (2026-08-18). It stands in for the fire click,
+		# so it honours MouseInput's refocus latch exactly as the shot does (mouse_input.gd header): Windows delivers
+		# the activating click as a real press, and the app-focus notification that arms the latch lands BEFORE this
+		# event is flushed, so the latch is already up here. Not consumed — the same click may still close a screen.
+		if _refocus_latched():
+			return
 		_release_timer_started_us = -1  # discard any E/Z-armed release timer — this click owns the throw now
 		_release(GameSettings.physics_damage.pickup_throw_impulse)
 		get_viewport().set_input_as_handled()
@@ -173,6 +179,13 @@ func _drop_held_in_hand() -> void:
 		return
 	if pl != null:
 		pl.hold_equipped_weapon()
+
+## True while the player's MouseInput refocus latch is holding the PRIMARY fire button — i.e. the left click being
+## read right now is the click that re-focused the window, not a fresh press. Read through the exported `player`
+## (`as Player`, the same idiom as above); null for a bare/AI body, where nothing is latched.
+func _refocus_latched() -> bool:
+	var pl := player as Player
+	return pl != null and is_instance_valid(pl.mouse_input) and pl.mouse_input.fire_blocked_by_refocus()
 
 ## Grab the aimed Throwable (start carrying), or — if already carrying — arm the release timer so the
 ## key-up becomes a drop/throw by hold time. Shared by the PickUp (E) and Throw (Z) presses.

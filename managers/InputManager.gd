@@ -168,6 +168,17 @@ func _ensure_modal_reg() -> void:
 ## The gameplay control gates — move / jump / fire / aim / crouch / grapple — check this. Truth set is the
 ## 15 registry screens + the two control-only suppressors (byte-identical to the pre-registry OR-chain, plus
 ## each screen registered since).
+##
+## OS window focus is deliberately NOT a third suppressor here: the OS stops routing keyboard and clicks to an
+## unfocused window, Godot itself releases held keys and every pressed action on focus loss (Input.release_pressed_events,
+## from SceneTree's APPLICATION_FOCUS_OUT handler), and the pad is silenced by the ENGINE too — project.godot sets
+## `input_devices/joypads/ignore_joypad_on_unfocused_application = true` (Project Settings → Input Devices → Joypads),
+## which makes Input drop joypad events and release held joy buttons / axes / actions the moment the app loses focus.
+## Without that flag SDL keeps reporting the stick through an alt-tab and the background window steers itself; with it
+## nothing polls non-zero, so no gate is needed. tests/test_focus_input_lock.gd pins the flag ON. The one thing the
+## flag can't cover — the CLICK that re-focuses the window firing the drawn weapon — is MouseInput's refocus latch.
+## (Accepted residual: the mouse WHEEL is the one input Windows' hover-scroll still delivers to an unfocused window and
+## Godot doesn't filter, so Hotbar Next/Prev can cycle a weapon in the background.)
 func gameplay_suppressed() -> bool:
 	return any_modal_open() or CutscenePlayer.is_active() or NameEntryDialog.is_open()
 

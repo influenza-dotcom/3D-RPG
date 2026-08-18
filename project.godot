@@ -291,6 +291,10 @@ Quickload={
 ]
 }
 
+[input_devices]
+
+joypads/ignore_joypad_on_unfocused_application=true
+
 [physics]
 
 3d/physics_engine="Jolt Physics"

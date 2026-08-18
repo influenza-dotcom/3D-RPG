@@ -480,6 +480,33 @@ DISTINCT from `gameplay_suppressed()`, which also counts the real-time Pip-Boy/l
 overlays that keep the player at risk and must NOT grant immunity. A cutscene that wants
 to script player damage must use a dedicated kill path, not incidental `take_damage`.
 
+**OS focus and input (2026-08-18).** An unfocused window is NOT a control-lock predicate —
+`gameplay_suppressed()`'s truth set is unchanged (modal registry + cutscene + name-entry). The OS
+stops routing keyboard and clicks to an unfocused window; Godot itself releases held keys and
+every pressed action on focus loss (`Input.release_pressed_events`, called from `SceneTree`'s
+`NOTIFICATION_APPLICATION_FOCUS_OUT` handler before the notification reaches any node, and again
+from the display server's deactivate path); and the pad — which SDL keeps reporting through an
+alt-tab while `Input.mouse_mode` still reads `CAPTURED` — is silenced by the engine flag
+`input_devices/joypads/ignore_joypad_on_unfocused_application = true` in `project.godot`, which
+makes `Input` drop joypad events and release held joy buttons/axes/actions. No input reader gates
+on focus; `tests/test_focus_input_lock.gd` pins the flag ON (the ProjectSettings value + the live
+`Input` property). The one seam the flag can't cover — Windows delivers the click that re-focuses
+the window as a real press — is `MouseInput`'s refocus fire latch: one latch per fire button
+(`Attack`, `alt_attack_action`), both armed in its `_notification` on
+`NOTIFICATION_APPLICATION_FOCUS_IN/OUT` (app-level: dispatched synchronously from `WM_ACTIVATEAPP`
+BEFORE the activating click is flushed, whereas the window-level pair's deactivate half is
+timer-deferred; both pairs flap harmlessly when the native Options music picker opens — a modal),
+each cleared by its own button's release (the release event in `_input`, or the next poll reading
+it up) — so the activating click is eaten, a fresh click fires even when it lands in the same
+frame as the release, and holding ADS after a left-click activation cannot swallow the next shot.
+`PickupRay`'s left-click alternate throw honours the primary latch. Known residuals, accepted: the
+mouse WHEEL is the one input Windows'
+hover-scroll still delivers to an unfocused window (Godot doesn't filter it, so Hotbar Next/Prev
+can cycle in the background); a pad trigger held across the focus edge reads released after
+refocus (the flag released it and the axis is only re-reported on its next value change), so its
+next movement is a fresh pull that fires; a fire key rebound to the KEYBOARD can re-press through
+OS autorepeat after a keyboard alt-tab. Same test file pins the latch.
+
 **Dialogue-suspend contract.** The station options themselves (Trade/Heal/Rest/Level Up/
 Install/Chess/Bank) are discovered via the **dialogue-station contract**: `DialogueManager`
 scans the speaker's direct children by `has_method` for the
