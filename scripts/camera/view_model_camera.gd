@@ -69,7 +69,17 @@ const VIEW_MODEL_LAYER: int = 4
 ## clearly visible". Raise for a brighter always-lit gun; lower to let the world's darkness show on it more.
 @export var view_model_ambient_energy: float = 0.75
 
+## Fraction of the fill energy left at DEEP NIGHT when a DayNightSky is driving the level (group "day_night",
+## duck-typed current_day_factor) — the gun dims with the world instead of glowing full-fill in the dark.
+## 1.0 = constant fill day and night. A level with NO day/night driver keeps the constant fill, so the gun
+## never darkens against a bright static world. Ignored when view_model_environment is authored (used verbatim).
+@export var night_fill_scale: float = 0.35
+
 var _main_camera: Camera3D            ## the live first-person camera we mirror (CameraEffects)
+## The HUD-ghost drop-in, for its `set_ghosted` opt-out helper alone (see _attach_container).
+## Preloaded BY PATH + used through the const — the editor class-cache cascade guard.
+const HUD_GHOST_SCRIPT := preload("res://scripts/ui/hud_ghost.gd")
+
 var _sub_viewport: SubViewport        ## off-screen pass that renders ONLY the gun layer
 var _gun_camera: Camera3D             ## camera inside _sub_viewport; masks ONLY VIEW_MODEL_LAYER
 var _container: SubViewportContainer  ## composites _sub_viewport's texture over the main view
@@ -150,18 +160,47 @@ func _attach_container(ui: CanvasLayer) -> void:
 	_container.add_child(_sub_viewport)  # the container is the SubViewport's sole parent
 	ui.add_child(_container)
 	ui.move_child(_container, 0)  # draw UNDER the post-process ColorRect (HUD child 0 was that rect)
+	# ...and OUT of the HUD-ghost capture (scripts/ui/hud_ghost.gd). Being a Control on the HUD layer is an
+	# implementation detail of how the gun pass is composited — it is not a HUD readout, and the ghost's rule
+	# is "an instrument readout trails". Left in, the whole weapon would smear behind itself on every turn,
+	# which reads as the gun being made of light rather than as a UI afterimage. This one line is also why
+	# the arms/gun stay crisp while the panel and reticle around them ghost.
+	HUD_GHOST_SCRIPT.set_ghosted(_container, false)
 	_composited = true
+
+## The gun pass's own render target, whose ALPHA is exactly the weapon's screen coverage — the SubViewport
+## clears TRANSPARENT and only the view-model layer draws into it, so alpha is 1 on the gun/arms and 0
+## everywhere else. WorldGhost samples it to keep the temporal trail off the weapon (the world behind it
+## still ghosts); nothing else may rely on the RGB, which is the gun's own lit colour and not a mask.
+## Null while the pass is not composited — a caller must treat that as "no mask", never as "mask everything".
+func coverage_texture() -> Texture2D:
+	if not _composited or _sub_viewport == null:
+		return null
+	return _sub_viewport.get_texture()
 
 func _process(_delta: float) -> void:
 	if _gun_camera == null or _main_camera == null:
 		return
 	_sync_gun_camera()
+	_follow_day_night()
 	# Only the bare (non-composited) fallback needs manual sizing — a stretched SubViewportContainer
 	# owns the size when composited, so touching it here would fight the container.
 	if not _composited and _sub_viewport:
 		var want := _viewport_pixel_size()
 		if _sub_viewport.size != want:
 			_sub_viewport.size = want
+
+## Dim the built-in fill with the level's day/night cycle so the gun goes dark WITH the world at night. Only
+## while a DayNightSky is live (group "day_night") — its absence means a static level, where the constant fill
+## is correct — and never on an authored view_model_environment, which is the designer's verbatim look.
+func _follow_day_night() -> void:
+	if view_model_environment != null or _gun_camera.environment == null:
+		return
+	var dns := get_tree().get_first_node_in_group(Groups.DAY_NIGHT)
+	var day := 1.0
+	if dns != null and dns.has_method(&"current_day_factor"):
+		day = clampf(float(dns.current_day_factor()), 0.0, 1.0)
+	_gun_camera.environment.ambient_light_energy = view_model_ambient_energy * lerpf(maxf(0.0, night_fill_scale), 1.0, day)
 
 ## Copy the live camera's pose + FOV onto the gun camera so the view model tracks shake / bob /
 ## landing dip / strafe tilt / ADS zoom (all already baked into the main camera each frame).

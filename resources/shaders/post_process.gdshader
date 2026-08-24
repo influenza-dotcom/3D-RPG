@@ -5,7 +5,19 @@ uniform sampler2D SCREEN_TEXTURE : hint_screen_texture, repeat_disable, filter_n
 
 // --- Retro post-process (downscale / posterize / dither) ---
 uniform int color_steps = 32;
+// AUTHORED master gate for the ordered dither (per-material, in the .tscn). The PLAYER's dial is
+// `dither_strength` below — this stays true in both shipped materials and exists so a scene can opt a
+// dither out entirely regardless of the player's setting.
 uniform bool enable_dithering = true;
+// Bayer matrix ORDER IN BITS, not its width: 0 = off, 1 = 2x2, 2 = 4x4, 3 = 8x8. A bigger matrix carries
+// more threshold levels (N*N of them), so it reconstructs a gradient more finely at the same `color_steps`
+// — 8x8 is the classic ordered-dither look, 2x2 is the crunchy one. Authored per material (an art choice,
+// like `color_steps`), NOT a player setting: the player gets the strength dial instead.
+uniform int bayer_order : hint_range(0, 3) = 3;
+// 0 = no dither (a plain round-to-nearest posterize, i.e. hard banding), 1 = the full ordered dither.
+// Driven live from code by Settings.dither_strength (Options -> Video -> Dithering), the contrast /
+// colorblind_mode idiom — see player.gd _update_low_hp.
+uniform float dither_strength : hint_range(0.0, 1.0) = 1.0;
 // CELL COUNT across the screen's WIDTH — NOT a divisor. The fragment does
 // floor(SCREEN_UV * render_scale) / render_scale, so this is "how many blocks wide is the image",
 // and LOWER = chunkier. (An older comment here claimed 0.5/1.0/2.0 = double/native/half res; that
@@ -21,6 +33,20 @@ uniform bool enable_dithering = true;
 //   < 792  = a real chunky downscale (computerroom.tscn uses 320 for the CRT look — intended)
 //   >= ~2x = effectively no downscale, quantization lands sub-pixel (ui.tscn uses 1584)
 uniform float render_scale = 320.0;
+
+// --- Colour quantization (Options -> Video -> Colour Depth; pushed live by player.gd, the contrast /
+//     dither_strength idiom) ---
+// Per-channel STEP COUNT the finished frame is snapped to. A channel lands on one of `steps + 1` values,
+// so 31 is the PlayStation's own 5-bit-per-channel RGB555 framebuffer (32 levels) and 255 is 8-bit, i.e.
+// what the buffer already holds — off. A vec3 rather than a second scalar because the depths worth having
+// are UNEQUAL: RGB565 spends its spare bit on green (31, 63, 31) because the eye resolves green finest,
+// and RGB332 starves blue (7, 7, 3) for the same reason. `color_steps` could never express either.
+//
+// vec3(0.0) is the sentinel for NOBODY IS DRIVING THIS MATERIAL, and the fragment then falls back to the
+// authored scalar `color_steps`. That is what keeps an un-driven material — computerroom.tscn's CRT wall,
+// or this shader opened on a bare quad in the editor — looking exactly as it was authored, so the default
+// here must stay zero. The player's overlay is driven every frame and never sees the fallback.
+uniform vec3 quantize_levels = vec3(0.0);
 
 // --- Film grain (applied last, over the processed image) ---
 uniform float grain_amount : hint_range(0.0, 1.0) = 0.05;
@@ -58,17 +84,67 @@ uniform int colorblind_mode = 0;
 //     image around mid-gray. 1.0 = the authored look; <1 washes toward gray, >1 deepens. ---
 uniform float contrast : hint_range(0.5, 1.5) = 1.0;
 
-// --- 4x4 Bayer Dither Matrix ---
-float dither_pattern(ivec2 pixel_coord) {
-    int x = pixel_coord.x % 4;
-    int y = pixel_coord.y % 4;
-    float[16] matrix = float[](
-         0.0,  8.0,  2.0, 10.0,
-        12.0,  4.0, 14.0,  6.0,
-         3.0, 11.0,  1.0,  9.0,
-        15.0,  7.0, 13.0,  5.0
-    );
-    return matrix[y * 4 + x] / 16.0;
+// --- Lens (barrel / fisheye) -------------------------------------------------------------------------------
+// Bends the SCREEN FETCH radially: the centre of the frame is magnified and the periphery squeezed, so straight
+// lines off the centre bow outward. That is barrel distortion — a wide lens — and it is the one thing that reads
+// as "fisheye" without touching the projection (a Camera3D cannot do it: FOV is a uniform scale, see
+// CameraEffects.base_fov). `hud_curve.gdshader` deliberately does NOT use a radial term, because its job is a
+// cylinder; its own comment says a `dot(d, d)` term "would bend both at once and always look like a lens". This
+// is that term, on purpose.
+//
+// ⭐ THE NUMBER IS CENTRE MAGNIFICATION MINUS ONE, because the bend is normalised by the corner and then divided
+// by itself at the corner (see lens_warp): 0.08 = the centre reads ~8% bigger, the CORNERS STAY PINNED to the
+// corners. Pinning is not cosmetic — SCREEN_TEXTURE is `repeat_disable`, so a fetch that ran past the edge would
+// smear the border texel down the whole side. It also means this never shows black bars, at any strength.
+// Driven live from code by player.gd out of GameSettings.camera.lens_barrel scaled by the Options → Video "Lens
+// Curve" slider (Settings.lens_curve) — the ps1_warp_intensity / hud_curve idiom. 0 = perfectly flat, and 0 is
+// the default so the CRT wall in computerroom.tscn (the other material on this shader) is untouched.
+uniform float lens_barrel : hint_range(-0.25, 1.0) = 0.0;
+// Lens fringe, as a FRACTION OF THE BEND rather than an absolute offset — red reads a slightly weaker bend and
+// blue a slightly stronger one, so the colour split grows with the curve instead of fighting it and vanishes
+// with it. This is what makes the warp read as GLASS rather than as a wobble. 0 = off (default); at 1.0 the red
+// and blue taps read a bend 20% weaker / stronger than green. Costs two extra screen taps, and only when it is
+// actually on.
+uniform float lens_chroma : hint_range(0.0, 1.0) = 0.0;
+
+// --- Bayer (ordered-dither) threshold matrix, 2x2 / 4x4 / 8x8 ---
+//
+// Evaluated as a FORMULA instead of a stored table so one function serves every size: a `float[16]`
+// const can only ever be one matrix, which is why the version this replaced was hardcoded to 4x4.
+//
+// The matrix is defined recursively —
+//     M_1  = [ 0 ]
+//     M_2N = [ [ 4*M_N + 0, 4*M_N + 2 ],
+//              [ 4*M_N + 3, 4*M_N + 1 ] ]
+// — so each finer level multiplies the value by 4 and adds an offset picked by ONE bit of x and one of y:
+//     offset(xb, yb) = 2*(xb ^ yb) + yb        // (0,0)->0  (1,0)->2  (0,1)->3  (1,1)->1
+// Walking the coordinate bits LOW to HIGH with `v = v*4 + offset` gives the HIGH coordinate bits the small
+// weights and the low bits the large ones, which is that recursion unrolled. At order 2 it reproduces the
+// classic 4x4 table this file used to spell out (0 8 2 10 / 12 4 14 6 / 3 11 1 9 / 15 7 13 5) EXACTLY —
+// same matrix, computed rather than typed — and at order 3 the canonical 8x8. Every size comes out a
+// permutation of 0..N*N-1, which is what makes the thresholds spread evenly over one quantisation step.
+//
+// Returns the threshold in (0, 1), CENTRED: the +0.5 makes the matrix mean exactly 0.5, so a full-strength
+// dither has no DC bias (a bare v/(N*N) averages 0.5 - 1/(2*N*N) and would darken the whole frame by a
+// fraction of a colour step). 0.5 is also what "no dither" means below, so the two blend cleanly.
+float bayer(ivec2 pixel_coord, int order) {
+    int size = 1 << order;
+    // Wrap with AND, never `%`: size is a power of two, and GLSL's % keeps the sign — a negative coordinate
+    // (possible on any off-screen fragment) would index the matrix from the wrong side.
+    int x = pixel_coord.x & (size - 1);
+    int y = pixel_coord.y & (size - 1);
+    int v = 0;
+    // Constant loop bound + break rather than `k < order`: the bound must not depend on a uniform, or the
+    // shader is at the mercy of the driver's willingness to compile a dynamically-bounded loop.
+    for (int k = 0; k < 3; k++) {
+        if (k >= order) {
+            break;
+        }
+        int xb = (x >> k) & 1;
+        int yb = (y >> k) & 1;
+        v = v * 4 + 2 * (xb ^ yb) + yb;
+    }
+    return (float(v) + 0.5) / float(size * size);
 }
 
 // Daltonization: simulate the colour deficiency in LMS cone space, then shift the lost contrast into
@@ -98,21 +174,91 @@ vec3 daltonize(vec3 rgb, int mode) {
     return clamp(rgb + shift, 0.0, 1.0);
 }
 
+// Map an output UV onto the source UV the barrel lens should read it from. `k` is passed in rather than read off
+// the uniform so the chroma taps can walk it per channel; `aspect` likewise, because a Godot shader's built-ins
+// (SCREEN_PIXEL_SIZE) are not reliably visible inside a user function.
+//
+// The shape: centre the coordinate, stretch X by the aspect so the bend is a CIRCLE and not an ellipse, then
+// scale the radius by (1 + k*r2n) where r2n is 0 at the centre and 1 at the corner. Dividing that by its own
+// value at the corner (1 + k) pins the corners — the same fitted-normalisation trick hud_curve.gdshader uses so
+// its concave panel cannot flare content off the canvas.
+vec2 lens_warp(vec2 uv, float k, float aspect) {
+    vec2 c = uv * 2.0 - 1.0;
+    c.x *= aspect;
+    float r2_corner = aspect * aspect + 1.0;
+    float r2n = dot(c, c) / r2_corner;
+    c *= (1.0 + k * r2n) / (1.0 + k);
+    c.x /= aspect;
+    return c * 0.5 + 0.5;
+}
+
+// One screen tap through the lens, or three when the fringe is on. Early-outs to a plain fetch when the lens is
+// flat, so the shipped default costs nothing at all.
+vec3 lens_sample(vec2 uv, float aspect) {
+    if (lens_barrel == 0.0) {
+        return texture(SCREEN_TEXTURE, uv).rgb;
+    }
+    if (lens_chroma <= 0.0) {
+        return texture(SCREEN_TEXTURE, lens_warp(uv, lens_barrel, aspect)).rgb;
+    }
+    // 0.2 = the fringe at chroma 1.0, as a fraction of the bend. Kept small deliberately: past about a fifth the
+    // split stops reading as glass and starts reading as a broken frame.
+    float spread = lens_barrel * lens_chroma * 0.2;
+    return vec3(
+        texture(SCREEN_TEXTURE, lens_warp(uv, lens_barrel - spread, aspect)).r,
+        texture(SCREEN_TEXTURE, lens_warp(uv, lens_barrel, aspect)).g,
+        texture(SCREEN_TEXTURE, lens_warp(uv, lens_barrel + spread, aspect)).b);
+}
+
 void fragment() {
     // --- 1. Downscale using UV quantization (works for any render_scale) ---
     // Each output pixel picks the colour from a fixed grid cell.
     vec2 low_res_uv = floor(SCREEN_UV * render_scale) / render_scale;
-    vec3 final_color = texture(SCREEN_TEXTURE, low_res_uv).rgb;
+    // The LENS bends the FETCH only — `low_res_uv` itself stays screen-aligned, so the pixelation grid and the
+    // Bayer threshold derived from it below stay square to the display instead of stretching with the warp.
+    float lens_aspect = SCREEN_PIXEL_SIZE.y / SCREEN_PIXEL_SIZE.x;
+    vec3 final_color = lens_sample(low_res_uv, lens_aspect);
 
-    // --- 2. Posterize ---
-    float steps = float(color_steps);
-    final_color = floor(final_color * steps + 0.5) / steps;
+    // --- 2+3. Posterize, with the Bayer threshold folded IN (ONE quantisation, not two; there is no
+    //          separate step 3 any more, which is the whole point) ---
+    //
+    // ⭐ THE TRAP THIS FIXES: posterizing first and dithering after is a mathematical NO-OP, and that is
+    // exactly what this shader used to do. Step 2 landed the colour on k/steps; step 3 then computed
+    // floor((k/steps + d/steps) * steps)/steps = floor(k + d)/steps, and d < 1 always floors straight back
+    // to k. Every pixel, every colour, every matrix cell — the 4x4 Bayer table above it was never able to
+    // change a single output value (proved by evaluating the shipped chain over 1001 input levels x all 16
+    // cells: 0 differences). A dither has to BE the rounding decision, so there is only one quantise now
+    // and the matrix supplies its threshold.
+    //
+    // Why it works: `floor(c*steps + d)` rounds up exactly when the fractional part exceeds 1 - d. Feed d
+    // from a matrix whose cells are spread evenly over (0,1) and a colour sitting 1/3 of the way between
+    // two palette steps rounds up in 1/3 of the cells, so the eye averages the tile back to the original
+    // colour: the band becomes a pattern instead of an edge.
+    //
+    // `dither_strength` shrinks the threshold spread around 0.5, so 0 degenerates to floor(c*steps + 0.5)
+    // — plain round-to-nearest, bit-identical to the old step 2 — and 1 is the full matrix. No branch on
+    // the player's value beyond the gate: the mix IS the dial.
 
-    // --- 3. Dither (optional) ---
-    if (enable_dithering) {
-        float d = dither_pattern(ivec2(FRAGCOORD.xy));
-        final_color = floor((final_color + d / steps) * steps) / steps;
+    // Per-channel levels from the player's Colour Depth dial; the vec3(0) sentinel falls back to the
+    // material's authored scalar, so an un-driven scene quantises exactly as it always did.
+    vec3 steps = quantize_levels.r > 0.0 ? quantize_levels : vec3(float(color_steps));
+    float threshold = 0.5;
+    if (enable_dithering && bayer_order > 0 && dither_strength > 0.0) {
+        // Dither on the DOWNSCALED grid, not on raw fragments. `low_res_uv` already names the block this
+        // fragment took its colour from, so mapping it back to pixels hands every fragment inside one
+        // chunky block the SAME threshold — one dithered colour per VISIBLE pixel, instead of a sub-block
+        // pattern that shimmers as the camera moves. Where render_scale is at or above the back-buffer
+        // width (ui.tscn ships 1584 over a 792 px buffer = no real downscale) this collapses exactly back
+        // to the fragment's own integer coordinate, so the shipped chain gets a true 1:1 screen-pixel
+        // Bayer. Derived from low_res_uv rather than render_scale so it can never disagree with whatever
+        // grid step 1 actually sampled.
+        ivec2 dither_px = ivec2(floor(low_res_uv / SCREEN_PIXEL_SIZE));
+        threshold = mix(0.5, bayer(dither_px, bayer_order), dither_strength);
     }
+    // ONE threshold across all three channels on purpose: an ordered dither is a spatial decision about
+    // this PIXEL, and per-channel thresholds would decorrelate the channels into colour fringing on flat
+    // greys. The channels differ only in how many levels they have to choose between.
+    final_color = floor(final_color * steps + threshold) / steps;
 
     // --- 4. Night vision: lift the darks, amplify, and tint green. Toggled from code. ---
     if (night_vision > 0.0) {

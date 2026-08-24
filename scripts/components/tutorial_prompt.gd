@@ -7,10 +7,10 @@ extends TriggerVolume
 ## persistent flag: re-entering, reloading, or a fresh session never repeats a prompt already seen.
 ##
 ## Write {action} tokens into the message and each is replaced with the key currently bound to that input action:
-## "Press {PickUp} to open doors" -> "Press E to open doors" (and it updates if the player rebinds). The token is
+## "Press {PickUp} to open doors" -> "Press F to open doors" (and it updates if the player rebinds). The token is
 ## the ACTION NAME from project.godot [input] (PickUp, jump, Crouch, Run, Takedown, ...) — NOT its Options label,
-## so {interact} is an unknown action and renders as "(none)". The substituted key is bare ("E"), unbracketed —
-## write your own brackets into prompt_text if you want "[E]".
+## so {interact} is an unknown action and renders as "(none)". The substituted key is bare ("F"), unbracketed —
+## write your own brackets into prompt_text if you want "[F]".
 ##
 ## Subclasses TriggerVolume, so every base action (set_flag, audio, start_dialogue, quest hooks) still fires
 ## alongside the prompt if you also configure them. INERT until you set prompt_text.

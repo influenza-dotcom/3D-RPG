@@ -37,7 +37,7 @@ extends GutTest
 ##
 ## DELIBERATELY SKIPPED (instantiation is unsafe / behaviour needs a full scene):
 ##   - CameraEffects._process/bob: those deref a null `player`; only a full Character + tree could exercise them.
-##   - flash_light.gd / laser_mesh.gd / ray_cast.gd: @onready NodePaths resolve to
+##   - flash_light.gd / ray_cast.gd: @onready NodePaths resolve to
 ##     null on a bare tree and _ready/_process dereference them; ray_cast also does
 ##     real physics (direct_space_state, impulses, freeze/layer mutation). Their
 ##     invariants are already guarded by test_smoke's file-content tests.
@@ -182,6 +182,37 @@ func test_camera_effects_layers_sprint_fov_with_other_cosmetic_fov() -> void:
 		"Sprint FOV must layer with the existing movement and dash FOV terms instead of replacing them")
 	assert_true(src.contains("clampf(composed_fov, 1.0, 179.0)"),
 		"Composed movement FOV must stay inside Camera3D's valid perspective range")
+
+
+## ⭐ REGRESSION (2026-08-20): moving the FOV slider mid-run left this camera resting at the OLD angle.
+##
+## `Settings.set_fov()` writes `GameSettings.camera.default_fov` and nothing else. `base_fov` used to be a plain
+## field initialised from that value ONCE per camera instance, so after a mid-run change CameraEffects composed
+## `_target_fov` against the stale number while ScopeIn's un-scoped branch eased the SAME `fov` property toward
+## the fresh one — two writers, two targets, `fov` settling at neither until the level reloaded. `base_fov` is a
+## getter now; this test fails if it is ever turned back into a stored field.
+##
+## The FIELD is written directly, never `Settings.set_fov()`: every Settings setter calls `save_settings()`, and
+## a test that went through the setter would rewrite the developer's real user://settings.cfg.
+func test_camera_base_fov_follows_a_mid_run_fov_change() -> void:
+	var authored: float = GameSettings.camera.default_fov
+	var cam := CameraEffects.new()
+	assert_almost_eq(cam.base_fov, authored, 0.001,
+		"CameraEffects.base_fov must start at the authored rest FOV")
+
+	# The Options slider's effect, without its persistence: only GameSettings changes.
+	var moved := authored + 25.0
+	GameSettings.camera.default_fov = moved
+	assert_almost_eq(cam.base_fov, moved, 0.001,
+		"CameraEffects.base_fov must FOLLOW a mid-run GameSettings.camera.default_fov change — a cached copy leaves this camera composing against the old rest FOV while ScopeIn eases toward the new one")
+	# The bug in one line: the two writers of `fov` must be aiming at the same number.
+	assert_almost_eq(cam.base_fov, GameSettings.camera.default_fov, 0.001,
+		"CameraEffects and ScopeIn must agree on the un-scoped rest FOV — ScopeIn eases toward GameSettings.camera.default_fov directly, so base_fov has to be the same value, not a snapshot of it")
+
+	GameSettings.camera.default_fov = authored
+	assert_almost_eq(cam.base_fov, authored, 0.001,
+		"base_fov must track the restore too (GameSettings.camera is shared across tests — a leaked value would poison every later FOV assertion)")
+	cam.free()
 
 
 func test_scope_in_respects_dialogue_fov_owner() -> void:
@@ -503,6 +534,85 @@ func test_combat_indicators_dropped_shadowed_look_exports() -> void:
 			assert_false(prop in inst,
 				"%s must not keep dead look knob '%s' — it lives on MenuStyle.hud now" % [path, prop])
 		inst.free()
+
+
+# --- The stale-paint contract shared by AimIndicators + SniperGlints -------------------------------
+# A CanvasItem repaints ONLY when queue_redraw() is called — never automatically per frame. Both widgets
+# drop an entry from report() when the enemy loses the shot (charge <= 0), and both _process() bodies
+# early-return once their dict is empty. Miss the queue_redraw on those two paths and the LAST painted
+# frame stays on screen forever: an enemy you walk out of range of reports charge 0 every frame from then
+# on (npc.gd caps _fire_timer at the shot interval, so the charge pins to 0), leaving _process nothing to
+# expire — the red arc froze at its pre-shot peak, bright and near max radius. These run IN-TREE with a
+# stand-in camera so the real paint/clear cycle is exercised, not just the dict bookkeeping.
+
+func _drawn_aim_indicators() -> AimIndicators:
+	var ind := AimIndicators.new()
+	add_child_autofree(ind)
+	ind.size = Vector2(792, 444)  # the UI canvas size; _draw takes its centre from this
+	var cam := Node3D.new()       # a bare Node3D is all AimIndicators reads (basis + global_position)
+	add_child_autofree(cam)
+	ind.camera = cam
+	return ind
+
+
+func test_aim_indicators_clears_the_arc_when_the_aim_drops() -> void:
+	# THE bug this pins: walk out of a ranged enemy's range and the red "being aimed at" arc stuck on
+	# screen. report(charge 0) erased the entry but queued no redraw, and _process then early-returned on
+	# the empty dict — so nothing ever repainted the (already-drawn) arc away.
+	var ind := _drawn_aim_indicators()
+	var src := Node.new()
+	add_child_autofree(src)
+	ind.report(src, Vector3(0, 0, -5), 0.9, 4.0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_true(ind._painted,
+		"A live aim report must actually PAINT an arc — otherwise this test can't tell a clear from a no-op")
+	ind.report(src, Vector3(0, 0, -5), 0.0, 4.0)  # enemy lost the shot: out of range / LOS broken / dry
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_false(ind._painted,
+		"Dropping the last aim must queue the redraw that CLEARS the arc: a CanvasItem repaints only on queue_redraw, so without one the arc stays frozen on screen forever")
+	assert_eq(ind._aims.size(), 0,
+		"report(charge 0) must also drop the entry itself, so no later frame can resurrect the arc")
+
+
+func test_aim_indicators_empty_process_still_clears_a_stale_paint() -> void:
+	# Belt-and-suspenders half of the fix: whatever empties _aims/_pings, the FIRST _process afterwards
+	# must clear a canvas that still holds paint, instead of early-returning and stranding it.
+	var ind := _drawn_aim_indicators()
+	var src := Node.new()
+	add_child_autofree(src)
+	ind.report(src, Vector3(0, 0, -5), 0.9, 4.0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_true(ind._painted, "precondition: an arc is on the canvas")
+	ind._aims.clear()  # emptied WITHOUT going through report() — the path report()'s own fix can't cover
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_false(ind._painted,
+		"_process must queue one clearing redraw when the dicts are empty but the canvas still holds an arc")
+
+
+func test_sniper_glints_clear_when_the_shot_is_lost() -> void:
+	# SniperGlints.report() carries the identical erase-without-redraw shape and the identical empty
+	# early-return, fed by the SAME player_hud call — so a lost clear shot could strand a flare too.
+	var g := SniperGlints.new()
+	add_child_autofree(g)
+	g.size = Vector2(792, 444)
+	var cam := Camera3D.new()  # SniperGlints needs a REAL Camera3D: it unprojects the world position
+	add_child_autofree(cam)
+	g.camera = cam
+	var src := Node.new()
+	add_child_autofree(src)
+	g.report(src, Vector3(0, 0, -40), 0.8)  # beyond min_distance (18 m), in front of the camera
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_true(g._painted, "a live glint report must paint a flare")
+	g.report(src, Vector3(0, 0, -40), 0.0)  # the player feeds 0 the instant the clear shot is lost
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_false(g._painted,
+		"Losing the clear shot must queue the redraw that CLEARS the flare, not just erase the dict entry")
 
 
 # ---------------------------------------------------------------------------

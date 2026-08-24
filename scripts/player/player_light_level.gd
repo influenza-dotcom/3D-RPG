@@ -18,6 +18,13 @@ extends Node3D
 ## meter to fully-lit everywhere and darkness could never help (live-sampling suits night / interiors; for a day
 ## level mark dark nooks with a hand-painted ShadowVolume instead).
 ##
+## SECOND OUTPUT — `host.carried_light` (0..1): how strongly the host is carrying their OWN lamp, sampled from the
+## &"carried_light" group (the flashlight joins it). It is a SEPARATE field because the exposure meter above
+## SATURATES at 1.0 — standing in a lit room already reads 1.0, so exposure alone can never say "and I am the
+## brightest thing in a dark street". Perception applies it as a straight PENALTY (wider sight range + faster
+## detection fill, tuned on GameSettings.light_stealth), which is what makes the torch cost something. 0 = nothing
+## lit on you = detection exactly as before.
+##
 ## ABSENT (or nothing to sample) -> the host stays fully lit (1.0), so this is purely additive — stealth-light is
 ## opt-in (it also needs an enemy Perception.light_falloff curve to actually matter). The sampling is a rough
 ## linear approximation (not a physical light probe); tune ambient / sample_interval / require_los + playtest.
@@ -32,6 +39,17 @@ extends Node3D
 @export var recollect_interval: float = 2.0
 ## Whether a DirectionalLight3D (sun/moon) lights the host globally. Turn OFF for a sun-lit level so dark can matter.
 @export var directional_contributes: bool = true
+
+@export_group("Carried light (the flashlight penalty)")
+## Radius (m) from the host inside which a &"carried_light" lamp counts as ON YOUR PERSON. Beyond it the lamp is
+## just scenery and only feeds the exposure meter above. Sized for a first-person torch riding at camera height —
+## standing OR crouched that stays well under 3 m from the player origin — so you can drop a lit lantern, walk off,
+## and stop being a beacon. 0 disables the whole carried-light penalty.
+@export var carried_light_radius: float = 3.0
+## The light_energy at which a carried lamp reveals you at FULL strength (1.0). A dimmer lamp scales down linearly,
+## so a candle is a smaller liability than a torch — and a lamp faded toward 0 (CrouchLightDouse) stops revealing
+## you at all, exactly as it stops feeding the meter above.
+@export var carried_light_full_energy: float = 1.0
 
 var _t: float = 0.0
 var _recollect_t: float = 0.0
@@ -59,6 +77,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_t = sample_interval
 	host.set(&"light_exposure", _sample())
+	host.set(&"carried_light", _sample_carried())
 
 ## Every Light3D in the running scene (auto_collect). Walks the CURRENT SCENE (so autoloads / UI overlays aren't
 ## scanned), falling back to the whole tree when there's no current scene or this component is outside current_scene
@@ -87,6 +106,30 @@ func _sample() -> float:
 		if lit >= 1.0:
 			break
 	return clampf(lit, 0.0, 1.0)
+
+## How strongly the host is CARRYING their own light (0..1) — written to host.carried_light for enemy Perception.
+## Scans the &"carried_light" group DIRECTLY rather than the auto-collected list: a carried lamp is one or two
+## nodes, it needs no LOS ray (it is ON you), and it must be found even with auto_collect off. Takes the MAX, not a
+## sum — two torches don't make you twice as findable; the brightest one is what gives you away. An INVISIBLE lamp
+## contributes nothing, which is exactly how the flashlight's off switch (and a dead player's dark beam) turns the
+## penalty off with no extra bookkeeping. Deliberately independent of the exposure sum above: a torch lit inside a
+## painted ShadowVolume still gives you away, because the shadow is not what you are holding.
+func _sample_carried() -> float:
+	var tree := get_tree()
+	if tree == null or carried_light_radius <= 0.0:
+		return 0.0
+	var at := host.global_position
+	var strongest := 0.0
+	for n in tree.get_nodes_in_group(Groups.CARRIED_LIGHT):
+		# is_instance_valid() FIRST, for the same reason as _light_contribution_for below: `freed is Light3D` is a
+		# hard error in Godot 4, and a carried lamp can be freed between scans (a dropped prop despawning).
+		if not is_instance_valid(n) or not (n is Light3D) or not (n as Node3D).visible:
+			continue
+		strongest = maxf(strongest, carried_reveal((n as Light3D).light_energy,
+				(n as Node3D).global_position.distance_to(at), carried_light_radius, carried_light_full_energy))
+		if strongest >= 1.0:
+			break  # already maximally revealing — the remaining lamps cannot make it worse
+	return strongest
 
 ## One light's contribution at `at`: a DirectionalLight3D adds its flat energy (when directional_contributes is on);
 ## an OmniLight3D / SpotLight3D adds energy * linear range-falloff (optionally LOS-gated). Anything else / a freed
@@ -131,6 +174,15 @@ static func light_contribution(energy: float, light_range: float, dist: float) -
 	if light_range <= 0.0 or dist >= light_range:
 		return 0.0
 	return maxf(energy, 0.0) * (1.0 - dist / light_range)
+
+## Pure reveal strength (0..1) of ONE carried lamp: full at/above `full_energy`, scaled down linearly for a dimmer
+## one, and 0 once it sits further than `radius` from the host — at which point it is no longer being carried.
+## Deliberately NOT distance-faded INSIDE the radius: a torch clipped to your belt gives you away exactly as much
+## as one held at arm's length, and a soft edge there would only make the penalty hard to read. Unit-tested.
+static func carried_reveal(energy: float, dist: float, radius: float, full_energy: float) -> float:
+	if radius <= 0.0 or dist > radius or full_energy <= 0.0:
+		return 0.0
+	return clampf(energy / full_energy, 0.0, 1.0)
 
 ## True when geometry sits between the lamp and the host (the lamp can't light it). World-guarded for tests.
 func _occluded(from: Vector3, to: Vector3) -> bool:

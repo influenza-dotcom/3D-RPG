@@ -172,10 +172,19 @@ static func build_tab_strip(current_key: StringName) -> Control:
 		else:
 			# Inactive tabs hover/press with the SAME accent underline as the active tab (at 35% — see
 			# make_hover_tab_style), so the strip speaks one selection language; the theme Button's LEFT
-			# accent bar is list-row language and read as a different system here.
+			# accent bar is list-row language and read as a different system here. The REST state is
+			# overridden too (make_inactive_tab_style): with artist button art in the theme, an
+			# un-overridden `normal` would dress the strip in button-body chrome.
+			b.add_theme_stylebox_override(&"normal", MenuStyle.make_inactive_tab_style())
 			b.add_theme_stylebox_override(&"hover", MenuStyle.make_hover_tab_style())
 			b.add_theme_stylebox_override(&"pressed", MenuStyle.make_hover_tab_style())
 			b.add_theme_stylebox_override(&"hover_pressed", MenuStyle.make_hover_tab_style())
+			# Caption ink stays PANEL ink in every state: the strip's chrome sits on the panel, never on
+			# the button body, so the skin's Button ink knobs (tuned for that body) must not colour it.
+			b.add_theme_color_override(&"font_color", MenuStyle.dim_color())
+			b.add_theme_color_override(&"font_hover_color", MenuStyle.text_color())
+			b.add_theme_color_override(&"font_pressed_color", MenuStyle.text_color())
+			b.add_theme_color_override(&"font_hover_pressed_color", MenuStyle.text_color())
 			# Resolve at CLICK time (lambda captures `key` by value): by runtime every autoload is registered.
 			b.pressed.connect(func() -> void:
 				var target = _screen_for(key)

@@ -7,8 +7,10 @@ extends Node
 ## engagement stings exactly ONCE, re-arms when every NPC disengages, and a cooldown stops a flickering line of
 ## sight from spamming the cue. Inert until an NPC actually goes ALERTED on the player.
 ##
-## Pairs with MusicDirector (which fades the COMBAT BED in/out): this is the sharp one-shot ON the detection
-## edge, that the continuous bed underneath.
+## Pairs with MusicDirector (which rides the continuous BED up and down its FULL / CAUTION / SILENT ladder):
+## this is the sharp one-shot ON the detection edge, punctuating that bed underneath. Note the two deliberately
+## read DIFFERENT predicates — this sting claims "YOU have been seen", so it uses the player-specific
+## is_alerted_on_player(); the bed makes no such claim and scans target-agnostically.
 ##
 ## SETUP: drop it as a CHILD of an AudioStreamPlayer / AudioStreamPlayer3D / AudioStreamPlayer2D whose stream is
 ## the detection sting (leave that player NON-autoplay, non-loop — this calls play() on the edge). PROCESS_MODE_ALWAYS
@@ -46,6 +48,8 @@ func _process(delta: float) -> void:
 		return
 	_poll_t = POLL_INTERVAL
 	if _eval(_any_npc_alerted_on_player()):
+		# A plain play(), NOT AudioManager.play_varied: this is a non-diegetic STING, and the global world-SFX
+		# pitch variation would make the alarm wobble. See AudioManager.vary_pitch for the boundary.
 		_player.play()
 
 ## Edge + cooldown decision: sting on the RISING edge of detection, but only when the cooldown has elapsed.

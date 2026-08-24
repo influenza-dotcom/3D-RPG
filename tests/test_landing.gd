@@ -100,6 +100,74 @@ func test_footstep_interval_survives_a_zero_target_speed() -> void:
 	assert_gt(stopped, 0.0, "A stopped player's interval must stay positive")
 
 
+## --- footstep VARIETY -------------------------------------------------------------------------------------
+## The player's WalkingSFX is ONE node retriggered on a timer, so with a single authored clip at a fixed pitch
+## every footfall was byte-identical two or three times a second — a machine gun, not footsteps. Every NPC has
+## had a random clip + pitch since LocomotionFx shipped; these pin the same for the player.
+
+func test_step_index_never_repeats_back_to_back() -> void:
+	# The whole point of the no-repeat rule: with a 3-clip set a pure roll doubles a third of the time, and a
+	# doubled clip is the exact artefact the variety exists to remove — you hear the repeat, not the randomness.
+	assert_ne(Landing.next_step_index(1, 1, 3), 1, "a roll matching the last clip must be nudged off it")
+	assert_eq(Landing.next_step_index(2, 0, 3), 2, "a roll that already differs is left alone")
+	assert_eq(Landing.next_step_index(0, -1, 3), 0, "the FIRST step (last = -1) can use any clip")
+
+func test_step_index_is_always_in_range() -> void:
+	# The nudge is a modulo wrap, and the roll is clamped — neither may hand `footstep_sounds` an out-of-bounds
+	# index, because that indexes an Array and crashes the physics tick rather than just sounding wrong.
+	for last in [-1, 0, 1, 2]:
+		for roll in [-5, 0, 1, 2, 99]:
+			var i := Landing.next_step_index(roll, last, 3)
+			assert_between(i, 0, 2, "index stayed in range for roll=%d last=%d" % [roll, last])
+	assert_eq(Landing.next_step_index(0, -1, 1), 0, "a single-clip set always returns that clip, never wraps off it")
+	assert_eq(Landing.next_step_index(0, 0, 1), 0, "...even when it repeats — one clip has nothing to alternate with")
+	assert_eq(Landing.next_step_index(0, -1, 0), -1, "an EMPTY set reports -1 so the caller leaves the authored stream alone")
+
+func test_vary_step_rotates_clips_and_wobbles_pitch() -> void:
+	var landing := Landing.new()
+	var sfx := AudioStreamPlayer3D.new()
+	var seen := {}
+	var prev: AudioStream = null
+	var spread: float = GameSettings.audio.footstep_pitch_spread
+	for i in 40:
+		landing.vary_step(sfx)
+		assert_ne(sfx.stream, prev, "step %d replayed the previous clip — the no-repeat rule leaked" % i)
+		assert_between(sfx.pitch_scale, 1.0 - spread - 0.001, 1.0 + spread + 0.001,
+			"the pitch wobble must stay inside ±footstep_pitch_spread")
+		prev = sfx.stream
+		seen[sfx.stream] = true
+	assert_gt(seen.size(), 1, "40 steps used only one clip — the player is back to a single machine-gunned sample")
+	landing.free()
+	sfx.free()
+
+func test_vary_step_leaves_an_authored_clip_alone_when_the_set_is_empty() -> void:
+	# Clearing footstep_sounds is the supported way for a designer to pin ONE deliberate clip on WalkingSFX; it
+	# must not be read as "silence the footsteps" or as licence to null the node's stream.
+	var landing := Landing.new()
+	landing.footstep_sounds = []
+	var sfx := AudioStreamPlayer3D.new()
+	var authored: AudioStream = load("res://assets/audio/sfx/Footstep1.mp3")
+	sfx.stream = authored
+	landing.vary_step(sfx)
+	assert_eq(sfx.stream, authored, "an empty set must leave the authored stream untouched")
+	assert_ne(sfx.pitch_scale, 0.0, "...while still wobbling the pitch, which needs no clip set")
+	landing.free()
+	sfx.free()
+
+func test_the_footstep_volume_trim_reaches_both_the_volume_and_the_ceiling() -> void:
+	# ⭐The trim has to ride BOTH writes. At WalkingSFX's authored 80 dB base the node outputs its max_db and
+	# nothing else, so a trim applied only to volume_db would be inaudible — which is the same dead-knob trap
+	# that made someone crank the base to 80 in the first place.
+	var original: float = GameSettings.audio.footstep_volume_db
+	GameSettings.audio.footstep_volume_db = -5.0
+	assert_almost_eq(Landing.step_db(0.0, 0.0, 0.0), -5.0, 0.001, "the trim moves a step's dB on its own")
+	assert_almost_eq(Landing.step_db(-7.0, -24.0, -8.0), -44.0, 0.001, "and stacks with the crouch + speed cuts")
+	GameSettings.audio.footstep_volume_db = 0.0
+	assert_almost_eq(Landing.step_db(-7.0, -24.0, -8.0), -39.0, 0.001,
+		"a zero trim must leave the shipped loudness EXACTLY as it was — this knob is opt-in, not a re-mix")
+	GameSettings.audio.footstep_volume_db = original  # shared tuning resource; restore for other tests
+
+
 func test_entry_points_are_null_host_safe() -> void:
 	# An off-tree Player built in a unit test has no prefab and no children, so a Landing can legitimately hold a
 	# null host. Both entry points must no-op rather than crash.

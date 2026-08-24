@@ -16,7 +16,7 @@ const HOST_SCRIPT := "res://scripts/ui/start_menu.gd"
 ## Every unique name character_creation.gd binds in _bind_ui — a rename in the editor breaks the bind at
 ## boot, so pin the roster here where it fails loudly instead.
 const BOUND := ["Dim", "Column", "Title", "NameLabel", "NameEdit", "NameHint",
-	"Tabs", "StatsTab", "PointsLabel", "StatHint", "StatScroll", "StatGrid",
+	"Tabs", "StatsTab", "PointsLabel", "StatScroll", "StatGrid",
 	"LookTab", "LookControls",
 	"ShirtTab", "ShirtRow", "SideRow", "CanvasFrame", "ShirtMid", "ToolsRow", "SizeRow", "SizeLabel",
 	"ActionsRow", "PaletteCenter", "CustomRow", "CustomLabel",
@@ -104,12 +104,25 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 	assert_eq(scroll.horizontal_scroll_mode, ScrollContainer.SCROLL_MODE_DISABLED,
 		"the stat scroll is vertical-only — rows fit the width")
 	assert_eq(scroll.size_flags_vertical, Control.SIZE_EXPAND_FILL, "the stat scroll takes the tab's slack")
-	assert_eq((inst.get_node("%StatGrid") as GridContainer).columns, 5,
-		"the stat grid keeps its 5 columns (name | - | value | + | effect)")
+	assert_eq((inst.get_node("%StatGrid") as GridContainer).columns, 4,
+		"the stat grid keeps its 4 columns (name-rail | - | value | +) — the effect column moved into the name/value hover tip")
+
+	# ONE card size for every tab. A TabContainer's minimum is the CURRENT page's minimum unless this is on,
+	# so the (fatter) Shirt page handed the container a fatter minimum and Godot grew the whole panel past its
+	# 0.05..0.95 anchor band — the card jumped 45px taller and off the top of the screen on the Shirt click.
+	# MenuStyle.apply pins it at runtime as well; authored here so the editor preview tells the same truth.
+	assert_true(tabs.use_hidden_tabs_for_min_size,
+		"the tab block reports ONE minimum for every page (use_hidden_tabs_for_min_size)")
 
 	# The shirt paint surface stays SQUARE at any panel height (its cells must stay square).
 	var canvas_frame := inst.get_node("%CanvasFrame")
 	assert_true(canvas_frame is AspectRatioContainer, "the canvas host is an AspectRatioContainer")
 	assert_eq((canvas_frame as AspectRatioContainer).ratio, 1.0, "the paint surface is kept square (ratio 1)")
+
+	# The Custom-colour row sits BESIDE the preset palette, not under it: the Shirt page's minimum height is
+	# the middle column's row stack, and that stack has ~145px to live in before the card starts growing (see
+	# character_creation.gd SHIRT_PAGE_HEIGHT_BUDGET). A fifth stacked row is what put it over.
+	assert_eq(inst.get_node("%CustomRow").get_parent(), inst.get_node("%PaletteCenter"),
+		"the Custom swatch row shares the palette's row instead of stacking a fifth row on the middle column")
 
 	inst.free()

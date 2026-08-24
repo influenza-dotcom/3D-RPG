@@ -81,6 +81,49 @@ max_value = 1.5
 step = 0.05
 value_format = 1
 
+[sub_resource type="Resource" id="ink_outline"]
+script = ExtResource("1")
+key = &"ink_outline"
+tab = &"Video"
+control = 2
+label = "Ink Outline"
+getter = &"ink_outline_intensity"
+setter = &"set_ink_outline_intensity"
+step = 0.05
+value_format = 1
+
+[sub_resource type="Resource" id="color_quantization"]
+script = ExtResource("1")
+key = &"color_quantization"
+tab = &"Video"
+control = 5
+label = "Color Depth"
+getter = &"color_quantization"
+setter = &"set_color_quantization"
+custom_handler = &"_emit_color_quantization"
+
+[sub_resource type="Resource" id="dither"]
+script = ExtResource("1")
+key = &"dither"
+tab = &"Video"
+control = 2
+label = "Dithering"
+getter = &"dither_strength"
+setter = &"set_dither_strength"
+step = 0.05
+value_format = 1
+
+[sub_resource type="Resource" id="muzzle_smoke"]
+script = ExtResource("1")
+key = &"muzzle_smoke"
+tab = &"Video"
+control = 2
+label = "Muzzle Smoke"
+getter = &"muzzle_smoke_scale"
+setter = &"set_muzzle_smoke_scale"
+step = 0.05
+value_format = 1
+
 [sub_resource type="Resource" id="vol_master"]
 script = ExtResource("1")
 key = &"vol_master"
@@ -164,7 +207,7 @@ getter = &"mouse_sensitivity"
 setter = &"set_mouse_sensitivity"
 min_value = 0.0002
 max_value = 0.004
-step = 0.000025
+step = 2.5e-05
 value_format = 4
 
 [sub_resource type="Resource" id="controller_look"]
@@ -341,6 +384,14 @@ label = "NPCs On Minimap"
 getter = &"minimap_show_npcs"
 setter = &"set_minimap_show_npcs"
 
+[sub_resource type="Resource" id="minimap_stations"]
+script = ExtResource("1")
+key = &"minimap_stations"
+tab = &"Accessibility"
+label = "Stations On Minimap"
+getter = &"minimap_show_stations"
+setter = &"set_minimap_show_stations"
+
 [sub_resource type="Resource" id="minimap_zoom"]
 script = ExtResource("1")
 key = &"minimap_zoom"
@@ -353,6 +404,22 @@ min_value = 0.5
 max_value = 3.0
 step = 0.1
 value_format = 5
+
+[sub_resource type="Resource" id="clock"]
+script = ExtResource("1")
+key = &"clock"
+tab = &"Accessibility"
+label = "HUD Clock"
+getter = &"clock_enabled"
+setter = &"set_clock_enabled"
+
+[sub_resource type="Resource" id="clock_24_hour"]
+script = ExtResource("1")
+key = &"clock_24_hour"
+tab = &"Accessibility"
+label = "24-Hour Clock"
+getter = &"clock_24_hour"
+setter = &"set_clock_24_hour"
 
 [sub_resource type="Resource" id="view_model_visible"]
 script = ExtResource("1")
@@ -397,6 +464,50 @@ setter = &"set_hud_sway_scale"
 step = 0.05
 value_format = 1
 
+[sub_resource type="Resource" id="hud_ghost"]
+script = ExtResource("1")
+key = &"hud_ghost"
+tab = &"Accessibility"
+control = 2
+label = "HUD Ghosting"
+getter = &"hud_ghost_scale"
+setter = &"set_hud_ghost_scale"
+step = 0.05
+value_format = 1
+
+[sub_resource type="Resource" id="world_ghost"]
+script = ExtResource("1")
+key = &"world_ghost"
+tab = &"Accessibility"
+control = 2
+label = "World Ghosting"
+getter = &"world_ghost_scale"
+setter = &"set_world_ghost_scale"
+step = 0.05
+value_format = 1
+
+[sub_resource type="Resource" id="hud_curve"]
+script = ExtResource("1")
+key = &"hud_curve"
+tab = &"Accessibility"
+control = 2
+label = "HUD Curve"
+getter = &"hud_curve_scale"
+setter = &"set_hud_curve_scale"
+step = 0.05
+value_format = 1
+
+[sub_resource type="Resource" id="lens_curve"]
+script = ExtResource("1")
+key = &"lens_curve"
+tab = &"Accessibility"
+control = 2
+label = "Lens Curve"
+getter = &"lens_curve"
+setter = &"set_lens_curve"
+step = 0.05
+value_format = 1
+
 [sub_resource type="Resource" id="tts"]
 script = ExtResource("1")
 key = &"tts"
@@ -415,4 +526,4 @@ setter = &"set_heartbeat_enabled"
 
 [resource]
 script = ExtResource("2")
-specs = Array[ExtResource("1")]([SubResource("window_mode"), SubResource("resolution"), SubResource("vsync"), SubResource("max_fps"), SubResource("render_scale"), SubResource("fov"), SubResource("contrast"), SubResource("vol_master"), SubResource("vol_music"), SubResource("vol_sfx"), SubResource("vol_ambient"), SubResource("vol_voice"), SubResource("music_folder"), SubResource("difficulty"), SubResource("mouse_sensitivity"), SubResource("controller_look"), SubResource("invert_look_y"), SubResource("auto_equip_pickups"), SubResource("debug_skip_menu"), SubResource("debug_always_show_tos"), SubResource("controls_hint"), SubResource("screen_shake"), SubResource("screen_flash"), SubResource("ps1_warp"), SubResource("hitstop"), SubResource("colorblind_mode"), SubResource("colorblind_cues"), SubResource("view_bob"), SubResource("detection_meter"), SubResource("enemy_health_bar"), SubResource("loot_beacons"), SubResource("stamina_ring"), SubResource("minimap"), SubResource("minimap_rotate"), SubResource("minimap_npcs"), SubResource("minimap_zoom"), SubResource("view_model_visible"), SubResource("view_model_left"), SubResource("camera_tilt"), SubResource("fov_effects"), SubResource("hud_sway"), SubResource("tts"), SubResource("heartbeat")])
+specs = Array[ExtResource("1")]([SubResource("window_mode"), SubResource("resolution"), SubResource("vsync"), SubResource("max_fps"), SubResource("render_scale"), SubResource("fov"), SubResource("contrast"), SubResource("ink_outline"), SubResource("color_quantization"), SubResource("dither"), SubResource("muzzle_smoke"), SubResource("vol_master"), SubResource("vol_music"), SubResource("vol_sfx"), SubResource("vol_ambient"), SubResource("vol_voice"), SubResource("music_folder"), SubResource("difficulty"), SubResource("mouse_sensitivity"), SubResource("controller_look"), SubResource("invert_look_y"), SubResource("auto_equip_pickups"), SubResource("debug_skip_menu"), SubResource("debug_always_show_tos"), SubResource("controls_hint"), SubResource("screen_shake"), SubResource("screen_flash"), SubResource("ps1_warp"), SubResource("hitstop"), SubResource("colorblind_mode"), SubResource("colorblind_cues"), SubResource("view_bob"), SubResource("detection_meter"), SubResource("enemy_health_bar"), SubResource("loot_beacons"), SubResource("stamina_ring"), SubResource("minimap"), SubResource("minimap_rotate"), SubResource("minimap_npcs"), SubResource("minimap_stations"), SubResource("minimap_zoom"), SubResource("clock"), SubResource("clock_24_hour"), SubResource("view_model_visible"), SubResource("view_model_left"), SubResource("camera_tilt"), SubResource("fov_effects"), SubResource("hud_sway"), SubResource("hud_ghost"), SubResource("world_ghost"), SubResource("hud_curve"), SubResource("lens_curve"), SubResource("tts"), SubResource("heartbeat")])

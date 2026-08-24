@@ -31,7 +31,6 @@ const EMPTY_LIST := "(empty)"
 ## the correct whole-template shape for any future LIST that needs the marker — the "{row}" token carries the
 ## composed row in as a value, so a locale can move or reword the marker. Pinned by tests/test_player_text.gd.
 const EQUIPPED_ROW := "{row}   (equipped)"
-const NEUTRAL_EFFECT := "neutral"
 
 const PROMPT_PICK_UP := "[PH] Pick Up"
 const PICK_UP := "Pick Up"
@@ -289,7 +288,7 @@ const RESPEC_NOTHING := "[PH] Nothing to respec"
 const RESPEC_CARD_TITLE := "Respec"
 ## Keep this SHORT: it swaps onto a rebind button pinned to MenuSkin.rebind_button_width (120px English
 ## budget incl. margins, clip_text on) — a longer prompt clips rather than growing the button, so it must
-## read whole at ~102px.
+## read whole at ~100px (the shipped art button boxes carry 10+10 margins).
 const OPTIONS_BIND_PROMPT := "[PH] Press key..."
 const OPTIONS_MUSIC_FOLDER_DEFAULT := "[PH] Default (each radio's own folder)"
 const OPTIONS_CHOOSE_MUSIC_FOLDER := "[PH] Choose a music folder"
@@ -303,6 +302,20 @@ const OPTIONS_CB_NONE := "None"
 const OPTIONS_CB_PROTANOPIA := "Protanopia"
 const OPTIONS_CB_DEUTERANOPIA := "Deuteranopia"
 const OPTIONS_CB_TRITANOPIA := "Tritanopia"
+## The Colour Depth cycler's captions (options_menu). Index-mapped to Settings.COLOR_QUANTIZE_LEVELS, so the
+## ARRAY ORDER AT THE CALL SITE IS BEHAVIOUR — an index picks a row of that table, not a caption. Named for the
+## HARDWARE depth rather than a colour count on purpose: "15-bit" is what a PlayStation framebuffer was called,
+## and "32768 colours" is a number nobody recognises. Kept SHORT — the cycler's value button clips rather than
+## widening the row (MenuStyle.cap_button), and the longest of these has to read whole beside two arrows.
+const OPTIONS_CQ_AUTHORED := "Default"
+const OPTIONS_CQ_24BIT := "24-bit (Off)"
+const OPTIONS_CQ_16BIT := "16-bit"
+const OPTIONS_CQ_15BIT := "15-bit (PS1)"
+const OPTIONS_CQ_12BIT := "12-bit"
+const OPTIONS_CQ_9BIT := "9-bit"
+const OPTIONS_CQ_8BIT := "8-bit"
+const OPTIONS_CQ_6BIT := "6-bit"
+const OPTIONS_CQ_3BIT := "3-bit"
 ## The difficulty dropdown's captions — index-mapped to DifficultySettings.Level, the same order contract.
 const OPTIONS_DIFFICULTY_EASY := "Easy"
 const OPTIONS_DIFFICULTY_NORMAL := "Normal"
@@ -310,6 +323,10 @@ const OPTIONS_DIFFICULTY_HARD := "Hard"
 ## The resolution dropdown's row for a window size outside the preset list — {w}/{h} ride in as digit
 ## strings. The preset rows themselves ("1280 x 720") are digits-only non-prose and stay at the call site.
 const OPTIONS_RESOLUTION_CUSTOM := "{w} x {h} (custom)"
+## The resolution row's caption for a preset that only fits this screen once the caption + borders are dropped —
+## the native size on its own monitor, placed as a borderless window covering the screen (Settings.needs_borderless).
+## Said out loud because the title bar visibly disappearing otherwise reads as a bug rather than the chosen setting.
+const OPTIONS_RESOLUTION_BORDERLESS := "{w} x {h} (borderless)"
 ## The Options overlay's own chrome — painted by scripts/ui/options_menu.gd's _bind_ui: the panel title plus
 ## the bottom button row (Save / Load / Main Menu / Apply / Revert / Close / Quit Game, in paint order; "Close"
 ## reuses the generic CLOSE above). The tab pages' ROW labels are authored SettingSpec.label / tab_label fields in
@@ -852,16 +869,13 @@ static func points_to_spend(spare: int) -> String:
 	return TextFormat.subst("[PH] Points to spend: {points}", {"points": spare})
 
 
-static func character_create_stat_hint(min_value: int, max_value: int) -> String:
-	return TextFormat.subst("[PH] Lower a stat to earn points, then spend them raising another (range {min} to +{max}). A minus is a real weakness.", {"min": min_value, "max": max_value})
-
 
 static func stat_effect_strength(melee: String, carry: String, max_hp: String) -> String:
 	return TextFormat.subst("[PH] melee {melee}, {carry} carry, {max_hp} max HP", {"melee": melee, "carry": carry, "max_hp": max_hp})
 
 
-static func stat_effect_endurance(stamina: String) -> String:
-	return TextFormat.subst("[PH] {stamina} max stamina", {"stamina": stamina})
+static func stat_effect_endurance(stamina: String, regen: String) -> String:
+	return TextFormat.subst("[PH] {stamina} max stamina, {regen} out-of-combat healing", {"stamina": stamina, "regen": regen})
 
 
 static func stat_effect_gunplay(damage: String, steadiness: String) -> String:
@@ -978,14 +992,40 @@ static func atm_statement(cash: float, saved: float, owed: float, credit_left: f
 	})
 
 
-## The standing explainer under the statement — the ONE place the economy is taught. Two whole templates:
-## a terminal whose fee multiplier zeroes the charge says so outright rather than printing "0%".
-static func atm_hint(fee_fraction: float) -> String:
+## The standing explainer under the statement — the ONE place the economy is taught. Whole templates only,
+## selected by state (owing × fee × rate), never fragment appends. SOLVENT: death-safety + the savings rate.
+## OWING: the debt rate instead — the savings clause is dropped there because the one-signed-account invariant
+## means you cannot hold growing savings while in the red (deposits retire debt first), so advertising growth
+## would be a receipt the Ledger won't honour. A zeroed rate drops its clause rather than printing "0%", and a
+## zeroed DEBT rate falls back to the solvent teaching wholesale (a debt that never grows needs no warning).
+## `savings_rate`/`debt_rate` are the per-dawn fractions (EconomySettings.bank_*_interest_rate) — quoted HERE
+## because the dawn toasts are the interest's only other surface, so a player who never happened to hold a
+## balance across a dawn had no way to learn that either direction moves.
+static func atm_hint(fee_fraction: float, savings_rate: float, debt_rate: float, owing: bool) -> String:
+	var pct := TextFormat.num(snappedf(fee_fraction * 100.0, 0.1))
+	if owing and debt_rate > 0.0:
+		var drate := TextFormat.num(snappedf(debt_rate * 100.0, 0.1))
+		if fee_fraction <= 0.0:
+			return TextFormat.subst(
+				"[PH] What you owe grows {rate}% at every dawn — deposits pay it down first. This terminal charges nothing to spend.",
+				{"rate": drate})
+		return TextFormat.subst(
+			"[PH] What you owe grows {rate}% at every dawn — deposits pay it down first. Spending costs {pct}% — the cash in your pocket never does.",
+			{"rate": drate, "pct": pct})
+	var rate := TextFormat.num(snappedf(savings_rate * 100.0, 0.1))
 	if fee_fraction <= 0.0:
+		if savings_rate > 0.0:
+			return TextFormat.subst(
+				"[PH] Banked money is safe if you die and grows {rate}% at every dawn. This terminal charges nothing to spend it.",
+				{"rate": rate})
 		return "[PH] Banked money is safe if you die. This terminal charges nothing to spend it."
+	if savings_rate > 0.0:
+		return TextFormat.subst(
+			"[PH] Banked money is safe if you die and grows {rate}% at every dawn. Spending it costs {pct}% — the cash in your pocket never does.",
+			{"rate": rate, "pct": pct})
 	return TextFormat.subst(
 		"[PH] Banked money is safe if you die. Spending it costs {pct}% — the cash in your pocket never does.",
-		{"pct": TextFormat.num(snappedf(fee_fraction * 100.0, 0.1))})
+		{"pct": pct})
 
 
 ## DEPOSIT doubles as SETTLE: two whole captions selected by whether anything is owed.
@@ -1071,6 +1111,23 @@ static func level_label(level: int) -> String:
 
 static func your_zorkmids(amount: float) -> String:
 	return TextFormat.subst("[PH] Your zorkmids: {amount}", {"amount": Zorkmids.fmt(amount)})
+
+
+## The Level Up card's payment TERMS, painted where the DEBIT/CREDIT selector would sit on a station whose
+## `accepts_credit` is off. Serving the terms is the point (the RentCollector notice doctrine): the armed rail
+## is global persisted state, so a player can arm CREDIT at an ATM and walk in here — without this line the
+## selector has silently vanished and the rows just cost more than they can reach, which reads as a bug.
+## THREE WHOLE templates selected by the facts the caller passes, never a fragment append (the TextFormat
+## rule): naming banked money to a player who has none advertises a purse they cannot open, and a debtor needs
+## the OTHER half of the rule (`requires_settled_account`) rather than a lecture about rails. ⭐Deliberately
+## names no station NOUN — a LevelUp is a trainer, a shrine or a bonfire depending on where a designer dropped
+## it, and the one in shipped content rides a Medicine Person.
+static func level_up_no_credit(owing: bool, has_savings: bool) -> String:
+	if owing:
+		return "[PH] The Ledger holds this counter until you are square. Settle what you owe before buying a level."
+	if has_savings:
+		return "[PH] No credit here — pay with the cash you carry, or the money you have banked."
+	return "[PH] No credit here — pay with the cash you carry."
 
 
 static func perks_header(points: int) -> String:
@@ -1317,3 +1374,57 @@ static func save_slot_caption(level_name: String, time_text: String) -> String:
 	if level_name.is_empty():
 		return TextFormat.subst(SAVE_SLOT_CAPTION_NO_LEVEL, {"time": time_text})
 	return TextFormat.subst(SAVE_SLOT_CAPTION, {"level": level_name, "time": time_text})
+
+
+## The HUD clock's face (scripts/ui/hud_clock.gd) — THREE whole templates SELECTED on the player's Options
+## choice and, in 12-hour mode, on the half of the day. The AM/PM marker is baked INTO its own whole template
+## rather than appended as a suffix argument, because a bare "AM" is exactly the untranslatable prose fragment
+## TextFormat's rule forbids: locales that use a 12-hour face place their marker differently (before the
+## digits, with a space or without, or not at all), and only a whole template lets a translator move it.
+## The SEPARATOR lives in the template too — several locales write "14h35" or "14.35", not "14:35".
+const CLOCK_24_HOUR := "{hours}:{minutes}"
+const CLOCK_12_HOUR_AM := "{hours}:{minutes} AM"
+const CLOCK_12_HOUR_PM := "{hours}:{minutes} PM"
+
+## The 24-hour face ("14:35"). Both arguments are pre-formatted VALUE strings (HudClock zero-pads them
+## through TextFormat.pad2) — never prose.
+static func clock_24_hour(hours: String, minutes: String) -> String:
+	return TextFormat.subst(CLOCK_24_HOUR, {"hours": hours, "minutes": minutes})
+
+## The 12-hour face ("2:35 PM"). `pm` SELECTS between two whole templates; the hour is unpadded on purpose,
+## which is the English 12-hour convention ("2:35 PM", not "02:35 PM").
+static func clock_12_hour(hours: String, minutes: String, pm: bool) -> String:
+	return TextFormat.subst(CLOCK_12_HOUR_PM if pm else CLOCK_12_HOUR_AM,
+			{"hours": hours, "minutes": minutes})
+
+
+## The WAIT screen (scripts/ui/wait_screen.gd) — the Fallout-style "let some hours pass" panel on T.
+const WAIT_TITLE := "Wait"
+## The two clock readouts flanking the selector: the hour it is now, and the hour the wait would end at.
+const WAIT_NOW_LABEL := "Now"
+const WAIT_UNTIL_LABEL := "Until"
+## The confirm button. Deliberately the same word as the title — it is the verb, and "Confirm"/"OK" would be
+## vaguer at the moment of committing hours you cannot get back.
+const WAIT_CONFIRM := "Wait"
+## The selector's duration, as a real singular/plural PAIR through TextFormat.plural (never a bare "(s)").
+const WAIT_HOURS_ONE := "{n} hour"
+const WAIT_HOURS_MANY := "{n} hours"
+## REFUSALS. Whole sentences, one per reason — never a shared stem with the cause appended, which is the
+## fragment TextFormat's rule forbids. Shown on the screen itself rather than as a toast, because the player
+## pressed a key expecting a panel and silence would read as a broken keybind.
+const WAIT_BLOCKED_HOSTILE := "Not while someone is hunting you."
+const WAIT_BLOCKED_AIRBORNE := "Not in mid-air."
+## Shown on a level whose designer pinned the clock (WorldClock.day_length_seconds = 0). Deliberately phrased
+## as a property of the PLACE, not as an error: nothing is broken, time genuinely does not move here.
+const WAIT_BLOCKED_FROZEN := "Time doesn't pass here."
+## The receipt after the hours pass, so a wait that changed nothing visible still confirms it happened.
+const WAIT_ELAPSED_ONE := "{n} hour passes."
+const WAIT_ELAPSED_MANY := "{n} hours pass."
+
+## The selector's duration line ("1 hour" / "6 hours") — whole singular/plural templates, the tr_n() seam.
+static func wait_hours(n: int) -> String:
+	return TextFormat.subst(TextFormat.plural(n, WAIT_HOURS_ONE, WAIT_HOURS_MANY), {"n": n})
+
+## The post-wait receipt ("6 hours pass."). Same whole-template pair rule as above.
+static func wait_elapsed(n: int) -> String:
+	return TextFormat.subst(TextFormat.plural(n, WAIT_ELAPSED_ONE, WAIT_ELAPSED_MANY), {"n": n})

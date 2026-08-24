@@ -179,7 +179,7 @@ func test_stashable_crate_is_a_throwable_with_a_pickup_child() -> void:
 	# instantiate() builds the node tree but does NOT run _ready (that fires on tree entry), so this is a
 	# pure structural contract check with no side effects — safe under the no-_ready-in-unit-tests rule.
 	# It pins the dual-item invariant: a Throwable ROOT (so Z still carries/throws) carrying a CanPickUp
-	# DESCENDANT (so ray_cast.gd lets E stash it instead of grabbing). If either half regresses, E or Z breaks.
+	# DESCENDANT (so ray_cast.gd lets F stash it instead of grabbing). If either half regresses, F or Z breaks.
 	var crate := STASHABLE_CRATE.instantiate()
 	assert_true(crate is Throwable, "the root is a Throwable so the carry/throw (Z) verb is unchanged")
 	# Find the pickup by class, not find_children's `type` filter (whose script-class_name matching is
@@ -193,7 +193,7 @@ func test_stashable_crate_is_a_throwable_with_a_pickup_child() -> void:
 	if cp != null:
 		assert_true(crate.is_ancestor_of(cp),
 			"the CanPickUp is a DESCENDANT of the Throwable — the dual-item rule ray_cast.gd needs so E (stash) beats Z (grab)")
-		assert_not_null(cp.item, "the CanPickUp has an item, so pressing E actually stashes something")
+		assert_not_null(cp.item, "the CanPickUp has an item, so pressing F actually stashes something")
 		if cp.item != null:
 			assert_eq(cp.item.id, CRATE_ITEM.id, "the stashed item is the crate item")
 	crate.free()

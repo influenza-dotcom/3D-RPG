@@ -26,10 +26,18 @@ const COUNT_DIRS := {
 }
 ## Folders whose resources are used via an explicit reference (so "unreferenced" is meaningful). Excludes
 ## items/factions (folder-scanned) and characters/encounters/loadouts (profile-export / WIP-archetype noise).
+##
+## `quests/` was MISSING from this list, which is why an orphaned quest could never surface here: every quest is
+## reached by an explicit Resource reference (`QuestStarter.quest`, `TriggerVolume.start_quest`,
+## `DialogueChoice.start_quest_on_choice`), so it belongs exactly as much as `dialogue/` does. Its absence is how
+## `clear_the_block.tres` — referenced by NOTHING project-wide — sat unnoticed while this tab reported clean.
+## NOTE this answers a narrower question than the Reach tab: "is it referenced by anything at all?", not "can a
+## PLAYER get to it from the boot scene". A quest wired only into a level nothing links to passes HERE and still
+## fails there, which is why both checks exist.
 const ORPHAN_DIRS: Array[String] = [
 	"res://resources/weapons/", "res://resources/loot/", "res://resources/dialogue/", "res://resources/status/",
 	"res://resources/cutscenes/", "res://resources/maps/", "res://resources/schedules/", "res://resources/barks/",
-	"res://resources/perks/",
+	"res://resources/perks/", "res://resources/quests/",
 ]
 
 const COLOR_HEAD := Color(0.6, 0.85, 1.0)

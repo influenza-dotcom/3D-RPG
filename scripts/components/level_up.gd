@@ -13,6 +13,33 @@ extends LookAtInteractable
 ## read live at their own seams. Stats have NO cap — every point is the same marginal gain, forever (the per-effect
 ## formulas on CharacterStats are straight lines now, no plateau).
 ##
+## ⭐THE LEDGER'S MONEY DOES NOT BUY LEVELS HERE, and it takes TWO gates to mean it.
+##
+## WHY. `Player.credit_limit()` rates the LIVE PERMANENT stat sheet, and this is the only till in the game that
+## SELLS entries on that sheet — so a stat point bought on borrowed money raises the very line that paid for it.
+## Measured on the shipped knobs: the first point costs 1 zm and lifts the line from 200 to 300 zm, each of the
+## first fifteen purchases opens more credit than it consumes, and the ladder ends at total level 51 with
+## 2022 zm owed — IDENTICALLY for every starting build, because character creation is zero-sum so all of them
+## meet the same cost curve. Two distinct defects wear that one costume: the line manufactures its own
+## collateral, and the whole 2100 zm cap converts into ~51 permanent, uncapped stat points in one sitting,
+## erasing the build the player just made. `Atm.withdraw` already states the invariant both violate — "the
+## credit line funds PURCHASES, never cash" — and a stat point is worse than cash, because it converts back
+## into credit.
+##
+## ⭐NOT the "die and keep the asset" argument, which is WRONG here and was written that way once: the debt is
+## death-safe too (see GameState.account — "you cannot die your way out of the Ledger"). Dying costs you your
+## pocket cash and leaves both the points AND the balance. The defect is the self-collateralising loop and the
+## pacing, not an escape hatch.
+##
+## GATE 1 — `accepts_credit` (default OFF): the till will not push the account past zero onto the credit line.
+## GATE 2 — `requires_settled_account` (default ON): it will not sell a PAID raise while the account is in the
+## red. Gate 1 alone is DEFEATED, and this is the part that is easy to miss: the credit line converts into
+## pocket CASH at any ledger vendor — buy on credit, sell the item straight back (`Merchant.sell` pays out in
+## cash, and `sell_price` is clamped to only one coin under `buy_price`), and the cash walks to a counter that
+## happily takes cash. The shipped Medicine Person carries a Merchant AND a LevelUp on the same NPC. Gate 2
+## closes it arithmetically rather than by chasing the laundry: reaching the till with borrowed money means
+## being in the red, and clearing the red costs more than the round trip returned.
+##
 ## SETUP: drop it under the shrine / trainer (or assign highlight_target), size its CollisionShape3D, and
 ## tune base_cost / cost_per_level. (A Dark-Souls bonfire = put a Bonfire AND a LevelUp on the same node.)
 
@@ -23,6 +50,20 @@ const STAT_NAMES: Array[StringName] = CharacterStats.STAT_NAMES
 @export var station_name: String = ""             ## hover + screen title; blank -> "Level Up"
 @export var base_cost: int = 1                    ## cost to raise from total level 0 (the curve climbs by cost_per_level)
 @export var cost_per_level: float = 1.5              ## added per total level already invested (the rising cost, same for every stat)
+## OFF (the default) = this trainer does NOT extend credit: a raise is funded from pocket cash and banked
+## savings only, never past zero onto the credit line. Independent of the rail the player armed elsewhere —
+## arming CREDIT at an ATM cannot make this counter lend, and the screen hides its rail selector and says so.
+## Turn it ON only if you want THIS station to sell permanent stat points on borrowed money; read the
+## self-collateralising loop in the class header first, because that is what the knob re-opens.
+@export var accepts_credit: bool = false
+## ON (the default) = a PAID raise is refused while `GameState.account` is negative. This is the OTHER half of
+## the same rule, and it is the half that actually holds: a credit line is fungible into cash at any ledger
+## vendor (buy on the rail, sell straight back), so refusing the credit RAIL alone only makes the exploit one
+## step longer. Requiring a settled account makes borrowed money unable to reach this till by ANY route — you
+## cannot hold laundered cash without being in the red, and settling the red costs more than the laundry paid.
+## A FREE raise (the floored sub-baseline price) still serves a debtor: this gates the fee, never the service.
+## Turning it OFF re-opens the buy-sell-launder path even with accepts_credit off — the two knobs are one rule.
+@export var requires_settled_account: bool = true
 ## ON = a self-serve station: aim + Interact opens the level-up menu directly. OFF = drive it from a
 ## dialogue NPC's "Level Up" option instead (the station stops responding to direct interaction).
 @export var standalone: bool = true
@@ -54,6 +95,8 @@ func _ready() -> void:
 		_fit_hitbox_to_host()
 	if standalone:
 		StationSpeaker.ensure(self)  # a self-serve terminal answers with the shared panel chirp; a data-only station rides a talking NPC, and people don't beep
+	# The minimap pin — TRAIN, shared with PerkStation / RespecStation: to a player all three are "spend what you earned".
+	StationMarker.ensure(self, StationMarker.Kind.TRAIN)
 
 ## The player's total level = the sum of all stats (= points invested; baseline is 0).
 func total_level(player_node: Node) -> int:
@@ -86,11 +129,17 @@ func level_up_stat(player_node: Node, stat: StringName) -> bool:
 	if player == null or not (stat in STAT_NAMES):
 		return false
 	var cost := level_up_cost(player, stat)  # flat total-level cost (same for every stat), floored at 0
-	# Gate the fee only when there IS one (the RespecStation.do_respec / ChipInstaller convention): a FREE raise
-	# (the floored sub-baseline price) must serve even a wallet in DEBT — the New Game implant purchase can
-	# legitimately start the run negative, and `money < 0.0` must not lock a debtor out of a free service. The
-	# paid path still refuses any wallet below the fee, debtors included.
-	if cost > 0.0 and not player.can_pay(cost):
+	# TWO gates, and BOTH gate the FEE only (`cost > 0.0`), never the service — the RespecStation.do_respec /
+	# ChipInstaller convention. A FREE raise (the floored sub-baseline price) must serve even a wallet in DEBT:
+	# the New Game implant purchase can legitimately start the run negative, and being in the red must not lock a
+	# debtor out of something that costs nothing. The paid path still refuses any wallet below the fee.
+	#   * `requires_settled_account` is checked FIRST and separately, because it is not an affordability question
+	#     at all — the money may well be there and we are declining to take it while the Ledger is owed.
+	#   * `accepts_credit` rides INTO the one affordability predicate rather than sitting beside it, so the
+	#     screen's row dim — which calls can_pay with the same flag — can never light up a row we would refuse.
+	if cost > 0.0 and requires_settled_account and owes_the_ledger():
+		return false  # the money may well be there — this till is declining to take it while the Ledger is owed
+	if cost > 0.0 and not player.can_pay(cost, accepts_credit):
 		return false
 	# Own a PRIVATE stats sheet before mutating — never edit a (possibly shared) assigned .tres in place.
 	var stats := player.stats_or_default()
@@ -109,9 +158,19 @@ func level_up_stat(player_node: Node, stat: StringName) -> bool:
 	# byte-identical. Zero number change for a normal positive raise; it now also clamps/floors/signals like the others.
 	CharacterStats.restamp_derived(player, stats.max_hp_bonus() - old_hp_bonus, stats.carry_bonus() - old_carry_bonus, old_stamina_max)
 	if cost > 0.0:                                             # > 0, not != 0: belt-and-braces with the cost floor, so no price can ever PAY the player (the RespecStation guard)
-		player.charge(cost)                                    # charge LAST so its money_changed autosave sees the full raise
+		player.charge(cost, accepts_credit)                    # charge LAST so its money_changed autosave sees the full raise
 	GameState.autosave(player)  # a raised stat is a milestone — the authoritative persist of the run
 	return true
+
+## Is the run currently in the red? THE shared answer for gate 2, so the station's refusal and the screen's dim
+## + terms line read ONE source (the can_pay discipline, applied to the half can_pay cannot express). Takes no
+## player: the account lives on the GameState autoload, never on a Character, so an NPC structurally has no
+## ledger to be in the red on. ⭐Deliberately an INSTANCE method, not a static one — LevelUpScreen holds this
+## station as a bare `Node` to dodge a LevelUp<->LevelUpScreen class cycle, so it reaches this the way it
+## reaches everything else here: has_method plus a duck-typed call (the shop_screen `_merchant` idiom).
+func owes_the_ledger() -> bool:
+	return GameState.account < 0.0
+
 
 ## Spend ONE skill point (granted by XP level-ups, on the PerkManager) to unlock `perk` — the level-up perk
 ## picker's seam. Requires an available point + can_unlock (prereqs met, not already owned), then unlocks via

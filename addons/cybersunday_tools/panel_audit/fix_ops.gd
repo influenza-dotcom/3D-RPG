@@ -124,13 +124,17 @@ static func clamp_loot_entries(table) -> int:
 
 # --- guarded apply (editor-side I/O) -------------------------------------------------------------------------
 
-## Apply a deduped plan. Returns {fixed, files, errors} — `fixed` = total individual corrections, `files` = files
-## written, `errors` = human-readable skip reasons (never throws). Caller re-scans + reimports afterward.
+## Apply a deduped plan. Returns {fixed, files, errors} — `fixed` = total individual corrections, `files` = DISTINCT
+## files written, `errors` = human-readable skip reasons (never throws). Caller re-scans + reimports afterward.
+##
+## `files`/`written` count each PATH once, not each plan row: build_plan emits one row per (kind, source), so a single
+## .gd carrying both a dead "player" literal AND a registered group literal yields TWO rows for the SAME file. Both
+## rows rewrite it, but the write-contract report must name it once (a path listed twice reads as two files changed).
 static func apply_plan(plan: Array) -> Dictionary:
 	var fixed := 0
-	var files := 0
 	var errors: Array = []
-	var written: Array = []  # the source paths actually rewritten — so the panel can REPORT what changed (write contract)
+	var written: Array = []  # the DISTINCT source paths actually rewritten — the panel REPORTs these (write contract)
+	var seen_written := {}   # path -> true, so a second fix kind on the same file doesn't list/count it again
 	for row in plan:
 		var kind := String(row.get("kind", ""))
 		var source := String(row.get("source", ""))
@@ -146,12 +150,12 @@ static func apply_plan(plan: Array) -> Dictionary:
 				r = {"ok": false, "count": 0, "error": "unknown fix kind '%s'" % kind}
 		if r.get("ok", false):
 			fixed += int(r.get("count", 0))
-			if int(r.get("count", 0)) > 0:
-				files += 1
+			if int(r.get("count", 0)) > 0 and not seen_written.has(source):
+				seen_written[source] = true
 				written.append(source)
 		else:
 			errors.append("%s: %s" % [source, str(r.get("error", "failed"))])
-	return {"fixed": fixed, "files": files, "errors": errors, "written": written}
+	return {"fixed": fixed, "files": written.size(), "errors": errors, "written": written}
 
 
 static func _apply_player_group(path: String) -> Dictionary:

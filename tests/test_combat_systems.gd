@@ -288,6 +288,244 @@ func test_attack_ranged_weapon_skips_melee_stamina() -> void:
 	gun = null
 
 
+# --- Ranged per-shot stamina (_shot_stamina_cost / _spend_shot_stamina) -------------------------------
+# The gun twin of the melee pair above, with two deliberate asymmetries:
+#   1. NO can-start gate - an empty pool never refuses a shot (an exhausted player still has an attack).
+#   2. The price is DERIVED, not hand-authored: stamina_shot_cost x WeaponData.stamina_effort() x the weapon's
+#      stamina_cost_mult TRIM, then clamped so cost/attack_speed can never exceed the sprint drain.
+# ⭐ Every case here authors attack_speed. A bare WeaponData defaults to 0.1s, which is just UNDER the
+# stamina_shot_cost / (ceiling x sprint_drain) = 1.8 / 17.1 = 0.105s break-even, so an unauthored weapon is
+# mildly CLAMPED and would not report its derived price. PISTOL_CADENCE is the shipped pistol's, well clear.
+
+const PISTOL_CADENCE := 0.44
+
+## A ranged weapon whose stamina_effort() is exactly its damage (1 pellet, no blast) and whose cadence is clear
+## of the clamp - so a test can assert the DERIVED price without the ceiling quietly rewriting it.
+func _priced_gun(effort_damage: float = 1.0, cadence: float = PISTOL_CADENCE) -> WeaponData:
+	var gun := WeaponData.new()
+	gun.is_melee = false
+	gun.damage = effort_damage
+	gun.attack_speed = cadence
+	return gun
+
+
+func test_attack_ranged_shot_spends_shot_stamina() -> void:
+	var a = load(ATTACK_PATH).new()
+	var p = load("res://scripts/player/player.gd").new()
+	var gun := _priced_gun()
+	a.current_weapon = gun
+	a.character = p
+	assert_almost_eq(gun.stamina_effort(), 1.0, 0.001,
+		"a plain 1.0-damage single-projectile round is the effort UNIT, so stamina_shot_cost reads as its price")
+	var expected: float = GameSettings.player_movement.stamina_shot_cost
+	assert_almost_eq(a._shot_stamina_cost(), expected, 0.001,
+		"a baseline ranged shot costs exactly stamina_shot_cost (effort 1.0, trim 1.0, well under the clamp)")
+	p.stamina = 50.0
+	a._spend_shot_stamina()
+	assert_almost_eq(p.stamina, 50.0 - expected, 0.001,
+		"firing a ranged weapon spends the derived per-shot stamina cost")
+	p.free()
+	a.free()
+	gun = null
+
+
+func test_shot_stamina_scales_with_weapon_power() -> void:
+	# The whole point of the feature: a powerful weapon costs more per trigger pull than a weak one, with nobody
+	# hand-pricing either. Effort is damage x sqrt(pellets) + blast payload.
+	var a = load(ATTACK_PATH).new()
+	a.character = null
+	var weak := _priced_gun(0.5)
+	var strong := _priced_gun(2.0)
+	a.current_weapon = weak
+	var weak_cost := a._shot_stamina_cost()
+	a.current_weapon = strong
+	var strong_cost := a._shot_stamina_cost()
+	assert_gt(strong_cost, weak_cost,
+		"a higher-damage weapon must cost more stamina per shot than a weaker one")
+	assert_almost_eq(strong_cost / weak_cost, 4.0, 0.001,
+		"cost tracks effort LINEARLY: 4x the damage is 4x the stamina (both well clear of the cadence clamp)")
+	# Pellets count sub-linearly - one trigger pull, one recoil impulse, and the pellets diverge over spread.
+	var buck := _priced_gun(2.0)
+	buck.pellet_count = 4
+	assert_almost_eq(buck.stamina_effort(), 4.0, 0.001,
+		"a 4-pellet 2.0-damage shell scores 2.0 x sqrt(4) = 4.0 effort, not the 8.0 of four separate shots")
+	# A blast payload is what lifts the grenade launcher above every solid-round weapon. Compared against an
+	# otherwise IDENTICAL solid round at the SAME cadence, so this isolates the payload - and both sit clear of
+	# the clamp (7.20 and 14.40 against a 15.39 ceiling), so the difference is the derived price, not the rail.
+	var solid := _priced_gun(4.0, 0.9)
+	var launcher := _priced_gun(4.0, 0.9)
+	launcher.projectile_explodes = true
+	assert_almost_eq(launcher.stamina_effort(), 8.0, 0.001,
+		"an exploding round adds BLAST_PAYLOAD scaled by radius on top of its direct damage (4.0 + 4.0)")
+	a.current_weapon = solid
+	var solid_cost := a._shot_stamina_cost()
+	a.current_weapon = launcher
+	assert_almost_eq(a._shot_stamina_cost(), solid_cost * 2.0, 0.001,
+		"the same round costs exactly DOUBLE once it explodes - the blast payload is charged for")
+	a.free()
+	weak = null
+	strong = null
+	buck = null
+	solid = null
+	launcher = null
+
+
+func test_shot_stamina_trim_nudges_the_derived_price() -> void:
+	var a = load(ATTACK_PATH).new()
+	var p = load("res://scripts/player/player.gd").new()
+	var gun := _priced_gun()
+	a.current_weapon = gun
+	a.character = p
+	var base := a._shot_stamina_cost()
+	gun.stamina_cost_mult = 0.75
+	assert_almost_eq(a._shot_stamina_cost(), base * 0.75, 0.001,
+		"stamina_cost_mult TRIMS the derived price rather than replacing it")
+	gun.stamina_cost_mult = 0.0
+	assert_almost_eq(a._shot_stamina_cost(), 0.0, 0.001,
+		"a 0.0 trim makes this weapon's fire free")
+	p.stamina = 50.0
+	a._spend_shot_stamina()
+	assert_almost_eq(p.stamina, 50.0, 0.001,
+		"a zero-cost weapon must not touch the pool at all")
+	# Neither a negative trim nor negative damage may ever REFILL the pool on a trigger pull.
+	gun.stamina_cost_mult = -5.0
+	assert_almost_eq(a._shot_stamina_cost(), 0.0, 0.001,
+		"a negative stamina_cost_mult floors to 0 instead of paying stamina back per shot")
+	gun.stamina_cost_mult = 1.0
+	gun.damage = -100.0
+	assert_almost_eq(a._shot_stamina_cost(), 0.0, 0.001,
+		"negative damage floors the effort to 0 rather than inverting the cost")
+	p.free()
+	a.free()
+	gun = null
+
+
+func test_shot_stamina_is_clamped_so_fire_never_outdrains_sprinting() -> void:
+	# The structural guarantee: power x cadence cannot multiply into an absurd drain, because cost is capped at
+	# stamina_shot_drain_ceiling x stamina_sprint_drain x attack_speed. Without it, a big payload on a fast
+	# cadence would drain the pool faster than running does.
+	var a = load(ATTACK_PATH).new()
+	a.character = null
+	var mv: PlayerMovementSettings = GameSettings.player_movement
+	var absurd := _priced_gun(100.0, 0.125)  # SMG cadence, a hundred damage a round
+	a.current_weapon = absurd
+	var cost := a._shot_stamina_cost()
+	var ceiling: float = mv.stamina_shot_drain_ceiling * mv.stamina_sprint_drain * 0.125
+	assert_almost_eq(cost, ceiling, 0.001,
+		"an over-powered weapon is clamped to its cadence ceiling instead of charging the derived price")
+	assert_lt(cost / 0.125, mv.stamina_sprint_drain,
+		"the clamp must hold sustained drain strictly under the sprint drain for ANY weapon a designer authors")
+	a.free()
+	absurd = null
+
+
+func test_melee_weapon_pays_no_shot_stamina() -> void:
+	var a = load(ATTACK_PATH).new()
+	var p = load("res://scripts/player/player.gd").new()
+	var melee := WeaponData.new()
+	melee.is_melee = true
+	melee.damage = 50.0            # ignored: effort never prices a swing
+	melee.stamina_cost_mult = 3.0  # ignored: a swing is priced by stamina_melee_attack_cost, never here
+	a.current_weapon = melee
+	a.character = p
+	assert_almost_eq(a._shot_stamina_cost(), 0.0, 0.001,
+		"melee weapons are priced by stamina_melee_attack_cost, so their shot cost is 0 whatever their damage")
+	p.stamina = 50.0
+	a._spend_shot_stamina()
+	assert_almost_eq(p.stamina, 50.0, 0.001,
+		"a melee swing must not be double-charged through the ranged spend")
+	p.free()
+	a.free()
+	melee = null
+
+
+func test_shot_stamina_never_refuses_fire_on_an_empty_pool() -> void:
+	# The deliberate melee/ranged asymmetry: _can_start_melee_attack() refuses a swing at zero, but there is no
+	# equivalent shot gate - an exhausted player must still be able to shoot, so the spend simply no-ops.
+	var a = load(ATTACK_PATH).new()
+	var p = load("res://scripts/player/player.gd").new()
+	var gun := _priced_gun()
+	a.current_weapon = gun
+	a.character = p
+	assert_false(a.has_method("_can_start_shot"),
+		"ranged fire must NOT grow a can-start stamina gate - an empty pool may never refuse a shot")
+	p.stamina = 0.0
+	a._spend_shot_stamina()
+	assert_almost_eq(p.stamina, 0.0, 0.001,
+		"firing on a pool ALREADY at zero is free - the spend no-ops rather than digging the debt deeper")
+	p.free()
+	a.free()
+	gun = null
+
+
+func test_shot_from_a_positive_but_insufficient_pool_overdraws_into_debt() -> void:
+	# The sharp edge of the ungated design, pinned so the next reader doesn't mistake "never refuses a shot" for
+	# "never costs more than you have". StaminaManager.can_spend_stamina is a HAS-ANY test (stamina > EPS), NOT
+	# HAS-ENOUGH - so a shot fired on the last sliver of the pool pays in FULL and lands it NEGATIVE, exactly the
+	# Dark-Souls overdraw melee/jump/slide already had. The consequence worth knowing: while the pool is in debt
+	# every GATED verb is refused, so a last shell really can cost you the punch that follows it.
+	var a = load(ATTACK_PATH).new()
+	var p = load("res://scripts/player/player.gd").new()
+	var gun := _priced_gun(2.0)  # a heavy round, and well clear of the cadence clamp
+	a.current_weapon = gun
+	a.character = p
+	var cost := a._shot_stamina_cost()
+	assert_gt(cost, 0.5,
+		"the test weapon must cost more than the sliver of pool below, or this proves nothing")
+	p.stamina = 0.5
+	a._spend_shot_stamina()
+	assert_almost_eq(p.stamina, 0.5 - cost, 0.001,
+		"a shot from a positive-but-insufficient pool still pays the FULL cost and overdraws into debt")
+	assert_lt(p.stamina, 0.0,
+		"that overdraw must actually land negative - the clamp floor is -stamina_max, not 0")
+	assert_false(p.can_spend_stamina(GameSettings.player_movement.stamina_melee_attack_cost),
+		"while the pool is in debt the melee gate refuses, so shooting dry briefly costs you your fists too")
+	p.free()
+	a.free()
+	gun = null
+
+
+func test_firing_arms_the_long_shot_regen_hold_not_the_movement_one() -> void:
+	# A shot must freeze recovery past its own cadence, which is what stops a weapon regenerating between shots
+	# and paying for itself. StaminaManager.spend_stamina takes the hold as an optional second argument; Attack
+	# passes stamina_regen_delay_after_shot, while every movement verb leaves it defaulted.
+	var a = load(ATTACK_PATH).new()
+	var p = load("res://scripts/player/player.gd").new()
+	var gun := _priced_gun()
+	a.current_weapon = gun
+	a.character = p
+	var mv: PlayerMovementSettings = GameSettings.player_movement
+	p.stamina = 50.0
+	a._spend_shot_stamina()
+	assert_almost_eq(p._stamina_mgr._stamina_regen_delay_left, mv.stamina_regen_delay_after_shot, 0.001,
+		"firing must arm the LONG shot hold, not the short movement delay")
+	# The movement default is still what an ordinary spend arms - a shot must not have changed jumps or slides.
+	p._stamina_mgr._stamina_regen_delay_left = 0.0
+	p.spend_stamina(5.0)
+	assert_almost_eq(p._stamina_mgr._stamina_regen_delay_left, mv.stamina_regen_delay_after_spend, 0.001,
+		"a plain one-argument spend still arms the movement delay, so jump / slide / dash feel is untouched")
+	p.free()
+	a.free()
+	gun = null
+
+
+func test_shot_stamina_is_safe_without_a_stamina_bearing_wielder() -> void:
+	# An NPC wielder has no stamina pool (no spend_stamina method), and an unwired Attack has no wielder at all.
+	# Both must be silent no-ops, exactly like the melee spend — AI fire is always free.
+	var a = load(ATTACK_PATH).new()
+	var gun := WeaponData.new()
+	gun.is_melee = false
+	a.current_weapon = gun
+	a.character = null
+	a._spend_shot_stamina()  # must not crash
+	a.current_weapon = null
+	assert_almost_eq(a._shot_stamina_cost(), 0.0, 0.001,
+		"an Attack with no equipped weapon reports no shot stamina cost")
+	a._spend_shot_stamina()  # must not crash
+	a.free()
+	gun = null
+
+
 func test_swap_weapons_default_slots_empty() -> void:
 	# weapon_slots defaults to [] (swap_weapons.gd) so the player starts with NOTHING; a designer populates it on
 	# the SwapWeapons node in weapon.tscn (or assigns a Loadout) to hand out a starting kit.

@@ -10,6 +10,7 @@
 [ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/sfx/Whizz.mp3" id="10_vsuli"]
 [ext_resource type="Script" uid="uid://cuj04jgclt1ky" path="res://scripts/effects/muzzle_whiz.gd" id="11_7kkbu"]
 [ext_resource type="PackedScene" uid="uid://bd87letey8iws" path="res://scenes/weapons/ak_472.tscn" id="12_ci0t6"]
+[ext_resource type="PackedScene" path="res://scenes/effects/muzzle_smoke.tscn" id="13_smoke"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_sg6sq"]
 radius = 0.1
@@ -62,3 +63,6 @@ script = ExtResource("11_7kkbu")
 
 [node name="ak472" parent="." unique_id=603630372 instance=ExtResource("12_ci0t6")]
 visible = false
+
+[node name="MuzzleSmoke" parent="Sketchfab_Scene/PlayerMuzzle" instance=ExtResource("13_smoke")]
+transform = Transform3D(1, 0, 0, 0, 0.06592563, 0.99782455, 0, -0.99782455, 0.06592563, 0, 0, 0)

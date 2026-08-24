@@ -20,6 +20,9 @@ extends Node
 const PATHS: Array[String] = [
 	# Lazily loaded by npc.gd at runtime (const WEAPON_SCENE_PATH) to break a preload cycle.
 	"res://scenes/weapons/weapon.tscn",
+	# Lazily load()ed by npc.gd when an armed NPC builds its muzzle FX (SMOKE_FX_SCENE_PATH). It is also a
+	# GPU-particle scene, so _prewarm_gpu_particles below renders it once at boot to build its pipeline too.
+	"res://scenes/effects/muzzle_smoke.tscn",
 	# EffectFactory effect / decal scenes — spawned on hits, deaths and impacts.
 	"res://scenes/effects/blood.tscn",
 	"res://scenes/effects/bloody_mess.tscn",
@@ -53,7 +56,7 @@ func _ready() -> void:
 		_cache[path] = res
 	# Beyond resource I/O, the FIRST kill also pays two ONE-TIME init costs that otherwise hitch mid-combat:
 	# the in-game speech backend installing its voices on the first NPC bark (kills now trigger witness
-	# barks), and the custom-shader GPU-particle death effects compiling on first render. Pay both at boot,
+	# barks), and the GPU-particle effects (death gore, barrel smoke) compiling on first render. Pay both at boot,
 	# deferred so the autoloads they reach (SpeechTts) are all up first.
 	if DisplayServer.get_name() != "headless":
 		call_deferred(&"_prewarm_tts")
@@ -67,12 +70,23 @@ func _prewarm_tts() -> void:
 	SpeechTts.prewarm()
 
 
-## Compile the custom-shader GPU-particle death effects (blood + bloody_mess) once, off-screen, at boot so
-## their render pipeline compiles during load instead of hitching on the FIRST kill. Renders them a few
-## frames in a throwaway SubViewport with its OWN World3D + camera — no on-screen flash, no gameplay-physics
+## Compile the GPU-particle effects that could otherwise compile mid-combat once, off-screen, at boot: the
+## custom-shader death effects (blood + bloody_mess) and the barrel-smoke trail. Their render pipeline is then
+## built during load instead of hitching on the FIRST kill / FIRST shot. Renders them a few frames in a
+## throwaway SubViewport with its OWN World3D + camera — no on-screen flash, no gameplay-physics
 ## contact — then frees it. Skipped on the headless renderer (nothing to compile, no real viewport there).
+##
+## ⭐This list is also a CRASH mitigation on this dev machine, not just a stutter one. Every silent hard crash
+## traced so far (STATUS_HEAP_CORRUPTION on a Godot WorkerThread inside the NVIDIA D3D12 shader compiler — no
+## Godot crash handler runs, the log simply stops) was preceded within ~4 s by a FIRST-TIME ParticlesShaderRD
+## pipeline being written to user://shader_cache. Warming a particle scene here moves that one compile into
+## load, where it happens once and stays cached. Any NEW GPU-particle effect that can first appear mid-combat
+## belongs in this list — a colour ramp, a scale curve, an emission shape, turbulence or a collision mode
+## each generate their own particle shader, so the muzzle-smoke trail (which uses the first four) is exactly
+## the shape of thing that must be warmed rather than met for the first time mid-firefight.
 func _prewarm_gpu_particles() -> void:
-	var paths := ["res://scenes/effects/blood.tscn", "res://scenes/effects/bloody_mess.tscn"]
+	var paths := ["res://scenes/effects/blood.tscn", "res://scenes/effects/bloody_mess.tscn",
+			"res://scenes/effects/muzzle_smoke.tscn"]
 	var vp := SubViewport.new()
 	vp.size = Vector2i(16, 16)
 	vp.own_world_3d = true  # isolated world: the warm-up particles never touch gameplay physics/lighting

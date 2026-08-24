@@ -33,10 +33,21 @@ a folder scan when `track` is null and would shuffle whatever is left.
 | ⚠ | `assets/audio/music/Jakub's Ladder.mp3` | 3,094,625 | commercial track | nothing — orphan | DELETE, no rewire |
 | ⚠ | `assets/audio/sfx/hotline_miami_lr.mp3` | 128,517 | Hotline Miami OST | `resources/tuning/PlayerFeedbackSettings.tres:8` (`death_sting`) | DELETE. Set `death_sting = null`; `death_mix.gd:275-281` documents null as inert and `tests/test_death_mix.gd:157-165` covers it. |
 | ⚠ | `assets/audio/music/RIP Granny 😔🙏.mp3` | 1,436,596 | unknown, non-original | `scenes/throwable/radiothrowable.tscn:6,37` (`track`) | DELETE **last**, and **repoint** `track` — do not merely unset it (see the warning below). |
+| ⚠ | `assets/audio/music/station/Shop Radio 1.mp3` | 1,543,923 | Spelunky OST (Eirik Suhrke) — **knowing placeholder**, added 2026-08-22 | `resources/tuning/StationMusicSettings.tres` (`tracks`) | REPLACE with a licensed or original shop loop, then DELETE. Clearing `tracks` makes the whole station-radio layer inert BY DESIGN, so the purge is a pure resource edit — no code change, no broken build. |
+| ⚠ | `assets/audio/music/station/Shop Radio 2.mp3` | 2,252,335 | Spelunky OST (Eirik Suhrke) — **knowing placeholder**, added 2026-08-22 | `resources/tuning/StationMusicSettings.tres` (`tracks`) | REPLACE, then DELETE — as above. |
+| ⚠ | `assets/audio/music/station/Shop Radio 3.mp3` | 1,675,247 | Spelunky OST (Eirik Suhrke) — **knowing placeholder**, added 2026-08-22 | `resources/tuning/StationMusicSettings.tres` (`tracks`) | REPLACE, then DELETE — as above. |
+| ⚠ | `assets/audio/music/station/Shop Radio 4.mp3` | 2,755,147 | Spelunky OST (Eirik Suhrke) — **knowing placeholder**, added 2026-08-22 | `resources/tuning/StationMusicSettings.tres` (`tracks`) | REPLACE, then DELETE — as above. |
 
-> **The radio has no repoint target.** After the deletions above, `assets/audio/music/` contains exactly one
-> file — `569856__danlucaz__hip-hop-loop-2.wav`, itself a Freesound export that still needs its own row
-> filled in (table C). So "point `track` at another track in the folder" is not available. `track` is a plain
+> **The radio has no CLEARED repoint target.** After the deletions above, `assets/audio/music/` contains two
+> files, neither of them cleared: `569856__danlucaz__hip-hop-loop-2.wav`, itself a Freesound export that still
+> needs its own row filled in (table C), and `BEST OF CORY SONG (ORIGINAL VERSION).mp3`, added 2026-08-22 and
+> pinned on the trenchboom level's radio — provenance UNKNOWN, also table C. The four `Shop Radio` tracks are not a repoint target either: they are §A material
+> themselves, and they deliberately live in the `music/station/` SUBFOLDER, which
+> `Radio._scan_audio_folder` (`radio.gd:553-566`) cannot see — its `dir.get_files()` walk is non-recursive.
+> That placement is load-bearing, not tidiness: left in `music/`, every in-world radio and every thrown
+> radio-grenade would start shuffling shop themes. (`music/wander/` exists for the same reason but is
+> currently EMPTY — the wandering-bed layer ships with no playlist and is inert.) So "point `track` at another track in the folder" is not
+> available. `track` is a plain
 > `@export var track: AudioStream` (`radio.gd:38`) and a pinned track bypasses the folder scan entirely, so it
 > may point anywhere under `res://`. Either commission one original loop, or point it at a cleared clip as a
 > stopgap. Also set `fallback_audio` on `scenes/components/radio.tscn` so a future designer-placed Radio with
@@ -97,9 +108,12 @@ ever find them, and replacing them means re-authoring mesh data inside the scene
 | ⚠ | `res://` path | Apparent origin | Wired at | Author | License | URL | Checked |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | ⚠ | `assets/audio/music/569856__danlucaz__hip-hop-loop-2.wav` | Freesound (id 569856, user `danlucaz`) | `resources/tuning/DialogueSettings.tres:4` — dialogue music bed | danlucaz | TODO — check CC0 vs CC-BY | `https://freesound.org/s/569856/` | |
+| ⚠ | `assets/audio/music/BEST OF CORY SONG (ORIGINAL VERSION).mp3` (1,294,545 B) | unknown — added 2026-08-22 from `Downloads/`. Marker: the ID3v2.4 tag carries exactly one frame, `TSSE: Lavf60.16.100` (an FFmpeg/libavformat re-encode), and every title/artist/album frame is stripped — the signature of a download-and-convert, so assume third-party until proven otherwise | `scenes/levels/trenchboom_test_level.tscn` → `Radio/Radio.track` (the in-world radio's pinned song, set 2026-08-22); **and** it sits in `assets/audio/music/`, so it is also in the folder rotation every UNPINNED `Radio` shuffles | TODO | UNKNOWN | TODO | |
 | ⚠ | `assets/audio/sfx/kai_audio-computer-hum-440742.mp3` | Pixabay (id 440742) | `scenes/computerroom.tscn` — **the first thing a player ever hears** | TODO | TODO | TODO | |
 | ⚠ | `assets/audio/sfx/crt_monitor_startup.mp3` | unknown | `scenes/computerroom.tscn` | TODO | UNKNOWN | TODO | |
 | ⚠ | `assets/audio/sfx/crt_static_noise.mp3` | unknown | `scenes/computerroom.tscn` | TODO | UNKNOWN | TODO | |
+| ⚠ | `assets/audio/sfx/NpcHurtCry.wav` | unknown — added 2026-08-18 from `Downloads/sndInspectorHurtF.wav`. Marker: the RIFF `LIST/INFO` chunk carries `ITCH: Pro Tools` and `ICRD: 2014-04-23`, and `snd<Name><State><M|F>` is GameMaker asset naming — assume a game rip until proven otherwise | `scenes/characters/enemy.tscn` → `Damage.stream` (inherited by civilian / chip_mechanic / medicine_person), `scenes/levels/SliceTestLevel.tscn` → `Damage2.stream` | TODO | UNKNOWN | TODO | |
+| ⚠ | `assets/audio/sfx/NpcDeathCry.wav` | same set, from `Downloads/sndInspectorDeadF.wav` — identical RIFF markers | `scenes/characters/enemy.tscn` → `Death.death_cry` (same inheritance), `scenes/levels/SliceTestLevel.tscn` → `Death2.death_cry` | TODO | UNKNOWN | TODO | |
 
 ## D. Textures
 

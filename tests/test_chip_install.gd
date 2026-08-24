@@ -319,7 +319,7 @@ func test_all_chip_resources_are_valid() -> void:
 		assert_true(known.has(String(item.installs_ability)),
 			"'%s' installs '%s', which must be a real ability on disk" % [fn, item.installs_ability])
 		assert_not_null(item.world_model, "'%s' must carry a world_model (the microchip look)" % fn)
-	assert_eq(count, 8, "expected 8 authored upgrade chips (one per shipped ability, incl. the Board Visualizer + the Takedown Chip)")
+	assert_eq(count, 7, "expected 7 authored upgrade chips (one per shipped ability, incl. the Board Visualizer + the Takedown Chip) — the Laser-Sight Chip was retired when the flashlight took the Light key")
 
 func test_mechanic_scene_loads_and_can_instantiate() -> void:
 	# The hand-authored mechanic scene must resolve its whole resource graph (NPC + Talkable dialogue +

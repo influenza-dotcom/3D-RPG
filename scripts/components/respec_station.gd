@@ -24,6 +24,8 @@ func _ready() -> void:
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
 	StationSpeaker.ensure(self)  # always a kiosk (this station has no dialogue-hosted mode) — give it the shared panel chirp
+	# The minimap pin. No `standalone` field either, so ensure() pins it. TRAIN, shared with LevelUp / PerkStation.
+	StationMarker.ensure(self, StationMarker.Kind.TRAIN)
 
 ## Aim + Interact opens the confirm modal (mirrors LevelUp.start_talk -> LevelUpScreen). The modal previews the
 ## cost + the perks that will be refunded and calls do_respec() on Confirm; nothing changes until then.

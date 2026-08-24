@@ -67,13 +67,17 @@ func _ready() -> void:
 	_build_outline()
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
-	# The terminal's own panel voice. A drop-in StationSpeaker, not code here: the chirp stopped being an ATM
-	# feature the day every self-serve station got one, so the machine's voice is now ONE component every
-	# station shares (scripts/components/station_speaker.gd). ensure() leaves an AUTHORED speaker alone, which
-	# is how a designer retunes or MUTES this terminal without touching the Atm's own inspector. Gated like
-	# every other station: a data-only Atm rides a talking teller, and a person who beeps is a bug.
+	# The terminal's own panel voice — BOTH cues: the wake-up chirp every station shares, and the applause this
+	# one claps back at a repayment (see deposit()). A drop-in StationSpeaker, not code here: the chirp stopped
+	# being an ATM feature the day every self-serve station got one, so the machine's voice is now ONE component
+	# every station shares (scripts/components/station_speaker.gd). ensure() leaves an AUTHORED speaker alone,
+	# which is how a designer retunes or MUTES this terminal (clear `applause_sound` for a terminal that takes
+	# repayment without the fanfare) without touching the Atm's own inspector. Gated like every other station:
+	# a data-only Atm rides a talking teller, and a person who beeps is a bug.
 	if standalone:
 		StationSpeaker.ensure(self)
+	# The minimap pin — see the Merchant note: ungated, because a teller who banks for you is still a bank.
+	StationMarker.ensure(self, StationMarker.Kind.BANK)
 
 
 # --- Transactions — the BANKING writers of GameState.account (Player.charge and StartMenu's implant bill also write it; LedgerAccrual posts interest) ---
@@ -81,7 +85,8 @@ func _ready() -> void:
 ## Move `amount` from the player's POCKET into the account. Returns what actually moved (0.0 = nothing).
 ## ⭐Clamped to cash ON HAND: you cannot deposit money you do not physically carry, so a broke player deposits
 ## nothing rather than digging the debt deeper (the LootScreen._deposit_coins_to_source precedent).
-## Against a NEGATIVE balance this IS the debt repayment — same code, the caption is all that changes.
+## Against a NEGATIVE balance this IS the debt repayment — same code, the caption is all that changes, and the
+## terminal APPLAUDS out of its panel speaker for exactly the portion that retires debt (see the branch below).
 func deposit(player_node: Node, amount: float) -> float:
 	var player := player_node as Player
 	if player == null or not allows_deposit:
@@ -105,6 +110,13 @@ func deposit(player_node: Node, amount: float) -> float:
 		GameState.add_credit_standing(repaid * maxf(0.0, eco.credit_standing_per_zm_repaid))
 		if GameState.account >= 0.0:  # the debt is gone, not merely smaller
 			GameState.add_credit_standing(maxf(0.0, eco.credit_standing_debt_cleared))
+		# …and the machine CLAPS for you, out of the same forty-cent panel speaker it chirps from. Hung on
+		# `repaid`, deliberately: the applause and the credit-standing award are the same branch, so the sound
+		# can never congratulate you for something your record ignores (or stay silent for something it counts).
+		# Banking savings into a positive account is not an achievement and gets nothing. Null-safe and mute-safe
+		# — a teller-hosted terminal has no StationSpeaker at all and simply stays quiet. The AtmScreen's commit
+		# click still fires alongside it on purpose; the reasoning is in StationSpeaker.applaud's header.
+		StationSpeaker.applaud(self)
 	GameState.autosave(player)  # a banking transaction is a milestone (the Bonfire / RespecStation convention)
 	if player.has_method(&"notify_toast"):
 		player.notify_toast(PlayerText.atm_deposited(n, was_owed), Color(0.6, 0.85, 1.0))

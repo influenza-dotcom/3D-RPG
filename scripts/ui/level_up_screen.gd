@@ -32,7 +32,8 @@ var _root: Control
 var _title: Label
 var _header: HBoxContainer  ## level + wallet as TWO Labels (a literal space-run can't align in a variable-width font)
 var _level_label: Label
-var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; rail_changed drives _rebuild (every stat row re-prices)
+var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; rail_changed drives _rebuild (every stat row re-prices). HIDDEN on a station that takes no credit — a control that cannot change the answer would be lying
+var _credit_notice: Label  ## stands in for the selector on a no-credit station: the terms, so a vanished control never reads as a bug
 var _money_label: Label     ## the zorkmid half — only it wears the wallet tint (gold, or danger while in debt)
 var _rows: VBoxContainer
 var _perks: VBoxContainer  ## rank 29 perk-pick section (hidden when the station authored no available_perks)
@@ -87,8 +88,8 @@ func open_level_up(station: Node, player: Node) -> void:
 	# to start and every row on the panel is pad-unreachable (the atm_screen must-not-recur rule).
 	if is_instance_valid(_first_focus):
 		_first_focus.grab_focus()
-	elif is_instance_valid(_rail_btn):
-		_rail_btn.grab_focus()
+	elif is_instance_valid(_rail_btn) and _rail_btn.visible:
+		_rail_btn.grab_focus()  # ...and only while it is ON SCREEN: a station that takes no credit hides it (see _rebuild), and grab_focus on a hidden Control silently does nothing, which would strand the pad with no owner
 	opened.emit()
 
 ## Guard failed: we never opened, but a dialogue-hosted open (DialogueManager._suspend_for_menu) suspended the
@@ -135,8 +136,31 @@ func _on_raise(stat: StringName) -> void:
 func _rebuild() -> void:
 	if not is_instance_valid(_station) or not is_instance_valid(_player):
 		return
+	# ⭐THIS STATION'S CREDIT POLICY, and every price on the card obeys it. Read duck-typed off the Node-typed
+	# handle (the shop_screen `_merchant.get(&"accepts_ledger")` idiom): a host that does not carry the property
+	# reads as PERMISSIVE, so a bare stub station behaves exactly as it did before the knob existed, while the
+	# real LevelUp — which ships accepts_credit = false — refuses. The flag then rides into spendable / can_pay /
+	# charge_total below so the header, the row dim and the station's own gate cannot disagree about one sale.
+	var takes_credit_v: Variant = _station.get(&"accepts_credit")
+	var takes_credit: bool = not (takes_credit_v is bool) or bool(takes_credit_v)
+	# GATE 2, the half can_pay cannot express: this till may refuse a PAID raise while the account is in the red,
+	# because a credit line is fungible into cash at any ledger vendor and gate 1 alone would only lengthen the
+	# exploit. Absent property (a bare stub station) reads as NOT gating — the same permissive direction as above.
+	var needs_settled_v: Variant = _station.get(&"requires_settled_account")
+	var needs_settled: bool = (needs_settled_v is bool) and bool(needs_settled_v)
+	var barred: bool = needs_settled and _station.has_method(&"owes_the_ledger") and bool(_station.owes_the_ledger())
 	if _rail_btn != null:
+		# set_available BEFORE refresh: refresh() re-applies `visible = _available`, so the other order would
+		# re-show a selector we just hid.
+		_rail_btn.set_available(takes_credit)
 		_rail_btn.refresh()  # the rail may have been flipped at an ATM since this screen was built
+	if _credit_notice != null:
+		# SERVE THE TERMS (the RentCollector notice doctrine). GameState.payment_method is GLOBAL persisted run
+		# state, so the player may have armed CREDIT at an ATM and walked in here; without a word, the selector
+		# has simply vanished and rows they could afford a minute ago are dim. Say why, once, in its place.
+		_credit_notice.visible = not takes_credit or barred
+		if _credit_notice.visible:
+			_credit_notice.text = PlayerText.level_up_no_credit(barred, GameState.account > 0.0)
 	# Cost is FLAT (Dark Souls) — the same for every stat at a given total level — so each row shows the identical
 	# next-level price and gates on it. FRACTIONAL throughout so the UI's affordability + display match
 	# LevelUp.level_up_stat exactly (a barely-affordable stat mustn't look clickable when the station would refuse it,
@@ -145,8 +169,8 @@ func _rebuild() -> void:
 	_level_label.text = PlayerText.level_label(level)
 	# spendable(), not `money`: the readout must count the pot the rows' can_pay gate can actually draw on, or a
 	# banked player reads "Your zorkmids: 0" under raise buttons that work — the heal/respec twins made the same fix.
-	_money_label.text = PlayerText.your_zorkmids(_player.spendable())
-	_money_label.add_theme_color_override(&"font_color", MenuStyle.wallet_color(_player.spendable()))  # gold, or danger while the pot is negative
+	_money_label.text = PlayerText.your_zorkmids(_player.spendable(takes_credit))
+	_money_label.add_theme_color_override(&"font_color", MenuStyle.wallet_color(_player.spendable(takes_credit)))  # always GOLD in practice: spendable() clamps both terms at 0, so wallet_color's danger branch is unreachable here — a debtor reads 0, and the notice line is what tells them why
 	for c in _rows.get_children():
 		c.queue_free()
 	_first_focus = null  # the old rows die with the rebuild — re-record the landing spot from the fresh build below
@@ -156,7 +180,7 @@ func _rebuild() -> void:
 		# Mirrors LevelUp.level_up_stat's gate EXACTLY, zero-cost branch included: a FREE raise (the floored
 		# sub-baseline price) stays clickable for a wallet in DEBT, which `money >= cost` alone would grey out
 		# while the station happily served it (the free-respec-refused-while-negative wart, level-up edition).
-		var affordable := cost <= 0.0 or _player.can_pay(cost)  # the SAME predicate LevelUp.level_up_stat gates on
+		var affordable := cost <= 0.0 or (not barred and _player.can_pay(cost, takes_credit))  # the SAME two gates, in the SAME order, that LevelUp.level_up_stat applies — and a free raise still serves a debtor
 		# Aligned columns (name | value | +1 | cost) overlaid on a clickable Button — space-padding can't
 		# line up a variable-width font, so each column is its own fixed-width Label. The HBox is capped at
 		# skin.level_up_cols_width and centered by a full-rect CenterContainer so the four columns read as one group; the
@@ -165,7 +189,7 @@ func _rebuild() -> void:
 		var row := Control.new()
 		row.custom_minimum_size.y = _row_height()
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var btn := Button.new()
+		var btn := MenuStyle.style_list_row(Button.new())  # ROW language: the light label columns above must never sit on artist button-body art
 		btn.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		# FOCUS_ALL (the atm_screen must-not-recur rule): these code-built rows ARE the panel's actions, so they
 		# are the pad path — a control a pad can never land on is not a path. A can't-afford row is disabled but
@@ -197,7 +221,7 @@ func _rebuild() -> void:
 		# rail-funded raise carries the account's service charge, so the sticker price alone would under-quote what
 		# actually leaves the player (the shop_screen pattern). The affordability gate above stays on the RAW cost —
 		# can_pay folds the fee in itself, so gating on the all-in number would double-charge the predicate.
-		var cost_col := _stat_col(PlayerText.level_up_cost_cell(_player.charge_total(cost)), 0, HORIZONTAL_ALIGNMENT_RIGHT)  # cost fills the group's remainder; the whole parenthesised money phrase (incl. "zm") comes from PlayerText / Zorkmids.money_text
+		var cost_col := _stat_col(PlayerText.level_up_cost_cell(_player.charge_total(cost, takes_credit)), 0, HORIZONTAL_ALIGNMENT_RIGHT)  # cost fills the group's remainder; the whole parenthesised money phrase (incl. "zm") comes from PlayerText / Zorkmids.money_text
 		cost_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cols.add_child(cost_col)
 		center.add_child(cols)
@@ -268,7 +292,7 @@ func _perk_row(perk: Perk, pm: PerkManager, points: int) -> Control:
 	var row := Control.new()
 	row.custom_minimum_size.y = _row_height()  # same height as a stat row — one grid, one rhythm
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var btn := Button.new()
+	var btn := MenuStyle.style_list_row(Button.new())  # ROW language — see the stat-row note
 	btn.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	btn.focus_mode = Control.FOCUS_ALL  # same parity contract as the stat rows — the rank-29 perk picks must be pad-reachable too
 	btn.disabled = not pickable
@@ -347,6 +371,8 @@ func _player_perk_manager() -> PerkManager:
 ##  * %Rows / %Perks are the DYNAMIC containers _rebuild / _rebuild_perks fill per stat/perk at runtime —
 ##    the scene authors only the empty VBoxes (row separation 2 is authored; it's a fixed rhythm, not a
 ##    skin knob). The perk section's divider + header are rebuilt INSIDE %Perks so they hide with it.
+##  * %RailButton is HIDDEN and %CreditNotice shown when the station's `accepts_credit` is off (the shop's
+##    cash-only `set_available(false)` idiom) — never both, so the card keeps its height either way.
 ##  * CONTROLLER PARITY (the atm_screen must-not-recur rule): the authored RailButton carries NO
 ##    `focus_mode = 0` (Button's default FOCUS_ALL is what a pad navigates onto), the code-built stat/perk
 ##    rows set FOCUS_ALL (_rebuild / _perk_row — they ARE the panel's actions), and open_level_up SEEDS focus
@@ -375,6 +401,11 @@ func _bind_ui() -> void:
 	_rail_btn = %RailButton as PaymentRailButton
 	MenuStyle.cap_button(_rail_btn)
 	_rail_btn.rail_changed.connect(_rebuild)
+	# The terms line that stands in for the selector on a no-credit station. NOT cap_label'd: clip_text drops a
+	# Label's min width to ~0 and trims prose to an ellipsis, which is right for a fixed-width column cell and
+	# wrong for a sentence (the debug-menu wart) — the scene authors autowrap instead, so a longer locale wraps.
+	_credit_notice = %CreditNotice
+	MenuStyle.style_hint(_credit_notice)  # the authored-Label twin of make_hint (atm_screen's _hint idiom): dim, hint-sized, WORD_SMART wrap
 	_money_label.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	_money_label.add_theme_color_override(&"font_color", MenuStyle.gold())  # zorkmid tint — the wallet half only; _rebuild re-tints danger while in debt
 

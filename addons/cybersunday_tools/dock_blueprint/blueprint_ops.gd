@@ -37,7 +37,7 @@ static func build_pack(base: String, weapon: WeaponData, loot: LootTable) -> Dic
 	# (Reputation.disposition_for reads default_disposition; `relations` is NPC-vs-NPC only). Mirrors raiders.tres.
 	faction.default_disposition = Disposition.Kind.HOSTILE
 	var npc := Scaffold.build_npc("raider", weapon)  # a fighting archetype, equipped with the pack weapon
-	npc.display_name = Scaffold._titleize(base)
+	npc.display_name = Scaffold.titleize(base)
 	npc.faction_id = base   # use the NEW faction, NOT the raider preset's id (the either/or rule: faction_id only)
 	npc.loot = loot
 	return {"faction": faction, "npc": npc}

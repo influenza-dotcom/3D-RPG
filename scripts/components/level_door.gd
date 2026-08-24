@@ -29,6 +29,10 @@ func _ready() -> void:
 	_build_outline()
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
+	# The minimap pin, and the one kind that gets its OWN tint (MenuStyle.hud.minimap_exit_color): a way out of
+	# the level is not the same class of thing as a shop. Always pinned to the rim — pointing at the exit from
+	# anywhere on the floor is the entire job of an exit marker.
+	StationMarker.ensure(self, StationMarker.Kind.EXIT)
 
 func start_talk(player: Node) -> void:
 	if target_level == null:

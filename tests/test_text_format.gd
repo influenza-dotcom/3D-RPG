@@ -108,6 +108,25 @@ func test_plural_selects_whole_variants() -> void:
 	assert_eq(TextFormat.plural(-1, "{n} item", "{n} items"), "{n} items", "a negative count takes the plural form")
 
 
+# --- pad2: the clock-face zero-pad --------------------------------------------------------------------
+
+func test_pad2_zero_pads_to_two_digits() -> void:
+	assert_eq(TextFormat.pad2(0), "00", "midnight's hour and minute both pad to two digits")
+	assert_eq(TextFormat.pad2(7), "07", "a single digit gains a leading zero")
+	assert_eq(TextFormat.pad2(35), "35", "a two-digit value is unchanged")
+
+func test_pad2_does_not_truncate_a_wide_value() -> void:
+	# Only the PADDING is promised. A silently clipped number is worse than a wide one, so a value outside
+	# 0..99 prints in full rather than losing its leading digit.
+	assert_eq(TextFormat.pad2(123), "123", "a wide value prints in full, never truncated to two characters")
+	assert_eq(TextFormat.pad2(-5), "-5", "a negative value keeps its sign rather than being mangled")
+
+func test_pad2_is_the_padding_seam_num_cannot_be() -> void:
+	# Why this exists at all: num() TRIMS, and has no width option — so it can never produce a clock face.
+	assert_eq(TextFormat.num(5.0, 0), "5", "num trims to the bare integer...")
+	assert_eq(TextFormat.pad2(5), "05", "...which is exactly what a clock face must not do")
+
+
 # --- Zorkmids.money_text: the ONE "<amount> zm" template ----------------------------------------------
 
 func test_money_text_owns_the_currency_word() -> void:

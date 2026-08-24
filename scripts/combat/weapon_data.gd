@@ -44,7 +44,8 @@ const Calibers = preload("res://scripts/items/calibers.gd")
 # and left-click / a Z-hold throws it. A weapon drop carries NO ThrowableData, so these are its authoring surface.
 # MOST of them (thrown_impact_damage_mult / thrown_faces_travel / thrown_face_rotation_degrees / thrown_impulse_mult /
 # thrown_sound / held_faces_aim / dropped_item_light_always_lit) are stamped onto the drop's Throwable — or, for
-# the item light, onto its CanPickUp — by WorldItem._make_throwable; the other two shape the drop itself in
+# the item light, onto its CanPickUp, and for thrown_trail / thrown_trail_color onto a ThrowTrail CHILD it adds —
+# by WorldItem._make_throwable; the other two shape the drop itself in
 # WorldItem.build — and those two are read ONLY in its case 3 (a weapon whose view_model is the drop's visual), with
 # dropped_model_offset additionally gated on npc_hold_override. Plain `#`, not `##`: a bare @export_group isn't a
 # member, so a doc comment here would attach to the wrong thing.
@@ -96,6 +97,27 @@ const Calibers = preload("res://scripts/items/calibers.gd")
 ## (WorldItem._make_throwable), because a fast, slender body can otherwise tunnel through thin geometry in one
 ## physics tick.
 @export var thrown_impulse_mult: float = 1.0
+## Drag a bright STREAK behind a dropped copy while it FLIES — the thrown-weapon tracer. Stamped by
+## WorldItem._make_throwable as a `ThrowTrail` child on the drop (see scripts/components/throw_trail.gd); the
+## component samples the prop's path each physics frame and draws a tapering, fading ribbon through it. Only a real
+## THROW streaks — the H tap-drop and the death/quickload release never do, because the arm rides the same
+## `is_throw` decision as the thrown facing and the throw sound. ON BY DEFAULT, for EVERY weapon: the streak reads
+## as "the thing you threw went THERE", which is as useful for a hurled pistol as for a blade — a throw is a
+## deliberate verb here, and the arc plus the landing spot are what the player needs back from it. (It shipped
+## knife-only on the theory that a tracer on a gun would read as a bug; in play it reads as a throw.) Tumbling is
+## no obstacle: the ThrowTrail sits at the drop's ORIGIN, so a gun spinning end over end still lays a smooth line
+## — only a weapon with `thrown_faces_travel` gets the extra "leads with its point" read. Turn it OFF for a
+## weapon whose flight should NOT be readable — a decoy meant to be lost track of, or a stealth throw that
+## shouldn't paint a line back to where you threw it from. Shape (width / tail length / the speed it stops at) is
+## global tuning on
+## GameSettings.effects → "Thrown weapon trail" so every streak in the game matches — and note that
+## `throw_trail_min_speed` now has to stay UNDER the ~12 m/s of an ordinary throw or only the HURLED knife (2.5x)
+## would still streak, which is pinned by tests/test_managers_tuning.gd.
+@export var thrown_trail: bool = true
+## Colour of that streak, alpha included — stamped onto the drop's `ThrowTrail.color`. WHITE (the default) is the
+## shipped tracer, on every weapon: unshaded, so it reads the same in a lit street and an unlit basement. Tint it
+## per weapon for a signature throw (a green-glowing blade); inert unless `thrown_trail` is on.
+@export var thrown_trail_color: Color = Color(1.0, 1.0, 1.0, 1.0)
 ## Sound played when a dropped copy is really THROWN (stamped onto Throwable.throw_sound), instead of its release
 ## sound. Null (default) = a throw is as quiet as a drop, which is right for a gun you toss aside; author it for a
 ## weapon with a signature throw (the knife's whip). Distinct from `audio`, the SWING/fire sound of the wielded weapon.
@@ -146,6 +168,67 @@ const Calibers = preload("res://scripts/items/calibers.gd")
 @export var attack_windup: float = 0.0
 ## Cooldown between shots (seconds) — the fire-rate timer. LOWER = faster gun (0.1 = 10 shots/sec); higher = slower.
 @export var attack_speed: float = 0.1
+## Does a round from this weapon EXPLODE on impact? Purely a stamina-pricing / authoring FACT — it does not make
+## anything blow up (whether a round blasts is decided inside its projectile_scene: rock_projectile.tscn wires its
+## Explosion node to the full blast path, Projectile.tscn to a cosmetic spark that hardcodes force 0 and the global
+## spark radius). Tick it on a weapon whose projectile really does blast, so stamina_effort() below charges for the
+## payload.
+## ⭐ This exists because NOTHING else on WeaponData can tell an explosive weapon from a hitscan one:
+## explosion_radius defaults to 4.0 on EVERY weapon, max_explosion_force defaults to 20.0 (so the PISTOL nominally
+## out-blasts the grenade launcher's authored 10.0), and explosion_damage is the -1 "use the global" sentinel on all
+## eight shipped weapons. Those three fields are simply INERT on a non-explosive gun — the spark path never reads
+## them — which is exactly why they cannot be used as the signal. Default false keeps every ordinary gun correct
+## with zero authoring.
+@export var projectile_explodes: bool = false
+## TRIM on this weapon's DERIVED per-shot stamina price — not the price itself. The cost falls out of
+## stamina_effort() below (damage, pellets, blast), so a designer who authors a weapon's combat stats gets a sane
+## stamina price for free and it cannot drift out of sync with a rebalance. This knob only nudges the result:
+## 1.0 = ship the derived price, 0.75 = a 25% discount, 0 = this gun's fire is free.
+##
+## Use it ONLY for something the per-shot formula structurally cannot see, and say why in a comment on the .tres.
+## Exactly one weapon needs it today: smg.tres authors 0.75. Effort is per-SHOT, but what a player feels on a
+## held trigger is per-SECOND, and at 8 shots/sec the SMG multiplies its cost harder than anything else on the
+## roster — at 1.0 it would drain 12.7/sec (74% of the 17.1/sec clamp) while firing the WEAKEST round in the
+## game, which reads as a punishment for choosing the light weapon. The trim buys back that cadence asymmetry.
+## Reach for a damage/cadence change before you reach for this; a trim that drifts far from 1.0 means the formula
+## and your intent have diverged.
+@export var stamina_cost_mult: float = 1.0
+
+## --- Derived per-shot stamina price ---------------------------------------------------------------------
+
+## Exponent on pellet_count in stamina_effort(). A shell is ONE trigger pull absorbing ONE recoil impulse, and its
+## pellets diverge over pellet_spread so the nominal Nx only all land at contact range — charging N full shots
+## double-counts, charging one ignores the payload, so effort grows as sqrt(pellets).
+const PELLET_EFFICIENCY := 0.5
+## Effort credited to a blast at the reference radius below. Tuned so the shipped grenade launcher (damage 4.0,
+## radius 4.0) scores 4.0 direct + 4.0 blast = 8.0 — twice the shotgun, eight times the pistol.
+const BLAST_PAYLOAD := 4.0
+## The blast radius BLAST_PAYLOAD is quoted at; a wider blast scales linearly from here. Deliberately LINEAR rather
+## than area-of-effect: an area term flattens against a cap almost immediately above the shipped 4.0m, so widening
+## a blast would stop moving the price with no warning.
+const BLAST_REF_RADIUS := 4.0
+
+## How much offensive output ONE trigger pull puts out — the "how big is this bang" proxy the stamina price scales
+## from, so a grenade launcher costs more per shot than a pistol without anyone hand-pricing either. Normalised so a
+## plain 1.0-damage single-projectile round scores exactly 1.0, which makes GameSettings.player_movement's
+## stamina_shot_cost readable as "what one baseline shot costs".
+##
+## Shipped roster: smg 0.88, pistol 1.00, sniper 1.25, shotgun 4.00, grenade launcher 8.00.
+##
+## ⭐ PURE over this resource's own @exports, by contract. weapon_data.gd is loaded by the @tool CYBER SUNDAY
+## inspector, which runs in the EDITOR where the GameSettings autoload does not exist — so this must never read a
+## global. That is also why the blast term is a flat credit scaled by radius rather than a read of explosion_damage
+## (whose -1 sentinel would need GameSettings.physics_damage to resolve). The economy half of the price — the
+## global cost per unit of effort and the sustained-drain clamp — lives in Attack._shot_stamina_cost().
+##
+## Distinct from power_score() below, which is a RATE for AI equip-ranking: dividing by cadence would price the
+## SMG's bullet highest and the one-shot-kill sniper lowest, which is backwards for a PER-SHOT cost.
+func stamina_effort() -> float:
+	var direct := damage * pow(maxf(float(pellet_count), 1.0), PELLET_EFFICIENCY)
+	var blast := 0.0
+	if projectile_explodes:
+		blast = BLAST_PAYLOAD * (maxf(explosion_radius, 0.0) / BLAST_REF_RADIUS)
+	return maxf(direct + blast, 0.0)
 
 ## Rough combat power for AI weapon RANKING (the NPC "equip the strongest" rule + container scavenging):
 ## damage per attack cycle times pellets, over the cadence — a consistent ordering, not a balance number.
@@ -294,13 +377,23 @@ func held_view_model() -> PackedScene:
 ## Show the muzzle flash mesh/light + sparks on fire? Cosmetic; off for muzzle-less weapons (rock, fists).
 @export var has_muzzle_flash: bool = true # show the muzzle flash mesh/light + sparks on fire?
 ## Show the laser sight beam for this weapon? Off for melee / thrown / unsighted weapons.
-@export var has_laser_sight: bool = true # show the laser sight for this weapon?
+## ⭐NPC-ONLY NOW. The PLAYER's laser sight was retired when the flashlight took the "Light" key — this flag
+## survives because it still gates the NPC aiming laser (npc.gd `_current_weapon_has_laser_sight`, the red
+## beam an armed enemy sweeps at you). Turning it off on a weapon hides that enemy beam; it no longer affects
+## anything the player carries.
+@export var has_laser_sight: bool = true # show the NPC aiming laser for this weapon?
 ## Eject a physical shell casing on fire? Off for weapons that don't shell out (melee, energy, thrown).
 @export var spawns_casing: bool = true   # eject a shell casing on fire?
 ## Scales the ejected shell casing — its mesh (and the RigidBody casing's collision). 1.0 = unchanged;
 ## > 1 = a bigger shell (e.g. the sniper's fat round), < 1 = a daintier one. Only matters when
 ## spawns_casing is true.
 @export var casing_size_scale: float = 1.0
+## Size of the barrel-smoke trail (scenes/effects/muzzle_smoke.tscn) this weapon leaves after a shot.
+## 1.0 = the authored wisp; > 1 = a big-bore belch (shotgun, sniper, launcher), < 1 = a thinner thread,
+## 0 = this weapon never smokes. Only matters when has_muzzle_flash is true — that flag already means "this
+## thing goes bang", so melee / fists / the spray can are dry without needing a value here. The player's
+## Options dial (Settings.muzzle_smoke_scale) multiplies on top, so 0 there turns every gun's smoke off at once.
+@export var muzzle_smoke_scale: float = 1.0
 
 @export_group("Audio")
 ## Gunshot / fire sound played per shot.

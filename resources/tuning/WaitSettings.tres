@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="WaitSettings" format=3]
+
+[ext_resource type="Script" path="res://resources/tuning/WaitSettings.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+max_hours = 24
+min_hours = 1
+default_hours = 1
+hp_per_hour = 2.0
+hp_cap_fraction = 1.0
+heals_limbs = false
+hostile_awareness_blocks = true
+airborne_blocks = true

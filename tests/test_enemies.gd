@@ -13,7 +13,12 @@ extends GutTest
 ##  - Enemy / RangedEnemy: exported SCRIPT defaults + inherited Character API + AI
 ##    method/constant surface, all via load(path).new() WITHOUT add_child so _ready()
 ##    never runs.
-##  - death.gd / damage.gd: type identity + handler method presence (has_method only).
+##  - death.gd / damage.gd: type identity + handler method presence, plus death.gd's death_cry export
+##    DECLARATION (the scenes wire it by name; its value is pinned in test_smoke.gd).
+##  - death.gd's _on_enemy_died() DRIVEN FOR REAL, end to end: an in-tree Character whose crit latches were
+##    set through the real take_damage, a real Death child, and an assertion that the crowd cheer actually
+##    lands in the tree on an all-headshot kill and stays silent on a body shot. Plus the gore splash's
+##    self-free, and the enemy.tscn `died` -> Death connection that fires the whole thing.
 ##
 ## WHAT THIS DELIBERATELY SKIPS (and why)
 ##  - Perception.can_see()/can_hear() POSITIVE paths and just_spotted EMISSION: reaching
@@ -28,9 +33,10 @@ extends GutTest
 ##    muzzle/weapon/NavigationAgent3D, read GameSettings.physics_damage.*, write
 ##    Engine.time_scale (FreezeFrame), mutate a shared static cooldown, or play real audio.
 ##    We assert their PRESENCE (has_method) but never call them.
-##  - death.gd/damage.gd handler INVOCATION (_on_enemy_died/_play_applause/_on_enemy_damaged):
-##    they add_child audio players to the tree, play(), create_tween, and call AudioManager.
-##    has_method only.
+##  - damage.gd's _on_enemy_damaged INVOCATION: still has_method only (it needs a real hurt-cry stream and
+##    a live wielder). death.gd's _on_enemy_died is NO LONGER skipped — see the invocation tests below. It
+##    turned out to need nothing but an in-tree Character parent, and while it went untested death.gd could
+##    have stopped calling _play_applause() entirely with the whole suite still green.
 ##  - enemy.tscn blast_damp_divisor==1.0 (the SCENE override) and Character's script-default
 ##    1.12 on a base Character: already covered by test_smoke.gd. Here we assert ENEMY's own
 ##    SCRIPT default (1.12, inherited) without instantiating the scene.
@@ -476,7 +482,135 @@ func test_death_script_surface() -> void:
 		"death.gd must define _on_enemy_died (wired to the enemy's `died` signal in enemy.tscn)")
 	assert_true(n.has_method("_play_applause"),
 		"death.gd must define _play_applause (the crit-only kill cheer)")
+	# The death_cry EXPORT (the dying NPC's voice, layered over the gore splash). Its authored VALUE lives in the
+	# scene and is pinned by test_smoke.gd; what this pins is the export itself, because renaming or dropping it
+	# orphans every `death_cry = ExtResource(...)` row already written into enemy.tscn / SliceTestLevel.tscn and
+	# they go quiet with no error. Scan the property list rather than reading it: an unset export and a MISSING
+	# one both read back as null through .get(), so a read cannot tell the two apart.
+	var declares_cry := false
+	for prop in n.get_property_list():
+		if String(prop.get("name", "")) == "death_cry":
+			declares_cry = true
+			break
+	assert_true(declares_cry,
+		"death.gd must declare the death_cry export — the scenes author it by that exact name")
 	n.free()
+
+
+## A concrete, in-tree Character to hang a real Death node off. Character is @abstract with no abstract
+## methods, so a plain subclass instantiates (the _Stub / _KillSpy idiom from test_character.gd). Nothing is
+## overridden: these tests never kill it, they only set the crit latches that death.gd reads.
+class _Victim extends Character:
+	pass
+
+
+## Build an in-tree victim whose _took_any_hit/_all_crits latches were set by the REAL take_damage, with a
+## real death.gd node parented under it. max_hp is raised BEFORE add_child so _ready seeds hp from it and the
+## hits below stay non-lethal — death.gd reads the latches, not the corpse.
+func _victim_with_death_node(crit: bool):
+	var victim := _Victim.new()
+	victim.max_hp = 1000.0
+	add_child_autofree(victim)
+	victim.take_damage(1.0, crit)
+	var death = load("res://scripts/npc/death.gd").new()
+	death.name = &"Death"
+	victim.add_child(death)
+	return death
+
+
+## Every AudioStreamPlayer/3D parented DIRECTLY to the tree root — where all four of death.gd's one-shots
+## land. Snapshot before and after so a test can tell what THIS call spawned and clean up after itself.
+func _root_audio() -> Array[Node]:
+	var out: Array[Node] = []
+	for n in get_tree().root.get_children():
+		if n is AudioStreamPlayer or n is AudioStreamPlayer3D:
+			out.append(n)
+	return out
+
+
+## THE REWARD ITSELF, driven end to end. This is the assertion that was missing while the applause was
+## suspected of having silently stopped: it is not enough that play_applause() works (test_audio_manager_spawn)
+## and that the latches work (test_character) — something has to prove death.gd still JOINS them.
+func test_all_crit_kill_actually_plays_the_applause() -> void:
+	var death = _victim_with_death_node(true)
+	var before := _root_audio()
+	death._on_enemy_died()
+	var cheered := false
+	for n in _root_audio():
+		if n in before:
+			continue
+		if n is AudioStreamPlayer and (n as AudioStreamPlayer).stream == AudioManager.APPLAUSE:
+			cheered = true
+		n.queue_free()  # these are one-shots parented to the ROOT; they outlive this test if we leave them
+	assert_true(cheered,
+		"an all-headshot kill must actually reach AudioManager.play_applause() — death.gd is the only thing joining killed_by_only_crits() to the cheer, and nothing else asserts it does")
+
+
+## The negative half, and the one that makes the test above mean something: if this ever goes green-by-accident
+## (an applause on every death) the reward stops being a reward.
+func test_body_shot_kill_plays_no_applause() -> void:
+	var death = _victim_with_death_node(false)
+	var before := _root_audio()
+	death._on_enemy_died()
+	var cheered := false
+	for n in _root_audio():
+		if n in before:
+			continue
+		if n is AudioStreamPlayer and (n as AudioStreamPlayer).stream == AudioManager.APPLAUSE:
+			cheered = true
+		n.queue_free()
+	assert_false(cheered,
+		"a kill with any non-crit damage in it must NOT cheer — _all_crits is a one-way latch and death.gd must respect it")
+
+
+## The gore splash is the ONE sound death.gd hand-rolls instead of routing through AudioManager, so it is also
+## the one that must clean up after itself. It is parented to the tree ROOT, so a missing free outlives even a
+## level change, and stop_sfx() cannot collect it either (that queue_free is gated on ONE_SHOT_META, which a
+## hand-rolled spawn never sets). Regression pin: this exact line was once deleted and nothing noticed.
+func test_the_hand_rolled_gore_splash_frees_itself() -> void:
+	var death = _victim_with_death_node(true)
+	var before := _root_audio()
+	death._on_enemy_died()
+	var splash: AudioStreamPlayer3D = null
+	for n in _root_audio():
+		if n in before:
+			continue
+		if n is AudioStreamPlayer3D and (n as AudioStreamPlayer3D).stream != null 				and (n as AudioStreamPlayer3D).stream.resource_path.ends_with("Spplshh.mp3"):
+			splash = n
+	assert_not_null(splash,
+		"death.gd must still spawn the positional gore splash at the death site")
+	if splash == null:
+		return
+	var frees_itself := false
+	for c in splash.finished.get_connections():
+		if (c["callable"] as Callable).get_method() == &"queue_free":
+			frees_itself = true
+	assert_true(frees_itself,
+		"the hand-rolled splash must connect finished -> queue_free: it is parented to the tree ROOT, so without it every NPC death leaks a player for the whole session and stop_sfx() cannot reclaim it")
+	for n in _root_audio():
+		if n not in before:
+			n.queue_free()
+
+
+## The wiring that fires all of the above. A scene-DATA pin (no instantiation): test_smoke asserts the Death
+## node exists and carries its death_cry, but nothing asserted the signal that actually calls into it — drop
+## this connection and every kill goes completely silent with no error anywhere.
+func test_enemy_scene_wires_died_to_the_death_handler() -> void:
+	var packed: PackedScene = load("res://scenes/characters/enemy.tscn")
+	assert_not_null(packed, "enemy.tscn must load")
+	var state := packed.get_state()
+	# Guard against a VACUOUS pass: if get_state() ever returns a scene with no connections at all (a format
+	# change, an inherited-scene quirk), the loop below would simply not run and `wired` would be false —
+	# but a reader would be entitled to assume the opposite. Prove there is real data to scan first.
+	assert_gt(state.get_connection_count(), 0,
+		"enemy.tscn must declare signal connections at all — a zero count would make the scan below meaningless")
+	var wired := false
+	for i in state.get_connection_count():
+		if state.get_connection_signal(i) == &"died" and state.get_connection_method(i) == &"_on_enemy_died":
+			wired = true
+			break
+	assert_true(wired,
+		"enemy.tscn must connect `died` to the Death node's _on_enemy_died — that connection is the ONLY thing that turns a death into the splash, the cry, the cha-ching and the applause")
 
 
 func test_damage_script_surface() -> void:

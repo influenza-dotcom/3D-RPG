@@ -60,6 +60,66 @@ func test_xc1_editor_guard_hoisted_and_pure_delegates_inherit() -> void:
 	assert_false(cont.contains("_editor_fit_hitbox"), "container routes the editor preview through super(), not a direct _editor_fit_hitbox() call (XC1)")
 
 
+## --- The shared-overlay-slot contract (the 2026-08-15 ATM bug) --------------------------------------------
+## `material_overlay` is ONE slot per mesh and the NPC combat rim / Throwable hull live in it too. The shipping
+## ATM is authored `highlight_color = Color(1,1,1,0)` + `highlight_width = 0.0` ("no hover outline") AND sits
+## directly under the level root, so its host was the whole map: hovering it swapped a transparent material over
+## every actor in the level and their black outlines vanished until you looked away. Two independent pins, either
+## of which alone kills that symptom — keep both, they guard different halves.
+
+class _FakeActor extends Node3D:
+	func flash_red() -> void:  # Character's API — this subtree drives its own rim
+		pass
+
+class _FakeProp extends Node3D:
+	func set_outline_visible(_want = null) -> void:  # Throwable's API — this subtree drives its own hull
+		pass
+
+
+func test_invisible_highlight_never_evicts_the_shared_overlay() -> void:
+	var host := Node3D.new()
+	add_child_autofree(host)
+	var mesh := MeshInstance3D.new()
+	mesh.mesh = BoxMesh.new()
+	var rim := TalkHelpers.make_outline_material(Color.BLACK, 2.0)  # stand-in for an NPC combat rim
+	mesh.material_overlay = rim
+	host.add_child(mesh)
+	var li := LookAtInteractable.new()
+	li.highlight_color = Color(1.0, 1.0, 1.0, 0.0)  # exactly how the shipping ATM is authored
+	li.highlight_width = 0.0
+	host.add_child(li)  # _ready -> _build_outline
+	li.set_look_highlight(true)
+	assert_eq(mesh.material_overlay, rim, "an invisible highlight must leave the existing overlay in place")
+	assert_false(mesh.has_meta(&"talk_prev_overlay"), "...and must not even stash it — nothing was swapped in")
+	li.set_look_highlight(false)
+	assert_eq(mesh.material_overlay, rim, "look-away restores nothing, because nothing was ever taken")
+
+
+func test_highlight_never_adopts_an_actor_or_prop_subtree() -> void:
+	var host := Node3D.new()
+	add_child_autofree(host)
+	var own := MeshInstance3D.new()
+	own.mesh = BoxMesh.new()
+	host.add_child(own)
+	var actor := _FakeActor.new()
+	var actor_mesh := MeshInstance3D.new()
+	actor_mesh.mesh = BoxMesh.new()
+	actor.add_child(actor_mesh)
+	host.add_child(actor)
+	var prop := _FakeProp.new()
+	var prop_mesh := MeshInstance3D.new()
+	prop_mesh.mesh = BoxMesh.new()
+	prop.add_child(prop_mesh)
+	host.add_child(prop)
+	var li := LookAtInteractable.new()  # default white highlight -> a REAL material, so the prune is what saves us
+	host.add_child(li)  # _ready -> _build_outline
+	assert_true(li._meshes.has(own), "the host's own mesh IS collected (the highlight still works)")
+	assert_false(li._meshes.has(actor_mesh),
+		"an actor subtree (flash_red) is pruned — it drives its own disposition rim + damage flash")
+	assert_false(li._meshes.has(prop_mesh),
+		"a prop subtree (set_outline_visible) is pruned — it drives its own black hull")
+
+
 func _read_source(path: String) -> String:
 	var f := FileAccess.open(path, FileAccess.READ)
 	assert_not_null(f, "could read %s" % path)

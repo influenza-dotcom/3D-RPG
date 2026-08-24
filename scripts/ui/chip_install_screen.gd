@@ -205,7 +205,7 @@ func _fill(list: VBoxContainer, chips: Array, is_buy: bool) -> void:
 ## "…" when long) and the PRICE as its own right-aligned column. Mirrors ShopScreen._make_row. `price` is the
 ## BASE fee from the installer; the column paints the armed rail's ALL-IN total (see the paint-site note).
 func _make_row(item: Item, price: int, affordable: bool, is_buy: bool) -> Button:
-	var btn := MenuStyle.size_row_button(Button.new())  # empty-text button: without the pin its rect (selection bar + hitbox) collapses above the labels
+	var btn := MenuStyle.style_list_row(MenuStyle.size_row_button(Button.new()))  # empty-text row: height-pinned, and pinned to ROW language (its child Labels carry their own inks — artist button-body art would bury them)
 	# FOCUS_ALL, NOT the FOCUS_NONE these rows shipped with (the atm_screen _add_chip lesson): the rows ARE the
 	# pad path — with them and the rail selector all refusing focus, ui navigation had no owner to start from and
 	# every action on this card was pad-unreachable. open_install seeds focus on the first row built (_first_focus).

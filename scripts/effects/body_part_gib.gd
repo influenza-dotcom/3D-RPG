@@ -209,7 +209,10 @@ func _walk_strip(node: Node, doomed: Array[Node]) -> void:
 				var so := mi.get_surface_override_material(s)
 				if so != null and so.has_meta(&"bms_body_transp"):
 					mi.set_surface_override_material(s, null)
-		mi.layers = 1
+		# Layer 1 (a gib is plain world-visible geometry, whatever view-model layer the limb wore) PLUS
+		# the ink-mask bit: the duplicate keeps the dead NPC's hull outline material, so like every
+		# hull-rimmed actor it must stay OUT of the screen-space ink pass or the rim gets double-lined.
+		mi.layers = 1 | InkOutline.ACTOR_INK_MASK_LAYER
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		mi.transparency = 0.0
 	for c in node.get_children():

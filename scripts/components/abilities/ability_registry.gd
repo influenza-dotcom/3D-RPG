@@ -1,8 +1,8 @@
 extends RefCounted
 ## Ability registry: the unlockable-mechanic ids available on disk, so a designer picks an UpgradePickup's
 ## legacy `unlock_id` from a DROPDOWN that self-populates instead of a hand-maintained list. Each ability scene
-## under scenes/components/abilities/ is named in PascalCase (Grapple, LaserSight, AirDash, …) and its Ability
-## root's ability_id() is the snake_case of that name (grapple, laser_sight, air_dash) — so scanning the folder
+## under scenes/components/abilities/ is named in PascalCase (Grapple, AirDash, FallImmunity, …) and its Ability
+## root's ability_id() is the snake_case of that name (grapple, air_dash, fall_immunity) — so scanning the folder
 ## and snake-casing the filenames yields the mechanic ids. A drift test pins that convention.
 ##
 ## Preloaded as a const where needed (NO class_name on purpose → nothing for the test global script class cache

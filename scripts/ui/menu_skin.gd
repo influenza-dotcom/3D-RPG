@@ -46,9 +46,13 @@ extends Resource
 @export var panel_style: StyleBox
 
 @export_group("Palette")
-## Primary menu text.
+## Primary menu text — PANEL ink: it colours text sitting on the menu panel/card. The shipped skin runs it
+## DARK (the artist's plum on the olive panel), so a surface that draws over the WORLD or the dark
+## start-menu background must pin its own light ink instead of consuming this: dialogue line text
+## (DialogueSettings.dialogue_text_color), the start menu's quote/attribution labels, the grid tiles'
+## stack-count badge (tile_count_color, below — it paints over ITEM ART in a dark cell, not on the panel).
 @export var text_color: Color = Color(0.92, 0.92, 0.95)
-## Secondary / hint / dim text.
+## Secondary / hint / dim text. Same PANEL-ink caveat as text_color.
 @export var text_dim_color: Color = Color(1.0, 1.0, 1.0, 0.45)
 ## The single ACCENT — selection bar, focused control, active tab, slider fill.
 @export var accent_color: Color = Color(0.95, 0.85, 0.4)
@@ -56,8 +60,8 @@ extends Resource
 @export var gold_color: Color = Color(0.95, 0.85, 0.4)
 ## Warnings (over-encumbered, can't-afford).
 @export var danger_color: Color = Color(1.0, 0.55, 0.4)
-## Text colour of a disabled control. (Hover styling is NOT a skin knob — MenuStyle builds the hover
-## stylebox from accent_color; see MenuStyle._accent_bar.)
+## Text colour of a disabled control. (With no button art, hover styling is generated from accent_color —
+## MenuStyle._accent_bar; once button art lands, the "Widget art — buttons" hover slot + ink knobs own it.)
 @export var disabled_text_color: Color = Color(1.0, 1.0, 1.0, 0.28)
 
 @export_group("Typography")
@@ -87,6 +91,36 @@ extends Resource
 ## MenuStyle.title_text (the single casing chokepoint) — so a future per-locale MenuSkin remap can flip
 ## casing off wholesale for locales with no meaningful uppercase (CJK, Turkish dotted/dotless i).
 @export var uppercase_titles: bool = true
+
+@export_group("Text drop shadow")
+## THE SAME LIGHT THE ART IS BAKED WITH. The panel/button/tooltip/dialogue PNGs carry a drop shadow baked
+## into a transparent pad (scripts/tools/bake_ui_shadows.gd — straight down, never diagonal); these three
+## knobs put the matching shadow under menu TEXT so the chrome and the type read as one lit object instead
+## of two. Keep them in step with that tool's light: a text shadow that leans sideways while the panels drop
+## straight down is the exact disagreement the bake exists to kill.
+##
+## Shadow ink. ⚠ ALPHA 0 = NO TEXT SHADOW — the same alpha-as-null-sentinel the button_font_*_color knobs
+## use, so an art-less skin stays flat and the shipped skin opts in. Author it as a DARK, mostly-transparent
+## ink: it has to read under the dark plum panel ink AND under the light ink that off-panel surfaces pin for
+## themselves (the start-menu quote, the dialogue line, the grid tiles' count badge).
+@export var text_shadow_color: Color = Color(0, 0, 0, 0)
+## How far the shadow falls, in CANVAS pixels (the 792x444 base — the 0.5 stretch doubles it on screen, so 1
+## here is the smallest useful drop and already reads clearly). Keep X at 0: that is what "straight down"
+## means, and it is the whole point of this group.
+##
+## ⚠ WHAT THIS REACHES, AND WHAT IT CANNOT. Godot 4.7 gives font-shadow theme items to Label, RichTextLabel
+## and TooltipLabel and to NOTHING ELSE — Button, TabBar/TabContainer and LineEdit never read one. So menu
+## text wears this shadow (every title, hint, options row, list column, stat/price/wallet readout), but
+## BUTTON CAPTIONS, the two tab strips and the four text fields do not, and cannot without re-drawing their
+## glyphs by hand. That is deliberate, not an oversight: the shipped skin paints captions DARK on the LIGHT
+## parchment button art, where a dark drop shadow is very nearly invisible anyway, while panel Labels are
+## plum on mid-dark olive, where it reads. ⚠ Setting `font_shadow_color` on the `Button` theme type SUCCEEDS
+## and does nothing — Theme.has_color() will even confirm it is there. Don't be fooled into "fixing" it that way.
+@export var text_shadow_offset: Vector2i = Vector2i(0, 1)
+## Softness — grows the shadow outward by this many px before it falls off (Godot's `shadow_outline_size`).
+## 0 = a crisp offset copy, which is what the pixel-font look wants; 1 already reads as a blur at this scale.
+## ⚠ TooltipLabel has no such theme item in Godot 4.7, so the tooltip card's text ignores this one knob.
+@export var text_shadow_blur: int = 0
 
 @export_group("Layout")
 ## Root VBox separation shared by every panel screen (inventory/stats/shop/loot/options/…) so the
@@ -126,18 +160,32 @@ extends Resource
 ## strings ("No cap", "100%") measure under ~56px at body_size 12; setting_label_col_width_dense's
 ## half-column math assumes this exact value.
 @export var slider_readout_width: int = 56
+## Options: the HSlider track's minimum width on a full-width (single-column) settings row. A FLOOR — the
+## slider is EXPAND_FILL and takes whatever the row has left; this only decides how narrow the page's
+## MINIMUM is, i.e. how small the panel may get before the slider starts pushing back.
+@export var slider_width: int = 120
+## Options: the same floor inside a two-up dense column (the Accessibility tab), where two full-width rows
+## have to share one panel. The half-column fit at the 792x444 canvas: the Options panel's 0.07..0.93 band
+## is 681px, the artist frame stylebox eats 72 of it, and the page's own margins another 20 — so the two
+## columns plus their 10px gutter must fit ~589px. 110 (dense label) + 10 + 90 + 10 + 56 (readout) = 276 per
+## column -> 562. At the drawn width the slider still gets ~103px, so this floor never binds in practice; it
+## exists so the page's MINIMUM stays inside the panel instead of growing the card when Accessibility opens.
+@export var slider_width_dense: int = 90
 ## Options: the keybind rebind buttons — a fixed-width right-aligned column, not full-width bars. 120 fits
-## the widest real ENGLISH binding name ("Mouse Wheel Up" ≈ 117px incl. the 9+9 stylebox margins); the
-## button is cap_button()'d so anything longer (the armed PlayerText.OPTIONS_BIND_PROMPT, an exotic key
-## name) clips instead of growing the button and shifting the column. The Controls tab lays out
-## single-column, so extra width here comes out of the EXPAND_FILL name label.
+## the widest real ENGLISH binding name ("Mouse Wheel Up" ≈ 119px incl. the 10+10 margins of the shipped
+## art button boxes — the parchment frames' content margins are 1px wider per edge than the generated 9+9,
+## so the slack here is now exactly 1px; a wider future art box must re-verify this fit). The button is
+## cap_button()'d so anything longer (the armed PlayerText.OPTIONS_BIND_PROMPT, an exotic key name) clips
+## instead of growing the button and shifting the column. The Controls tab lays out single-column, so
+## extra width here comes out of the EXPAND_FILL name label.
 @export var rebind_button_width: int = 120
 ## Options: left setting-name column floor on a full-width row, so every tab's controls start on one rail.
 @export var setting_label_col_width: int = 130
 ## Options: setting-name column floor inside a two-up dense column (the Accessibility tab). The half-column
-## fit is English-measured: 110 + 10 + 120 (slider min width) + 10 + slider_readout_width (56) = 306 fits a
-## ~310px half-column at the 792x444 canvas — the full setting_label_col_width (130) would overflow it. A
-## locale growing either label width must re-verify that sum.
+## fit is English-measured: 110 + 10 + slider_width_dense (90) + 10 + slider_readout_width (56) = 276, and two
+## of those plus the 10px gutter and the page's 20px margins fit the panel's ~609px inner width — the full
+## setting_label_col_width (130) would overflow it and grow the whole Options card. A locale growing either
+## label width must re-verify that sum (tests/test_menu_layout_stability.gd fails if it stops fitting).
 @export var setting_label_col_width_dense: int = 110
 ## Shop: the Sort cycle button's fixed min width (cap_button clip_text pins BOTH edges) — ≥ the widest
 ## ENGLISH caption ("Sort: Default") so the footprint never shifts as the caption cycles.
@@ -191,13 +239,43 @@ extends Resource
 @export var button_normal: StyleBox
 ## Button under the mouse (default: a 2px accent bar on the left, no fill).
 @export var button_hover: StyleBox
-## Button held down (default: accent bar + faint accent fill).
+## Button held down (default: accent bar + faint accent fill). SHIPPED STAND-IN (2026-08-12): the artist's
+## "Selected" frame arrived byte-identical to "Normal", so the shipped box wears button_frame_selected.png
+## (currently that copy) darkened via modulate_color — when the real Selected art lands, replace the PNG
+## and clear the modulate.
 @export var button_pressed: StyleBox
 ## Button holding keyboard/controller focus (default: same as pressed). Keep it visually distinct from
-## normal — this is the only "you are here" cue when navigating without a mouse.
+## normal — this is the only "you are here" cue when navigating without a mouse. ⚠ Godot draws this box
+## as an OVERLAY on top of the current STATE box (normal/hover/pressed/disabled), not instead of it — so
+## deliver a transparent-centred ring/outline here, never an opaque body: an opaque focus box hides the
+## state art underneath and paints a body onto focused DISABLED buttons (the heal card seeds focus on a
+## Heal button that can be disabled — that is how this was caught). The shipped skin uses a 1px accent
+## ring (a StyleBoxFlat authored in the .tres) over the parchment button art for exactly this reason.
 @export var button_focus: StyleBox
-## Button that can't be clicked (default: transparent; the disabled_text_color grey does the talking).
+## Button that can't be clicked. Fallback follows the TOGGLE-ICON rule: null with button_normal art set =
+## MenuStyle derives a DIMMED copy of the rest body (an enable/disable flip greys the same body instead of
+## popping it out of existence); null on an art-less skin = transparent, the disabled_text_color grey talks.
 @export var button_disabled: StyleBox
+
+## OPTIONAL button caption inks, one per state — for when button art needs its own text colours. The
+## palette-derived defaults (text_dim/text/accent) were chosen for TRANSPARENT buttons on the dark panel;
+## an opaque light body (the shipped parchment frames) makes them unreadable, so any knob with alpha > 0
+## replaces the derived colour for that state (MenuStyle._ink). Alpha 0 = unset — a fully transparent
+## caption is never a real want, so alpha doubles as the null sentinel, the Color twin of the null-StyleBox
+## fallback rule above. These colour ONLY real theme Buttons: the player-menu tab strip pins its hover/
+## pressed caption ink back to text_color (its hover visuals are tab-language chrome on the PANEL, not
+## button art — see PlayerMenus.build_tab_strip), and Labels never consult Button colours.
+@export var button_font_color: Color = Color(0, 0, 0, 0)
+## Ink under the mouse (derived default: text_color).
+@export var button_font_hover_color: Color = Color(0, 0, 0, 0)
+## Ink while held down, and for hover_pressed (derived default: accent_color).
+@export var button_font_pressed_color: Color = Color(0, 0, 0, 0)
+## Ink holding keyboard/controller focus (derived default: text_color).
+@export var button_font_focus_color: Color = Color(0, 0, 0, 0)
+## Ink of a disabled caption (derived default: disabled_text_color). The shipped skin authors a muted
+## dark olive here because its disabled BODY is the derived dimmed-parchment copy of the rest art (see
+## button_disabled) — the light disabled_text_color would wash out on it.
+@export var button_font_disabled_color: Color = Color(0, 0, 0, 0)
 
 @export_group("Widget art — toggles")
 ## CheckButton/CheckBox ON art (default: a generated 20x10 switch). All four slots swap together —
@@ -253,6 +331,17 @@ extends Resource
 ## The tooltip card — BOTH the custom in-viewport cursor tip and native theme tooltips (default: a
 ## near-black bordered panel).
 @export var tooltip_panel: StyleBox
+## The DIALOGUE box's background (the bottom conversation panel, DialogueView). Its OWN slot rather than
+## the theme panel on purpose: this box is short and very wide (~632x160 on the 792x444 canvas) and floats
+## over the 3D world, so the full screen-card art in panel_style would drown it — the same reason compact
+## confirm cards take make_plain_panel_style. null = the box keeps its background-LESS look: outlined text
+## straight over the world, with only the response menu backed by the plain generated panel (what it wore
+## before any art landed, and still the fallback for an art-less skin).
+## ⚠ Art with a TRANSPARENT cut-out (the shipped notch in the bottom-left corner) only survives 9-patching
+## if the texture margin on that side CONTAINS the whole cut — the corner cell is the one region drawn at
+## native size; anything spilling into a stretched edge/centre cell smears. The matching content margin
+## must clear it too, or text/choice buttons land over the hole. See resources/ui/menu_skin.tres sb_dialogue.
+@export var dialogue_panel: StyleBox
 
 @export_group("Grid tiles")
 ## The tetris-grid stack tiles (grid_tile.gd / grid_inventory_view.gd) — the inventory/loot/shop cells.
@@ -263,6 +352,12 @@ extends Resource
 @export var tile_consumable_color: Color = Color(0.45, 0.80, 0.52)
 ## The thin ring the overlay draws around the hovered stack.
 @export var tile_hover_ring_color: Color = Color(1, 1, 1, 0.85)
+## Ink of a tile's stack-count / money badge ("x3", "12.50"). A GRID ink, deliberately NOT text_color: the
+## badge paints over the ITEM ART inside a dark tinted cell, never on the menu panel, so it must stay LIGHT
+## even while the panel palette runs dark (the shipped plum) — the same rule the HUD labels follow, and the
+## same white the hotbar's slot text wears (HudSettings.hotbar_filled_color). Drawn over a black outline, so
+## it reads on any icon.
+@export var tile_count_color: Color = Color(0.92, 0.92, 0.95)
 ## Alpha the source tile dims to while its stack is being dragged.
 @export var drag_source_dim_alpha: float = 0.35
 

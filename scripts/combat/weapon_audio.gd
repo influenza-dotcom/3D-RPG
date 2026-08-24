@@ -44,27 +44,30 @@ func setup(p_attack_audio: AudioStreamPlayer3D, p_reload_sfx: AudioStreamPlayer3
 ## Play the fire sound for this shot. Cruelty-Squad-style: the fire sound deepens as the magazine
 ## empties, using `ammo_before` (the count BEFORE this shot) so a full mag fires at full pitch.
 ## Infinite-ammo weapons (melee, fists) keep normal pitch.
+##
+## The ammo pitch is the BASE handed to AudioManager.play_varied, which multiplies the global per-play
+## variation onto it — the mag-empties sag still reads exactly as authored, it just stops firing the
+## byte-identical sample on every trigger pull (most audible on a full-auto burst).
 func play_fire(weapon: WeaponData, ammo_before: int) -> void:
 	attack_audio.stream = weapon.audio
+	var base_pitch := 1.0
 	if not weapon.is_infinite_ammo:
 		var ammo_frac := clampf(float(ammo_before) / float(weapon.max_ammo), 0.0, 1.0)
-		attack_audio.pitch_scale = lerpf(GameSettings.audio.fire_pitch_empty_ammo, GameSettings.audio.fire_pitch_full_ammo, ammo_frac)
-	else:
-		attack_audio.pitch_scale = 1.0
-	attack_audio.play()
+		base_pitch = lerpf(GameSettings.audio.fire_pitch_empty_ammo, GameSettings.audio.fire_pitch_full_ammo, ammo_frac)
+	AudioManager.play_varied(attack_audio, base_pitch)
 
 ## The dry-fire click (empty clip / last round chambered).
 func play_empty() -> void:
-	empty_clip.play()
+	AudioManager.play_varied(empty_clip)
 
 ## The ejected casing hitting the ground.
 func play_shell() -> void:
-	shell_impact.play()
+	AudioManager.play_varied(shell_impact)
 
 ## Play the reload sound — per-weapon if it defines one, else the node's authored default.
 func play_reload(weapon: WeaponData) -> void:
 	reload_sfx.stream = weapon.reload_sound if weapon.reload_sound else _default_reload_sfx
-	reload_sfx.play()
+	AudioManager.play_varied(reload_sfx)
 
 ## Point the two impact players at this weapon's per-weapon impact sounds, falling back to the nodes'
 ## authored defaults when it has none. Done once per shot, before the raycast loop.
@@ -114,7 +117,7 @@ func _emit_positional_impact(source: AudioStreamPlayer3D, hit_pos: Vector3, pitc
 	one_shot.unit_size = source.unit_size
 	one_shot.max_db = source.max_db
 	one_shot.max_distance = source.max_distance
-	one_shot.pitch_scale = pitch
+	one_shot.pitch_scale = AudioManager.vary_pitch(pitch)  # the HP/impact pitch above is the BASE; see AudioManager.vary_pitch
 	get_tree().root.add_child(one_shot)
 	one_shot.global_position = hit_pos
 	one_shot.play()

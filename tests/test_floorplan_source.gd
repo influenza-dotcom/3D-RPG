@@ -157,6 +157,43 @@ func test_slice_rejects_the_void_seal_and_the_speckle() -> void:
 	var segs := s.slice(0.0, 120.0, 0.35)
 	assert_eq(segs.size(), 8, "only the real wall survives — one 4-edge ring")
 
+## THE ORDER OF THE TWO PASSES IS THE CONTRACT: reject FIRST, merge SECOND. The void seal encloses every
+## other solid in the level, so a version that merged before filtering would hand it to the union as an
+## occluder and the whole floorplan would come back EMPTY — a blank map, with no error anywhere.
+func test_slice_never_lets_a_rejected_solid_occlude() -> void:
+	var s = SRC.new()
+	var solids: Array[Dictionary] = [
+		{"hull": FS.box_points(Vector3(500, 10, 500), Transform3D.IDENTITY)},   # swallows everything below
+		{"hull": FS.box_points(Vector3(4, 3, 0.2), Transform3D.IDENTITY)},      # a real wall, inside it
+	]
+	s.solids = solids
+	assert_eq(s.slice(0.0, 120.0, 0.35, true, 0.05).size(), 8,
+			"the wall is still drawn: a shell dropped by max_solid_span never becomes an occluder")
+
+
+# --- the silhouette, through the cut ---------------------------------------------------------------------
+
+func _inked(pairs: PackedVector2Array) -> float:
+	var total := 0.0
+	var n := pairs.size() / 2
+	for i in n:
+		total += pairs[i * 2].distance_to(pairs[i * 2 + 1])
+	return total
+
+## The end-to-end shape of the feature: two brushes that overlap are ONE wall, and a floorplan draws walls,
+## not the boxes a level happens to be built from.
+func test_slice_merges_two_overlapping_boxes() -> void:
+	var s = SRC.new()
+	var solids: Array[Dictionary] = [
+		{"hull": FS.box_points(Vector3(2, 3, 2), Transform3D.IDENTITY)},
+		{"hull": FS.box_points(Vector3(2, 3, 2), Transform3D(Basis.IDENTITY, Vector3(1, 0, 1)))},
+	]
+	s.solids = solids
+	assert_almost_eq(_inked(s.slice(0.0, 120.0, 0.01, true, 0.0)), 12.0, 0.001,
+			"merged, the pair inks its 12 m union outline")
+	assert_almost_eq(_inked(s.slice(0.0, 120.0, 0.01, false, 0.0)), 16.0, 0.001,
+			"unmerged, both rings ink whole — the 4 m of buried seam is the difference")
+
 
 # --- the pure cut maths (FloorplanSection's half) -------------------------------------------------------
 

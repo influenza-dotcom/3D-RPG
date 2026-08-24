@@ -108,15 +108,23 @@ func _ready() -> void:
 func _limit_monitoring_window() -> void:
 	var visual_only := not deals_damage and max_explosion_force <= 0.0
 	if not visual_only:
-		# Let body_entered fire for everything we already overlap, then stop.
-		await get_tree().physics_frame
+		# Let body_entered fire for everything we already overlap, then stop. Re-check between the awaits:
+		# a blast freed mid-window (level unload, quit) would otherwise call .physics_frame on a null get_tree().
 		await get_tree().physics_frame
 		if not is_inside_tree():
 			return
-	monitoring = false
+		await get_tree().physics_frame
+		if not is_inside_tree():
+			return
+	# set_deferred, NOT a direct write — the project's own idiom for this exact operation (trigger_volume.gd:90).
+	# Area3D::set_monitoring is BLOCKED while the physics server is flushing queries, and the visual_only branch
+	# above reaches this line synchronously from _ready(), i.e. from inside whatever add_child() built us — which
+	# for the bullet-spark bridge (explosion.gd) is a RigidBody3D contact callback, mid-flush. Deferring lands
+	# both branches safely outside the flush.
+	set_deferred(&"monitoring", false)
 	var shake := get_node_or_null("ScreenShakeArea")
 	if shake is Area3D:
-		(shake as Area3D).monitoring = false
+		(shake as Area3D).set_deferred(&"monitoring", false)
 
 ## Push (and optionally damage) each body entering the blast. Force falls off
 ## linearly to zero at explosion_radius. Characters/enemies receive a DECAYING blast
@@ -137,6 +145,11 @@ func _on_body_entered(body: Node3D) -> void:
 		# explosion kill pays the zorkmid bounty. No hit_pos -> blasts don't apply locational/limb damage.
 		# M9: a per-instance explosion_damage override (>= 0) wins; -1 (barrels, unconfigured) falls back to the global knob.
 		var dmg: float = resolve_damage(explosion_damage, GameSettings.physics_damage.explosion_damage)
+		# PRE-hit HP, captured before the blast lands, so the hit-confirm block below can tell a body THIS blast just
+		# killed from one that was ALREADY a corpse: after take_damage the two are indistinguishable (it early-outs on
+		# its own _dead latch, leaving hp at its lethal value), and blasts routinely reach corpses — an NPC holds its
+		# pose for the whole death-freeze beat with its collider live. -1 marks "not a Character".
+		var hp_before := (body as Character).hp if body is Character else -1.0
 		body.take_damage(dmg, false, instigator)
 		# Flash the player's hitmarker when our blast connects — enemy splash OR self-damage.
 		# But ONLY when the PLAYER instigated this blast (see the gate below) — enemies have rockets now.
@@ -146,8 +159,18 @@ func _on_body_entered(body: Node3D) -> void:
 			(body as Character).indicate_damage_from(global_position)
 			# Hitmarker is PLAYER feedback for a hit the player dealt — flash it only when the player
 			# instigated THIS blast (an NPC's rocket splashing another NPC must not ping it).
+			# Pass the victim's POST-damage HP fraction, exactly like the hitscan (damage_trace) and direct-impact
+			# (projectile) paths do. This is the hit DING's pitch, which tracks the target's remaining HP (deeper as it
+			# nears death) — a bare on_dealt_hit() defaulted hp_frac to 1.0, so every explosive in the game dinged at
+			# the full-HP end no matter how close to dead it left the target. headshot stays false: a blast deals no
+			# locational damage (no hit_pos above). A hit on a body that was ALREADY dead reports full HP rather than
+			# its real 0, so splashing a corpse keeps the hitmarker + ding this path has always given without dinging
+			# it as a fresh death-blow. NOT the kill flash — that fires once per victim from take_damage's lethal
+			# branch, on the resolved killer, and never rides hp_frac.
 			if is_instance_valid(instigator) and instigator.is_in_group(Groups.PLAYER) and instigator.has_method(&"on_dealt_hit"):
-				instigator.on_dealt_hit()
+				var victim := body as Character
+				var hp_frac := 1.0 if hp_before <= 0.0 else clampf(victim.hp / maxf(victim.max_hp, 1.0), 0.0, 1.0)
+				instigator.on_dealt_hit(false, hp_frac)
 
 	# Player (a Character but NOT an NPC): blast push with optional upward bias, lessened by how loaded they are.
 	if body is Character and body is not NPC:

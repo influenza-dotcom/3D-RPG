@@ -20,6 +20,7 @@ thrown_pins_body_part = true
 thrown_faces_travel = true
 thrown_face_rotation_degrees = Vector3(0, 180, 0)
 thrown_impulse_mult = 2.5
+thrown_trail = true
 thrown_sound = ExtResource("6_thrw1")
 held_faces_aim = true
 dropped_item_light_always_lit = true

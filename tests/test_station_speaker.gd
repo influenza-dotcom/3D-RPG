@@ -11,8 +11,13 @@ extends GutTest
 ##   * `ensure(station)` gives a bare prefab a default voice but NEVER overwrites an authored one — that is the
 ##     whole designer surface: drop a StationSpeaker child to retune, or drop one with `open_sound` cleared to
 ##     MUTE the machine. A greedy ensure() would make the mute switch impossible.
+##   * `applaud(station)` is the REWARD cue in the same static, null-safe shape — the machine clapping for you
+##     out of the same panel. `Atm.deposit` fires it on the portion of a deposit that RETIRES DEBT. The two
+##     cues own SEPARATE AudioStreamPlayer3Ds, which is the contract worth pinning here: one shared player
+##     would mean re-opening the terminal mid-applause chopped the celebration off, and a per-cue volume trim
+##     would be impossible.
 ##
-## Speakers are exercised IN TREE (add_child_autofree): the AudioStreamPlayer3D is built in _ready, so an
+## Speakers are exercised IN TREE (add_child_autofree): the AudioStreamPlayer3Ds are built in _ready, so an
 ## off-tree instance is deliberately mute — which is itself one of the cases below.
 
 
@@ -32,6 +37,9 @@ func test_the_static_seam_is_null_safe() -> void:
 	# station must be a quiet no-op, not a crash on the open path.
 	assert_false(StationSpeaker.chirp(null), "a null station never crashes the open path")
 	assert_null(StationSpeaker.find_speaker(null), "…and finding on null is null")
+	# applaud() is called from INSIDE Atm.deposit — a transaction that has already moved money and awarded
+	# credit standing. A crash there would roll nothing back, so it has to be at least as forgiving as chirp.
+	assert_false(StationSpeaker.applaud(null), "a null station never crashes the repayment path either")
 
 
 func test_ensure_gives_a_bare_station_a_voice_and_is_idempotent() -> void:
@@ -42,6 +50,7 @@ func test_ensure_gives_a_bare_station_a_voice_and_is_idempotent() -> void:
 	assert_eq(StationSpeaker.ensure(host), sp, "…and calling it again returns the SAME one (a station's _ready must never stack speakers)")
 	assert_eq(StationSpeaker.find_speaker(host), sp, "…found by TYPE, so renaming the node in a scene can't silence the machine")
 	assert_not_null(sp.open_sound, "the default voice ships with a clip assigned")
+	assert_not_null(sp.applause_sound, "…and so does the reward clap, so a bare Atm applauds a repayment with zero authoring")
 	assert_eq(sp.bus, &"speaker", "…on the tinny speaker bus — the filter chain IS the cheap-plastic sound")
 
 
@@ -65,6 +74,48 @@ func test_a_live_speaker_chirps_and_reports_it() -> void:
 	assert_true(StationSpeaker.chirp(host), "a station with a voice speaks, and says it did — that return is what suppresses the duplicate UI sting")
 
 
+func test_a_live_speaker_applauds_and_reports_it() -> void:
+	var host := _station()
+	var sp := StationSpeaker.new()
+	host.add_child(sp)
+	add_child_autofree(host)
+	assert_true(StationSpeaker.applaud(host), "a station with a voice claps for you, and says it did")
+	var clap := sp.get_node_or_null("Applause") as AudioStreamPlayer3D
+	assert_not_null(clap, "the applause has its OWN voice node, built at _ready beside the chirp's")
+	assert_true(clap.playing, "…and applaud() actually started it")
+
+
+func test_clearing_only_the_applause_leaves_the_chirp_alone() -> void:
+	# ⭐The two cues are INDEPENDENT authoring choices, not one on/off switch. A designer who wants a terminal
+	# that still wakes up with a chirp but takes your repayment without the fanfare clears `applause_sound`
+	# alone — if either clip's null check reached the other player, that terminal would go completely silent.
+	var host := _station()
+	var sp := StationSpeaker.new()
+	sp.applause_sound = null
+	host.add_child(sp)
+	add_child_autofree(host)
+	assert_false(StationSpeaker.applaud(host), "a cleared clap is a mute celebration")
+	assert_true(StationSpeaker.chirp(host), "…and the machine still chirps when its screen wakes")
+
+
+func test_the_two_cues_never_cut_each_other() -> void:
+	# ⭐WHY THEY GET SEPARATE PLAYERS. play() RESTARTS a player, so one shared voice would mean re-opening the
+	# terminal mid-applause chopped the several-second celebration off with the chirp (and vice versa). The
+	# self-cutting is only wanted WITHIN a cue — a second repayment restarts the clap rather than stacking one
+	# crowd on another. This is the assertion that fails the day someone "simplifies" the two voices into one.
+	var host := _station()
+	var sp := StationSpeaker.new()
+	host.add_child(sp)
+	add_child_autofree(host)
+	StationSpeaker.applaud(host)
+	StationSpeaker.chirp(host)  # the player closed and re-opened the terminal while it was still clapping
+	var clap := sp.get_node_or_null("Applause") as AudioStreamPlayer3D
+	var chirp := sp.get_node_or_null("Player") as AudioStreamPlayer3D
+	assert_true(clap.playing, "the applause survives an open cue landing on top of it")
+	assert_true(chirp.playing, "…and the chirp still sounds — two voices, two cues, neither one yielding")
+	assert_ne(clap, chirp, "the cues must not share a player, which is what makes the above possible")
+
+
 func test_the_player_processes_through_a_pause() -> void:
 	# ⭐The trap this component was extracted with. A PAUSABLE AudioStreamPlayer3D fades itself to silence on
 	# NOTIFICATION_PAUSED — measured at ~15 ms in, with no error and nothing logged. The station screens are
@@ -78,6 +129,13 @@ func test_the_player_processes_through_a_pause() -> void:
 	assert_not_null(voice, "the speaker builds its AudioStreamPlayer3D at _ready")
 	assert_eq(voice.process_mode, Node.PROCESS_MODE_ALWAYS,
 		"the voice must process ALWAYS — a dialogue-hosted station opens under the conversation's pause and a pausable player dies mid-chirp")
+	# The applause is MORE exposed to this than the chirp, not less: it runs for seconds rather than a blink,
+	# so any pause the player triggers mid-celebration (opening a menu, dying to a shot they took while banking)
+	# falls inside its clip. A voice built by a helper that forgot the flag would fail here, not in a playtest.
+	var clap := sp.get_node_or_null("Applause") as AudioStreamPlayer3D
+	assert_not_null(clap, "…and a second one for the reward clap")
+	assert_eq(clap.process_mode, Node.PROCESS_MODE_ALWAYS,
+		"the applause must process ALWAYS too — it is long enough that a pause almost certainly lands inside it")
 
 
 func test_a_missing_bus_degrades_to_sfx_rather_than_master() -> void:
@@ -90,3 +148,5 @@ func test_a_missing_bus_degrades_to_sfx_rather_than_master() -> void:
 	add_child_autofree(host)
 	var voice := sp.get_node_or_null("Player") as AudioStreamPlayer3D
 	assert_eq(voice.bus, &"sfx", "a missing bus falls back to sfx (with a warning), never Master")
+	var clap := sp.get_node_or_null("Applause") as AudioStreamPlayer3D
+	assert_eq(clap.bus, &"sfx", "…and BOTH voices take the same fallback — one routed cue and one orphan on Master would be worse than either")

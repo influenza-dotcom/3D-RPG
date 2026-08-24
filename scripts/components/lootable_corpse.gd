@@ -138,7 +138,7 @@ func can_be_talked_to() -> bool:
 	return inventory != null and not inventory.is_empty()
 
 ## HUD readout when aimed at: "Loot <name>" while there's anything TO loot — the player's readout then
-## prefixes the interact key ("[E] Loot Kyle"), since the key hint only shows for actionable targets. Once
+## prefixes the interact key ("[F] Loot Kyle"), since the key hint only shows for actionable targets. Once
 ## EMPTIED, just the bare name: the readout deliberately follows non-actionable targets too (like a hostile
 ## NPC's name), and an emptied corpse advertising "Loot" with no key was the misleading state.
 func look_name() -> String:

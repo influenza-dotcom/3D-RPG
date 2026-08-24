@@ -80,20 +80,37 @@ static func speaker_name(own: String, node: Node) -> String:
 ## trigger), so the white "talkable" outline can be toggled on the host's visible body. `include_root`
 ## also collects `host` itself when it IS a MeshInstance3D (matches the old per-script collectors that
 ## recursed from-and-including the root — e.g. an overlay applied to a body that's itself the mesh node).
-static func collect_meshes(host: Node, skip: Node = null, include_root: bool = false) -> Array[MeshInstance3D]:
+## `stop_at` (optional) is a Callable(Node) -> bool that PRUNES a child subtree before it is walked —
+## LookAtInteractable passes `owns_its_overlay` so a highlight can never adopt meshes another system drives.
+static func collect_meshes(host: Node, skip: Node = null, include_root: bool = false, stop_at: Callable = Callable()) -> Array[MeshInstance3D]:
 	var out: Array[MeshInstance3D] = []
 	if include_root and host is MeshInstance3D and host != skip:
 		out.append(host)
-	_collect(host, skip, out)
+	_collect(host, skip, out, stop_at)
 	return out
 
-static func _collect(node: Node, skip: Node, out: Array[MeshInstance3D]) -> void:
+static func _collect(node: Node, skip: Node, out: Array[MeshInstance3D], stop_at: Callable = Callable()) -> void:
 	for child in node.get_children():
 		if child == skip:
 			continue
+		if stop_at.is_valid() and bool(stop_at.call(child)):
+			continue  # pruned: that subtree drives its own material_overlay (see owns_its_overlay)
 		if child is MeshInstance3D:
 			out.append(child)
-		_collect(child, skip, out)
+		_collect(child, skip, out, stop_at)
+
+## ⭐ True for a subtree that OWNS its own `material_overlay` chain, so a look-at collect must not adopt it:
+## an actor (Character/NPC — the disposition rim chained in front of the damage flash) or a prop (Throwable —
+## the black hull plus its InkOutline actor-mask bit). There is exactly ONE overlay slot per mesh and
+## `set_overlay` below swaps into it, so adopting someone else's meshes strips THEIR outline for as long as you
+## look at YOU. Matters because the host defaults to `get_parent()`: an interactable dropped straight under the
+## level root takes the whole map as its host and would otherwise collect every NPC and prop in the level.
+## DUCK-TYPED on purpose — `Character` and `Throwable` both sit on the actor parse path and this file is on it
+## too (character.gd calls collect_meshes), so a `class_name` edge from here would close a parse cycle; same
+## reason ThrowTrail reads `is_trailing()` by name. `flash_red` is Character's, `set_outline_visible` is
+## Throwable's, and each IS the API that drives the overlay we must leave alone.
+static func owns_its_overlay(n: Node) -> bool:
+	return n.has_method(&"flash_red") or n.has_method(&"set_outline_visible")
 
 ## THE shared outline-material builder. Single source of truth for "make an outline ShaderMaterial":
 ## used by the talk look-at highlight (Talkable / DialogueNPC) AND the NPC combat outline (npc.gd),

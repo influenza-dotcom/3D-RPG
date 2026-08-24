@@ -22,13 +22,24 @@ extends CanvasLayer
 signal opened
 signal closed
 
-## Board cell edge (px) — layout fit math, not a designer knob (the stats_screen grid-gap idiom, whose 8px gap now lives authored on its scene's %StatGrid). The 0.12
-## panel band is AUTHORED on the scene's Panel (the same border as the shop/loot/install modals — shared menu chrome, so the "peer" claim at layer setup holds
-## visually too); at those margins the panel's inner height on a worst-case 792x432 canvas is ~0.76*432 - 2*16 panel margins ≈ 296px;
-## minus the title/status/hint rows ≈ 74px that leaves ~222px for the board row, so 8*26 = 208 fits where the
-## old 28px cells (8*28) would clip. The blindfold placeholder derives its width from this too, so the two
-## left panes can never drift apart again.
-const BOARD_CELL := 26
+## Board cell edge (px) — layout fit math, not a designer knob (the stats_screen grid-gap idiom, whose 8px gap
+## now lives authored on its scene's %StatGrid). The 0.12 panel band is AUTHORED on the scene's Panel (the same
+## border as the shop/loot/install modals — shared menu chrome, so the "peer" claim at layer setup holds
+## visually too), and the grid is 64 cells with ZERO separation, so 8 x this number is a HARD floor under the
+## card: beat the band with it and Godot grows the whole panel past its anchors (it never clips or scrolls),
+## which is the sighted board rendering ~23px taller than the same screen opened blindfold.
+## The fit, measured (not estimated) at the worst-case 792x432 canvas:
+##   band 0.76*432                                        = 328.3
+##   - the skin panel stylebox's content margins (sb_panel 36 top / 40 bottom — the ARTIST FRAME, not the old
+##     16px generated box this comment used to assume)    = -76
+##   - title 20 + status 17 + hint 15 + 3 x content_separation 8 = -76
+##   = 176 for the board row -> 8 x 21 = 168 fits with ~8px to spare (~17px at the 16:9 792x444 canvas).
+## The blindfold placeholder derives its width from this too, so the two left panes can never drift apart, and
+## the piece-letter size below is derived from it so the glyphs keep filling the square.
+## tests/test_menu_layout_stability.gd measures this card in BOTH panes and fails if either stops fitting.
+const BOARD_CELL := 21
+## Piece-letter size — derived from BOARD_CELL (~0.62 of the square, the ratio the 26px board shipped with).
+const BOARD_PIECE_FONT := int(BOARD_CELL * 0.62)
 const VISUALIZER_ABILITY := &"chess_visualizer"
 
 # Board cell tints (muted, mid-tone so both white and black piece letters stay legible on either shade).
@@ -192,7 +203,7 @@ func close() -> void:
 	closed.emit()
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Close on Esc. NOT on the Interact/PickUp key — its letter (E) is a legal file, so it must reach the move
+	# Close on Esc. NOT on the Interact/PickUp key — its letter (F) is a legal file, so it must reach the move
 	# LineEdit as text rather than dismiss the board mid-game.
 	if _is_open and event.is_action_pressed(&"ui_cancel"):
 		close()
@@ -510,7 +521,7 @@ func _populate_board_grid(grid: GridContainer) -> void:
 		lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		lbl.add_theme_font_size_override("font_size", 16)  # piece letters sized to the BOARD_CELL square
+		lbl.add_theme_font_size_override("font_size", BOARD_PIECE_FONT)  # piece letters sized to the BOARD_CELL square
 		lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		cell.add_child(lbl)
 		grid.add_child(cell)

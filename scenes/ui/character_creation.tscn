@@ -71,6 +71,7 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+use_hidden_tabs_for_min_size = true
 
 [node name="StatsTab" type="VBoxContainer" parent="Panel/Column/Tabs"]
 unique_name_in_owner = true
@@ -78,11 +79,6 @@ layout_mode = 2
 theme_override_constants/separation = 6
 
 [node name="PointsLabel" type="Label" parent="Panel/Column/Tabs/StatsTab"]
-unique_name_in_owner = true
-layout_mode = 2
-horizontal_alignment = 1
-
-[node name="StatHint" type="Label" parent="Panel/Column/Tabs/StatsTab"]
 unique_name_in_owner = true
 layout_mode = 2
 horizontal_alignment = 1
@@ -100,7 +96,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/h_separation = 8
 theme_override_constants/v_separation = 4
-columns = 5
+columns = 4
 
 [node name="LookTab" type="HBoxContainer" parent="Panel/Column/Tabs"]
 unique_name_in_owner = true
@@ -151,7 +147,7 @@ size_flags_vertical = 3
 unique_name_in_owner = true
 layout_mode = 2
 alignment = 1
-theme_override_constants/separation = 6
+theme_override_constants/separation = 4
 
 [node name="ToolsRow" type="HBoxContainer" parent="Panel/Column/Tabs/ShirtTab/ShirtRow/ShirtMid"]
 unique_name_in_owner = true
@@ -180,13 +176,13 @@ unique_name_in_owner = true
 layout_mode = 2
 alignment = 1
 
-[node name="CustomRow" type="HBoxContainer" parent="Panel/Column/Tabs/ShirtTab/ShirtRow/ShirtMid"]
+[node name="CustomRow" type="HBoxContainer" parent="Panel/Column/Tabs/ShirtTab/ShirtRow/ShirtMid/PaletteCenter"]
 unique_name_in_owner = true
 layout_mode = 2
 alignment = 1
 theme_override_constants/separation = 5
 
-[node name="CustomLabel" type="Label" parent="Panel/Column/Tabs/ShirtTab/ShirtRow/ShirtMid/CustomRow"]
+[node name="CustomLabel" type="Label" parent="Panel/Column/Tabs/ShirtTab/ShirtRow/ShirtMid/PaletteCenter/CustomRow"]
 unique_name_in_owner = true
 layout_mode = 2
 

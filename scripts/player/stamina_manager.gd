@@ -36,8 +36,11 @@ extends RefCounted
 ##
 ## TUNING: the manager holds ZERO knobs. Every number stays on GameSettings.player_movement (max_stamina, the
 ## stamina_regen_* tier rates, stamina_regen_delay_after_spend, stamina_sprint_drain / stamina_sprint_lockout,
-## the jump/melee costs read by the callers) plus GameSettings.weapon_general.allow_sprint_while_scoped —
-## designer-tuned .tres resources, never consts here.
+## and the per-verb jump / melee / dash / slide / grapple / SHOT costs read by the callers) plus
+## GameSettings.weapon_general.allow_sprint_while_scoped — designer-tuned .tres resources, never consts here.
+## The ONE stamina cost that is not a flat player_movement number: the RANGED SHOT, which attack.gd DERIVES
+## per weapon as stamina_shot_cost x WeaponData.stamina_effort() (damage / pellets / blast payload) x that
+## weapon's stamina_cost_mult trim, clamped by stamina_shot_drain_ceiling so no gun can out-drain sprinting.
 
 ## Relayed out by the Player as its own `stamina_changed` (Player._on_stamina_changed — the mechanic_unlocked
 ## relay idiom, synchronous, so emission order/count is unchanged); external consumers keep connecting to the
@@ -107,13 +110,24 @@ func sprint_blocked_by_scope() -> bool:
 		scoped = raw is bool and raw
 	return scoped and not GameSettings.weapon_general.allow_sprint_while_scoped
 
-func spend_stamina(cost: float) -> bool:
+## Spend a one-off cost and hold off regen behind it. `regen_delay` lets a caller ask for a LONGER hold than the
+## movement default: Attack passes stamina_regen_delay_after_shot so a trigger pull freezes recovery well past the
+## weapon's own cadence, which is what stops a slow weapon regenerating between its own shots and paying for
+## itself. Negative (the default) means "use stamina_regen_delay_after_spend" — so every existing one-arg caller,
+## and every duck-typed has_method(&"spend_stamina") call site, is unchanged.
+## NOTE a REFUSED spend (empty pool) returns before the hold is armed, which is what keeps the design
+## self-terminating: once the pool bottoms out the drain stops AND recovery resumes normally.
+func spend_stamina(cost: float, regen_delay: float = -1.0) -> bool:
 	if cost <= 0.0:
 		return true
 	if not can_spend_stamina(cost):
 		return false
 	_set_stamina(stamina - cost)
-	_stamina_regen_delay_left = maxf(_stamina_regen_delay_left, GameSettings.player_movement.stamina_regen_delay_after_spend)
+	# GameSettings is an untyped autoload, so the fallback is read into an explicitly TYPED local rather than
+	# inferred through a ternary (the house no-`:=`-from-a-Variant rule).
+	var default_hold: float = GameSettings.player_movement.stamina_regen_delay_after_spend
+	var hold := regen_delay if regen_delay >= 0.0 else default_hold
+	_stamina_regen_delay_left = maxf(_stamina_regen_delay_left, hold)
 	return true
 
 func drain_stamina(rate: float, delta: float) -> bool:

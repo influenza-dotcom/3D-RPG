@@ -11,7 +11,7 @@ extends Node
 ## @test res://tests/test_dialogue_speaker_contracts.gd
 ## Autoload ("DialogueManager") that runs conversations. Builds a simple bottom text box + cinematic
 ## letterbox bars in code, frees the mouse while a line is up (the world keeps running — no pause,
-## real-time like Deus Ex), and advances on PickUp (E) / ui_accept / left-click. The player script
+## real-time like Deus Ex), and advances on PickUp (F) / ui_accept / left-click. The player script
 ## freezes locomotion while is_active() so it reads as a soft cinematic lock. Call start(resource).
 ##
 ## A thin COORDINATOR + FACADE: it owns the conversation state machine (which line, who's speaking, the
@@ -123,6 +123,14 @@ func is_engaged() -> bool:
 func reset_music_duck() -> void:
 	if _ducker != null:
 		_ducker.reset()
+
+## Forwarded from the StationMusic autoload every frame: a station terminal's screen is up (or is not), so the
+## conversation's own music bed steps aside for the machine's tinny radio rather than stacking under it. Safe
+## with no conversation in progress — a station screen opens standalone far more often than it opens from a
+## conversation, and the bed itself latches, so this is a cheap idempotent assert either way.
+func note_menu_music(under_menu: bool) -> void:
+	if _music_bed != null:
+		_music_bed.note_menu_music(under_menu)
 
 ## The NPC currently being talked to (null when no conversation is active) -- so the head-look can let ONLY the
 ## speaker turn its head during a conversation, while every other NPC holds still.

@@ -328,7 +328,7 @@ func _validated(edit: LineEdit) -> String:
 	if raw.is_empty():
 		_warn("Type a name first.")
 		return ""
-	return Scaffold._slugify(raw)
+	return Scaffold.slugify(raw)
 
 
 ## Save `res` to <dir>/<name>.tres, REFUSING to overwrite (the level_dock dupe-guard), then rescan + open it.

@@ -98,6 +98,10 @@ func apply_part_overlays(overlay: Material) -> void:
 		var part_overlay := _build_part_overlay(overlay, _part_flash_material(key))
 		var targets := TalkHelpers.collect_meshes(root, null, true)
 		for m in targets:
+			# Same ink-mask registration as Character._apply_overlay_to_meshes, for the SWAPPED parts —
+			# BodyModelSwap resets `layers` on the models it spawns, so the whole-body stamp alone would
+			# leave a freshly swapped limb inked over its hull rim until the next overlay re-apply.
+			m.layers |= InkOutline.ACTOR_INK_MASK_LAYER
 			if m.has_meta(&"talk_prev_overlay"):
 				m.set_meta(&"talk_prev_overlay", part_overlay)
 			else:

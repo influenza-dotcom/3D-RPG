@@ -150,6 +150,8 @@ static func weapon_warnings(wd: WeaponData, known_calibers: PackedStringArray) -
 		w.append("caliber '%s' matches no ammo Item on disk — this weapon could never reload." % cal)
 	if wd.is_infinite_ammo and cal != "":
 		w.append("is_infinite_ammo is on but caliber '%s' is set — the caliber/reserve is ignored (the clip never depletes)." % cal)
+	if wd.is_melee and not is_equal_approx(wd.stamina_cost_mult, 1.0):
+		w.append("is_melee is on but stamina_cost_mult is %.2f — a swing is priced by stamina_melee_attack_cost, so this multiplier is inert (Attack._shot_stamina_cost returns 0 for melee)." % wd.stamina_cost_mult)
 	return w
 
 

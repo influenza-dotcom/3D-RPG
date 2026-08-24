@@ -29,6 +29,9 @@ extends RefCounted
 ## tests/test_player_text.gd does over scan_text's — the panel lists the live debt, the test stops it growing.
 
 const ScanDisk := preload("res://addons/cybersunday_tools/panel_audit/scan_disk.gd")
+## Shared one-read-per-file cache (see scan_cache.gd) — this domain re-reads the same .gd files scan_disk and
+## scan_text already read during one Re-scan. Inert outside audit_panel's begin()/end() window.
+const ScanCache := preload("res://addons/cybersunday_tools/panel_audit/scan_cache.gd")
 
 ## Mirrors ScanText.SKIP_DIRS. tests/ and tests_soak/ call the play_* seams to ASSERT on them (a test that
 ## fires a commit with no denial is not a blindspot), and addons/ is editor tooling with no menu audio at all.
@@ -94,7 +97,7 @@ static func _scan_dir(path: String, out: Array) -> void:
 			if not SKIP_DIRS.has(name) and not SKIP_DIR_PATHS.has(full):
 				_scan_dir(full, out)
 		elif name.ends_with(".gd") and not SKIP_FILES.has(full):
-			var text := FileAccess.get_file_as_string(full)
+			var text := ScanCache.text_of(full)
 			if not text.is_empty():
 				out.append_array(scan_gd_text(text, full))
 		name = dir.get_next()

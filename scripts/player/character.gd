@@ -52,22 +52,35 @@ func add_money(delta: float) -> void:
 # THE BASE RAIL IS A PLAIN WALLET. An NPC has no bank account and no credit line and never will — the account
 # lives on the GameState autoload, not on any Character — so that isolation is STRUCTURAL, not a guard someone
 # can forget. `Player` overrides these four with the cash -> savings -> credit logic.
+#
+# ⭐`allow_credit` IS THE TILL'S POLICY, NOT THE PLAYER'S RAIL. Every method here carries it so a counter that
+# refuses to lend can say so ONCE and have the gate, the quote and the UI dim all obey the same answer — the
+# whole reason the seam exists. False means "this till funds a sale from cash and banked savings only; it will
+# not push the account past zero onto the credit line", and it is INDEPENDENT of which rail the player armed
+# (GameState.payment_method): arming CREDIT at an ATM cannot make a cash-only counter lend. It defaults TRUE, so
+# every existing caller and every duck-typed one-argument call is byte-identical.
+#
+# WHY A POLICY ARGUMENT RATHER THAN A SECOND PREDICATE: `can_pay` must stay the ONE affordability answer. A
+# parallel `can_pay_no_credit` would be a second source of truth for the same question, and the two would drift
+# exactly the way the hand-rolled `money >= cost` sites drifted before this seam existed.
+#
+# The base wallet has no credit line at all, so the flag is inert here — see Player for the rail that honours it.
 
 ## What this character could put toward a purchase right now — the raw pot, BEFORE any service charge.
 ## Display-only (a "you have N" readout); `can_pay` is the authority on whether a specific price is affordable.
-func spendable() -> float:
+func spendable(_allow_credit: bool = true) -> float:
 	return maxf(0.0, money)
 
 ## The ALL-IN price of `cost` on this character's active rail: the base price plus whatever service charge the
 ## rail adds (none, for a plain wallet). THE one quoted number — every display site paints this and `charge`
 ## re-derives it from the same formula, so the label and the till can never disagree (the pickpocket rule:
 ## one formula feeds the shown odds AND the roll).
-func charge_total(cost: float) -> float:
+func charge_total(cost: float, _allow_credit: bool = true) -> float:
 	return maxf(0.0, snappedf(cost, Zorkmids.QUANTUM))
 
 ## THE one affordability predicate. Every transaction gate and every UI dim reads exactly this.
-func can_pay(cost: float) -> bool:
-	return charge_total(cost) <= spendable()
+func can_pay(cost: float, allow_credit: bool = true) -> bool:
+	return charge_total(cost, allow_credit) <= spendable(allow_credit)
 
 ## THE TWO-PART PRICE QUOTE, for a point-of-sale display that wants to show the service charge SEPARATELY rather
 ## than only the all-in total: {base, cash, rail, fee, total, ok}. `base` is the sticker price, `cash`/`rail` how
@@ -76,20 +89,20 @@ func can_pay(cost: float) -> bool:
 ## paint any character's quote without asking what kind it is.
 ##
 ## A plain wallet has no rail and therefore no fee, so the quote degrades to "the price is the price".
-func quote(cost: float) -> Dictionary:
+func quote(cost: float, allow_credit: bool = true) -> Dictionary:
 	var base := maxf(0.0, snappedf(cost, Zorkmids.QUANTUM))
 	return {"base": base, "cash": minf(base, maxf(0.0, money)), "rail": 0.0,
-		"fee": 0.0, "total": base, "ok": can_pay(cost)}
+		"fee": 0.0, "total": base, "ok": can_pay(cost, allow_credit)}
 
 ## Pay `cost`. FAIL-CLOSED: returns false having moved NOTHING when the whole quoted total isn't covered — no
 ## partial draw, no goods, no debt. A cost of 0 or less always SUCCEEDS and charges nothing, so a free service
 ## still serves a character with an empty wallet or an open debt (the RespecStation / ChipInstaller convention,
 ## and the fix for the free-respec-refused-while-negative class of bug).
-func charge(cost: float) -> bool:
-	var total := charge_total(cost)
+func charge(cost: float, allow_credit: bool = true) -> bool:
+	var total := charge_total(cost, allow_credit)
 	if total <= 0.0:
 		return true
-	if not can_pay(cost):
+	if not can_pay(cost, allow_credit):
 		return false
 	add_money(-total)
 	return true
@@ -318,6 +331,11 @@ func _apply_overlay_to_meshes(overlay: Material) -> void:
 		return
 	var targets := TalkHelpers.collect_meshes(mesh, null, true)
 	for m in targets:
+		# Register this body with the ink-outline actor mask: hull-outlined actors are EXCLUDED from the
+		# screen-space ink pass (the hull rim is their outline; ink on top doubles it — see InkOutline).
+		# Riding THIS walk means every path that dresses the body (setup, provoke recolour, model rebuild)
+		# re-stamps the bit for free, so a body swap can never strand its new parts inked.
+		m.layers |= InkOutline.ACTOR_INK_MASK_LAYER
 		# If the look-at talk highlight is active on this mesh, its real overlay is STASHED in meta (the
 		# white highlight sits in the live slot). Update the stash so look-away restores the NEW overlay —
 		# else a provoke / disposition recolour is lost when the highlight clears (a friendly turned
@@ -413,6 +431,27 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 		var killer := _resolve_killer(attacker)  # resolved ONCE, AFTER _award_kill, so both hooks below name the same killer
 		_bequeath_wallet(killer)  # the PLAYER hands death_purse_loss_fraction of its wallet to the killer, or spills it on the ground when there isn't one (base no-op; see Player)
 		_on_killed_by(killer)     # post-mortem reaction to WHO killed us (base no-op; the Player settles provoked grudges)
+		# THE KILL CUE (the red whole-sky flash), and THIS is the one place it fires from.
+		#
+		# It sits at the same seam as the bounty deliberately: "who does this death pay?" and "whose sky pops?" are the
+		# same question, so `killer` is the ALREADY-resolved answer from _resolve_killer above — which is what makes
+		# EVERY kill flash, not just the ones with a hit site to hang a cue on. It carries, for free: a silent takedown
+		# (SilentTakedown applies lethal damage through here), a status-effect / DoT tick that finishes someone off, a
+		# thrown prop or thrown weapon, the pinball body-ram, and a FALL the player caused — the last three because
+		# _resolve_killer falls back to `_credit_attacker` inside the kill-credit window when the killing blow itself
+		# carries no attacker.
+		#
+		# Three guarantees come from the resolve + the _dead latch above, so this line needs no gates of its own:
+		#   • ONCE per victim — `if _dead: return` at the top of take_damage means a shotgun's remaining pellets, a
+		#     pierce through a corpse or a second grenade on a body cannot re-fire it. This latch is the authoritative
+		#     "this hit was the kill" edge, which is why no caller has to compare a pre-hit HP for the flash.
+		#   • NEVER a suicide — _resolve_killer returns null on `killer == self`, so your own blast/fall can't flash.
+		#   • NEVER an NPC's kill — Character.on_scored_kill is a NO-OP; only the Player overrides it. So NPC-vs-NPC
+		#     infighting (which still pays its bounty one line up) never touches the player's sky.
+		# has_method-guarded because _resolve_killer only vouches for `reward_kill`; a future non-Character killer
+		# (a turret, a trap) would pay a bounty without owning the cue.
+		if killer != null and killer.has_method(&"on_scored_kill"):
+			killer.call(&"on_scored_kill")
 		_begin_death()
 	else:
 		# Non-lethal, real hit: punch in the low "underwater car door" thud. Only on the survive
@@ -523,7 +562,13 @@ func _award_kill(attacker: Node, killing_was_crit: bool) -> void:
 ## distance IS the gate — no weapon-type check is needed. `killer` is a Character (it exposes reward_kill), so
 ## it is always a Node3D; the guard just keeps a duck-typed test double from crashing on global_position.
 func _award_long_range_bonus(killer: Node) -> void:
-	if not (killer is Node3D):
+	# BOTH transforms must be real. The `is Node3D` half keeps a duck-typed test double out; the is_inside_tree()
+	# half covers the case it missed — a REAL Node3D that never entered the tree (a bare Class.new() in a unit
+	# test, where _ready never runs). Reading global_position off-tree raises `Condition "!is_inside_tree()" is
+	# true`, and GUT 9.6 fails a test on any unexpected engine error even when every assert in it passes. A
+	# distance is meaningless without a tree anyway, so an off-tree kill simply pays no marksman bonus — the same
+	# no-op an off-tree instance gets everywhere else in this class.
+	if not (killer is Node3D) or not (killer as Node3D).is_inside_tree() or not is_inside_tree():
 		return
 	var eco := GameSettings.economy
 	var distance := (killer as Node3D).global_position.distance_to(global_position)
@@ -589,6 +634,17 @@ func _on_damaged_by(_attacker: Node, _was_crit: bool = false, _amount: float = 0
 ## Hook for when THIS character lands a hit on something, so a hitmarker can flash. Base is a
 ## no-op (enemies don't show one); the Player overrides it.
 func on_dealt_hit(_headshot: bool = false, _hp_frac: float = 1.0) -> void:
+	pass
+
+## Hook for when THIS character KILLED something — the kill flash (whole-sky red pour). Fired
+## from ONE place: the lethal branch of take_damage above, on the `killer` _resolve_killer picked, so every
+## attributed kill in the game reaches it (see the long note there for what that buys). Separate from
+## on_dealt_hit because most kills have no hit-confirm to ride on — a takedown, a DoT tick and a caused fall all
+## kill without any hitmarker moment.
+##
+## The base MUST stay a no-op: it is called duck-typed on whoever got the credit, so every NPC killer lands here,
+## and an NPC-vs-NPC kill flashing the player's sky is exactly what that emptiness prevents. Only Player overrides.
+func on_scored_kill() -> void:
 	pass
 
 @export_group("Mitigation")

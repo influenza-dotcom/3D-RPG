@@ -234,10 +234,11 @@ func _do_spray_paint() -> void:
 	proj.global_position = muzzle_pos
 	# Coloured muzzle flash to match the paint — reuses the bullet-hit spark, tinted (like the splat).
 	GunFX.spawn_muzzle_flash(get_tree().root, muzzle_pos, col)
-	# Spray hiss: play the weapon's audio but don't restart it every tick (that would stutter).
+	# Spray hiss: play the weapon's audio but don't restart it every tick (that would stutter). Varied per
+	# BURST, not per tick — the `playing` guard means each squeeze of the trigger gets one fresh pitch roll.
 	if current_weapon.audio and not attack_audio.playing:
 		attack_audio.stream = current_weapon.audio
-		attack_audio.play()
+		AudioManager.play_varied(attack_audio)
 
 func _can_start_melee_attack() -> bool:
 	if current_weapon == null or not current_weapon.is_melee:
@@ -251,6 +252,84 @@ func _spend_melee_attack_stamina() -> void:
 		return
 	if character != null and character.has_method(&"spend_stamina"):
 		character.spend_stamina(GameSettings.player_movement.stamina_melee_attack_cost)
+
+## What a RANGED shot costs this wielder in stamina — the economy half of the price, over WeaponData's
+## stamina_effort() (the "how big is this bang" half: damage, pellets, blast payload). A grenade launcher costs
+## ~8x a pistol shot because its effort IS ~8x, not because anyone hand-priced it; stamina_cost_mult is only a
+## per-weapon trim on the result. Melee returns 0 — a swing is priced by stamina_melee_attack_cost through the
+## pair above, never here. Floored at 0 so a negative multiplier or damage authored by mistake can never REFILL
+## the pool on every trigger pull.
+##
+## ⭐ The CLAMP is what keeps power and cadence from multiplying into an absurd drain. Cost is capped at
+## stamina_shot_drain_ceiling x stamina_sprint_drain x this weapon's cadence, so cost/attack_speed can never
+## exceed 0.95 x 18.0 = 17.1/sec for ANY weapon a designer can author — "shooting never costs more per second
+## than sprinting" is a theorem here, not something the .tres files happen to respect. The max(attack_speed, 0.05)
+## floor mirrors the divisor tests/test_combat_data.gd uses, so the bound is exact even at attack_speed 0.
+## Break-even cadence for a 1.0-effort weapon is stamina_shot_cost / (ceiling x sprint_drain) = 1.8 / 17.1 =
+## 0.105s — note WeaponData's DEFAULT attack_speed (0.1) sits just under it, so a bare unauthored weapon is
+## mildly clamped; every shipped gun is well clear.
+##
+## GameSettings is an untyped autoload Node, so its property reads come back Variant — the tuning resource is
+## bound to an explicitly TYPED local rather than inferred with `:=` (the house no-`:=`-from-a-Variant rule).
+func _shot_stamina_cost() -> float:
+	if current_weapon == null or current_weapon.is_melee:
+		return 0.0
+	var mv: PlayerMovementSettings = GameSettings.player_movement
+	var raw := mv.stamina_shot_cost * current_weapon.stamina_effort() * current_weapon.stamina_cost_mult
+	var ceiling := mv.stamina_shot_drain_ceiling * mv.stamina_sprint_drain * maxf(current_weapon.attack_speed, 0.05)
+	return maxf(minf(raw, ceiling), 0.0)
+
+## Charge the wielder for a shot that is ALREADY committed (ammo consumed) — the ranged twin of
+## _spend_melee_attack_stamina(), called from the same beat so a dry click, a blocked click, a spray-paint blob
+## and the scoped air dash (which pays stamina_air_dash_cost of its own) all cost nothing. It is charged in the
+## SAME beat as the round itself, so a shot the wind-up / hit-flash awaits later ABORT (dialogue opened, the
+## weapon got holstered, the wielder died) forfeits its stamina exactly the way it already forfeits its ammo —
+## the two stay in lockstep rather than one refunding and the other not.
+##
+## ⭐ Deliberately UNGATED — there is no _can_start_shot() mirroring _can_start_melee_attack(). Refusing a SHOT on
+## an empty pool would leave an exhausted player with no attack at all (fists are melee, so the melee gate already
+## refuses them), so firing always works and spend_stamina() no-ops once the pool is ALREADY at/below zero. The
+## cost's real bite is the post-spend regen hold plus the sprint budget it eats, not a lockout.
+##
+## Note the one sharp edge that follows from StaminaManager.can_spend_stamina being a HAS-ANY test, not HAS-ENOUGH:
+## a shot from a positive-but-insufficient pool pays in FULL and lands the pool negative (bounded at one shot's cost
+## below zero). While it is in debt every GATED verb is refused — jump, slide, sprint, dash, grapple, and fists — so
+## a last shell really can cost you the punch that follows it, for the ~0.35s hold plus the climb back past zero.
+## That is the pre-existing overdraw melee/jump/slide already had, now reachable from the trigger; the gun itself
+## still fires, which is the property that matters.
+##
+## Only the Player answers the has_method duck-type (player.gd forwards to StaminaManager), so an NPC — which has
+## no stamina pool — keeps firing for free, exactly like the melee spend above.
+func _spend_shot_stamina() -> void:
+	var cost := _shot_stamina_cost()
+	if cost <= 0.0:
+		return
+	if character != null and character.has_method(&"spend_stamina"):
+		character.spend_stamina(cost, _shot_regen_hold())
+
+## How long a shot holds off stamina recovery. NEVER shorter than the time until this weapon can physically fire
+## AGAIN — that is the whole point, and it is what makes the cost mean anything: if the pool can regenerate
+## between two shots, a weapon refunds its own price and no amount of firing will ever run you down. The pistol
+## did exactly that before the shot hold existed (0.44s cadence against a 0.35s movement delay earned 2.16
+## standing still against a 1.8 cost).
+##
+## ⭐ attack_speed is only the COOLDOWN, and taking it for the interval is the trap this method exists to close:
+## a shot that EMPTIES the clip cannot be followed until the magazine is back, so for a small magazine the RELOAD
+## is the real gap. sniper_wep.tres is the case — it cycles every 0.668s on paper, but max_ammo 1 + auto_reload
+## means every single shot is followed by auto_reload_delay + reload_time = 3.5s, during which a flat 1.5s hold
+## would hand back 24.0 x 2.0 = 48 stamina against a 2.25 shot. Deriving the hold from the real gap keeps
+## "you never regenerate between your own shots" true BY CONSTRUCTION, for any weapon anyone authors later.
+##
+## Reads the post-shot clip (this runs after clip.consume_ammo() succeeded), so current_ammo == 0 means THIS shot
+## was the one that emptied it.
+func _shot_regen_hold() -> float:
+	var base: float = GameSettings.player_movement.stamina_regen_delay_after_shot
+	if current_weapon == null:
+		return base
+	var gap := current_weapon.attack_speed
+	if clip != null and clip.current_ammo <= 0 and not current_weapon.is_infinite_ammo:
+		gap = maxf(gap, GameSettings.weapon_general.auto_reload_delay + current_weapon.reload_time)
+	return maxf(base, gap)
 
 ## --- Spray-paint colour picker facade (forwards to the SprayPainter child) ---
 
@@ -344,6 +423,7 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false, alt := f
 			_audio.play_empty()
 		return
 	_spend_melee_attack_stamina()
+	_spend_shot_stamina()
 	attack.wait_time = current_weapon.attack_speed
 	attack.start()
 	# Wind-up: heavy weapons (melee) pause briefly after the click before the

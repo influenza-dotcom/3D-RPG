@@ -19,8 +19,8 @@ func test_player_unlock_set() -> void:
 	assert_true(p.has_mechanic(&"grapple"), "unlock_mechanic grants the mechanic")
 	p.unlock_mechanic(&"grapple")
 	assert_eq(p.unlocked_list().size(), 1, "re-granting the same mechanic is a no-op")
-	p.set_unlocks([&"laser_sight", &"wall_climb"])
-	assert_true(p.has_mechanic(&"laser_sight"), "set_unlocks installs the loaded ids")
+	p.set_unlocks([&"fall_immunity", &"wall_climb"])
+	assert_true(p.has_mechanic(&"fall_immunity"), "set_unlocks installs the loaded ids")
 	assert_false(p.has_mechanic(&"grapple"), "set_unlocks replaces the set, clearing anything not loaded")
 	p.free()
 
@@ -85,7 +85,7 @@ func _property(obj: Object, prop_name: String) -> Dictionary:
 func test_ability_registry_scans_disk_sorted() -> void:
 	var ids := AbilityRegistry.ids()
 	assert_true(ids.size() >= 5, "AbilityRegistry.ids() must find the shipped ability scenes under %s" % ABILITY_DIR)
-	for known in ["air_dash", "grapple", "laser_sight", "slide", "wall_climb"]:
+	for known in ["air_dash", "grapple", "fall_immunity", "slide", "wall_climb"]:
 		assert_true(ids.has(known), "AbilityRegistry.ids() must include shipped mechanic '%s'" % known)
 	var resorted := Array(ids).duplicate()
 	resorted.sort()
@@ -114,7 +114,7 @@ func test_ability_scene_filename_matches_ability_id() -> void:
 			assert_eq(String((inst as Ability).ability_id()), f.trim_suffix(".tscn").to_snake_case(),
 				"ability scene '%s' filename must snake-case to its ability_id() (the unlock_id dropdown relies on it)" % f)
 		inst.free()
-	assert_eq(checked, 8, "expected the 8 shipped ability scenes (AirDash/Grapple/LaserSight/Slide/WallClimb/FallImmunity/ChessVisualizer/SilentTakedown)")
+	assert_eq(checked, 7, "expected the 7 shipped ability scenes (AirDash/Grapple/Slide/WallClimb/FallImmunity/ChessVisualizer/SilentTakedown) — the laser sight was retired when the flashlight took F")
 
 func test_ability_scripts_covers_registry_ids() -> void:
 	# C21 drift guard (post-extraction): every ability id the editor dropdown can suggest (AbilityRegistry, scanned

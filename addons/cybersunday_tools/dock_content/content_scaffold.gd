@@ -26,8 +26,8 @@ const TOWN_FACTION := "townsfolk"          ## valid id on disk (resources/factio
 static func build_quest(id: StringName, objective_count: int) -> Quest:
 	var q := Quest.new()
 	q.id = id
-	q.title = _titleize(String(id))
-	q.description = "TODO: describe the quest \"%s\"." % _titleize(String(id))
+	q.title = titleize(String(id))
+	q.description = "TODO: describe the quest \"%s\"." % titleize(String(id))
 	q.reward_money = 100.0
 	q.reward_xp = 50.0
 	var n := maxi(1, objective_count)
@@ -106,7 +106,7 @@ static func build_npc(preset: String, weapon: WeaponData) -> NpcData:
 ## mirrors the weapon's so an ammo item authored later lines up. The ids derive from `name` so the pair stays
 ## addressable. `name` is sanitised to a snake_case base.
 static func build_weapon_and_item(name: String) -> Dictionary:
-	var base := _slugify(name)
+	var base := slugify(name)
 	if base.is_empty():
 		base = "weapon"
 	var caliber := StringName(base)  # a fresh caliber named after the weapon — author its ammo Item next
@@ -118,7 +118,7 @@ static func build_weapon_and_item(name: String) -> Dictionary:
 	w.caliber = caliber
 	var it := Item.new()
 	it.id = StringName(base)
-	it.display_name = _titleize(name)
+	it.display_name = titleize(name)
 	it.category = Item.Category.WEAPON
 	it.weapon = w               # the cross-link: a WEAPON item carries its WeaponData
 	it.caliber = caliber        # mirror the weapon's caliber so matching ammo resolves
@@ -135,7 +135,7 @@ static func build_weapon_and_item(name: String) -> Dictionary:
 static func build_faction(id: StringName) -> Faction:
 	var f := Faction.new()
 	f.id = id
-	f.display_name = _titleize(String(id))
+	f.display_name = titleize(String(id))
 	f.default_disposition = Disposition.Kind.NEUTRAL
 	f.relations = {}
 	return f
@@ -146,7 +146,7 @@ static func build_faction(id: StringName) -> Faction:
 static func build_dialogue(id: StringName) -> DialogueResource:
 	var dr := DialogueResource.new()
 	var greeting := DialogueLine.new()
-	greeting.text = "Hello there. (TODO: write %s's greeting.)" % _titleize(String(id))
+	greeting.text = "Hello there. (TODO: write %s's greeting.)" % titleize(String(id))
 	var goodbye := DialogueLine.new()
 	goodbye.text = "Safe travels. (TODO: write the goodbye.)"
 	var lines: Array[DialogueLine] = [greeting, goodbye]
@@ -160,12 +160,12 @@ static func build_dialogue(id: StringName) -> DialogueResource:
 ## rule). A consumable seeds a small heal_amount + a stack so it's immediately usable; junk stacks too but is
 ## inert. NO caliber / weapon / consumable_effect — those slots stay null/empty for the designer to add.
 static func build_item(name: String, consumable: bool) -> Item:
-	var base := _slugify(name)
+	var base := slugify(name)
 	if base.is_empty():
 		base = "item"
 	var it := Item.new()
 	it.id = StringName(base)
-	it.display_name = _titleize(name)
+	it.display_name = titleize(name)
 	if consumable:
 		it.category = Item.Category.CONSUMABLE
 		it.description = "TODO: describe this consumable."
@@ -202,8 +202,8 @@ static func build_loot_table() -> LootTable:
 static func build_perk(id: StringName) -> Perk:
 	var p := Perk.new()
 	p.id = id
-	p.display_name = _titleize(String(id))
-	p.description = "TODO: describe what \"%s\" does." % _titleize(String(id))
+	p.display_name = titleize(String(id))
+	p.description = "TODO: describe what \"%s\" does." % titleize(String(id))
 	p.stat_bonuses = {}
 	p.combat_bonuses = {}
 	var reqs: Array[StringName] = []
@@ -218,7 +218,7 @@ static func build_perk(id: StringName) -> Perk:
 static func build_status_effect(id: StringName) -> StatusEffect:
 	var se := StatusEffect.new()
 	se.id = id
-	se.display_name = _titleize(String(id))
+	se.display_name = titleize(String(id))
 	se.description = "TODO: describe this status effect."
 	se.duration = 5.0
 	se.tick_interval = 1.0
@@ -321,21 +321,25 @@ static func build_map_data() -> MapData:
 ## the pure-builder contract. Pure (no load / ResourceSaver — the dock owns disk I/O).
 static func build_throwable(name: String) -> ThrowableData:
 	var t := ThrowableData.new()
-	t.display_name = _titleize(name)
+	t.display_name = titleize(name)
 	return t
 
 
-# --- helpers (pure) --------------------------------------------------------------------------------------------
+# --- SHARED name normalisation (pure, PUBLIC) ------------------------------------------------------------------
+# These two are the project's ONE name-normalisation seam, not private helpers: content_dock's `_validated`,
+# blueprint_view / blueprint_ops, and level_dock's New Level all route designer-typed text through them so every
+# generator produces the same id==filename slug. Changing the rules here changes every tab's naming at once —
+# keep them public and documented so a new generator reuses them instead of hand-rolling a third spelling.
 
 ## "raider_camp" / "Raider Camp" -> "Raider Camp" (a display-friendly Title Case from any id/name spelling).
-static func _titleize(s: String) -> String:
+static func titleize(s: String) -> String:
 	var cleaned := s.strip_edges().replace("_", " ").replace("-", " ")
 	if cleaned.is_empty():
 		return s.strip_edges()
 	return cleaned.capitalize()
 
 ## "Plasma Rifle!" -> "plasma_rifle" (a file-safe snake_case base for ids/calibers; strips non-alphanumerics).
-static func _slugify(s: String) -> String:
+static func slugify(s: String) -> String:
 	var out := ""
 	var prev_us := false
 	for ch in s.strip_edges().to_lower():

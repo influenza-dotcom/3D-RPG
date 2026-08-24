@@ -3,7 +3,7 @@ extends Resource
 
 ## @system Run And Level Flow
 ## @seam resource_path persists as GameState.current_level_path for Continue; a non-null `scene` gates boot-viability, else GameRoot uses the exported level.
-## @seam map_data (the authored minimap underlay) is PULLED by the HUD's code-built Minimap, never pushed: Minimap._resolve_level_underlay reads Groups.GAME_ROOT's `level` inside rebake() on every region swap, so the underlay needs no wiring in game_root.gd or ui.gd.
+## @seam map_data (the authored minimap underlay) is PULLED by the HUD's Minimap widget, never pushed: Minimap._resolve_level_underlay reads Groups.GAME_ROOT's `level` inside rebake() on every region swap, so the underlay needs no wiring in game_root.gd or ui.gd.
 ## @risk A LevelData with a blank/unstable resource_path persists no resolvable path, so Continue silently boots the export, losing the saved level (GameRoot.load_level's set_current_level, read back by resolve_boot_level).
 ## @risk A saved LevelData whose `scene` is null is rejected by resolve_boot_level, which silently boots the export instead of the saved level (GameRoot.saved_level_is_bootable's scene != null check).
 ## @test res://tests/test_level_data.gd

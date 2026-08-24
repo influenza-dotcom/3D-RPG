@@ -13,13 +13,16 @@ extends GutTest
 ##   - is_headshot() head-zone threshold; is_off_guard() base false.
 ##   - Weapon-host aim contract (get_aim_origin/direction/basis) at an identity transform.
 ##   - get_hit_flash() base null; the base no-op hooks exist (indicate_damage_from,
-##     on_dealt_hit, on_weapon_fired, on_weapon_launched).
+##     on_dealt_hit, on_scored_kill, on_weapon_fired, on_weapon_launched).
 ##   - The movement guard reports no live physics space on a bare off-tree actor.
 ##
 ## DELIBERATELY SKIPPED (would crash / mutate the world in a unit run, see character.gd):
 ##   - The LETHAL take_damage branch (hp<=0) -> gore()+die(): spawns physics gibs/decals
 ##     into get_tree().root, raycasts the world, reads GameSettings, queue_free()s. Every
 ##     take_damage test below keeps max_hp huge / damage tiny so hp never reaches 0.
+##     ONE EXCEPTION, at the bottom of this file: the kill-cue tests DO run the lethal branch,
+##     through a _KillSpy subclass that neuters _begin_death() — everything the branch does
+##     BEFORE that (bounty, killer resolve, the on_scored_kill cue) is safe off-tree.
 ##   - gore()/spawn_gibs()/spawn_blood_decal()/spawn_dust()/flash_red() real tween/
 ##     _setup_overlay_chain with a real mesh/apply_velocity/apply_blast/gravity/
 ##     _physics_process/_push_interactables/_apply_fall_damage/_notify_nearby_players_of_death:
@@ -209,6 +212,20 @@ func test_on_dealt_hit_is_base_noop() -> void:
 	var c = load(CHARACTER_PATH).new()
 	assert_true(c.has_method("on_dealt_hit"),
 		"Character must expose on_dealt_hit() so any wielder can be told it landed a hit without a Player-specific override")
+	c.free()
+
+
+## The kill-flash cue. take_damage's lethal branch fires it DUCK-TYPED on whoever _resolve_killer picked, and that
+## is EVERY killer in the game — so an NPC that kills another NPC lands here too. It must therefore (a) exist on
+## the base at all, or the has_method guard misses and the seam quietly stops working for anything that isn't a
+## Player, and (b) do NOTHING on the base, or NPC-vs-NPC infighting would pour red across the player's sky.
+## Both halves are asserted: the method exists, and CALLING it on a bare Character is inert. The behaviour that
+## rides on it (once per victim, never a suicide, delayed credit) is pinned by the kill-cue tests at the bottom.
+func test_on_scored_kill_is_base_noop() -> void:
+	var c = load(CHARACTER_PATH).new()
+	assert_true(c.has_method("on_scored_kill"),
+		"Character must expose on_scored_kill() so take_damage's lethal branch can tell any killer it scored, without a Player-specific override")
+	c.on_scored_kill()  # must not crash and must not touch StarSky / the HUD — the base is a pure no-op
 	c.free()
 
 
@@ -469,3 +486,101 @@ func test_get_aim_origin_is_global_position() -> void:
 	add_child_autofree(c)
 	assert_eq(c.get_aim_origin(), Vector3.ZERO,
 		"get_aim_origin() must return the body's global_position (origin here) — where hitscan/projectiles originate")
+
+
+# --- the KILL CUE: Character.take_damage's lethal branch -> killer.on_scored_kill() -----------
+#
+# This is the single seam the whole-sky kill flash fires from, so what is pinned here is not the visual
+# (that's StarSky's) but the three guarantees the visual leans on: it fires ONCE per victim, never for a suicide,
+# and it reaches whoever _resolve_killer picked — including through the DELAYED credit window, which is the only
+# reason a silent takedown, a status/DoT tick and a fall the player caused flash at all. Those have no hit site,
+# so nothing else could have told the player about them.
+
+
+## A Character we can drive through its own LETHAL branch and spy on: _begin_death() is neutered (the real one
+## calls gore() + die(), which spawn physics gibs/decals into the tree and raycast the world — impossible on a
+## bare off-tree instance), and the two killer-side calls just count. Everything the lethal branch does before
+## _begin_death() — _award_kill, _resolve_killer, _bequeath_wallet, _on_killed_by, the cue — then runs FOR REAL.
+## Character is @abstract with no abstract methods, so a concrete subclass instantiates (the _SpyAttacker idiom).
+class _KillSpy extends Character:
+	var scored := 0
+	var rewarded := 0
+	func _begin_death() -> void:
+		pass
+	func on_scored_kill() -> void:
+		scored += 1
+	func reward_kill(_bounty: float) -> void:
+		rewarded += 1
+
+
+func _kill_spy() -> _KillSpy:
+	var n := _KillSpy.new()
+	n.max_hp = 100.0
+	n.hp = 100.0
+	return n
+
+
+## The ordinary case, and the ONCE-per-victim guarantee that lets every caller skip a corpse check of its own:
+## take_damage's `if _dead: return` latch means a shotgun's remaining pellets, an overkill pierce or a second
+## grenade on the same body cannot re-pop the sky. If this ever reports > 1, the flash has started restarting
+## itself mid-beat on multi-hit weapons.
+func test_lethal_hit_fires_the_kill_cue_exactly_once() -> void:
+	var killer := _kill_spy()
+	var victim := _kill_spy()
+	victim.take_damage(999.0, false, killer)
+	assert_eq(killer.scored, 1,
+		"a lethal attributed hit must tell the killer on_scored_kill() exactly once — that call IS the kill sky flash")
+	assert_eq(killer.rewarded, 1,
+		"the same lethal hit must pay the bounty once; the cue rides the SAME resolved killer, so these two must agree")
+	victim.take_damage(999.0, false, killer)
+	victim.take_damage(999.0, false, killer)
+	assert_eq(killer.scored, 1,
+		"further hits on the corpse must NOT re-fire the cue — take_damage's _dead latch is what makes the flash once-per-kill")
+	killer.free()
+	victim.free()
+
+
+## A non-lethal hit is not a kill: the cue must stay silent or every bullet would flash the sky.
+func test_non_lethal_hit_does_not_fire_the_kill_cue() -> void:
+	var shooter := _kill_spy()
+	var tough := _kill_spy()
+	tough.take_damage(1.0, false, shooter)
+	assert_eq(shooter.scored, 0,
+		"a survivable hit must not fire the kill cue — only the lethal branch reaches it")
+	shooter.free()
+	tough.free()
+
+
+## Blowing yourself up must not congratulate you. _resolve_killer returns null on `killer == self`, which is the
+## FIRST thing standing between the player's own grenade/fall death and a red sky over their death cinematic
+## (Player.on_scored_kill's _dying gate is the second line of defence, not the first).
+func test_suicide_does_not_fire_the_kill_cue() -> void:
+	var solo := _kill_spy()
+	solo.take_damage(999.0, false, solo)
+	assert_eq(solo.scored, 0,
+		"a self-inflicted kill must never fire the cue — _resolve_killer nulls out killer == self")
+	solo.free()
+
+
+## An unattributed death (a hazard zone, ambient DoT, a plain fall nobody caused) has no killer to congratulate.
+func test_unattributed_death_fires_no_kill_cue() -> void:
+	var lonely := _kill_spy()
+	lonely.take_damage(999.0, false, null)
+	assert_eq(lonely.scored, 0,
+		"a death with no attacker and no credited attacker must fire no cue — there is nobody whose sky should pop")
+	lonely.free()
+
+
+## ⭐THE ONE THAT MAKES "ALL KILLS" TRUE. A killing blow that carries NO attacker still resolves to whoever hit
+## the victim recently, via _credit_attacker + kill_credit_window_ms. That fallback is the entire mechanism behind
+## the kills with no hit site: a fall the player knocked them into, a burn/poison tick that finishes them, and any
+## delayed blast. Break it and those kills silently stop flashing while every gunshot still does.
+func test_delayed_credit_still_fires_the_kill_cue() -> void:
+	var sniper := _kill_spy()
+	var faller := _kill_spy()
+	faller.take_damage(10.0, false, sniper)  # tag them: stamps _credit_attacker
+	faller.take_damage(999.0, false, null)   # the fall / DoT tick finishes them, with no attacker of its own
+	assert_eq(sniper.scored, 1,
+		"an unattributed KILLING blow must still fire the cue on the recently-credited attacker — this is why a caused fall, a DoT tick and a silent takedown flash the sky")
+	sniper.free()
+	faller.free()

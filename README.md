@@ -1,9 +1,12 @@
-# RPG - first-person immersive-sim prototype (Godot 4.7)
+# CYBERSUNDAY - first-person immersive-sim prototype (Godot 4.7)
 
 A single-player FPS/RPG prototype built in **Godot 4.7**. The presentation is
 deliberately crunchy: a low internal resolution, pixel/downscale post-process,
-dither, film grain, night vision, and PS1-style material warping over a dense
-first-person movement and combat sandbox.
+a selectable colour depth (24-bit down to 3-bit, with the PlayStation's own
+15-bit RGB555 on the list) resolved through an ordered Bayer dither, film
+grain, night vision, a Borderlands-style black ink outline over every surface,
+and PS1-style material warping over a dense first-person movement and combat
+sandbox.
 
 Almost every number that affects feel lives in editable `.tres` resources or
 Inspector exports, not hardcoded constants. The editor is the design surface.
@@ -17,6 +20,9 @@ each content type lives.
 
 ## Current Documentation
 
+- [Design](DESIGN.md) - **what the game is and what to work on next.** The premise, the
+  three pillars, the core loop, the first ten minutes, and the scope fence. For the question
+  "what should I build?" this file outranks every other doc here.
 - [Current architecture](docs/CURRENT_ARCHITECTURE.md) - the live map for future
   humans and model passes.
 - [System Map](docs/SYSTEM_MAP.md) - a GENERATED index of systems, their seams,
@@ -44,8 +50,14 @@ doc in the same change.
 ## Running
 
 1. Open `project.godot` in **Godot 4.7**.
-2. Run `scenes/game.tscn`.
+2. Press **F5** (Run Project). The main scene is `scenes/computerroom.tscn` — the
+   computer-room intro that hosts the start menu.
 3. Let the editor finish any first-launch imports before judging missing assets.
+
+Running `scenes/game.tscn` directly is a level-authoring shortcut, not the way in.
+The internet-warning card, the TOS gate, character creation and the implant
+purchase are all owned by `StartMenu` rather than by autoloads, so launching
+`game.tscn` skips all four and drops you into a run with an unbuilt character.
 
 `game.tscn` owns the persistent Player wrapper and `GameRoot`; `GameRoot` loads
 the current `LevelData` as the runtime `Level` child. Run levels through
@@ -60,17 +72,25 @@ the current `LevelData` as the runtime `Level` child. Run levels through
 | Jump | `Space` |
 | Crouch / slide | `Ctrl` |
 | Run (sprint; walking is the default; ignored while aiming down sights) | `Shift` |
+| Lean left / right — peek round cover (hold) | `Q` / `E` |
 | Attack / fire (throw the prop while carrying) | Left mouse |
 | Aim down sights | Right mouse |
 | Reload | `R` |
-| Pick up / carry / throw / interact | `E` / `Z` / configured actions |
+| Pick up / carry / throw / interact | `F` / `Z` / configured actions |
 | Take the wielded weapon into your hands to throw (press again to put it back), or set down a held prop | `H` |
-| Flashlight | `F` |
+| Silent takedown / pet (hold, aimed at an unaware NPC or a pettable) | `Q` |
+| Befriend a stray (aim + tap) | `B` |
+| Wait — let in-game hours pass | `T` |
+| Flashlight | `L` |
 | Night vision | `N` |
 | Weapon slots | number keys |
 | Quicksave / quickload | `F5` / `F9` |
 | Manual save slots | in-game **Esc → Save / Load**; start menu **Load Game** |
 | Debug reload scene | `End` |
+
+**`Q` is contextual.** It runs the takedown/pet verb when one has a target and falls back to LEANING left when
+nothing is under the crosshair. `E` is a plain lean right — Interact moved off it onto `F`, so that side never
+defers to a verb. Rebind either lean side to its own key in Options → Controls and it leans unconditionally.
 
 Bindings are data-driven, so the table above is a convenience snapshot that can
 drift: the real defaults live in `project.godot` `[input]` and
@@ -125,7 +145,13 @@ rpg/
   component, an authored Resource, or a tuning `.tres`.
 - **Procedural HUD minimap.** The top-right map is a vector floorplan derived at
   runtime from the level's baked navmesh and its static colliders — no per-level
-  authoring, no top-down render to keep in sync with the geometry.
+  authoring, no top-down render to keep in sync with the geometry. A time-of-day
+  clock sits under it, so the hour is a readout rather than something to infer
+  from how dark the street looks. Markers carry their meaning in their **shape**
+  before their colour — a hostile is a caret, a companion a diamond, a bystander a
+  hollow ring, and each kind of station a stroked glyph of its own — because a 4 px
+  dot on a 108 px box cannot differentiate by hue alone, least of all with
+  Colorblind-Safe Cues on. A hostile that has noticed *you* grows a ring.
 - **Level seam.** `GameRoot` loads a `LevelData` resource, instantiates its scene
   as `Level`, applies level music/ambience, and places the player at a
   `PlayerSpawn`. `LevelDoor` swaps levels at runtime.
@@ -230,9 +256,15 @@ off-tree pure tests for planner/combat/math logic.
   a catwalk or the top of a staircase is not on the map while you are below it, and
   a flight of stairs reads as a gap between two floors.
 - `alive.map` ships **no `WorldMarker`s**, so the minimap and compass show no
-  point-of-interest dots there until some are placed. A level started from
+  hand-placed point-of-interest dots there until some are placed. A level started from
   `LevelTemplate.tscn` gets objective markers automatically (it ships a
-  `QuestMarkerSync`); `alive.map` predates that and needs them by hand.
+  `QuestMarkerSync`); `alive.map` predates that and needs them by hand. **Stations are
+  the exception** — a `Merchant` / `Atm` / `Healer` / trainer / `ChipInstaller` /
+  `Bonfire` / `ChessMatch` / `LevelDoor` marks itself on the map with no authoring, via
+  the `StationMarker` its component ensures.
+- **`Healer`, `Bonfire`, `PerkStation`, `RespecStation` and `LevelDoor` are placed in zero
+  levels**, so five of the seven station glyphs have no shipped content to point at yet —
+  and because `LevelDoor` is unplaced, no authored level transition exists either.
 - The screen-edge **`Compass` is still not on the HUD** — the minimap half of the
   marker system ships, the chevron half needs a `Compass` Control added.
 - A level whose navmesh is not baked draws **no walkable floor fill** on the minimap

@@ -19,6 +19,16 @@ extends Node
 ## The Player this drives. Wire to `..` in the scene; typed so `host.crouch` / `host.walking_sfx` resolve statically.
 @export var host: Player
 
+## The clips a footstep picks from, one at random per step. This is the same three-sample set every NPC gets from
+## `LocomotionFx`; the player was the only actor in the game walking on a single hard-authored clip at a fixed
+## pitch, so a sprint read as one sample machine-gunned rather than as footfalls. EMPTY = leave whatever stream
+## Player.tscn authored on `WalkingSFX` alone (a designer deliberately pinning one clip).
+@export var footstep_sounds: Array[AudioStream] = [
+	preload("res://assets/audio/sfx/Footstep1.mp3"),
+	preload("res://assets/audio/sfx/Footstep2.mp3"),
+	preload("res://assets/audio/sfx/Footstep3.mp3"),
+]
+
 ## Seconds until the next footstep. Counts down every physics tick; re-armed to `footstep_interval` on each step.
 var _footstep_timer: float = 0.0
 ## Current seconds BETWEEN footsteps — recomputed each tick from the frame's `target_speed`, so the cadence quickens
@@ -32,9 +42,13 @@ var _walking_sfx_base_db: float = 0.0
 ## hear (see tick_footsteps).
 var _walking_sfx_base_max_db: float = 0.0
 var _base_db_captured: bool = false
+## Which `footstep_sounds` entry the LAST step used, so the next one never repeats it back-to-back (see `vary_step`).
+var _last_step_index: int = -1
+var _rng := RandomNumberGenerator.new()
 
 func _ready() -> void:
 	footstep_interval = GameSettings.player_movement.footstep_base_interval
+	_rng.randomize()
 	_capture_base_db()
 
 ## The 0..1 landing strength for a touchdown at `pre_landing_velocity` (that frame's `velocity.y`, negative while
@@ -47,6 +61,24 @@ static func impact_for(pre_landing_velocity: float) -> float:
 ## walk and the authored `footstep_base_interval` is the cadence at full `max_speed`. Pure static, same reason.
 static func interval_for(target_speed: float) -> float:
 	return GameSettings.player_movement.footstep_base_interval * (GameSettings.player_movement.max_speed / max(target_speed, 0.01))
+
+## One step's loudness: an authored base plus the two stacking cuts plus the global `footstep_volume_db` trim.
+## Called TWICE per step — once for `volume_db`, once for `max_db` — because exactly one of those two ever bites
+## and which one depends on the authored base (see tick_footsteps). Routing the trim through here is what makes
+## `GameSettings.audio.footstep_volume_db` the single knob that reliably turns the player's steps up or down.
+static func step_db(base_db: float, crouch_db: float, speed_db: float) -> float:
+	return base_db + crouch_db + speed_db + GameSettings.audio.footstep_volume_db
+
+## Which clip this step plays, given a fresh random `roll`. Never the same index twice running: with a 3-clip set
+## a pure roll doubles a third of the time, and a doubled clip is precisely the artefact the variety exists to
+## remove — you hear the repeat, not the randomness. Pure static so the no-repeat rule is testable without an RNG.
+static func next_step_index(roll: int, last: int, count: int) -> int:
+	if count <= 0:
+		return -1
+	var i := clampi(roll, 0, count - 1)
+	if count > 1 and i == last:
+		i = (i + 1) % count
+	return i
 
 ## Latch the authored footstep volume AND ceiling. Called from `_ready` (a child's `_ready` runs before its parent's,
 ## and exported NodePaths are already resolved by then) and again lazily on the first tick, so an off-tree or
@@ -142,7 +174,29 @@ func tick_footsteps(delta: float, target_speed: float) -> void:
 	# authored max_db (unchanged — the mix is not being re-balanced here) and lets the cuts be heard; the volume
 	# write stays so the knobs keep working the ordinary way if that 80 dB base is ever brought down to a sane
 	# one. Both are latched bases, never the live values, or a crouched step would ratchet the next one quieter.
-	host.walking_sfx.volume_db = _walking_sfx_base_db + crouch_db + speed_db
-	host.walking_sfx.max_db = _walking_sfx_base_max_db + crouch_db + speed_db
+	# `step_db` folds in GameSettings.audio.footstep_volume_db on the way past, so that ONE number moves the whole
+	# footstep mix — which is the only reachable way to do it while the ceiling is what you're actually hearing.
+	host.walking_sfx.volume_db = step_db(_walking_sfx_base_db, crouch_db, speed_db)
+	host.walking_sfx.max_db = step_db(_walking_sfx_base_max_db, crouch_db, speed_db)
+	vary_step(host.walking_sfx)
 	host.walking_sfx.play()
 	_footstep_timer = footstep_interval
+
+
+## Give this step its own voice: a different clip from `footstep_sounds` and a small random pitch. Both halves
+## matter — the player's WalkingSFX is ONE node replayed on a timer, so without them every footfall is a
+## byte-identical retrigger two or three times a second, which is the most fatiguing thing a step loop can do and
+## the reason every NPC has had a random clip + pitch since `LocomotionFx` shipped. Writing `stream` stops the
+## node, so this must run BEFORE `play()`.
+func vary_step(sfx: AudioStreamPlayer3D) -> void:
+	if sfx == null:
+		return
+	var spread: float = GameSettings.audio.footstep_pitch_spread
+	sfx.pitch_scale = _rng.randf_range(1.0 - spread, 1.0 + spread) if spread > 0.0 else 1.0
+	if footstep_sounds.is_empty():
+		return  # designer pinned a single authored clip on the node — leave it be
+	var i := next_step_index(_rng.randi_range(0, footstep_sounds.size() - 1), _last_step_index, footstep_sounds.size())
+	if i < 0:
+		return
+	_last_step_index = i
+	sfx.stream = footstep_sounds[i]

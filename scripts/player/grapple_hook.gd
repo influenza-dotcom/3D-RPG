@@ -320,7 +320,10 @@ func detach(launch: bool = true) -> void:
 			if _yanked is RigidBody3D:
 				(_yanked as RigidBody3D).linear_velocity = throw_dir * yank_throw_speed
 				if _yanked is Throwable:
-					(_yanked as Throwable).mark_thrown_for_facing()  # a grapple-fling is a throw too — nose toward travel if the prop opts in
+					# A grapple-fling is a throw too: nose toward travel if the prop opts in, and streak if it
+					# carries a ThrowTrail (the same pair PickupRay._release arms on a hand throw).
+					(_yanked as Throwable).mark_thrown_for_facing()
+					(_yanked as Throwable).mark_thrown_for_trail()
 			elif _yanked is Character:
 				(_yanked as Character).explosion_velocity = throw_dir * yank_throw_speed
 	_state = State.RETRACTING

@@ -16,8 +16,10 @@ const CATALOG_PATH := "res://resources/input/ActionCatalog.tres"
 ## rebind it. Keep in sync ONLY with a deliberate add/remove.
 const EXPECTED_REBINDABLE := [
 	&"forward", &"backward", &"left", &"right", &"jump", &"Crouch", &"Run",
+	&"LeanLeft", &"LeanRight",
 	&"Attack", &"Zoom", &"Reload", &"Throw", &"Light", &"Grapple", &"NightVision", &"Takedown", &"DropHeld",
-	&"PickUp", &"Inventory", &"Stats", &"Factions", &"Journal", &"Implants", &"RotateItem", &"Claim",
+	&"PickUp", &"Inventory", &"Stats", &"Factions", &"Journal", &"Implants", &"RotateItem", &"Claim", &"Wait",
+	&"MinimapZoom",
 	&"Weapon Slot 1", &"Weapon Slot 2", &"Weapon Slot 3", &"Weapon Slot 4", &"Weapon Slot 5",
 	&"Weapon Slot 6", &"Weapon Slot 7", &"Weapon Slot 8", &"Weapon Slot 9", &"Weapon Slot 10",
 	&"Hotbar Next", &"Hotbar Prev", &"Quicksave", &"Quickload",

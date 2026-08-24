@@ -12,7 +12,7 @@ extends Control
 ## assigned (hover in the backpack, press a slot key) — they never auto-fill, so a pocketful of dogs can't flood
 ## the bar over your weapons. Pressing a holdable's slot pulls the prop OUT of the bag into your hands (held
 ## hands-free like an aimed Z-grab, via Player.hold_item); pressing it again STASHES the prop back. While a prop
-## is in hand its slot is RESERVED + tinted gold; dropping / throwing it (E/Z/left-click) vacates the slot.
+## is in hand its slot is RESERVED + tinted gold; dropping / throwing it (F/Z/left-click) vacates the slot.
 ##
 ## Built in code by the UI layer (ui.gd setup, once the player is known), like the rest of the HUD. AUTO-filled
 ## weapon/consumable slots are DERIVED from bag contents in insertion order, so a reload rebuilds that ordering

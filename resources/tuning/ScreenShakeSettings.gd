@@ -2,8 +2,8 @@ class_name ScreenShakeSettings
 extends Resource
 
 ## Tuning for ScreenShake (trauma decay + intensity) plus the explosion/death shake
-## events: death_shake_* feed Player.on_nearby_death; explosion_* feed Explosion and
-## its screen_shake_area trigger.
+## events: death_shake_* feed Player.on_nearby_death; kill_shake_amount feeds
+## Player.on_scored_kill; explosion_* feed Explosion and its screen_shake_area trigger.
 
 @export_group("Trauma & Intensity")
 ## How fast trauma bleeds off per second — higher = a hit shakes hard then settles fast (punchy); lower = a longer, mushier rumble.
@@ -15,6 +15,9 @@ extends Resource
 @export var death_shake_range: float = 8.0
 ## Trauma added by a point-blank death (scaled down with distance) — the kick from a nearby kill.
 @export var death_shake_amount: float = 1.6
+@export_group("Kill Shake")
+## Trauma added when YOU score a kill, at ANY distance — the punch you feel under the on-kill flash. Unlike death_shake_amount this does NOT fall off with distance, so a sniped kill lands as firmly as a point-blank one. 0 disables the kill kick without touching any other shake.
+@export var kill_shake_amount: float = 0.4
 @export_group("Explosion Shake")
 ## Trauma ceiling an explosion can add so a huge blast can't oversaturate the shake — caps the rumble.
 @export var explosion_max_trauma: float = 1.6

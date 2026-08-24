@@ -7,7 +7,7 @@ extends EditorInspectorPlugin
 ## silently no-op (a spreadless shotgun, recoil that never recovers, a caliber with no ammo, …). ALL compute lives
 ## in InspectorCalc statics (pure, scene-tree-free) so it's unit-tested headless; this card is thin glue.
 ##
-## TUNE-AND-SEE: the key balance fields (damage, attack_speed, pellet_count, headshot/sneak multipliers, ammo,
+## TUNE-AND-SEE: the key balance fields (damage, attack_speed, stamina_cost_mult, pellet_count, headshot/sneak multipliers, ammo,
 ## reload) are EDITABLE here as SpinBoxes. An edit writes back through EditorInterface.get_editor_undo_redo() (the
 ## proper persist-and-undoable path to mutate a resource from a custom inspector) and re-renders the derived
 ## DPS/TTK + warning lines live — so a designer tunes the number and watches the TTK move without leaving the card.
@@ -21,6 +21,12 @@ const Calibers := preload("res://scripts/items/calibers.gd")
 const FIELDS := [
 	["damage", "Damage", 0.0, 9999.0, 0.1],
 	["attack_speed", "Attack speed (s/shot)", 0.0, 60.0, 0.01],
+	# A TRIM on the DERIVED per-shot stamina price, not the price itself: the cost comes out of
+	# WeaponData.stamina_effort() (damage x sqrt(pellets) + blast payload), which is why damage above is the knob
+	# that really moves it. Kept on the card because it sits beside the two fields that DO set the price, and
+	# because a trim drifting far from 1.0 is the signal that the formula and the designer intent have diverged.
+	# Range is deliberately tight — this is a nudge, not a pricing system.
+	["stamina_cost_mult", "Stamina trim (x)", 0.0, 3.0, 0.05],
 	["pellet_count", "Pellets", 1.0, 999.0, 1.0],
 	["headshot_multiplier", "Headshot ×", 0.0, 100.0, 0.1],
 	["sneak_attack_multiplier", "Sneak ×", 0.0, 100.0, 0.1],
@@ -100,7 +106,11 @@ func _build_card(wd: WeaponData) -> Control:
 ## (Re)build the derived DPS/TTK lines + amber warnings into `readout`, clearing any previous render. Called on
 ## build and after every field edit so the numbers track the live resource.
 func _render_readout(readout: VBoxContainer, wd: WeaponData) -> void:
+	# remove_child BEFORE queue_free: a queue_free'd child stays in the tree until the end of the frame, and a SpinBox
+	# drag can fire value_changed several times WITHIN one frame — so a bare queue_free would stack N duplicate
+	# DPS/TTK/warning blocks in the card and make it jump in height while the designer is tuning.
 	for child in readout.get_children():
+		readout.remove_child(child)
 		child.queue_free()
 	for line in InspectorCalc.weapon_lines(wd):
 		var l := Label.new()

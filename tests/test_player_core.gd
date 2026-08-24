@@ -717,6 +717,134 @@ func test_player_is_crouching_tracks_crouch_t() -> void:
 	p.free()
 
 
+# --- out-of-combat recovery: the heartbeat duck + the passive health regen ---
+# Both ride the ONE is_out_of_combat() predicate, so the softer heartbeat IS the audible tell that healing has
+# begun. The two curves are PURE STATICS (the StaminaManager.recovery_rate_for idiom), pinned here host-free.
+
+func test_health_regen_rate_curve_is_pure_and_floored() -> void:
+	# health_regen_rate_for(max_hp, frac_per_sec, endurance_mult) — a static, so no Player is built at all.
+	assert_almost_eq(Player.health_regen_rate_for(10.0, 0.02, 1.0), 0.2, 0.0001,
+		"at a neutral endurance multiplier the rate is simply max_hp x the authored fraction")
+	assert_almost_eq(Player.health_regen_rate_for(10.0, 0.02, 2.0), 0.4, 0.0001,
+		"the endurance multiplier scales the rate linearly — double the multiplier, double the HP/s")
+	assert_almost_eq(Player.health_regen_rate_for(20.0, 0.02, 1.0), 0.4, 0.0001,
+		"the knob is a FRACTION of max HP, so doubling max_hp doubles HP/s and the empty->full TIME stays fixed as a build grows")
+	assert_almost_eq(Player.health_regen_rate_for(10.0, 0.0, 1.0), 0.0, 0.0001,
+		"a 0 fraction is the documented off-switch for the whole feature")
+	assert_almost_eq(Player.health_regen_rate_for(10.0, 0.02, 0.0), 0.0, 0.0001,
+		"an endurance multiplier of 0 (the CharacterStats floor) stops regen entirely")
+	assert_almost_eq(Player.health_regen_rate_for(10.0, 0.02, -3.0), 0.0, 0.0001,
+		"the rate is FLOORED at 0 and can never go negative — a negative would reach Character.heal(), which drains hp with no death check, no flash and no _dead latch")
+
+
+func test_heartbeat_duck_is_volume_only_and_keeps_the_intensity_ramp() -> void:
+	# heartbeat_db_for(db_min, db_max, intensity, duck_db, calm) — the calm cut folds into the SAME lerp the beat
+	# already used, so the near-death ramp survives and the beat INTERVAL is untouched.
+	var loud: float = Player.heartbeat_db_for(-16.0, 2.0, 0.5, 4.0, false)
+	var calm: float = Player.heartbeat_db_for(-16.0, 2.0, 0.5, 4.0, true)
+	assert_almost_eq(calm, loud - 4.0, 0.0001,
+		"out of combat the beat is exactly duck_db quieter at the same HP — a SLIGHT cut, not a mute")
+	assert_almost_eq(Player.heartbeat_db_for(-16.0, 2.0, 1.0, 4.0, true) - Player.heartbeat_db_for(-16.0, 2.0, 0.0, 4.0, true),
+		Player.heartbeat_db_for(-16.0, 2.0, 1.0, 4.0, false) - Player.heartbeat_db_for(-16.0, 2.0, 0.0, 4.0, false), 0.0001,
+		"the duck SHIFTS the curve without flattening it: a calm player bleeding out still gets louder as they fall, by the same dB span as in combat")
+	assert_almost_eq(Player.heartbeat_db_for(-16.0, 2.0, 0.5, 0.0, true), loud, 0.0001,
+		"duck_db 0 is byte-identical to the un-ducked beat — the knob's own off position")
+	assert_almost_eq(Player.heartbeat_db_for(-16.0, 2.0, 0.5, -4.0, true), calm, 0.0001,
+		"a NEGATIVE duck still CUTS (absf) — a designer who reads the knob as a signed offset cannot accidentally make the calm heartbeat louder")
+	assert_almost_eq(Player.heartbeat_db_for(-16.0, 2.0, 0.0, 4.0, true), -20.0, 0.0001,
+		"against the shipped -16/+2 range a calm threshold beat lands at -20 dB: quieter, nowhere near inaudible (silencing it is the Accessibility toggle's job, not the duck's)")
+
+
+func test_out_of_combat_grace_and_cold_boot_sentinel() -> void:
+	# The == 0 sentinel: Time.get_ticks_msec() counts from ENGINE START, so an unstamped _last_combat_msec makes
+	# seconds_since_combat() report the process uptime — on a cold boot that is a small number, i.e. "in combat".
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	assert_true(p.is_out_of_combat(),
+		"a player who has never been in a fight this process must read OUT of combat — without the _last_combat_msec == 0 sentinel a fresh spawn reads the ENGINE UPTIME as its time-since-combat and refuses to heal")
+	p.note_combat()
+	assert_false(p.is_out_of_combat(),
+		"the instant combat is stamped the player is IN combat — the grace has not elapsed")
+	assert_gte(GameSettings.player_feedback.combat_calm_grace, 0.0,
+		"the grace is a duration, so a negative would make is_out_of_combat() true on the very frame you fired")
+	p.free()
+
+
+func test_health_regen_commits_in_steps_and_is_gated_by_combat_and_death() -> void:
+	# Drive _update_health_regen directly with fake deltas (the _update_sprint_lockout idiom). hp/max_hp are
+	# written RAW — never take_damage() off-tree, which reaches gore() -> get_world_3d() and the master bus.
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	var fb: PlayerFeedbackSettings = GameSettings.player_feedback
+	p.max_hp = 10.0
+	p.hp = 1.0
+	var step: float = p.max_hp * fb.health_regen_commit_frac
+	var rate: float = Player.health_regen_rate_for(p.max_hp, fb.health_regen_frac_per_sec, 1.0)
+	assert_gt(rate, 0.0, "the shipped tuning must actually regenerate, or the rest of this test proves nothing")
+	assert_gt(step, 0.0, "the shipped commit step must be a real step, or the banking half of this test proves nothing")
+	# 1) below the commit step: the slice BANKS, hp does not move and `damaged` never fires.
+	var almost: float = (step / rate) * 0.9
+	p._update_health_regen(almost)
+	assert_almost_eq(p.hp, 1.0, 0.0001,
+		"a sub-step slice must NOT pay out — `damaged` is a discrete event signal (the carried emitting light recolours on it), not a 60 Hz write")
+	assert_gt(p._health_regen_carry, 0.0, "the un-committed slice is BANKED in the carry, not discarded")
+	# 2) crossing the step commits the whole banked carry through heal().
+	var banked: float = p._health_regen_carry
+	p._update_health_regen(almost)
+	assert_almost_eq(p.hp, 1.0 + banked + rate * almost, 0.001,
+		"once the carry crosses the commit step the WHOLE bank pays out through Character.heal()")
+	assert_almost_eq(p._health_regen_carry, 0.0, 0.0001, "committing resets the carry")
+	# 3) in combat: the carry is held — neither grown nor erased.
+	p._update_health_regen(almost)          # bank a fresh sub-step slice
+	var hp_before: float = p.hp
+	var held: float = p._health_regen_carry
+	assert_gt(held, 0.0, "precondition: a slice is banked before combat is stamped")
+	p.note_combat()
+	p._update_health_regen(almost)
+	assert_almost_eq(p.hp, hp_before, 0.0001, "no healing while in combat")
+	assert_almost_eq(p._health_regen_carry, held, 0.0001,
+		"a lull mid-fight PAUSES progress: the banked carry survives combat unchanged — it neither grows nor is thrown away")
+	# 4) dead: no regen at all, and the carry is cleared so it can never pay into a later life.
+	p._dead = true
+	p._update_health_regen(1.0)
+	assert_almost_eq(p.hp, hp_before, 0.0001,
+		"a corpse never heals — Character.heal() has no _dead guard of its own, so this gate is the only one")
+	assert_almost_eq(p._health_regen_carry, 0.0, 0.0001, "death clears the banked carry")
+	# 5) at the ceiling: inert, no overheal.
+	p._dead = false
+	p.hp = p.max_hp
+	p._update_health_regen(1.0)
+	assert_almost_eq(p.hp, p.max_hp, 0.0001, "regen stops at the ceiling and never overheals past max HP")
+	p.free()
+
+
+func test_regen_beat_is_absent_from_the_dialogue_frozen_branch() -> void:
+	# SOURCE-TEXT pins on the two drive-beat placements the feature's correctness rests on.
+	var src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
+	assert_true(src.contains("_update_health_regen(delta)  # LIVE branch ONLY"),
+		"the regen beat must be driven from Player._physics_process — die() calls set_physics_process(false), so a self-ticking Timer/component would keep healing the corpse under the death card")
+	var regen_at := src.find("_update_health_regen(delta)")
+	var lowhp_at := src.find("_update_low_hp(delta)")
+	assert_true(regen_at > -1 and lowhp_at > regen_at,
+		"the regen beat must run BEFORE _update_low_hp so the vignette + heartbeat paint THIS frame's post-regen HP, with no one-frame lag")
+	# Scoped to the regen function BODY, not the whole file — take_damage carries its own world_frozen() gate, so a
+	# bare file-wide contains() would stay green with this one deleted.
+	var regen_body_at := src.find("func _update_health_regen(delta: float) -> void:")
+	assert_true(regen_body_at > -1, "precondition: _update_health_regen is still declared with that signature")
+	var regen_end := src.find("\nfunc ", regen_body_at + 1)
+	var regen_body := src.substr(regen_body_at, regen_end - regen_body_at)
+	assert_true(regen_body.contains("InputManager.world_frozen()"),
+		"regen must be gated on InputManager.world_frozen() for SYMMETRY with take_damage's cinematic damage immunity — a cutscene deliberately does NOT pause the tree, so without this gate a long cutscene hands back a large chunk of max HP at zero risk and zero agency")
+	assert_true(src.contains("heartbeat_db_for(heartbeat_db_min, heartbeat_db_max, hb_intensity"),
+		"the duck must be FOLDED INTO the per-beat gain expression — an external _heartbeat.volume_db write is clobbered by that same line on the next beat, which reads as the duck doing nothing, with no error anywhere")
+	# NEGATIVE pin: the dialogue-frozen early-out returns ABOVE _update_low_hp, so healing there would move hp with
+	# the low-HP vignette + heartbeat frozen — and a long shopkeeper conversation would quietly become a Bonfire.
+	var frozen_at := src.find("if DialogueManager.is_active():")
+	var live_at := src.find("if _ground_snap_frames_left", frozen_at)
+	assert_true(frozen_at > -1 and live_at > frozen_at, "precondition: the dialogue-frozen branch is still shaped as expected")
+	var frozen_branch := src.substr(frozen_at, live_at - frozen_at)
+	assert_false(frozen_branch.contains("_update_health_regen"),
+		"health regen must NOT be driven from the dialogue-frozen branch (stamina deliberately is): you are already damage-immune in a conversation, and healing there with the low-HP feedback frozen would turn every long chat into a rest")
+
+
 func test_player_seconds_since_combat_zero_right_after_note() -> void:
 	# note_combat() stamps Time.get_ticks_msec(); seconds_since_combat() returns elapsed seconds
 	# since that stamp. Right after stamping it must be ~0 — assert a small UPPER bound (tolerant,

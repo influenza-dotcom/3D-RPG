@@ -263,3 +263,132 @@ func test_sticky_band_is_stable_once_settled() -> void:
 func test_sticky_band_degenerate_band_is_safe() -> void:
 	assert_eq(FS.sticky_band_key(3, true, 9.0, 0.0, 0.6), FS.deck_key(9.0, 0.0),
 			"a zero band cannot divide, so it falls through to the raw answer")
+
+
+# --- silhouette (the boolean union, drawn as lines) -----------------------------------------------------
+# A level is BUILT from overlapping boxes and a floorplan must not be DRAWN as one. These pin the union by
+# MEASURING it: the total inked length of a merged pile is the union's perimeter, which is a number you can
+# work out on paper for each fixture below and which no amount of "looks right" can fake.
+
+## An axis-aligned rectangle ring, xz metres.
+func _rect(x0: float, z0: float, x1: float, z1: float) -> PackedVector2Array:
+	return PackedVector2Array([Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1)])
+
+
+## Total inked length of a flat draw_multiline pair array — the measure every union test below is written in.
+func _inked(pairs: PackedVector2Array) -> float:
+	var total := 0.0
+	var n := pairs.size() / 2
+	for i in n:
+		total += pairs[i * 2].distance_to(pairs[i * 2 + 1])
+	return total
+
+
+func test_silhouette_leaves_a_lone_solid_exactly_alone() -> void:
+	# Nothing overlaps it, so it must come back byte-identical to the plain ring — the pass may not round-trip
+	# an unchanged shape through Clipper and move its vertices.
+	var rings: Array[PackedVector2Array] = [_rect(0, 0, 2, 2)]
+	assert_eq(FS.silhouette(rings, PackedVector2Array(), 0.05), FS.ring_edges(rings[0]),
+			"a solid with no neighbour draws its own authored cut, untouched")
+
+func test_silhouette_drops_the_buried_seams() -> void:
+	# THE PICTURE THIS FEATURE EXISTS FOR: two 2x2 squares overlapping corner-on-corner. Each keeps 6 of its 8
+	# metres — the 1 m of each of two sides that runs inside the neighbour is interior seam, not wall.
+	var rings: Array[PackedVector2Array] = [_rect(-1, -1, 1, 1), _rect(0, 0, 2, 2)]
+	var merged := FS.silhouette(rings, PackedVector2Array(), 0.0)
+	assert_almost_eq(_inked(merged), 12.0, 0.001,
+			"the union outline measures 12 m; drawing both rings whole would ink 16 (2 m of it buried)")
+	assert_eq(merged.size() % 2, 0, "draw_multiline still needs whole pairs")
+
+func test_silhouette_welds_an_abutting_face() -> void:
+	# THE COMMON BRUSH-LEVEL CASE and the reason weld exists: two boxes sharing the x = 2 face exactly. Probed
+	# against the engine, a line lying precisely ON a clip polygon's boundary SURVIVES the difference, so
+	# without a tolerance that shared face is drawn twice and the merge does nothing at all here.
+	var rings: Array[PackedVector2Array] = [_rect(0, 0, 2, 2), _rect(2, 0, 4, 2)]
+	assert_almost_eq(_inked(FS.silhouette(rings, PackedVector2Array(), 0.0)), 16.0, 0.001,
+			"weld 0 is exact-overlaps-only: the shared face is still inked from both sides")
+	var welded := _inked(FS.silhouette(rings, PackedVector2Array(), 0.05))
+	assert_almost_eq(welded, 11.9, 0.01,
+			"welded, the pair reads as ONE 4x2 room: 12 m of union perimeter less the four 0.025 m corner trims")
+
+func test_silhouette_swallows_a_solid_that_is_wholly_inside_another() -> void:
+	var rings: Array[PackedVector2Array] = [_rect(0, 0, 10, 10), _rect(4, 4, 6, 6)]
+	assert_almost_eq(_inked(FS.silhouette(rings, PackedVector2Array(), 0.05)), 40.0, 0.001,
+			"a solid buried inside another is interior matter: only the outer 40 m perimeter is inked")
+
+## THE ANNIHILATION GUARD. A copy-pasted brush is a real authoring accident, and each copy buries the other —
+## so a pass that let both clip would delete the shape from the map entirely. Failing SAFE here means drawing
+## the outline twice, which is invisible; failing unsafe means a wall that is simply not there.
+func test_silhouette_survives_a_duplicated_brush() -> void:
+	var rings: Array[PackedVector2Array] = [_rect(0, 0, 2, 2), _rect(0, 0, 2, 2)]
+	assert_almost_eq(_inked(FS.silhouette(rings, PackedVector2Array(), 0.05)), 16.0, 0.001,
+			"two copies of one brush both survive whole — the failure guarded against is BOTH vanishing")
+
+func test_silhouette_clips_the_trimesh_soup_but_never_by_it() -> void:
+	# A trimesh cut is an unordered segment set, so it is hidden-line trimmed by the rings and never occludes:
+	# chaining it back into loops would let a hollow CSG shell's outer loop swallow the whole level.
+	var rings: Array[PackedVector2Array] = [_rect(0, 0, 2, 2)]
+	var soup := PackedVector2Array([
+		Vector2(0.5, 1.0), Vector2(1.5, 1.0),   # buried inside the ring
+		Vector2(3.0, 1.0), Vector2(4.0, 1.0),   # out in the open
+	])
+	var merged := FS.silhouette(rings, soup, 0.05)
+	assert_almost_eq(_inked(merged), 8.0 + 1.0, 0.001,
+			"the ring's 8 m plus the 1 m segment outside it; the buried segment inks nothing")
+
+func test_silhouette_of_nothing_is_nothing() -> void:
+	var none: Array[PackedVector2Array] = []
+	assert_eq(FS.silhouette(none, PackedVector2Array(), 0.05).size(), 0, "no solids, no strokes, no errors")
+	var soup := PackedVector2Array([Vector2.ZERO, Vector2(1, 0)])
+	assert_eq(FS.silhouette(none, soup, 0.05), soup, "with no rings to clip against, a soup passes through")
+
+
+# --- the silhouette's parts ------------------------------------------------------------------------------
+
+func test_open_ring_drops_the_closing_duplicate() -> void:
+	# Geometry2D.convex_hull repeats the first point and Clipper's polygon input must not.
+	var closed := PackedVector2Array([Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 0)])
+	assert_eq(FS.open_ring(closed).size(), 3, "the repeat is dropped")
+	assert_eq(FS.open_ring(FS.open_ring(closed)).size(), 3, "and dropping it is idempotent")
+
+func test_closed_polyline_closes_the_ring() -> void:
+	var pl := FS.closed_polyline(_rect(0, 0, 1, 1))
+	assert_eq(pl.size(), 5, "4 corners + the repeat, so the ring's LAST edge is clipped like every other one")
+	assert_eq(pl[0], pl[4], "...and it really is the same point")
+
+func test_polyline_edges_never_wraps_around() -> void:
+	# The difference from ring_edges, and it matters: a clipped piece is a FRAGMENT of an outline, so joining
+	# its ends would ink a chord straight across the room.
+	var pl := PackedVector2Array([Vector2(0, 0), Vector2(1, 0), Vector2(1, 1)])
+	assert_eq(FS.polyline_edges(pl).size(), 4, "3 points -> 2 segments, not 3")
+	assert_eq(FS.ring_edges(pl).size(), 6, "...whereas the same 3 points AS A RING close up into 3")
+	assert_eq(FS.polyline_edges(PackedVector2Array([Vector2.ZERO])).size(), 0, "a single point is not an edge")
+
+func test_grow_ring_grows_on_both_axes() -> void:
+	# The load-bearing direction: offset_polygon's sign is documented against the path's ORIENTATION, and an
+	# occluder that SHRANK would leave every seam this pass exists to erase.
+	for ring in [_rect(0, 0, 2, 2), FS.closed_polyline(_rect(0, 0, 2, 2))]:
+		var g: PackedVector2Array = FS.grow_ring(ring, 0.25)
+		var b := FS.ring_bounds(g)
+		assert_almost_eq(b.size.x, 2.5, 0.001, "grown by delta on each side in X")
+		assert_almost_eq(b.size.y, 2.5, 0.001, "...and in Z")
+
+func test_grow_ring_of_a_reversed_winding_still_grows() -> void:
+	var ring := _rect(0, 0, 2, 2)
+	ring.reverse()
+	var b := FS.ring_bounds(FS.grow_ring(ring, 0.25))
+	assert_almost_eq(b.size.x, 2.5, 0.001, "winding must not decide the direction of the offset")
+
+func test_grow_ring_zero_delta_is_the_ring_itself() -> void:
+	var ring := _rect(0, 0, 2, 2)
+	assert_eq(FS.grow_ring(ring, 0.0), ring, "weld 0 = exact overlaps only, and no Clipper round trip")
+	assert_eq(FS.grow_ring(PackedVector2Array([Vector2.ZERO, Vector2(1, 0)]), 0.25).size(), 2,
+			"a degenerate two-point 'ring' is handed back rather than offset")
+
+func test_ring_contains_ring() -> void:
+	var big := _rect(0, 0, 10, 10)
+	assert_true(FS.ring_contains_ring(big, _rect(4, 4, 6, 6)), "wholly inside")
+	assert_false(FS.ring_contains_ring(big, _rect(9, 9, 11, 11)), "poking out is NOT contained")
+	assert_false(FS.ring_contains_ring(big, _rect(20, 20, 21, 21)), "nowhere near")
+	assert_true(FS.ring_contains_ring(big, big),
+			"a ring contains ITSELF — that is what resolves the duplicated-brush case instead of a rounding")

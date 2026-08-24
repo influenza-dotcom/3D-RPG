@@ -58,6 +58,15 @@ extends Resource
 @export var dialogue_music_talk_duck_db: float = -4.0
 ## Fade time (seconds) for the talk duck's dip down / swell back. Higher = a smoother, lazier dip.
 @export var dialogue_music_talk_duck_fade: float = 0.25
+## How far (dB) the conversation's bed steps aside while a STATION TERMINAL's own radio is playing — i.e. a
+## dialogue-hosted Trade / Heal / Level Up / Install / Chess / Bank menu, driven by the StationMusic autoload.
+## -60 (the default) is a FULL handover: you hear the machine's tinny bed alone, and the conversation's loop
+## swells back when the sub-menu closes. Set about -8 to layer the two instead, or 0 to disable the handover
+## and hear both at their authored levels. A positive value is clamped to 0 — a duck only ever pulls down.
+@export var dialogue_music_menu_duck_db: float = -60.0
+## Fade time (seconds) for the station-terminal handover down / swell back. Longer than the talk duck on
+## purpose: this is a scene change between two music layers, not a dip under one spoken line.
+@export var dialogue_music_menu_duck_fade: float = 0.8
 ## Fade time (seconds) from silence up to level as the conversation opens. Higher = a slower swell.
 @export var dialogue_music_fade_in: float = 0.6
 ## Fade time (seconds) back down to silence as the conversation ends (the bed stops once it lands). Higher = a longer tail.
@@ -77,8 +86,13 @@ extends Resource
 @export var panel_vertical_element_spacing: int = 8
 ## Font size (px) of the spoken line text. Bigger = more readable, fewer words per line.
 @export var dialogue_text_font_size: int = 18
-## Outline width (px) on the line text so it reads against the world (the panel has no background). 0 = no outline.
+## Outline width (px) on the line text. Load-bearing when the skin leaves MenuSkin.dialogue_panel empty —
+## the box then has NO background and the line reads straight against the world. 0 = no outline.
 @export var dialogue_text_outline_width: int = 6
+## Fill colour of the spoken line text. Never the menu theme's text_color: that is PANEL ink and runs dark
+## (the 08-12 plum palette), while this line either floats over the 3D WORLD inside its black outline
+## (no dialogue_panel art) or sits on the artist's mid-dark olive box (with it) — light reads on both.
+@export var dialogue_text_color: Color = Color(0.92, 0.92, 0.95)
 
 @export_group("Choices")
 ## Font size (px) of the choice buttons (authored options + the synthesized Trade/Heal/Goodbye affordances).
@@ -87,7 +101,7 @@ extends Resource
 @export var choice_button_spacing: int = 6
 ## Max height of the scrollable choices area as a fraction of screen height — a many-option line SCROLLS past this instead of growing off the top. Higher = a taller menu before it scrolls.
 @export var choices_scroll_max_height_fraction: float = 0.55
-## Font size (px) of the "[E] / click to continue" hint (kept smaller than the choices for hierarchy).
+## Font size (px) of the "[F] / click to continue" hint (kept smaller than the choices for hierarchy).
 @export var dialogue_continue_hint_font_size: int = 13
 ## Opacity (0..1) of the continue hint — deemphasized so it doesn't compete with the line. 1 = fully opaque.
 @export var dialogue_continue_hint_opacity: float = 0.55

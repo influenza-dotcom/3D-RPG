@@ -71,7 +71,7 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 @export_group("Upgrade Chip")
 ## When set, this item is a MICROCHIP UPGRADE: carrying it does nothing on its own, but a ChipInstaller mechanic
 ## CONSUMES it to permanently grant the named player ability via Player.unlock_mechanic. The value is a mechanic
-## id from scripts/components/abilities/ (wall_climb, grapple, slide, air_dash, laser_sight, fall_immunity) — the
+## id from scripts/components/abilities/ (wall_climb, grapple, slide, air_dash, fall_immunity) — the
 ## SAME registry UpgradePickup's grants/unlock_id draws from — picked from the dropdown below. Blank = an ordinary
 ## item (not a chip). Author the chip's microchip look via `world_model` and its install economy via `value` (the
 ## installer's fee/markup multiply it). See scripts/components/chip_installer.gd + scripts/ui/chip_install_screen.gd.

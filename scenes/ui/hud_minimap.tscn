@@ -1,0 +1,74 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/minimap.gd" id="1"]
+
+; THE HUD MINIMAP, as an AUTHORED SCENE (the "menus are scenes" rule, applied to a HUD widget).
+;
+; NOTE these comments are a convenience only — Godot REWRITES this file wholesale when the editor saves it,
+; which strips them. The canonical version of everything below lives in docs/AUTHORING_GUIDE.md ("The minimap
+; is a scene") and in minimap.gd's own @seam header, both of which the editor cannot touch.
+;
+; ui.gd instantiates THIS FILE instead of calling minimap.gd .new(), so the box's position, size and draw
+; order are the artist's, edited by dragging in the 2D editor rather than by hand-editing anchor maths.
+;
+; THE ART SANDWICH — three slots, and the order in this file IS the render order:
+;   %MapUnder      art that renders BEHIND the whole procedural plan (a paper/CRT/parchment backdrop).
+;   <the root's own _draw>   backing, floor fill, wall strokes, markers, caret, rim. Code-drawn.
+;   %MapOver       art that renders IN FRONT of everything (a bezel, a frame, glass, scanlines, a vignette).
+; Both slots ship EMPTY, so an untouched game draws exactly what it always drew.
+;
+; The box hangs to the LEFT of the scene origin in the 2D editor because it is anchored to the RIGHT screen
+; edge — that empty top-right corner of the HUD is where it lands in game.
+;
+; The offsets below are the numbers ui.gd used to compute from GameSettings.hud.minimap_inset (8,8) and
+; minimap_size (108,108): right = -inset.x, left = -inset.x - size.x, top = inset.y, bottom = inset.y + size.y.
+; Move them and you MUST mirror the new box into resources/tuning/HudSettings.tres — tests/test_minimap_scene.gd
+; fails loudly if the two drift apart, because the whole top-right stack's clearance rules are pinned off the knobs.
+
+[node name="Minimap" type="Control"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -116.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = 116.0
+grow_horizontal = 0
+mouse_filter = 2
+clip_contents = true
+texture_filter = 1
+z_index = 1
+script = ExtResource("1")
+
+[node name="EditorPreview" type="ColorRect" parent="."]
+unique_name_in_owner = true
+show_behind_parent = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.02, 0.04, 0.06, 0.6)
+
+[node name="MapUnder" type="Control" parent="."]
+unique_name_in_owner = true
+show_behind_parent = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="MapOver" type="Control" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2

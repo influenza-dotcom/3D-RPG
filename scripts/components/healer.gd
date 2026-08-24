@@ -41,6 +41,8 @@ func _ready() -> void:
 		_fit_hitbox_to_host()
 	if standalone:
 		StationSpeaker.ensure(self)  # a self-serve med-station answers with the shared panel chirp; a data-only healer rides a talking NPC, and people don't beep
+	# The minimap pin — ungated (a doctor who patches you up is still a clinic); ensure() derives pinning from `standalone`.
+	StationMarker.ensure(self, StationMarker.Kind.HEAL)
 
 ## Zorkmids to fully heal `player` right now — LINEAR in missing HP, floored at min_cost while anything is
 ## hurt. 0 means there's nothing to heal (full HP + no limb damage), so the service refuses / is free.

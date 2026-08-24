@@ -12,7 +12,8 @@ extends AudioStreamPlayer
 ##
 ## WHY THIS EXISTS AT ALL. The cinematic used to fade the global **Master** bus to silence, which is the one
 ## thing that cannot coexist with a death sting: in Godot every bus chain terminates at Master (`ambient`,
-## `sfx`, `music`, `voice` all send there; `radio` -> `music`, `ambient_bed` -> `ambient`), so there is no
+## `sfx`, `music`, `voice` all send there; `radio` -> `music`, `station_music` -> `music`, `ambient_bed` ->
+## `ambient`, `speaker` -> `sfx`), so there is no
 ## route around a Master fade and no gain trick that survives it. The fade therefore moved down one level
 ## onto the four WORLD buses (GameSettings.player_feedback.death_cinematic_buses) and the sting got a bus
 ## that is deliberately absent from that list (`death_sting_bus`, default `sting` — straight to Master, no

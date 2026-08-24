@@ -7,10 +7,14 @@ extends Node
 ## washes the scene white and the fog reads. Re-applies whenever a WorldEnvironment (group "world_environment",
 ## or the node type) enters the tree, covering every scene load with no scene editing.
 ##
-## flash_kill() -- the player calls it on a kill (Player.on_dealt_hit, which ALSO does a screen-space flash) --
-## spikes the shader's `flash` uniform then fades it, so the whole sky pops on a kill (Hotline Miami). Tune the
-## flash timing + the night-ambient tint on GameSettings.effects (Sky FX group); tune the sky look on the
-## shader's uniforms.
+## TWO SKY FLASHES, one per player event, on two INDEPENDENT shader channels so neither can cut the other short:
+##   flash_kill()  -- the player scored a kill  -> `flash` / `flash_color`           (ships RED, ~1 s)
+##   flash_hurt()  -- the player TOOK DAMAGE    -> `hurt_flash` / `hurt_flash_color` (ships RED, shorter/partial)
+## Each spikes its level uniform, HOLDS it, then fades it (Hotline Miami), and each WRITES its colour every
+## trigger so the pop is the DESIGNER's colour rather than the shader's default. Both are twins of a screen-space
+## flash on PlayerHud (flash_kill / flash_hurt) and both honour the Accessibility "Screen Flashes" toggle.
+## Tune both channels + the night-ambient tint on GameSettings.effects (Sky FX group); tune the sky look itself on
+## the shader's uniforms.
 
 const HORIZON_SHADER := preload("res://resources/shaders/horizon_sky.gdshader")
 
@@ -18,8 +22,13 @@ const HORIZON_SHADER := preload("res://resources/shaders/horizon_sky.gdshader")
 ## exactly one WorldEnvironment each, so this points at the visible sky. (A future additively-loaded second
 ## env would need flash_kill to iterate live envs instead.)
 var _sky_mat: ShaderMaterial = null
-var _flash_tween: Tween = null
-var _flash_warned: bool = false  ## one-shot so a sky material missing the `flash` uniform warns ONCE, not per kill
+## Live tween per flash CHANNEL, keyed by that channel's level uniform (&"flash" / &"hurt_flash"). Keyed rather
+## than two fields so the channels are provably independent (a kill can never kill the hurt tween) and a third
+## channel is a new key, not new plumbing.
+var _channel_tweens: Dictionary = {}
+## One-shot warning latch per channel, same keys: a sky material missing a channel's uniform warns ONCE for that
+## channel, not once per kill / per bullet taken.
+var _channel_warned: Dictionary = {}
 
 func _ready() -> void:
 	# NOTE (perf, accepted): node_added fires for EVERY node entering the tree, but the handler is a cheap
@@ -83,34 +92,94 @@ func _apply_night_ambient(env: Environment) -> void:
 	if env.reflected_light_source == Environment.REFLECTION_SOURCE_BG or env.reflected_light_source == Environment.REFLECTION_SOURCE_SKY:
 		env.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 
-## Flash the whole sky on a kill (Hotline Miami): spike the shader's `flash` uniform to 1, then fade it; a rapid
-## second kill restarts the flash. Real-time (set_ignore_time_scale) so a kill's slow-mo doesn't stretch it and
-## desync it from the HUD kill flash. Timing lives on GameSettings.effects (Sky FX group).
+## Pop the whole sky on a KILL (Hotline Miami): red, ~1 s. Fired by Player.on_scored_kill(), which is itself
+## fired once per victim from Character.take_damage's lethal branch — so every kill the player is credited with
+## reaches here, including a takedown, a DoT tick and a fall they caused.
 func flash_kill() -> void:
-	# Accessibility: the "Screen Flashes" toggle (Options -> Accessibility, read live) suppresses the whole-sky
-	# pop for photosensitive players — the twin PlayerHud.flash_kill honours the same flag, so a kill is fully
-	# flash-free when it's off.
+	var fx := GameSettings.effects
+	_run_channel(&"flash", &"flash_color", fx.sky_flash_color, fx.sky_flash_peak,
+			fx.sky_flash_up_time, fx.sky_flash_hold_time, fx.sky_flash_down_time)
+
+## Wash the whole sky RED when the player TAKES DAMAGE. Fired from Player.take_damage — the single funnel every
+## damage vector in the game already goes through (enemy fire, explosions, hazards, status DoT, falls), so this
+## needs no per-source wiring, exactly like the kill cue.
+##
+## Ships SHORTER and PARTIAL where the kill flash is long and total, and that asymmetry is deliberate: you take
+## damage an order of magnitude more often than you kill, so a solid red sky held for a second would sit red
+## through an entire firefight and smear into the kill flash's own red. Tune it to match the kill flash exactly
+## (peak 1.0, same three times) if you want them symmetrical -- but then the two cues stop reading apart at all.
+func flash_hurt() -> void:
+	var fx := GameSettings.effects
+	_run_channel(&"hurt_flash", &"hurt_flash_color", fx.sky_hurt_color, fx.sky_hurt_peak,
+			fx.sky_hurt_up_time, fx.sky_hurt_hold_time, fx.sky_hurt_down_time)
+
+## Drive ONE sky-flash channel: write its colour, then tween its level up -> HOLD -> back to 0, replacing any beat
+## already running on that channel (a rapid re-trigger restarts it rather than stacking two tweens on one uniform).
+## Channels are keyed by `level_param`, so the kill and hurt beats never touch each other's tween.
+##
+## Real-time (set_ignore_time_scale) so a kill's slow-mo doesn't stretch the beat and desync it from the
+## screen-space twin on PlayerHud.
+##
+## Accessibility: the "Screen Flashes" toggle (Options -> Accessibility, read live) suppresses EVERY whole-sky pop
+## for photosensitive players — checked here so it covers each channel by construction, and the twin PlayerHud
+## flashes honour the same flag, so a kill / a hit is fully flash-free when it's off.
+##
+## Guards the tween: a sky material whose shader doesn't expose this channel's level uniform — a non-horizon env,
+## or a STALE / failed shader compile after an editor reimport — would otherwise spam "property does not exist"
+## plus a no-Tweeners error on EVERY trigger. Skip gracefully (warn once per channel); it self-heals once the
+## horizon shader is live again.
+func _run_channel(level_param: StringName, color_param: StringName, color: Color, peak: float,
+		up: float, hold: float, down: float) -> void:
 	if not Settings.screen_flash_enabled:
 		return
-	# Guard the tween: a sky material whose shader doesn't expose the `flash` uniform — a non-horizon env, or a
-	# STALE / failed shader compile after an editor reimport — would otherwise spam "property does not exist" plus
-	# a no-Tweeners error on EVERY kill. Skip gracefully (warn once); it self-heals once the horizon shader is live.
-	if _sky_mat == null or not _has_flash_param():
-		if _sky_mat != null and not _flash_warned:
-			_flash_warned = true
-			push_warning("StarSky.flash_kill: sky material exposes no `flash` shader param — skipping the kill flash (sky shader isn't horizon_sky.gdshader, or it needs a reimport).")
+	if _sky_mat == null or not _has_param(level_param):
+		if _sky_mat != null and not bool(_channel_warned.get(level_param, false)):
+			_channel_warned[level_param] = true
+			push_warning("StarSky: the sky material exposes no `%s` shader param — skipping that sky flash (the sky shader isn't horizon_sky.gdshader, or it needs a reimport)." % level_param)
 		return
-	if _flash_tween != null and _flash_tween.is_valid():
-		_flash_tween.kill()
-	_flash_tween = create_tween().set_ignore_time_scale(true)
-	_flash_tween.tween_property(_sky_mat, "shader_parameter/flash", 1.0, GameSettings.effects.sky_flash_up_time)
-	_flash_tween.tween_property(_sky_mat, "shader_parameter/flash", 0.0, GameSettings.effects.sky_flash_down_time)
+	# Re-assert the COLOUR on every trigger rather than once at paint time, for two reasons: the designer's colour
+	# stays live-tunable in the Remote inspector mid-fight, and _paint's "already ours" early-out (which
+	# deliberately keeps an existing panorama binding) can never strand a stale colour on a re-entered environment.
+	# Skipped silently on a sky shader that declares the level uniform but not the colour one — the pop still
+	# happens in the shader's OWN default colour, which degrades to a wrong hue rather than to nothing.
+	if _has_param(color_param):
+		_sky_mat.set_shader_parameter(color_param, color)
+	var previous: Tween = _channel_tweens.get(level_param, null)
+	if previous != null and previous.is_valid():
+		previous.kill()
+	# Three beats — up / SUSTAIN / down — mirroring Character._build_flash_tween's per-part hit flash. The sustain
+	# is what makes a long beat read as a COLOUR: with only up+down, a ~1 s flash is a slow ramp THROUGH the colour
+	# that the eye reads as the sky brightening, not as the sky turning red. Interval only when it is actually
+	# held, so a designer zeroing the hold gets a clean two-beat tween instead of a degenerate 0 s tweener.
+	var prop := "shader_parameter/" + String(level_param)
+	# SEED THE LEVEL UNIFORM BEFORE TWEENING IT, or the flash never renders at all.
+	# A ShaderMaterial PUBLISHES a `shader_parameter/<uniform>` property for every uniform its shader declares,
+	# but `get()` on one returns Nil until something ASSIGNS it — a shader-side default
+	# (horizon_sky.gdshader's `uniform float flash ... = 0.0`) is NOT copied into the material's param_cache.
+	# _paint() seeds only panorama/use_panorama, so `flash` / `hurt_flash` start Nil. tween_property reads the
+	# property for its INITIAL value, gets Nil, and the tweener dies with
+	#   "Type mismatch between initial and final value: Nil and float"
+	# once per tween_property call — twice per trigger, every trigger. _has_param() cannot catch this: it
+	# matches on property NAME, which IS published, so the guard above passes. And because the tween never
+	# runs, nothing ever writes the uniform, so it stays Nil forever — it can never self-heal.
+	if _sky_mat.get(prop) == null:
+		_sky_mat.set_shader_parameter(level_param, 0.0)
+	var t := create_tween().set_ignore_time_scale(true)
+	t.tween_property(_sky_mat, prop, clampf(peak, 0.0, 1.0), up)
+	if hold > 0.0:
+		t.tween_interval(hold)
+	t.tween_property(_sky_mat, prop, 0.0, down)
+	_channel_tweens[level_param] = t
 
-## True when the live sky material actually exposes the `flash` shader uniform, so tweening shader_parameter/flash
-## is valid. A ShaderMaterial publishes one `shader_parameter/<uniform>` property per declared uniform, so the
-## material's own property list is exactly what the tween validates against (no shader-introspection guesswork).
-func _has_flash_param() -> bool:
+## True when the live sky material actually exposes shader uniform `uniform_name`, so tweening / setting
+## shader_parameter/<uniform_name> is valid. A ShaderMaterial publishes one `shader_parameter/<uniform>` property
+## per declared uniform, so the material's own property list is exactly what the tween validates against (no
+## shader-introspection guesswork). Used for ALL FOUR flash uniforms across the two channels (kill: `flash` /
+## `flash_color`, hurt: `hurt_flash` / `hurt_flash_color`): the LEVEL one is TWEENED — a missing one errors
+## per-frame — and the COLOUR one is SET, where a missing one is silent, which is exactly why it's checked too.
+func _has_param(uniform_name: StringName) -> bool:
+	var prop := "shader_parameter/" + String(uniform_name)
 	for p in _sky_mat.get_property_list():
-		if p.get("name", "") == "shader_parameter/flash":
+		if p.get("name", "") == prop:
 			return true
 	return false

@@ -3,7 +3,7 @@ class_name ItemContainer
 extends LookAtInteractable
 
 
-## Drop-in LOOTABLE CONTAINER component (a crate, chest, locker, fridge): aim at it and press E (Interact)
+## Drop-in LOOTABLE CONTAINER component (a crate, chest, locker, fridge): aim at it and press F (Interact)
 ## to open the loot transfer on its OWN inventory — take items out, or deposit your own in (two-way).
 ## Extends LookAtInteractable (the talk-layer hitbox + look-at outline); this adds the inventory + open
 ## behaviour. Unlike a corpse, a container is PERSISTENT: it's never freed, so you can stash gear and return.
@@ -148,7 +148,7 @@ func can_be_talked_to() -> bool:
 	return true
 
 ## Hover readout: "Loot <name>" (or just "Container" when unnamed) — "Unlock <name>" while a Lock child
-## holds it shut, so the [E] prompt says what pressing it will actually attempt.
+## holds it shut, so the [F] prompt says what pressing it will actually attempt.
 func look_name() -> String:
 	var lock := Lock.of(self)
 	if lock != null and lock.locked:

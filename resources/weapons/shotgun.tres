@@ -26,6 +26,7 @@ self_knockback = 5.0
 enemy_knockback = 20.0
 enemy_lift = 15.0
 view_model = ExtResource("6_tnw6x")
+muzzle_smoke_scale = 1.7
 audio = ExtResource("1_ktqtt")
 whiz_sound = ExtResource("5_l7w0u")
 impact_sound = ExtResource("3_tnw6x")

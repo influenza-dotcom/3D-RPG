@@ -14,6 +14,10 @@ const DESTROY_DECAL_PROBE: float = 3.0
 const DESTROY_DECAL_CULL_MASK: int = 2
 const DESTROY_DECAL_PARALLEL_THRESHOLD: float = 0.99
 
+## The at-rest rim: the classic BLACK hull ("hidden in plain sight" — it reads as the prop's outline,
+## and flips white on hover). Props are EXCLUDED from the InkOutline screen-space pass via the
+## ACTOR_INK_MASK_LAYER stamp in _setup_overlay_chain, so this black never doubles with the world's ink.
+## (It briefly shipped transparent to dodge that doubling — wrong fix; the mask is the right one.)
 const OUTLINE_HIDDEN_COLOR: Color = Color(0.0, 0.0, 0.0, 1.0)
 const OUTLINE_VISIBLE_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
 const FLASH_PEAK_STRENGTH: float = 2.0
@@ -244,6 +248,7 @@ const LOOP_NOTICED_LINGER: float = 0.5  ## seconds the noticed loop keeps playin
 var _noticed_linger: float = 0.0  ## counts down once the player is no longer noticing; the noticed loop stops only when it reaches 0 (debounces the boundary)
 var _breathe_phase: float = 0.0  ## visual-only living-prop sine phase
 var _facing_travel: bool = false  ## armed by mark_thrown_for_facing (a real THROW); cleared on landing/slow/re-grab
+var _trailing: bool = false  ## armed by mark_thrown_for_trail (a real THROW); read through is_trailing() by a ThrowTrail child
 var _breathe_base_scale: Vector3 = Vector3.ONE  ## authored mesh_instance scale; breathing pulses around this, never the collider/body
 var _data_model_root: Node3D = null  ## live PackedScene visual instanced from ThrowableData.mesh, parented under mesh_instance
 var _authored_mesh: Mesh = null  ## mesh_instance.mesh before data overrides, so clearing data.mesh can restore the authored visual
@@ -431,6 +436,9 @@ func _setup_overlay_chain() -> void:
 	_outline_material.next_pass = _flash_material
 	var targets := TalkHelpers.collect_meshes(self, null, true)
 	for m in targets:
+		# Register with the ink-outline actor mask: a hull-rimmed prop is EXCLUDED from the screen-space
+		# ink pass (the rim is its outline — ink on top doubles it; see InkOutline's class doc).
+		m.layers |= InkOutline.ACTOR_INK_MASK_LAYER
 		m.material_overlay = _outline_material
 
 # `want_visible` is a sentinel-defaulted Variant, not `bool = visible`: a default expression is captured at
@@ -488,6 +496,15 @@ func _physics_process(delta: float) -> void:
 		_thrown_grace -= delta
 		if _thrown_grace <= 0.0:
 			_thrown_by = null
+	# The throw is over once the prop has actually COME TO REST, and that has to be released here or the arm
+	# outlives the throw for the rest of the level: a knife you threw and never picked up would still read as
+	# "mid-throw" hours later, so the next thing to shove it — an explosion, a grapple reel-in, a long fall off
+	# a ledge — would draw a streak nobody threw. That is precisely what ThrowTrail.require_thrown promises
+	# cannot happen. `sleeping` is the engine's own at-rest signal and is the right test because it CANNOT fire
+	# mid-flight (a moving body never sleeps), which a bare speed threshold can't promise — a knife thrown
+	# straight up passes through zero velocity at its apex.
+	if _trailing and sleeping:
+		_trailing = false
 	_animate_breathing(delta)
 	_update_ambient_loop(delta)
 	_pre_step_velocity = linear_velocity
@@ -645,6 +662,10 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 	var hp_after := character.hp if is_instance_valid(character) else 0.0
 	var real_loss := hp_before - hp_after
 	DamageNumberPopupScript.show(character, real_loss, global_position, was_crit, attacker)
+	# NOTE: a thrown kill's SKY FLASH needs nothing here. take_damage's own lethal branch fires the kill cue on the
+	# resolved killer, and `attacker` is threaded into the call above, so a thrown-weapon kill flashes through the
+	# same one seam as a gunshot. (This path still shows no hitmarker and rings no ding — it never calls
+	# on_dealt_hit — which is a hit-confirm question, not a kill-cue one.)
 	_damage_cooldown = GameSettings.physics_damage.interactable_damage_cooldown
 
 ## Enter/exit "loyal" thrown-combat mode — called by Claimable on befriend / release. While on, a THROWN hit spares
@@ -721,6 +742,26 @@ func _resolved_face_travel_min_speed() -> float:
 func mark_thrown_for_facing() -> void:
 	_facing_travel = faces_travel_when_thrown()
 
+## Arm the in-flight STREAK — called from the same real-THROW seam as mark_thrown_for_facing (PickupRay._release
+## and the grapple fling), never on a tap-drop or a forced death/quickload release. Unconditional, unlike the
+## facing arm: whether anything is DRAWN is the `ThrowTrail` child's business (a prop without one ignores this
+## entirely), so there is no toggle to consult here.
+func mark_thrown_for_trail() -> void:
+	_trailing = true
+
+## Whether this prop is mid-THROW right now — the streak's gate, read by a ThrowTrail child. Deliberately
+## duck-typed by that component (`has_method(&"is_trailing")`) rather than type-referenced, because this script
+## sits on the actor parse path via Character and a mutual class_name reference is how a parse cycle starts.
+##
+## Stays TRUE through a bounce, exactly like _facing_travel: a knife that skips off a wall is still in flight and
+## should keep its tail. What ends the DRAWING is the trail's own speed gate
+## (GameSettings.effects.throw_trail_min_speed), after which the existing tail ages out; what ends the ARM is the
+## prop coming to rest (the `sleeping` release in _physics_process), plus the two places the throw is cut short —
+## a re-grab (on_picked_up) and a pin (pin_at). The rest release is load-bearing rather than tidy: without it a
+## thrown-and-abandoned knife stays armed, and a later shove would streak with no throw behind it.
+func is_trailing() -> bool:
+	return _trailing
+
 # --- Embedded (pinned) blade ---------------------------------------------------------------------------------
 #
 # A knife that landed a PIN kill ends up driven into the wall through the limb it carried there. Physically that
@@ -788,6 +829,7 @@ func pin_at(pose: Transform3D, free_position: Vector3) -> void:
 	_pin_free_position = free_position
 	_pin_prior_gravity = gravity_scale
 	_facing_travel = false  # the flight is over; nothing left for _integrate_forces to nose toward
+	_trailing = false  # ...nor for a streak to follow — the blade is parked in the wall
 	linear_velocity = Vector3.ZERO
 	angular_velocity = Vector3.ZERO
 	gravity_scale = 0.0
@@ -1143,6 +1185,7 @@ func look_name() -> String:
 func on_picked_up(_picker: Node) -> void:
 	_confetti_eligible = false  # handled by the player -- no longer a fresh kill gib (anti-confetti-cheese)
 	_facing_travel = false  # re-grabbing mid-flight cancels the thrown-facing; the next throw re-arms it
+	_trailing = false  # ...and the streak: catching a knife out of the air ends that throw
 	_held = true  # the ambient-loop driver (_update_ambient_loop) starts the held loop from this next physics frame
 	_play_pickup_sound()
 	_set_carried_transparency(true)
@@ -1192,6 +1235,13 @@ func _character_impact_sound() -> AudioStream:
 		return character_impact_sound
 	return data.character_impact_sound if data != null else null
 
+## This creature's BASE vocal pitch: `sound_pitch_mult` is its ROLLED BODY SIZE (RandomSize.pitch_mult_for_size
+## writes it), which is why a small dog yaps high and a big one low.
+##
+## ⭐It is the CENTRE of the per-play variation, not an alternative to it. AudioManager.vary_pitch MULTIPLIES,
+## so a yap plays at `size x (1 +- spread)`: the animal still sounds exactly as big as it is (the default
+## ±15% is nowhere near the pitch ratio that separates a small dog from a large one), it just never fires
+## the byte-identical sample twice. Callers therefore pass this as the BASE and leave `vary` at its default.
 func _vocal_pitch(base_pitch: float = 1.0) -> float:
 	return maxf(base_pitch, 0.01) * maxf(sound_pitch_mult, 0.01)
 

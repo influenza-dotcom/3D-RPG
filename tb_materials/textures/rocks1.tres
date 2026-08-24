@@ -1,0 +1,8 @@
+[gd_resource type="StandardMaterial3D" format=3 uid="uid://1s7rwd2xl547"]
+
+[ext_resource type="Texture2D" uid="uid://c54lg52gsj7eb" path="res://tb_textures/textures/rocks1.png" id="1_g47pw"]
+
+[resource]
+albedo_texture = ExtResource("1_g47pw")
+metallic_specular = 0.0
+texture_filter = 2

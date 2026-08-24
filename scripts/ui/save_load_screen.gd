@@ -179,7 +179,7 @@ func _bind_ui() -> void:
 	# Escape (_unhandled_input) both dismiss. Both captions are static consts, so the card never reflows.
 	_confirm = %Confirm
 	MenuStyle.style_dim(%ConfirmDim)
-	MenuStyle.style_dialog_card(%ConfirmCard)  # pins the card to skin.dialog_width (the make_dialog twin)
+	MenuStyle.style_compact_card(%ConfirmCard)  # width pin + PLAIN panel (the card is shorter than the artist screen-card art's margins)
 	var confirm_title: Label = MenuStyle.cap_label(%ConfirmTitle)
 	MenuStyle.style_title(confirm_title)
 	confirm_title.text = MenuStyle.title_text(PlayerText.SAVE_LOAD_OVERWRITE_TITLE)
@@ -216,7 +216,12 @@ func _rebuild() -> void:
 ## The button rail is two FIXED-width cells — an absent button leaves a same-width spacer — so the Save and
 ## Load columns stay aligned across rows whose affordances differ (quicksave = load-only, empty = save-only).
 func _add_row(slot: int, label_text: String, path: String) -> void:
-	var meta := slot_metadata(path)
+	# Read the metadata off the path the file ACTUALLY lives at: while the debug save sandbox is on
+	# (GameState.resolve_save_path maps the five canonical files into user://sandbox/), the raw canonical path is
+	# the REAL profile the sandbox exists to protect — painting its caption here would offer a Load button for a
+	# file GameState.load_from_slot will not read, and paint "empty" over a sandbox slot that does exist.
+	# Identity when the sandbox is off, so a shipped build is unaffected.
+	var meta := slot_metadata(GameState.resolve_save_path(path))
 	var exists := bool(meta["exists"])
 	var row := HBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL

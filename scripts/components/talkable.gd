@@ -10,7 +10,7 @@ extends Area3D
 ##
 ## It works as a LOOK-AT target, not a proximity trigger: the component sits on the dedicated
 ## talk physics layer, and the player's interaction ray (ray_cast.gd) detects it when aimed at.
-## The ray highlights the host while you look, and pressing the interact key (E / PickUp) turns
+## The ray highlights the host while you look, and pressing the interact key (F / PickUp) turns
 ## the host to face you (if turn_to_face) and starts `dialogue` through DialogueManager. Looking
 ## decides WHICH target you talk to, so two NPCs in the same spot are no longer ambiguous.
 ##
@@ -58,7 +58,12 @@ func _ready() -> void:
 	# detect nothing ourselves (mask 0 -- we're aimed at, we don't sense bodies).
 	collision_layer = TalkHelpers.TALK_LAYER
 	collision_mask = 0
-	_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
+	# An INVISIBLE highlight (alpha 0 / zero width) builds NO material, and set_look_highlight then no-ops —
+	# the overlay slot is shared with the host's own combat rim, so writing a transparent material into it
+	# would strip that rim for as long as you look. Same invariant as LookAtInteractable._build_outline.
+	_outline_mat = null
+	if highlight_color.a > 0.0 and highlight_width > 0.0:
+		_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
 	# Meshes are gathered LAZILY on first highlight (see _ensure_meshes), NOT here: an NPC's modular head is
 	# attached in NPC._ready, which runs AFTER this child component's _ready, so collecting now would miss it.
 
@@ -106,6 +111,8 @@ func can_pickpocket(player: Node) -> bool:
 
 ## Toggled by the interaction ray as the player's aim enters/leaves this target.
 func set_look_highlight(on: bool) -> void:
+	if _outline_mat == null:
+		return  # invisible highlight — never touch the shared overlay slot (see _ready)
 	_ensure_meshes()
 	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)
 

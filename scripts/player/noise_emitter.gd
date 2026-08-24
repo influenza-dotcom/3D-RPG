@@ -36,6 +36,7 @@ func tick(delta: float) -> void:
 	# stub host) this stays null and is skipped; in-tree it's created once and then just tracks noise_radius.
 	if _source == null and is_instance_valid(host) and host.is_inside_tree():
 		_source = NoiseSource.new()
+		_source.emitter = host  # this noise IS the player — an NPC that investigates it has noticed THEM (2D "!" sting)
 		host.add_child(_source)
 	if _source != null:
 		_source.radius = host.noise_radius

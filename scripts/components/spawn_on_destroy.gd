@@ -119,7 +119,10 @@ func _play_spawn_sound(spawned: Node, origin: Vector3) -> void:
 	var pos := origin
 	if spawned is Node3D:
 		pos = (spawned as Node3D).global_position
-	AudioManager.play_sfx(pos, spawn_sound, spawn_sound_volume_db, spawn_sound_pitch(spawned, 1.0, pitch_spawn_sound_from_spawned))
+	# The spawned creature's size pitch is the BASE here (the crate barks at the dog it just revealed);
+	# AudioManager's per-play variation multiplies around it, so the size still reads and no two spawns match.
+	AudioManager.play_sfx(pos, spawn_sound, spawn_sound_volume_db,
+		spawn_sound_pitch(spawned, 1.0, pitch_spawn_sound_from_spawned))
 
 static func spawn_sound_pitch(spawned: Node, base_pitch: float = 1.0, use_spawned_pitch: bool = true) -> float:
 	var pitch := maxf(base_pitch, 0.01)

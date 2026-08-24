@@ -93,6 +93,89 @@ func test_the_speaker_bus_exists_and_routes_through_sfx() -> void:
 		"the `speaker` bus with no effects IS a clean bus — the filters are the whole point of it existing")
 
 
+## The STATION-RADIO bus — `speaker`'s twin, and the pair has to stay a pair.
+## `station_music` carries a byte-identical clone of the chirp's filter chain, because the whole brief was
+## "the shop music sounds like it comes out of the same crappy panel speaker the ATM chirps from". What it
+## does NOT clone is the SEND: it goes into `music`, not `sfx`.
+##  * the SEND is the deliberate divergence. A 50-90 second loop is MUSIC by every definition the Options menu
+##    uses, so the Music slider must govern it — a player who drags Music to 0 to run their own playlist must
+##    not still be hearing shop themes, and one who drags Effects to 0 to quiet gunfire must not lose them.
+##    Sending into `music` also inherits the dialogue duck, the ADS duck and the death-cinematic world duck
+##    for free; sending to Master would escape all four.
+##  * the CHAIN is the thing that must NOT diverge, and a hand-copied chain is exactly what drifts silently:
+##    somebody retunes the chirp's low-pass in the editor's Audio panel and the shop radio quietly stops
+##    matching it. Nothing audible fails, so only a pairwise assert catches it. Gain is deliberately NOT
+##    compared — `speaker` is +4 dB into an `sfx` bus that is ~6.6 dB down, so equal gain would be unequal
+##    loudness.
+func test_the_station_music_bus_clones_the_speaker_chain_but_routes_through_music() -> void:
+	var idx := AudioServer.get_bus_index(&"station_music")
+	assert_gte(idx, 0,
+		"the `station_music` bus is missing from default_bus_layout.tres — the station radio falls back to a "
+		+ "clean `music` bed and loses the tinny panel-speaker character that is the whole feature")
+	var spk := AudioServer.get_bus_index(&"speaker")
+	if idx < 0 or spk < 0:
+		return
+	assert_eq(AudioServer.get_bus_send(idx), &"music",
+		"the `station_music` bus must send into `music` so the MUSIC volume slider governs it — sending it "
+		+ "into `sfx` files a music bed under the Effects slider, and Master escapes every slider")
+	assert_eq(AudioServer.get_bus_effect_count(idx), AudioServer.get_bus_effect_count(spk),
+		"`station_music` must carry the same NUMBER of effects as `speaker` — the two chains are a matched "
+		+ "pair and a dropped stage is inaudible until someone A/Bs them")
+	for i in mini(AudioServer.get_bus_effect_count(idx), AudioServer.get_bus_effect_count(spk)):
+		var a := AudioServer.get_bus_effect(spk, i)
+		var b := AudioServer.get_bus_effect(idx, i)
+		assert_eq(b.get_class(), a.get_class(),
+			"`station_music` effect %d is a %s but `speaker`'s is a %s — the chains have drifted apart"
+			% [i, b.get_class(), a.get_class()])
+		# Duck-typed rather than branched on class: each stage only carries one of these parameter sets, and
+		# a null on both sides simply compares equal, so this covers filters and the distortion in one loop.
+		for prop in [&"cutoff_hz", &"resonance", &"mode", &"drive"]:
+			assert_eq(b.get(prop), a.get(prop),
+				"`station_music` effect %d (%s) has %s = %s but `speaker` has %s — retune BOTH buses or the "
+				% [i, a.get_class(), prop, str(b.get(prop)), str(a.get(prop))]
+				+ "shop radio stops sounding like the machine that just chirped at you")
+
+
+## The ROOF-DUCK bus. `IndoorAmbienceDucker` muffles the outdoor bed by sweeping a low-pass on `ambient_bed`,
+## and a low-pass is a per-BUS effect — so that bus is the duck's blast radius. Two things keep it honest, and
+## both are one-line edits in the editor's Audio panel away from silently going wrong:
+##  * `ambient_bed` SENDS INTO `ambient` (not the reverse, and not straight to Master). Because audio flows
+##    child -> parent, that routing is exactly what confines the muffle to the bed: everything authored on
+##    `ambient` itself — a light fixture's electrical buzz, a machine hum, the player's fall-wind — is
+##    UPSTREAM of the filter and cannot be dulled by it. Flip the send and the roof duck would start muffling
+##    every local sound in the world, which is precisely the "why does the buzzing light sound like it's
+##    outside" complaint this pins against.
+##  * it still CARRIES a low-pass. Without one the muffle silently degrades to a pure volume duck (the ducker
+##    no-ops rather than erroring), so "the indoors treatment stopped working" would only show up in a playtest.
+func test_the_roof_ducks_muffle_bus_cannot_reach_local_sounds() -> void:
+	var bed := AudioServer.get_bus_index(&"ambient_bed")
+	assert_gte(bed, 0, "the `ambient_bed` bus is missing — IndoorAmbienceDucker's muffle has nothing to sweep")
+	if bed < 0:
+		return
+	assert_eq(AudioServer.get_bus_send(bed), &"ambient",
+		"`ambient_bed` must send INTO `ambient`. That direction is what scopes the roof duck's low-pass to the "
+		+ "outdoor bed and keeps every `ambient`-bus local sound (light buzz, machine hum) out of it")
+	var has_lowpass := false
+	for i in AudioServer.get_bus_effect_count(bed):
+		has_lowpass = has_lowpass or AudioServer.get_bus_effect(bed, i) is AudioEffectLowPassFilter
+	assert_true(has_lowpass,
+		"`ambient_bed` has no AudioEffectLowPassFilter — IndoorAmbienceDucker silently degrades to a volume-only "
+		+ "duck and the 'stepped indoors' muffle just stops happening")
+
+## The other half of that contract, from the emitter side: a light fixture's hum is a LOCAL sound and must stay
+## off the muffled bus. If someone re-routes `Light.tscn`'s emitter to `ambient_bed` it would start ducking and
+## muffling whenever the player walks under a roof — i.e. the buzz of the strip light you are standing beneath
+## would go dull the moment you step inside, which is backwards.
+func test_the_light_fixture_buzz_stays_off_the_muffled_bus() -> void:
+	var src := FileAccess.get_file_as_string("res://scenes/levels/Light.tscn")
+	assert_ne(src, "", "scenes/levels/Light.tscn is unreadable — the fixture prefab moved or was renamed")
+	assert_true(src.contains('bus = &"ambient"'),
+		"Light.tscn's LightBuzz must play on the plain `ambient` bus")
+	assert_false(src.contains('bus = &"ambient_bed"'),
+		"Light.tscn's LightBuzz is on `ambient_bed`, the bus IndoorAmbienceDucker muffles under a roof — a "
+		+ "fixture you are standing next to indoors would lose its high end exactly when it should be clearest. "
+		+ "Keep fixture-local sound on `ambient`; `ambient_bed` is for the outdoor bed only")
+
 func test_the_scan_actually_finds_audio_players() -> void:
 	# Guard against the scan silently matching nothing (a .tscn format change would make the test above pass
 	# vacuously forever). The project authors dozens of players; assert we can see a healthy number.

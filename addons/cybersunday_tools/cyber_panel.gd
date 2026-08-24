@@ -1,10 +1,10 @@
 @tool
 extends TabContainer
 
-## Single host for every CYBER SUNDAY tool Control, each an inner tab (22 in all): the palette, the item + scene
+## Single host for every CYBER SUNDAY tool Control, each an inner tab (24 in all): the palette, the item + scene
 ## placers, level, the content generators, blueprint + icon viewers, tuning, factions, audit, the save inspector,
-## the dialogue/quest graph viewers, the Dialogue/Quest/Loot/Text editors, the content browser, the ref viewer, and
-## the encounter / stats / scene-diff / arch views.
+## the dialogue/quest graph viewers, the Dialogue/Quest/Loot/Text editors, the content browser, the ref viewer,
+## the encounter / stats / scene-diff / arch views, the Reach report, and the AI Bridge.
 ## plugin.gd adds THIS as ONE collapsible bottom panel instead of several right-side docks --
 ## right-side docks contribute to the editor's MINIMUM height (and Godot restores their saved sizes on relaunch),
 ## which on a short/HiDPI display forces the whole editor taller than the screen and squishes the 3D viewport. A
@@ -33,6 +33,13 @@ const StatsView := preload("res://addons/cybersunday_tools/dock_stats/stats_view
 const SceneDiffView := preload("res://addons/cybersunday_tools/dock_scenediff/scene_diff_view.gd")
 const ScenePlacer := preload("res://addons/cybersunday_tools/dock_place/scene_placer.gd")
 const ArchView := preload("res://addons/cybersunday_tools/dock_arch/arch_view.gd")
+## Sits beside the other read-only reporters (Stats / Refs / Audit) in spirit, but is appended rather than inserted
+## so no existing tab shifts index. Answers the one question none of them do: what can a PLAYER actually reach from
+## the boot scene — the check that stays green on a quest nothing starts.
+const ReachView := preload("res://addons/cybersunday_tools/dock_reach/reach_view.gd")
+## LAST tab on purpose: the Bridge is meta-tooling (it exposes the OTHER tabs' read-only data to an external AI
+## client), not an authoring surface, and appending keeps every existing tab at the index the user already knows.
+const BridgeView := preload("res://addons/cybersunday_tools/dock_bridge/bridge_view.gd")
 
 
 func _init() -> void:
@@ -64,3 +71,5 @@ func _init() -> void:
 	add_child(StatsView.new())
 	add_child(SceneDiffView.new())
 	add_child(ArchView.new())
+	add_child(ReachView.new())
+	add_child(BridgeView.new())

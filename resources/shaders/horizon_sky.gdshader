@@ -3,7 +3,8 @@ shader_type sky;
 // A grounded "Deus Ex" HORIZON sky. The level's authored skybox image (use_panorama) is mapped CYLINDRICALLY
 // -- wrapped flat around the horizon as a band -- instead of the equirectangular SPHERE mapping that pinches a
 // picture at the poles. A sky gradient sits above the band, ground below, and a warm amber LIGHT-POLLUTION
-// haze hugs the horizon (no stars -- the city glow drowns them). `flash` whites the sky for a beat on a kill.
+// haze hugs the horizon (no stars -- the city glow drowns them). `flash` floods the sky with `flash_color` for
+// about a second on a kill -- both are driven by StarSky.flash_kill, never authored here (see below).
 
 uniform sampler2D panorama : source_color, filter_linear;  // the level's authored skybox image (bound by StarSky)
 uniform bool use_panorama = false;   // true -> lay the image flat along the horizon; false -> plain gradient
@@ -22,8 +23,18 @@ uniform float haze_height : hint_range(0.02, 0.6) = 0.16;
 uniform float haze_strength : hint_range(0.0, 2.0) = 0.45;
 uniform float sun_glow : hint_range(0.0, 2.0) = 0.5;
 uniform float sun_azimuth : hint_range(-3.1416, 3.1416) = 0.7;
-uniform float flash : hint_range(0.0, 1.0) = 0.0;
-uniform vec3  flash_color : source_color = vec3(1.0, 1.0, 1.0);
+// TWO INDEPENDENT FLASH CHANNELS, both driven by StarSky (up / hold / down per channel), NEITHER authored here.
+// Their live colours come from GameSettings.effects and are re-written on every trigger; the defaults below are
+// only the fallback for a sky painted by something other than StarSky. Renaming any of these four uniforms
+// silently reverts or disables a flash -- tests/test_effects.gd pins all four names for exactly that reason.
+//
+// They are SEPARATE uniforms rather than one shared pair on purpose: you get hit while killing constantly, and a
+// single channel would mean each trigger killed the other's tween and repainted its colour mid-beat -- a kill's
+// hot red would be cut to the darker hurt red by the next bullet, and vice versa.
+uniform float flash : hint_range(0.0, 1.0) = 0.0;             // KILL: StarSky.flash_kill (hot red, ~1 s)
+uniform vec3  flash_color : source_color = vec3(1.0, 0.1, 0.08);
+uniform float hurt_flash : hint_range(0.0, 1.0) = 0.0;        // TOOK DAMAGE: StarSky.flash_hurt (red, shorter)
+uniform vec3  hurt_flash_color : source_color = vec3(0.85, 0.0, 0.0);
 
 void sky() {
 	float h = EYEDIR.y;                                  // -1 (down) .. 1 (up), 0 = horizon
@@ -54,5 +65,13 @@ void sky() {
 	col += haze_color * (band + sun);
 
 	col = mix(col, flash_color, clamp(flash, 0.0, 1.0));
+	// HURT is applied AFTER the kill flash so that when both channels are up at once the DAMAGE read wins: being
+	// shot is more urgent information than having scored.
+	// NOTE: both cues ship RED now, which blunts that. At sky_flash_peak = 1.0 the kill flash REPLACES the sky, so
+	// a hit landing mid-kill only pulls (1.0, 0.1, 0.08) toward (0.85, 0.0, 0.0) at 0.55 -- a ~20% brightness dip
+	// with NO hue change, where the old purple kill flash swung the hue hard. Ordering still means the hurt wash is
+	// not swallowed, but it no longer reads as a different colour. To get that separation back, drop sky_flash_peak
+	// below 1.0 (so the hurt mix has a non-red base to pull from) or move one of the two colours off red.
+	col = mix(col, hurt_flash_color, clamp(hurt_flash, 0.0, 1.0));
 	COLOR = col;
 }

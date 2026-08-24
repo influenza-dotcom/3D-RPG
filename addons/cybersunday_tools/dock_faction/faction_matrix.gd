@@ -3,8 +3,14 @@ extends VBoxContainer
 
 ## Faction matrix dock: an N x N grid of OptionButtons editing who-is-hostile/neutral/friendly to whom.
 ## Rows = "from" faction, columns = "to" faction; each cell sets the FROM faction's relation toward the TO
-## faction. Editing a cell writes the relation onto the Faction resource and ResourceSaver.save()s that .tres
-## (so it persists to disk). The save is wrapped: a failure reports on the status Label instead of corrupting.
+## faction. Editing a cell writes the relation onto the Faction resource and saves that .tres (so it persists to
+## disk). The save is wrapped: a failure reports on the status Label instead of corrupting.
+##
+## WRITE CONTRACT: unlike the Dialogue/Quest/Loot/Text editors there is no Save button here — a cell change IS the
+## commit, because a 3-way dropdown has no in-progress state worth staging. That makes the write UNDO-able only via
+## the on-disk backup, so it goes through ContentSaveGuard.save_with_backup like every other content editor: the
+## prior bytes land in <path>.tres.bak first, so a stray click (or an arrow-key scroll over a focused cell) is
+## recoverable by renaming the .bak back. The status Label names the exact path written, every time.
 ##
 ## Storage matches scripts/faction/faction.gd EXACTLY: Faction.relations is a Dictionary keyed by the OTHER
 ## faction's `id` (StringName) -> a float relation score (<0 enemies / 0 neutral / >0 allies), read by
@@ -17,6 +23,8 @@ extends VBoxContainer
 const RELATION_DIR := "res://resources/factions/"
 ## The faction registry (factions.gd has NO class_name on purpose -> preload it) -- enumerates + resolves the .tres.
 const Factions := preload("res://scripts/faction/factions.gd")
+## Recoverable saves: prior bytes -> <path>.tres.bak before every overwrite (the same guard the content editors use).
+const ContentSaveGuard := preload("res://addons/cybersunday_tools/core/content_save_guard.gd")
 
 ## The three discrete relation buckets the matrix offers, mapped to the float score stored in Faction.relations.
 ## A cell shows the bucket nearest the stored float (see _bucket_for / RELATION_VALUES). Enemy => -1 (NPC.is_hostile
@@ -28,6 +36,13 @@ var _grid: GridContainer = null
 var _status: Label = null
 var _factions: Array = []  ## Array[Faction], parallel to _ids
 var _ids: PackedStringArray = PackedStringArray()
+
+## Lazy first-reveal latch — the faction scan (which LOADS every .tres under resources/factions/ and builds an
+## N x N OptionButton grid) runs on first reveal, not at panel construction. cyber_panel._init() builds all 22 tabs
+## eagerly, and the editor reconstructs the panel on every plugin reload, so an _init-time scan costs a full folder
+## load on every editor start even when this tab is never opened. Mirrors content_browser / tuning_browser /
+## item_placer_dock (pinned by tests/test_devtools_lazy_reveal.gd).
+var _revealed := false
 
 
 func _init() -> void:
@@ -66,7 +81,15 @@ func _init() -> void:
 	_status.add_theme_font_size_override("font_size", 10)
 	add_child(_status)
 
-	_rebuild()
+	visibility_changed.connect(_on_visibility_changed)
+	_on_visibility_changed()  # lazy: scan factions on first reveal, not at panel construction
+
+
+## Lazy first-reveal: load the factions + build the grid ONCE, the first time the tab is actually shown.
+func _on_visibility_changed() -> void:
+	if is_visible_in_tree() and not _revealed:
+		_revealed = true
+		_rebuild()
 
 
 # --- pure relation helpers (testable WITHOUT disk / EditorInterface) ---------------------------------------------
@@ -107,7 +130,10 @@ static func bucket_for(score: float) -> int:
 # --- build ------------------------------------------------------------------------------------------------------
 
 func _rebuild() -> void:
+	# remove_child BEFORE queue_free: a queue_free'd child stays in the tree (and in get_children()) until the end of
+	# the frame, so the new header/cells added below would lay out alongside the old grid for a frame.
 	for c in _grid.get_children():
+		_grid.remove_child(c)
 		c.queue_free()
 	_factions.clear()
 	_ids = Factions.ids()
@@ -202,19 +228,21 @@ func _on_cell_selected(idx: int, row: int, col: int) -> void:
 
 
 ## Persist one Faction .tres. Save failure (bad path / locked file) is REPORTED, never silently swallowed, so a
-## partial write can't corrupt the resource without the designer seeing it. Saves to its source .tres path.
+## partial write can't corrupt the resource without the designer seeing it. Saves to its source .tres path, through
+## ContentSaveGuard so the PRIOR bytes are copied to <path>.tres.bak first — a cell change commits immediately (there
+## is no Save button), so that .bak is the only undo a mis-click has.
 func _save_faction(f: Faction) -> void:
 	var path := f.resource_path
 	if path.is_empty():
 		_set_status("Cannot save '%s': it has no resource_path (not an on-disk .tres)." % _faction_name(f))
 		return
-	var err := ResourceSaver.save(f, path)
+	var err := ContentSaveGuard.save_with_backup(f, path)
 	if err != OK:
 		_set_status("FAILED to save %s (err %d) — change NOT persisted." % [path, err])
 		return
 	if Engine.is_editor_hint():
 		EditorInterface.get_resource_filesystem().update_file(path)
-	_set_status("Saved %s" % path)
+	_set_status("Saved %s  (previous bytes -> %s)" % [path, ContentSaveGuard.backup_path(path).get_file()])
 
 
 func _set_status(msg: String) -> void:

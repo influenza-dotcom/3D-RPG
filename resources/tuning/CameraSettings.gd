@@ -111,3 +111,20 @@ extends Resource
 @export var dialogue_frame_height: float = 3.0
 ## FOV floor (degrees) for the dialogue zoom, so a distant target doesn't zoom to a pinhole. Higher = a wider minimum framing.
 @export var dialogue_min_fov: float = 25.0
+
+@export_group("Lens")
+## Barrel (fisheye) bend of the WHOLE rendered frame at full strength — the centre magnified, the periphery
+## squeezed, straight lines off the centre bowing outward. This is the number the player's Accessibility "Lens
+## Curve" slider scales, and it is read as CENTRE MAGNIFICATION MINUS ONE: 0.12 = the middle of the frame reads
+## ~12% bigger, with the CORNERS PINNED (post_process.gdshader normalises the bend by the corner, so the frame
+## never shows a black edge at any strength). 0 = a perfectly flat frame.
+##
+## It is a screen-space warp, NOT a projection change: no Camera3D property can bow a straight line (FOV is a
+## uniform scale on the image — see the note on CameraEffects.base_fov), which is why this lives in the
+## post-process rather than on the camera. It reads strongest at a wide field of view, because there is more
+## off-axis frame for it to bend.
+@export var lens_barrel_amount: float = 0.12
+## Lens fringe (chromatic aberration) as a FRACTION OF THE BEND, so it grows with the curve and vanishes with it
+## instead of sitting on a flat frame as a colour error. This is what makes the warp read as GLASS rather than as
+## a wobble. 0 = off; ~0.35 is a subtle edge fringe; 1.0 is a strong one. Costs two extra screen taps when on.
+@export var lens_chroma_amount: float = 0.35

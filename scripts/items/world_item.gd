@@ -143,6 +143,16 @@ static func _make_throwable(item: Item, amount: int, visual: Node, body_size: Ve
 	#     thrown_face_rotation_degrees — a THROWN weapon that opts in noses toward its travel direction (the knife
 	#     leads with its point; guns leave it off and tumble). The rotation is the mesh-front correction
 	#     Throwable._integrate_forces applies inside the aim basis.
+	#   • a ThrowTrail CHILD ← weapon.thrown_trail / thrown_trail_color — the white streak the drop drags while it
+	#     flies. ON for EVERY weapon (thrown_trail defaults true), so this branch is the common case, not the knife's
+	#     special case; the flag stays a per-weapon OPT-OUT for a throw that shouldn't be readable. The only stamp
+	#     here that adds a NODE rather than setting a field, because the effect is a drop-in component (a hand-placed
+	#     prop gets one by dragging it into the scene). Loaded by PATH, not by its ThrowTrail class_name: this builder
+	#     already reaches Throwable.gd that way, and the component's host is duck-typed for the same reason (no
+	#     class_name edge into the actor parse path). The child is added at the body's ORIGIN with no offset, which is
+	#     what lets a TUMBLING drop (every gun — thrown_faces_travel is off) still lay a smooth line instead of a
+	#     corkscrew: the sample point doesn't orbit as the body spins. A weapon that wants the streak to leave a
+	#     specific point (a blade tip) authors a hand-placed ThrowTrail in a world_prop scene instead.
 	#   • face_carrier_while_held + face_carrier_reversed ← weapon.held_faces_aim — and THAT is what decides whether
 	#     the same rotation also poses the drop while it's CARRIED. ONE weapon flag sets BOTH Throwable fields because
 	#     a weapon has only one sensible carry pose: the dog's face-carrier machinery, REVERSED, so the business end
@@ -160,6 +170,12 @@ static func _make_throwable(item: Item, amount: int, visual: Node, body_size: Ve
 		t.face_carrier_while_held = item.weapon.held_faces_aim
 		t.face_carrier_reversed = item.weapon.held_faces_aim
 		cp.item_light_always_lit = item.weapon.dropped_item_light_always_lit
+		if item.weapon.thrown_trail:
+			# Plain `var`, not `:=` — a load().new() chain is Variant and inference off it is an analyzer error.
+			var trail = load("res://scripts/components/throw_trail.gd").new()
+			trail.name = "ThrowTrail"
+			trail.color = item.weapon.thrown_trail_color
+			t.add_child(trail)
 		# Continuous collision detection for a weapon tuned to fly FAST. The release sets linear_velocity directly, so
 		# thrown_impulse_mult scales metres-per-second one-for-one: at the default 12 m/s a 60 Hz tick moves the body
 		# 0.2 m, but a 2.5x knife covers 0.5 m — more than the length of its own 0.46 m collider — and discrete

@@ -208,3 +208,24 @@ extends Resource
 ## lifeless). OFF (default) -> the mount no-ops and the head sits at its rest pose, byte-identical to before. Flip
 ## it on, then playtest (the head aim axis/sign can need a per-rig tweak).
 @export var head_look: bool = false
+
+@export_group("AI level of detail")
+## Species-wide seeds for the AiLod drop-in (scripts/components/ai_lod.gd) every NPC auto-builds — how often a
+## DISTANT, UNAWARE NPC re-runs its brain. A configured AiLod dropped under one NPC overrides these for it.
+##
+## Measured on the shipped map (2026-08-13, GTX 1660 / i5-9400F): at 40 NPCs, npc.gd's own _physics_process was
+## ~54 ms of a 66.7 ms frame (81%). It is the tick CADENCE that costs, not navigation (0.1-0.4 ms), not RVO
+## avoidance, and not sight_range — all three were measured and refuted. Movement is never throttled (gravity
+## and move_and_slide run every tick at every band), so a throttled NPC still walks smoothly; it only DECIDES
+## less often. NPCs that are fighting, investigating, in dialogue, or following you are exempt entirely.
+##
+## OFF -> every NPC thinks every physics tick, exactly as before this existed.
+@export var lod_enabled: bool = true
+## Metres. Inside this the NPC always thinks every tick. Raise it if throttled NPCs read as sluggish up close.
+@export var lod_near_distance: float = 20.0
+## Metres. Between near and this the NPC thinks every lod_mid_interval; beyond it, every lod_far_interval.
+@export var lod_far_distance: float = 45.0
+## Seconds between thinks in the middle band (0.1 = 10 Hz).
+@export var lod_mid_interval: float = 0.1
+## Seconds between thinks in the far band (0.25 = 4 Hz).
+@export var lod_far_interval: float = 0.25

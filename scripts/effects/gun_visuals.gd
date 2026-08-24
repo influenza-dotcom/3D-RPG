@@ -31,13 +31,27 @@ const RIM_LIGHT_SHADER = preload("res://resources/shaders/rim_light.gdshader")
 @export var rim_top_bias: float = 0.35
 
 @export_group("Outline")
-## Black inverted-hull outline on the view model (same shader the NPCs/ragdoll use). The gun
-## sits much closer to the camera than an NPC, so the clip-space inflation reads large — tune
-## this DOWN from the NPC's 0.085 until the rim looks right in-game.
+## Black inverted-hull outline on the view model (same shader the NPCs / props / ragdoll / your own
+## first-person body use, via TalkHelpers.make_outline_material). BLACK is the house look.
 @export var outline_color: Color = Color.BLACK
-## Inverted-hull outline thickness fed to the shared outline shader. The gun is very close to the camera, so
-## clip-space inflation reads large — keep this WELL below the NPC's 0.085; higher = chunkier black edge.
-@export var outline_width: float = 0.02
+## Inverted-hull rim thickness fed to the shared outline shader — the SAME units as NPC.outline_width /
+## Ragdoll.outline_width / BodyModelSwap.actor_outline_width, and 2.0 is parity with all of them.
+## ⭐⭐ THIS IS THE VIEW MODEL'S ONLY OUTLINE. The gun renders on the view-model layer, and InkOutline's mask
+## camera culls that layer, so the world's screen-space ink is DISCARDED over the gun on purpose (an actor
+## wearing a hull rim AND the ink is the doubled outline that system exists to prevent). Make this rim
+## sub-pixel and the weapon has no outline at all — which is what shipped until 2026-08-18. This default
+## was 0.02 from the day the gun got a rim (2026-06-03), sized against the NPC's then-0.085 — a value left
+## over from the OLD outline shader, a world-space extrusion in METRES, where a gun 20 cm from the lens did
+## need a far smaller extrusion than an NPC. But outline.gdshader had already become (2026-05-27) a
+## screen-space extrusion — `outline_width` is ~2 px of the 1584-wide 3D buffer per unit (≈1 visible pixel),
+## invariant to how close the mesh is to the camera — so both values were sub-pixel; the NPC was retuned
+## to 2.0 (2026-06-16) and the gun never was. Measured: 5 rim pixels on the whole silenced pistol at 0.02
+## vs 988 at 2.0. Nobody noticed for months because the gun had no other outline to compare against —
+## until the ink pass (2026-08-12) briefly inked it, and the actor mask then (correctly) took the ink off
+## it, which is the day the weapon visibly "lost its outline": it had fallen back to this rim.
+## Distance no longer matters, so there is no reason for the gun to differ from an NPC. Higher = chunkier
+## edge; ~8 shatters the hull into shards (the fists were probe-calibrated to the same 2.0).
+@export var outline_width: float = 2.0
 ## MeshInstance3D name substrings (case-insensitive) to SKIP when applying the outline — for a modeled
 ## laser sight / dot baked into a gun model that should read as a see-through emitter, not an outlined
 ## prop. If your gun's laser sight still gets outlined, add its exact node name to this list.

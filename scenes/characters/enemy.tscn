@@ -5,7 +5,8 @@
 [ext_resource type="AudioStream" uid="uid://cpq0kwlpi35nu" path="res://assets/audio/sfx/Spplshh.mp3" id="3_fcftc"]
 [ext_resource type="Script" uid="uid://bk5dgfayt1w6d" path="res://scripts/components/npc_head_look_mount.gd" id="3_qch6t"]
 [ext_resource type="Script" uid="uid://cxebw2kcm5244" path="res://scripts/npc/death.gd" id="4_lu5c6"]
-[ext_resource type="AudioStream" uid="uid://dfh8566viyug3" path="res://assets/audio/sfx/Augh.mp3" id="6_nb6gf"]
+[ext_resource type="AudioStream" path="res://assets/audio/sfx/NpcHurtCry.wav" id="6_nb6gf"]
+[ext_resource type="AudioStream" path="res://assets/audio/sfx/NpcDeathCry.wav" id="5_dcry0"]
 [ext_resource type="Script" uid="uid://cvlhdoggqcytg" path="res://scripts/npc/damage.gd" id="7_jt03m"]
 [ext_resource type="Script" uid="uid://bms5grrivunn4" path="res://scripts/components/body_model_swap.gd" id="10_y5th1"]
 [ext_resource type="PackedScene" uid="uid://cjmrxe3tgvrb1" path="res://scenes/bodyparts/torso.tscn" id="11_p7w77"]
@@ -50,6 +51,7 @@ unit_size = 100.0
 max_db = 6.0
 bus = &"sfx"
 script = ExtResource("4_lu5c6")
+death_cry = ExtResource("5_dcry0")
 
 [node name="Damage" type="AudioStreamPlayer3D" parent="." unique_id=903524182]
 stream = ExtResource("6_nb6gf")

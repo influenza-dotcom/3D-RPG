@@ -63,7 +63,7 @@ func _init() -> void:
 
 ## Live list of the files the current name would create (QA: show every resource a template creates BEFORE it runs).
 func _refresh_preview() -> void:
-	var base := Scaffold._slugify(_edit.text.strip_edges())
+	var base := Scaffold.slugify(_edit.text.strip_edges())
 	if base.is_empty():
 		_preview.text = "[color=#888]Type a name to preview the files this pack will create.[/color]"
 		return
@@ -76,9 +76,12 @@ func _refresh_preview() -> void:
 
 
 ## Create the pack: sub-resources first (so the NpcData references them by path), then the Faction + NpcData. Refuses
-## if ANY target path already exists. Fails soft — a save error stops with a message, never a half-built throw.
+## if ANY target path already exists. Fails soft — a save error STOPS with a message and never throws, but the files
+## written BEFORE the failure stay on disk (there is no rollback: deleting a just-written .tres the editor may already
+## be importing is riskier than leaving it). So a partial run REPORTS every path it did create, because the
+## refuse-overwrite guard above will block a retry under the same name until the designer removes them.
 func _on_scaffold() -> void:
-	var base := Scaffold._slugify(_edit.text.strip_edges())
+	var base := Scaffold.slugify(_edit.text.strip_edges())
 	if base.is_empty():
 		_warn("Type a name first.")
 		return
@@ -95,31 +98,45 @@ func _on_scaffold() -> void:
 	var faction_path: String = DIRS["faction"] + base + ".tres"
 	var npc_path: String = DIRS["npc"] + base + ".tres"
 
+	# Every path successfully written, so a mid-sequence failure can report exactly what it left behind.
+	var made: Array[String] = []
+
 	var pair := Scaffold.build_weapon_and_item(base)
-	if not _save(pair["weapon"], weapon_path):
+	if not _save(pair["weapon"], weapon_path, made):
 		return
 	var item: Item = pair["item"]
 	item.weapon = load(weapon_path)  # re-link to the SAVED weapon so the item .tres references it by path
-	if not _save(item, item_path):
+	# Match the item's id to its <base>_item.tres FILENAME (the same correction content_dock._on_new_weapon makes).
+	# build_weapon_and_item seeds id == base, which would collide with a plain Item authored as items/<base>.tres —
+	# ItemDb keys its registry on Item.id, so two items sharing one id silently shadow each other (last write wins).
+	item.id = StringName(base + "_item")
+	if not _save(item, item_path, made):
 		return
-	if not _save(Scaffold.build_loot_table(), loot_path):
+	if not _save(Scaffold.build_loot_table(), loot_path, made):
 		return
 	var pack := Ops.build_pack(base, load(weapon_path), load(loot_path))
-	if not _save(pack["faction"], faction_path):
+	if not _save(pack["faction"], faction_path, made):
 		return
-	if not _save(pack["npc"], npc_path):
+	if not _save(pack["npc"], npc_path, made):
 		return
 
 	EditorInterface.get_resource_filesystem().scan()
 	EditorInterface.edit_resource(load(npc_path))  # open the NpcData — the hub of the pack
 	_set_out("[color=lime]Created the %s pack[/color] (5 files):\n• %s\n• %s\n• %s\n• %s\n• %s\n\n[b]Ready to fight:[/b] the faction ships HOSTILE (attacks the player on sight). Drop the NPC into a level or an EncounterSpawner. Optional: set the faction's relations for NPC-vs-NPC, and fill the LootTable's drops." % [
-		Scaffold._titleize(base), faction_path, weapon_path, item_path, loot_path, npc_path])
+		Scaffold.titleize(base), faction_path, weapon_path, item_path, loot_path, npc_path])
 
 
-func _save(res: Resource, path: String) -> bool:
+## Save one pack file, recording it in `made` on success. On failure the message NAMES the files already written —
+## the refuse-overwrite guard will block a retry under this name until the designer deletes them, so "what did it
+## leave behind?" has to be answerable from the panel, not from the FileSystem dock.
+func _save(res: Resource, path: String, made: Array[String]) -> bool:
 	if ResourceSaver.save(res, path) != OK:
-		_warn("Failed to save %s" % path)
+		var tail := ""
+		if not made.is_empty():
+			tail = "\n\nAlready created (delete these before retrying the same name):\n• " + "\n• ".join(made)
+		_warn("Failed to save %s%s" % [path, tail])
 		return false
+	made.append(path)
 	return true
 
 

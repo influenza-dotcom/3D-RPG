@@ -494,6 +494,28 @@ func test_rim_search_out_reaches_every_authored_outline_width() -> void:
 	npc.free()
 	ink.free()
 
+func test_the_view_model_hull_rim_is_a_visible_width() -> void:
+	# ⭐⭐ THE VIEW MODEL HAS EXACTLY ONE OUTLINE, AND THIS IS IT. The gun draws on the view-model layer, the
+	# mask camera culls that layer, and the ink shader DISCARDS covered pixels — so the world's ink never
+	# touches the weapon (correct: rim + ink = the doubled outline this pass exists to prevent). Which
+	# means GunVisuals' hull rim is the gun's only line, and it must be a VISIBLE one. It was not: the
+	# default sat at 0.02 from 2026-06-03 to 2026-08-18 — a value sized in the OLD outline shader's units
+	# (a world-space extrusion in metres) and never retuned when the shader went screen-space, where
+	# `outline_width` is ~1 visible pixel per unit at any distance. Measured on the silenced pistol: 5 rim
+	# pixels at 0.02, 988 at 2.0. The gun had no other outline to compare against until the ink pass
+	# briefly inked it and the mask took the ink off — the day the weapon visibly "lost its outline".
+	# Pinned to NPC PARITY, not merely ">0": the rim is a house look shared by every actor, and the fists
+	# (FirstPersonBody) are pinned to the same 2.0 beside the gun.
+	var visuals = load("res://scripts/effects/gun_visuals.gd").new()   # off-tree: _ready never runs
+	var npc = load("res://scripts/npc/npc.gd").new()
+	assert_almost_eq(float(visuals.outline_width), float(npc.outline_width), 0.0001,
+		"GunVisuals.outline_width (%.3f) must match the NPC rim (%.3f) — the ink is masked off the gun, so a sub-pixel hull rim leaves the weapon with NO outline"
+			% [visuals.outline_width, npc.outline_width])
+	assert_gte(float(visuals.outline_width), 1.0,
+		"the view model's rim must be at least a visible pixel (outline_width 1.0 ≈ 1 px of the 792-wide screen)")
+	npc.free()
+	visuals.free()
+
 func test_depth_is_packed_and_unpacked_across_the_same_two_channels() -> void:
 	# ⭐⭐ The depth is a 16-bit value split over two 8-bit colour channels — G coarse, R fine — because one
 	# channel spends a step every ~3% of the distance, and that alone meant an NPC had to stand a full
@@ -591,3 +613,183 @@ func test_settings_exposes_the_live_intensity_the_pass_polls() -> void:
 		"Settings must expose ink_outline_intensity for InkOutline's per-frame poll")
 	assert_true(Settings.has_method(&"set_ink_outline_intensity"),
 		"Settings must expose the setter the Options row binds to")
+
+# ---------------------------------------------------------------------------------------------------
+# Seam merge — level geometry built from several pieces inks as ONE solid, not as its parts
+# ---------------------------------------------------------------------------------------------------
+# The user's sketch: two boxes side by side should draw the L, not the shared boundary. Flush and
+# interpenetrating joins already merged (a screen-space pass cannot see an interior face — measured on a
+# synthetic scene and on the shipped map's flush floor/roof brush joins), but a box a couple of
+# centimetres out of line leaves a sub-pixel sliver of perpendicular face along the join, and the CREASE
+# term inked that sliver as a corner — one surface split by a faint dotted line. The fix is
+# `crease_min_feature_px`: the crease is re-measured on two wider crosses and the WEAKER answer, as a
+# RATIO of the narrow one, scales the crease down, so a normal change that lives only in a sliver stops
+# drawing while every corner wide enough to be a corner keeps its line. `concave_crease_strength` is the
+# companion look dial: on a level built from boxes every piece junction is a CONCAVE crease, so it is the
+# knob for how much the pieces read as one solid. Headless can never compile the shader, so what these
+# pin is the script->shader seam and the rules the shader source must keep, not the pixels.
+
+func test_seam_merge_radius_is_pushed_and_ships_on() -> void:
+	var ink = load(INK_PATH).new()
+	var params: Dictionary = ink._params(1.0)
+	assert_true(params.has("crease_min_feature_px"),
+		"crease_min_feature_px must ride _params, or the seam merge is a knob wired to nothing")
+	assert_true(_shader_uniform_names().has("crease_min_feature_px"),
+		"ink_outline.gdshader must declare crease_min_feature_px — the generic drift guard catches a rename, this catches a removal")
+	assert_gt(float(params["crease_min_feature_px"]), 0.0,
+		"the seam merge ships ON: with it off, every hand-authored blockout join a few cm out of line grows a crawling seam line")
+	# 0 is the documented OFF position and must reach the shader as exactly 0 (the shader gates on > 0.0).
+	ink.crease_min_feature_px = 0.0
+	assert_almost_eq(float(ink._params(1.0)["crease_min_feature_px"]), 0.0, 0.0001,
+		"crease_min_feature_px = 0 must be pushed as 0 — that is the shader's off switch")
+	ink.free()
+
+func test_seam_merge_default_clears_the_measured_floor() -> void:
+	# Measured on the level: with the confirming taps inside the narrow cross's own footprint (width_px/2
+	# either side) the wide pass is only a second sampling of the same edge, and reducing by it thins every
+	# real crease line by a pixel — floor/wall junctions came out ragged. The shader floors the reach at
+	# width_px for that reason (derivation: each cross keeps a straddling pair for the whole narrow band
+	# iff reach * sin 45 >= width_px/2 * sqrt 2); the AUTHORED default must clear it too, so a designer
+	# reading the Inspector sees the value that is actually in effect.
+	var ink = load(INK_PATH).new()
+	assert_gte(ink.crease_min_feature_px, ink.width_px,
+		"the shipped crease_min_feature_px must be >= width_px (the measured floor below which it only thins real lines)")
+	ink.free()
+
+func test_seam_merge_shader_keeps_its_rules() -> void:
+	# Source-text pins, because headless cannot compile the shader and each rule failed by being ALMOST
+	# right: (1) ONE wide cross left the seam as a dotted trail wherever the sliver ran along a tap
+	# diagonal — it takes two crosses (diagonal + axis) MIN-ed for a sliver at any orientation to be clean
+	# to at least one of them; (2) the reach must be floored at width_px (see the test above); (3) the wide
+	# result must scale the crease as a RATIO of the narrow one, not pass through a second absolute
+	# threshold — the absolute version dimmed every shallow crease (a ramp meeting the floor, a kerb
+	# chamfer) to ~22% at axis/diagonal screen angles, because an axis-aligned crease straddles both
+	# narrow diagonals but only one pair of the wide axis cross; and it may only ever REMOVE (a multiply
+	# by a 0..1 factor), never add.
+	var src := _read(SHADER_PATH)
+	assert_true(src.contains("min(diag_diff, axis_diff)"),
+		"the wide confirmation must take the MIN of the diagonal and axis crosses — one cross alone leaves dotted seams")
+	assert_true(src.contains("max(crease_min_feature_px, max(width_px, 0.0))"),
+		"the wide reach must be floored at width_px in the shader, or a small value thins every real crease line")
+	assert_true(src.contains("crease *= smoothstep(0.15, 0.4, wide_diff / max(normal_diff"),
+		"the wide pass must scale the crease by the RATIO wide/narrow (a 0..1 factor) — a second absolute threshold dims shallow creases, and anything but a multiply could add lines")
+
+func test_seam_merge_reach_does_not_follow_the_intensity_dial() -> void:
+	# The knob is a screen-space FEATURE SIZE, not a line weight: the Options dial thins the line
+	# (width_px x0.5..1) but must not change WHICH lines exist. The only coupling allowed is the shader's
+	# floor at width_px, which the default clears (see the floor test).
+	var ink = load(INK_PATH).new()
+	var full: Dictionary = ink._params(1.0)
+	var half: Dictionary = ink._params(0.5)
+	assert_lt(float(half["width_px"]), float(full["width_px"]), "sanity: the dial thins the line")
+	assert_almost_eq(float(half["crease_min_feature_px"]), float(full["crease_min_feature_px"]), 0.0001,
+		"crease_min_feature_px must be pushed unscaled at every dial position — a reach that follows the dial changes which lines exist, not just how heavy they are")
+	ink.free()
+
+func test_viewport_size_is_only_read_inside_fragment() -> void:
+	# VIEWPORT_SIZE is a fragment() built-in and NOT reachable from a helper function; using it there
+	# fails the WHOLE shader with "Unknown identifier", which headless never notices (this project has
+	# shipped exactly that once — see gdshader-headless-never-compiles). The wide-reach conversion must
+	# stay inside fragment().
+	# Comments are stripped first: the shader documents this very trap in a helper's header comment,
+	# and a comment is not a read.
+	var in_fragment := false
+	var uses_before := 0
+	var uses_inside := 0
+	for raw_line in _read(SHADER_PATH).split("
+"):
+		var line: String = raw_line
+		var slash := line.find("//")
+		if slash >= 0:
+			line = line.substr(0, slash)
+		if line.contains("void fragment()"):
+			in_fragment = true
+		if line.contains("VIEWPORT_SIZE"):
+			if in_fragment:
+				uses_inside += 1
+			else:
+				uses_before += 1
+	assert_true(in_fragment, "ink_outline.gdshader must define fragment()")
+	assert_gt(uses_inside, 0, "fragment() must read VIEWPORT_SIZE (the tap offsets are pixel sizes converted to UV)")
+	assert_eq(uses_before, 0,
+		"every VIEWPORT_SIZE read must sit inside fragment() — %d code use(s) found before it, which fails the whole shader" % uses_before)
+
+func test_concave_crease_strength_is_pushed_and_ships_unchanged() -> void:
+	# The look dial for piece junctions. It ships at 1.0 = every junction drawn (the resting state the
+	# user signed off before this knob existed); anything lower is a deliberate authoring choice.
+	var ink = load(INK_PATH).new()
+	var params: Dictionary = ink._params(1.0)
+	assert_true(params.has("concave_crease_strength"), "concave_crease_strength must ride _params")
+	assert_true(_shader_uniform_names().has("concave_crease_strength"),
+		"ink_outline.gdshader must declare concave_crease_strength")
+	assert_almost_eq(float(params["concave_crease_strength"]), 1.0, 0.0001,
+		"concave_crease_strength ships at 1.0 — the authored look is unchanged until a designer dials it")
+	ink.concave_crease_strength = 0.0
+	assert_almost_eq(float(ink._params(1.0)["concave_crease_strength"]), 0.0, 0.0001,
+		"0 (convex edges and silhouettes only) must reach the shader as 0")
+	# The convexity test is the standard sign of dot(dN, dP): pin that the shader reads FOLD from the
+	# depth taps' positions rather than guessing from normals alone (which cannot tell the two apart).
+	var src := _read(SHADER_PATH)
+	assert_true(src.contains("float fold = dot(dn, dp)"),
+		"concavity must be read from dot(dN, dP) — normals alone cannot separate an inside corner from an outside one")
+	ink.free()
+
+# ---------------------------------------------------------------------------------------------------
+# Contact merge — the boundary between two pieces that are TOUCHING is not a silhouette
+# ---------------------------------------------------------------------------------------------------
+# The second half of the user's sketch, and the half the crease knobs could not reach: a flight of
+# stairs is a stack of slabs, and every step drew a line, so the flight read as separately outlined
+# pieces instead of one stepped solid. Measured on the porch steps: the risers are not even visible
+# from a normal eye height (the raycast normal never changes, (0,1,0) both sides) — each step is a PURE
+# depth discontinuity between two treads, drawn by the silhouette term, so crease_strength = 0 left
+# every line intact. The rule the user gave is "not where the two actually are touching": at an edge
+# pixel the two taps that found it land on two surfaces, and the 3D distance between those points is how
+# far apart the pieces are along the view ray (a step gives its riser height, the sky gives the far
+# plane). Below the threshold they are one solid.
+
+func test_contact_merge_is_pushed_and_ships_on() -> void:
+	var ink = load(INK_PATH).new()
+	var params: Dictionary = ink._params(1.0)
+	assert_true(params.has("contact_merge_m"), "contact_merge_m must ride _params")
+	assert_true(_shader_uniform_names().has("contact_merge_m"),
+		"ink_outline.gdshader must declare contact_merge_m")
+	assert_gt(float(params["contact_merge_m"]), 0.0,
+		"the contact merge ships ON: with it off every stair tread and slab-on-slab join draws its own line")
+	ink.contact_merge_m = 0.0
+	assert_almost_eq(float(ink._params(1.0)["contact_merge_m"]), 0.0, 0.0001,
+		"contact_merge_m = 0 must be pushed as 0 — that is the shader's off switch")
+	ink.free()
+
+func test_contact_merge_clears_the_levels_authored_module() -> void:
+	# The level's module is 0.5 m (stair risers, kerbs, slab thickness). Measured on the porch steps, a
+	# 0.5 m riser presents a ~0.95 m gap between the two visible tread points, so the threshold has to
+	# clear the module itself with margin or the flight keeps half its lines. Anything at/above 2x the
+	# knob is still drawn at full strength (the smoothstep's far end), which is what keeps a real drop.
+	var ink = load(INK_PATH).new()
+	assert_gte(ink.contact_merge_m, 0.5,
+		"contact_merge_m must clear the level's 0.5 m authored module, or stairs keep drawing per-step lines")
+	assert_lte(ink.contact_merge_m, 2.0,
+		"contact_merge_m past ~2 m starts merging genuinely separate things (a crate against a wall, a doorway into an alcove)")
+	ink.free()
+
+func test_contact_merge_shader_keeps_its_rules() -> void:
+	# Source pins for the two things that make it safe, both of which are easy to "simplify" away:
+	# (1) it must measure the diagonal THAT FOUND THE EDGE — the other diagonal can lie along the edge
+	# and measure nothing, which would merge real silhouettes at some orientations; (2) it must MULTIPLY
+	# the existing edge (0..1), never replace it, so it can only ever remove.
+	var src := _read(SHADER_PATH)
+	assert_true(src.contains("(diff_tlbr >= diff_trbl) ? p_tl : p_tr"),
+		"the contact test must measure the diagonal that found the edge, not a fixed one")
+	assert_true(src.contains("edge *= smoothstep(contact_merge_m, contact_merge_m * 2.0, distance(pa, pb))"),
+		"the contact test must scale the existing silhouette edge by the gap (a 0..1 multiply) — it may only ever remove lines")
+
+func test_contact_merge_can_never_erase_a_sky_silhouette() -> void:
+	# The fail-safe direction: an undrawn pixel must read as ENORMOUSLY far away, so a rooftop against
+	# the sky can never be merged into it. linear_depth/view_pos both answer SKY_DEPTH there, and
+	# view_pos must keep that along the pixel's own ray (a zero vector would read as a 0 m gap — i.e.
+	# "touching" — and would delete every silhouette against the sky).
+	var src := _read(SHADER_PATH)
+	assert_true(src.contains("return dir * (SKY_DEPTH / -dir.z);"),
+		"view_pos must place a sky sample at SKY_DEPTH along its own ray — a zero/short vector would read as a contact and erase sky silhouettes")
+	assert_true(src.contains("const float SKY_DEPTH = 1.0e6;"),
+		"SKY_DEPTH must stay far enough that no contact threshold can reach it")

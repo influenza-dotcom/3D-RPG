@@ -2,7 +2,7 @@ extends GutTest
 
 ## Interact key-hints + the Deus Ex carry fade.
 ## - InputManager.display_key reads an action's CURRENT binding for display. It is now a thin alias for the
-##   canonical InputManager.get_action_binding (the OptionsMenu rebind-button label + the "[E]"/"[Z]" hints all
+##   canonical InputManager.get_action_binding (the OptionsMenu rebind-button label + the "[F]"/"[Z]" hints all
 ##   resolve through that); this test deliberately exercises the alias so it can't be dropped without notice.
 ## - Throwable: look_name "Pick Up" backs the "[Z] Pick Up" hover prompt; on_picked_up / on_dropped apply
 ##   and clear carried_transparency on its meshes.

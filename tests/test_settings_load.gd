@@ -23,6 +23,8 @@ func test_player_movement_settings() -> void:
 		"ordinary movement should restore stamina faster than special movement states")
 	assert_gte(r.stamina_regen_delay_after_spend, 0.0,
 		"stamina_regen_delay_after_spend must be >= 0")
+	assert_gt(r.stamina_regen_delay_after_shot, r.stamina_regen_delay_after_spend,
+		"a SHOT must hold recovery longer than a movement verb, or a weapon regenerates between its own shots and firing can never deplete the pool (see tests/test_combat_data.gd for the per-weapon rule)")
 	assert_gt(r.stamina_sprint_drain, 0.0,
 		"stamina_sprint_drain must be > 0")
 	assert_eq(r.stamina_sprint_lockout, 3.0,
@@ -35,6 +37,18 @@ func test_player_movement_settings() -> void:
 		"stamina_wall_climb_drain must be > 0")
 	assert_gt(r.stamina_melee_attack_cost, 0.0,
 		"stamina_melee_attack_cost must be > 0")
+	assert_gt(r.stamina_shot_cost, 0.0,
+		"stamina_shot_cost must be > 0 — shooting is meant to draw on the same pool as sprinting")
+	assert_lt(r.stamina_shot_cost, r.stamina_melee_attack_cost,
+		"one shot should cost less than a full melee swing — a gun fires many times per swing")
+	assert_lt(r.stamina_shot_cost, r.stamina_sprint_drain,
+		"a BASELINE shot must cost less than a second of sprinting, or firing outpaces the sprint budget")
+	# The clamp that makes "shooting never costs more per second than running" a theorem rather than a habit.
+	# Strictly below 1.0 so the bound stays STRICT: ceiling x sprint_drain < sprint_drain.
+	assert_gt(r.stamina_shot_drain_ceiling, 0.0,
+		"stamina_shot_drain_ceiling must be > 0 or every shot clamps to free")
+	assert_lt(r.stamina_shot_drain_ceiling, 1.0,
+		"stamina_shot_drain_ceiling must be < 1 so a clamped weapon still drains strictly less than sprinting")
 
 func test_player_crouch_settings() -> void:
 	var r := load("res://resources/tuning/PlayerCrouchSettings.tres") as PlayerCrouchSettings
@@ -113,6 +127,20 @@ func test_player_feedback_settings() -> void:
 	# Toast colours moved off player.gd's SNEAK_HIT_COLOR / CRIPPLE_TOAST_COLOR consts (byte-identical defaults).
 	assert_eq(r.sneak_toast_color, Color(0.4, 1.0, 0.45), "sneak toast ships green (was SNEAK_HIT_COLOR)")
 	assert_eq(r.cripple_toast_color, Color(1.0, 0.42, 0.38), "cripple toast ships red (was CRIPPLE_TOAST_COLOR)")
+	# Out-of-combat recovery (2026-08-18): the passive health regen + the low-HP heartbeat duck, both gated on
+	# is_out_of_combat(). These are the SHIPPED values, so the bounds guard what a designer can author.
+	assert_gte(r.combat_calm_grace, 5.0,
+		"player_feedback.combat_calm_grace must not open before GunPose.idle_combat_grace (5.0) has dropped the weapon — the visual tell has to land before the mix softens and HP starts climbing")
+	assert_gte(r.health_regen_frac_per_sec, 0.0,
+		"player_feedback.health_regen_frac_per_sec cannot be negative — a negative rate reaches Character.heal(), which drains hp with no death check (0 is the documented off-switch)")
+	assert_gt(r.health_regen_cap_frac, 0.0,
+		"player_feedback.health_regen_cap_frac must be > 0, or the regen ceiling sits at zero HP and the feature is inert in a way no knob reads as 'off'")
+	assert_lte(r.health_regen_cap_frac, 1.0,
+		"player_feedback.health_regen_cap_frac is a fraction of max HP — above 1.0 it would ask the drip to exceed the cap heal() already clamps to")
+	assert_gt(r.heartbeat_calm_duck_db, 0.0,
+		"player_feedback.heartbeat_calm_duck_db must be > 0 or 'duck the heartbeat out of combat' does nothing")
+	assert_lt(r.heartbeat_calm_duck_db, 12.0,
+		"the duck is SLIGHT — past ~12 dB it reads as muting the cue, which is what the Accessibility heartbeat toggle is for")
 
 func test_npc_ai_settings() -> void:
 	var r := load("res://resources/tuning/NpcAiSettings.tres") as NpcAiSettings

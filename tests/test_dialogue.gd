@@ -681,6 +681,36 @@ func test_holster_deescalation_ignores_forced_carry_holster() -> void:
 		"a forced carry holster must not forgive: the player is holding a throwable threat, not standing down")
 	player.free()
 
+## The DEATH holster's twin of the carry case above. Player.die() holsters the weapon for the cinematic; that must
+## not pardon anyone. The pardon would sweep every provoked NPC no matter who killed you AND spend each one's
+## one-shot betrayal latch — both of which the killer-aware death settlement (stand_down_on_player_death, applied on
+## the respawn) is deliberately built to avoid, so a fall death would otherwise pacify the level for free.
+func test_holster_deescalation_ignores_the_death_holster() -> void:
+	var controller := DialogueController.new()
+	var player := Player.new()
+	var npc := _ForgiveRecorder.new()
+	controller.host = player
+	npc.add_to_group(Groups.NPC)
+	add_child_autofree(controller)
+	add_child_autofree(npc)
+
+	player._dying = true
+	controller.on_weapon_holstered(true)
+	assert_eq(npc.forgive_count, 0,
+		"the holster die() fires for the death cinematic must not forgive — a corpse lowering its gun is not a stand-down")
+	# _dead is Character's latch, set by take_damage BEFORE die() runs, and it stays up for the whole cinematic:
+	# cover it independently so neither half of the death state can leak a pardon.
+	player._dying = false
+	player._dead = true
+	controller.on_weapon_holstered(true)
+	assert_eq(npc.forgive_count, 0,
+		"still no pardon while the Character death latch is up, even once the _dying cinematic flag is down")
+	player._dead = false
+	controller.on_weapon_holstered(true)
+	assert_eq(npc.forgive_count, 1,
+		"and a live, empty-handed player still gets the normal holster pardon — the death gate is not a blanket off-switch")
+	player.free()
+
 
 # ---------------------------------------------------------------------------
 # DialogueSelector / DialogueSelectorRow (rank 8) -- pick a conversation by world state. Pure data + the

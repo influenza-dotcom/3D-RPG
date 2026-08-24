@@ -7,6 +7,20 @@ extends MeshInstance3D
 ##
 ## speed_to_scale: 0 = start at full scale (instant, e.g. muzzle flash); > 0 = start at
 ## zero and grow toward full (e.g. an explosion bloom), faster for larger values.
+##
+## ⭐⭐ A FLASH IS LIGHT, NOT GEOMETRY — IT IS EXCLUDED FROM THE WORLD'S INK (2026-08-16).
+## `_ready` stamps `InkOutline.ACTOR_INK_MASK_LAYER` unconditionally, and that is not optional
+## authoring. The fallback material built below is a StandardMaterial3D with transparency DISABLED
+## (the alpha pulse in `_process` only bites on a transparent authored base like bulletmat), so the
+## flash sphere writes depth exactly like a wall — and InkOutline's screen-space edge detect drew a
+## black ring around every explosion and bullet-impact spark. That was the WORLD's outline on
+## something that is meant to read as light, the same defect the player's own first-person body had:
+## a mesh with NEITHER a hull rim NOR the mask bit is inked by the wrong system entirely. No stamper
+## could ever have reached it — an Explosion is added under the scene root, outside every actor walk.
+##
+## ⭐ With the bit stamped, `has_outline` below means exactly what it says and the two lines can never
+## stack: OFF = a bare flash with no line at all (the explosion/hit spark), ON = the inverted-hull rim
+## and only the rim (the muzzle flash). See InkOutline — "the rim and the stamp are one contract".
 
 const EMISSION_ENERGY_MULTIPLIER: float = 3.0
 const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
@@ -15,7 +29,9 @@ const OUTLINE_WIDTH: float = 1.0
 
 ## How the flash grows in. 0 = pops in at full scale instantly (a muzzle flash); > 0 = starts at zero and swells toward full size, larger values swelling faster (an explosion bloom).
 @export var speed_to_scale: float
-## Add a black silhouette outline pass around the flash mesh (toon look). Off = bare emissive flash, no rim.
+## Add a black silhouette outline pass around the flash mesh (toon look). This is the flash's ONLY line —
+## it is excluded from the world's ink either way (class doc). Off = a bare emissive flash with no outline
+## at all (explosions, hit sparks); on = the inverted-hull rim, and only the rim (the muzzle flash).
 @export var has_outline: bool = false
 
 var _time: float = 0.0
@@ -27,6 +43,10 @@ var _base_albedo: Color = Color.WHITE
 
 func _ready() -> void:
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Register the flash with InkOutline's actor mask (see the class doc). OR-ed, so the scene's authored
+	# layers survive, and done BEFORE the mesh-less early return below — a drop-in whose mesh is assigned
+	# later must not be the one flash left wearing the world's ink line.
+	layers |= InkOutline.ACTOR_INK_MASK_LAYER
 	scale = Vector3.ZERO if speed_to_scale > 0.0 else Vector3.ONE
 	if mesh == null:
 		return

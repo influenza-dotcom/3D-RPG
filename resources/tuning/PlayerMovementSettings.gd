@@ -69,8 +69,22 @@ extends Resource
 @export var stamina_regen_airborne: float = 8.0
 ## Stamina restored per second while in a special movement state that is not actively draining.
 @export var stamina_regen_active: float = 4.0
-## Seconds after spending stamina before natural recovery resumes.
+## Seconds after spending stamina before natural recovery resumes. Applies to the MOVEMENT verbs (jump, slide,
+## dash, grapple, and the per-frame sprint / wall-climb drains); a SHOT holds regen for the longer
+## stamina_regen_delay_after_shot below instead. Every spend re-FLOORS this countdown rather than adding to it,
+## so holding a drain down keeps regen frozen for as long as it lasts plus this tail.
+## ⚠ Raising this is felt hardest by BUNNYHOPPING, where a chain of jumps re-arms it on every launch.
 @export var stamina_regen_delay_after_spend: float = 0.35
+## Seconds a RANGED SHOT holds off recovery — deliberately much longer than the movement delay above, and the
+## knob that decides whether shooting can deplete you at all.
+##
+## ⭐ THE RULE: keep this ABOVE the slowest weapon's attack_speed (the shotgun's 1.4s), or that weapon
+## regenerates between its own shots and can never run you down however much its shot costs. At 0.35s the pistol
+## refunded 24.0 x (0.44 - 0.35) = 2.16 standing still against a 1.8 cost — it literally paid for itself, and no
+## amount of firing depleted the pool. At 1.5s NO shipped weapon earns a refund between consecutive shots, so
+## sustained fire is pure drain and the magazine sizes above become the real budget.
+## tests/test_combat_data.gd fails if a weapon is ever authored slower than this.
+@export var stamina_regen_delay_after_shot: float = 1.5
 ## Stamina drained per second while moving at the full run tier.
 @export var stamina_sprint_drain: float = 18.0
 ## Seconds sprint stays unavailable after running drains stamina to empty.
@@ -89,3 +103,31 @@ extends Resource
 @export var stamina_slide_start_cost: float = 12.0
 ## One-time stamina cost when a melee weapon swing actually starts.
 @export var stamina_melee_attack_cost: float = 14.0
+## Stamina charged per UNIT OF PER-SHOT EFFORT when a ranged shot actually leaves the barrel (after the ammo is
+## consumed). The weapon's effort comes from WeaponData.stamina_effort() — damage, pellets and blast payload —
+## normalised so a plain 1.0-damage single-projectile round scores exactly 1.0, so this number reads as "what one
+## baseline shot costs". A grenade launcher (effort 8.0) therefore costs 8x a baseline round without anyone hand-
+## pricing it; WeaponData.stamina_cost_mult is only a trim on the result. 0 = shooting is free for every gun.
+##
+## Unlike a melee swing this NEVER refuses the attack, so an exhausted player is never left with no way to fight
+## back: a pool ALREADY at/below zero makes the shot free, and a pool that is positive but short pays in full and
+## OVERDRAWS into debt (the same Dark-Souls overdraw jump/melee/slide already have). The bite is that sustained
+## fire holds off regen and eats the sprint budget — and that the debt itself briefly refuses every GATED verb,
+## fists included.
+##
+## ⭐ The one bound to respect: too HIGH and the heaviest weapon rails against stamina_shot_drain_ceiling below
+## (the launcher's 15.39 / effort 8.0 = 1.92) where the price stops tracking the weapon and it gets silently
+## CHEAPER as it grows stronger. There is no longer a lower bound from regen — stamina_regen_delay_after_shot now
+## outlasts every weapon's cadence, so nothing earns a refund between its own shots and any positive cost really
+## depletes. (Before that hold existed this dial was boxed into a ~16% band, because the launcher had to out-cost
+## the 13.2 it regenerated during its own 0.9s cadence.) Retune the whole roster together here rather than
+## reaching for per-weapon trims.
+@export var stamina_shot_cost: float = 1.8
+## Hard cap on a shot's cost, as a FRACTION of stamina_sprint_drain x the weapon's attack_speed — so no weapon,
+## however it is authored, can ever drain more than this share of the sprint rate on a held trigger. This is what
+## makes "shooting never costs more per second than running" a THEOREM rather than a thing a designer can break by
+## pairing a big payload with a fast cadence. Keep it under 1.0; the shipped 0.95 leaves the invariant strictly
+## true (0.95 x 18.0 = 17.1/s < 18.0/s) while leaving the grenade launcher 6% of headroom under its own cap.
+## ⚠ A weapon that HITS this cap gets silently CHEAPER as it grows more powerful, because the derived price is
+## discarded — tests/test_combat_data.gd pins that no shipped weapon is clamped, so that failure is loud.
+@export var stamina_shot_drain_ceiling: float = 0.95

@@ -34,6 +34,20 @@ drive = 0.25
 resource_name = "Speaker LowPass"
 cutoff_hz = 4200.0
 
+[sub_resource type="AudioEffectHighPassFilter" id="AudioEffectHighPassFilter_stationmusic"]
+resource_name = "Station Music HighPass"
+cutoff_hz = 900.0
+resonance = 0.7
+
+[sub_resource type="AudioEffectDistortion" id="AudioEffectDistortion_stationmusic"]
+resource_name = "Station Music Crunch"
+mode = 2
+drive = 0.25
+
+[sub_resource type="AudioEffectLowPassFilter" id="AudioEffectLowPassFilter_stationmusic"]
+resource_name = "Station Music LowPass"
+cutoff_hz = 4200.0
+
 [resource]
 bus/1/name = &"ambient"
 bus/1/solo = false
@@ -99,3 +113,15 @@ bus/8/effect/1/effect = SubResource("AudioEffectDistortion_speaker")
 bus/8/effect/1/enabled = true
 bus/8/effect/2/effect = SubResource("AudioEffectLowPassFilter_speaker")
 bus/8/effect/2/enabled = true
+bus/9/name = &"station_music"
+bus/9/solo = false
+bus/9/mute = false
+bus/9/bypass_fx = false
+bus/9/volume_db = 0.0
+bus/9/send = &"music"
+bus/9/effect/0/effect = SubResource("AudioEffectHighPassFilter_stationmusic")
+bus/9/effect/0/enabled = true
+bus/9/effect/1/effect = SubResource("AudioEffectDistortion_stationmusic")
+bus/9/effect/1/enabled = true
+bus/9/effect/2/effect = SubResource("AudioEffectLowPassFilter_stationmusic")
+bus/9/effect/2/enabled = true

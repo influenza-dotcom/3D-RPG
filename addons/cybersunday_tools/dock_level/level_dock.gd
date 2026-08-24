@@ -8,6 +8,8 @@ extends VBoxContainer
 ## (SceneWalk), never get_tree() group queries (which at edit time span the whole open editor scene).
 
 const SceneWalk := preload("res://addons/cybersunday_tools/core/scene_walk.gd")
+## The shared name-normalisation seam every other generator routes designer-typed names through (id == filename).
+const Scaffold := preload("res://addons/cybersunday_tools/dock_content/content_scaffold.gd")
 const TEMPLATE_SCENE := "res://scenes/levels/LevelTemplate.tscn"
 
 var _out: RichTextLabel = null
@@ -140,11 +142,18 @@ func _on_validate_level() -> void:
 	_set_out("\n".join(lines))
 
 func _on_new_level() -> void:
-	var nm := _name_edit.text.strip_edges()
-	if nm.is_empty():
+	var raw := _name_edit.text.strip_edges()
+	if raw.is_empty():
 		_warn("Type a level name first.")
 		return
-	_set_out(_make_level(nm, ""))
+	# SLUGIFY like every other generator: the raw text goes straight into a res:// path, so a "/" would silently write
+	# into another folder and a ":"/"?" would fail the save with only a generic message. The typed text is kept as the
+	# LevelData display_name, so "Raider Camp" -> raider_camp.tscn / raider_camp.tres shown as "Raider Camp".
+	var nm := Scaffold.slugify(raw)
+	if nm.is_empty():
+		_warn("'%s' has no usable letters or digits — pick a name like \"raider_camp\"." % raw)
+		return
+	_set_out(_make_level(nm, raw))
 
 ## Port of new_level.gd: clone LevelTemplate.tscn into scenes/levels/<name>.tscn (re-packed for a fresh uid) and
 ## write a matching LevelData at resources/levels/<name>.tres. Returns a bbcode result line. Refuses to overwrite.

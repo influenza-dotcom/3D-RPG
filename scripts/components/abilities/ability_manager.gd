@@ -50,7 +50,7 @@ func track(a: Ability) -> void:
 		_abilities.append(a)
 
 ## True while an ENABLED ability grants `id` — the ACTIVE predicate. The GATE consumed (via Player.has_mechanic)
-## by air_dash / laser_sight / grapple / fall_immunity / chess_visualizer; wall_climb / slide are driven through
+## by air_dash / grapple / fall_immunity / chess_visualizer; wall_climb / slide are driven through
 ## the Player's typed refs instead. A player-disabled implant reads FALSE here (all gameplay switches off) while
 ## still reading true on is_installed — the ChipInstaller re-sell guards key on THAT, never on this.
 func has(id: StringName) -> bool:

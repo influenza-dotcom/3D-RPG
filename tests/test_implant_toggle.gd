@@ -8,7 +8,7 @@ extends GutTest
 ## after a toggle would have permanently deleted the implant.
 ##
 ## All off-tree (bare Player.new(), no _ready — the CLAUDE.md rule) on pure-gate abilities (air_dash /
-## laser_sight / fall_immunity build no in-tree helpers); the in-tree feel of a mid-slide/mid-grapple switch-off
+## chess_visualizer / fall_immunity build no in-tree helpers); the in-tree feel of a mid-slide/mid-grapple switch-off
 ## is playtested. GameState is exercised on FRESH load().new() instances + a temp path, never the autoload.
 
 const PLAYER_PATH := "res://scripts/player/player.gd"
@@ -47,12 +47,12 @@ func test_switching_off_keeps_it_installed_but_inactive() -> void:
 
 func test_switching_back_on_restores_the_mechanic() -> void:
 	var p = load(PLAYER_PATH).new()
-	p.unlock_mechanic(&"laser_sight")
-	p.set_mechanic_active(&"laser_sight", false)
-	assert_true(p.set_mechanic_active(&"laser_sight", true), "switching it back on succeeds")
-	assert_true(p.has_mechanic(&"laser_sight"), "the mechanic is live again")
-	assert_true(p.unlocked_list().has(&"laser_sight"), "...and back in the ACTIVE save projection")
-	assert_false(p.disabled_list().has(&"laser_sight"), "...and out of the disabled one")
+	p.unlock_mechanic(&"chess_visualizer")
+	p.set_mechanic_active(&"chess_visualizer", false)
+	assert_true(p.set_mechanic_active(&"chess_visualizer", true), "switching it back on succeeds")
+	assert_true(p.has_mechanic(&"chess_visualizer"), "the mechanic is live again")
+	assert_true(p.unlocked_list().has(&"chess_visualizer"), "...and back in the ACTIVE save projection")
+	assert_false(p.disabled_list().has(&"chess_visualizer"), "...and out of the disabled one")
 	p.free()
 
 
@@ -98,9 +98,9 @@ func test_set_disabled_unlocks_builds_the_node_then_disables_it() -> void:
 	# the ids it's told to ENABLE — so without this build-then-disable step a switched-off implant would come
 	# back from a save uninstalled.
 	var p = load(PLAYER_PATH).new()
-	p.set_unlocks([&"laser_sight"])           # the saved ACTIVE set
+	p.set_unlocks([&"chess_visualizer"])           # the saved ACTIVE set
 	p.set_disabled_unlocks([&"air_dash"])     # ...and the saved switched-OFF set
-	assert_true(p.has_mechanic(&"laser_sight"), "the active implant loads active")
+	assert_true(p.has_mechanic(&"chess_visualizer"), "the active implant loads active")
 	assert_true(p.mechanic_installed(&"air_dash"), "the disabled implant is BUILT (installed) by the load")
 	assert_false(p.has_mechanic(&"air_dash"), "...but comes back switched OFF")
 	assert_true(p.set_mechanic_active(&"air_dash", true), "...and can be switched on again after the load")
@@ -113,12 +113,12 @@ func test_disabled_implant_survives_a_save_load_round_trip() -> void:
 	var gs = load(GAMESTATE_PATH).new()
 	var p = load(PLAYER_PATH).new()
 	p.unlock_mechanic(&"air_dash")
-	p.unlock_mechanic(&"laser_sight")
+	p.unlock_mechanic(&"chess_visualizer")
 	p.set_mechanic_active(&"air_dash", false)
 	gs.capture(p)
 	assert_false(gs.unlocks.has(&"air_dash"), "the switched-off implant is NOT in the active unlock set")
 	assert_true(gs.disabled_unlocks.has(&"air_dash"), "...it rides the separate disabled key")
-	assert_true(gs.unlocks.has(&"laser_sight"), "the active implant stays in the unlock set")
+	assert_true(gs.unlocks.has(&"chess_visualizer"), "the active implant stays in the unlock set")
 	assert_eq(gs.save_to_disk(TMP_SAVE), OK, "the profile writes")
 	var gs2 = load(GAMESTATE_PATH).new()
 	assert_true(gs2.load_from_disk(TMP_SAVE), "the profile loads back")
@@ -129,7 +129,7 @@ func test_disabled_implant_survives_a_save_load_round_trip() -> void:
 	p2.set_disabled_unlocks(gs2.disabled_unlocks)
 	assert_true(p2.mechanic_installed(&"air_dash"), "the reloaded player still OWNS the switched-off implant")
 	assert_false(p2.has_mechanic(&"air_dash"), "...and it is still switched off")
-	assert_true(p2.has_mechanic(&"laser_sight"), "the active implant reloads active")
+	assert_true(p2.has_mechanic(&"chess_visualizer"), "the active implant reloads active")
 	p2.free()
 	p.free()
 	gs2.free()
@@ -185,13 +185,13 @@ func test_clicking_a_row_flips_that_implant_and_no_other() -> void:
 	# _on_row_toggled(on, id). A reversed pair keeps the arity — only asserting WHICH implant moved catches it.
 	var p = load(PLAYER_PATH).new()
 	p.unlock_mechanic(&"air_dash")
-	p.unlock_mechanic(&"laser_sight")
+	p.unlock_mechanic(&"chess_visualizer")
 	var screen := _screen_with(p)
 	var row: Button = screen._make_toggle_row(&"air_dash", "Air Dash", "", true)
 	row.button_pressed = false  # the real click path: emits toggled(false) into the bound handler
 	assert_false(p.has_mechanic(&"air_dash"), "clicking the row switched THAT implant off")
 	assert_true(p.mechanic_installed(&"air_dash"), "...without uninstalling it")
-	assert_true(p.has_mechanic(&"laser_sight"), "...and left the other implant alone")
+	assert_true(p.has_mechanic(&"chess_visualizer"), "...and left the other implant alone")
 	row.button_pressed = true
 	assert_true(p.has_mechanic(&"air_dash"), "clicking again switches it back on")
 	row.free()

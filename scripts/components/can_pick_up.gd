@@ -5,7 +5,7 @@ extends LookAtInteractable
 const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable per-object save key (GameState.world_objects)
 
-## Drop-in PICKUP component: aim at the object and press E (Interact) to add a configured Item to your
+## Drop-in PICKUP component: aim at the object and press F (Interact) to add a configured Item to your
 ## inventory. Extends LookAtInteractable (the talk-layer hitbox + look-at outline); this adds only the
 ## pickup behaviour, so PickupRay detects it with ZERO changes to ray_cast.gd, like Talkable / LootableCorpse.
 ##

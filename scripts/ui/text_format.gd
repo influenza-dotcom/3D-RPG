@@ -44,6 +44,15 @@ static func num(value: float, decimals: int = 2) -> String:
 	return "0" if out == "-0" else out
 
 
+## Zero-padded TWO-DIGIT integer ("07", "35") — the clock-face idiom, and the reason it lives here rather
+## than as a "%02d" at each call site: digit rendering is a LOCALE concern (several locales draw their own
+## digit glyphs), so the day that lands it changes in one place, exactly as num() centralises the decimal
+## separator. Only the PADDING is this function's promise — a value outside 0..99 prints in full rather than
+## being truncated to two characters, because a silently clipped number is worse than a wide one.
+static func pad2(value: int) -> String:
+	return "%02d" % value
+
+
 ## Whole-WORD (or whole-template) selection by count — the future tr_n() seam. The two-form
 ## signature is deliberately the ENGLISH source shape (singular / everything-else); languages with
 ## richer agreement (Russian needs 3 forms, Arabic 6) will be served by widening this behind

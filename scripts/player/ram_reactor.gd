@@ -98,6 +98,9 @@ func _check_ram_damage(delta: float, pre_velocity: Vector3) -> void:
 			if enemy.hp <= 0:
 				# centralized one-shot (self-freeing); play_sfx no-ops on a null stream
 				AudioManager.play_sfx(enemy.global_position, host.bowling_sound, host.bowling_sound_volume_db)
+				# The kill FLASH needs nothing here: take_damage above was credited to `host`, so its lethal branch
+				# already fired the kill cue on the player. This branch owns only the bowling-strike sfx. (The
+				# white_flash pop further down is a different cue — it fires on EVERY qualifying ram, lethal or not.)
 			elif host.ram_thud_sound:
 				AudioManager.play_sfx(enemy.global_position, host.ram_thud_sound, 0.0, randf_range(0.95, 1.05))
 

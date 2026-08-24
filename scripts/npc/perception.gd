@@ -11,14 +11,22 @@ extends Node3D
 ## spot) before it finally forgets. As a child of the enemy it inherits the enemy's transform,
 ## so the cone points along the enemy's facing automatically. (Hearing is OR-ed into the
 ## perceived test: a heard noise raises INVESTIGATING via can_hear().)
+##
+## Two target-side stealth modifiers ride on top, both read duck-typed off the target so an NPC target is
+## unaffected: CROUCHING shrinks the sight RANGE (crouch_sight_mult), and CARRYING A LIT LAMP — the player's
+## flashlight — both LENGTHENS that range and speeds the detection fill (GameSettings.light_stealth's
+## carried_light_* dials). The light meter (light_exposure -> light_falloff) can only ever slow detection because
+## it saturates at "fully lit"; carried_light is the counterpart that makes a torch actually cost you something.
 
 enum State { UNAWARE, DETECTING, ALERTED, INVESTIGATING }
 ## A graded awareness tier (finer than the 4 states) for HUD feedback + a read-only planner fact. Derived from
 ## state + the detection meter via suspicion(); CALM (oblivious) -> WARY -> SUSPICIOUS -> ALERTED (locked on).
 enum SuspicionTier { CALM, WARY, SUSPICIOUS, ALERTED }
 
-## Emitted the instant the enemy FIRST becomes aware of the player by ANY sense (sight -> DETECTING
-## or sound -> INVESTIGATING), before the meter fills. Drives the MGS "!" alert sting.
+## Emitted the instant the enemy FIRST becomes aware of SOMETHING by ANY sense (sight -> DETECTING, sound ->
+## INVESTIGATING, a hit / a caught thief -> ALERTED, a heard noise / scripted point -> INVESTIGATING), before the
+## meter fills. Drives the MGS "!" alert sting. Carries no args (AiEventLog binds onto it); WHAT was noticed is
+## published in `noticed` immediately before each emit — read it from the handler.
 signal just_spotted
 ## Emitted when the enemy locks on / becomes ALERTED (about to fire). Drives the sniper charge sfx.
 signal just_alerted
@@ -90,6 +98,17 @@ var detection: float = 0.0          ## 0..1 awareness meter (also drives the las
 var last_known_position: Vector3
 var target: Node3D                  ## the target root — player or NPC (set by the owner)
 var target_body: Node3D             ## target's collision shape for LOS; falls back to target
+## WHAT the most recent just_spotted was ABOUT — the node the noticing sense / forced spot fired ON: sense()'s
+## `target` (seen OR heard), the attacker / thief handed to alert_to, the noise's `emitter` handed to
+## investigate_point (the Player for its own footsteps + gunfire — NoiseEmitter stamps it; an NPC for its gunfire
+## pulse — NoisePulser stamps it), or NULL for nobody in particular (a thrown decoy, an authored beeper, a scripted
+## "go look here", a hit we couldn't attribute). Written IMMEDIATELY before every just_spotted.emit() and meant to
+## be read by the handler on that same call (signals are synchronous), so NPC._on_spotted can ask "was it the
+## PLAYER I noticed?" WITHOUT inferring it from NPC._target — that's a PROXIMITY lock (NpcTargeting binds the
+## nearest hostile by range while still UNAWARE), so it names the player even when what the guard actually noticed
+## was a decoy or another NPC's gunfire. Loose `Node` (never typed to the stimulus; it can be freed under us —
+## is_instance_valid it before use). Per-life: forget() clears it.
+var noticed: Node = null
 
 var _investigate_t: float = 0.0
 ## Pursuit-grace countdown: re-armed to pursuit_grace_time every frame we can SEE the target, decremented while
@@ -139,6 +158,14 @@ func sense(delta: float) -> void:
 			# but inert until a writer drops light_exposure below 1.0 (so an unlit scene detects exactly as before).
 			if seen and (range_falloff != null or peripheral_falloff != null or _effective_light_falloff() != null):
 				rate *= visibility_factor(_see_distance_frac(), _see_angle_frac(), _target_light_factor())
+			# CARRIED LIGHT (the flashlight penalty): a target walking around holding their own lamp is a beacon,
+			# so we lock on FASTER. Applied OUTSIDE visibility_factor on purpose — that clamps to 1.0, so it can
+			# only ever SLOW detection, and a light meter that saturates at "fully lit" can never make a torch cost
+			# anything. Reads exactly 1.0 for a target carrying nothing, so NPC-vs-NPC and a torch-less player
+			# detect as before. Gated on `seen` like the multipliers above so it never speeds the DRAIN up — being
+			# lit must not make you forgotten faster.
+			if seen:
+				rate *= _carried_light_detect_mult()
 			detection = clampf(detection + (rate if seen else -rate), 0.0, 1.0)
 			if detection >= 1.0:
 				state = State.ALERTED
@@ -180,8 +207,10 @@ func sense(delta: float) -> void:
 				if _investigate_t <= 0.0:
 					state = State.UNAWARE
 					detection = 0.0
-	# First noticed by ANY sense -> the MGS "!". Locking on to fire -> the sniper charge cue.
+	# First noticed by ANY sense -> the MGS "!". Locking on to fire -> the sniper charge cue. Both senses are
+	# target-based (can_see / can_hear test `target`), so what we noticed IS the target — publish it for the handler.
 	if prev_state == State.UNAWARE and state != State.UNAWARE:
+		noticed = target
 		just_spotted.emit()
 	if state == State.ALERTED and prev_state != State.ALERTED:
 		just_alerted.emit()
@@ -218,12 +247,15 @@ func refresh_investigation() -> void:
 ## Force full alert toward a known position — e.g. the enemy just got shot, so it instantly
 ## knows roughly where you are. sense() takes over next tick: it stays ALERTED while it can
 ## see you, or turns to investigate the spot (so a shot in the back spins it around).
-func alert_to(_position: Vector3) -> void:
+## `who` = the node this alert is ABOUT (the attacker, the caught thief), published as `noticed` for the "!"
+## handler; null = a hit we couldn't attribute to anyone.
+func alert_to(_position: Vector3, who: Node = null) -> void:
 	var prev := state
 	last_known_position = _position
 	detection = 1.0
 	state = State.ALERTED
 	if prev == State.UNAWARE:
+		noticed = who
 		just_spotted.emit()  # shot out of nowhere still counts as a detection ("!")
 	# Intentionally NO just_alerted here: being shot shouldn't replay the sniper charge sting on
 	# every hit. That sting fires on a genuine sense-based lock-on + per-shot wind-up instead.
@@ -240,7 +272,10 @@ func alert_to(_position: Vector3) -> void:
 ## detection bark don't mislabel the body or swallow the body line).
 ## `seed_radius` (Slice 8) sizes the breadcrumb search's uncertainty ring — a loud noise seeds a wider area than a
 ## faint one (0 until Slice 8.5 wires real per-channel seeds; inert at the SearchSettings defaults regardless).
-func investigate_point(pos: Vector3, alerting: bool = true, seed_radius: float = 0.0, sector_phase: float = NAN) -> void:
+## `source` = WHO made the noise / what this hunch is about (a NoiseSource's `emitter`), published as `noticed` for
+## the "!" handler; null = nobody in particular (a decoy, an ambient beeper, a scripted "go look here") — the NPC is
+## investigating a POINT, not a person.
+func investigate_point(pos: Vector3, alerting: bool = true, seed_radius: float = 0.0, sector_phase: float = NAN, source: Node = null) -> void:
 	if state == State.DETECTING or state == State.ALERTED:
 		return
 	var prev := state
@@ -253,6 +288,7 @@ func investigate_point(pos: Vector3, alerting: bool = true, seed_radius: float =
 	if prev != State.INVESTIGATING:
 		begin_search(seed_radius, sector_phase)
 	if alerting and prev == State.UNAWARE:
+		noticed = source
 		just_spotted.emit()
 
 ## Forget everything and drop to UNAWARE with a cleared meter. Called by the owner when it has NO valid target
@@ -264,6 +300,7 @@ func forget() -> void:
 	detection = 0.0
 	_investigate_t = 0.0
 	_pursuit_grace_t = 0.0  # drop any in-flight pursuit coast so a re-detect starts fresh (and NpcPool reuse is clean)
+	noticed = null  # the last "!" is over; a stale (possibly freed) stimulus must not leak into the next edge / pooled life
 	_search.clear()  # a stale widened ring/breadcrumbs must not leak into the next investigation
 	_sector_phase_override = NAN  # GA-4: drop a coordinated sector so the next search reverts to the per-NPC default
 
@@ -433,22 +470,58 @@ func can_see_node(node: Node3D) -> bool:
 	var hit := world.direct_space_state.intersect_ray(query)
 	return hit.is_empty() or hit.get("collider") == node
 
-## Sight range, shortened while the target is CROUCHING (stealth) — a deeper crouch shrinks how close an
-## enemy must be to spot you. Reads the target's `crouch` component duck-typed (only the player has one);
-## any target without it uses the full range. Hearing is already silenced by crouch via noise_radius.
+## Sight range for the CURRENT target: the base range SHORTENED while they crouch (stealth) and LENGTHENED while
+## they carry their own lit lamp (the flashlight penalty). The two are multiplicative, so crouching with your torch
+## on mostly cancels the crouch discount — sneaking and a lamp don't mix, by design. Both factors read 1.0 for a
+## target that has neither, so an NPC target (or a bare Perception) uses the plain sight_range as before.
 func _effective_sight_range() -> float:
+	return sight_range * _crouch_range_mult() * _carried_light_range_mult()
+
+## Sight-range multiplier from the target CROUCHING — a deeper crouch shrinks how close an enemy must be to spot
+## you. Reads the target's `crouch` component duck-typed (only the player has one); any target without it reads
+## 1.0 (full range). Hearing is already silenced by crouch via noise_radius.
+func _crouch_range_mult() -> float:
 	if not is_instance_valid(target):
-		return sight_range
+		return 1.0
 	var crouch: Variant = target.get(&"crouch")
 	if not (crouch is Object) or not is_instance_valid(crouch):
-		return sight_range
+		return 1.0
 	# Duck-typed read: the crouch component's crouch_t into a Variant + a numeric type-guard. A target whose
 	# crouch node lacks it (or holds a non-number) is treated as standing — full range, the neutral fallback.
 	var raw: Variant = crouch.get(&"crouch_t")
 	if not (raw is float or raw is int):
-		return sight_range
-	var ct: float = clampf(float(raw), 0.0, 1.0)
-	return sight_range * lerpf(1.0, crouch_sight_mult, ct)
+		return 1.0
+	return lerpf(1.0, crouch_sight_mult, clampf(float(raw), 0.0, 1.0))
+
+## Sight-range multiplier from the target CARRYING a lit lamp (their flashlight): >= 1.0, so a beacon is spotted
+## FURTHER out than an unlit target. Tuned globally on GameSettings.light_stealth (carried_light_sight_mult) rather
+## than per-archetype — like the light curve it sits beside, one dial turns the whole trade up or down.
+func _carried_light_range_mult() -> float:
+	var ls: Variant = _light_stealth()
+	return ls.carried_sight_mult(_target_carried_light()) if ls != null else 1.0
+
+## Detection-fill multiplier from the target carrying a lit lamp: >= 1.0, so a beacon locks an enemy on faster.
+func _carried_light_detect_mult() -> float:
+	var ls: Variant = _light_stealth()
+	return ls.carried_detect_mult(_target_carried_light()) if ls != null else 1.0
+
+## The global light-stealth tuning, read the PER-FRAME-SAFE way. Every reader below runs on each sense() tick for
+## every live NPC, and that is exactly the poller that trips the editor's script-reload hiccup: for a sub-second
+## window during a reimport a direct `GameSettings.light_stealth` THROWS "Invalid access to property", while
+## Object.get() just returns null (which every caller here already degrades to 1.0 on). Same fix as
+## restocker._interval(); event-driven consumers keep the plain GameSettings.<group> idiom.
+func _light_stealth() -> Variant:
+	return GameSettings.get(&"light_stealth")
+
+## The target's carried-light strength 0..1 (0 = carrying nothing lit), read duck-typed off `carried_light` — the
+## field PlayerLightLevel stamps from the &"carried_light" group. Absent / non-numeric -> 0.0, the neutral
+## fallback, so every NPC target and any player without the sampler is penalty-free. Numeric type-guard per the
+## duck-typed-read rule (same shape as _target_light_factor's exposure read).
+func _target_carried_light() -> float:
+	if not is_instance_valid(target):
+		return 0.0
+	var raw: Variant = target.get(&"carried_light")
+	return clampf(float(raw), 0.0, 1.0) if (raw is float or raw is int) else 0.0
 
 ## Per-frame visibility scalar (0..1) for a target at normalized distance `dist_frac` (0 = point-blank, 1 = at
 ## sight range) and `angle_frac` (0 = dead centre, 1 = cone edge): the DETECTING meter fills FASTER for a close,
@@ -477,7 +550,7 @@ func _target_light_factor() -> float:
 func _effective_light_falloff() -> Curve:
 	if light_falloff != null:
 		return light_falloff
-	var ls: Variant = GameSettings.light_stealth
+	var ls: Variant = _light_stealth()  # per-frame reader — see _light_stealth() for why this isn't direct access
 	return ls.falloff() if ls != null else null
 
 ## The current target's distance into sight range, normalized 0..1 (for the range falloff); 0 with no target.

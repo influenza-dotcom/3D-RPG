@@ -134,8 +134,10 @@ func _draw() -> void:
 			badge = Zorkmids.fmt(floorf(float(_count) * Zorkmids.QUANTUM))
 		var pos := Vector2(0.0, size.y - 3.0)
 		# Black outline first (the treatment every HUD label uses) so the count stays legible over the item art.
+		# The ink is the skin's GRID knob, never the panel ink (MenuStyle.text_color): this badge sits on the item
+		# art inside a dark tinted cell, not on the menu panel, so it stays light while the panel palette runs dark.
 		draw_string_outline(font, pos, badge, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 3.0, fs, maxi(1, fs / 5), Color(0, 0, 0, 0.9))
-		draw_string(font, pos, badge, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 3.0, fs, MenuStyle.text_color())
+		draw_string(font, pos, badge, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 3.0, fs, MenuStyle.skin.tile_count_color)
 
 ## The colour to MODULATE this item's icon by when drawn — its captured coat tint (RandomCoat.COAT_META), so a
 ## picked-up dog's tile shows the SAME coat it wore in the world instead of the neutral white the icon was baked at.

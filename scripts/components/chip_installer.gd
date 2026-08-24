@@ -11,7 +11,7 @@ extends LookAtInteractable
 ## Drop-in UPGRADE MECHANIC component. The player finds/buys MICROCHIP items (Item.installs_ability set, see
 ## resources/items/chip_*.tres) but holding one does nothing — they bring it HERE and pay zorkmids to have it
 ## INSTALLED, which permanently grants the encapsulated ability via Player.unlock_mechanic. Every player upgrade
-## (wall_climb, grapple, slide, air_dash, laser_sight, fall_immunity) ships as one of these chips.
+## (wall_climb, grapple, slide, air_dash, fall_immunity) ships as one of these chips.
 ##
 ## Two ways to use it, exactly like Merchant / Healer:
 ##   1. STANDALONE (a workbench / a lone mechanic NPC with no Talkable): leave `standalone` on (default) — it
@@ -82,6 +82,8 @@ func _ready() -> void:
 		_fit_hitbox_to_host()
 	if standalone:
 		StationSpeaker.ensure(self)  # a self-serve install booth answers with the shared panel chirp; a data-only installer rides a talking NPC, and people don't beep
+	# The minimap pin — ungated (a back-alley mechanic is still where you go for chrome).
+	StationMarker.ensure(self, StationMarker.Kind.TECH)
 
 ## Seed `into` from the authored chip stock. Non-weapon items (chips are MISC) stack by shared template, so a
 ## line stocks `count` of the shared Item — matching Merchant's non-weapon branch. Split out for tests.

@@ -28,6 +28,9 @@ const SNIPER_GLINTS_SCRIPT := preload("res://scripts/ui/sniper_glints.gd")
 ## above: a brand-new class_name isn't in the editor's global script cache until it reimports, and naming the
 ## type here would fail this whole file to parse ("Could not find type EnemyHealthBar") in the meantime.
 const ENEMY_HEALTH_BAR_SCRIPT := preload("res://scripts/ui/enemy_health_bar.gd")
+## The HUD-ghost drop-in, for its `set_ghosted` opt-out helper only (this file builds no ghost of its own).
+## Preloaded BY PATH + used through the const for the same class-cache reason as the two scripts above.
+const HUD_GHOST_SCRIPT := preload("res://scripts/ui/hud_ghost.gd")
 
 var host: Player
 
@@ -81,7 +84,8 @@ func build(ui: Node, camera: Node3D) -> void:
 	ui.add_child(_hurt_flash)
 	_hurt_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# Full-screen flash when the player gets a KILL (Hotline Miami); sky-independent so it shows over the
-	# skybox too. Alpha is pulsed in flash_kill().
+	# skybox too. Alpha is pulsed in flash_kill() — and ships OFF (kill_flash_peak_alpha = 0), because this rect
+	# is added LAST and so washed over the BloodSplatter overlay; see flash_kill().
 	_kill_flash = ColorRect.new()
 	_kill_flash.color = Color(GameSettings.player_feedback.kill_flash_color, 0.0)
 	_kill_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -196,7 +200,7 @@ func build(ui: Node, camera: Node3D) -> void:
 
 	# Claim/Unclaim prompt (driven by ClaimInteraction via Player.set_claim_cue). Placed ABOVE the pet/takedown prompt
 	# (offset 96) with its own hold bar just under it (78), so an object that is BOTH claimable AND pettable — the dog
-	# — shows both stacked ("[T] Befriend Dog" over "[Q] Pet Dog") with no overlap. The bar fills only on a HOLD-to-
+	# — shows both stacked ("[B] Befriend Dog" over "[Q] Pet Dog") with no overlap. The bar fills only on a HOLD-to-
 	# unclaim (a befriend is a tap), shown between the label (56) and the pet cluster (96).
 	_claim_label = Label.new()
 	_claim_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -235,6 +239,27 @@ func build(ui: Node, camera: Node3D) -> void:
 	_enemy_hp = ENEMY_HEALTH_BAR_SCRIPT.new()
 	ui.add_child(_enemy_hp)
 	_enemy_hp.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_apply_ghost_rule()
+
+## HUD-GHOST OPT-OUTS for the overlays built above (the rule itself is written out in ui.gd's _build_ghost).
+## The HUD is re-rendered into a fading offscreen buffer that is drawn behind it, so an INSTRUMENT READOUT
+## trails; these two families must not.
+##   - THE FULL-SCREEN WASHES (speed vignette, dash / hurt / kill flashes) — each is already a timed fade
+##     across the whole canvas, and smearing one over its own tail turns a punch into a haze that outlives
+##     the event it reports. The kill flash is the loudest case: a 1 s hold ghosted is several seconds of
+##     coloured fog.
+##   - THE WORLD-DIRECTION ANNOTATIONS (damage arcs, "being aimed at" radials, sniper glints) — these are
+##     bearings. A ghost of one is a bearing that was true a moment ago, i.e. a second arc pointing at a
+##     threat that has moved. Everything else built here (the hitmarker, the centre-top prompt ladder and
+##     its hold bars, the stealth badge + detection meter, the enemy health bar) is a readout and keeps its
+##     tail, which is why they are absent from this list rather than forgotten.
+## Kept as its own method so the list reads as a policy and not as five stray lines at the end of build().
+func _apply_ghost_rule() -> void:
+	for wash: CanvasItem in [_speed_lines, _dash_flash, _hurt_flash, _kill_flash]:
+		HUD_GHOST_SCRIPT.set_ghosted(wash, false)
+	HUD_GHOST_SCRIPT.set_ghosted(_damage_indicators, false)
+	HUD_GHOST_SCRIPT.set_ghosted(_aim_indicators, false)
+	HUD_GHOST_SCRIPT.set_ghosted(_sniper_glints as CanvasItem, false)
 
 ## Skin a stock ProgressBar into the HUD meter look: neutral dark track + solid fill, both from the
 ## HudSettings "Prompt meters" knobs. The StyleBoxFlat pair is built fresh PER BAR and the fill box is
@@ -407,7 +432,9 @@ func on_dealt_hit(headshot := false, hp_frac := 1.0) -> void:
 	# still (HEADSHOT_PITCH_MULT < 1.0). NOTE: this intentionally desyncs the ding from the per-weapon
 	# impact-against-character sound (attack.gd / projectile.gd still pitch UP on headshot).
 	var pitch := lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, hp_frac) * (Player.HEADSHOT_PITCH_MULT if headshot else 1.0)
-	AudioManager.play_2d_sfx(Player.HIT_SFX, 0.0, pitch)
+	# vary=false: this is a HUD readout, not a world sound, and its pitch IS the information (how close to
+	# death the target is). A random wobble on top would blur exactly the signal the cue exists to carry.
+	AudioManager.play_2d_sfx(Player.HIT_SFX, 0.0, pitch, &"sfx", false)
 
 ## Air-dash recharge cue: pulse the white screen-flash to peak alpha, then fade it out in real time.
 ## Gated on the Accessibility "Screen Flashes" toggle (read live) — off = no full-screen pulse (photosensitivity).
@@ -434,7 +461,15 @@ func flash_hurt() -> void:
 ## sky shader, so it shows over the authored skybox too. Real-time (ignore_time_scale) so a kill's slow-mo
 ## doesn't stretch it. Gated on the Accessibility "Screen Flashes" toggle (read live) — off = no pop
 ## (photosensitivity); the twin StarSky.flash_kill sky pop honours the same toggle.
+##
+## OFF BY DEFAULT: kill_flash_peak_alpha ships at 0 and this early-outs there, so a kill pops the SKY only.
+## _kill_flash is the LAST child of `ui`, i.e. it draws OVER the BloodSplatter overlay Player.on_nearby_death
+## sprays on a close kill — a 0.45-alpha full-screen wash for 0.35 s buried the blood, which is the kill
+## feedback that actually reads at melee range (where the sky is not in frame at all). Raise the alpha to bring
+## the screen punch back; the early-out is what keeps a zeroed knob from running a pointless invisible tween.
 func flash_kill() -> void:
+	if GameSettings.player_feedback.kill_flash_peak_alpha <= 0.0:
+		return
 	if _kill_flash and Settings.screen_flash_enabled:
 		if _kill_flash_tween != null and _kill_flash_tween.is_valid():
 			_kill_flash_tween.kill()

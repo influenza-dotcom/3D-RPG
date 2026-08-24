@@ -22,6 +22,9 @@ func _ready() -> void:
 	_build_outline()
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
+	# The minimap pin. This station has no `standalone` field (it is always a kiosk), so ensure() pins it to the
+	# box rim — a fixed fixture worth pointing at. TRAIN, shared with LevelUp / RespecStation.
+	StationMarker.ensure(self, StationMarker.Kind.TRAIN)
 
 func start_talk(player: Node) -> void:
 	if perk == null or player == null:

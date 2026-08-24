@@ -6,6 +6,8 @@ extends Resource
 ## (resources/tuning/PlayerFeedbackSettings.tres), read as GameSettings.player_feedback.<field>.
 ## These were consts scattered across player.gd / player_hud.gd / character.gd; now a designer
 ## tunes the whole "getting rocked -> keeling over -> fading back in" arc without touching code.
+## The last group is the TAIL of that arc: once the shooting stops the mix calms down and you start
+## knitting back together (Out-of-combat recovery, below).
 
 @export_group("Hurt (getting rocked)")
 ## time_scale at the hit's slow-mo dip (lower = more brutal).
@@ -167,12 +169,32 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 @export var dash_flash_time: float = 0.18
 
 @export_group("Kill flash (HUD)")
-## Peak opacity (0..1) of the full-screen pop when YOU land a kill — the Hotline-Miami flash. Sky-independent, so it shows over the skybox too.
-@export var kill_flash_peak_alpha: float = 0.45
-## Seconds the kill flash takes to fade out.
-@export var kill_flash_time: float = 0.22
-## The full-screen kill-flash tint.
-@export var kill_flash_color: Color = Color(1.0, 1.0, 1.0)
+## Peak opacity (0..1) of the full-screen pop when YOU land a kill — the Hotline-Miami flash. Sky-independent,
+## so it would show over the skybox too.
+##
+## SHIPS AT 0 — a kill is a SKY-ONLY cue, and this alpha is the switch that turns the screen half back on.
+## Reason: PlayerHud builds this ColorRect as the LAST child of `ui`, so it drew OVER the BloodSplatter overlay
+## that Player.on_nearby_death sprays on a close kill, and a 0.45-alpha full-screen wash fading over 0.35 s
+## buried the blood — the one piece of kill feedback that reads at exactly the melee range where the sky is not
+## in frame. PlayerHud.flash_kill early-outs at 0, so nothing tweens; raise it to bring the screen punch back.
+##
+## ⭐KNOWN COST of shipping this at 0: the screen punch was the ONLY half of the kill cue that works with no sky
+## in frame, and blood_splatter_range is just 3.5 m — so an INDOOR kill past ~3.5 m (a DoT tick finishing someone,
+## a fall you caused, a shot down a corridor) now confirms with the camera kick alone. That is the deliberate
+## trade for seeing the blood; re-arm this knob (and see kill_flash_color's note on hue) if it reads as too quiet.
+@export var kill_flash_peak_alpha: float = 0.0
+## Seconds the kill flash takes to FADE OUT — it snaps to peak alpha and eases straight to 0, with no hold beat
+## (unlike the sky channel's up → hold → down). Only matters if kill_flash_peak_alpha is raised off 0; it was
+## lengthened from 0.22 back when the punch was armed, and is kept so re-arming gives you the tuned fade rather
+## than the old snap.
+@export var kill_flash_time: float = 0.35
+## The full-screen kill-flash tint, kept matched to GameSettings.effects.sky_flash_color (red) so that raising
+## kill_flash_peak_alpha off 0 gives you the SAME colour on both halves of the cue rather than two different
+## flashes. Retune it with the sky colour, or set Color(1, 1, 1) for the old white screen punch.
+## ⭐If you DO re-arm it, note that RED is now the worst possible tint for it: the blood blobs it buried are
+## themselves dark red (EffectsSettings.blood_splatter_tint_*), so a red wash hides them by hue as well as by
+## alpha, and merely reordering the rect under BloodSplatter will not give the blobs their contrast back.
+@export var kill_flash_color: Color = Color(1.0, 0.1, 0.08)
 
 @export_group("Toasts")
 ## Min gap (ms) between sneak-result toasts so a multi-pellet sneak shot shows one line.
@@ -184,3 +206,50 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 ## Colour of the death wallet-settlement toast (death_purse_loss_fraction) shown on the in-place respawn — the one
 ## that tells you whether your killer pocketed the purse or it spilled on the ground where you fell.
 @export var death_wallet_toast_color: Color = Color(1.0, 0.78, 0.32)
+@export_group("Out-of-combat recovery")
+## Seconds of quiet before the player counts as OUT OF COMBAT — the ONE predicate behind BOTH the passive health
+## regen and the heartbeat duck (Player.is_out_of_combat), so the audible cue and the mechanic can never disagree
+## about when the fight ended.
+## "Combat" is whatever stamps Player.note_combat(): we fired, we lost HP for ANY reason (a hazard, a burn tick, a
+## fall with nobody around — being on fire IS combat), or a hostile is drawing a bead on us. That last one re-stamps
+## while an alerted enemy holds us as its target, so being HUNTED never opens the window even between shots.
+## ⭐ Keep this ABOVE GunPose.idle_combat_grace (5.0, gun_pose.gd:40) so the VISUAL tell lands FIRST: the weapon
+## droops, and only then does the mix soften and the HP start climbing. A player who watched the gun come down has
+## already been taught what the quieter heartbeat means; below 5.0 the reward arrives with the gun still up.
+@export var combat_calm_grace: float = 6.0
+## Health regenerated per second while out of combat, as a FRACTION OF MAX HP. 0 = no passive regen at all (the
+## whole feature off, no code change).
+## A FRACTION rather than flat HP/s because it pins the RECOVERY TIME (1/rate seconds empty->full) regardless of
+## max_hp — which LevelUp, PerkManager and PassiveItemBuffs all move at runtime through CharacterStats.restamp_derived
+## — so the feel doesn't drift as a run progresses and a high-strength build doesn't silently heal proportionally
+## slower. 0.012 = ~83 s for a full refill at baseline endurance; on the shipped 4 HP player that's 0.048 HP/s.
+## ⚠ This competes with the shipped healing money-sinks (the Healer prices linearly in missing HP; the Wait screen's
+## hourly trickle). Lower this — or health_regen_cap_frac — if paying to be patched up stops mattering.
+@export var health_regen_frac_per_sec: float = 0.012
+## Ceiling the passive regen climbs to, as a fraction of max HP. ⭐ THE ECONOMY DIAL. 1.0 = all the way to full.
+## Set it to ~0.5 for the Souls/New-Vegas shape WaitSettings' header describes: field regen only gets you off the
+## floor, and a Bonfire / Healer / health pack still has to finish the job.
+@export_range(0.0, 1.0, 0.05) var health_regen_cap_frac: float = 1.0
+## Minimum health the regen banks before it COMMITS, as a fraction of max HP. The tick accumulates into a float
+## carry and only pays out through Character.heal() once the carry crosses this — because `damaged` is a DISCRETE
+## event signal (the player's carried emitting light recolours on it, see _setup_health_light), and firing it 60x a
+## second for a sub-milli-HP slice would re-run health_light_color_for every physics frame. Rate-PROPORTIONAL by
+## design: the emit count is fixed per HP healed, not per second, so lowering the RATE can't reintroduce the spam —
+## and because both the step and the rate scale with max_hp, the commit INTERVAL is the same at every max HP.
+## ⭐ KEEP IT SMALL — this is signal hygiene, and it is NOT free feel. The HUD bar polls player.hp every frame and
+## fills the live segment CONTINUOUSLY (ui.gd _update_hp_bar), so the step size is directly visible: at 0.05 the bar
+## sat frozen for ~4 s and then jumped a fifth of a segment, which reads as a per-tick regen effect rather than the
+## continuous knitting-back-together this is meant to be. 0.01 commits roughly once a second — a creep, not a tick.
+## 0 = commit every frame (smoothest possible, one `damaged` emit per frame).
+@export_range(0.0, 0.5, 0.01) var health_regen_commit_frac: float = 0.01
+## dB SUBTRACTED from the low-HP heartbeat while out of combat — the "slight" duck. Authored POSITIVE ("how many dB
+## quieter") and absf()'d at the read site, so a designer who types a minus still gets a cut, never a boost.
+## Folded into the SAME lerp(heartbeat_db_min, heartbeat_db_max, intensity) the beat already uses, so the near-death
+## ramp survives intact: a calm player bleeding out still gets louder as they fall, just quieter than mid-firefight.
+## ⭐ VOLUME ONLY. Do NOT express this duck by scaling hb_intensity — that scalar also drives the BEAT INTERVAL and
+## the hard-silence gate in Player._update_low_hp, so scaling it would slow the pulse (killing the urgency read — a
+## design change wearing a mix change's clothes) or mute the cue outright. And do NOT duck the `sfx` BUS: it carries
+## every other SFX plus the diegetic speaker bus, and the death mix already writes its own duck there.
+## 4.0 dB reads as released tension without approaching inaudible — against the shipped -16.0/+2.0 range it puts a
+## calm threshold beat at -20.0 dB and a calm near-death beat at -2.0 dB, so the cue still reads at every HP level.
+@export_range(0.0, 24.0, 0.5) var heartbeat_calm_duck_db: float = 4.0

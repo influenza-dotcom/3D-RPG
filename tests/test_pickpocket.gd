@@ -60,7 +60,7 @@ func test_microchip_is_a_gamble_that_scales_with_larceny() -> void:
 	# tooltip says so); an invested thief sees a real gamble. This is the skill-investment payoff in one row.
 	var ls = load(LOOT_PATH)
 	var st := _settings()
-	var chip := _item(250.0, &"chip_laser_sight")
+	var chip := _item(250.0, &"chip_air_dash")
 	assert_true(ls._pickpocket_can_lift(chip, null, _sheet(0), st),
 		"even at larceny 0 the chip is ATTEMPTABLE — no more flat 'too valuable' refusal")
 	assert_eq(ls._pickpocket_success_percent(chip, null, _sheet(0), st), 0,

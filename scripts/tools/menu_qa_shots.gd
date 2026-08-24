@@ -217,7 +217,7 @@ func _run() -> void:
 	var ci := ChipInstaller.new()
 	ci.set(&"installer_name", "QA Clinic")
 	var chip_stock: Array[StockEntry] = []
-	for p in ["res://resources/items/chip_grapple.tres", "res://resources/items/chip_laser_sight.tres",
+	for p in ["res://resources/items/chip_grapple.tres", "res://resources/items/chip_takedown.tres",
 			"res://resources/items/chip_air_dash.tres"]:
 		var chip := load(p)
 		if chip != null:
@@ -233,6 +233,12 @@ func _run() -> void:
 	await _frames(2)
 	ci.free()
 
+	# The board is the SIGHTED open: without the Board Visualizer chip the screen shows the blindfold
+	# placeholder instead, which is both a different picture and (much) less layout — and the sighted one is
+	# the one whose 8x8 grid decides whether the card fits its anchor band. Grant the chip and cover the
+	# stake, or this shot is a toast ("you can't cover the 50 zm stake") over an unopened screen.
+	player.call(&"unlock_mechanic", &"chess_visualizer")
+	player.call(&"add_money", 500.0)
 	var cm := ChessMatch.new()
 	cm.set(&"opponent_name", "QA Grandmaster")
 	cm.set(&"wager", 50)
@@ -303,3 +309,21 @@ func _shot(name: String) -> void:
 	var path := _dir.path_join(name + ".png")
 	var err := img.save_png(ProjectSettings.globalize_path(path))
 	print("QA_SHOT " if err == OK else "QA_SHOT_FAIL ", path)
+	_report_card_rect(name)
+
+## Print the on-screen rect of every visible menu CARD in this shot, so a sibling screen that resizes or
+## re-centres its panel shows up as a number here and not just as a "hmm, that moved" in the PNGs. A card
+## whose combined minimum beats its anchor band is GROWN past the anchors by the engine (never clipped, never
+## scrolled) — see tests/test_menu_layout_stability.gd, which pins the tabbed screens against exactly this.
+func _report_card_rect(shot_name: String) -> void:
+	for panel in get_tree().root.find_children("Panel", "", true, false):
+		var c := panel as Control
+		if c == null or not c.is_visible_in_tree():
+			continue
+		var band := Vector2(
+			(c.anchor_right - c.anchor_left) * get_viewport().get_visible_rect().size.x,
+			(c.anchor_bottom - c.anchor_top) * get_viewport().get_visible_rect().size.y)
+		var over := "  <<< MINIMUM BEATS THE ANCHOR BAND" if band.x > 0.0 and band.y > 0.0 \
+				and (c.get_combined_minimum_size().x > band.x + 0.5 or c.get_combined_minimum_size().y > band.y + 0.5) else ""
+		print("QA_RECT ", shot_name, " ", c.get_parent().name, "/", c.name,
+			" pos=", c.global_position, " size=", c.size, " min=", c.get_combined_minimum_size(), over)

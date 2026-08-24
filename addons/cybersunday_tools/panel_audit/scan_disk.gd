@@ -7,6 +7,9 @@ extends RefCounted
 
 const GroupsReflect := preload("res://addons/cybersunday_tools/core/groups_reflect.gd")
 const WiringScan := preload("res://addons/cybersunday_tools/panel_audit/scan_wiring.gd")
+## Shared one-read-per-file cache: this domain, scan_wiring, scan_text and scan_menu_sound all read the SAME .gd
+## files during one Re-scan. Inert outside audit_panel's begin()/end() window, so a standalone run is unchanged.
+const ScanCache := preload("res://addons/cybersunday_tools/panel_audit/scan_cache.gd")
 # `tests` is skipped: GUT fixtures deliberately use synthetic group literals (e.g. "noise"/"vip"/"flammable")
 # and throwaway story flags that aren't real content — scanning them only adds permanent baseline noise that
 # hides a genuine production typo. A broken ref inside a test fails the GUT run itself, so it's covered there.
@@ -53,10 +56,9 @@ static func _scan_file(path: String, out: Array, allowed: Dictionary, const_name
 	var ext := path.get_extension()
 	if ext != "gd" and ext != "tscn" and ext != "tres":
 		return
-	var f := FileAccess.open(path, FileAccess.READ)
-	if f == null:
+	var text := ScanCache.text_of(path)
+	if text.is_empty():
 		return
-	var text := f.get_as_text()
 	if ext == "gd":
 		out.append_array(scan_gd_text(text, path, allowed, const_names))
 		return

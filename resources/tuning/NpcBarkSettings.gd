@@ -37,7 +37,9 @@ extends Resource
 @export_range(0.0, 1.0) var hurt_bark_hp_frac: float = 0.35
 
 @export_group("Detection stings")
-## Shared throttle (ms) so a swarm spotting you at once plays ONE MGS "!" sting. Mirrors NPC.ALERT_COOLDOWN_MS.
+## Shared throttle (ms) so a swarm spotting you at once plays ONE MGS "!" sting. Paces BOTH of NpcAudioCues' static
+## stamps (the 2D player-detection sting and the positional ambient one — an ambient sting also yields to a recent
+## player sting, never the reverse). Mirrors NPC.ALERT_COOLDOWN_MS.
 @export var alert_cooldown_ms: int = 3000
 ## Sniper charge-sting de-dup window (ms) — dedups near-simultaneous lock + first-shot triggers. Mirrors NPC.AIM_COOLDOWN_MS.
 @export var aim_cooldown_ms: int = 120

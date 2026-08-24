@@ -68,7 +68,7 @@ func test_a_hotbar_pulled_prop_still_drops() -> void:
 
 
 func test_a_world_grabbed_prop_still_drops() -> void:
-	# Nothing came out of the bag at all (a crate grabbed off the floor with E/Z) — H must still set it down.
+	# Nothing came out of the bag at all (a crate grabbed off the floor with F/Z) — H must still set it down.
 	var p = load(PLAYER_PATH).new()
 	var inv := CharacterInventory.new()
 	p.inventory = inv

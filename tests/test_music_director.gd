@@ -1,9 +1,10 @@
 extends GutTest
 
-## MusicDirector: the dynamic-music drop-in (constant playback, fade in for combat/dialogue, fade out after).
-## Tested in-tree under a bare AudioStreamPlayer (volume_db works with no stream); combat is forced through
-## the private flag with the poll pushed out, so no NPCs are needed. The real combat scan + dialogue trigger
-## are in-tree behaviour (playtested).
+## MusicDirector: the dynamic-music drop-in (constant playback, a three-tier FULL / CAUTION / SILENT ladder).
+## Tested in-tree under a bare AudioStreamPlayer (volume_db works with no stream); each tier is forced through
+## its private flag with the poll pushed out, so no NPCs are needed. The real group scan (_scan_alert_levels,
+## which needs live NPCs with a Perception) + the dialogue trigger are in-tree behaviour (playtested).
+## The rig authors -6 dB, so with the default caution_duck_db (-6) the CAUTION level is exactly -12 dB.
 
 const DIRECTOR_PATH := "res://scripts/components/music_director.gd"
 
@@ -68,7 +69,8 @@ func test_leaving_combat_lingers_then_fades_out() -> void:
 	assert_almost_eq(music.volume_db, -6.0, 0.0001, "music HOLDS through the combat linger (no flap at a fight's edge)")
 	for i in 200:
 		d._process(0.1)  # burn the linger + fade out
-	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "after the linger the music fades back to the silent floor")
+	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "a fight that ends with nobody left hunting (a clean kill: ALERTED straight to gone) fades to the silent floor, NOT to the caution level")
+	assert_lt(music.volume_db, d.caution_db(), "regression guard: silence must still be reachable below the caution tier")
 
 
 func test_degenerate_authored_volume_keeps_fade_meaningful() -> void:
@@ -185,6 +187,7 @@ func test_dialogue_bed_stays_silent_by_default() -> void:
 	var rig := _make_dialogue_rig()
 	var music: AudioStreamPlayer = rig[0]
 	var d: DialogueDirector = rig[1]
+	d._poll_t = 999.0  # don't let the live group scan decide this — no NPC in the GUT tree should be able to
 	assert_false(d.swell_for_dialogue, "the dialogue swell is opt-in — off by default")
 	for i in 200:
 		d._process(0.1)
@@ -196,6 +199,7 @@ func test_dialogue_bed_fades_in_when_opted_in() -> void:
 	var rig := _make_dialogue_rig()
 	var music: AudioStreamPlayer = rig[0]
 	var d: DialogueDirector = rig[1]
+	d._poll_t = 999.0
 	d.swell_for_dialogue = true
 	for i in 200:
 		d._process(0.1)
@@ -213,3 +217,194 @@ func test_audible_radio_holds_dialogue_bed_silent_when_opted_in() -> void:
 	for i in 50:
 		d._process(0.1)
 	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "an audible radio makes the opted-in dialogue score yield (radio owns the soundscape)")
+
+
+## --- CAUTION tier: a searcher SUSTAINS the score, ducked, instead of dropping it to silence ---
+
+func test_caution_level_sits_between_silence_and_the_fight() -> void:
+	var rig := _make_rig()
+	var d = rig[1]
+	assert_lt(d.caution_duck_db, 0.0, "the duck is a NEGATIVE offset (house convention: music_duck_amount_db)")
+	assert_almost_eq(d.caution_db(), -12.0, 0.0001, "authored -6 dB ducked by the default -6 -> the search plays at -12 dB")
+	assert_lt(d.caution_db(), d._audible_db, "a search must never be as loud as a firefight")
+	assert_gt(d.caution_db(), d.silent_db, "a search must be AUDIBLE — that is the whole point of the tier")
+
+
+func test_caution_alone_fades_the_bed_in_ducked() -> void:
+	# A fresh investigation with no prior fight still starts the bed — it just starts it quiet.
+	var rig := _make_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d = rig[1]
+	d._poll_t = 999.0
+	d._in_caution = true
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, d.caution_db(), 0.0001, "a hunt with nobody shooting settles at the ducked caution level")
+
+
+func test_combat_outranks_caution() -> void:
+	# Mixed crowd: one NPC shooting, another still sweeping. The firefight owns the mix.
+	var rig := _make_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d = rig[1]
+	d._poll_t = 999.0
+	d._in_combat = true
+	d._in_caution = true
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, -6.0, 0.0001, "FULL beats CAUTION — a live fight plays at the authored level")
+
+
+func test_fight_ending_into_a_search_ducks_instead_of_fading_out() -> void:
+	# THE headline behaviour: losing you drops the NPC ALERTED -> INVESTIGATING. The music must NOT fade out.
+	var rig := _make_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d = rig[1]
+	d._poll_t = 999.0
+	d._in_combat = true
+	for i in 200:
+		d._process(0.1)  # fully in
+	d._in_combat = false
+	d._in_caution = true
+	d._process(0.1)
+	assert_almost_eq(music.volume_db, -6.0, 0.0001, "the combat linger still holds FULL across the handover")
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, d.caution_db(), 0.0001, "once the linger burns, the score DUCKS to the caution level — it does not go silent")
+	assert_gt(music.volume_db, d.silent_db, "the search keeps playing (regression guard for the old fade-to-silence)")
+
+
+func test_search_giving_up_lingers_then_fades_to_silence() -> void:
+	var rig := _make_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d = rig[1]
+	d._poll_t = 999.0
+	d._in_caution = true
+	for i in 200:
+		d._process(0.1)
+	d._in_caution = false
+	d._process(0.1)
+	assert_almost_eq(music.volume_db, d.caution_db(), 0.0001, "the caution linger holds through the tail of a search (no flap on a 0.3 s poll)")
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "with nobody hunting any more the bed finally returns to the silent floor")
+
+
+func test_combat_to_caution_duck_runs_at_the_fade_out_rate() -> void:
+	# Direction — not "is anything wanted" — picks the fade time, or this downward step would use fade_in_time.
+	var rig := _make_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d = rig[1]
+	d._poll_t = 999.0
+	d._in_combat = true
+	for i in 200:
+		d._process(0.1)
+	d._in_combat = false
+	d._linger_t = 0.0     # burn the FULL hold so the very next tick is the duck itself
+	d._in_caution = true
+	d._process(0.1)
+	# span 54 dB over fade_out_time 3.0 s = 18 dB/s; one 0.1 s tick = 1.8 dB below the authored -6.
+	assert_almost_eq(music.volume_db, -7.8, 0.0001, "the duck steps at the fade-OUT rate (18 dB/s), not the fade-in rate")
+
+
+func test_caution_duck_is_clamped_into_the_band() -> void:
+	var rig := _make_rig()
+	var d = rig[1]
+	d.caution_duck_db = 12.0    # a sign slip: a search must not get LOUDER than the fight
+	assert_almost_eq(d.caution_db(), d._audible_db, 0.0001, "a positive duck clamps to the authored level")
+	d.caution_duck_db = -200.0  # absurdly deep
+	assert_almost_eq(d.caution_db(), d.silent_db, 0.0001, "an over-deep duck clamps to the silent floor, never below it")
+
+
+func test_duck_at_the_floor_restores_silent_searching() -> void:
+	# The documented OFF SWITCH: a duck that reaches the floor is the old behaviour, searching in tense silence.
+	var rig := _make_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d = rig[1]
+	d.caution_duck_db = -60.0
+	d._poll_t = 999.0
+	d._in_caution = true
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "caution_duck_db at the floor opts back out of the caution tier entirely")
+
+
+func test_audible_radio_holds_the_caution_bed_silent_too() -> void:
+	# Radio precedence collapses BOTH top tiers, not just combat.
+	var rig := _make_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d = rig[1]
+	_add_player_and_radio(d, Vector3(0, 0, 5))  # within earshot
+	d._poll_t = 999.0
+	d._in_caution = true
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "a radio the player can hear owns the soundscape during a search as well")
+
+
+func test_distant_radio_does_not_suppress_caution() -> void:
+	var rig := _make_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d = rig[1]
+	_add_player_and_radio(d, Vector3(0, 0, 100))  # well outside audible_radius 12
+	d._poll_t = 999.0
+	d._in_caution = true
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, d.caution_db(), 0.0001, "a radio out of earshot must not mute the search bed either")
+
+
+## --- A conversation FREEZES the world, so a polled tier must not latch under the dialogue ---
+
+func test_dialogue_suppresses_a_latched_search() -> void:
+	# DialogueManager pauses the tree, so an INVESTIGATING NPC can never finish searching while the box is up.
+	# Without the suppression gate the ducked bed would play under every line, stacked on DialogueMusicBed.
+	var rig := _make_dialogue_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d: DialogueDirector = rig[1]
+	d._poll_t = 999.0
+	d._in_caution = true       # a searcher frozen mid-hunt by the pause
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "an open conversation holds the bed at the silent floor even with a searcher latched outside")
+
+
+func test_dialogue_suppresses_a_lingering_fight_too() -> void:
+	# The same gate closes the older, smaller hole: a combat_linger tail bleeding into a conversation's opening.
+	var rig := _make_dialogue_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d: DialogueDirector = rig[1]
+	d._poll_t = 999.0
+	d._in_combat = true
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "with swell_for_dialogue off, no tier survives an open conversation")
+
+
+func test_dialogue_suppression_lifts_when_the_conversation_ends() -> void:
+	# The gate must be a gate, not a latch: hanging up hands the hunt its bed straight back.
+	var rig := _make_dialogue_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d: DialogueDirector = rig[1]
+	d._poll_t = 999.0
+	d._in_caution = true
+	for i in 50:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "suppressed while talking")
+	d.dialogue_on = false
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, d.caution_db(), 0.0001, "conversation over — the still-running search gets its ducked bed back")
+
+
+func test_opted_in_swell_is_not_suppressed() -> void:
+	# swell_for_dialogue is the explicit opt OUT of the gate: the score plays under the conversation on purpose.
+	var rig := _make_dialogue_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d: DialogueDirector = rig[1]
+	d._poll_t = 999.0
+	d.swell_for_dialogue = true
+	d._in_caution = true
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, -6.0, 0.0001, "opted in, the conversation itself swells the score to FULL regardless of the caution tier underneath")

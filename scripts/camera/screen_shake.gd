@@ -5,7 +5,8 @@ extends Node3D
 ## node continuously decays it and applies a random rotation each frame. The camera
 ## is a CHILD of this node, so rotating it shakes the view. Fed by many systems:
 ## weapon fire (per-weapon screen_shake_amount), landings, the pinball ram bounce,
-## interactable destruction, and nearby enemy deaths.
+## interactable destruction, nearby enemy deaths, and every kill the player is
+## credited with (Player.on_scored_kill, at any distance).
 
 const MAX_TRAUMA: float = 1.0
 

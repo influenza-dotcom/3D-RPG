@@ -61,8 +61,9 @@ extends LookAtInteractable
 ## for combat (MusicDirector.yield_to_radio silences the combat bed instead). true -> the old behaviour: the radio
 ## ducks OUT for combat and the combat bed plays over it. Dialogue ducking is independent of this (`duck_for_dialogue`).
 @export var duck_for_combat: bool = false
-## Only matters when `duck_for_combat` is on: false -> duck through the whole hunt (matches the music system);
-## true -> only duck in an active firefight.
+## Only matters when `duck_for_combat` is on: false -> duck through the whole hunt, mirroring the music system's
+## CAUTION tier (which sustains the bed, ducked, across exactly that search phase); true -> only duck in an
+## active firefight, mirroring its FULL tier.
 @export var combat_strict: bool = false
 ## Seconds between combat scans of the "npc" group (a per-frame scan would be waste).
 @export var poll_interval: float = 0.3
@@ -176,7 +177,8 @@ func _ready() -> void:
 	_build_outline()
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
-	# Keep ducking through a dialogue tree-pause / freeze-frame, exactly like MusicDirector (music_director.gd:43).
+	# Keep ducking through a dialogue tree-pause / freeze-frame, exactly like MusicDirector's own
+	# `process_mode = PROCESS_MODE_ALWAYS` in _ready (named, not line-numbered — that pin has rotted twice).
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if audio_player == null:
 		audio_player = AudioStreamPlayer3D.new()
@@ -396,7 +398,8 @@ func _resolved_vibration_target() -> Node3D:
 	return self
 
 ## True while any NPC is fighting — hunting (ALERTED/INVESTIGATING) by default, or only an active firefight
-## when combat_strict. Null-guarded for a bare off-tree instance (no tree -> no combat). Mirrors MusicDirector.
+## when combat_strict. Null-guarded for a bare off-tree instance (no tree -> no combat). Mirrors MusicDirector's
+## scan, which reads the same two NPC predicates to split its FULL and CAUTION tiers.
 func _any_npc_fighting() -> bool:
 	# is_inside_tree() FIRST — calling get_tree() while off-tree itself logs a tracked engine error (which
 	# fails GUT 9.6), so guard on tree membership rather than get_tree() == null.
@@ -569,7 +572,7 @@ func _play_click(stream: AudioStream) -> void:
 		return
 	click_player.stream = stream
 	click_player.volume_db = click_volume_db
-	click_player.play()
+	AudioManager.play_varied(click_player)  # the CLICK varies per play; audio_player (the music) never does
 
 ## True while the radio is switched on -- read by the NPC music-reaction scan.
 func is_playing() -> bool:

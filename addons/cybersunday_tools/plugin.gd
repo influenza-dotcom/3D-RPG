@@ -2,10 +2,15 @@
 extends EditorPlugin
 
 ## CYBER SUNDAY in-editor dev-tools -- umbrella plugin. Registers ONE Node3D gizmo plugin, ONE bottom panel
-## ("CYBER SUNDAY" -- a 22-tab host, in registration order: palette / items / level / content / blueprints / icons /
+## ("CYBER SUNDAY" -- a 24-tab host, in registration order: palette / items / level / content / blueprints / icons /
 ## tuning / factions / audit / saves / graphs / dialogue / quest / loot / text / place / browse / refs / encounter /
-## stats / scene-diff / arch), FIVE inspector plugins (LootTable / NpcData / WeaponData / GoapProfile / Perk), and
-## ONE toolbar control (play-from-spawn).
+## stats / scene-diff / arch / reach / bridge), FIVE inspector plugins (LootTable / NpcData / WeaponData / GoapProfile /
+## Perk), and ONE toolbar control (play-from-spawn).
+##
+## The BRIDGE tab is the odd one out: it hosts an OPT-IN localhost command server (127.0.0.1 only, token-gated,
+## OFF until the user presses Start) that lets an external AI client read editor state, refresh the FileSystem
+## cache after an external write, and reveal a resource. It is registered here like any other tab -- the plugin
+## owns no socket itself, so disabling the plugin closes the port with everything else.
 ##
 ## WHY one bottom panel instead of several right-side docks: right-side docks contribute to the editor's MINIMUM
 ## height (and Godot restores their saved sizes on relaunch, overriding code), so on a short / HiDPI display the

@@ -18,7 +18,7 @@ const SCREEN_SOURCE := "res://scripts/ui/level_up_screen.gd"
 
 ## Every unique name level_up_screen.gd binds in _bind_ui — a rename in the editor breaks the bind at boot,
 ## so pin the roster here where it fails loudly instead.
-const BOUND := ["Root", "Dim", "VBox", "Title", "Header", "LevelLabel", "MoneyLabel", "RailButton", "Body", "Rows", "Perks"]
+const BOUND := ["Root", "Dim", "VBox", "Title", "Header", "LevelLabel", "MoneyLabel", "RailButton", "CreditNotice", "Body", "Rows", "Perks"]
 
 
 func test_autoload_is_the_authored_scene() -> void:
@@ -111,6 +111,12 @@ func test_every_authored_button_is_reachable_by_a_pad() -> void:
 	var btn := inst.get_node("%RailButton") as Button
 	assert_eq(btn.focus_mode, Control.FOCUS_ALL,
 		"RailButton must take focus (no `focus_mode = 0` in the .tscn) — it is this panel's only authored Button and the pad's fallback landing spot")
+	# ...on a station that LENDS. A LevelUp with `accepts_credit` off hides the selector (_rebuild calls
+	# set_available(false)) and shows %CreditNotice instead, so on THAT card the fallback is gone — which is
+	# why open_level_up's fallback branch also tests `_rail_btn.visible`, and why pad reachability really
+	# rests on the code-built stat rows (FOCUS_ALL in _rebuild, seeded into _first_focus). Pinned below.
+	assert_false((inst.get_node("%CreditNotice") as Label).visible,
+		"CreditNotice ships HIDDEN — _rebuild reveals it only for a station that takes no credit, so a lending station's card is unchanged")
 	inst.free()
 
 

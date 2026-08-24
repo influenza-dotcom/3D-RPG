@@ -135,6 +135,7 @@ func test_self_opening_screens_all_gate_on_the_mid_death_predicate() -> void:
 		"res://scripts/ui/implants_screen.gd",          # the implants tab (I)
 		"res://scripts/ui/character_inspect_screen.gd", # fullscreen hero-view takeover
 		"res://scripts/ui/save_load_screen.gd",         # reached from the Options bottom row
+		"res://scripts/ui/wait_screen.gd",              # Wait (T)
 	]:
 		assert_true(FileAccess.get_file_as_string(path).contains("PlayerMenus.player_alive("),
 			"%s opens from a player hotkey while PROCESS_MODE_ALWAYS, so its open() must refuse mid-death via PlayerMenus.player_alive() — else the key re-opens it over the death cinematic / in-place revive" % path)
@@ -143,14 +144,15 @@ func test_self_opening_screens_all_gate_on_the_mid_death_predicate() -> void:
 func test_registry_size_and_membership() -> void:
 	# T1: pin the registry so the historically-forgotten screens force a deliberate test edit when a new screen lands.
 	var screens := InputManager._modal_screens()
-	assert_eq(screens.size(), 16, "the modal registry holds all 16 player-facing screens")
+	assert_eq(screens.size(), 17, "the modal registry holds all 17 player-facing screens")
 	assert_true(screens.has(AtmScreen), "AtmScreen is registered (the Ledger terminal; real-time, unlike its station siblings)")
 	assert_true(screens.has(ChessScreen), "ChessScreen is registered (was missed by the death sweep)")
 	assert_true(screens.has(ChipInstallScreen), "ChipInstallScreen is registered")
 	assert_true(screens.has(QuestJournal), "QuestJournal is registered (historically forgotten)")
 	assert_true(screens.has(CharacterInspectScreen), "CharacterInspectScreen is registered")
 	assert_true(screens.has(SaveLoadScreen), "SaveLoadScreen is registered (the manual save/load slot menu; non-pausing)")
-	assert_true(screens.has(ImplantsScreen), "ImplantsScreen is registered (the newest — the implants tab; non-pausing)")
+	assert_true(screens.has(ImplantsScreen), "ImplantsScreen is registered (the implants tab; non-pausing)")
+	assert_true(screens.has(WaitScreen), "WaitScreen is registered (the newest — the Wait panel; real-time, and it owns the cursor while you pick hours)")
 
 
 func test_gameplay_suppressed_fires_for_every_registered_modal() -> void:
@@ -178,7 +180,7 @@ func test_chess_and_chipinstall_are_registered_stations() -> void:
 ## where false belongs makes a Pip-Boy tab refuse to open with no feedback at all.
 func test_every_registry_row_declares_the_right_tab_posture() -> void:
 	var blocks := [OptionsMenu, LootScreen, ShopScreen, LevelUpScreen, RespecScreen, HealScreen, AtmScreen,
-			ChipInstallScreen, ChessScreen]
+			ChipInstallScreen, ChessScreen, WaitScreen]
 	var allows := [InventoryScreen, StatsScreen, ReputationScreen, QuestJournal, ImplantsScreen,
 			CharacterInspectScreen, SaveLoadScreen]
 	for s in blocks:

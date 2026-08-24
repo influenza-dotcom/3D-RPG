@@ -53,8 +53,20 @@ func _can_run() -> bool:
 		return false
 	if DialogueManager.is_active() or InputManager.gameplay_suppressed():
 		return false
+	# The LEAN has CLAIMED the Takedown key for this hold (Q is shared three ways now — takedown, pet, lean).
+	# Stand down until it is released, exactly as SilentTakedown does: a peek must not quietly pet whatever it
+	# swings past. See the contextual-key rule in scripts/player/lean.gd.
+	if host.lean_owns_action(InputManager.action_takedown):
+		return false
 	return true
 
+
+## The contextual verb this driver is holding a target for, as an ACTION name (&"" = nothing pettable). Duck-typed
+## by Player.pending_verb_actions(): the LEAN asks it before claiming a shared key, so aiming at a stray dog and
+## pressing Q still pets rather than peeking. The pet verb rides the SAME action as the takedown, so both drivers
+## report the same name — either one having a target is enough to out-rank the lean.
+func pending_verb_action() -> StringName:
+	return InputManager.action_takedown if (_target != null and is_instance_valid(_target)) else &""
 
 ## The Pettable under the crosshair that can be petted right now, or null. Casts the player's aim ray (like
 ## SilentTakedown), resolves the hit to a Pettable (the collider itself, or one in its immediate family so an object

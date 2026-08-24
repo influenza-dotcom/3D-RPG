@@ -2,14 +2,14 @@ class_name ClaimInteraction
 extends Node
 
 
-## The player-side CLAIM verb — the ownership twin of the pet/takedown verbs. PRESS the Claim key (default T) while
+## The player-side CLAIM verb — the ownership twin of the pet/takedown verbs. PRESS the Claim key (default B) while
 ## aimed at a Claimable object to adopt it: name it and make it follow you. Built by Player._ready (.new() + host)
 ## alongside the takedown / pet nodes, and runs its OWN _physics_process with the same dialogue / menu / death guards.
 ##
 ## Unlike pet (HOLD Q) and takedown (HOLD Q), claim is a single TAP on its own key — it's a one-time, deliberate
 ## act, not a sustained one, and it opens a text box, so a hold would fight the typing. The same object can be BOTH
 ## pettable and claimable (the dog is): the two verbs own separate keys + separate HUD cues, so both prompts can show
-## ("[T] Befriend Dog" above "[Q] Pet Dog") until the dog is claimed, after which it reads "[T] Hold to Release Dog".
+## ("[B] Befriend Dog" above "[Q] Pet Dog") until the dog is claimed, after which it reads "[B] Hold to Release Dog".
 ##
 ## Naming: on the Claim key we open the real-time NameEntryDialog (mouse freed, world keeps running) seeded with the
 ## object's current name; on confirm it calls Claimable.claim(host, typed_name). While the dialog is up,
@@ -169,7 +169,7 @@ func _unclaim(claimable: Claimable) -> void:
 	_reset()
 
 
-## CLAIM prompt (tap verb): "[T] Befriend <name>" (from claimable.prompt_verb) with NO hold bar (progress 0).
+## CLAIM prompt (tap verb): "[B] Befriend <name>" (from claimable.prompt_verb) with NO hold bar (progress 0).
 func _cue_claim(claimable: Claimable) -> void:
 	if not host.has_method(&"set_claim_cue"):
 		return
@@ -179,7 +179,7 @@ func _cue_claim(claimable: Claimable) -> void:
 	host.set_claim_cue(true, text, 0.0)
 
 
-## UNCLAIM prompt (hold verb): "[T] Hold to Release <name>" plus the hold-progress fill (the bar appears once the
+## UNCLAIM prompt (hold verb): "[B] Hold to Release <name>" plus the hold-progress fill (the bar appears once the
 ## hold starts), so releasing reads like a deliberate hold, mirroring the pet/takedown cue.
 func _cue_unclaim(claimable: Claimable) -> void:
 	if not host.has_method(&"set_claim_cue"):

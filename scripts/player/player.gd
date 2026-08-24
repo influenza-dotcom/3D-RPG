@@ -5,7 +5,7 @@ var current_speed: float = 0.0
 # (The wallet — money / money_changed / add_money / reward_kill — was HOISTED to Character so every NPC
 # carries one too. The player's fresh-game 100 zm default is set in _ready, before the loadout override.)
 
-## --- Unlockable mechanics: each gateable ability (grapple, laser sight, wall climb, air dash, slide) is a
+## --- Unlockable mechanics: each gateable ability (grapple, wall climb, air dash, slide) is a
 ## drag-drop Ability CHILD NODE -- its presence (+ `enabled`) IS the grant, discovered in _ready. To choose what
 ## a FRESH game starts with, drop the ability scenes you want (scenes/components/abilities/*.tscn) under the
 ## Player; "start with nothing" = add none. An UpgradePickup grants one at runtime by ADDING its node; a loaded
@@ -20,7 +20,7 @@ signal mechanic_toggled(id: StringName, active: bool)
 ## the registry). Pick each from the DROPDOWN -- no more typo'd ids. PREFER dropping the ability scenes under the
 ## Player; this stays empty by default. A loaded save replaces this whole set. Stored as plain strings (the registry
 ## keys); unlock_mechanic takes String or StringName interchangeably.
-@export_enum("grapple", "laser_sight", "wall_climb", "air_dash", "slide") var starting_unlocks: Array[String] = []
+@export_enum("grapple", "wall_climb", "air_dash", "slide", "fall_immunity") var starting_unlocks: Array[String] = []
 ## The ability SUBSYSTEM: grant / revoke / persistence bookkeeping + the live ability list live in AbilityManager
 ## (scripts/components/abilities/ability_manager.gd), not here. Built at var-init and wired in _init so the bare-
 ## Player unit tests (no _ready) can drive it. The Player keeps ONLY the three typed hot-path refs below + the
@@ -100,8 +100,9 @@ const GROUND_SNAP_RETRY_FRAMES := 120  ## ~2 s at 60 fps — long enough for any
 ## the hold-R draw (FNV-style), matching how every armed NPC also spawns holstered (see WeaponStance, "start with the
 ## gun put away"). Applied at the END of _ready, AFTER the starting/loaded loadout is equipped — equipping a weapon
 ## DRAWS it (Attack._on_swap_weapons_equip_this → set_holstered(false)), so the holster must run last to win. Covers a
-## New Game and a Continue; a full-reload death mode re-runs _ready so it re-holsters, while the in-place checkpoint
-## revive keeps your pre-death stance. Turn OFF for a gun-out start (e.g. a combat test level). Designer knob.
+## New Game and a Continue; a full-reload death mode re-runs _ready so it re-holsters, and the in-place checkpoint
+## revive now agrees — die() puts the gun away for the cinematic and does not restore it, so EVERY death mode comes
+## back holstered. Turn OFF for a gun-out start (e.g. a combat test level). Designer knob.
 @export var start_holstered: bool = true
 
 var _carrying: bool = false  ## true while a physics prop is held (PickupRay)
@@ -166,6 +167,8 @@ var _rewield_in_flight: bool = false
 @export_group("Components")
 ## The Crouch component that drives crouching (lowers head + shrinks the collider, runs stand-up clearance). Wire to the player's Crouch child.
 @export var crouch: Crouch
+## The Lean component that drives corner-peeking (slides + rolls the head rig, probes for a wall). Wire to the player's Lean child. Null = no lean; nothing else depends on it.
+@export var lean: Lean
 ## The Head camera rig (Head -> ScreenShake -> Camera3D); the camera + screen-shake are read off it and it's handed back this player. Wire to the player's Head child.
 @export var head: Head
 ## The Weapon system that owns the inventory, attack, ammo, scope and swap logic. Wire to the player's Weapon child.
@@ -311,6 +314,13 @@ var noise_radius: float = 0.0
 # detection. The optional PlayerLightLevel drop-in WRITES this each sample; default 1.0 = fully lit, so with no
 # PlayerLightLevel (or no enemy light_falloff curve) light has no effect and detection behaves exactly as today.
 var light_exposure: float = 1.0
+# How strongly we are CARRYING our own light (0 = nothing lit on us, 1 = a full-strength torch in hand). A SEPARATE
+# field from light_exposure because that meter SATURATES: standing in a lit room already reads 1.0, so it can never
+# express "...and I am also the brightest thing in a dark street". Enemy Perception reads this to WIDEN its sight
+# range and fill its detection meter faster (tuned by GameSettings.light_stealth), which is the flashlight's stealth
+# cost. The PlayerLightLevel drop-in WRITES it each sample from the &"carried_light" group; default 0.0 = no
+# penalty, so with no sampler (or nothing tagged) detection behaves exactly as before.
+var carried_light: float = 0.0
 # Whether a roof/ceiling is currently overhead (we're "indoors"). The optional IndoorAmbienceDucker drop-in WRITES
 # this each sample; default false, so with no ducker in the scene nothing reads a changed value. It's the shared
 # "is there a roof over me" seam other systems can read (ambience duck, a future reverb/rain/interior-music swap)
@@ -369,6 +379,14 @@ func _enter_tree() -> void:
 	crouch.player = self
 	crouch.head = head
 	crouch.collision_shape = player_collision_shape
+	# Same injection the Crouch above gets, and for the same reason: an extraction that clears the exported
+	# NodePaths must not silently kill the component. Lean drives the SAME Head node's local X + Z that
+	# Crouch drives the Y of — three independent components of one transform, no shared writer.
+	if lean == null:
+		lean = get_node_or_null("Lean") as Lean
+	if lean != null:
+		lean.player = self
+		lean.head = head
 	weapon_system.setup(self, camera_effects, muzzle)
 	coyote_time.character = self
 	# The view model self-wires its gun-mesh pose anims + muzzle FX from these refs.
@@ -388,7 +406,7 @@ func _enter_tree() -> void:
 ## the release bookkeeping) and TAILS into the FirstPersonBody's cosmetic half at the end — see the relay note there.
 func _on_carry_changed(holding: bool) -> void:
 	_carrying = holding
-	# A prop pulled from the backpack (Hotbar hold) that gets DROPPED/THROWN (E/Z/left-click) rather than stashed
+	# A prop pulled from the backpack (Hotbar hold) that gets DROPPED/THROWN (F/Z/left-click) rather than stashed
 	# back leaves our reservation stale: the prop is now a world object with its OWN CanPickUp, so restore its
 	# destructibility (it's out of your protected hands) and release the reservation (the hotbar slot then vacates —
 	# the item is gone from the bag and lives in the world until re-collected). stash_held_item() clears _held_inv_item
@@ -835,6 +853,51 @@ func _on_equipped_item_lost() -> void:
 func is_crouching() -> bool:
 	return crouch != null and crouch.crouch_t > 0.5
 
+## How far the player is currently peeking: -1 = full left lean, 0 = upright, +1 = full right (see Lean).
+## Cosmetic to the BODY — the capsule never moves — but the camera, and therefore the aim origin, does.
+func lean_amount() -> float:
+	return lean.lean_t if lean != null else 0.0
+
+## True while the player is leaning at all (past a hair off centre, so a lean easing back out stops counting).
+func is_leaning() -> bool:
+	return absf(lean_amount()) > 0.01
+
+## Every input ACTION a CONTEXTUAL VERB DRIVER is holding a live target for right now. A "verb driver" is any
+## child that answers `pending_verb_action()` — today SilentTakedown and PetInteraction (both on `Takedown`)
+## plus the camera rig's PickupRay (on `PickUp`); a future one is picked up automatically by being a child that
+## implements the method, which is why this is a duck-typed scan rather than a hand-written list of three.
+##
+## TWO CONSUMERS, BOTH CONTEXTUAL FALLBACKS ON A SHARED KEY, both asking once per PRESS and never per frame:
+##   • the LEAN (scripts/player/lean.gd) — whether a verb is waiting on a key sharing the lean side it just
+##     claimed. That is how Q stays Takedown/Pet when there is a target and becomes a peek when there is not.
+##   • the FLASHLIGHT (scenes/player/flash_light.gd) — whether an Interact is waiting on the F it shares with
+##     `PickUp`, in which case the press interacts instead of toggling the torch.
+## ⭐They differ in HOW they test the share, on purpose: the lean uses the action-level
+## InputManager.actions_share_binding(), the torch asks the EVENT (its pad button is not shared, so an
+## action-level test would wrongly defer a controller press). Read flash_light.gd before copying either.
+func pending_verb_actions() -> Array[StringName]:
+	var out: Array[StringName] = []
+	for c in get_children():
+		if not c.has_method(&"pending_verb_action"):
+			continue
+		var act: StringName = c.pending_verb_action()
+		if act != &"" and not out.has(act):
+			out.append(act)
+	# The interaction ray is NOT a direct child — it lives deep in the camera rig (Head/ScreenShake/Camera3D/RayCast),
+	# so the scan above can never see it. Read it off the rig interface the same way the camera and shake are.
+	var ray: PickupRay = head.pickup_ray if head != null else null
+	if ray != null:
+		var ray_act := ray.pending_verb_action()
+		if ray_act != &"" and not out.has(ray_act):
+			out.append(ray_act)
+	return out
+
+## True while the LEAN has claimed a key that also binds `action` for the current hold. Asked by the verb drivers
+## that share a lean key (SilentTakedown / PetInteraction in _can_run) so they stand down for the rest of that
+## hold instead of charging under the peek. Always false with no Lean component wired.
+func lean_owns_action(action: StringName) -> bool:
+	return lean != null and lean.owns_action(action)
+
 ## Drop `count` of `item` out of the backpack into the world as a throwable pickup the player (or anyone)
 ## can grab again (E to stash, Z to carry/throw) — spawned on the floor just in front of you. Dropping the
 ## weapon you're WIELDING is allowed: removing it clears the backpack's equipped_item -> equipped_item_lost
@@ -908,12 +971,25 @@ const MoneyBagBuilder := preload("res://scripts/components/money_bag.gd")
 # CREDIT therefore never costs more than DEBIT for a purchase you could already afford — it only extends how
 # far the same draw may go. `GameState.account` is ONE SIGNED field, so a purchase that dips below zero IS the
 # debt, and there is no second ledger to reconcile.
+#
+# ⭐AND A TILL MAY REFUSE THE THIRD KIND. Every method below takes `allow_credit` (default true, so nothing
+# existing changes); false drops the credit line out of the pot and leaves cash + savings, which turns the
+# CREDIT rail back into DEBIT for that one counter without touching GameState.payment_method. It exists
+# because the credit LIMIT is rated off the live permanent stat sheet (see credit_limit below), so a till that
+# sells PERMANENT STAT POINTS on credit is lending against collateral its own loan creates: measured on the
+# shipped knobs, the first point costs 1 zm and lifts the line 200 -> 300, and fifteen purchases later the
+# player has borrowed 178 zm and holds the full 2100 zm line at a perfect rating. That is the same invariant
+# Atm.withdraw already enforces from the other side — the line funds PURCHASES, never anything that converts
+# back into spending power — and a stat point converts back into CREDIT ITSELF. (It is NOT a die-and-keep-it
+# loop: the debt is death-safe too, so dying settles nothing. See GameState.account.) LevelUp therefore ships
+# `accepts_credit = false` AND `requires_settled_account = true`, because the rail refusal alone is defeated by
+# buying on credit and selling the goods back for cash; see scripts/components/level_up.gd.
 
 ## THE funding split for `cost` under the armed rail: {base, cash, rail, fee, total, ok}. The ONE formula —
 ## spendable / charge_total / can_pay / charge all read it, so the dim, the quote and the till cannot diverge.
 ## ⭐The fee is derived from the BASE split and simply ADDED; it never re-enters its own split, so there is no
 ## fixed-point iteration and the quoted number is stable across repaints.
-func _split(cost: float) -> Dictionary:
+func _split(cost: float, allow_credit: bool = true) -> Dictionary:
 	var base := maxf(0.0, snappedf(cost, Zorkmids.QUANTUM))
 	if base <= 0.0:  # a free service always clears, whatever the wallet or the debt looks like
 		return {"base": 0.0, "cash": 0.0, "rail": 0.0, "fee": 0.0, "total": 0.0, "ok": true}
@@ -922,37 +998,40 @@ func _split(cost: float) -> Dictionary:
 	var fee := snappedf(rail * maxf(0.0, GameSettings.economy.bank_noncash_fee_fraction), Zorkmids.QUANTUM)
 	var total := snappedf(base + fee, Zorkmids.QUANTUM)
 	var pot := snappedf(maxf(0.0, money) + maxf(0.0, GameState.account), Zorkmids.QUANTUM)
-	if GameState.payment_method == PAY_CREDIT:
+	if allow_credit and GameState.payment_method == PAY_CREDIT:
 		pot = snappedf(pot + credit_left(), Zorkmids.QUANTUM)
 	return {"base": base, "cash": cash, "rail": rail, "fee": fee, "total": total, "ok": total <= pot}
 
 ## Cash on hand plus banked savings, plus the remaining credit line when CREDIT is armed. A readout, not a
 ## gate — a purchase also has to clear the service charge, which only can_pay/charge_total know about.
-func spendable() -> float:
+func spendable(allow_credit: bool = true) -> float:
 	var funds := maxf(0.0, money) + maxf(0.0, GameState.account)
-	if GameState.payment_method == PAY_CREDIT:
+	if allow_credit and GameState.payment_method == PAY_CREDIT:
 		funds += credit_left()
 	return snappedf(funds, Zorkmids.QUANTUM)
 
-func charge_total(cost: float) -> float:
-	return float(_split(cost)["total"])
+func charge_total(cost: float, allow_credit: bool = true) -> float:
+	return float(_split(cost, allow_credit)["total"])
 
-func can_pay(cost: float) -> bool:
-	return bool(_split(cost)["ok"])
+func can_pay(cost: float, allow_credit: bool = true) -> bool:
+	return bool(_split(cost, allow_credit)["ok"])
 
 ## The two-part price quote (Character.quote override) — literally the funding split, so a point-of-sale display
 ## can show "120 zm (+4 service charge)" instead of a single opaque total. Nothing here is recomputed: the label,
 ## the affordability dim and the till all read this ONE dictionary, which is what keeps the quote and the charge
 ## from drifting the way they did before the seam existed.
-func quote(cost: float) -> Dictionary:
-	return _split(cost)
+func quote(cost: float, allow_credit: bool = true) -> Dictionary:
+	return _split(cost, allow_credit)
 
 ## Pay `cost`: cash first (it is fee-free and earns nothing, so spending it first is always correct), then the
 ## account. Under CREDIT the account may cross zero into debt; under DEBIT `ok` already refused that case.
 ## Never pushes `money` below zero — the wallet is CASH-ONLY now, and a negative one would re-create the old
 ## "debt hides in the wallet" model the account exists to replace.
-func charge(cost: float) -> bool:
-	var s := _split(cost)
+func charge(cost: float, allow_credit: bool = true) -> bool:
+	# `allow_credit == false` needs no extra clamp down here: _split already sized the pot as cash + POSITIVE
+	# account, so a passing `ok` guarantees `rest <= maxf(0.0, GameState.account)` and the subtraction below
+	# cannot carry the balance past zero. The refusal is the gate, not a second guard that could drift from it.
+	var s := _split(cost, allow_credit)
 	var total := float(s["total"])
 	if total <= 0.0:
 		return true
@@ -1114,7 +1193,7 @@ func _flush_autosave() -> void:
 ## --- Drag-drop ABILITY components (scripts/components/abilities): each unlockable mechanic is a CHILD Ability
 ## node; its presence + enabled flag IS the grant. Discovered in _ready (editor-placed), and grown at runtime by
 ## a pickup / a loaded save. wall_climb + slide own their logic in their node (driven via the typed refs below);
-## air_dash / laser_sight / grapple still read has_mechanic (their logic lives in the weapon/gun systems). ---
+## air_dash / grapple still read has_mechanic (their logic lives in the movement/gun systems). ---
 
 ## Wire the ability + stamina subsystems at CONSTRUCTION (before _ready), so the white-box unit tests — which
 ## build a bare Player.new() and never run _ready — can drive unlock/grant/has and spend/drain/regen immediately.
@@ -1157,7 +1236,7 @@ func _register_ability(a: Ability) -> void:
 	elif a is Grapple:
 		_grapple_ability = a as Grapple
 
-## True while an ENABLED ability child grants `id`. Gated abilities (air_dash / laser_sight / grapple) call this;
+## True while an ENABLED ability child grants `id`. Gated abilities (air_dash / grapple) call this;
 ## wall_climb / slide are driven through their typed refs instead. Thin forwarder to the ability subsystem — kept
 ## on the Player because every external caller resolves the Player and duck-types has_method(&"has_mechanic").
 func has_mechanic(id: StringName) -> bool:
@@ -1403,8 +1482,13 @@ func get_aim_direction() -> Vector3:
 	var dir := camera_effects.project_ray_normal(get_viewport().get_visible_rect().size / 2.0)
 	# Deus Ex aim wander (AimSway): the SHOT direction drifts around the camera centre — steadier standing
 	# still, steadier again crouched, settling further the longer you hold still — instead of landing exactly
-	# on the camera ray. The laser DOT (flash_light) is aimed along THIS value, so it shows the true shot
-	# point while the crosshair stays fixed at centre.
+	# on the camera ray. ⭐NOTHING VISUALLY TRACKS THIS ANY MORE: the retired laser sight's dot used to ride it
+	# and show the true shot point, but the laser is gone (the flashlight took that key, and now sits on L) and flash_light.gd
+	# never reads this — it eases its rotation toward the CAMERA's. So the sway is currently felt, not seen: the
+	# crosshair stays pinned at centre (_update_crosshair) and the shot lands wherever this drifted to.
+	# ⭐DO NOT "fix" that by re-centring the flashlight on the camera. The torch's beam apex is authored OFF the
+	# lens on purpose (camera_rig.tscn LightPosition) and its bright spot is parallel-offset from the crosshair
+	# by design — that separation is the only reason the torch casts visible shadows at all. See flash_light.gd.
 	return _aim_sway.apply(dir, camera_effects.global_transform.basis) if _aim_sway != null else dir
 
 func get_aim_basis() -> Basis:
@@ -1443,6 +1527,7 @@ var _heartbeat: AudioStreamPlayer
 var _heartbeat_timer: float = 0.0
 
 var _last_combat_msec: int = 0  ## last time we fired / took damage / were aimed at — keeps the gun up in combat
+var _health_regen_carry: float = 0.0  ## banked sub-commit out-of-combat regen, paid out in steps (see _update_health_regen)
 
 ## Mark "in combat now" so the view model stays raised (GunPose reads seconds_since_combat) for a beat.
 func note_combat() -> void:
@@ -1450,6 +1535,27 @@ func note_combat() -> void:
 
 func seconds_since_combat() -> float:
 	return float(Time.get_ticks_msec() - _last_combat_msec) / 1000.0
+
+## True once the combat stamp has been quiet for player_feedback.combat_calm_grace seconds. The ONE shared
+## predicate behind BOTH the passive health regen and the low-HP heartbeat duck, deliberately: the softer
+## heartbeat IS the audible tell that healing has begun, so the two must open on the same edge or the mix lies
+## about the mechanic.
+## Built on note_combat()'s stamp rather than a Groups.NPC scan on purpose. Several components already run their
+## own scans (MusicDirector / Radio at 0.3 s), and NPC.is_in_combat() is TARGET-AGNOSTIC — two NPCs brawling
+## across the map would freeze your healing for no reason the player can see (the trap minimap.gd:12 warns about).
+## The stamp already means "something happened TO ME", and because indicate_aimed_from re-stamps while an alerted
+## hostile holds us as its target, the stamp IS the NPC-awareness signal — already player-gated, already O(1).
+## ⭐ The `== 0` sentinel is load-bearing. Time.get_ticks_msec() counts from ENGINE START, not from this Player's
+## construction, so an UNSTAMPED _last_combat_msec makes seconds_since_combat() report the process uptime. On a
+## cold boot where the level loads at t=3s that reads 3.0 — under the grace — and a player who has never fired a
+## shot would spawn "in combat" and not heal until the clock ran out.
+func is_out_of_combat() -> bool:
+	if _last_combat_msec == 0:
+		return true  # never stamped this process — see the uptime trap above
+	# GameSettings is an untyped autoload, so the knob lands in an explicitly TYPED local rather than being
+	# inferred through the read (the house no-`:=`-from-a-Variant rule).
+	var grace: float = GameSettings.player_feedback.combat_calm_grace
+	return seconds_since_combat() >= grace
 
 ## --- STAMINA / SPRINT economy: the state and function bodies live in StaminaManager
 ## (scripts/player/stamina_manager.gd — the AbilityManager idiom; see the signal + `stamina` alias up top).
@@ -1482,8 +1588,8 @@ func sprint_blocked_by_scope() -> bool:
 func is_sprinting() -> bool:
 	return can_sprint() and _wants_sprint(input_dir)
 
-func spend_stamina(cost: float) -> bool:
-	return _stamina_mgr.spend_stamina(cost)
+func spend_stamina(cost: float, regen_delay: float = -1.0) -> bool:
+	return _stamina_mgr.spend_stamina(cost, regen_delay)
 
 func drain_stamina(rate: float, delta: float) -> bool:
 	return _stamina_mgr.drain_stamina(rate, delta)
@@ -1683,6 +1789,28 @@ func _update_low_hp(delta: float) -> void:
 			mat.set_shader_parameter("low_hp", vis_intensity)
 			mat.set_shader_parameter("colorblind_mode", Settings.colorblind_mode)
 			mat.set_shader_parameter("contrast", Settings.contrast)  # Video-tab setting, polled live like colorblind
+			# Ordered-dither (Bayer) strength — the third Video-tab look dial polled here rather than applied
+			# on change, for the same reason as the two above: this ColorRect is rebuilt with the player on
+			# every respawn/level load, so a push-on-change would have to find the new material afterwards.
+			# Polling costs one uniform write a frame and can never go stale. The matrix SIZE is authored on
+			# the material (`bayer_order`), not read from Settings — see Settings.dither_strength.
+			mat.set_shader_parameter("dither_strength", Settings.dither_strength)
+			# Colour Depth — the quantiser the dither above feeds. Pushed as the per-channel STEP COUNT the
+			# shader wants rather than the menu index, so the mapping from "15-bit (PS1)" to vec3(31,31,31)
+			# lives in exactly one place (Settings.color_quantize_levels) and is assertable off-tree; the
+			# shader never learns what a menu index is. Vector3.ZERO is the sentinel for "leave this material
+			# quantising at its authored `color_steps`", which is what the default option pushes — so a player
+			# who never opens the menu gets a byte-identical frame to the one this shipped with.
+			mat.set_shader_parameter("quantize_levels", Settings.color_quantize_levels(Settings.color_quantization))
+			# World LENS — the barrel/fisheye bend of the whole frame. Authored amplitude x the player's 0..1
+			# Accessibility scale, resolved HERE so the shader only ever sees one number and never learns that a
+			# preference exists (the quantize_levels shape). Polled rather than pushed on change for the same
+			# reason as every uniform above it: this ColorRect is rebuilt with the player on every respawn and
+			# level load, so a push-on-change would have to go find the new material afterwards.
+			mat.set_shader_parameter("lens_barrel", GameSettings.camera.lens_barrel_amount * Settings.lens_curve)
+			# The fringe is a fraction of the bend inside the shader, so it needs no scale of its own — at
+			# lens_curve 0 the bend is 0 and the fringe goes with it.
+			mat.set_shader_parameter("lens_chroma", GameSettings.camera.lens_chroma_amount)
 	# Heartbeat is a near-death cue with its OWN, lower threshold — faster + louder the lower you go.
 	# The Accessibility "Heartbeat" toggle silences JUST this pulse (the sfx bus is untouched), read live.
 	var hb_intensity := 0.0
@@ -1695,9 +1823,88 @@ func _update_low_hp(delta: float) -> void:
 	if _heartbeat_timer <= 0.0:
 		_heartbeat_timer = lerpf(heartbeat_interval_slow, heartbeat_interval_fast, hb_intensity)
 		if _heartbeat and _heartbeat.stream:
-			_heartbeat.volume_db = lerpf(heartbeat_db_min, heartbeat_db_max, hb_intensity)
+			# Out-of-combat duck: a SLIGHT, volume-only cut FOLDED INTO this expression rather than written onto
+			# the node from outside — an external _heartbeat.volume_db write would be clobbered by this very line
+			# on the next beat, which reads as "the duck didn't work" with no error anywhere. hb_intensity is
+			# untouched, so the beat RATE keeps its urgency; the cue just stops shouting once the fight is over.
+			# ⭐ It composes with the Accessibility toggle for FREE: heartbeat_enabled == false leaves hb_intensity
+			# at 0.0, which already returned at the gate above — this line is never reached.
+			# ⭐ Latency is ONE BEAT by construction: volume_db is written exactly once per beat, right here, just
+			# before play(). Worst case is one interval (1.1 s at the threshold, 0.45 s near death). That's the
+			# right trade rather than an oversight — re-gaining a one-shot mid-playback would read as a fade
+			# artefact, and leaving combat is not a sample-accurate event.
+			var duck_db: float = GameSettings.player_feedback.heartbeat_calm_duck_db  # untyped autoload -> typed local
+			_heartbeat.volume_db = heartbeat_db_for(heartbeat_db_min, heartbeat_db_max, hb_intensity, duck_db, is_out_of_combat())
 			_heartbeat.pitch_scale = 1.0  # natural pitch — the real asset already sounds like a heartbeat
 			_heartbeat.play()
+
+## PURE heartbeat gain (the StaminaManager.recovery_rate_for / Landing.impact_for idiom — host-free, so a test can
+## pin the whole curve without building a Player): the existing threshold->near-death lerp, minus the calm duck.
+## `duck_db` is absf()'d so a designer who authors a negative still gets a CUT, never a boost. Kept SEPARATE from
+## the beat INTERVAL by construction, so ducking the mix can never slow the pulse.
+static func heartbeat_db_for(db_min: float, db_max: float, intensity: float, duck_db: float, calm: bool) -> float:
+	var db := lerpf(db_min, db_max, intensity)
+	return (db - absf(duck_db)) if calm else db  # parenthesised: the cut applies to the LERPED gain, not to db_max alone
+
+## PURE regen curve: HP per second from max HP, the authored fraction, and the endurance multiplier. Floored at 0 —
+## regen must never run backwards, because Character.heal() would happily accept a negative amount and drain hp with
+## no death check at all. A FRACTION of max_hp (not flat HP/s) so "a full heal takes about a minute" stays true as
+## max_hp moves under LevelUp / a perk / a held +STR trinket.
+static func health_regen_rate_for(maximum_hp: float, frac_per_sec: float, endurance_mult: float) -> float:
+	return maxf(0.0, maxf(maximum_hp, 0.0) * frac_per_sec * endurance_mult)
+
+## Passive OUT-OF-COMBAT health regen — "you catch your breath once the shooting stops" — scaled by ENDURANCE
+## (CharacterStats.hp_regen_mult, endurance's second derived effect beside the stamina cap).
+##
+## ⭐ Driven from _physics_process's LIVE branch and nowhere else. NOT a component's own _process, NOT a Timer, NOT
+## a tween: die() calls set_physics_process(false), so this has to freeze for the whole death cinematic exactly
+## like the stamina beats do — a self-ticking node would keep healing the corpse and drive the HP bar back up under
+## the death card. (The same rule stamina_manager.gd states for its own drive beats.)
+## ⭐ And unlike _update_stamina_recovery it is deliberately NOT also called from the DIALOGUE-FROZEN early-out.
+## Three reasons: that branch returns above _update_low_hp, so a conversation would move hp with the low-HP vignette
+## and heartbeat frozen at their pre-dialogue values; InputManager.world_frozen() already grants full damage
+## immunity there, so there's nothing to recover FROM; and a long shopkeeper conversation would quietly become a
+## Bonfire. Stamina ticks while frozen for a defensive reason with no HP analogue — you must not walk out of a chat
+## unable to sprint. A CUTSCENE is blocked by the world_frozen() gate in the body for the same reason, since that
+## one does NOT pause the tree and so would otherwise tick right through.
+##
+## Payout goes through Character.heal(), the ONE clamping hp-RAISING seam (min(hp + x, max_hp) plus the `damaged`
+## emit the player's carried emitting light listens on). A raw `hp +=` would move the polled HUD bar but leave that
+## light frozen at its last-damaged colour. To keep `damaged` a DISCRETE event rather than a 60 Hz Color write, the
+## per-frame slice banks in _health_regen_carry and only commits once it crosses health_regen_commit_frac of max HP.
+func _update_health_regen(delta: float) -> void:
+	var fb: PlayerFeedbackSettings = GameSettings.player_feedback  # untyped autoload -> typed local
+	# A corpse never heals, and neither does anyone mid-death-cinematic. is_alive() also covers the OFF-TREE unit
+	# test, where hp is still its pre-_ready 0.0 default and must never be allowed to climb out of nothing (the
+	# hp = max_hp seed lives in Character._ready). heal() itself has NO _dead guard, so this gate is load-bearing.
+	if _dying or not is_alive() or fb.health_regen_frac_per_sec <= 0.0:
+		_health_regen_carry = 0.0
+		return
+	# ⭐ SYMMETRY WITH THE CINEMATIC DAMAGE IMMUNITY. take_damage() early-returns on InputManager.world_frozen()
+	# (a control-locked player takes NO damage from any vector), so a frozen world must not HEAL you either — a
+	# 40-second cutscene would otherwise hand back ~40% of max HP at zero risk and zero agency, which is the
+	# clearest possible way to teach players that watching a cutscene is a rest stop. The DIALOGUE half of
+	# world_frozen() is already unreachable here (that branch returns above the drive beat); the CUTSCENE half is
+	# NOT — cutscene_player.gd deliberately never pauses the tree, so _physics_process keeps running through it.
+	# The carry is HELD rather than cleared, exactly like the in-combat pause: a cutscene interrupts recovery, it
+	# doesn't confiscate the progress you'd already banked.
+	if InputManager.world_frozen():
+		return
+	if not is_out_of_combat():
+		return  # the carry stays BANKED but can't GROW — a lull mid-fight pauses progress, it never erases it
+	var ceiling := max_hp * fb.health_regen_cap_frac
+	if hp >= ceiling:
+		_health_regen_carry = 0.0
+		return
+	var endurance_mult := stats_or_default().hp_regen_mult(status_stat_modifier(&"endurance"))
+	_health_regen_carry += health_regen_rate_for(max_hp, fb.health_regen_frac_per_sec, endurance_mult) * delta
+	var step := max_hp * fb.health_regen_commit_frac
+	if _health_regen_carry < step:
+		return
+	# Our OWN clamp to the ceiling: heal() only knows about max_hp, but a designer who lowered health_regen_cap_frac
+	# wants the drip to STOP at that cap rather than creep past it one committed slice at a time.
+	heal(minf(_health_regen_carry, ceiling - hp))
+	_health_regen_carry = 0.0
 
 ## Punchy "got hit" feedback — forwards to the HurtFeedback component (the slow-mo + screen-drain +
 ## bus muffle). Called from take_damage on a non-lethal hit. Off-tree (_hurt null) this no-ops, matching
@@ -1774,10 +1981,19 @@ func held_prop() -> Node:
 		return head.pickup_ray.held_object
 	return null
 
-## True when a holster should read as a peaceful stand-down. Carrying a throwable forcibly holsters the weapon,
-## but that is not surrender; it is just trading the gun for whatever is in your hands.
+## True when a holster should read as a peaceful stand-down. TWO forced holsters deliberately don't:
+##   * CARRYING a prop — the carry lock puts the gun away for you, but that is trading it for whatever is in your
+##     hands (a throwable is still a threat), not laying it down.
+##   * DYING — die() holsters for the death cinematic, and a corpse lowering its gun is not you surrendering. This
+##     gate is load-bearing rather than cosmetic: the pardon would fire at die() time, sweep EVERY provoked NPC
+##     regardless of who (or what) killed you, and SPEND each one's one-shot betrayal latch — all three of which
+##     the deliberate death settlement (HostilityHelpers.death_settles_grudges -> NPC.stand_down_on_player_death,
+##     applied on the RESPAWN and only when a hostile actually killed you) is specifically shaped to avoid. Without
+##     it, dying to a fall or your own grenade would quietly pacify the level and burn the pardon your next life
+##     may need. Both `_dying` (our cinematic latch) and `_dead` (Character's, set before die() runs) are checked
+##     so a death that reaches the holster by either path is covered.
 func should_holster_deescalate() -> bool:
-	return not _carrying and held_prop() == null
+	return not _carrying and held_prop() == null and not _dying and not _dead
 
 ## The BACKPACK item currently pulled into your hands via the hotbar (or null). Read by the hotbar to RESERVE +
 ## highlight the slot the prop came from, and by the save to fold the in-hand item back into the snapshot.
@@ -2001,11 +2217,11 @@ func _apply_look_readout(handler: Node) -> void:
 		if npc != null:
 			# Ally (companion) -> blue; else friendly green / hostile red; else keep the neutral default.
 			col = CBPalette.disposition_color(npc.is_following(), npc.resolved_disposition(), col)
-		# Key-hint prefix ("[E] Talk to Kyle" / "[Z] Pick Up"): the action's CURRENT binding, read live from
+		# Key-hint prefix ("[F] Talk to Kyle" / "[Z] Pick Up"): the action's CURRENT binding, read live from
 		# the InputMap so a rebind shows immediately. A Throwable is carried with the THROW key (its own,
 		# unique input — E would stash a dual item into the backpack instead); anything else interacts with
 		# PickUp, hinted only when it can actually be acted on RIGHT NOW (a hostile NPC's bare name gets no
-		# key — pressing E at it would do nothing).
+		# key — pressing F at it would do nothing).
 		if handler is Throwable:
 			label = "[%s] %s" % [InputManager.get_action_binding(InputManager.action_throw), label]
 		elif TalkHelpers.is_talkable_now(handler) or TalkHelpers.is_pickpocketable_now(handler, self):
@@ -2027,7 +2243,7 @@ func _on_air_dash_recharged() -> void:
 	if _hud:
 		_hud.flash_dash()
 	if air_dash_recharge_sfx:
-		AudioManager.play_2d_sfx(air_dash_recharge_sfx)
+		AudioManager.play_2d_sfx(air_dash_recharge_sfx, 0.0, 1.0, &"sfx", false)  # vary=false: an ability-ready HUD cue
 
 const EDGE_MIN_SPEED: float = 0.2         ## below this gap-ward speed there's nothing meaningful to brake — skip the probe
 
@@ -2150,6 +2366,7 @@ func _physics_process(delta: float) -> void:
 	gravity(delta)
 	_update_night_vision(delta)
 	_update_save_input()
+	_update_health_regen(delta)  # LIVE branch ONLY (see the header) — and BEFORE the low-HP feedback that reads hp
 	_update_low_hp(delta)
 
 	input_dir = Input.get_vector("left", "right", "forward", "backward")
@@ -2342,10 +2559,13 @@ func _update_stealth_hud(delta: float) -> void:
 	_hud.set_stealth_level(_stealth_hud_snap[&"level"], is_crouching())
 	_hud.set_detection_meter(_stealth_hud_snap[&"meter"], is_crouching())
 
-## Keep the crosshair pinned to SCREEN CENTRE — a fixed reticle (Deus Ex). It deliberately does
-## NOT track the shot: the swaying LASER DOT (flash_light, aimed along get_aim_direction) is what shows where
-## a shot will truly land — drifting wide on the move, settling back toward centre as you stand still. Re-set
-## each frame so a viewport resize keeps it centred. No-op without a HUD.
+## Keep the crosshair pinned to SCREEN CENTRE — a fixed reticle (Deus Ex). It deliberately does NOT track the
+## shot: the real shot direction sways around centre (get_aim_direction), drifting wide on the move and settling
+## back as you stand still, and the reticle stays put through all of it. ⭐The swaying LASER DOT that used to
+## SHOW you that drift is retired along with the laser sight, so nothing draws the true shot point today — and
+## the flashlight is NOT a stand-in for it: its beam apex is deliberately offset from the lens so the torch can
+## cast shadows, which puts its bright spot beside the crosshair by design. Re-set each frame so a viewport
+## resize keeps it centred. No-op without a HUD.
 func _update_crosshair() -> void:
 	if ui == null or not is_inside_tree():
 		return
@@ -2483,6 +2703,13 @@ func take_damage(amount: float, was_crit: bool = false, attacker: Node = null, h
 	if _hud:
 		_hud.flash_hurt()  # whole-screen red flash on every hit (lethal too — reads as the killing blow)
 	if not _dying:
+		# Wash the whole SKY red too. This sits inside the not-_dying gate while its screen-space twin above
+		# deliberately sits outside it, and the asymmetry is the point: the HUD flash on the KILLING blow is wanted
+		# (it reads as the blow that got you) and hide_hud_for_death sweeps it up a moment later — but StarSky is
+		# WORLD-rendered, so nothing in the death sequence can reach it, and a fatal hit would leave red pouring
+		# over the closing vignette with no way to cancel it. Same reasoning as on_scored_kill's _dying gate.
+		# No accessibility check here: StarSky.flash_hurt reads Settings.screen_flash_enabled itself, like its twin.
+		StarSky.flash_hurt()
 		_trigger_hurt()
 
 ## Ping the SINGLE aim radial toward `world_pos` (the shooter) when we actually take a hit — forwards
@@ -2521,10 +2748,42 @@ func on_dealt_hit(headshot := false, hp_frac := 1.0) -> void:
 		return
 	if _hud:
 		_hud.on_dealt_hit(headshot, hp_frac)
-	if hp_frac <= 0.0:
-		StarSky.flash_kill()  # pop the whole authored sky for a beat (StarSky paints every WorldEnvironment, so it always fires)
-		if _hud:
-			_hud.flash_kill()  # screen-space colour pop -> the kill flash shows over the authored skybox too
+
+## THE KILL CUE — StarSky's whole-sky colour pour (red, ~1 s), plus the screen-space punch over it when the
+## designer has armed it (it ships at alpha 0 — see PlayerHud.flash_kill for why a kill is sky-only). EVERY kill the player is credited with lands here, from exactly ONE caller:
+## Character.take_damage's lethal branch, on the killer _resolve_killer picked (see the note there). So a
+## takedown, a burn tick, a thrown knife, a body-ram and a fall you caused all flash, not only the kills that
+## happen to have a hitmarker moment. Nothing else may call this — a second caller would double-fire a cue whose
+## once-per-victim guarantee comes from take_damage's _dead latch.
+##
+## Kept as a NAME because Character calls it duck-typed on whoever got the credit; the Character base is a no-op,
+## so an NPC killer costs one has_method and can never pop the player's sky.
+##
+## `_dying` gate, inherited from on_dealt_hit's original reasoning: ordnance still in flight when we died (a
+## grenade, a knife mid-air) lands during the death cinematic, and StarSky is WORLD-rendered — hide_hud_for_death
+## cannot reach it — so an ungated late kill would flash over the closing vignette. NOT gated on _hud_quiet:
+## through the revive's quiet window the player is alive and killing, and the sky was never part of the HUD that
+## window silences.
+func on_scored_kill() -> void:
+	if _dying:
+		return
+	StarSky.flash_kill()  # pop the whole authored sky for a beat (StarSky paints every WorldEnvironment, so it always fires)
+	if _hud:
+		_hud.flash_kill()  # screen-space colour pop -> no-op at the shipped kill_flash_peak_alpha = 0 (it buried the blood splatter)
+	# ...and the KICK under the flashes. Deliberately distance-INDEPENDENT, unlike every other death shake here:
+	# on_nearby_death already kicks for a death you STOOD NEXT TO (whoever dealt it, including a rival's kill and
+	# your own death), and it fades to nothing by death_shake_range — so a sniped kill, a thrown knife across a
+	# room, a burn tick or a fall you caused would land with no camera answer at all. This is the confirmation you
+	# FEEL for the kill you were CREDITED with, wherever it happened, and it rides the same once-per-victim
+	# guarantee as the flashes above (take_damage's _dead latch), so a shotgun's remaining pellets can't re-kick.
+	# At point-blank both fire: shake() clamps trauma to MAX_TRAUMA, so they saturate rather than spiking, and a
+	# kill in your face correctly stays the most violent one. Gated exactly like the flashes (_dying only, NOT
+	# _hud_quiet) because the kick is part of the SAME cue — through the revive's quiet window the player is alive,
+	# in control and killing, and _respawn_at_checkpoint() calls screen_shake.reset() BEFORE that window opens, so
+	# nothing rides in from the last life. Null off-tree (no camera rig) and scaled by Options -> Accessibility ->
+	# Screen Shake, which is the accessibility opt-out: that slider at 0 zeroes intensity_multiplier with the kick.
+	if screen_shake:
+		screen_shake.shake(GameSettings.screen_shake.kill_shake_amount)
 
 ## Slice 6b: forward the takedown prompt + hold-progress cue to PlayerHud. Driven every frame by SilentTakedown:
 ## `active` shows "[key] Take Down <name>" with the hold fill, inactive hides it. Off-tree (_hud null) it no-ops.
@@ -2841,6 +3100,20 @@ func die() -> void:
 	if mouse_input != null:
 		mouse_input.set_process(false)
 		mouse_input.set_process_unhandled_input(false)
+	# PUT THE WEAPON AWAY, for the same reason the legs + fists go down just below: a drawn gun otherwise hangs
+	# dead-centre in view through the whole keel-over. It SWINGS down rather than snapping — GunMesh.holster()
+	# rides the holster_changed signal (via DialogueController.on_weapon_holstered) — so you visibly lower it as
+	# you fall. Placed AFTER the carry teardown above so this gets the last word: a prop release lifts draw_locked
+	# and (outside death) would restore the pre-carry stance. No-op when already holstered.
+	# NOT undone by the in-place revive, deliberately — the ONE die() effect meant to outlive it (see the note in
+	# _respawn_at_checkpoint): a fresh life starts with the gun stowed and draws it on demand with a fire-click /
+	# hold-R, which is exactly what start_holstered gives every other spawn, and what the RELOAD_* death modes
+	# already did for free by re-running _ready.
+	# It must not read as a peaceful stand-down either: should_holster_deescalate() gates the FNV holster pardon on
+	# _dying, so dying can't quietly forgive every NPC you provoked. Settling those grudges is the DEATH
+	# settlement's job, on its own killer-aware terms and its own timing (see _settle_provoked_grudges).
+	if weapon_system != null and weapon_system.attack != null:
+		weapon_system.attack.set_holstered(true)
 	# Hide your own first-person BODY (legs + bare fists) and freeze the crouch driver for the death cinematic.
 	# The legs (the FirstPersonBody's body-awareness rig) would otherwise hang in view as the camera keels
 	# over; and the Crouch node runs its OWN _physics_process, which the player's set_physics_process(false)
@@ -2858,6 +3131,11 @@ func die() -> void:
 		fp_body.refresh_unarmed_hands()
 	if crouch != null:
 		crouch.set_physics_process(false)
+	# ...and the LEAN driver, for exactly the same reason: it runs its OWN _physics_process, which the player's
+	# set_physics_process(false) above does not stop, so a dead player could keep peeking the death camera
+	# sideways off a held key. Restored (via reset(), see _respawn_at_checkpoint) on the in-place revive.
+	if lean != null:
+		lean.set_physics_process(false)
 	# Kill all residual motion so a death taken mid-launch (rocket-jump, explosion knock, melee-dash, ram)
 	# doesn't linger on the frozen corpse — and, above all, doesn't survive the in-place revive. `velocity`
 	# is the controller motion; `explosion_velocity` is the decaying blast impulse Character.apply_velocity
@@ -3106,6 +3384,7 @@ func _respawn_at_checkpoint() -> void:
 	explosion_velocity = Vector3.ZERO                    # drop any launch/blast impulse — else apply_velocity re-adds it the instant physics resumes and flings the fresh life
 	_continuous_fall_time = 0.0
 	hp = max_hp
+	_health_regen_carry = 0.0                            # a slice banked at the moment of death must not pay into the fresh life
 	_set_stamina(stamina_max())
 	_stamina_mgr.clear_sprint_lockout()                  # the fresh life sprints immediately — the lockout doesn't outlive death
 	heal_limbs()
@@ -3124,6 +3403,9 @@ func _respawn_at_checkpoint() -> void:
 	# Belt-and-suspenders: guarantee the fresh life can draw its weapon. Dying mid-carry force-releases the prop,
 	# which already clears the carry draw-lock — but clear it here too so no death path can revive you unable to
 	# take your gun out (the full-reload death modes rebuild a fresh Player, so this only matters on the in-place revive).
+	# ⭐The LOCK is cleared; the HOLSTER itself deliberately is NOT. die() puts the gun away and the fresh life KEEPS
+	# it away — the one intentional exception to this revive's "whatever die() disables, restore it" rule — so every
+	# death mode now revives holstered, matching start_holstered. Don't "fix" the asymmetry; see die()'s holster note.
 	if weapon_system != null and weapon_system.attack != null:
 		weapon_system.attack.draw_locked = false
 	if _wall_climb != null:
@@ -3157,6 +3439,9 @@ func _respawn_at_checkpoint() -> void:
 	if crouch != null:
 		crouch.reset()                       # snap upright first: a crouched death froze crouch_t, so re-enabling alone would revive you shrunk/low
 		crouch.set_physics_process(true)
+	if lean != null:
+		lean.reset()                         # same shape as the crouch above: a death taken mid-peek froze lean_t, and reset() also drops the key CLAIM so the takedown/pet verbs are not left standing down for a hold that ended with the last life
+		lean.set_physics_process(true)
 	_reset_screen_post_process()
 	_fade_in_from_black()
 	# Bring the ducked world buses back UP from the death silence in step with the visual fade-up. The death

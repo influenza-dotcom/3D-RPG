@@ -53,6 +53,9 @@ extends GutTest
 const PISTOL = preload("res://resources/weapons/pistol.tres")
 const SHOTGUN = preload("res://resources/weapons/shotgun.tres")
 const SPRAY_PAINT = preload("res://resources/weapons/spray_paint.tres")
+## Folder swept by the shipped-weapon stamina guards below (the test_calibers.gd idiom): a derived price is only
+## as safe as the WORST .tres on disk, so the guards validate every one instead of the three preloaded here.
+const WEAPONS_DIR := "res://resources/weapons/"
 const ModelResource = preload("res://scripts/components/model_resource.gd")
 
 func _property(obj: Object, prop_name: String) -> Dictionary:
@@ -96,6 +99,176 @@ func test_weapon_data_move_speed_multiplier_defaults_to_one() -> void:
 	assert_eq(w.move_speed_multiplier, 1.0,
 		"Default move_speed_multiplier is 1.0 — a fresh weapon slows the holder not at all; only a heavier .tres sets it lower")
 	w = null
+
+
+func test_weapon_data_stamina_cost_mult_defaults_to_one() -> void:
+	var w := WeaponData.new()
+	assert_eq(typeof(w.stamina_cost_mult), TYPE_FLOAT,
+		"stamina_cost_mult must be a float — it scales the global per-shot stamina cost for this weapon")
+	assert_eq(w.stamina_cost_mult, 1.0,
+		"Default stamina_cost_mult is 1.0 — a fresh gun costs exactly the global stamina_shot_cost per shot; a fast-cadence .tres authors it DOWN and a heavy one UP")
+	w = null
+
+
+# ---------------------------------------------------------------------------
+# Shipped-weapon guards for the DERIVED per-shot stamina price. The price is
+# stamina_shot_cost x WeaponData.stamina_effort() x stamina_cost_mult, clamped
+# to stamina_shot_drain_ceiling x stamina_sprint_drain x attack_speed. Because
+# power and cadence are authored on separate knobs, a rebalance can quietly
+# invert the design or rail a weapon against its clamp with nothing else going
+# red, so the whole folder is swept (the test_calibers.gd idiom).
+#
+# SCOPE NOTE: the drain figures in the first two guards are the RAW held-trigger
+# rate. They do NOT model the regen a weapon earns back between its own shots -
+# that is stamina_regen_delay_after_shot's job and it is the subject of
+# test_no_shipped_weapon_regenerates_between_its_own_shots below, which is where
+# the real inter-shot interval (cooldown OR reload) is worked out.
+# ---------------------------------------------------------------------------
+
+## The shipped price of one shot from `w`, mirroring Attack._shot_stamina_cost() exactly.
+func _shot_cost_for(w: WeaponData) -> float:
+	var mv: PlayerMovementSettings = GameSettings.player_movement
+	var raw := mv.stamina_shot_cost * w.stamina_effort() * w.stamina_cost_mult
+	return maxf(minf(raw, _shot_cost_ceiling_for(w)), 0.0)
+
+
+## The cadence clamp for `w` - the most a single shot may ever cost, whatever its power.
+func _shot_cost_ceiling_for(w: WeaponData) -> float:
+	var mv: PlayerMovementSettings = GameSettings.player_movement
+	return mv.stamina_shot_drain_ceiling * mv.stamina_sprint_drain * maxf(w.attack_speed, 0.05)
+
+
+## Every shipped weapon that actually pays the ranged shot cost (melee pays stamina_melee_attack_cost; a spray
+## blob returns before the spend), as {path: WeaponData}.
+func _priced_ranged_weapons() -> Dictionary:
+	var out := {}
+	var dir := DirAccess.open(WEAPONS_DIR)
+	if dir == null:
+		return out
+	for file in dir.get_files():
+		var f := file.trim_suffix(".remap")
+		if not (f.ends_with(".tres") or f.ends_with(".res")):
+			continue
+		var w := load(WEAPONS_DIR.path_join(f)) as WeaponData
+		if w == null or w.is_melee or w.is_spray_paint:
+			continue
+		out[f] = w
+	return out
+
+
+func test_shipped_weapons_sustained_fire_stamina_stays_under_the_sprint_drain() -> void:
+	var weapons := _priced_ranged_weapons()
+	assert_gt(weapons.size(), 0, "expected at least one ranged weapon to validate")
+	var sprint_drain: float = GameSettings.player_movement.stamina_sprint_drain
+	for f in weapons:
+		var w: WeaponData = weapons[f]
+		assert_gte(w.stamina_cost_mult, 0.0,
+			"weapon '%s' has a NEGATIVE stamina_cost_mult - firing must never pay stamina back" % f)
+		var per_second := _shot_cost_for(w) / maxf(w.attack_speed, 0.05)
+		assert_lt(per_second, sprint_drain,
+			"weapon '%s' drains %.1f stamina/sec on a held trigger, at or above the %.1f/sec sprint drain - lower its damage or its stamina_cost_mult, or shooting costs more than running" % [f, per_second, sprint_drain])
+
+
+func test_no_shipped_weapon_is_railed_against_its_cadence_clamp() -> void:
+	# The clamp's failure mode is SILENT CHEAPENING, not an inversion: once a weapon's derived price exceeds
+	# stamina_shot_drain_ceiling x sprint_drain x attack_speed, the clamp discards the derived value, so making
+	# the weapon MORE powerful (or faster) stops raising its cost and every other test here stays green. Nothing
+	# shipped may sit on that rail, so the day someone raises the launcher's damage the suite says so.
+	var weapons := _priced_ranged_weapons()
+	assert_gt(weapons.size(), 0, "expected at least one ranged weapon to validate")
+	var mv: PlayerMovementSettings = GameSettings.player_movement
+	for f in weapons:
+		var w: WeaponData = weapons[f]
+		var raw := mv.stamina_shot_cost * w.stamina_effort() * w.stamina_cost_mult
+		var ceiling := _shot_cost_ceiling_for(w)
+		assert_lt(raw, ceiling,
+			"weapon '%s' wants %.2f stamina/shot but is clamped to %.2f - its price has stopped tracking its power, so raise stamina_shot_drain_ceiling or slow the weapon down" % [f, raw, ceiling])
+
+
+func test_the_grenade_launcher_is_the_most_expensive_shot_in_the_game() -> void:
+	# The design the per-shot cost exists to express: a powerful weapon costs more to fire than a weak one.
+	# rock_weapon.tres IS the grenade launcher (view_model grenade_launcher.tscn, caliber &"grenades") - the
+	# filename is legacy. Its lead comes from stamina_effort(): 4.0 direct damage plus a 4.0 blast payload, so
+	# twice the shotgun's 4.0 and eight times the pistol's 1.0.
+	var weapons := _priced_ranged_weapons()
+	assert_true(weapons.has("rock_weapon.tres"),
+		"rock_weapon.tres (the grenade launcher) must be on the roster for this guard to mean anything")
+	var launcher: float = _shot_cost_for(weapons["rock_weapon.tres"])
+	var runner_up := 0.0
+	var runner_up_name := ""
+	for f in weapons:
+		if f == "rock_weapon.tres":
+			continue
+		var c := _shot_cost_for(weapons[f])
+		if c > runner_up:
+			runner_up = c
+			runner_up_name = f
+	assert_gt(launcher, runner_up,
+		"the grenade launcher (%.2f/shot) must cost more than every other weapon - '%s' is at %.2f" % [launcher, runner_up_name, runner_up])
+	# A margin, not just a win: assert_gt alone passes on a 0.001 lead, which would not read as "powerful" in play.
+	assert_gte(launcher / maxf(runner_up, 0.001), 1.5,
+		"the grenade launcher only leads '%s' by %.2fx (%.2f vs %.2f) - a retune has narrowed it to where the two feel identically priced" % [runner_up_name, launcher / maxf(runner_up, 0.001), launcher, runner_up])
+
+
+## The regen hold a shot from `w` arms, mirroring Attack._shot_regen_hold(). `emptied` selects the shot that
+## used the last round in the magazine, which cannot be followed until the weapon reloads.
+func _shot_regen_hold_for(w: WeaponData, emptied: bool) -> float:
+	var base: float = GameSettings.player_movement.stamina_regen_delay_after_shot
+	var gap := w.attack_speed
+	if emptied and not w.is_infinite_ammo:
+		gap = maxf(gap, GameSettings.weapon_general.auto_reload_delay + w.reload_time)
+	return maxf(base, gap)
+
+
+## The real gap before `w` can fire again. ⭐ attack_speed is only the COOLDOWN: a shot that empties the clip
+## waits out the reload instead, which for a 1-round magazine (sniper_wep.tres) is EVERY shot.
+func _inter_shot_gap_for(w: WeaponData, emptied: bool) -> float:
+	var gap := w.attack_speed
+	if emptied and not w.is_infinite_ammo:
+		gap = maxf(gap, GameSettings.weapon_general.auto_reload_delay + w.reload_time)
+	return gap
+
+
+func test_no_shipped_weapon_regenerates_between_its_own_shots() -> void:
+	# THE rule that decides whether shooting can deplete you at all, and the one no cost guard can catch. Every
+	# spend re-floors a regen hold; a SHOT arms Attack._shot_regen_hold(). If that hold is SHORTER than the gap
+	# before the weapon can fire again, it regenerates between its own shots and can never run the pool down
+	# however much a shot costs. The pistol did exactly that at the old 0.35s movement delay: it earned
+	# stamina_regen_idle x (0.44 - 0.35) = 2.16 standing still against a 1.80 cost, so firing was free.
+	#
+	# ⭐ Both cases are checked, because the interval is NOT just attack_speed. A shot that empties the magazine
+	# waits out the reload, and for a 1-round magazine that is every shot: sniper_wep.tres cycles every 0.668s on
+	# paper but really fires once per 3.5s, which a cadence-only guard reads as "no refund" while the pool climbs.
+	var weapons := _priced_ranged_weapons()
+	assert_gt(weapons.size(), 0, "expected at least one ranged weapon to validate")
+	var mv: PlayerMovementSettings = GameSettings.player_movement
+	assert_gt(mv.stamina_regen_delay_after_shot, mv.stamina_regen_delay_after_spend,
+		"a shot must hold recovery LONGER than a movement verb, or firing regenerates as fast as it costs")
+	for f in weapons:
+		var w: WeaponData = weapons[f]
+		for emptied in [false, true]:
+			var gap := _inter_shot_gap_for(w, emptied)
+			var hold := _shot_regen_hold_for(w, emptied)
+			var refund: float = mv.stamina_regen_idle * maxf(gap - hold, 0.0)
+			assert_almost_eq(refund, 0.0, 0.001,
+				"weapon '%s' (%s shot) waits %.2fs before it can fire again but only holds recovery for %.2fs - it regenerates %.2f between its own shots, so no cost can ever deplete the pool with it" % [f, "clip-emptying" if emptied else "mid-clip", gap, hold, refund])
+
+
+func test_sustained_fire_actually_drains_the_pool_for_every_weapon() -> void:
+	# The player-facing consequence of the rule above, asserted as a real budget: holding the trigger on ANY
+	# shipped weapon must empty a full pool in finite time, standing perfectly still (the most forgiving tier,
+	# stamina_regen_idle). Before the shot hold existed the pistol's answer here was "never", and before the hold
+	# accounted for reload time the sniper's was "never" too - it gained 45.75 a shot.
+	var weapons := _priced_ranged_weapons()
+	assert_gt(weapons.size(), 0, "expected at least one ranged weapon to validate")
+	var mv: PlayerMovementSettings = GameSettings.player_movement
+	for f in weapons:
+		var w: WeaponData = weapons[f]
+		var cost := _shot_cost_for(w)
+		for emptied in [false, true]:
+			var refund: float = mv.stamina_regen_idle * maxf(_inter_shot_gap_for(w, emptied) - _shot_regen_hold_for(w, emptied), 0.0)
+			assert_gt(cost - refund, 0.0,
+				"weapon '%s' nets %.2f stamina per %s shot standing still - firing it can never deplete the pool" % [f, cost - refund, "clip-emptying" if emptied else "mid-clip"])
 
 
 func test_weapon_data_default_projectile_fields() -> void:

@@ -28,6 +28,14 @@ const _NPC_AI := preload("res://resources/tuning/NpcAiSettings.tres")
 @export var radius: float = 0.0    ## current audible radius (m); 0 = silent. Driven live (persistent) or decayed (one-shot)
 @export var decay: float = 0.0     ## radius lost per second (one-shot fade); 0 = constant
 @export var lifetime: float = 0.0  ## seconds until the node frees itself (one-shot); 0 = persistent (never self-frees)
+## WHO made this sound — the node the noise is ABOUT. NpcDistraction hands it to Perception.investigate_point as the
+## thing the investigating NPC `noticed`, so the MGS "!" sting can tell the PLAYER's own footsteps / gunfire (its live
+## source — NoiseEmitter stamps the Player here) from a decoy it threw or an NPC's gunfire pulse (NoisePulser stamps
+## its host NPC). Leave NULL for a noise that is nobody in particular (a thrown decoy, an authored ambient beeper): an
+## NPC investigating one is looking at a POINT, not a person, and must not sting "you've been seen". Loose `Node` and
+## NOT exported: it's a runtime identity, and the source may outlive it (a death pulse outlives its NPC) — readers
+## is_instance_valid it.
+var emitter: Node = null
 
 var _age: float = 0.0
 

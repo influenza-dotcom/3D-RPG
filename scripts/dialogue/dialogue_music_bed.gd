@@ -19,13 +19,18 @@ extends AudioStreamPlayer
 ##   defaults to the `music` bus the duck applies to it too — a CONSTANT offset, since the bed only ever plays
 ##   while a conversation is up. Tune by ear with dialogue_music_volume_db, but know that editing
 ##   music_duck_amount_db shifts this bed's level as well.
-## • Not the MusicDirector score. That fades the scene's Music node in for COMBAT and holds it SILENT during
-##   dialogue by default (swell_for_dialogue = false), which is why this loop is normally the only music you
-##   hear while talking. Turn swell_for_dialogue ON and the two play TOGETHER — pick one or the other.
+## • Not the MusicDirector score. That fades the scene's Music node in for COMBAT (and holds it there, ducked,
+##   through the CAUTION hunt), while holding it SILENT during dialogue by default (swell_for_dialogue = false) —
+##   which is why this loop is normally the only music you hear while talking. That suppression is load-bearing
+##   now, not incidental: a conversation pauses the tree, so a searcher outside would otherwise hold the combat
+##   bed under every line. Turn swell_for_dialogue ON and the two play TOGETHER — pick one or the other.
 ##
 ## LIFECYCLE mirrors the ducker exactly: on at start(), off at _finish(). A conversation merely SUSPENDED
 ## behind a sub-menu (Trade / Heal / Level Up / Install) keeps the bed playing — the conversation still
-## EXISTS (is_engaged()), the box is just hidden, and cutting the music there would stutter the scene.
+## EXISTS (is_engaged()), the box is just hidden, and cutting the music there would stutter the scene. It
+## does, however, STEP ASIDE for that sub-menu's own music: those are STATION screens, and a station's
+## machine plays its own tinny radio (managers/StationMusic.gd), which asserts note_menu_music(true) every
+## frame it is up. The loop keeps its position and swells back when the sub-menu closes.
 ## The bed RESTARTS from the top each conversation, so a short loop always opens on its downbeat.
 ##
 ## THE TALK DUCK: on top of the conversation envelope, the bed dips SLIGHTLY (dialogue_music_talk_duck_db)
@@ -46,6 +51,9 @@ var _base_db: float = SILENT_DB   ## the conversation envelope (silence <-> auth
 var _speech_duck_db: float = 0.0  ## the talk-duck offset while a line is spoken (0 = un-ducked); the other summed level
 var _speech_token: int = 0        ## bumped on every pulse/stop; a pending talk-duck auto-release only fires if its token still matches (so the next line's pulse extends the dip instead of being cut by the previous line's timer)
 var _duck_fade: Tween
+var _menu_duck_db: float = 0.0    ## the THIRD summed level: how far this bed steps aside while a station TERMINAL's own radio plays (StationMusic drives it) — see note_menu_music
+var _menu_ducked: bool = false    ## latch mirroring the requested state, so StationMusic's per-frame assert is idempotent and only a CHANGE builds a tween
+var _menu_fade: Tween
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keep playing through the dialogue tree-pause
@@ -66,28 +74,12 @@ func _ready() -> void:
 ## import settings being right we FORCE the loop flag here — on a duplicate, so we never mutate the shared
 ## resource other systems (or a future Radio playlist) may be holding. An already-looping track is used as-is,
 ## with no copy. Null in -> null out (an unauthored bed).
+## Delegates to LoopableStream, the shared owner since the station-terminal bed (managers/StationMusic.gd)
+## became a second consumer — the zero-length-WAV-range scar this reads around must live in exactly one place.
+## Kept as an INSTANCE method under this exact name and signature: tests/test_dialogue_music_bed.gd calls it
+## directly on a bare instance.
 func _looping_copy(authored: AudioStream) -> AudioStream:
-	if authored == null or _stream_loops(authored):
-		return authored
-	var copy: AudioStream = authored.duplicate() as AudioStream
-	# Same two shapes the probe reads: the WAV's loop_mode enum, or the .mp3/.ogg `loop` bool.
-	if copy.get(&"loop_mode") != null:
-		copy.set(&"loop_mode", AudioStreamWAV.LOOP_FORWARD)
-		# The RANGE matters as much as the flag. A .wav imported with Loop Mode Disabled carries
-		# loop_begin = loop_end = 0, and LOOP_FORWARD over a zero-length region plays SILENCE, not a loop —
-		# so give it the whole sample. loop_end is in frames: seconds * mix_rate (get_length() already
-		# accounts for the compressed format, so this is exact for QOA/IMA-ADPCM as well as raw PCM).
-		if int(copy.get(&"loop_end")) <= int(copy.get(&"loop_begin")):
-			copy.set(&"loop_begin", 0)
-			copy.set(&"loop_end", int(copy.get_length() * float(copy.get(&"mix_rate"))))
-	elif copy.get(&"loop") != null:
-		copy.set(&"loop", true)
-	if not _stream_loops(copy):
-		# An unrecognised stream shape — fall back to the `finished` restart backstop and say so, since that
-		# repeat has an audible gap at the join.
-		push_warning("DialogueMusicBed: could not force '%s' (%s) to loop — falling back to a restart-on-finish repeat, which seams audibly." % [authored.resource_path, authored.get_class()])
-		return authored
-	return copy
+	return LoopableStream.looping_copy(authored, "DialogueMusicBed")
 
 ## Fade the dialogue bed in (true) as a conversation opens, out (false) when it ends. No-op without an
 ## authored track. Safe to call repeatedly — a redundant true won't restart the loop mid-conversation.
@@ -107,6 +99,10 @@ func set_bed_playing(play_bed: bool) -> void:
 	# across conversations), and the fade-out should carry the swell-back with it rather than freeze a dip in.
 	# Its short fade runs in parallel with the envelope fade below — the two levels compose.
 	note_line_speech_stop()
+	# Same settle rule for the station-terminal handover, and for the same reason: a conversation must never
+	# open (or close) with a stale -60 dB menu dip frozen in. StationMusic re-asserts every frame, so if a
+	# terminal genuinely IS still up the dip is simply rebuilt on the next tick.
+	note_menu_music(false)
 	var target: float = cfg.dialogue_music_volume_db if play_bed else SILENT_DB
 	var time: float = cfg.dialogue_music_fade_in if play_bed else cfg.dialogue_music_fade_out
 	if _fade and _fade.is_valid():
@@ -158,6 +154,32 @@ func note_line_speech_stop() -> void:
 		return
 	_fade_speech_duck(0.0)
 
+## A station TERMINAL's screen is up (true) or is not (false) — asserted EVERY FRAME by the StationMusic
+## autoload rather than pulsed on the edge, because the latch below makes the call idempotent and a per-frame
+## assert has no ordering hazard against a conversation starting or ending.
+##
+## While true this bed steps aside by dialogue_music_menu_duck_db (default -60 = a FULL handover) so a
+## dialogue-hosted Trade / Heal / Level Up / Install / Chess / Bank plays ONE bed — the machine's — instead of
+## two stacked ones. It is a DUCK, not a stop: the loop keeps its position and swells back when the sub-menu
+## closes, the same reason a suspended conversation keeps the bed playing at all (see the LIFECYCLE note).
+## This is why the feature behaves identically on a bare kiosk and on a person-vendor who hosts the shop
+## inside a conversation.
+func note_menu_music(under_menu: bool) -> void:
+	if under_menu == _menu_ducked:
+		return
+	_menu_ducked = under_menu
+	var cfg: DialogueSettings = GameSettings.dialogue
+	# minf(.., 0.0): a duck can only ever pull DOWN — a positive knob must not make the bed louder than authored.
+	var target: float = minf(cfg.dialogue_music_menu_duck_db, 0.0) if under_menu else 0.0
+	if _menu_fade and _menu_fade.is_valid():
+		_menu_fade.kill()
+	_menu_fade = create_tween()
+	_menu_fade.tween_method(_set_menu_duck_db, _menu_duck_db, target, maxf(cfg.dialogue_music_menu_duck_fade, 0.0))
+
+func _set_menu_duck_db(db: float) -> void:
+	_menu_duck_db = db
+	_apply_volume()
+
 ## The spoken estimate elapsed with no advance (auto-advance off, player idling on the line): release the dip —
 ## unless the token moved, i.e. a newer line re-pulsed or a stop already settled it.
 func _release_speech_duck(tok: int) -> void:
@@ -179,10 +201,12 @@ func _set_speech_duck_db(db: float) -> void:
 	_speech_duck_db = db
 	_apply_volume()
 
-## The ONE place the live volume is composed: the conversation envelope plus the talk-duck offset. Both fade
-## tweens write their own level and meet here, so neither ever stomps the other's contribution.
+## The ONE place the live volume is composed: the conversation envelope, plus the talk-duck offset, plus the
+## station-terminal handover. All three fade tweens write their own level and meet here, so none ever stomps
+## another's contribution (the conversation fade-in runs WHILE the first line dips, and a terminal can open
+## mid-line).
 func _apply_volume() -> void:
-	volume_db = _base_db + _speech_duck_db
+	volume_db = _base_db + _speech_duck_db + _menu_duck_db
 
 ## `finished` fires only for a stream that ISN'T set to loop (see _ready) — restart it so the bed covers a
 ## conversation longer than the track. Gated on _bed_playing so it can't resurrect the bed after the
@@ -191,19 +215,7 @@ func _on_finished() -> void:
 	if _bed_playing:
 		play()
 
-## True when the stream is authored to loop seamlessly. Duck-typed rather than branched on class, because the
-## loop flag lives under a different name per stream type (AudioStreamWAV.loop_mode enum vs the .mp3/.ogg
-## `loop` bool) and a designer may drop in any of them. An unknown stream type reports true, so we warn only
-## when we're actually sure it won't loop.
+## Delegates to LoopableStream.loops — see there for the zero-length-WAV-range trap this reads around. Kept
+## under its exact old name/signature for the same reason as _looping_copy: the tests call it on an instance.
 func _stream_loops(s: AudioStream) -> bool:
-	var loop_mode: Variant = s.get(&"loop_mode")  # AudioStreamWAV: 0 = Disabled
-	if loop_mode != null:
-		# The flag ALONE is not enough: a WAV also needs a non-degenerate range. LOOP_FORWARD with
-		# loop_begin == loop_end (what a Loop-Mode-Disabled import leaves behind: both 0) loops a
-		# zero-length region, which is silence — audibly identical to a broken bed, and the exact bug
-		# that shipped the first time this component was written.
-		return int(loop_mode) != 0 and int(s.get(&"loop_end")) > int(s.get(&"loop_begin"))
-	var loops: Variant = s.get(&"loop")  # AudioStreamMP3 / AudioStreamOggVorbis
-	if loops != null:
-		return bool(loops)
-	return true
+	return LoopableStream.loops(s)

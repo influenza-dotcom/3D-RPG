@@ -6,17 +6,11 @@
 [ext_resource type="Script" path="res://scripts/components/chip_installer.gd" id="4_inst"]
 [ext_resource type="Script" path="res://scripts/components/stock_entry.gd" id="5_se"]
 [ext_resource type="Resource" path="res://resources/items/chip_air_dash.tres" id="6_c1"]
-[ext_resource type="Resource" path="res://resources/items/chip_laser_sight.tres" id="7_c2"]
 [ext_resource type="Resource" path="res://resources/items/chip_takedown.tres" id="8_c3"]
 
 [sub_resource type="Resource" id="SE1"]
 script = ExtResource("5_se")
 item = ExtResource("6_c1")
-count = 1
-
-[sub_resource type="Resource" id="SE2"]
-script = ExtResource("5_se")
-item = ExtResource("7_c2")
 count = 1
 
 [sub_resource type="Resource" id="SE3"]
@@ -39,4 +33,4 @@ display_name = "[PH] Mechanic"
 script = ExtResource("4_inst")
 installer_name = "[PH] Mechanic"
 standalone = false
-stock_counts = Array[ExtResource("5_se")]([SubResource("SE1"), SubResource("SE2"), SubResource("SE3")])
+stock_counts = Array[ExtResource("5_se")]([SubResource("SE1"), SubResource("SE3")])

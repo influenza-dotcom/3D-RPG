@@ -194,7 +194,8 @@ func _unhandled_input(event: InputEvent) -> void:
 ##    %Root's LAST child so it draws on top of the panel). Quit Game only ARMS it; nothing kills the
 ##    process but its Confirm, so a misclick at the end of the bottom row is no longer fatal. Cancel and
 ##    Escape (_unhandled_input) both dismiss. Both captions are static consts, so the card never reflows;
-##    style_dialog_card pins %QuitCard to skin.dialog_width (the make_dialog discipline).
+##    style_compact_card pins %QuitCard to skin.dialog_width (the make_dialog discipline) and keeps the
+##    card on the PLAIN generated panel — it stands under the artist screen-card art's 9-patch floor.
 func _bind_ui() -> void:
 	_root = %Root
 	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/sliders/tabs/tooltips/fonts) — reskin via resources/ui/menu_skin.tres; also sound-wires the authored buttons
@@ -245,7 +246,7 @@ func _bind_ui() -> void:
 	# Quit-confirm overlay adoption (see the header bullet): dim + centered fixed-width card, both authored.
 	_quit_confirm = %QuitConfirm
 	MenuStyle.style_dim(%QuitDim)
-	MenuStyle.style_dialog_card(%QuitCard)
+	MenuStyle.style_compact_card(%QuitCard)
 	var quit_title: Label = MenuStyle.cap_label(%QuitTitle)
 	MenuStyle.style_title(quit_title)
 	quit_title.text = MenuStyle.title_text(PlayerText.OPTIONS_QUIT_GAME)
@@ -325,7 +326,7 @@ func _page_columns(page: VBoxContainer, tab_specs: Array) -> Array[VBoxContainer
 		return [page]
 	var two_up := HBoxContainer.new()
 	two_up.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	two_up.add_theme_constant_override("separation", 10)  # matches the row gap; a wider gutter would squeeze the slider rows out of their half-column (306px min vs ~310px)
+	two_up.add_theme_constant_override("separation", 10)  # matches the row gap; the gutter is part of the half-column fit math (see MenuSkin.slider_width_dense)
 	page.add_child(two_up)
 	var columns: Array[VBoxContainer] = []
 	for _i in 2:
@@ -399,21 +400,34 @@ func _formatter_for(fmt: int) -> Callable:
 
 # --- Custom row builders (the few rows that aren't pure value-binding; named by spec.custom_handler) ---
 
-## Resolution chooser: items + selection derive from Settings.RESOLUTIONS / windowed_size, and the staged
-## setter maps the chosen index back to a Vector2i (_on_resolution_selected). Driven by a Custom spec so it
-## still lives in the catalog's order, but the index<->Vector2i mapping stays code.
+## Resolution chooser: items + selection derive from Settings.available_resolutions() / windowed_size, and the
+## staged setter maps the chosen index back to a Vector2i (_on_resolution_selected). Driven by a Custom spec so it
+## still lives in the catalog's order, but the index<->Vector2i mapping stays code. The list is the presets that
+## FIT the player's current screen (Settings filters RESOLUTIONS against the usable rect + window decorations), so
+## the row never offers a window bigger than the monitor — the 1920x1080 preset on a 1080p screen used to park the
+## title bar above the screen with no way back but this row. A preset that fits only once the caption + borders are
+## dropped (the native size on its own monitor) is still offered, captioned "(borderless)" because that is how
+## Settings will place it — filtering it out is what left a 1080p player three sizes and no native one (2026-08-20).
+## The exact list offered is bound into the setter, so a staged index always maps through the same list it was
+## picked from even if the screen changes before Apply.
 func _emit_resolution(parent: VBoxContainer, _spec: Variant) -> Control:
+	var choices: Array[Vector2i] = Settings.available_resolutions()
 	var res_items: Array[String] = []
-	for r in Settings.RESOLUTIONS:
-		res_items.append("%d x %d" % [r.x, r.y])
-	var res_sel: int = Settings.RESOLUTIONS.find(Settings.windowed_size)
+	for r in choices:
+		# A preset only reachable without decorations is captioned as such — picking the native size drops the
+		# title bar (Settings places it borderless over the screen), which must read as the setting, not a glitch.
+		if Settings.is_borderless_size(r):
+			res_items.append(TextFormat.subst(PlayerText.OPTIONS_RESOLUTION_BORDERLESS, {"w": str(r.x), "h": str(r.y)}))
+		else:
+			res_items.append("%d x %d" % [r.x, r.y])
+	var res_sel: int = choices.find(Settings.windowed_size)
 	if res_sel == -1:
-		# The live size isn't one of the presets (a custom window size). Surface it as its own trailing
-		# entry showing the TRUE dimensions, rather than clamping the display to index 0 and lying about it.
+		# The live size isn't one of the offered presets (a custom / clamped window size). Surface it as its own
+		# trailing entry showing the TRUE dimensions, rather than clamping the display to index 0 and lying about it.
 		var cur: Vector2i = Settings.windowed_size
 		res_items.append(TextFormat.subst(PlayerText.OPTIONS_RESOLUTION_CUSTOM, {"w": str(cur.x), "h": str(cur.y)}))
 		res_sel = res_items.size() - 1
-	return _option_row(parent, _spec.label, res_items, res_sel, _on_resolution_selected)
+	return _option_row(parent, _spec.label, res_items, res_sel, _on_resolution_selected.bind(choices))
 
 ## Window-mode chooser — items are CODE-defined (Settings.WINDOW_MODES order) rather than spec.options, so the
 ## editor can't drop them on a SettingsCatalog.tres re-save (a recurring quirk that left this an empty chooser +
@@ -432,6 +446,19 @@ func _emit_colorblind_mode(parent: VBoxContainer, spec: Variant) -> Control:
 ## ARRAY ORDER IS BEHAVIOUR — must stay the DifficultySettings.Level order; the consts only re-word.
 func _emit_difficulty(parent: VBoxContainer, spec: Variant) -> Control:
 	return _option_row(parent, spec.label, [PlayerText.OPTIONS_DIFFICULTY_EASY, PlayerText.OPTIONS_DIFFICULTY_NORMAL, PlayerText.OPTIONS_DIFFICULTY_HARD], int(_spec_current(spec)), _spec_setter(spec))
+
+## Colour Depth chooser (Video) — how many colours the screen post-process is allowed to use. Code-defined
+## items for the same reason as window mode: a generic DROPDOWN's options do not survive an editor re-save of
+## SettingsCatalog.tres. ARRAY ORDER IS BEHAVIOUR — index-mapped straight into Settings.COLOR_QUANTIZE_LEVELS,
+## so these captions must stay in that table's order (the PlayerText consts only re-word). Sits directly above
+## Dithering on purpose: this row decides which colours EXIST, that one decides how the gaps between them are
+## faked, and at the coarse end of this list the dither is the only reason the image still reads.
+func _emit_color_quantization(parent: VBoxContainer, spec: Variant) -> Control:
+	return _option_row(parent, spec.label, [
+		PlayerText.OPTIONS_CQ_AUTHORED, PlayerText.OPTIONS_CQ_24BIT, PlayerText.OPTIONS_CQ_16BIT,
+		PlayerText.OPTIONS_CQ_15BIT, PlayerText.OPTIONS_CQ_12BIT, PlayerText.OPTIONS_CQ_9BIT,
+		PlayerText.OPTIONS_CQ_8BIT, PlayerText.OPTIONS_CQ_6BIT, PlayerText.OPTIONS_CQ_3BIT,
+	], int(_spec_current(spec)), _spec_setter(spec))
 
 ## A non-interactive hint line (the Controls "click a binding…" note). Returns null — not a focus target.
 func _emit_hint(parent: VBoxContainer, spec: Variant) -> Control:
@@ -532,7 +559,7 @@ func _rebind_row(parent: VBoxContainer, action: StringName, label_text: String) 
 	_row(parent, label_text, btn, false)
 
 ## The current binding shown on a rebind button — the canonical logic now lives on InputManager
-## (get_action_binding / event_label), shared with the hover readout's interact key-hints ("[E] Talk to Kyle").
+## (get_action_binding / event_label), shared with the hover readout's interact key-hints ("[F] Talk to Kyle").
 func _binding_label(action: StringName) -> String:
 	return InputManager.get_action_binding(action)
 
@@ -654,6 +681,16 @@ func _label_col_width(parent: Control) -> float:
 		return float(MenuStyle.skin.setting_label_col_width_dense)
 	return float(MenuStyle.skin.setting_label_col_width)
 
+## The slider track's minimum for a row emitted into `parent` — the _label_col_width twin, and for the same
+## reason: TWO dense half-columns have to fit one panel. A slider row is the widest row this menu builds
+## (label + track + readout), so it is the row that decides the Accessibility page's MINIMUM width — and a
+## page minimum wider than the panel's anchor band makes Godot grow the PANEL (it never scrolls sideways),
+## which is how clicking Accessibility used to make the whole Options card 33px wider than every other tab.
+func _slider_width(parent: Control) -> float:
+	if parent.has_meta(&"_dense_column"):
+		return float(MenuStyle.skin.slider_width_dense)
+	return float(MenuStyle.skin.slider_width)
+
 ## Slider row with a live, right-aligned value readout. `setter` applies the value to Settings;
 ## `formatter` turns the raw value into display text. Value is set BEFORE connecting so the initial
 ## assignment doesn't fire the setter (and re-save) during construction. Returns the slider (focus target).
@@ -674,7 +711,7 @@ func _slider_row(parent: VBoxContainer, label_text: String, min_v: float, max_v:
 	s.value = value
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	s.custom_minimum_size.x = 120
+	s.custom_minimum_size.x = _slider_width(parent)
 	h.add_child(s)
 	var val := Label.new()
 	val.custom_minimum_size.x = float(MenuStyle.skin.slider_readout_width)  # EXACT English-measured skin budget (see MenuSkin)
@@ -805,21 +842,28 @@ func _stage(control: Object, setter: Callable, value: Variant) -> void:
 func _stage_signal(value: Variant, control: Object, setter: Callable) -> void:
 	_stage(control, setter, value)
 
-## Commit every staged change (each Settings setter applies to the engine + persists), then clear. Keyed by
-## the CONTROL node (a reliable Dictionary key), so each control contributes exactly one pending apply.
+## Commit every staged change (each Settings setter applies to the engine + persists), then clear and REBUILD
+## the rows from the live Settings. Keyed by the CONTROL node (a reliable Dictionary key), so each control
+## contributes exactly one pending apply. The rebuild matters because a setter may not land exactly what was
+## staged: Settings.set_windowed_size / set_window_mode re-fit a preset that does not fit the screen (a 1920x1080
+## pick on a 1080p monitor becomes 1600x900) — without the rebuild the Resolution cycler would keep showing the
+## staged value while the window is visibly another size, until the next open() or Revert.
 func _apply_pending() -> void:
 	for apply_cb in _pending.values():
 		(apply_cb as Callable).call()
 	_pending.clear()
-	_refresh_apply_state()
+	_rebuild_preserving_tab()
 
-## Drop the staged changes and rebuild the controls from the unchanged Settings. This is the ONE
-## _rebuild_tabs call that runs while the menu is on screen (open()'s runs before _root turns visible), and
-## a TabContainer whose pages are all freed + re-added resets to tab 0 — so the current tab is captured and
-## restored or Revert would visibly bounce the player back to the first tab. Tab order is deterministic
-## across rebuilds (catalog insertion order), so the same index lands on the same tab.
+## Drop the staged changes and rebuild the controls from the unchanged Settings.
 func _revert() -> void:
 	_pending.clear()
+	_rebuild_preserving_tab()
+
+## Rebuild every row from the live Settings while the menu is ON SCREEN (open()'s _rebuild_tabs runs before
+## _root turns visible). A TabContainer whose pages are all freed + re-added resets to tab 0 — so the current tab
+## is captured and restored, or Revert/Apply would visibly bounce the player back to the first tab. Tab order is
+## deterministic across rebuilds (catalog insertion order), so the same index lands on the same tab.
+func _rebuild_preserving_tab() -> void:
 	var cur := _tabs.current_tab if _tabs != null else 0
 	_rebuild_tabs()
 	if _tabs != null:
@@ -833,12 +877,14 @@ func _refresh_apply_state() -> void:
 	if _apply_btn != null:
 		_apply_btn.disabled = _pending.is_empty()
 
-func _on_resolution_selected(index: int) -> void:
+## `choices` is the exact preset list the row was built from (bound in _emit_resolution — .bind APPENDS, so it
+## arrives after the cycler's index), never re-read from Settings here.
+func _on_resolution_selected(index: int, choices: Array[Vector2i]) -> void:
 	# A trailing "(custom)" entry (index past the presets) represents the already-active non-preset size —
-	# selecting it is a no-op rather than an out-of-bounds RESOLUTIONS read.
-	if index < 0 or index >= Settings.RESOLUTIONS.size():
+	# selecting it is a no-op rather than an out-of-bounds read.
+	if index < 0 or index >= choices.size():
 		return
-	Settings.set_windowed_size(Settings.RESOLUTIONS[index])
+	Settings.set_windowed_size(choices[index])
 
 ## The bottom row's Quit Game arms the confirm overlay; only the overlay's Confirm reaches _on_quit.
 func _show_quit_confirm() -> void:

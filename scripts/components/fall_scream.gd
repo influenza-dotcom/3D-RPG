@@ -52,4 +52,6 @@ func _process(delta: float) -> void:
 	_fall_time += elapsed
 	if not _screamed and _fall_time >= min_fall_time and scream != null and host is Node3D:
 		_screamed = true
+		# VARIES: a yell of pain is an EXERTION, not a voice identity — see AudioManager.vary_pitch. Every actor
+		# in the game ships with the same placeholder grunt, so without it a squad falling together yells in unison.
 		AudioManager.play_sfx((host as Node3D).global_position, scream, volume_db)

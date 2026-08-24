@@ -68,6 +68,8 @@ func _ready() -> void:
 		_fit_hitbox_to_host()
 	if standalone:
 		StationSpeaker.ensure(self)  # a self-serve board answers with the shared panel chirp; a data-only match rides a talking opponent, and people don't beep
+	# The minimap pin — LEISURE, shared with Bonfire: both are "somewhere to stop for a while".
+	StationMarker.ensure(self, StationMarker.Kind.LEISURE)
 
 # ---------------------------------------------------------------------------------------------------
 # Duck-typed config surface (read by ChessScreen.open_match; the dialogue option rides the station contract below)

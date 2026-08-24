@@ -105,17 +105,29 @@ func apply(root: Control) -> void:
 		root.set_meta(&"_menu_root", true)
 		_wire_existing_buttons(root)
 
-## Sound-wire buttons that are ALREADY under `root` when apply() runs. The node_added hook below only wires a
-## button whose ancestry carries _menu_root at the moment it ENTERS the tree — true for every runtime-built
-## row, but an AUTHORED-SCENE screen's buttons (heal/respec/name-entry Confirm/Cancel) enter the tree WITH
-## the autoload scene, BEFORE its _ready calls apply(), so the hook saw them meta-less and skipped them
-## (silent buttons). One sweep at apply() time closes the gap; _wire_button's _snd_wired meta keeps it
-## idempotent with the hook for anything built later.
+## Sound-wire buttons that are ALREADY under `root` when apply() runs, and pin every TabContainer's minimum
+## (see _pin_tab_minimum). The node_added hook below only wires a button whose ancestry carries _menu_root at
+## the moment it ENTERS the tree — true for every runtime-built row, but an AUTHORED-SCENE screen's buttons
+## (heal/respec/name-entry Confirm/Cancel) enter the tree WITH the autoload scene, BEFORE its _ready calls
+## apply(), so the hook saw them meta-less and skipped them (silent buttons). One sweep at apply() time closes
+## the gap; _wire_button's _snd_wired meta keeps it idempotent with the hook for anything built later.
 func _wire_existing_buttons(node: Node) -> void:
 	if node is BaseButton:
 		_wire_button(node as BaseButton)
+	elif node is TabContainer:
+		_pin_tab_minimum(node as TabContainer)
 	for c in node.get_children():
 		_wire_existing_buttons(c)
+
+## MENUS DON'T RESIZE WHEN YOU CHANGE TABS. A TabContainer's minimum size defaults to the CURRENT page's
+## minimum (use_hidden_tabs_for_min_size = false), so pages of different sizes hand the container a different
+## minimum per tab — and a minimum that beats the panel's anchor band makes Godot GROW the panel (it never
+## clips or scrolls), so the card swells and re-centres mid-click. Pinning the flag ON makes the minimum the
+## MAX over all pages: one size, whichever tab is up. This is the structural half of the rule; the other half
+## is that the biggest page must still FIT (tests/test_menu_layout_stability.gd pins both). Applied here, at
+## the one seam every menu already routes through, so a new tabbed screen inherits it without opting in.
+func _pin_tab_minimum(tabs: TabContainer) -> void:
+	tabs.use_hidden_tabs_for_min_size = true
 
 # --- backdrops -------------------------------------------------------------------------------------
 
@@ -202,24 +214,45 @@ func cap_button(b: Button) -> Button:
 ## Give an EMPTY-TEXT row Button the height its own one-line caption WOULD get. The list screens build
 ## multi-column rows as an empty Button carrying full-rect child Labels inset by the stylebox content
 ## margins (implant_choice/chip_install _make_row) — but an empty text buffer contributes ZERO height to
-## Button.get_minimum_size() (measured: 10px = the v-margins alone, vs 26px with a caption), so the button's
-## rect ends up half a line ABOVE the glyphs its labels draw: the hover/pressed/focus accent bar (the menu
-## "cursor"), the faint selection fill AND the click hitbox all misalign with the visible text. Pinning
-## custom_minimum_size.y to a PROBE captioned Button's own get_minimum_size() under this same theme restores
-## the exact caption-height box (exact by construction — hand-summed font metrics undershot the engine's
-## Button layout, see test_menu_row_button), so the selection art wraps the glyphs again. Call it on EVERY
-## empty-text Button whose content lives in child Controls; a Button with its own `text` never needs it. The
-## probe wears THIS autoload's theme, so it is correct even while the button is still off-tree (rows are
-## built before add_child).
+## Button.get_minimum_size() (measured under the shipped art skin: 12px = the v-margins alone, vs 28px with
+## a caption), so the button's rect ends up half a line ABOVE the glyphs its labels draw: the hover/pressed/
+## focus accent bar (the menu "cursor"), the faint selection fill AND the click hitbox all misalign with the
+## visible text. Pinning custom_minimum_size.y to a PROBE captioned Button's own get_minimum_size() under
+## this theme restores the exact caption-height box (exact by construction — hand-summed font metrics
+## undershot the engine's Button layout, see test_menu_row_button), so the selection art wraps the glyphs
+## again. Call it on EVERY empty-text Button whose content lives in child Controls; a Button with its own
+## `text` never needs it (and a row button also wants style_list_row — see below).
 func size_row_button(btn: Button) -> Button:
 	var probe := Button.new()
 	probe.theme = theme
 	# Any single glyph works — it's the line box being measured, never a shown string (the probe is freed
-	# unseen, off-tree). Composed in a local per the text-debt rule for non-prose paints: geometry, not copy.
+	# unseen). Composed in a local per the text-debt rule for non-prose paints: geometry, not copy.
 	var probe_caption := "X"
 	probe.text = probe_caption
+	# The probe must be IN the tree for its `.theme` to resolve: theme-owner assignment happens on tree
+	# entry, so an OFF-tree probe silently measures the ThemeDB fallback theme instead of this skin (the
+	# fallback's bigger default font over-reserved by 1-3px and only covered the real box by luck — caught
+	# during the 08-12 art landing). Parented here for one synchronous measure; freed before it can render.
+	add_child(probe)
 	btn.custom_minimum_size.y = ceilf(probe.get_minimum_size().y)
+	remove_child(probe)
 	probe.free()
+	return btn
+
+## Pin a LIST-ROW Button (an empty-text row carrying its own child Labels — the chip-install /
+## implant-choice / implants-tab / level-up idiom) to the generated row language: transparent rest,
+## accent-bar selection, in EVERY state. The tab-strip rule applied to rows: artist button art in the
+## theme is push-button language for CAPTIONED buttons wearing the skin's button inks — a row's child
+## Labels keep their own light inks (text/gold/accent on the dark panel), so an opaque art body under
+## them buries the text. Every empty-text row Button must route through this beside size_row_button.
+func style_list_row(btn: Button) -> Button:
+	btn.add_theme_stylebox_override(&"normal", _flat(Color(0, 0, 0, 0), 0, Color(0, 0, 0, 0), 0, 9, 5))
+	btn.add_theme_stylebox_override(&"hover", _accent_bar(0.0))
+	btn.add_theme_stylebox_override(&"pressed", _accent_bar(0.10))
+	btn.add_theme_stylebox_override(&"hover_pressed", _accent_bar(0.10))
+	# The focus override must stay translucent — Godot draws `focus` as an OVERLAY on the state box.
+	btn.add_theme_stylebox_override(&"focus", _accent_bar(0.10))
+	btn.add_theme_stylebox_override(&"disabled", _flat(Color(0, 0, 0, 0), 0, Color(0, 0, 0, 0), 0, 9, 5))
 	return btn
 
 # --- adopt helpers (authored-scene screens) --------------------------------------------------------
@@ -240,6 +273,34 @@ func style_dim(cr: ColorRect) -> void:
 func style_dialog_card(vbox: VBoxContainer, extra_sep: int = 0) -> void:
 	vbox.custom_minimum_size.x = skin.dialog_width
 	vbox.add_theme_constant_override("separation", skin.content_separation + extra_sep)
+
+## The GENERATED flat panel (skin.panel_color + border + panel_content_margin), built regardless of any
+## artist panel_style art. For surfaces the big screen-card art cannot serve: COMPACT utility cards, where
+## the art's heavy torn borders (~76px of a ~106px popup's height) drown the content, and solid legibility
+## backings (the dialogue choice list). Everything else wears the theme panel.
+func make_plain_panel_style() -> StyleBoxFlat:
+	var m: int = skin.panel_content_margin
+	return _flat(skin.panel_color, skin.panel_border_width, skin.panel_border_color, skin.panel_corner_radius, m, m)
+
+## The DIALOGUE box's own background art (skin.dialogue_panel), or NULL when the skin leaves that slot
+## empty. Null is meaningful here — unlike every other art slot there is no generated fallback to derive,
+## because "no art" is a real authored look for this surface (outlined text straight over the 3D world),
+## so DialogueView reads the null and wears a StyleBoxEmpty instead. Duplicated per the _pick rule: the
+## caller overrides a Control with what it's handed, and a shared .tres sub-resource must never be mutated.
+func make_dialogue_panel_style() -> StyleBox:
+	return skin.dialogue_panel.duplicate() if skin.dialogue_panel != null else null
+
+## Adopt a COMPACT confirm card (title + one button row — the quit-confirm / TOS-nag / overwrite-confirm
+## popups): style_dialog_card's width pin PLUS the plain generated panel on the card's PanelContainer
+## parent. These cards stand ~105-140px — at that scale the artist screen-card art is nearly all torn
+## border, so utility popups keep the plain look by design (and stay visually distinct from real screens).
+## Structural contract: `card` is the direct VBox child of the card's PanelContainer (the authored
+## Root/…/Panel>Card shape all three adopters share).
+func style_compact_card(card: VBoxContainer, extra_sep: int = 0) -> void:
+	var panel := card.get_parent() as PanelContainer
+	if panel != null:
+		panel.add_theme_stylebox_override(&"panel", make_plain_panel_style())
+	style_dialog_card(card, extra_sep)
 
 ## Adopt an authored title Label (the make_title twin): title font/size/colour + ellipsis. Does NOT touch
 ## the text — the screen sets it (through title_text) from PlayerText, never the scene (l10n owns strings).
@@ -363,8 +424,8 @@ func make_active_tab_style() -> StyleBox:
 
 ## Hover/press stylebox for an INACTIVE tab in that same strip: the skin's tab_hovered art when set,
 ## else the active underline at 35% — one visual language for the strip, instead of the theme Button's
-## LEFT accent bar (list-row language). Margins (9,5) match the Button metrics so captions don't shift
-## 1px between states.
+## LEFT accent bar (list-row language). Margins (9,5) match the strip's other states (all three helpers
+## use them) so captions don't shift 1px between states.
 func make_hover_tab_style() -> StyleBox:
 	if skin.tab_hovered != null:
 		return skin.tab_hovered.duplicate()
@@ -373,6 +434,15 @@ func make_hover_tab_style() -> StyleBox:
 	var a: Color = skin.accent_color
 	sb.border_color = Color(a.r, a.g, a.b, 0.35)
 	return sb
+
+## An inactive strip tab at REST — the third sibling of the two helpers above: the skin's tab_unselected
+## art when set, else transparent. Exists so the strip's rest state never falls through to the theme
+## Button `normal` box: that was invisible while both defaulted to transparent, but the moment button art
+## lands (the parchment frames) an un-overridden strip tab would wear list-row BUTTON chrome mid-strip.
+func make_inactive_tab_style() -> StyleBox:
+	if skin.tab_unselected != null:
+		return skin.tab_unselected.duplicate()
+	return _flat(Color(0, 0, 0, 0), 0, Color(0, 0, 0, 0), 0, 9, 5)
 
 # --- custom tooltip ---------------------------------------------------------------------------------
 
@@ -682,21 +752,28 @@ func quiet_next_back() -> void:
 
 # --- internals: wiring + voices ------------------------------------------------------------------------
 
-## Every node added anywhere: if it's a button inside a menu root, wire its hover/click sounds. The
-## BaseButton check is first so this is near-free for the gameplay nodes that dominate node_added.
+## Every node added anywhere: if it's a button inside a menu root, wire its hover/click sounds; if it's a
+## TabContainer, pin its minimum (one size for every page).
 ## NOTE: this is a tree-global SceneTree.node_added listener, so it fires for EVERY node spawned anywhere
-## (projectiles, VFX, NPCs). The leading `node is BaseButton` early-out keeps it ~free for that common
-## case; only the rare button walks ancestors. Kept global on purpose — buttons are built lazily under
+## (projectiles, VFX, NPCs). The leading two class checks early-out keep it ~free for that common case;
+## only a button or a tab block walks ancestors. Kept global on purpose — menu chrome is built lazily under
 ## many menu roots and there's no single parent to scope a local signal to.
 ## The listener COUNT is a pinned budget (tests/test_global_node_added_listeners.gd allows exactly two,
 ## star_sky + this) — extend this hook, never add a third global listener.
 func _on_node_added(node: Node) -> void:
-	if not (node is BaseButton):
+	# Same shape for the two things a menu subtree gets for free: buttons get their voice, tab blocks get
+	# their one-size-for-every-page minimum (see _pin_tab_minimum — a screen that BUILDS its TabContainer
+	# after apply() would otherwise miss the pin and resize its card on a tab click).
+	var is_btn := node is BaseButton
+	if not is_btn and not (node is TabContainer):
 		return
 	var p: Node = node
 	while p != null:
 		if p.has_meta(&"_menu_root"):
-			_wire_button(node as BaseButton)
+			if is_btn:
+				_wire_button(node as BaseButton)
+			else:
+				_pin_tab_minimum(node as TabContainer)
 			return
 		p = p.get_parent()
 
@@ -769,6 +846,12 @@ func _volume_for(kind: StringName) -> float:
 
 ## Playback pitch for a cue kind. Only the denial is transposed — that detune is what keeps a DERIVED
 ## refusal (back_sound speaking for an unassigned denied_sound) from sounding exactly like a menu closing.
+##
+## ⭐MENU CUES DELIBERATELY SIT OUT the global per-play pitch variation that every WORLD sound effect gets
+## (GameSettings.audio.global_pitch_spread, applied by AudioManager.vary_pitch / play_varied). Menu chrome is
+## not diegetic: a click is a piece of UI that should sound like the same button every time, and a randomised
+## blip reads as a defect rather than as life. This table is EXACT, and play_ui writes it verbatim.
+## tests/test_menu_sound.gd pins the unity-for-everything-but-the-denial contract.
 func _pitch_for(kind: StringName) -> float:
 	if kind == &"denied":
 		return maxf(0.01, skin.denied_pitch_scale)  # 0 would hang the voice forever; the skin range-clamps too
@@ -798,6 +881,13 @@ func _style_tip() -> void:
 		_pick(skin.tooltip_panel, _flat(Color(0.04, 0.04, 0.055, 0.98), 1, skin.panel_border_color, skin.panel_corner_radius, 8, 6)))
 	_tip_label.add_theme_color_override(&"font_color", skin.text_color)
 	_tip_label.add_theme_font_size_override(&"font_size", skin.hint_size)
+	# The tip lives on MenuStyle's OWN CanvasLayer, parented to this autoload Node — nothing above it is a
+	# Control, so NO theme reaches it and every look it has must be an explicit override. That is why the
+	# text drop shadow _build_theme() stamps on `Label` has to be repeated here by hand; without these three
+	# lines the cursor tip is the one menu text surface that silently keeps the old flat look.
+	_tip_label.add_theme_color_override(&"font_shadow_color", skin.text_shadow_color)
+	_tip_label.add_theme_constant_override(&"shadow_offset_x", skin.text_shadow_offset.x)
+	_tip_label.add_theme_constant_override(&"shadow_offset_y", skin.text_shadow_offset.y)
 
 # --- internals -------------------------------------------------------------------------------------
 
@@ -820,6 +910,25 @@ func _make_title_font() -> Font:
 ## across every widget and back into the saved skin file.
 func _pick(artist: StyleBox, generated: StyleBox) -> StyleBox:
 	return artist.duplicate() if artist != null else generated
+
+
+## The _pick twin for caption colours: an authored ink (alpha > 0) replaces the palette-derived default.
+## Alpha 0 = unset — see the MenuSkin ink knobs for why alpha doubles as the null sentinel.
+func _ink(authored: Color, derived: Color) -> Color:
+	return authored if authored.a > 0.0 else derived
+
+
+## Stamp the skin's text drop shadow onto one theme type. `Label`, `RichTextLabel` and `TooltipLabel` are
+## the ONLY types Godot 4.7 gives font-shadow items to (probed against ThemeDB) — Button, TabBar and LineEdit
+## never read one, and stamping it on them SUCCEEDS SILENTLY while drawing nothing. See the MenuSkin knob for
+## why button captions are left flat rather than re-drawn by hand.
+## Always stamped, never branched: skin.text_shadow_color's alpha-0 sentinel already means "draw nothing",
+## and a theme entry that exists-but-is-transparent is what lets a live reskin turn the shadow back ON.
+func _text_shadow(t: Theme, kind: StringName) -> void:
+	t.set_color(&"font_shadow_color", kind, skin.text_shadow_color)
+	t.set_constant(&"shadow_offset_x", kind, skin.text_shadow_offset.x)
+	t.set_constant(&"shadow_offset_y", kind, skin.text_shadow_offset.y)
+	t.set_constant(&"shadow_outline_size", kind, skin.text_shadow_blur)  # TooltipLabel has no such item; harmless there
 
 
 ## A StyleBoxFlat with the given fill, optional border, and corner radius — the building block of the theme.
@@ -854,7 +963,7 @@ func _build_theme() -> Theme:
 	# Panel / PanelContainer ----------------------------------------------------
 	var panel_sb: StyleBox
 	if skin.panel_style != null:
-		panel_sb = skin.panel_style
+		panel_sb = skin.panel_style.duplicate()  # the _pick rule: the theme never shares the .tres sub-resource
 	else:
 		var m: int = skin.panel_content_margin
 		panel_sb = _flat(skin.panel_color, skin.panel_border_width, skin.panel_border_color, skin.panel_corner_radius, m, m)
@@ -871,13 +980,28 @@ func _build_theme() -> Theme:
 	t.set_stylebox(&"pressed", &"Button", _pick(skin.button_pressed, sel))
 	t.set_stylebox(&"focus", &"Button", _pick(skin.button_focus, sel.duplicate()))
 	t.set_stylebox(&"hover_pressed", &"Button", _pick(skin.button_pressed, sel.duplicate()))
-	t.set_stylebox(&"disabled", &"Button", _pick(skin.button_disabled, clear.duplicate()))
-	t.set_color(&"font_color", &"Button", skin.text_dim_color)
-	t.set_color(&"font_hover_color", &"Button", skin.text_color)
-	t.set_color(&"font_pressed_color", &"Button", skin.accent_color)
-	t.set_color(&"font_focus_color", &"Button", skin.text_color)
-	t.set_color(&"font_hover_pressed_color", &"Button", skin.accent_color)
-	t.set_color(&"font_disabled_color", &"Button", skin.disabled_text_color)
+	# Disabled follows the TOGGLE-ICON rule (a missing disabled variant reuses the delivered art rather
+	# than snapping back to the generated look): with rest art but no disabled art, disabled buttons wear
+	# a DIMMED copy of the rest body — an enable/disable flip must grey the same body, never pop it in and
+	# out of existence next to its always-bodied siblings. Art-less skins keep the transparent box.
+	var disabled_sb: StyleBox
+	if skin.button_disabled != null:
+		disabled_sb = skin.button_disabled.duplicate()
+	elif skin.button_normal != null:
+		disabled_sb = skin.button_normal.duplicate()
+		if disabled_sb is StyleBoxTexture:
+			(disabled_sb as StyleBoxTexture).modulate_color *= Color(0.62, 0.62, 0.60, 0.9)
+		elif disabled_sb is StyleBoxFlat:
+			(disabled_sb as StyleBoxFlat).bg_color = (disabled_sb as StyleBoxFlat).bg_color.darkened(0.4)
+	else:
+		disabled_sb = clear.duplicate()
+	t.set_stylebox(&"disabled", &"Button", disabled_sb)
+	t.set_color(&"font_color", &"Button", _ink(skin.button_font_color, skin.text_dim_color))
+	t.set_color(&"font_hover_color", &"Button", _ink(skin.button_font_hover_color, skin.text_color))
+	t.set_color(&"font_pressed_color", &"Button", _ink(skin.button_font_pressed_color, skin.accent_color))
+	t.set_color(&"font_focus_color", &"Button", _ink(skin.button_font_focus_color, skin.text_color))
+	t.set_color(&"font_hover_pressed_color", &"Button", _ink(skin.button_font_pressed_color, skin.accent_color))
+	t.set_color(&"font_disabled_color", &"Button", _ink(skin.button_font_disabled_color, skin.disabled_text_color))
 	t.set_font_size(&"font_size", &"Button", skin.body_size)
 
 	# CheckButton / CheckBox — skin-drawn toggle art (the _grabber_tex idiom): without these icons the
@@ -903,6 +1027,15 @@ func _build_theme() -> Theme:
 	# Labels --------------------------------------------------------------------
 	t.set_color(&"font_color", &"Label", skin.text_color)
 	t.set_font_size(&"font_size", &"Label", skin.body_size)
+
+	# TEXT DROP SHADOW — the type half of the same straight-overhead light the art PNGs are baked with
+	# (MenuSkin's "Text drop shadow" group; scripts/tools/bake_ui_shadows.gd owns the art half). Stamped on
+	# all three theme types that HAVE a font-shadow item and no others — see _text_shadow. The custom cursor
+	# tip is a fourth surface that needs the same shadow but takes it by hand (_style_tip): it hangs off this
+	# autoload's own CanvasLayer, so no theme reaches it.
+	_text_shadow(t, &"Label")
+	_text_shadow(t, &"RichTextLabel")  # the chess move log — its only theme entry
+	_text_shadow(t, &"TooltipLabel")   # Godot's NATIVE tooltips; the in-viewport tip is _style_tip's job
 
 	# LineEdit — flat skin chrome (name entry / character creation). Without these entries the two
 	# text fields in the game wore the STOCK engine rounded grey box inside our near-black panels.

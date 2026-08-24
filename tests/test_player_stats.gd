@@ -44,6 +44,7 @@ func test_baseline_sheet_is_perfectly_neutral() -> void:
 	assert_almost_eq(s.max_hp_bonus(), 0.0, 0.0001, "baseline strength adds no HP")
 	assert_almost_eq(s.melee_damage_mult(), 1.0, 0.0001, "baseline strength changes no melee damage")
 	assert_almost_eq(s.stamina_bonus(), 0.0, 0.0001, "baseline endurance adds no stamina")
+	assert_almost_eq(s.hp_regen_mult(), 1.0, 0.0001, "baseline endurance changes no health regen — a baseline character still regenerates, at exactly the authored base rate")
 	assert_almost_eq(s.weapon_damage_mult(), 1.0, 0.0001, "baseline gunplay changes no gun damage")
 	assert_almost_eq(s.headshot_damage_bonus(), 1.0, 0.0001, "baseline gunplay changes no headshot bonus")
 	assert_almost_eq(s.sway_mult(), 1.0, 0.0001, "baseline gunplay changes no aim sway")
@@ -78,6 +79,23 @@ func test_endurance_drives_stamina_capacity() -> void:
 	assert_almost_eq(tired.stamina_bonus(), -30.0, 0.0001, "negative endurance lowers max stamina linearly")
 	s = null
 	tired = null
+
+
+func test_endurance_drives_health_regen_rate() -> void:
+	# Endurance's SECOND derived effect (2026-08-18): the out-of-combat health-regen rate, as a multiplier on the
+	# authored base rate — so it reads as a percentage in the stat tooltip, like every other live-seam stat.
+	var s := _sheet(0, 0, 0, 0, 0, 5)  # endurance 5
+	assert_almost_eq(s.hp_regen_mult(), 1.5, 0.0001, "endurance 5 -> +50% out-of-combat regen rate (10%/pt)")
+	var frail := _sheet(0, 0, 0, 0, 0, -3)
+	assert_almost_eq(frail.hp_regen_mult(), 0.7, 0.0001, "worse forever going down: negative endurance heals slower, linearly")
+	var brittle := _sheet(0, 0, 0, 0, 0, -9)
+	assert_almost_eq(brittle.hp_regen_mult(), 0.1, 0.0001, "still STRICTLY positive just above the floor — no interior plateau (NO SOFT CAP)")
+	var dead_inside := _sheet(0, 0, 0, 0, 0, -20)
+	assert_almost_eq(dead_inside.hp_regen_mult(), 0.0, 0.0001, "the physical floor: a deeply negative endurance stops regen at 0 and NEVER goes negative — a negative rate would reach Character.heal() and silently drain hp with no death check")
+	s = null
+	frail = null
+	brittle = null
+	dead_inside = null
 
 
 func test_gunplay_drives_gun_damage_and_aim() -> void:
@@ -275,6 +293,7 @@ func test_status_bonus_folds_into_multiplier_stats() -> void:
 	var base := CharacterStats.new()
 	assert_almost_eq(base.melee_damage_mult(2.0), _sheet(2).melee_damage_mult(), 0.0001, "strength bonus folds into melee damage")
 	assert_almost_eq(base.stamina_bonus(2.0), _sheet(0, 0, 0, 0, 0, 2).stamina_bonus(), 0.0001, "endurance bonus folds into stamina capacity")
+	assert_almost_eq(base.hp_regen_mult(2.0), _sheet(0, 0, 0, 0, 0, 2).hp_regen_mult(), 0.0001, "endurance bonus folds into the out-of-combat health-regen rate")
 	assert_almost_eq(base.weapon_damage_mult(2.0), _sheet(0, 2).weapon_damage_mult(), 0.0001, "gunplay bonus folds into gun damage")
 	assert_almost_eq(base.headshot_damage_bonus(2.0), _sheet(0, 2).headshot_damage_bonus(), 0.0001, "gunplay bonus folds into headshot punch")
 	assert_almost_eq(base.sway_mult(2.0), _sheet(0, 2).sway_mult(), 0.0001, "gunplay bonus folds into aim sway")

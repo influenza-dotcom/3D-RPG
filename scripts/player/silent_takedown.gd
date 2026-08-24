@@ -103,7 +103,8 @@ func _set_pressing(on: bool, s: SilentTakedownSettings = null) -> void:
 		if not _press_player.playing:
 			_press_player.stream = s.takedown_sfx
 			_press_player.volume_db = s.takedown_sfx_volume_db
-			_press_player.play()
+			# Varied per PRESS, not per frame — the `playing` guard above is what keeps this one roll per wind-up.
+			AudioManager.play_varied(_press_player)
 	elif _press_player.playing:
 		_press_player.stop()
 
@@ -123,8 +124,22 @@ func _can_run() -> bool:
 		return false  # no takedowns during the player's death cinematic — a dead player must not score the kill / XP / a post-mortem autosave
 	if DialogueManager.is_active() or InputManager.gameplay_suppressed():
 		return false
+	# The LEAN has CLAIMED the Takedown key for the current hold — you pressed it with nothing to take down, so
+	# it became a peek (see the contextual-key rule in scripts/player/lean.gd). Stand down until the key is
+	# released. Without this a lean that swept an off-guard NPC into the crosshair mid-hold would quietly start
+	# charging a silent takedown underneath the peek — a kill the player never asked for.
+	if host.lean_owns_action(InputManager.action_takedown):
+		return false
 	return true
 
+
+## The contextual verb this driver is holding a target for, as an ACTION name (&"" = nothing eligible). Duck-typed
+## by Player.pending_verb_actions(); the LEAN asks it before claiming a shared key, so a Q press with an unaware
+## NPC in the crosshair goes to the takedown and one with nothing there becomes a peek. Reads the target resolved
+## by the last _physics_process pass — Lean runs at process_physics_priority 1 precisely so that pass is THIS
+## frame's, not the previous one.
+func pending_verb_action() -> StringName:
+	return InputManager.action_takedown if (_eligible != null and is_instance_valid(_eligible)) else &""
 
 ## The NPC under the crosshair eligible for a takedown, or null. Casts the player's aim ray (copying
 ## Player._check_aim_remark), then applies the pure eligibility gate so the decision is unit-testable.

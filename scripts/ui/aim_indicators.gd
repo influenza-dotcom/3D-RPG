@@ -21,6 +21,10 @@ var camera: Node3D
 var _aims: Dictionary = {}  # source instance id -> { pos, charge, damage, warning, t }
 var _pings: Dictionary = {} # source instance id -> { pos, t } : transient damage-direction pings
 var _blink_t: float = 0.0   # advances every frame; drives the warning blink so all warning radials pulse together
+## True while the canvas still HOLDS a painted arc. A CanvasItem only re-runs _draw() on queue_redraw() --
+## it does NOT repaint every frame -- so emptying _aims/_pings without queuing one leaves the last frame's
+## arc frozen on screen FOREVER. This flag lets the empty state queue exactly ONE clearing redraw.
+var _painted: bool = false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE  # never eat input
@@ -32,7 +36,20 @@ func _ready() -> void:
 func report(source: Object, world_pos: Vector3, charge: float, damage: float = 0.0, warning: bool = false) -> void:
 	var id := source.get_instance_id()
 	if charge <= 0.0:
-		_aims.erase(id)
+		# Dropping the arc CHANGES what should be on screen, so it must queue a redraw exactly like the set
+		# path below. Without this the arc painted LAST frame just stays there: erasing leaves _aims empty,
+		# so _process has nothing to expire and takes its early-out -- and a CanvasItem repaints only when
+		# something queues it. THE STUCK RED ARC. It stranded at the arc's pre-shot peak (bright, near max
+		# radius) because npc_combat reports the charge computed BEFORE the shot fired. Reachable whenever
+		# an enemy's last report is a zero with no positive one behind it in the same frame:
+		#   * runs dry -> GOAP replans to FireUnarmed, which reports 0 every frame and never aims a laser;
+		#   * swaps to a melee weapon -> act_alerted suppresses the laser's report and zeroes this one;
+		#   * fires, then drops the alerted body before the next tick (you broke away / out of perception)
+		#     -- the post-shot frame pins charge to exactly 0, so that frame's reports both erase silently.
+		# (Walking out of RANGE mid-charge self-heals: the laser's positive report queues a redraw that
+		# resolves against the erased dict. Which is why this only bit "sometimes".)
+		if _aims.erase(id):
+			queue_redraw()
 		return
 	_aims[id] = {"pos": world_pos, "charge": clampf(charge, 0.0, 1.0), "damage": maxf(damage, 0.0), "warning": warning, "t": Time.get_ticks_msec()}
 	queue_redraw()
@@ -50,6 +67,11 @@ func ping(source: Object, world_pos: Vector3) -> void:
 func _process(delta: float) -> void:
 	_blink_t += delta
 	if _aims.is_empty() and _pings.is_empty():
+		# Nothing to age -- but if the canvas still holds the last arc, queue the ONE redraw that clears it.
+		# Belt-and-suspenders behind report()'s erase path above: ANY future way of emptying these dicts
+		# lands here within a frame, so a stale arc can never outlive its entry again.
+		if _painted:
+			queue_redraw()
 		return
 	var now := Time.get_ticks_msec()
 	var ping_ttl_ms: float = MenuStyle.hud.aim_ping_ttl * 1000.0
@@ -66,8 +88,13 @@ func _process(delta: float) -> void:
 	queue_redraw()  # redraw every frame so the arcs follow camera rotation
 
 func _draw() -> void:
+	# Every _draw starts from a CLEARED canvas item, so this run defines what stays on screen; record it
+	# for the _process guard above. Set conservatively (an unnecessary clearing redraw is free; a missed
+	# one strands an arc), so it counts "we got past the early-outs", not "a stroke actually landed".
+	_painted = false
 	if (_aims.is_empty() and _pings.is_empty()) or not is_instance_valid(camera):
 		return
+	_painted = true
 	var hud = MenuStyle.hud  # untyped on purpose: HudSkin's class_name may not be cached yet
 	var centre := size * 0.5
 	var half: float = deg_to_rad(hud.aim_arc_degrees) * 0.5

@@ -41,7 +41,11 @@ static func _effect(stat: StringName, s: CharacterStats, bonus: float = 0.0) -> 
 				_signed_num(s.carry_bonus()),
 				_signed_num(s.max_hp_bonus()))
 		&"endurance":
-			return PlayerText.stat_effect_endurance(_signed_num(s.stamina_bonus(bonus)))
+			# Two effects now: the stamina CAP (an absolute bonus) and the out-of-combat health-regen RATE (a
+			# multiplier, so it reads as a percentage like every other live-seam stat — see agility below).
+			return PlayerText.stat_effect_endurance(
+				_signed_num(s.stamina_bonus(bonus)),
+				_signed_pct(roundi((s.hp_regen_mult(bonus) - 1.0) * 100.0)))
 		&"gunplay":
 			return PlayerText.stat_effect_gunplay(
 				_signed_pct(roundi((s.weapon_damage_mult(bonus) - 1.0) * 100.0)),
@@ -76,11 +80,13 @@ static func _num(x: float) -> String:
 ## A SIGNED bare/half number: "+4", "-4", "+4.5", and "0" at baseline (never "+0" / "-0").
 static func _signed_num(x: float) -> String:
 	if is_zero_approx(x):
-		return "0"
+		return "+0"  # baseline reads as an explicit no-bonus, same voice as every other value (see _signed_pct)
 	return ("+" + _num(x)) if x > 0.0 else _num(x)  # a negative already carries its minus
 
-## A SIGNED percentage: "+8%", "-8%", and "0%" at baseline.
+## A SIGNED percentage: "+8%", "-8%", and "+0%" at baseline — zero keeps the plus so a baseline stat reads
+## as "this is your bonus: none" in the same voice as a real bonus, instead of a bare number that looks like
+## a different kind of line (the creation tooltip used to say "neutral" here; user call 2026-08-12).
 static func _signed_pct(p: int) -> String:
 	if p == 0:
-		return "0%"
+		return "+0%"
 	return ("+%d%%" % p) if p > 0 else ("%d%%" % p)  # a negative already carries its minus

@@ -332,7 +332,7 @@ func _make_row(left: String, left_color: Color, right: String, right_color: Colo
 ## OFF implant's caption dims to 40% — the theme's persistent `pressed` accent bar + the dim together read
 ## as on/off in one glance. Click -> _on_row_toggled flips the mechanic live.
 func _make_toggle_row(id: StringName, ability_name: String, chip_name: String, active: bool) -> Button:
-	var btn := MenuStyle.size_row_button(Button.new())  # empty-text button: without the pin its rect (selection bar + hitbox) collapses above the labels
+	var btn := MenuStyle.style_list_row(MenuStyle.size_row_button(Button.new()))  # empty-text row: height-pinned, and pinned to ROW language (its child Labels carry their own inks — artist button-body art would bury them)
 	btn.toggle_mode = true
 	# FOCUS_ALL, NOT the FOCUS_NONE these shipped with (the atm_screen _add_chip lesson): the toggle rows ARE
 	# this tab's pad path, and a control a pad can never land on is not a path at all. Paint order = focus

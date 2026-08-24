@@ -44,3 +44,63 @@ func test_thresholds_are_honored() -> void:
 	p.detection = 0.9
 	assert_eq(p.suspicion(), Perception.SuspicionTier.SUSPICIOUS, "above the raised suspicious threshold -> SUSPICIOUS")
 	p.free()
+
+
+# --- NPC.suspicion_of: the HUD-facing facade (2026-08-13) -----------------------------------------------
+
+## The third member of the awareness_of / detection_of family, added so the minimap's hostile alert ring could
+## read a graded tier without reaching into the private _perception child. Built off-tree with .new() and NO
+## add_child — running an NPC's _ready in a unit test instantiates weapon.tscn, nav, audio and mutates shared
+## statics (the house rule).
+func _bare_npc() -> Node:
+	return load("res://scripts/npc/npc.gd").new()
+
+## A bare NPC has no Perception child at all, so the facade must degrade to CALM rather than erroring — the
+## same null-safety awareness_of and detection_of promise.
+func test_npc_suspicion_of_is_calm_without_a_perception() -> void:
+	var n := _bare_npc()
+	var who := Node3D.new()
+	assert_eq(n.suspicion_of(who), Perception.SuspicionTier.CALM,
+		"no Perception child -> CALM, never a crash inside a HUD paint loop")
+	who.free()
+	n.free()
+
+## THE TARGET GATE, which is what makes the alert ring honest: the tier is reported only for the node the NPC is
+## actually tracking. Without it, a guard fighting a stray dog would ring as "they are onto YOU".
+func test_npc_suspicion_of_is_target_gated() -> void:
+	var n := _bare_npc()
+	var me := Node3D.new()
+	var someone_else := Node3D.new()
+	var p := Perception.new()
+	p.state = Perception.State.ALERTED
+	p.detection = 1.0
+	p.target = someone_else
+	n._perception = p
+	assert_eq(n.suspicion_of(me), Perception.SuspicionTier.CALM,
+		"ALERTED on somebody ELSE reads CALM toward me")
+	p.target = me
+	assert_eq(n.suspicion_of(me), Perception.SuspicionTier.ALERTED,
+		"...and ALERTED toward me once I am the target")
+	p.free()
+	someone_else.free()
+	me.free()
+	n.free()
+
+## The graded middle of the ladder reaches the facade intact — the ring draws one step per tier, so WARY and
+## SUSPICIOUS must not both collapse to "something".
+func test_npc_suspicion_of_passes_the_graded_tiers_through() -> void:
+	var n := _bare_npc()
+	var me := Node3D.new()
+	var p := Perception.new()
+	p.state = Perception.State.DETECTING
+	p.target = me
+	n._perception = p
+	p.detection = 0.0
+	assert_eq(n.suspicion_of(me), Perception.SuspicionTier.CALM, "an empty meter is CALM")
+	p.detection = 0.3
+	assert_eq(n.suspicion_of(me), Perception.SuspicionTier.WARY, "a filling meter is WARY")
+	p.detection = 0.9
+	assert_eq(n.suspicion_of(me), Perception.SuspicionTier.SUSPICIOUS, "a nearly-full meter is SUSPICIOUS")
+	p.free()
+	me.free()
+	n.free()

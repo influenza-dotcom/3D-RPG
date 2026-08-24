@@ -43,7 +43,12 @@ const KNOWN_DROPPABLES := ["Readable", "Switch", "Claimable", "FallImmunity",
 	"RandomCoat", "SprayPaintable", "RandomInventory", "PropFollow",
 	"RewardStinger", "CrippleCallout", "NoisePulser", "DebugOverlay",
 	"ChessMatch", "ChessVisualizer", "SilentTakedownAbility", "RandomSize",
-	"IndoorAmbienceDucker"]
+	"IndoorAmbienceDucker",
+	# The in-game debug suite (2026-08-18): the backtick console, the F1 cheat menu, F2 noclip flight and the
+	# F4 look-at inspector. All debug-build-gated drop-ins; absent from the palette they are undiscoverable.
+	"DebugConsole", "DebugMenu", "DebugNoclip", "DebugInspector",
+	# Loop iteration 4: the AI transition log and the game-event ticker (both session ring buffers).
+	"AiEventLog", "DebugEventTicker"]
 
 
 func _catalog_class_names() -> Dictionary:

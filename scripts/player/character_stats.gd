@@ -15,6 +15,7 @@ extends Resource
 ##   strength   -> carry_bonus() + max_hp_bonus()    Character._apply_stats (spawn-stamped, BEFORE hp seeds)
 ##                 + melee_damage_mult()              ShotResolver.scaled_damage for a MELEE weapon (WeaponData.is_melee)
 ##   endurance  -> stamina_bonus()                    Player.stamina_max (special-movement stamina capacity)
+##                 + hp_regen_mult()                  Player._update_health_regen (out-of-combat health regen rate)
 ##   gunplay    -> sway_mult() + weapon_damage_mult() + headshot_damage_bonus()  AimSway + ShotResolver (a RANGED weapon)
 ##   streetwise -> buy/sell_price_mult()              Merchant.buy_price / sell_price (the trading character)
 ##                 + rep_gain/loss_mult()             Reputation.add_reputation (gains bigger, losses smaller)
@@ -55,6 +56,7 @@ const CARRY_PER_STRENGTH := 2.0            ## strength -> +carry capacity per po
 const HP_PER_STRENGTH := 1.5               ## strength -> +max HP per point (was HP_PER_ENDURANCE before the merge)
 const MELEE_DAMAGE_PER_STRENGTH := 0.05    ## strength -> +5% melee weapon damage per point
 const STAMINA_PER_ENDURANCE := 10.0        ## endurance -> +max stamina per point
+const HP_REGEN_PER_ENDURANCE := 0.10       ## endurance -> +10% out-of-combat health regen rate per point
 const WEAPON_DAMAGE_PER_GUNPLAY := 0.05    ## gunplay  -> +5% ranged weapon damage per point
 const HEADSHOT_PER_GUNPLAY := 0.05         ## gunplay  -> +5% extra headshot punch per point (ranged crits)
 const SWAY_PER_GUNPLAY := 0.08             ## gunplay  -> aim wander 8% steadier per point
@@ -69,8 +71,10 @@ const TAKEDOWN_TIME_PER_LARCENY := 0.05    ## larceny  -> silent-takedown wind-u
 ## STRENGTH. The physical stat (it merged in the old Endurance). Each point over baseline adds +2.0 carry capacity
 ## and +1.5 max HP (both stamped at spawn) AND +5% MELEE weapon damage (read live at the swing). 0 = neutral.
 @export var strength: int = BASELINE
-## ENDURANCE. Each point over baseline adds +10 max stamina for special movement abilities (grapple, climb, dash).
-## 0 = neutral; negative lowers the pool until Player.stamina_max hits its physical floor.
+## ENDURANCE. Each point over baseline adds +10 max stamina for special movement abilities (grapple, climb, dash)
+## AND speeds out-of-combat health regen by 10% (read live while you're out of a fight — see hp_regen_mult).
+## 0 = neutral; negative lowers the pool until Player.stamina_max hits its physical floor, and slows healing until
+## regen stops entirely at endurance -10.
 @export var endurance: int = BASELINE
 ## GUNPLAY. Each point over baseline steadies the aim wander 8% (floored at perfectly still), hits 5% harder with
 ## RANGED weapons, and adds 5% headshot punch. 0 = neutral; higher = a deadlier, tighter shooter.
@@ -128,6 +132,23 @@ func max_hp_bonus() -> float:
 ## `bonus` folds active/held endurance status modifiers into the live stamina limit.
 func stamina_bonus(bonus: float = 0.0) -> float:
 	return float(endurance - BASELINE + bonus) * STAMINA_PER_ENDURANCE
+
+## ENDURANCE: the passive out-of-combat health-regen RATE scales +10% per point over baseline. Exactly 1.0 AT
+## BASELINE, so a baseline character still regenerates — at precisely the authored base rate. The neutrality
+## contract is carried by that 1.0, not by switching the feature off for an unsheeted character.
+## A MULTIPLIER rather than a stamina_bonus-shaped ADDITIVE, for two reasons. (1) The rate is authored as a
+## fraction of max HP, so an absolute per-point term would be meaningless against a max_hp that starts at 4.0 and
+## that strength / perks / held trinkets all move at runtime. (2) An additive term would COUPLE this const to the
+## authored base rate — the physical zero floor would sit wherever their ratio put it, so halving the rate in the
+## .tres would silently move the "endurance stops helping" cliff. As a multiplier that floor is always at
+## endurance -10, whatever the base rate is.
+## Floored at 0 like every other multiplier, and here the floor is LOAD-BEARING rather than tidy: a negative rate
+## would flow into Character.heal(), which accepts a negative amount and drains hp with no death check and no
+## flash — an untracked, unkillable damage source. Straight line all the way down to that floor, no interior
+## plateau (the NO SOFT CAP contract). `bonus` folds active/held endurance status modifiers in exactly like
+## stamina_bonus, so an adrenaline shot or a carried endurance trinket really does speed recovery.
+func hp_regen_mult(bonus: float = 0.0) -> float:
+	return maxf(0.0, 1.0 + float(endurance - BASELINE + bonus) * HP_REGEN_PER_ENDURANCE)
 
 ## The strength->derived RE-STAMP chokepoint — the SINGLE place a host's strength-driven max_hp / carry_capacity
 ## (and endurance-driven stamina cap) are re-applied as a DELTA. LevelUp.level_up_stat, PerkManager._apply /

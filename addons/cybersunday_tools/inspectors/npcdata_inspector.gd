@@ -125,7 +125,11 @@ func _build_card(nd: NpcData) -> Control:
 
 ## (Re)build the resolved-stats summary + conflict warnings into `readout`, clearing the previous render.
 func _render_readout(readout: VBoxContainer, nd: NpcData) -> void:
+	# remove_child BEFORE queue_free: a queue_free'd child stays in the tree until the end of the frame, and a SpinBox
+	# drag can fire value_changed several times WITHIN one frame — so a bare queue_free would stack N duplicate
+	# summary/conflict lines in the card and make it jump in height while the designer is tuning.
 	for child in readout.get_children():
+		readout.remove_child(child)
 		child.queue_free()
 	var stats := Label.new()
 	stats.modulate = Color(1, 1, 1, 0.8)

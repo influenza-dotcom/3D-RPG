@@ -24,7 +24,8 @@
       "Bash(git stash *)",
       "Bash(\"C:/Users/dalla/bin/godot.cmd\" --headless --path \"C:/Users/dalla/3D RPG/rpg\" -s addons/gut/gut_cmdln.gd -gdir=res://tests -gtest=res://tests/test_smoke.gd -gunit_test_name=test_muzzle_whiz_node_present_and_connected -gexit)",
       "Bash(\"C:/Users/dalla/bin/godot.cmd\" --headless --path \"C:/Users/dalla/3D RPG/rpg\" --quit-after 3)",
-      "Bash(xargs grep -l \"wooden_crate\\\\|InteractableData\\\\|Interactable.gd\")"
+      "Bash(xargs grep -l \"wooden_crate\\\\|InteractableData\\\\|Interactable.gd\")",
+      "Bash(rg -n -o -i \".{0,160}\\(shop|trad|merchant\\).{0,160}\" docs/*.md)"
     ]
   }
 }

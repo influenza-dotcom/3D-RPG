@@ -14,14 +14,23 @@ hitbox + look-at outline, and each subclass writes only its own behaviour (`star
 `LootableCorpse`, the service stations (`Healer`, `Bonfire`, `LevelUp`, `PerkStation`, `RespecStation`), `Door`,
 `Radio`, and more — **20 scripts extend `LookAtInteractable`** (see the full tree below). Plus standalone
 drop-ins: `Lock`, `SpawnOnDestroy`, `CanDestroy`, `Throwable`, `Pettable`, `NoisePulser`, `Locomotor`, `NavBlocker`, `NavLink`,
-`AmbientSound`, `AudioZone`, `IndoorAmbienceDucker`, and more — that list is a sampler, not the roster; the full
+`AmbientSound`, `AudioZone`, `IndoorAmbienceDucker`, `AiLod`, and more — that list is a sampler, not the roster; the full
 designer-facing catalogue (every drop-in with its knobs) is `docs/AUTHORING_GUIDE.md` §11, *The drop-in component
 catalogue*.
+
+The **in-game debug suite** (2026-08-18) is also built as drop-ins, all debug-build-gated and pre-placed in
+`scenes/game.tscn`: `DebugConsole` (backtick — typed commands over the pure `DebugCommands` registry, executed by
+`DebugActionsPlayer`/`DebugActionsWorld`), `DebugMenu` (F1 — the same registry as clickable pages, with a
+search bar over `DebugCommands.search()`), `DebugNoclip`
+(F2 — fly the real body), `DebugOverlay` (F3 — perf + game-state + stealth + input HUD), `DebugInspector` (F4 —
+look-at NPC/prop state via `AiDebugDraw`), `AiEventLog` (the AI transition ring) and `DebugEventTicker` (the game-event
+column). 86 commands; the save sandbox (`GameState.resolve_save_path`) keeps cheats off the real profile. See the
+*In-game debug tools* chapter in `docs/AUTHORING_GUIDE.md`.
 
 ## The `LookAtInteractable` hierarchy
 
 `LookAtInteractable` (`look_at_interactable.gd`, `extends Area3D`) is the shared base for every world
-object you **look at and press E** on. It is the interaction PLUMBING — the talk-layer hitbox the player's
+object you **look at and press F** on. It is the interaction PLUMBING — the talk-layer hitbox the player's
 interaction ray (`PickupRay`) detects, plus the white look-at outline drawn over the host on hover — so each
 subclass writes only its OWN verb and leaves the ray untouched.
 
@@ -40,6 +49,16 @@ new subclass needs zero ray changes). A subclass overrides the first three; `hos
 **Shared `@export`s** every subclass inherits: `highlight_target` (the `Node3D` to outline; null → parent),
 `highlight_color`, `highlight_width`, and `auto_fit_collider` (opt-in: fit the hitbox to the host meshes at
 runtime instead of hand-sizing a `CollisionShape3D`; default `false`).
+
+⭐**The hover outline shares ONE `material_overlay` slot with the NPC combat rim and the `Throwable` hull**, so
+two rules protect the outlines it is not entitled to. (1) **Zero `highlight_color.a` or `highlight_width` = no
+highlight at all** — the component builds no material and never writes the slot, instead of swapping a
+transparent one in and evicting whatever rim was showing. Use it for a terminal you don't want outlined. (2) The
+collect **prunes actor and prop subtrees** (`TalkHelpers.owns_its_overlay`), because `highlight_target` is
+usually blank and the host is then `get_parent()` — an interactable dropped straight under the LEVEL root takes
+the whole map as its host, and without the prune hovering it would strip every NPC and prop outline in the
+level. Still prefer to set `highlight_target` (or child the component under the prop): the prune keeps the
+damage cosmetic, it does not make a map-wide host correct.
 
 ### The subclass tree
 
@@ -99,7 +118,7 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
   DUCK-TYPE the same four talk-handler methods so `PickupRay` treats them identically, but they extend
   `Area3D` / their own root, not `LookAtInteractable`.
 - **`Pettable`** / **`Claimable`** (`pettable.gd` / `claimable.gd`, `extends Area3D`) — HOLD-Q pet and TAP-T
-  befriend verbs on their OWN physics layers, deliberately off the talk layer so they never show an "[E]"
+  befriend verbs on their OWN physics layers, deliberately off the talk layer so they never show an "[F]"
   prompt.
 - **`PickupBeacon`** (`pickup_beacon.gd`, `extends Node3D`) — the colour-coded pickup item light. The class keeps
   its legacy name, but it now builds only a small `OmniLight3D` on the item: no vertical shaft, no mesh beacon, no
@@ -123,6 +142,22 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
 - **`WorldMarker`** (`world_marker.gd`, `extends Node3D`) — a point-of-interest beacon: joins the `&"compass"`
   and `&"minimap"` groups on `_ready`, so a chevron rides the screen edge and a dot sits on the HUD floorplan
   with no wiring. Place by hand for fixed landmarks; `QuestMarkerSync` spawns them for live objectives.
+- **`StationMarker`** (`station_marker.gd`, `@tool`, `extends Node3D`) — the station's minimap pin. **You almost
+  never place it:** every station component calls `StationMarker.ensure(self, Kind.X)` from its own `_ready`, so a
+  bare prefab dropped in a level is on the map with no authoring. Joins `Groups.MINIMAP_STATION`; the widget draws
+  its `kind`'s STROKED glyph (`glyph_shape` / `glyph_angle` map the seven kinds to seven shapes, beside the enum).
+  Place one only to override — `enabled = false` hides this station, `kind` re-glyphs it, an opaque `color` picks
+  it out of the family (the export ships TRANSPARENT as the "use the skin" sentinel), and its own transform nudges
+  the pin off the counter and onto the doorway.
+  **Invariant — an AUTHORED marker always wins,** which is what makes a hand-placed one both the retune and the
+  mute switch (the `StationSpeaker.ensure` bargain, verbatim). `ensure()` is idempotent and runtime-only: a `@tool`
+  station must never spawn a node into a scene the designer is editing, or the pin gets saved into the `.tscn` and
+  a second one appears beside it on the next run.
+  **Second invariant — `pin_offscreen` derives from the station's own `standalone` flag,** which already answers
+  "fixed kiosk or riding a person": a wall terminal points at itself from the box rim, a vendor on a walking NPC
+  stays clipped, because a rim blip tracking a body around the edge is the radar the minimap refuses to be.
+  **Third — it joins `Groups.MINIMAP_STATION`, never `Groups.MINIMAP`.** The POI channel is the one the body loop
+  skips, so joining it would suppress the allegiance dot on exactly the stations that ride NPCs.
 - **`MinimapHide`** (`minimap_hide.gd`, `extends Node`) — the "not a wall" tag. `FloorplanSource.gather` skips
   the whole subtree it marks, so a fence / awning / parked car stops being drawn as a wall on the minimap's
   section cut. Collision is untouched: the prop still blocks bullets, footsteps and navigation.
@@ -155,6 +190,17 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
 7. If it is a self-serve station, give it a voice in one line: `StationSpeaker.ensure(self)` in `_ready`,
    gated on `standalone` (a data-only station rides a talking NPC, and a person who beeps is a bug). The
    screen sounds it with `StationSpeaker.chirp(station)` and suppresses the generic UI sting when it fires.
+   The same speaker has a second cue, `StationSpeaker.applaud(station)` — the machine clapping for you at a
+   milestone (today: `Atm.deposit`, on the portion that actually retires debt). Fire it from the COMPONENT,
+   not the screen, so a scripted or dialogue-driven path gets it too, and hang it on the same predicate the
+   rest of the reward already uses — ⭐unlike `chirp` it does **not** suppress the caller's UI cue, because a
+   press-confirmation click and a several-second celebration are different layers (reasoning in its header).
+7b. Put it on the minimap in one line: `StationMarker.ensure(self, StationMarker.Kind.X)` in `_ready`, **NOT**
+   gated on `standalone` (a vendor riding a walking NPC is still somewhere to trade — `ensure` derives the
+   rim-pinning choice from `standalone` instead). Pick an existing `Kind` if a player would read the new station
+   the same way as one that exists; otherwise add a `Kind`, map it in `StationMarker.glyph_shape`, and add the row
+   to `STATION_PINS` in `tests/test_station_marker.gd` — that roster test greps for the `ensure` line, so a
+   station that forgets it fails loudly instead of being silently absent from the map.
 8. If it is **dual-mode** (a `standalone` flag + a dialogue-NPC option), implement the dialogue-station
    contract pair — `dialogue_station_option()` / `open_dialogue_station(player)` (see the dual-mode paragraph
    above) — with a free `DIALOGUE_ORDER` slot, and add its roster row to
@@ -319,7 +365,9 @@ split `AudioZone` uses. (2) MUFFLE (`enable_muffle`, on by default): sweeps a lo
 bed sits on its own **`ambient_bed`** bus (in `default_bus_layout.tres`, carrying an `AudioEffectLowPassFilter`,
 sending into `ambient` so the slider still applies) — the same shape as the `radio` bus's low-pass. (The full bus
 set is `ambient`, `sfx`, `music`, `voice`, `radio` → `music`, `ambient_bed` → `ambient`, `speaker` → `sfx` (the
-tinny `StationSpeaker` kiosk chain — `docs/AUTHORING_GUIDE.md` §2a), and `sting` → Master,
+tinny `StationSpeaker` kiosk chain — `docs/AUTHORING_GUIDE.md` §2a), `station_music` → `music` (that SAME chain
+re-cloned for the shop bed a terminal plays while its screen is up — §1d; the chain is the tinny sound, the
+send is which volume slider owns it), and `sting` → Master,
 which is reserved for the death sting: the death cinematic ducks the world buses rather than Master, so `sting`
 is exempt by routing. Anything left on Master therefore escapes BOTH the volume sliders and that duck — see
 `scripts/player/death_mix.gd`.) The up-ray fan
@@ -329,6 +377,16 @@ WRITES `host.is_indoors` (a bool on the player, declared next to `light_exposure
 shared "is there a roof over me" seam a future reverb send / rain cutoff / interior-music swap can read instead of
 re-casting. Ray + throttle + held-prop LOS mask are lifted from `PlayerLightLevel`. Pure vote/fade/sweep math, the
 low-pass resolver, and the in-tree roof detection are unit-tested (`tests/test_indoor_ambience_ducker.gd`).
+
+⭐**`ambient_bed` IS the duck's entire blast radius.** The volume fade moves one node, and the muffle is a per-bus
+effect — so because audio flows child bus → parent bus and `ambient_bed` sends *into* `ambient`, every emitter on
+`ambient` itself (a `MyLight` fixture's electrical buzz, a machine hum, the player's fall-wind) sits UPSTREAM of the
+low-pass and cannot be dulled by walking under a roof. That is the intent: a sound you are standing beside indoors
+should get clearer, not muffled. So when a local sound seems to go dull indoors, suspect the emitter's own distance
+falloff, not the duck — the fixture buzz was exactly that (unbounded `max_distance` + the engine's air-absorption
+shelf made four lights sum into a map-wide dull wash, which the duck merely UNMASKED by pulling the city bed down
+12 dB indoors; see `MyLight`'s Buzz-mix group). Both directions of the routing contract — `ambient_bed` → `ambient`
+with a low-pass on it, and the fixture buzz staying off that bus — are pinned by `tests/test_audio_bus_hygiene.gd`.
 
 `BodyPartGibs` is the **per-actor switch for the body-part death burst** (`body_part_gibs.gd`): a dying character
 coming apart into its OWN head / torso / arms / legs — lifted live off its `BodyModelSwap`, skin and tint included —
@@ -357,6 +415,19 @@ below). Hence the `auto_fit_collider` opt-out — the same field name `LookAtInt
 already use. `body_part_gib.tscn` keeps the auto-fit ON (its mount point is empty, so the box tracks the real limb)
 and instead OVERRIDES `_fade_out_for_despawn`, because `GeometryInstance3D.transparency` does not propagate to
 children and its visual is a mounted subtree. Pinned by `tests/test_gore_gib_prefab.gd`.
+
+**`ThrowTrail` draws its ribbon OUTSIDE the prop it follows, and that is not tidiness.** Child one to a
+`Throwable` and a real throw drags a white tracer behind it (`throw_trail.gd`; a weapon drop gets one stamped from
+`WeaponData.thrown_trail`, the `PickupBeacon.always_lit` idiom one section up, except this stamp adds a NODE). The
+`MeshInstance3D` it draws into is parented to the **tree root**, because every `MeshInstance3D` *under* a
+`Throwable` is swept by `_setup_overlay_chain` — which stamps the black inverted hull **and** the
+`InkOutline.ACTOR_INK_MASK_LAYER` bit, so a ribbon childed to the prop would wear a black rim and be re-rendered
+in the ink mask's second scene pass — and again by `_set_carried_transparency`. Child `_ready` runs *before* the
+parent's, so building it eagerly under the prop guarantees getting caught. Two more invariants worth keeping:
+its material must stay `TRANSPARENCY_ALPHA` (writing no depth is what hides it from the ink edge detect — the
+`bulletmat.tres` trick, not a layer trick), and it reads its host's throw state through a duck-typed
+`is_trailing()` rather than typing against `Throwable`, which sits on the actor parse path via `Character`.
+Pinned by `tests/test_throw_trail.gd`.
 
 **New drop-in components go here.** Internal helpers composed in code with `.new()` under the
 Player/NPC (HurtFeedback, NpcVoice, NpcDistraction, AimSway, PassiveItemBuffs, …) are NOT editor-attached and stay

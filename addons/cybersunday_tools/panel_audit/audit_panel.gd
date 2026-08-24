@@ -14,6 +14,8 @@ const ScanText := preload("res://addons/cybersunday_tools/panel_audit/scan_text.
 const ScanMenuSound := preload("res://addons/cybersunday_tools/panel_audit/scan_menu_sound.gd")
 const FixOps := preload("res://addons/cybersunday_tools/panel_audit/fix_ops.gd")
 const CustomRules := preload("res://addons/cybersunday_tools/panel_audit/custom_rules.gd")
+## One-read-per-file window shared by the four domain scanners below (see scan_cache.gd).
+const ScanCache := preload("res://addons/cybersunday_tools/panel_audit/scan_cache.gd")
 
 const COLOR_ERROR := Color(1.0, 0.42, 0.42)
 const COLOR_WARN := Color(1.0, 0.82, 0.3)
@@ -58,7 +60,9 @@ func _init() -> void:
 	_fix_btn = Button.new()
 	_fix_btn.text = "Fix"
 	_fix_btn.disabled = true
-	_fix_btn.tooltip_text = "Apply the safe, mechanical fixes among the findings (dead \"player\" group -> Groups.PLAYER; LootTable max<min clamp). Previews first."
+	# Name ALL of FixOps.KNOWN_KINDS: this tooltip is the pre-click description of a batch write that rewrites SOURCE
+	# files, and group_literal is by far the highest-volume one. Keep it in sync when a fix kind is added.
+	_fix_btn.tooltip_text = "Apply the safe, mechanical fixes among the findings: dead \"player\" group -> Groups.PLAYER; every raw registered group literal -> its Groups.<CONST> (rewrites .gd source project-wide); LootTable max<min clamp. Previews the exact file list first."
 	_fix_btn.pressed.connect(_on_fix_pressed)
 	bar.add_child(_fix_btn)
 	_auto = CheckButton.new()
@@ -156,9 +160,14 @@ func _rescan() -> void:
 	var root := EditorInterface.get_edited_scene_root()
 	if root != null:
 		findings.append_array(ScanScene.run(root))
+	# The disk-reading domains below each walk res:// with their own SKIP policy but re-read the SAME .gd files.
+	# One caching window makes each file's bytes leave the disk ONCE per Re-scan instead of three or four times —
+	# which matters most with Auto on, where every editor save replays this whole block. Closed in ALL paths.
+	ScanCache.begin()
 	findings.append_array(ScanDisk.run())
 	findings.append_array(ScanText.run())  # Domain D: hardcoded player-facing text (the PlayerText ratchet)
 	findings.append_array(ScanMenuSound.run())  # Domain E: menu-sound blindspots (silent refusal paths)
+	ScanCache.end()  # before the custom rules: a designer rule may read files this scan just wrote/edited
 	findings.append_array(CustomRules.run(root))  # designer-authored rules in res://audit_rules/ (no-op if absent)
 	_render(findings)
 

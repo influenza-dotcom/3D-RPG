@@ -37,6 +37,27 @@ const OBJ_TYPE_FLAG := 5
 const SKIP_DIRS: Array[String] = [".godot", "addons", ".git", "tests"]
 const FACTION_DIR := "res://resources/factions/"
 
+## Shared one-read-per-file cache (see scan_cache.gd) — this pass walks res:// reading the SAME files scan_disk just
+## read. Inert outside audit_panel's begin()/end() window, so a standalone run behaves exactly as before.
+const ScanCache := preload("res://addons/cybersunday_tools/panel_audit/scan_cache.gd")
+
+## scan_disk.gd is resolved with a LAZY load(), NOT a `const` preload: scan_disk already preloads THIS file (its
+## run() appends our rows), so a const preload back would be a parse-time cyclic reference. load() at call time is
+## served from the resource cache, so the cost is a dictionary lookup.
+const SCAN_DISK_PATH := "res://addons/cybersunday_tools/panel_audit/scan_disk.gd"
+
+
+## Blank out `#` line-comments (length-preserving) via scan_disk's masker — the SAME primitive scan_disk, scan_text
+## and scan_menu_sound all mask with. Needed because this project documents call idioms in prose: an unmasked
+## `## ... GameState.set_flag("vault_open")` in a docstring would register a phantom WRITER for that flag, which
+## either marks a real dead gate as covered (dropping a true finding) or invents a "written but never read" row.
+## Degrades to the raw text if scan_disk can't be loaded — a scan is never worth a hard failure.
+static func _mask_comments(text: String) -> String:
+	var sd: Variant = load(SCAN_DISK_PATH)
+	if sd == null:
+		return text
+	return String(sd.mask_comments(text))
+
 
 # ============================================================================================================
 # EDITOR GLUE -- run() walks the project ONCE into the gathered sets, loads the quest/faction .tres the passes
@@ -100,10 +121,9 @@ static func _gather_file(path: String, ctx: Dictionary) -> void:
 	var ext := path.get_extension()
 	if ext != "gd" and ext != "tscn" and ext != "tres":
 		return
-	var f := FileAccess.open(path, FileAccess.READ)
-	if f == null:
+	var text := ScanCache.text_of(path)
+	if text.is_empty():
 		return
-	var text := f.get_as_text()
 	# Flags: merge this file's writers/readers into the project sets, remembering the FIRST source of each name.
 	var refs := collect_flag_refs(text)
 	for name in refs["write"]:
@@ -181,10 +201,7 @@ static func _collect_quests_dir(path: String, ctx: Dictionary) -> void:
 
 
 static func _maybe_collect_quest(path: String, ctx: Dictionary) -> void:
-	var f := FileAccess.open(path, FileAccess.READ)
-	if f == null:
-		return
-	if not ("script_class=\"Quest\"" in f.get_as_text()):
+	if not ("script_class=\"Quest\"" in ScanCache.text_of(path)):
 		return  # only LOAD a .tres whose header declares Quest -- avoids loading every resource
 	var q: Variant = load(path)
 	if not (q is Quest):
@@ -228,11 +245,14 @@ static func collect_flag_refs(text: String) -> Dictionary:
 			for v in _field_string_values(block, "target_id"):
 				out["read"].append(v)
 	# Bare autoload calls in .gd source (a hand-coded gate) -- set_flag(...) writes, get_flag/has_flag(...) read.
-	for v in _call_string_args(text, "set_flag"):
+	# Masked FIRST: unlike the `field = "x"` regexes above (anchored at ^\s*, so a `#` comment line can never match),
+	# a bare CALL matches anywhere on the line, so a flag call quoted in a docstring would count as a real usage.
+	var masked := _mask_comments(text)
+	for v in _call_string_args(masked, "set_flag"):
 		out["write"].append(v)
-	for v in _call_string_args(text, "get_flag"):
+	for v in _call_string_args(masked, "get_flag"):
 		out["read"].append(v)
-	for v in _call_string_args(text, "has_flag"):
+	for v in _call_string_args(masked, "has_flag"):
 		out["read"].append(v)
 	return out
 

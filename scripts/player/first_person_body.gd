@@ -49,31 +49,140 @@ extends Node
 @export var fp_leg_model: PackedScene = preload("res://assets/models/leg.blend")
 ## Uniform scale of each first-person leg.
 @export var fp_leg_scale: float = 0.44
-## Where the leg rig sits relative to the player origin -- lower Y drops the legs toward your feet. PLAYTEST + TUNE.
-@export var fp_leg_offset: Vector3 = Vector3(0.0, -0.55, 0.0)
+## Uniform scale of the WHOLE first-person body rig — every part, and every mount offset between them, together.
+##
+## ⭐⭐THIS EXISTS BECAUSE THE CAST DOES NOT FIT UNDER THIS CAMERA, and the arithmetic is worth keeping: the parts
+## are the NPC's (that is the point — see first_person_body_arms), and an NPC's body measures **1.226 m** from the
+## soles of its feet to the top of its chest. The player's eye sits **1.0 m** above the floor (Player.tscn authors
+## Head at y ~0.014, i.e. on the player origin, and the capsule bottom is at exactly -1.0). 1.226 does not fit in
+## 1.0 at ANY mount height: push the feet down to the floor and the chest closes over the lens; drop the chest
+## clear of the lens and the feet go through the floor. Every previous attempt to fix one end by moving a single
+## offset simply moved the failure to the other end — the legs ended up mounted 0.19 m ABOVE the top of the chest,
+## which is what "my legs are drawn on top of my body" was.
+##
+## So the rig is scaled instead of re-stacked, which keeps the NPC's own part-to-part layout intact BY
+## CONSTRUCTION (a scale can't reorder anything) rather than by three offsets agreeing with each other. The hard
+## ceiling is k ≤ (1.0 − margin) / 1.226 ≈ 0.73, but 0.60 is what SHIPPED and the reason is framing, not fit: it
+## reproduces the chest's old on-screen size and its old ~70° entry angle almost exactly, so the fix reads as
+## "the parts are stacked right now" and not as "my whole body changed size". Measured at 0.60: chest top 0.245 m
+## below the lens, feet 0.019 m above the floor, hip 0.017 m under the chest's bottom edge.
+## Raise it and the chest climbs toward the near plane; lower it and you shrink into a doll.
+## Re-run `scripts/tools/preview_fp_body_frame.gd` after ANY change here — it prints all three of those numbers
+## (floor clearance, the hip-vs-chest stack, the forward reach) and renders the frame.
+@export_range(0.3, 1.2, 0.01) var fp_body_scale: float = 0.60
+## Where the WHOLE FP body rig sits relative to the player origin (the eye) — the mount every part hangs off.
+##
+## ⭐This is a MEASURED value, not a taste one, and it is the one knob here you should not eyeball. The rig's feet
+## sit 0.984 m below its origin AT FULL SIZE (the NPC body model's own proportions), so scaled they sit
+## `0.984 × fp_body_scale` below it; the player's floor is the capsule bottom at exactly -1.0. That makes the
+## whole formula `-1.0 + 0.984 × fp_body_scale + clearance`, and -0.39 is that at the shipped 0.60 with ~2 cm of
+## clearance — which is what you want over a slope or a stair riser rather than feet welded to the plane.
+## **It is paired with fp_body_scale: retuning the scale without recomputing this buries the feet or floats them.**
+@export var fp_leg_offset: Vector3 = Vector3(0.0, -0.39, 0.0)
 ## Show your own TORSO under the camera too — look down and you see your chest, not just legs. Resolved from
 ## your character-creation appearance through the SAME catalog slice the customizer uses (chosen body model;
 ## a drawn shirt planar-projects untinted, else the skin tint), but BODY-ONLY: no head (it would sit inside
 ## the camera) and no catalog arms (the hands are the separate view-model rig). A whole_body appearance skips
 ## the FP torso — a one-piece character model can't have its head chopped off. Rides the legs rig.
 @export var first_person_torso: bool = true
-## FP-specific nudge ADDED to the catalog body's authored position (rig-local metres; the rig already hangs
-## fp_leg_offset below the camera). Tune STANDING so the shoulder line sits below the camera — crouching then
-## stays clip-safe automatically (_update_fp_torso sinks the torso by the head's own live drop). LIVE-tunable:
-## tracked every frame, so drag it in the editor's Remote inspector while playing.
-@export var fp_torso_offset: Vector3 = Vector3(0.0, -0.1, 0.0)
-## RESTING see-through of the FP torso while it's simply in view (0 = solid, the shipped look; raise it for a
-## permanent Odyssey-style ghost). The look-down fade below ADDS to this: the deeper you bury your look, the
-## more the chest would block your view of the ground, so it dissolves as it gets in the way. All of it draws
-## as a DITHERED screen-door — the retro stipple, never smooth alpha. Crouching overrides to fully hidden.
+## FP-specific nudge ADDED to the catalog body's authored position (rig-local metres, so it is scaled by
+## fp_body_scale along with everything else; the rig itself already hangs fp_leg_offset below the camera).
+## LIVE-tunable: tracked every frame, so drag it in the editor's Remote inspector while playing.
+##
+## ⭐ZERO is the right default and means "wear the chest exactly where an NPC wears it". It used to carry -0.65,
+## which sank the torso until its top was 0.19 m BELOW the leg hips — your own legs rendered on top of your chest.
+## The fix for a body that doesn't fit under the lens is fp_body_scale, NOT a nudge here: this offset moves ONE
+## part out of the arrangement the catalog authored, so anything it buys at the chest it takes from the join.
+@export var fp_torso_offset: Vector3 = Vector3(0.0, 0.0, 0.0)
+## See-through of the FP torso once it IS revealed (0 = solid, the shipped look; raise it for a permanent
+## Odyssey-style ghost). Draws as a DITHERED screen-door — the retro stipple, never smooth alpha.
 @export_range(0.0, 1.0, 0.01) var fp_torso_transparency: float = 0.0
-## The torso starts DISSOLVING (dithering out) once your look passes this many degrees below the horizon.
-## Deliberately DEEP: the chest enters frame around ~40°, and it must read fully SOLID through that whole
-## normal look-down stretch — the dissolve begins only once you're burying the view into yourself...
-@export_range(0.0, 89.0, 0.5, "degrees") var fp_torso_fade_start_deg: float = 65.0
-## ...and is FULLY hidden by this angle (just shy of straight down, so a 100%-down look shows the ground,
-## not your chest). The band between fades it out riding the look itself — no pop.
-@export_range(0.0, 89.0, 0.5, "degrees") var fp_torso_fade_full_deg: float = 88.0
+## ⭐⭐THE WHOLE VISIBILITY RULE, and it is deliberately the dumbest one that works: **your body is INVISIBLE
+## until you look down at it.** Above this many degrees below the horizon it is simply not drawn; from here it
+## dithers in, and by fp_body_reveal_full_deg it is solid.
+##
+## This replaced a much cleverer scheme and the reason is worth keeping. The rule used to be the other way up —
+## solid by default, dissolving only once you buried your look — which is correct ONLY if the body is out of
+## frame whenever you are not looking at it. It is not. Your eyes are 1.0 m off the floor, the chest tops out
+## 0.245 m below them, and at a wide FOV that chest sits barely outside the frustum edge at level pitch; then
+## the landing dip (up to 1.0 m), the stair step-smoothing (up to 0.7 m), the crouch (0.61 m) and the walk-bob
+## (0.075 m) each drop the LENS toward a body that has not moved. Two rounds went into chasing those four
+## sources with sinks and metre-sized dissolve bands, and the player still saw their own chest while running,
+## crouching and climbing stairs. **A gate on the LOOK cannot be defeated by anything that moves the camera**,
+## which is why it is the pragmatic answer: there is no threshold to size, no FOV to track, and no fourth
+## offset that can be forgotten later.
+##
+## Tune with the Remote inspector while playing — the reveal tracks these every frame.
+@export_range(0.0, 89.0, 0.5, "degrees") var fp_body_reveal_start_deg: float = 50.0
+## ...and FULLY visible by this angle. The band between eases it in with the look itself, so there is no pop.
+## Applies to the whole body — torso, arms AND legs — so they can never disagree about whether you are looking.
+@export_range(0.0, 89.0, 0.5, "degrees") var fp_body_reveal_full_deg: float = 70.0
+## Show your own ARMS on your own BODY — the pair every character in the cast wears, hanging off the FP torso at
+## REAL world depth on the main camera, so looking down shows arms attached to your chest and world geometry
+## occludes them correctly. Body AWARENESS, and a completely separate rig from the view-model hands below
+## (first_person_arms): those live under the camera on the gun's render layer and are the carry hold / the bare
+## fists. These just hang there being your arms. They ride the legs rig, so they inherit body yaw (never camera
+## pitch — your arms must not swing up when you look up) and the same shadow suppression.
+##
+## The MOUNT is not authored here: it comes from the appearance catalog's own arm_model / arm_scale /
+## arm_position / arm_rotation — the exact rows CharacterAppearanceCatalog.configure_swap stamps onto every NPC.
+## That is what makes this "arms like an NPC has arms" by construction rather than by a copied number that
+## silently drifts the first time the cast's proportions are retuned. Tune the mount in
+## resources/characters/PlayerAppearanceCatalog.tres (it moves everyone, which is correct — they are the same
+## arms on the same body) and use fp_body_arm_offset below for anything first-person-specific.
+@export var first_person_body_arms: bool = true
+## FP-specific nudge ADDED to the catalog's authored arm_position (rig-local metres, so fp_body_scale scales it
+## too) — the fp_torso_offset idiom, and zero because the catalog mount already sits these arms on this torso.
+## Reach for it only when the first-person view needs the shoulders somewhere the third-person/portrait body does
+## not. LIVE-tunable — tracked every frame, so drag it in the editor's Remote inspector while playing. Spelled as
+## a LITERAL rather than Vector3.ZERO on purpose: the frame probe reads these defaults as .tscn-style text and
+## str_to_var can't parse a constant name — the same rule the rest of this file's Vector3 exports already follow.
+##
+## ⭐It used to carry -0.55 as a counterweight to a leg-offset change; that is gone with the whole compensate-one-
+## part-against-another approach. See fp_torso_offset and fp_body_scale.
+@export var fp_body_arm_offset: Vector3 = Vector3(0.0, 0.0, 0.0)
+## FP-only MULTIPLIER on the catalog's arm_scale — a length knob kept because the catalog's own scale is shared
+## with every NPC and must not move for a first-person framing decision.
+##
+## ⭐1.0 (NPC parity) is now correct and was not before. It sat at 0.78 because at full catalog length the hanging
+## hands reached 0.13 m BELOW the floor — but that was the whole rig being too big for this camera, which
+## fp_body_scale now handles for every part at once. Shortening the arms alone made them the one part of you that
+## wasn't NPC-proportioned. Re-run the frame probe if you move it; the clearance must stay ≥ 0.
+@export_range(0.3, 1.5, 0.01) var fp_body_arm_scale_mult: float = 1.0
+## How far (degrees at the shoulder) your arms SWING as you walk — the antisymmetric arm-pump every NPC does,
+## at a cadence the legs rig already matches to your real speed (velocity_driven_legs), fading to a dead hang
+## when you stop. Defaults to BodyModelSwap's own value, so your arms walk like everyone else's; this knob exists
+## because the whole FP body rig is code-built, so its motion has no Inspector row of its own. 0 = arms that
+## hang perfectly still, which reads as a mannequin from first person — lower it, don't kill it.
+@export_range(0.0, 60.0, 0.5, "degrees") var fp_body_arm_swing_deg: float = 35.0
+## Hide the body arms whenever the VIEW-MODEL rig owns your hands, so only one pair of arms is ever on screen.
+## That means: a weapon DRAWN (the gun or the raised fists are what your arms are doing now), and also a carried
+## prop (hands full — the view-model hands are visibly holding it). Holster the weapon and put the prop down and
+## your real arms fade back in at your sides. Off = the arms are always present, which double-arms you the moment
+## you look down with anything drawn. They dissolve on the same dithered screen-door as the torso, not a pop.
+@export var fp_body_arms_hide_when_drawn: bool = true
+## How fast that hide/reveal dissolves (per-second exponential rate; higher = snappier). The default is paced to
+## read alongside the weapon's own ~0.35 s holster swing rather than racing it.
+@export var fp_body_arms_hide_fade: float = 8.0
+## Wear the black ACTOR RIM — the inverted-hull outline every NPC, prop and view model in this game wears — on
+## your own first-person body, and (the same switch, inseparably) keep the world's screen-space INK outline off
+## it. Both halves live on the rig itself (BodyModelSwap.actor_outline), because that component RESETS the render
+## layers of the meshes it spawns and so is the only place a stamp survives a model swap.
+##
+## ⭐OFF is not "no outline", it is TWO outlines. Your body is an actor at real world depth, so InkOutline's edge
+## detect finds its silhouette exactly like a wall's and draws the world's line on it; the rim is what tells the
+## ink pass "an actor already owns this pixel". Turning this off gives you the world line ALONE, which is the
+## doubled/redundant outline the whole ink system exists to prevent — see scripts/effects/ink_outline.gd,
+## "hull owns actors, ink owns the world". The view-model hands have worn theirs since they were built
+## (FistVisuals, in _build_first_person_arms); this is the body half finally catching up.
+@export var first_person_body_outline: bool = true
+## Colour of that rim. BLACK is the house look, shared with NPC.outline_color and Throwable.OUTLINE_HIDDEN_COLOR.
+## Its alpha is DRIVEN by the rig, not authored here: the rim dissolves with the chest and arms it wraps.
+@export var fp_body_outline_color: Color = Color(0.0, 0.0, 0.0, 1.0)
+## Rim thickness (the outline shader's `outline_width`, which it scales x4 in clip space). 2.0 is NPC parity —
+## your own body is drawn by the same camera at the same depth as theirs, so it should carry the same weight of
+## line. (The view-model fists use 2.0 too, but for a different reason: they are much closer to the lens.)
+@export var fp_body_outline_width: float = 2.0
 ## Tint for both legs (WHITE = the model's own colour). Character creation will override this per-save later.
 @export var fp_leg_color: Color = Color(0.486, 0.184, 0.224)
 ## How far (degrees) the first-person legs LEAN toward the wall they're clinging to, at a full wall-climb cling.
@@ -181,9 +290,12 @@ var _fp_legs: BodyModelSwap = null
 @export var fp_arm_punch_duration: float = 0.32
 ## How far the punching fist THRUSTS, in camera space: -Z is forward (AWAY from the lens), -X pulls it inward
 ## toward screen centre. From the steep guard the swing pitches the fist down-forward toward the crosshair.
-## Keep the reach PROPORTIONATE to the guard's rig depth (fp_arm_offset.z + fp_arm_unarmed_nudge.z, ~0.23 m
-## shipped) — an over-deep lunge can swing arm geometry through the near clip plane. After any big guard
-## retune, sanity-check a punch by eye (or re-run the frame probe) rather than trusting the numbers.
+## Keep the reach PROPORTIONATE to the guard's rig depth (fp_arm_offset.z + fp_arm_unarmed_nudge.z, ~1.75 m
+## on the authored Player.tscn pose): deep as that shoulder sits, the fists still ride only ~1 m in front of
+## the lens (docs/AUTHORING_GUIDE.md "depth-coupled"), so an over-deep lunge can swing arm geometry through
+## the near clip plane. This DEFAULT is the old ~0.23 m guard's tuning — the FirstPersonBody child's override
+## is the live reach. After any big guard retune, sanity-check a punch by eye (or re-run the frame probe)
+## rather than trusting the numbers.
 @export var fp_arm_punch_thrust: Vector3 = Vector3(-0.03, 0.02, -0.14)
 ## Amplitude shape over the punch's ELAPSED fraction (x 0 = the swing's start, x 1 = settled; y = amplitude,
 ## and y BELOW zero is an anticipation pull-back). Null = a flat snap-out-then-ease with no wind-up.
@@ -204,6 +316,8 @@ var _fp_bob_gate: float = 0.0  ## eased 0→1 "fists are up" amplitude gate so t
 var _fp_breath_time: float = 0.0  ## breathing sine phase, advanced at fp_arm_unarmed_breath_speed (GunPose parity)
 var _fp_breath_t: float = 0.0  ## eased 0→1 idle-breathing blend — fades out while walking/airborne, like GunPose's
 var _fp_torso_catalog_pos: Vector3 = Vector3.ZERO  ## the catalog body's authored position — fp_torso_offset and the crouch sink ADD to it
+var _fp_arm_catalog_pos: Vector3 = Vector3.ZERO  ## ...and the catalog's authored arm_position, the same way for fp_body_arm_offset
+var _fp_body_arm_hide_t: float = 0.0  ## eased 0→1 "the view model owns my hands" dissolve for the BODY arms (see _fp_body_arms_hidden)
 var _fp_head_standing_y: float = 0.0  ## Head's standing local Y, cached at rig build — the live delta below it IS the crouch drop the torso mirrors
 
 
@@ -226,7 +340,7 @@ func _ready() -> void:
 ## AFTER physics wrote it" is preserved by construction.
 func _process(delta: float) -> void:
 	_update_fp_arm_bob(delta)
-	_update_fp_torso()
+	_update_fp_torso(delta)
 
 
 ## Build both rigs. Called by the HOST from Player._ready — never from our own _ready — because a child's
@@ -246,11 +360,16 @@ func build() -> void:
 ## untouched. Per-leg hip pose comes from the shipped NPC rig; the whole rig's drop is the tunable
 ## `fp_leg_offset`; the torso is stamped by _configure_fp_torso and crouch-follows in _update_fp_torso.
 func _build_first_person_legs() -> void:
-	if (not first_person_legs or fp_leg_model == null) and not first_person_torso:
+	if (not first_person_legs or fp_leg_model == null) and not first_person_torso and not first_person_body_arms:
 		return
 	var legs := BodyModelSwap.new()
 	legs.name = "FirstPersonLegs"
 	legs.casts_shadow = false  # FP body would cast a shadow from under the camera — looks wrong; suppress it
+	# The ACTOR RIM + the ink mask, set BEFORE any model so the rig's very first build already dresses its parts
+	# (every later rebuild re-applies them itself — that is why they live on the rig and not on a walk out here).
+	legs.actor_outline = first_person_body_outline
+	legs.actor_outline_color = fp_body_outline_color
+	legs.actor_outline_width = fp_body_outline_width
 	legs.leg_model = fp_leg_model if first_person_legs else null  # torso can show without legs, and vice versa
 	legs.leg_scale = fp_leg_scale
 	legs.leg_position = Vector3(0.095, -0.265, -0.02)  # per-leg hip offset, from scenes/enemies/enemy.tscn
@@ -268,13 +387,20 @@ func _build_first_person_legs() -> void:
 	legs.velocity_leg_ref_speed = GameSettings.player_movement.max_speed  # walk-cycle cadence matches your real run speed
 	host.add_child(legs)  # a child of the PLAYER, not this component — the gait reads body yaw + velocity off its parent chain
 	legs.position = fp_leg_offset
+	# ONE uniform scale for the whole body instead of a per-part diet: the cast's proportions are 1.226 m of body
+	# under a 1.0 m eye, and scaling the mount keeps the NPC's own part-to-part layout by construction. See
+	# fp_body_scale. Everything rig-local (the catalog mounts, the crouch sink) is in this scaled frame from here on.
+	legs.scale = Vector3.ONE * fp_body_scale
 	_fp_legs = legs
 	if host.head != null:
 		_fp_head_standing_y = host.head.position.y  # built from Player._ready, before any crouch — this IS the standing Y
+	# Arms BEFORE the torso: _configure_fp_torso deliberately assigns body_model last so the rig rebuilds ONCE
+	# with everything already stamped, and that only holds if the arm mount is in place before it.
+	_configure_fp_body_arms(legs)
 	_configure_fp_torso(legs)
-	if legs.leg_model == null and legs.body_model == null:
-		# Nothing resolved (legs off + a whole_body / catalog-less look): don't tick an empty rig for the whole
-		# life of the Player — free it and let the FP body simply be absent.
+	if legs.leg_model == null and legs.body_model == null and legs.arm_model == null:
+		# Nothing resolved (legs off + arms off + a whole_body / catalog-less look): don't tick an empty rig for
+		# the whole life of the Player — free it and let the FP body simply be absent.
 		legs.queue_free()
 		_fp_legs = null
 
@@ -324,12 +450,59 @@ func _build_first_person_arms() -> void:
 	var visuals := GunVisuals.new()
 	visuals.name = "FistVisuals"
 	visuals.host = arms  # duck-typed: the rig exposes no `layers`, so meshes keep the view-model layer it forced
-	# Probe-calibrated for the fists: the gun's 0.02 default is SUB-PIXEL at fist distance (invisible), ~2
-	# draws a clean one-edge comic outline, ~8 shatters the hull into shards. Set BEFORE add_child — _ready
-	# bakes it into the shared outline material.
+	# Probe-calibrated for the fists: ~2 draws a clean one-edge comic outline, ~8 shatters the hull into
+	# shards. GunVisuals now ships that same 2.0 as its default (its old 0.02 was SUB-PIXEL — see the export's
+	# note; the fists were the first place anyone measured it), so this pin is parity, kept explicit so the
+	# hands can't drift from the gun beside them. Set BEFORE add_child — _ready bakes it into the shared
+	# outline material.
 	visuals.outline_width = 2.0
 	arms.add_child(visuals)  # _ready builds the shared rim/outline materials...
 	visuals.dress(arms)  # ...then the dress stamps them onto the already-instanced arm pair
+
+
+## Hang your own ARMS off the FP body rig — the same mirrored pair an NPC wears, at real world depth, so looking
+## down shows arms attached to your chest rather than a torso with stumps. Deliberately NOT the catalog's arm
+## slice: the catalog arms are authored for a third-person/portrait body, and the FP shoulders have to be framed
+## against the CAMERA (see fp_body_arm_position) — but the customizer's chosen arm COLOUR is honoured, the same
+## way the legs take its leg colour, so your first-person body matches your portrait.
+##
+## ⭐The mode pitches are all zeroed on purpose. BodyModelSwap's arm animation reads the HOST duck-typed, and an
+## NPC host answers `is_holding_gun` / `is_fists_out` to pose its arms forward, plus airborne throws them
+## straight overhead (arm_air_pitch, the roller-coaster flail). The Player implements neither weapon method, so
+## those two are already inert here — but `airborne` is just `not is_on_floor()`, which the Player very much
+## does answer, so WITHOUT zeroing arm_air_pitch every jump would fling your own arms up over your face. What
+## survives is exactly what should: the antisymmetric walk swing, cadence-matched to real speed by the legs'
+## velocity_driven_legs, so your arms swing as you walk and hang still when you stop.
+func _configure_fp_body_arms(rig: BodyModelSwap) -> void:
+	if not first_person_body_arms:
+		return
+	var catalog := CharacterAppearanceCatalog.get_catalog()
+	if catalog == null or catalog.arm_model == null:
+		return
+	# A whole_body look already HAS arms baked into its one-piece model — mounting a second pair would grow you
+	# four. Same reason _configure_fp_torso skips those looks entirely.
+	var body := catalog.body_option(String(host.appearance.get("body", "")))
+	if body == null:
+		body = catalog.default_body()
+	if body != null and body.whole_body:
+		return
+	rig.arm_scale = catalog.arm_scale * fp_body_arm_scale_mult
+	_fp_arm_catalog_pos = catalog.arm_position
+	rig.arm_position = _fp_arm_catalog_pos + fp_body_arm_offset  # LEFT shoulder; the RIGHT mirrors across X
+	rig.arm_rotation = catalog.arm_rotation
+	rig.arm_color = _appearance_fp_color("arm", catalog.default_arm_color)
+	rig.animate_arms = true
+	rig.arm_swing_amplitude = fp_body_arm_swing_deg
+	# ⭐ZERO ALL THREE MODE PITCHES — the arms only ever hang and walk-swing. See the note above for why: these
+	# are the poses BodyModelSwap strikes when its host answers `is_holding_gun` / `is_fists_out` / goes airborne.
+	# `airborne` is the live one today (the Player answers is_on_floor), and it would throw your own arms straight
+	# over your face on every single jump. The weapon two are inert only because the Player happens not to
+	# implement those methods — zeroed anyway, deliberately, so that adding one later (for the AI, the portrait
+	# host, anything) can't silently swing your body arms forward through the view model you are already holding.
+	rig.arm_air_pitch = 0.0
+	rig.arm_hold_pitch = 0.0
+	rig.arm_fists_pitch = 0.0
+	rig.arm_model = catalog.arm_model  # LAST: the setter rebuilds, so everything above is already stamped
 
 
 ## Stamp the player's OWN torso onto the FP body rig — the catalog's BODY slice only (the same resolution
@@ -366,32 +539,103 @@ func _configure_fp_torso(rig: BodyModelSwap) -> void:
 	# near-clip margin. Set legs.breathe = false here if a dead-still chest is ever wanted.
 
 
-## Keep the FP torso glued to its authored rest + the LIVE fp_torso_offset (Remote-inspector tunable) and sunk
-## by the head's CURRENT drop below its standing height — so chest-to-eye spacing stays constant while the
-## camera lowers. Crouching ALSO fades the torso out entirely (dithered, riding the already-eased crouch_t)
-## and back in on stand: crouched, your chest would fill the whole lowered view, so it hides for your ease of
-## viewing; the resting state keeps fp_torso_transparency's see-through. Epsilon-skipped writes throughout.
-func _update_fp_torso() -> void:
-	if host == null or not first_person_torso or not is_instance_valid(_fp_legs) or _fp_legs.body_model == null:
+## Keep the FP torso AND the body arms glued to their authored rests + the LIVE fp_torso_offset (Remote-
+## inspector tunable) and sunk by the head's CURRENT drop below its standing height — so chest-to-eye spacing
+## stays constant while the camera lowers. Crouching ALSO fades them out entirely (dithered, riding the
+## already-eased crouch_t) and back in on stand: crouched, your chest would fill the whole lowered view, so it
+## hides for your ease of viewing; the resting state keeps fp_torso_transparency's see-through. The arms take
+## BOTH the sink and the fade off the same values as the chest — they hang off it, so they must never outlive
+## it. Runs for whichever parts exist (torso-only, arms-only, both). Epsilon-skipped writes throughout.
+func _update_fp_torso(delta: float) -> void:
+	if host == null or not is_instance_valid(_fp_legs):
 		return
+	var has_torso := first_person_torso and _fp_legs.body_model != null
+	var has_arms := first_person_body_arms and _fp_legs.arm_model != null
+	var has_legs := _fp_legs.leg_model != null
+	if not has_torso and not has_arms and not has_legs:
+		return
+	# The crouch sink is measured in PLAYER metres (how far the Head dropped) but written as a RIG-LOCAL offset,
+	# and the rig is scaled by fp_body_scale — so it has to be divided back out or the chest follows the camera
+	# down by only fp_body_scale of the drop and creeps up into the lowered view. Guarded against a zero scale.
 	var sink := 0.0
 	if host.head != null:
-		sink = maxf(0.0, _fp_head_standing_y - host.head.position.y)
-	var target := _fp_torso_catalog_pos + fp_torso_offset - Vector3(0.0, sink, 0.0)
-	if _fp_legs.body_model_position.distance_squared_to(target) > 0.000001:
-		_fp_legs.body_model_position = target
-	# LOOK-DOWN dissolve: solid (well, fp_torso_transparency) while merely in view, dithering progressively
-	# out as the look buries past the fade band, fully hidden just shy of straight down — the chest gets out
-	# of the way exactly when it would block what you're looking at. Head owns the look pitch (rotate_x;
-	# negative = down). Crouching then overrides toward fully hidden regardless.
+		sink = maxf(0.0, _fp_head_standing_y - host.head.position.y) / maxf(fp_body_scale, 0.001)
+	if has_torso:
+		var target := _fp_torso_catalog_pos + fp_torso_offset - Vector3(0.0, sink, 0.0)
+		if _fp_legs.body_model_position.distance_squared_to(target) > 0.000001:
+			_fp_legs.body_model_position = target
+	# The ARMS take the same crouch sink, so the shoulders stay glued to the chest through the whole transition
+	# rather than the arms hanging in place while the torso drops out from under them. Written through
+	# arm_position's setter, which re-poses the pair to REST — safe by ordering, not by luck: this component
+	# ticks at process_priority -1 (see _ready), so the rig's own BodyModelSwap._process re-applies the live walk
+	# swing AFTER us every frame. Same rule as the view-model rig's eased arm_scale.
+	if has_arms:
+		var arm_target := _fp_arm_catalog_pos + fp_body_arm_offset - Vector3(0.0, sink, 0.0)
+		if _fp_legs.arm_position.distance_squared_to(arm_target) > 0.000001:
+			_fp_legs.arm_position = arm_target
+	# ⭐⭐THE REVEAL — the one rule that decides whether any of this is on screen: hidden until you LOOK DOWN at
+	# yourself, eased in across the band, solid past it. Head owns the look pitch (rotate_x; negative = down).
+	# Keyed on the LOOK and nothing else on purpose — see fp_body_reveal_start_deg for why the previous
+	# camera-relative schemes could not hold. Crouching then overrides back toward hidden regardless: crouched,
+	# the lens is 0.61 m down among your own knees and a revealed body just fills the lowered view.
 	var down_deg := (maxf(0.0, -host.head.rotation_degrees.x) if host.head != null else 90.0)
-	var fade := clampf(
-		inverse_lerp(fp_torso_fade_start_deg, maxf(fp_torso_fade_full_deg, fp_torso_fade_start_deg + 0.1), down_deg),
+	var reveal := clampf(
+		inverse_lerp(fp_body_reveal_start_deg, maxf(fp_body_reveal_full_deg, fp_body_reveal_start_deg + 0.1), down_deg),
 		0.0, 1.0)
-	var see := lerpf(fp_torso_transparency, 1.0, fade)
-	see = lerpf(see, 1.0, host.crouch.crouch_t if host.crouch != null else 0.0)
-	if absf(_fp_legs.body_transparency - see) > 0.002:
+	var crouch_t := (host.crouch.crouch_t if host.crouch != null else 0.0)
+	# 1 = fully invisible, so an un-revealed body is 1 and the reveal eases DOWN to its resting see-through.
+	var see := lerpf(1.0, fp_torso_transparency, reveal)
+	see = lerpf(see, 1.0, crouch_t)
+	if has_torso and absf(_fp_legs.body_transparency - see) > 0.002:
 		_fp_legs.body_transparency = see
+	# ⭐The LEGS ride the SAME reveal, on their own channel (BodyModelSwap.leg_transparency, which they gained for
+	# this). They used to have no fade channel at all — which is precisely why, whatever the torso did, a pair of
+	# thighs stayed on screen. One gate, every part, so they can never disagree about whether you are looking.
+	# Their revealed state is always fully solid: fp_torso_transparency is the CHEST's ghost knob, not the body's.
+	if has_legs:
+		var leg_see := lerpf(1.0, 0.0, reveal)
+		leg_see = lerpf(leg_see, 1.0, crouch_t)
+		if absf(_fp_legs.leg_transparency - leg_see) > 0.002:
+			_fp_legs.leg_transparency = leg_see
+	# ⭐The arms dissolve on the SAME curve as the chest they hang off. Without this the crouch hide (and the
+	# deep look-down fade) would delete your torso and leave two disembodied arms floating under the camera —
+	# strictly worse-looking than either extreme. One `see` value, both parts, so they can never disagree.
+	#
+	# ...and then the arms get ONE MORE term the torso doesn't: they also dissolve while the VIEW-MODEL rig owns
+	# your hands (see _fp_body_arms_hidden), so you never see two pairs of arms at once. Eased here rather than
+	# in the predicate because the holster is a binary flip, unlike the crouch and look-down terms which arrive
+	# already smooth. Composed with lerpf toward fully-invisible, exactly like the crouch term above, so whichever
+	# reason is strongest wins and they can't fight.
+	if has_arms:
+		var hide_target := 1.0 if (fp_body_arms_hide_when_drawn and _fp_body_arms_hidden()) else 0.0
+		_fp_body_arm_hide_t = lerpf(_fp_body_arm_hide_t, hide_target, 1.0 - exp(-fp_body_arms_hide_fade * delta))
+		var arm_see := lerpf(see, 1.0, _fp_body_arm_hide_t)
+		if absf(_fp_legs.arm_transparency - arm_see) > 0.002:
+			_fp_legs.arm_transparency = arm_see
+
+
+## True when the VIEW-MODEL rig owns your hands, so the BODY arms must get out of the way — the "only one pair of
+## arms on screen" rule. Two reasons, and they are deliberately different questions:
+##   • the weapon is DRAWN (`not attack.holstered`) — the gun, or the raised fists, IS what your arms are doing.
+##     Asked of the holster rather than of the view model because a drawn weapon's mesh lives on the GUN rig,
+##     which this component doesn't own and can't see.
+##   • the view-model ARMS rig is on screen — a carried prop (hands visibly full). Carrying force-holsters the
+##     weapon, so the holster question alone answers "put them away" there and would leave your body arms hanging
+##     at your sides while your other hands hold a crate.
+##
+## Asking the rig's live `visible` (not a latch) is what gives the nice sequencing: it stays true for the length
+## of the stow slide, so the view-model hands finish sinking out of frame BEFORE your real arms fade back in,
+## instead of both being half-present at once.
+##
+## Null-safe in every direction: no weapon system reads as holstered (nothing drawn), no view-model rig reads as
+## nothing held. A bare component with no host hides nothing.
+func _fp_body_arms_hidden() -> bool:
+	if host == null:
+		return false
+	if host.weapon_system != null and host.weapon_system.attack != null \
+			and not host.weapon_system.attack.holstered:
+		return true
+	return is_instance_valid(_fp_arms) and _fp_arms.visible
 
 
 ## The customizer's chosen colour for a first-person limb (`&"arm"` / `&"leg"`) from the mirrored appearance dict,
@@ -813,13 +1057,19 @@ static func advance_bob_phase(phase: float, bob_speed: float, delta: float, adva
 ## _update_wall_shadow wrote _shadow_wall_blend that frame, and it must FREEZE with the death cinematic —
 ## die()'s set_physics_process(false) stops the host's whole step, where a self-ticked callback would keep
 ## pitching the legs through the keel-over.
+##
+## ⭐⭐EVERY BASIS WRITE HERE MUST CARRY fp_body_scale — route them all through _fp_legs_basis(). A Basis holds
+## rotation AND scale in the same three columns, so assigning a bare `Basis()` does not mean "no rotation", it
+## means "no rotation, AND scale 1". This function runs UNCONDITIONALLY every physics frame and takes the rest
+## branch on every grounded one, so a scale-less write here silently resets the whole body to full size on the
+## first frame of every session — see 2026-08-16 in the header notes.
 func update_leg_wall_pose() -> void:
 	if host == null or _fp_legs == null:
 		return
 	# Off the wall (or no real wall normal this frame -- it reads ~zero as contact drops): legs rest (hang down).
 	var wn := host.get_wall_normal()
 	if host._shadow_wall_blend <= 0.001 or not host.is_on_wall() or wn.length_squared() < 0.0001:
-		_fp_legs.transform.basis = Basis()
+		_fp_legs.transform.basis = _fp_legs_basis()
 		return
 	# Bring the wall direction into the rig's local frame. The player basis is an orthonormal yaw, so
 	# orthonormalized().transposed() equals its inverse() but can NEVER raise a det==0 invert on a transient
@@ -828,10 +1078,25 @@ func update_leg_wall_pose() -> void:
 	into_local.y = 0.0  # flatten — pitch the legs toward the wall horizontally, not up/down it
 	var axis := Vector3.DOWN.cross(into_local)  # horizontal pitch axis, perpendicular to the wall direction
 	if axis.length() < 0.001:
-		_fp_legs.transform.basis = Basis()
+		_fp_legs.transform.basis = _fp_legs_basis()
 		return
 	# Swing the rig's local-DOWN (where the legs extend) toward the wall by up to fp_leg_wall_pitch, eased by the cling.
-	_fp_legs.transform.basis = Basis(axis.normalized(), deg_to_rad(fp_leg_wall_pitch) * host._shadow_wall_blend)
+	_fp_legs.transform.basis = _fp_legs_basis(
+		Basis(axis.normalized(), deg_to_rad(fp_leg_wall_pitch) * host._shadow_wall_blend))
+
+
+## The rig's basis for a given ROTATION, carrying the whole-body scale — the single place that knows a basis write
+## to this rig owes fp_body_scale. `scaled()` post-multiplies, which for a UNIFORM scale commutes with the
+## rotation, so the wall pitch is unaffected by the order.
+##
+## ⭐This exists because the scale was silently lost for a day. `legs.scale = ...` is written ONCE at build, and
+## `transform.basis = Basis()` in the rest branch above overwrote it 60 times a second — so the shipped game ran
+## the body at FULL NPC size with its feet 0.37 m through the floor and its chest 45.6° below the horizon, i.e.
+## INSIDE a 120° FOV frustum while standing still and looking straight ahead. Nothing caught it: the frame probe
+## and every geometry test build their own rig and set the scale themselves, so all of them measured a rig this
+## call had never touched. If you add another basis write, route it through here.
+func _fp_legs_basis(rotation: Basis = Basis()) -> Basis:
+	return rotation.scaled(Vector3.ONE * fp_body_scale)
 
 
 ## Death/revive beat: hide the FP legs for the death cinematic, show them again on the in-place revive. The

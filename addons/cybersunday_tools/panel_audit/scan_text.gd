@@ -11,6 +11,9 @@ extends RefCounted
 ## unit-testable core returning offender dicts {source, line, pattern, excerpt}.
 
 const ScanDisk := preload("res://addons/cybersunday_tools/panel_audit/scan_disk.gd")
+## Shared one-read-per-file cache (see scan_cache.gd) — this domain re-reads the same .gd files scan_disk and
+## scan_menu_sound already read during one Re-scan. Inert outside audit_panel's begin()/end() window.
+const ScanCache := preload("res://addons/cybersunday_tools/panel_audit/scan_cache.gd")
 
 ## Mirrors ScanDisk.SKIP_DIRS (+ tests_soak, excluded for the same reason as tests: soak fixtures are
 ## synthetic, not shipped content). addons/ is editor tooling — its strings paint editor surfaces.
@@ -22,9 +25,23 @@ const SKIP_DIR_PATHS: Array[String] = ["res://scripts/tools"]
 ## A file earns a place here only if NOTHING it paints can ever be player copy — not "it currently has none".
 ##  - debug_overlay.gd: the F3 developer HUD (FPS / draw calls / node + NPC counts / error tallies), toggled by
 ##    a raw dev key, never shipped-facing prose. Its readouts must never enter a translation catalog.
+##  - debug_console.gd: the backtick developer console. Everything it paints is a command name, a usage line
+##    or a command's result — developer diagnostics keyed to identifiers in code, not copy. It is gated on
+##    OS.is_debug_build(), so a shipped build never instantiates it at all.
+##  - debug_menu.gd: the F1 clickable cheat menu. Its labels are generated from the DebugCommands registry
+##    (command names + their one-line developer help), same bar and same debug-build gate as the console.
+##  - debug_event_ticker.gd / ai_event_log.gd: the on-screen event column and the AI transition panel. Every line
+##    they paint is a timestamped signal/state-transition record keyed to identifiers in code (quest ids, faction
+##    ids, perception state names) — a developer timeline, never copy. Same debug-build gate.
 ## NOT a dump for inconvenient files: npc_bark_ui.gd, for instance, stays scanned because real bark copy
 ## paints through it (its one non-prose glyph is a designer @export instead — see bubble_tail_glyph).
-const SKIP_FILES: Array[String] = ["res://scripts/components/debug_overlay.gd"]
+const SKIP_FILES: Array[String] = [
+	"res://scripts/components/debug_overlay.gd",
+	"res://scripts/components/debug_console.gd",
+	"res://scripts/components/debug_menu.gd",
+	"res://scripts/components/debug_event_ticker.gd",
+	"res://scripts/components/ai_event_log.gd",
+]
 
 ## The CURATED paint idioms — every entry is an ENUMERABLE call/assignment shape, NEVER a fuzzy English-word
 ## grep (prose in ordinary strings — ids, paths, format keys — must not trip this). Each regex captures the
@@ -104,8 +121,8 @@ static func _scan_dir(path: String, offenders: Array) -> void:
 			if not SKIP_DIRS.has(entry) and not SKIP_DIR_PATHS.has(full):
 				_scan_dir(full, offenders)
 		elif entry.get_extension() == "gd" and not SKIP_FILES.has(full):
-			var f := FileAccess.open(full, FileAccess.READ)
-			if f != null:
-				offenders.append_array(scan_gd_text(f.get_as_text(), full))
+			var text := ScanCache.text_of(full)
+			if not text.is_empty():
+				offenders.append_array(scan_gd_text(text, full))
 		entry = d.get_next()
 	d.list_dir_end()

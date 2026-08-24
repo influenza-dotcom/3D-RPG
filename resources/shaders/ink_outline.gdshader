@@ -88,6 +88,30 @@ uniform float min_depth_reference : hint_range(0.01, 4.0) = 0.35;
 // The floor/wall junction people expect to see is NOT lost to this: two touching surfaces have no
 // depth discontinuity at all, so that line is drawn by the crease term below, not this one.
 uniform float grazing_tolerance : hint_range(1.0, 32.0) = 8.0;
+// ⭐⭐ CONTACT MERGE — how far apart (METRES) two surfaces have to be at an edge before that edge counts
+// as a real silhouette rather than a JOIN between two pieces that are touching. 0 = off, i.e. the
+// pre-2026-08-18 behaviour where every depth step draws a line no matter what is behind it.
+//
+// THE ASK, in the user's own words: ink the outside of a solid, "not where the two actually are
+// touching". A level built from boxes is full of pieces that meet — a step on a step, a slab on a wall,
+// a kerb against the road — and the silhouette term drew the boundary at every one of them, so a flight
+// of stairs read as a stack of separately outlined slabs instead of one stepped solid. That is the NOW
+// half of the sketch; the WANT half is the union.
+//
+// THE TEST, and why it is in metres rather than pixels: at an edge pixel the two Roberts taps land on
+// two different surfaces, and the 3D distance between those two points IS how far apart the two pieces
+// are along the view ray. A step's far surface starts at the foot of its riser, so the gap is the riser
+// height (~0.5 m here) however grazing the view; a box standing on the floor gives its own height; a
+// building against a building 10 m behind gives 10 m; anything against the SKY gives the far plane. So
+// "are they touching?" is one distance, measured from the depth buffer, with no extra pass and nothing
+// to author per object. Surfaces closer than this merge into one solid, and the shoulder runs to 2x so
+// a piece near the threshold fades rather than pops as the camera moves.
+//
+// ⭐ This is a LOOK knob with teeth: raise it and genuinely separate things start reading as one mass
+// (a crate a metre in front of a wall loses the line between them). The default merges this level's
+// authored 0.5 m module — its stairs, kerbs and slab-on-slab joins — and keeps everything past ~2 m.
+// It only ever REMOVES lines, and only from the DEPTH term; creases are the concave dial's business.
+uniform float contact_merge_m : hint_range(0.0, 8.0) = 1.0;
 
 // --- Crease (normal) term --------------------------------------------------------------------------
 // The interior lines: where two surfaces meet at an angle but are flush in depth (wall corners, the
@@ -95,6 +119,49 @@ uniform float grazing_tolerance : hint_range(1.0, 32.0) = 8.0;
 uniform float crease_strength : hint_range(0.0, 2.0) = 1.0;
 // How sharp a normal change has to be before it becomes a line. Higher = only hard corners.
 uniform float crease_threshold : hint_range(0.05, 2.0) = 0.4;
+// ⭐⭐ SEAM MERGE — the narrowest feature, in pixels OF THIS BUFFER, that still earns a crease line: the
+// confirming taps sit exactly this far either side of the pixel, so a face narrower than this cannot hold
+// one and its creases merge into the surface around it. 0 = off, i.e. the pre-2026-08-18 behaviour where
+// ANY normal change draws a line.
+//
+// THE PROBLEM IT SOLVES, in the user's own picture: a solid built from several boxes should be inked as
+// ONE solid, not as its parts. Flush and interpenetrating boxes already are — an interior face is behind
+// the union's surface, so a screen-space pass cannot see it, and a perfect butt-join has no depth step
+// and no normal change either (measured: two L-arms sharing a face come out as one clean silhouette).
+// What breaks it is a box a couple of CENTIMETRES out of line. That misalignment leaves a sliver of
+// perpendicular face along the join — sub-pixel wide, invisible in the art, and a FULL 90-degree normal
+// change to the crease term, which had no notion of how big a feature is. One continuous surface came
+// away split by a faint dotted line that crawls as the camera moves. On the shipped map that is the
+// authored 6 cm plank trims seen edge-on and a 4 mm decal-plate brush; on hand-placed blockout it is
+// every join.
+//
+// THE TEST: a genuine corner has different normals on both sides of it NO MATTER HOW FAR OUT YOU LOOK —
+// walk a few pixels either way from a building corner and you are still on the two walls. A misalignment
+// sliver has the SAME surface on both sides a few pixels out; the only place the normals differ is the
+// sliver itself. So the crease is re-measured on wider crosses and may only ever be REDUCED by what they
+// find: the narrow pass decides where the line sits (so it stays width_px wide, centred on the edge), the
+// wide pass decides whether the change PERSISTS. Nothing here is world-scale, deliberately — a 4 cm kerb
+// underfoot spans plenty of pixels and keeps its line, the same kerb at 40 m does not, and that is the
+// right answer twice: at 40 m it was a crawling artefact, not a detail. The documented collateral: a
+// reveal, trim or stair tread narrower than this on screen loses its interior lines (silhouettes stay).
+//
+// ⭐ THIS TERM ONLY EVER REMOVES LINES, which is the opposite of the fail-safe direction the actor mask
+// is built around — so it is a knob with an off position, and the default is the smallest reach that
+// clears the artefact rather than the biggest that looks tidy. Costs 8 extra normal taps, and only on
+// pixels the narrow pass already called a crease.
+uniform float crease_min_feature_px : hint_range(0.0, 16.0) = 4.0;
+// ⭐ CONCAVE vs CONVEX. A crease is CONVEX where the two surfaces fold AWAY from the viewer (a building's
+// outside corner, the nosing of a step, the top edge of a wall) and CONCAVE where they fold TOWARD it
+// (the floor/wall junction, the inside corner of an L, the line where a slab sits on a wall). Both are
+// 90-degree normal changes and the crease term cannot tell them apart by normals alone. On a level built
+// from boxes every "junction between two pieces" is a concave crease, so this is the dial for how much
+// the pieces read as ONE solid: 1.0 draws every junction (the shipped look), 0.0 draws only the convex
+// edges and the silhouettes, so a slab on a wall or a step against a riser shows no line where they meet.
+// Convexity is read from the same taps the crease uses: the pair whose normals differ most is the crease's
+// own, and the sign of dot(dN, dP) — do the normals diverge along the offset (convex) or converge
+// (concave) — is the standard test; see the crease block. Soft, not a switch, so a pixel that sits right
+// on the ambiguity does not pop.
+uniform float concave_crease_strength : hint_range(0.0, 1.0) = 1.0;
 
 // --- Distance fade ----------------------------------------------------------------------------------
 // Ink eases out across this window (metres of view depth) so the far skyline does not become a black
@@ -194,24 +261,41 @@ void vertex() {
 	POSITION = vec4(VERTEX.xy * 2.0, 0.0, 1.0);
 }
 
-// View-space distance in metres for a screen pixel, or SKY_DEPTH where nothing was drawn.
-// INV_PROJECTION_MATRIX carries whatever depth convention the driver is using, so this needs no
-// reverse-Z special case; the guard is only against a degenerate w (an infinite far plane would
-// divide by zero at the far value) and against NaN, which the "not greater than zero" test catches
-// where a plain <= 0.0 would not.
-float linear_depth(vec2 uv, mat4 inv_proj) {
+// View-space POSITION for a screen pixel (metres, camera at the origin, -Z forward), or a point at
+// SKY_DEPTH straight down the pixel's ray where nothing was drawn. INV_PROJECTION_MATRIX carries whatever
+// depth convention the driver is using, so this needs no reverse-Z special case; the guard is only
+// against a degenerate w (an infinite far plane would divide by zero at the far value) and against NaN,
+// which the "not greater than zero" test catches where a plain <= 0.0 would not.
+vec3 view_pos(vec2 uv, mat4 inv_proj) {
 	float raw = texture(depth_tex, uv).x;
 	vec4 view = inv_proj * vec4(uv * 2.0 - 1.0, raw, 1.0);
 	float d = -view.z / view.w;
 	if (!(d > 0.0) || d > SKY_DEPTH) {
-		return SKY_DEPTH;
+		// Keep the ray's DIRECTION so the convexity test below still has a sane offset to compare against
+		// when one tap is sky, and scale it so -z is EXACTLY SKY_DEPTH (linear_depth's contract; two sky
+		// pixels must read as the same depth, not as a slope).
+		vec3 dir = (abs(view.w) > 1.0e-12) ? view.xyz / view.w : vec3(0.0, 0.0, -1.0);
+		if (!(dir.z < -1.0e-6)) {
+			dir = vec3(0.0, 0.0, -1.0);
+		}
+		return dir * (SKY_DEPTH / -dir.z);
 	}
-	return d;
+	return view.xyz / view.w;
+}
+
+// View-space distance in metres for a screen pixel, or SKY_DEPTH where nothing was drawn.
+float linear_depth(vec2 uv, mat4 inv_proj) {
+	return min(-view_pos(uv, inv_proj).z, SKY_DEPTH);
 }
 
 // View-space normal for a screen pixel, decoded from the normal/roughness buffer's 0..1 packing.
-// Returns a zero-length vector where the buffer holds no usable normal (sky, or a depth prepass that
-// never ran) — callers test the length rather than trusting the direction.
+// ⭐ SKY IS NOT ZERO-LENGTH — measured 2026-08-18 by a probe reading this buffer the way this function
+// does: the target is cleared to 0 and the engine's decode normalises (-1,-1,-1), so an undrawn pixel
+// comes back as the unit junk normal (-0.577, -0.577, -0.577), and the zero-length branch below is dead
+// on this driver. It is kept as a guard against a buffer that really is empty (no depth prepass), which
+// is the one case it was written for. Two consequences worth knowing: sky reads as a DIFFERENT surface
+// from anything real, so a crease that runs up to a silhouette keeps its line (good), and the seam merge
+// cannot clean a sliver within a tap's reach of a silhouette (a wide tap on sky votes "corner").
 vec3 view_normal(vec2 uv) {
 	vec3 n = texture(normal_tex, uv).xyz * 2.0 - 1.0;
 	return (dot(n, n) < 0.01) ? vec3(0.0) : n;
@@ -326,11 +410,18 @@ void fragment() {
 	// is actually looking at before it can decide whether the mask's actor is in front of it or behind.
 	// (They used to sit after an early discard. The discard is still here and still skips the expensive
 	// half — the four crease taps and all the edge maths — it just no longer skips these five.)
+	// The four corner taps keep their full view-space POSITIONS (not just depth): the crease block below
+	// needs them to tell a concave junction from a convex edge, and it costs nothing extra — the depth is
+	// -z of the same unprojection.
 	float d_c = linear_depth(SCREEN_UV, INV_PROJECTION_MATRIX);
-	float d_tl = linear_depth(tl, INV_PROJECTION_MATRIX);
-	float d_tr = linear_depth(tr, INV_PROJECTION_MATRIX);
-	float d_bl = linear_depth(bl, INV_PROJECTION_MATRIX);
-	float d_br = linear_depth(br, INV_PROJECTION_MATRIX);
+	vec3 p_tl = view_pos(tl, INV_PROJECTION_MATRIX);
+	vec3 p_tr = view_pos(tr, INV_PROJECTION_MATRIX);
+	vec3 p_bl = view_pos(bl, INV_PROJECTION_MATRIX);
+	vec3 p_br = view_pos(br, INV_PROJECTION_MATRIX);
+	float d_tl = min(-p_tl.z, SKY_DEPTH);
+	float d_tr = min(-p_tr.z, SKY_DEPTH);
+	float d_bl = min(-p_bl.z, SKY_DEPTH);
+	float d_br = min(-p_br.z, SKY_DEPTH);
 
 	// Actor exclusion (see the uniform block above). Two separate questions, and conflating them
 	// is what put a visible HALO around every actor:
@@ -388,6 +479,21 @@ void fragment() {
 	float t = depth_threshold * slope;
 	float edge = smoothstep(t, t * 2.0, rel);
 
+	// CONTACT MERGE (see contact_merge_m): the silhouette term has found a depth step — is it the outside
+	// of a solid, or the join between two pieces that are touching? Measure the 3D distance between the
+	// two surface points the edge sits between: at a stair nosing or a slab on a wall that is the height
+	// of the step (they are in contact), against the sky or a far facade it is metres. Take the DIAGONAL
+	// THAT FOUND THE EDGE (the one with the larger depth difference) — the other one may lie along the
+	// edge and measure nothing. Sky taps sit at SKY_DEPTH along their own ray, so a silhouette against the
+	// sky can never be merged, which is the direction to fail in.
+	if (edge > 0.0 && contact_merge_m > 0.0) {
+		float diff_tlbr = abs(d_tl - d_br);
+		float diff_trbl = abs(d_tr - d_bl);
+		vec3 pa = (diff_tlbr >= diff_trbl) ? p_tl : p_tr;
+		vec3 pb = (diff_tlbr >= diff_trbl) ? p_br : p_bl;
+		edge *= smoothstep(contact_merge_m, contact_merge_m * 2.0, distance(pa, pb));
+	}
+
 	// Creases. Skipped entirely at zero strength so the four extra taps are not paid for when a
 	// silhouette-only look is what is wanted.
 	if (crease_strength > 0.0) {
@@ -395,8 +501,74 @@ void fragment() {
 		vec3 n_tr = view_normal(tr);
 		vec3 n_bl = view_normal(bl);
 		vec3 n_br = view_normal(br);
-		float normal_diff = length(n_tl - n_br) + length(n_tr - n_bl);
+		float diff_a = length(n_tl - n_br);
+		float diff_b = length(n_tr - n_bl);
+		float normal_diff = diff_a + diff_b;
 		float crease = smoothstep(crease_threshold, crease_threshold * 2.0, normal_diff);
+
+		// CONCAVE OR CONVEX (see concave_crease_strength). Take the diagonal pair whose normals differ
+		// most — that pair straddles the crease — and ask which way the surfaces fold: dot(dN, dP) > 0
+		// means the normals DIVERGE along the offset between the taps (an outside corner, convex),
+		// < 0 means they converge (an inside corner, concave). Normalised so the shoulder is an angle,
+		// not a distance: +-0.15 of a unit dot is a few degrees of ambiguity around a pixel that sits
+		// dead on the crease, softened rather than snapped so it cannot pop as the camera moves.
+		if (crease > 0.0 && concave_crease_strength < 1.0) {
+			vec3 dn = (diff_a >= diff_b) ? (n_tl - n_br) : (n_tr - n_bl);
+			vec3 dp = (diff_a >= diff_b) ? (p_tl - p_br) : (p_tr - p_bl);
+			float fold = dot(dn, dp) / max(length(dn) * length(dp), 1.0e-6);
+			float convex = smoothstep(-0.15, 0.15, fold);
+			crease *= mix(concave_crease_strength, 1.0, convex);
+		}
+
+		// SEAM MERGE (see crease_min_feature_px): re-measure the same question further out and let the
+		// answer only ever REDUCE the crease, so a normal change that exists only in a sub-pixel sliver —
+		// the join between two blockout boxes a centimetre out of line — stops drawing a line, while every
+		// corner wide enough to be a corner keeps one. Guarded on `crease > 0.0` so the taps are paid for
+		// only where there is something to confirm, which on a normal frame is a thin minority of it.
+		//
+		// ⭐ TWO CROSSES, AND THE MINIMUM OF THEM — not one, and this is the whole difference between the
+		// artefact fading and the artefact going. A single wide cross fails wherever the sliver happens to
+		// run ALONG one of its diagonals: a tap then lands ON the sliver, reads its perpendicular normal,
+		// and votes to keep a line the sliver does not deserve. Measured, that left the seam as a sparse
+		// dotted trail rather than a clean surface — and a dotted line is the version that crawls.
+		// So the wide question is asked twice, once on the diagonals and once on the axes, and a sliver at
+		// ANY orientation is clean to at least one of them. Within a cross the two pairs are SUMMED (that
+		// is what makes a single cross orientation-robust for real corners); only BETWEEN the crosses is
+		// the minimum taken, so one contaminated cross can no longer force a line on its own.
+		//
+		// ⭐ A RATIO AGAINST THE NARROW CROSS, NOT A SECOND ABSOLUTE THRESHOLD. The first version ran the
+		// wide result through the same smoothstep(threshold, 2*threshold) as the narrow one, and that
+		// quietly dimmed every SHALLOW crease: an axis-aligned crease straddles BOTH diagonals of the narrow
+		// cross (sum = 2|dN|) but only ONE pair of the axis cross (sum = |dN|), so a 30-degree chamfer that
+		// the narrow pass drew at full strength (2*0.52 = 1.03) came back at 22% (0.52 -> smoothstep 0.22)
+		// wherever it ran along a screen axis or diagonal — a ramp meeting the floor, a kerb chamfer. The
+		// question the wide pass is actually asking is "does the change PERSIST out here?", and the honest
+		// measure of that is the wide change RELATIVE to the narrow one. For a straight crease of ANY
+		// dihedral at ANY screen angle the weaker wide cross keeps at least HALF the narrow sum (each cross
+		// has >= 1 straddling pair once the reach clears the line width — see the floor below), so 0.5 is a
+		// hard floor for real geometry; a sliver leaves ~0. The shoulder 0.15..0.4 sits well under that.
+		if (crease > 0.0 && crease_min_feature_px > 0.0) {
+			// Reach floored at ONE line width. Measured on the level: with the taps inside the narrow
+			// cross's own footprint (`o` = width_px/2 either side) the wide pass is just a second, slightly
+			// different sampling of the SAME edge, and reducing by it thins every real crease line by a
+			// pixel along one side — floor/wall junctions came out ragged. Below one line width the knob
+			// cannot merge anything the narrow cross did not already straddle, so it has no upside there,
+			// only that artefact. (Derivation: each cross keeps a straddling pair for the whole narrow band
+			// iff reach * sin(45deg) >= o * sqrt(2), i.e. reach >= width_px.)
+			vec2 w = max(crease_min_feature_px, max(width_px, 0.0)) / VIEWPORT_SIZE;
+			vec3 m_tl = view_normal(SCREEN_UV + vec2(-w.x, -w.y));
+			vec3 m_tr = view_normal(SCREEN_UV + vec2(w.x, -w.y));
+			vec3 m_bl = view_normal(SCREEN_UV + vec2(-w.x, w.y));
+			vec3 m_br = view_normal(SCREEN_UV + vec2(w.x, w.y));
+			float diag_diff = length(m_tl - m_br) + length(m_tr - m_bl);
+			vec3 a_l = view_normal(SCREEN_UV - vec2(w.x, 0.0));
+			vec3 a_r = view_normal(SCREEN_UV + vec2(w.x, 0.0));
+			vec3 a_u = view_normal(SCREEN_UV - vec2(0.0, w.y));
+			vec3 a_d = view_normal(SCREEN_UV + vec2(0.0, w.y));
+			float axis_diff = length(a_l - a_r) + length(a_u - a_d);
+			float wide_diff = min(diag_diff, axis_diff);
+			crease *= smoothstep(0.15, 0.4, wide_diff / max(normal_diff, 1.0e-4));
+		}
 		edge = max(edge, crease * crease_strength);
 	}
 

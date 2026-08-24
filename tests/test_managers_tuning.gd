@@ -16,8 +16,8 @@ extends GutTest
 ##     particles into the live tree (a real visual/physics side effect), so only
 ##     has_method / slot-type checks are made.
 ##   * GameSettings: the sub-resource accessor CLASS types (is <Class>) for the FULL
-##     thirteen-group registry, including the designer-first additions player_aim,
-##     economy, player_feedback and npc_ai — neither test_autoload_order.gd (only
+##     tuning-group registry, including the designer-first additions player_aim,
+##     economy, player_feedback, npc_ai and station_music — neither test_autoload_order.gd (only
 ##     != null) nor test_smoke.gd (only per-field typeof) asserts that each slot is the
 ##     correct resource class, which is the real contract systems rely on.
 ##     (test_aim_sway.gd spot-checks player_aim's class in passing; the canonical
@@ -36,8 +36,8 @@ extends GutTest
 ##     (hurt_freeze_scale < 1, lpf cutoff < clear, dash_flash_peak_alpha < 1,
 ##     death_time_scale < 1, death_camera_roll > 0) is NOT repeated here.
 ##     EconomySettings, NpcAiSettings and the new weapon_general (swap/reload/hitstop/
-##     tracer) + effects (gib/blood-drop) fields had no prior default coverage in any
-##     suite, so their range/ordering asserts land here in full.
+##     tracer) + effects (gib/blood-drop/thrown-weapon-trail) fields had no prior default
+##     coverage in any suite, so their range/ordering asserts land here in full.
 ##
 ## TESTABILITY NOTES:
 ##   * AudioManager / EffectFactory are loaded with load(path).new() and NOT added to the
@@ -181,6 +181,8 @@ func test_game_settings_sub_resource_class_types() -> void:
 		"GameSettings.distraction must be a DistractionSettings so the thrown-decoy noise reads (Throwable._emit_decoy_noise) resolve")
 	assert_true(GameSettings.dialogue is DialogueSettings,
 		"GameSettings.dialogue must be a DialogueSettings so the talk pacing / letterbox / music-duck reads (TalkHelpers/DialogueManager/DialogueView/MusicDucker) resolve")
+	assert_true(GameSettings.station_music is StationMusicSettings,
+		"GameSettings.station_music must be a StationMusicSettings — the StationMusic autoload reads it LIVE on its very first _process frame, so a missing or mistyped group is a null-deref at boot, not a quiet degrade")
 	assert_true(GameSettings.search is SearchSettings,
 		"GameSettings.search must be a SearchSettings so the NPC search-feel reads (Perception / GoapActionSearch) resolve")
 	assert_true(GameSettings.pickpocket is PickpocketSettings,
@@ -565,6 +567,41 @@ func test_effects_settings_body_part_gib_defaults() -> void:
 		"body_part_gib_lifetime must exceed its fade time so a limb lingers fully visible before fading")
 	assert_gte(s.gib_max_active, s.body_part_gib_meat_count + 6,
 		"gib_max_active must fit ONE death's whole burst (up to 6 body parts + the meat chunks) or a single kill evicts its own gibs — body parts share the &\"gib\" group and its oldest-first cap")
+	s = null
+
+
+func test_effects_settings_throw_trail_defaults() -> void:
+	# Sibling to the gore/gib default tests for the "Thrown weapon trail" group — the white streak a thrown weapon
+	# drags in flight (scripts/components/throw_trail.gd, stamped onto EVERY weapon drop from WeaponData.thrown_trail,
+	# which defaults ON).
+	# RANGE + ORDERING only, like its siblings: these are feel knobs a designer retunes, and a value pin would
+	# turn "the streak is a little longer now" into a red suite. tests/test_throw_trail.gd covers the behaviour
+	# these numbers feed.
+	var s = EffectsSettings.new()
+	assert_eq(typeof(s.throw_trail_enabled), TYPE_BOOL,
+		"throw_trail_enabled is the master switch ThrowTrail reads before it builds anything")
+	assert_gt(s.throw_trail_width, 0.0,
+		"throw_trail_width must be > 0 or the ribbon has no width and the streak is invisible")
+	assert_gt(s.throw_trail_lifetime, 0.0,
+		"throw_trail_lifetime must be > 0 — at 0 every sample ages out the frame it is laid, so nothing ever draws")
+	assert_gt(s.throw_trail_min_speed, 0.0,
+		"throw_trail_min_speed must be > 0 so a prop that has come to rest stops laying streak (this is what ends the effect on landing)")
+	assert_gt(s.throw_trail_reference_dist, 0.0,
+		"throw_trail_reference_dist must be > 0 — it divides the view distance in the perspective compensation")
+	assert_eq(typeof(s.throw_trail_max_points), TYPE_INT,
+		"throw_trail_max_points must be an int — it caps a sample COUNT")
+	assert_gte(s.throw_trail_max_points, 2,
+		"throw_trail_max_points must be >= 2: one sample cannot make a triangle strip, so a lower cap would sample forever and never draw")
+	# The one ORDERING pin in this group, and the only cross-resource one: the streak is now on EVERY weapon, and
+	# an ordinary weapon leaves the hand at exactly pickup_throw_impulse (PickupRay._release sets it as the
+	# velocity outright). A min_speed at or above that floor doesn't disable the effect visibly — it silently
+	# reverts it to knife-only, because the knife's 2.5x thrown_impulse_mult is the one thing still clearing the
+	# bar. That is the exact bug shape this file exists to catch: two independently-sensible tuning numbers whose
+	# PRODUCT breaks a feature, with no single test in either system able to see it.
+	var phys = PhysicsDamageSettings.new()
+	assert_lt(s.throw_trail_min_speed, phys.pickup_throw_impulse,
+		"throw_trail_min_speed must stay UNDER pickup_throw_impulse (the speed an ordinary throw leaves the hand at) or every weapon except the HURLED knife throws bare")
+	phys = null
 	s = null
 
 
@@ -1026,6 +1063,13 @@ func test_player_feedback_settings_defaults() -> void:
 		"sneak_toast_cooldown_ms must be an int — player.gd compares it against msec tick deltas")
 	assert_gt(s.sneak_toast_cooldown_ms, 0,
 		"sneak_toast_cooldown_ms must be > 0 so a multi-pellet sneak shot shows ONE toast line, not a stack")
+	# Out-of-combat recovery — the RELATIONAL angle only; the shipped-.tres bounds live in test_settings_load.gd.
+	assert_gt(s.combat_calm_grace, 0.0,
+		"combat_calm_grace must be > 0 — a 0 grace would call you out of combat on the same frame you fired, and the heartbeat would duck mid-firefight")
+	assert_gte(s.health_regen_commit_frac, 0.0,
+		"health_regen_commit_frac cannot be negative — 0 is legal and means commit every frame (smoothest bar, one `damaged` emit per frame)")
+	assert_lt(s.health_regen_commit_frac, s.health_regen_cap_frac,
+		"the commit step must be smaller than the ceiling it climbs toward, or the regen banks a slice it can never pay out")
 	s = null
 
 

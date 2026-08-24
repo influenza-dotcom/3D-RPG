@@ -51,7 +51,9 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export var zone_damage_mult: Dictionary = {}
 ## Master switch for this archetype's combat outline. Off = flash-only overlay, no rim.
 @export var has_outline: bool = true
-## Outline rim colour. Combatants default to black; a friendly archetype can tint it differently.
+## Outline rim colour, stamped onto NPC.outline_color at spawn — keep the two defaults in lockstep
+## (black, the classic combat rim; actors are excluded from the InkOutline screen-space pass via
+## ACTOR_INK_MASK_LAYER, so this never doubles with the world's ink).
 @export var outline_color: Color = Color.BLACK
 ## Outline thickness fed to the shader's outline_width uniform. 2.0 is the standard enemy rim; higher = thicker.
 @export var outline_width: float = 2.0

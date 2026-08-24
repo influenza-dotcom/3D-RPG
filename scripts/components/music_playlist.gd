@@ -78,3 +78,27 @@ func advance() -> String:
 			index = _order.size()  # exhausted sentinel -> current() returns ""
 			return ""
 	return current()
+
+
+## PURE + STATIC, and NOT part of the cursor-based playlist above: the one-shot "pick the next track at
+## random, but never the one that just played" rule, for the beds that re-pick on every rise instead of
+## walking a cursor (StationMusic, WanderMusic). It lives here because this file is already the home for
+## pure, Node-free, GUT-testable track ORDERING; it was lifted out of StationMusic on 2026-08-22 when the
+## wandering bed became a second caller, and StationMusic.pick_next_index still exists under its old name as
+## a one-line delegation so its tests were untouched.
+##
+## `roll` is a uniform 0..1 — passed in rather than rolled here so a test can prove the rule with no RNG, no
+## audio device and no tree. Returns an index in [0, count) that is never `last`, unless count == 1, where
+## repeating is the only option. A `last` that is negative or out of range means the whole list is fair game
+## (a first pick, or a playlist edited under us).
+static func pick_next_index(count: int, last: int, roll: float) -> int:
+	if count <= 0:
+		return -1
+	if count == 1:
+		return 0
+	if last < 0 or last >= count:
+		return clampi(int(roll * float(count)), 0, count - 1)
+	# Roll over the count-1 OTHER slots, then skip past `last` — a uniform pick with one index excluded, which
+	# a reroll loop would only approximate (and could in principle spin).
+	var j: int = clampi(int(roll * float(count - 1)), 0, count - 2)
+	return j if j < last else j + 1

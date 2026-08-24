@@ -147,9 +147,13 @@ func _build_section(source: Dictionary) -> Section:
 	var names := PackedStringArray(DirAccess.get_files_at(dir))
 	names.sort()
 	for n in names:
-		if n.get_extension().to_lower() != "tres":
+		# Accept BOTH resource extensions, like loot_editor / item_placer_dock / scene_placer / inspector_calc:
+		# a binary-saved .res is a real authored resource and its prose must not be silently invisible here.
+		var fname := n.trim_suffix(".remap")
+		var ext := fname.get_extension().to_lower()
+		if ext != "tres" and ext != "res":
 			continue
-		var path := dir.path_join(n)
+		var path := dir.path_join(fname)
 		var res := load(path)
 		if res == null or not (res is Resource):
 			continue

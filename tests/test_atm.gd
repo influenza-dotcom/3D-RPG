@@ -8,7 +8,9 @@ extends GutTest
 ## no third verb and no second ledger, which is why "pay off your debt" needs no code of its own and why you
 ## can never hold death-safe savings WHILE owing.
 ##
-## The components are driven off-tree (`.new()`, never `_ready`) with a bare Player as the host.
+## The components are driven off-tree (`.new()`, never `_ready`) with a bare Player as the host. ONE pair of
+## tests breaks that rule and says why at the call site: the terminal's applause needs a real `StationSpeaker`,
+## which only exists once `Atm._ready` has run in the tree.
 ##
 ## ⭐TWO DIFFERENT GameStates, and the line between them is load-bearing:
 ##   • `Atm` / `LedgerAccrual` / `CreditWatch` all read and write the GameState AUTOLOAD by name, so the
@@ -125,6 +127,78 @@ func test_overpaying_a_debt_leaves_the_remainder_banked() -> void:
 	atm.deposit(p, 400.0)
 	assert_eq(GameState.account, 300.0,
 		"paying 400 against a 100 debt clears it and banks the other 300 — one field, one subtraction")
+	atm.free()
+	p.free()
+
+
+# --- THE APPLAUSE (the machine's reward cue, hung on the repayment branch) ----------------------------------
+
+## ⭐THE ONE IN-TREE Atm IN THIS FILE, and it has to be: `StationSpeaker.ensure` runs in `Atm._ready`, and the
+## speaker builds its AudioStreamPlayer3Ds in ITS `_ready` — so a `.new()` terminal has no voice to test. The
+## Atm is parented to a throwaway Node3D rather than straight to the GUT scene so `_build_outline`'s host-mesh
+## walk stays inside an empty two-node subtree instead of crawling the test runner's tree.
+func _atm_with_a_voice() -> Variant:
+	var host := Node3D.new()
+	var atm = _atm()
+	host.add_child(atm)
+	add_child_autofree(host)  # tree entry is what fires both _ready chains, in order
+	return atm
+
+
+## The Applause voice of `atm`'s speaker, by the node name StationSpeaker builds it under.
+func _clap_of(atm) -> AudioStreamPlayer3D:
+	var sp := StationSpeaker.find_speaker(atm)
+	if sp == null:
+		return null
+	return sp.get_node_or_null("Applause") as AudioStreamPlayer3D
+
+
+func test_paying_down_the_debt_makes_the_terminal_applaud() -> void:
+	var atm = _atm_with_a_voice()
+	var p = _player(100.0)
+	GameState.account = -240.0
+	assert_eq(atm.deposit(p, 100.0), 100.0, "precondition: the repayment actually goes through")
+	var clap := _clap_of(atm)
+	assert_not_null(clap, "a standalone terminal builds its own panel speaker, applause voice included")
+	assert_true(clap.playing, "…and retiring debt claps for you out of it — the whole point of the cue")
+	p.free()
+
+
+func test_merely_banking_savings_is_not_applauded() -> void:
+	# ⭐THE RULE, and the reason the cue hangs on `repaid` rather than on "a deposit happened": paying into an
+	# already-positive account is saving, not an achievement. It scores no credit standing either — the sound
+	# and the record read the SAME branch, so a machine that clapped here would be congratulating you for
+	# something your credit file ignores. A rich player must not be able to buy applause without ever borrowing.
+	var atm = _atm_with_a_voice()
+	var p = _player(100.0)
+	GameState.account = 300.0
+	assert_eq(atm.deposit(p, 100.0), 100.0, "precondition: the deposit itself still goes through")
+	assert_false(_clap_of(atm).playing, "banking savings is unremarkable — the machine stays quiet")
+	p.free()
+
+
+func test_a_refused_deposit_is_not_applauded() -> void:
+	# The refusal paths return 0.0 without touching the ledger; none of them may sound like a repayment. A broke
+	# player standing at the terminal in the red is the exact case where a stray clap would read as a bug.
+	var atm = _atm_with_a_voice()
+	var p = _player(0.0)
+	GameState.account = -200.0
+	assert_eq(atm.deposit(p, 100.0), 0.0, "precondition: nothing moves with an empty pocket")
+	assert_false(_clap_of(atm).playing, "a deposit that never happened is never celebrated")
+	p.free()
+
+
+func test_a_teller_hosted_terminal_repays_in_silence_rather_than_crashing() -> void:
+	# ⭐The null-speaker path, which is the COMMON one: a `standalone = false` Atm riding a talking teller gets no
+	# StationSpeaker at all (a person who claps at themselves is a bug), so applaud() is a no-op there. It is
+	# called from INSIDE deposit(), after the money and the credit standing have already moved — a crash would
+	# leave a half-finished transaction, so this pins that the cue can never be the thing that breaks banking.
+	var atm = _atm()  # off-tree AND voiceless, the harshest version of the same case
+	var p = _player(100.0)
+	GameState.account = -240.0
+	assert_eq(atm.deposit(p, 100.0), 100.0, "the repayment completes normally with no speaker in sight")
+	assert_eq(GameState.account, -140.0, "…ledger and all")
+	assert_null(StationSpeaker.find_speaker(atm), "…and there was genuinely no voice to find")
 	atm.free()
 	p.free()
 

@@ -164,7 +164,10 @@ func _bind_ui() -> void:
 
 	_attrib_label = %AttribLabel
 	_attrib_label.add_theme_font_size_override(&"font_size", 2 * MenuStyle.skin.hint_size)
-	_attrib_label.add_theme_color_override(&"font_color", MenuStyle.dim_color())
+	# Pinned light like the quote above it, NOT skin dim: this label sits on the dark start-menu
+	# BACKGROUND (background_color), and the skin's dim ink is PANEL ink — dark plum since the 08-12
+	# palette, invisible here.
+	_attrib_label.add_theme_color_override(&"font_color", Color(1, 1, 1, 0.45))
 
 	_menu_input_shield = %MenuInputShield
 

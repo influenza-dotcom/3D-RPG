@@ -62,6 +62,7 @@ func pulse(radius_override: float = -1.0, throttled: bool = false) -> NoiseSourc
 	src.radius = r
 	src.decay = decay
 	src.lifetime = maxf(lifetime, 0.05)  # always one-shot — never a persistent (leaking) source
+	src.emitter = host  # the pulse is ABOUT the host (its gunfire / death cry) — a listener that investigates it noticed the HOST, not a bare point
 	# Parent to the host's PARENT (a sibling of the host), not under the host, so the sound OUTLIVES the emitter
 	# being freed this frame — an NPC's death pulse must survive the NPC's own queue_free. Fall back to under the
 	# host if it has no parent (it's a scene root).

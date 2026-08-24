@@ -6,7 +6,7 @@ const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable pe
 ## The default "cha-ching!" jingle played when a stash is collected (uid://dpu3xluhnn4u1).
 const CHACHING := preload("res://assets/audio/sfx/Chaching.mp3")
 
-## A pickable stash of zorkmids. Aim at it and press Interact (E) to collect: it adds `amount` to the
+## A pickable stash of zorkmids. Aim at it and press Interact (F) to collect: it adds `amount` to the
 ## player's money, drives the HUD readout/floating delta, plays its pickup sound, and frees the host.
 ## Built on LookAtInteractable so PickupRay detects it with ZERO changes to ray_cast.gd, exactly like
 ## CanPickUp / LootableCorpse.
@@ -70,7 +70,7 @@ func start_talk(player: Node) -> void:
 	# "cha-ching!" — a one-shot reward cue. Routed through AudioManager (NOT a child AudioStreamPlayer) so it
 	# outlives us freeing our own node this very frame; 2D/in-your-ear like the hit + reward cues (you're always
 	# point-blank when you Interact). play_2d_sfx no-ops on a null stream, so clearing pickup_sound = silent pickup.
-	AudioManager.play_2d_sfx(pickup_sound, pickup_volume_db)
+	AudioManager.play_2d_sfx(pickup_sound, pickup_volume_db, 1.0, &"sfx", false)  # vary=false: a reward chime, not a world sound
 	amount = 0.0  # zero BEFORE freeing so can_be_talked_to() goes false even if the free is deferred a frame
 	# Persist "gone" so a hand-placed money pickup stays collected across a reload (stops respawn / infinite-money on
 	# Continue). A code-spawned bag Reclaim child opts out via persist_collected=false — a dynamic spawn has no stable

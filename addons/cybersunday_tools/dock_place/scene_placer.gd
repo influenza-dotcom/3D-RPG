@@ -31,6 +31,12 @@ var _snap_pick: OptionButton = null
 const SNAP_VALUES: Array[float] = [0.0, 0.5, 1.0, 2.0]  # index-aligned with the snap dropdown (0 = Off)
 var _body: VBoxContainer = null  ## scrollable body — all placement controls live here so a growing button list scrolls inside the tab instead of forcing the whole bottom panel taller (the content_dock.gd pattern)
 
+## Lazy first-reveal latch — the archetype scan (which LOADS every file under resources/characters/ to type-test it)
+## runs on first reveal, not at panel construction. cyber_panel._init() builds all 22 tabs eagerly and the editor
+## reconstructs the panel on every plugin reload, so an _init-time scan costs a full folder load on every editor
+## start even when this tab is never opened. Mirrors content_browser / tuning_browser / item_placer_dock.
+var _revealed := false
+
 
 func _init() -> void:
 	name = "Place"
@@ -116,7 +122,15 @@ func _init() -> void:
 	_status.modulate = Color(1, 1, 1, 0.75)
 	add_child(_status)  # outside the scroll so the current status is always visible
 
-	_reload_profiles()
+	visibility_changed.connect(_on_visibility_changed)
+	_on_visibility_changed()  # lazy: scan resources/characters on first reveal, not at panel construction
+
+
+## Lazy first-reveal: run the archetype folder scan ONCE, the first time the tab is actually shown.
+func _on_visibility_changed() -> void:
+	if is_visible_in_tree() and not _revealed:
+		_revealed = true
+		_reload_profiles()
 
 
 func _add_button(text: String, handler: Callable) -> void:

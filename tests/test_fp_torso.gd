@@ -62,13 +62,23 @@ func test_the_torso_is_dither_see_through_and_hides_on_crouch() -> void:
 		"the drawn-shirt shader must carry the see_through dither — a custom-shirt chest must fade like a plain one")
 	assert_true(swap_src.contains("sm.shader == ShirtPlanarShader"),
 		"and the see-through pass must route the planar ShaderMaterial to that uniform (foreign shaders stay untouched)")
-	assert_true(src.contains("inverse_lerp(fp_torso_fade_start_deg"),
-		"the dissolve must be PITCH-driven — the torso dithers OUT as the look buries, gone just shy of straight down")
+	# ⭐2026-08-16: this pin used to assert the OPPOSITE rule — solid by default, dithering OUT as the look
+	# buried. That is only safe if the body is off-screen whenever you are not looking at it, and it is not:
+	# the landing dip, the stair step-smoothing, the crouch and the walk-bob all drop the LENS toward a body
+	# that has not moved, and the player saw their own chest while running, crouching and climbing stairs.
+	# The rule is now inverted — HIDDEN until you look down — because a gate on the LOOK cannot be defeated by
+	# anything that moves the camera.
+	assert_true(src.contains("inverse_lerp(fp_body_reveal_start_deg"),
+		"visibility must be PITCH-driven — the body is hidden until the look buries past the reveal band")
+	assert_true(src.contains("lerpf(1.0, fp_torso_transparency, reveal)"),
+		"...and it must ease from FULLY INVISIBLE toward its resting see-through, not the other way up")
 	var p = load(FP_BODY_SOURCE).new()
 	assert_between(p.fp_torso_transparency, 0.0, 0.5,
-		"the FP torso rests visible (near-solid) — the dither belongs to the look-down dissolve, not the rest state")
-	assert_gt(p.fp_torso_fade_full_deg, p.fp_torso_fade_start_deg,
-		"the fade band must be a real range (full > start), or the dissolve divides toward a pop")
+		"the FP torso rests near-solid ONCE REVEALED — this knob is the ghost amount, not the hide")
+	assert_gt(p.fp_body_reveal_full_deg, p.fp_body_reveal_start_deg,
+		"the reveal band must be a real range (full > start), or the ease divides toward a pop")
+	assert_gt(p.fp_body_reveal_start_deg, 20.0,
+		"the reveal must not start at a glance — below ~20 degrees you are looking where you are GOING, not at yourself")
 	p.free()
 
 func test_death_gibs_shed_the_torso_see_through() -> void:

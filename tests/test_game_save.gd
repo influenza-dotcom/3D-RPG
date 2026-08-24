@@ -419,7 +419,7 @@ func test_save_load_round_trip_via_temp_path() -> void:
 	gs.player_name = "Rae Vandel"
 	# agility is NEGATIVE: character creation lets a stat go sub-baseline (a real weakness), so the save must carry it.
 	gs.stat_values = {&"strength": 2, &"endurance": 5, &"gunplay": 1, &"agility": -3, &"streetwise": 4, &"larceny": 3}
-	var unlocks: Array[StringName] = [&"grapple", &"laser_sight"]
+	var unlocks: Array[StringName] = [&"grapple", &"fall_immunity"]
 	gs.unlocks = unlocks
 	gs.set_respawn(Vector3(5.0, 6.0, 7.0), 2.0)
 	gs.save_to_disk(TMP_SAVE)
@@ -435,7 +435,7 @@ func test_save_load_round_trip_via_temp_path() -> void:
 	assert_eq(rebuilt.agility, -3, "make_stats rebuilds the negative allocation onto a CharacterStats sheet")
 	assert_eq(rebuilt.endurance, 5, "make_stats rebuilds endurance onto a CharacterStats sheet")
 	assert_true(rebuilt.move_speed_mult() < 1.0, "the negative agility inverts its derived effect (slower than baseline)")
-	assert_true(gs2.unlocks.has(&"grapple") and gs2.unlocks.has(&"laser_sight"), "unlocks round-trip (as StringNames)")
+	assert_true(gs2.unlocks.has(&"grapple") and gs2.unlocks.has(&"fall_immunity"), "unlocks round-trip (as StringNames)")
 	assert_true(gs2.has_respawn, "the respawn flag round-trips")
 	assert_almost_eq(gs2.respawn_position, Vector3(5.0, 6.0, 7.0), Vector3(0.001, 0.001, 0.001), "respawn position round-trips")
 	assert_almost_eq(gs2.respawn_yaw, 2.0, 0.001, "respawn yaw round-trips")
@@ -1017,7 +1017,7 @@ func test_full_profile_round_trips_no_data_loss() -> void:
 	gs.appearance = {"head": "head_punk", "body": "body_heavy", "skin": Color(0.8, 0.6, 0.5), "arm": Color(0.2, 0.2, 0.25), "leg": Color(0.1, 0.15, 0.2)}
 	gs.xp = 1234.0
 	gs.level = 7
-	var unlocks: Array[StringName] = [&"grapple", &"double_jump", &"laser_sight"]
+	var unlocks: Array[StringName] = [&"grapple", &"double_jump", &"fall_immunity"]
 	gs.unlocks = unlocks
 	gs.stat_values = {&"strength": 4, &"endurance": 6, &"gunplay": 2, &"agility": -3, &"streetwise": 5, &"larceny": 1}
 	gs.reputation = {"faction_alpha": 55.0, "faction_beta": -22.5}
@@ -1065,7 +1065,7 @@ func test_full_profile_round_trips_no_data_loss() -> void:
 	assert_true(gs2.appearance.has("leg") and (gs2.appearance["leg"] as Color).is_equal_approx(Color(0.1, 0.15, 0.2)), "appearance leg colour round-trips")
 	assert_almost_eq(gs2.xp, 1234.0, 0.001, "xp round-trips")
 	assert_eq(gs2.level, 7, "level round-trips")
-	assert_true(gs2.unlocks.has(&"grapple") and gs2.unlocks.has(&"double_jump") and gs2.unlocks.has(&"laser_sight"), "every unlock round-trips (as StringNames)")
+	assert_true(gs2.unlocks.has(&"grapple") and gs2.unlocks.has(&"double_jump") and gs2.unlocks.has(&"fall_immunity"), "every unlock round-trips (as StringNames)")
 	assert_eq(gs2.unlocks.size(), 3, "no phantom / dropped unlocks")
 	for n in GameState.STAT_NAMES:
 		assert_eq(int(gs2.stat_values.get(n, 999)), int(gs.stat_values[n]), "stat '%s' round-trips (the loop covers EVERY stat incl. the negative agility)" % n)

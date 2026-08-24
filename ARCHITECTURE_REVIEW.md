@@ -188,8 +188,9 @@ because each one established an idiom the next extraction should copy.
   - ⭐ NO `class_name`, by choice: player.gd is the sole runtime consumer and
     preloads it by path (`StaminaManagerRef`, the StatBudget idiom) — a fresh
     class_name is the stale-class-cache cascade in the next headless run. All
-    tuning stays on `GameSettings.player_movement` / `weapon_general`; the
-    manager holds zero knobs.
+    tuning stays on `GameSettings.player_movement` / `weapon_general` — bar the
+    RANGED SHOT price, which is derived per weapon from `WeaponData.stamina_effort()`
+    and trimmed by `stamina_cost_mult`; the manager holds zero knobs.
   - Two `tests/test_player_core.gd` migrations only: the `_sprint_lockout_left`
     white-box read now goes through `p._stamina_mgr`, and the
     `"if sprint_blocked_by_scope():"` source pin greps the manager file (the
@@ -204,12 +205,37 @@ all-in total; `Merchant.accepts_ledger` gives cash-only vendors a single
 `can_afford` / `take_payment` / `quoted_total` predicate trio the till and the UI
 dim share; the HUD carries an OWED row; `scenes/components/atm.tscn` is the
 drop-in world terminal; and the DEBIT/CREDIT choice is available **at every point
-of sale**, not just at an ATM.
+of sale** that honours both rails, not just at an ATM.
 
 That last piece is `PaymentRailButton` (`scripts/ui/payment_rail_button.gd`) — one
 drop-in authored into all five paid screens (shop, heal, level-up, chip-install,
 respec). It owns the toggle, the caption, and the persist-on-flip; the host screen
 connects `rail_changed` to its own repaint.
+
+> ⭐ **One till refuses the credit rail on purpose: `LevelUp` (`accepts_credit`,
+> default off).** It is the only counter that sells entries on the permanent stat
+> sheet, and `Player.credit_limit()` re-rates that sheet live — so a stat point
+> bought on credit raises the line that funded it (1 zm buys 100 zm of new line at
+> the shipped knobs; the ladder ends at total level 51 / 2022 zm owed for every
+> build), erasing the creation choice. The refusal rides a new `allow_credit`
+> parameter on the payment seam (`can_pay` / `charge` / `charge_total` / `quote` /
+> `spendable`, defaulted true so every other caller is unchanged), NOT a UI change —
+> hiding the selector alone would be cosmetic, since the rail is global persisted
+> state.
+>
+> ⭐ **And the rail refusal alone is not enough**, which is why `LevelUp` also ships
+> `requires_settled_account = true`. The credit line is fungible into CASH at any
+> ledger vendor — `Merchant.take_payment` funds the buy on the armed rail while
+> `Merchant.sell` pays out in cash, and `sell_price` is clamped to one coin under
+> `buy_price` — so a buy/sell round trip converts the line at ~97% and walks the
+> proceeds to a cash-taking till. The shipped Medicine Person carries both
+> components. Refusing a PAID raise while the account is negative closes that
+> arithmetically. **That credit-to-cash conversion is itself an open defect against
+> `Atm.withdraw`'s stated invariant** and is not fixed here.
+>
+> Not a die-and-keep-it loop, despite an earlier framing: the debt is death-safe
+> too (`GameState.account` — "you cannot die your way out of the Ledger").
+> `tests/test_level_up_credit.gd` pins both gates.
 
 > ⭐ **The signal is the contract, not garnish.** The armed rail changes what
 > `Player._split` may draw on, so it changes the affordability dim and the quoted
@@ -219,12 +245,11 @@ connects `rail_changed` to its own repaint.
 > `tests/test_payment_rail_selector.gd` pins the connection in all five screens by
 > source-grep, because it is made at runtime in `_bind_ui`.
 
-One asymmetry left deliberately: only ShopScreen paints the **all-in** total. The
-healer / level-up / chip-installer / respec cards still show the vendor's base
-price, while `charge` adds the account's service charge when the purchase is
-ledger-funded. The gate is honest everywhere (all five read `can_pay`), so nothing
-is refused unexpectedly — but a ledger-funded buy can debit slightly more than the
-card quoted. Closing it means routing four more price labels through `quote()`.
+That asymmetry is CLOSED (2026-08-11): all five paid cards now paint the **all-in**
+total through `charge_total`, and the heal / respec / level-up funds readouts paint
+`spendable()` rather than raw `money`. The gate still runs on the RAW sticker —
+`can_pay` / `charge` fold the service charge in themselves, so wrapping the gate's
+argument in `charge_total` would double-apply it.
 
 ### Pending One-Time Playtest Sweep (2026-07-11 remediation)
 

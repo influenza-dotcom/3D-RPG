@@ -4,6 +4,7 @@ extends RefCounted
 ## @system Minimap
 ## @seam view_transform() is THE single projection the HUD minimap draws through: handed to draw_set_transform_matrix(), it maps world (x, z) metres straight onto the Control's pixel space, so the baked floorplan, the optional authored underlay and every marker dot share ONE matrix and can never fork projections.
 ## @seam walkable_triangles() turns the level's BAKED NavigationMesh into a flat triangle list for one floor band — the day-one picture, needing no authored texture and no MapData; it reads the same three accessors NavMeshAudit / NavLinkPlanner already rely on (get_vertices / get_polygon_count / get_polygon).
+## @seam silhouette() is the wall layer's boolean UNION: every cut ring is differenced against the other solids' grown outlines with Geometry2D.clip_polyline_with_polygon, so a level built from overlapping boxes prints one merged outline instead of a stack of them. It runs on the LINES, never on the areas, because merge_polygons' outer/hole winding cannot survive being folded over N rings two at a time.
 ## @risk A section cut renders ONLY the band it cuts — a mezzanine, catwalk or stair tread above the cut plane is invisible by construction, and a flight of stairs reads as a gap between two bands.
 ## @risk band_floor quantises the player's ORIGIN Y and never raycasts down: get_world_3d().direct_space_state returns EMPTY, silently, outside a physics frame — a previously-shipped bug class in this project.
 ## @test res://tests/test_floorplan_section.gd
@@ -278,6 +279,184 @@ static func ring_is_noise(ring: PackedVector2Array, min_span: float) -> bool:
 		return false
 	var b := ring_bounds(ring)
 	return b.size.x < min_span and b.size.y < min_span
+
+
+# --- THE SILHOUETTE: a boolean union, drawn as lines ----------------------------------------------------
+# A level is BUILT out of overlapping boxes; a floorplan is not DRAWN as one. Two brushes that overlap — or
+# merely share a face — each draw four sides, and the sides buried inside the neighbour are interior seams of
+# what is really ONE wall. No draughtsman inks those. This pass removes exactly them, so a pile of solids
+# prints its OUTLINE and nothing else.
+#
+# WHY NOT Geometry2D.merge_polygons. That built-in takes exactly TWO polygons and returns a polygon SET —
+# outer rings plus holes, told apart only by winding. Folding N rings through it means feeding a set back in
+# one polygon at a time, and the first result carrying a hole loses that distinction: a desk standing in a
+# room would be unioned INTO the room's interior hole and disappear off the map. So the union is taken the
+# way a draughtsman takes it — on the LINES rather than on the areas. Every ring is DIFFERENCED against the
+# other solids with Geometry2D.clip_polyline_with_polygon (still Clipper, still the engine's own boolean,
+# just its open-path form), and what survives is precisely the union boundary. The result is polylines, which
+# is what draw_multiline wanted anyway.
+#
+# THE WELD IS LOAD-BEARING, not a fudge factor. Probed against 4.7.1: a polyline lying EXACTLY on a clip
+# polygon's boundary survives the difference untouched, so two brushes sharing a face keep drawing that face
+# from both sides — the single most common seam in a brush level. Growing the OCCLUDER by half the weld puts
+# a shared face unambiguously INSIDE its neighbour, so it cancels from both. Only the hidden-line TEST is
+# grown; every stroke emitted is the solid's own untouched cut geometry.
+
+## A ring with no repeated closing vertex. Geometry2D.convex_hull repeats the first point (see ring_edges);
+## Clipper's polygon input must not, or the ring carries a zero-length edge into every boolean.
+static func open_ring(ring: PackedVector2Array) -> PackedVector2Array:
+	var out := ring.duplicate()
+	while out.size() >= 2 and out[0].is_equal_approx(out[out.size() - 1]):
+		out.remove_at(out.size() - 1)
+	return out
+
+
+## A ring as a CLOSED polyline — the form the difference is taken on, so the ring's last edge is clipped like
+## every other one rather than silently surviving.
+static func closed_polyline(ring: PackedVector2Array) -> PackedVector2Array:
+	var out := open_ring(ring)
+	if out.size() >= 2:
+		out.append(out[0])
+	return out
+
+
+## An OPEN polyline -> flat draw_multiline pairs. Unlike ring_edges there is NO wrap-around: a clipped piece
+## is a fragment of an outline, not a closed shape, and joining its ends would draw a chord across the room.
+static func polyline_edges(polyline: PackedVector2Array) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for i in range(1, polyline.size()):
+		out.append(polyline[i - 1])
+		out.append(polyline[i])
+	return out
+
+
+## The OCCLUDER form of a cut ring: the same shape grown by `delta` metres, so geometry lying exactly on (or
+## within `delta` of) its boundary counts as buried. Returns an open ring; delta <= 0 or a degenerate input
+## degrades to the ungrown one, which is the "exact overlaps only" behaviour.
+##
+## SELF-CHECKING, because offset_polygon's sign is documented against the path's ORIENTATION and this widget
+## cannot afford a silent INWARD offset — an occluder that shrank would leave every seam this pass exists to
+## erase. Measured against 4.7.1 it grows either winding, so the guard should never fire; it is here so an
+## engine change degrades to "the seams come back" instead of "the walls vanish".
+static func grow_ring(ring: PackedVector2Array, delta: float) -> PackedVector2Array:
+	var src := open_ring(ring)
+	if delta <= 0.0 or src.size() < 3:
+		return src
+	var grown := Geometry2D.offset_polygon(src, delta, Geometry2D.JOIN_MITER)
+	if grown.size() != 1:
+		return src
+	var g: PackedVector2Array = grown[0]
+	if g.size() < 3:
+		return src
+	var gb := ring_bounds(g)
+	var sb := ring_bounds(src)
+	if not gb.encloses(sb) or gb.size.x < sb.size.x or gb.size.y < sb.size.y:
+		return src
+	return g
+
+
+## Is `inner` entirely inside `outer`? THE GUARD THAT STOPS THE PASS EATING A DUPLICATED BRUSH: two copies of
+## one solid each bury the other, and left to it they would clip each other out of existence — the shape would
+## simply not be on the map, which is a far worse failure than the seam this pass removes. A solid swallowed
+## whole by another cannot hide any part of that other's outline anyway, so skipping it as an occluder is free.
+## (Boundary points count as inside — verified against the engine — which is what makes the identical-ring case
+## resolve rather than depending on a rounding.)
+static func ring_contains_ring(outer: PackedVector2Array, inner: PackedVector2Array) -> bool:
+	if outer.size() < 3 or inner.is_empty():
+		return false
+	if not ring_bounds(outer).encloses(ring_bounds(inner)):
+		return false   # cheap Rect2 reject before the per-vertex test
+	for p in inner:
+		if not Geometry2D.is_point_in_polygon(p, outer):
+			return false
+	return true
+
+
+## THE PASS. `rings` are the closed convex cross-sections — ALREADY shell- and noise-filtered, because a
+## rejected solid must not occlude either: one void-seal brush promoted to an occluder would erase the entire
+## level. `segments` are the flat pairs a trimesh cut produces. Returns flat draw_multiline pairs for the
+## whole wall layer.
+##
+## Trimesh soups are CLIPPED but never CLIP. An unordered segment set is not a polygon, and the obvious fix —
+## chaining the segments back into loops — is worse than the disease: a hollow CSG shell's outer loop encloses
+## the whole level and, knowing nothing of its own holes, would swallow every wall inside it. So a CSG blockout
+## occludes nothing. Its bake is already ONE merged solid, which was the case that mattered.
+##
+## Cost is one Clipper difference per OVERLAPPING pair (a Rect2 test rejects the rest) plus one offset per
+## ring — paid once per floor deck at bake time, never per frame.
+static func silhouette(rings: Array[PackedVector2Array], segments: PackedVector2Array,
+		weld: float) -> PackedVector2Array:
+	var n := rings.size()
+	var occ: Array[PackedVector2Array] = []
+	var occ_box: Array[Rect2] = []
+	var ring_box: Array[Rect2] = []
+	for r in rings:
+		var g := grow_ring(r, weld * 0.5)
+		occ.append(g)
+		occ_box.append(ring_bounds(g))
+		ring_box.append(ring_bounds(r))
+	var out := PackedVector2Array()
+	for i in n:
+		var pieces: Array[PackedVector2Array] = []
+		var clipped := false
+		for j in n:
+			if j == i or not occ_box[j].intersects(ring_box[i]):
+				continue
+			if ring_contains_ring(occ[i], occ[j]):
+				continue
+			if not clipped:
+				pieces = [closed_polyline(rings[i])]
+				clipped = true
+			var kept: Array[PackedVector2Array] = []
+			for pl in pieces:
+				kept.append_array(Geometry2D.clip_polyline_with_polygon(pl, occ[j]))
+			pieces = kept
+			if pieces.is_empty():
+				break   # buried whole — this solid is interior matter and draws nothing
+		if not clipped:
+			# Nothing overlaps it. Emit the authored ring untouched rather than round-tripping an unchanged
+			# shape through Clipper — same picture, and the vertices stay exactly where the cut put them.
+			out.append_array(ring_edges(rings[i]))
+			continue
+		for pl in pieces:
+			out.append_array(polyline_edges(pl))
+	out.append_array(clip_segments(segments, occ, occ_box))
+	return out
+
+
+## The trimesh soup, hidden-line trimmed against the ring occluders. Each pair is clipped on its own: the
+## segments are unordered, so there is no polyline worth preserving across them.
+static func clip_segments(segments: PackedVector2Array, occ: Array[PackedVector2Array],
+		occ_box: Array[Rect2]) -> PackedVector2Array:
+	if occ.is_empty():
+		return segments
+	var out := PackedVector2Array()
+	var pairs := segments.size() / 2
+	for s in pairs:
+		var a := segments[s * 2]
+		var b := segments[s * 2 + 1]
+		var box := Rect2(a, Vector2.ZERO).expand(b)
+		var pieces: Array[PackedVector2Array] = []
+		var clipped := false
+		for j in occ.size():
+			if not occ_box[j].intersects(box):
+				continue
+			if not clipped:
+				pieces = [PackedVector2Array([a, b])]
+				clipped = true
+			var kept: Array[PackedVector2Array] = []
+			for pl in pieces:
+				kept.append_array(Geometry2D.clip_polyline_with_polygon(pl, occ[j]))
+			pieces = kept
+			if pieces.is_empty():
+				break
+		if not clipped:
+			out.append(a)
+			out.append(b)
+			continue
+		for pl in pieces:
+			out.append_array(polyline_edges(pl))
+	return out
 
 
 ## THE DAY-ONE PICTURE: the walkable floor for one band, taken from the level's BAKED NavigationMesh and

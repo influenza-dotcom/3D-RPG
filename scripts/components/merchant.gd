@@ -99,6 +99,11 @@ func _ready() -> void:
 		_fit_hitbox_to_host()
 	if standalone:
 		StationSpeaker.ensure(self)  # a self-serve kiosk answers with the shared panel chirp; a data-only merchant rides a talking NPC, and people don't beep
+	# The minimap pin. NOT gated on `standalone` — the whole point of a shop glyph is "there is somewhere to
+	# trade over there", and a vendor riding a walking NPC is the commonest shape of that in this game. ensure()
+	# derives PINNING from `standalone` instead, so a counter points at itself from the box rim while a walking
+	# shopkeeper stays clipped to the box (the radar rule).
+	StationMarker.ensure(self, StationMarker.Kind.SHOP)
 
 ## Seed `into` from the authored stock: the COUNTED lines (stock_counts — N per entry). A weapon entry stocks one UNIQUE duplicate per count, so "2 shotguns" are two
 ## distinct objects (no shared-instance bugs); stackables stack. Split from _ready so tests can exercise

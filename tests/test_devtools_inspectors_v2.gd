@@ -84,6 +84,21 @@ func test_weapon_lines_are_nonempty_and_mention_hp_anchors() -> void:
 
 # ── WeaponData: amber warnings ─────────────────────────────────────────────────────────────────────────────
 
+func test_weapon_warns_melee_carrying_an_inert_stamina_cost_mult() -> void:
+	# stamina_cost_mult only prices RANGED fire — Attack._shot_stamina_cost() returns 0 for a melee weapon, which
+	# pays stamina_melee_attack_cost instead. A knife authored with a multiplier is therefore the exact
+	# "half-configured knob that silently no-ops" class this warning list exists for.
+	var wd := WeaponData.new()
+	wd.is_melee = true
+	wd.stamina_cost_mult = 2.5
+	var w := Calc.weapon_warnings(wd, PackedStringArray())
+	assert_true(_any_contains(w, "stamina_cost_mult"), "a melee weapon carrying a non-default stamina_cost_mult is warned as inert")
+	wd.stamina_cost_mult = 1.0
+	assert_false(_any_contains(Calc.weapon_warnings(wd, PackedStringArray()), "stamina_cost_mult"),
+		"a melee weapon left at the 1.0 default must NOT warn — the default is not a half-configured knob")
+	wd = null
+
+
 func test_weapon_warns_shotgun_without_spread() -> void:
 	var wd := WeaponData.new()
 	wd.pellet_count = 6

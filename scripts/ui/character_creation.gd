@@ -43,6 +43,24 @@ signal cancelled
 const NAME_MAX_LENGTH := 24
 ## Selectable shirt brush footprints (square side in canvas cells) offered on the Shirt tab; first = the default.
 const SHIRT_BRUSH_SIZES: Array[int] = [1, 2, 3, 4]
+
+# --- Shirt-tab HEIGHT BUDGET (why these three numbers exist) ---------------------------------------------------
+# A tab page whose MINIMUM size beats the space the panel can give it does not scroll or clip — Godot grows the
+# PANEL past its 0.05..0.95 anchor band (grow_horizontal/vertical = BOTH), so the whole card swells and re-centres
+# the moment that tab is shown. That is exactly what the Shirt tab used to do: 202px of minimum against ~156px of
+# page, so opening it pushed the card 45px taller than the screen. The card must be the SAME size on every tab.
+# The arithmetic at the shipped 792x444 canvas (and at 432px tall, the shortest this canvas ever gets — ultrawide):
+#   panel band          0.90 * 432          = 388.8
+#   - artist frame inset (menu_skin panel stylebox content margins, 36 top / 40 bottom) = -76
+#   - pinned chrome     title + name row + hint + 2 separators + Back/Begin + separations = -143
+#   - TabContainer tab bar + its panel box  = -24
+#   = the budget below. Every tab page's combined minimum must fit it, and the Shirt page (the biggest) is the
+# one that has to be watched: tests/test_menu_layout_stability.gd fails if any page or the panel outgrows it.
+const SHIRT_PAGE_HEIGHT_BUDGET := 145
+## Paint-surface minimum (square). Floor only — the canvas EXPANDs into whatever the page has left.
+const SHIRT_CANVAS_MIN := 108
+## Paint chips per palette row. Wide keeps the middle column short (12 chips = 2 rows, not 3).
+const SHIRT_PALETTE_COLUMNS := 6
 ## Per-stat allocation bounds: a stat can be dumped to STAT_MIN (a real weakness) and raised to STAT_MAX. The
 ## zero-sum rule still applies on top — raising still costs a point freed by lowering another stat. DERIVED
 ## from the allocator (the STATS/STAT_NAMES idiom): the same pair normalizes the implant step's credit check,
@@ -56,7 +74,7 @@ const STATS: Array[StringName] = CharacterStats.STAT_NAMES
 var _name_edit: LineEdit
 var _budget: StatBudget                ## the zero-sum allocator (pure; see stat_budget.gd) — the widgets mirror it
 var _value_labels: Dictionary = {}    ## stat -> Label (the current number)
-var _effect_labels: Dictionary = {}   ## stat -> Label (the live derived-effect blurb)
+var _name_labels: Dictionary = {}     ## stat -> Label (the name cell; its hover tip carries the live breakdown)
 var _plus_buttons: Dictionary = {}    ## stat -> Button (disabled when no spare points OR the stat is at STAT_MAX)
 var _minus_buttons: Dictionary = {}   ## stat -> Button (disabled when the stat is at STAT_MIN)
 var _points_label: Label
@@ -196,15 +214,15 @@ func _bind_ui() -> void:
 
 ## The "Stats" tab: the spare-points banner + the one-line rule, then the zero-sum stat grid in an authored
 ## SCROLL region (vertical-only, so a tall list never buries the pinned buttons). The stepper rows are DYNAMIC
-## (one per CharacterStats.STAT_NAMES entry) and stay code-built into the authored 5-column %StatGrid.
+## (one per CharacterStats.STAT_NAMES entry) and stay code-built into the authored 4-column %StatGrid.
 func _bind_stats_tab() -> void:
 	_points_label = %PointsLabel
 	_points_label.add_theme_color_override(&"font_color", MenuStyle.gold())
-	var stat_hint: Label = %StatHint
-	MenuStyle.style_hint(stat_hint)
-	stat_hint.text = PlayerText.character_create_stat_hint(STAT_MIN, STAT_MAX)
 
-	# Columns (authored: columns = 5): name | − | value | + | effect
+	# Columns (authored: columns = 4): name | − | value | +. The name column is the EXPAND_FILL rail, so
+	# the stepper cluster right-aligns against the panel edge (the options-row label-left/control-right
+	# idiom). No effect column and no hint line: what a stat does lives in the hover tip on its name/value
+	# (see _stat_tip — the CK3-style breakdown), not in inline prose.
 	var grid: GridContainer = %StatGrid
 	for stat in STATS:
 		_add_stat_row(grid, stat)
@@ -313,7 +331,10 @@ func _make_swatch_row(title: String, palette: PackedColorArray, key: String) -> 
 		sb.bg_color = color
 		sb.set_border_width_all(0)
 		sb.border_color = Color.WHITE
-		for state in ["normal", "hover", "pressed", "disabled"]:
+		# hover_pressed included: a mouse press is always hovered+pressed, and the theme resolves that
+		# state to the artist button art — an un-overridden hover_pressed flashes a parchment tile
+		# in place of the colour chip on every click.
+		for state in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:
 			b.add_theme_stylebox_override(state, sb)
 		b.pressed.connect(_on_swatch.bind(key, color))
 		row.add_child(b)
@@ -391,12 +412,16 @@ func _mark_selected_swatches() -> void:
 
 # --- The "Shirt" tab: paint your own torso texture ------------------------------------------------------------
 
-## The "Shirt" tab: the paint canvas on the left at the FULL tab height (it's the star — the old stacked layout
-## squeezed it to ~146px), the tools + palette in a slim middle column, and a live full-body preview on the right
-## so the shirt shows on the character as it's painted. The drawing starts a BLANK tee and is only APPLIED once
-## the player actually paints (is_dirty) — an untouched tab leaves the character's base shirt. The column split
-## (canvas 1.2 : tools : preview) is authored; every widget INSIDE the rows is dynamic (the ShirtCanvas, the
-## radio/tool/palette buttons from ShirtCanvas consts + the disk catalog, the preview, the lazy HSV overlay).
+## The "Shirt" tab: the paint canvas on the left at the FULL tab height (it's the star), the tools + palette in a
+## slim middle column, and a live full-body preview on the right so the shirt shows on the character as it's
+## painted. The drawing starts a BLANK tee and is only APPLIED once the player actually paints (is_dirty) — an
+## untouched tab leaves the character's base shirt. The column split (canvas 1.2 : tools : preview) is authored;
+## every widget INSIDE the rows is dynamic (the ShirtCanvas, the radio/tool/palette buttons from ShirtCanvas
+## consts + the disk catalog, the preview, the lazy HSV overlay).
+## ⭐ The middle column is FOUR rows — tools / brush size / actions / [palette + Custom swatch] — and that is a
+## HARD ceiling, not a style choice: its stack IS this page's minimum height, and the page has SHIRT_PAGE_HEIGHT_BUDGET
+## to live in before the whole card starts growing (see that const). A fifth row, a taller palette, or a bigger
+## canvas floor puts the panel back off-screen. Add a control by folding it into an existing row.
 func _bind_shirt_tab() -> void:
 	var row: HBoxContainer = %ShirtRow
 
@@ -419,8 +444,12 @@ func _bind_shirt_tab() -> void:
 
 	# The paint surface, kept SQUARE by the authored AspectRatioContainer (%CanvasFrame, ratio 1 / FIT — the
 	# engine defaults, so the cells stay square at any panel height).
+	# ⚠ The floor is a BUDGET, not the drawn size: the canvas is EXPAND_FILL inside the tab, so it takes every
+	# pixel the page can spare (~124px at the shipped canvas) and the floor only decides how small the page's
+	# MINIMUM is. Keep it under SHIRT_PAGE_HEIGHT_BUDGET minus the side-toggle row, or the Shirt page's minimum
+	# beats the panel's anchor band and Godot grows the whole panel off-screen — see that const.
 	_shirt_canvas = ShirtCanvas.new()
-	_shirt_canvas.custom_minimum_size = Vector2(150, 150)
+	_shirt_canvas.custom_minimum_size = Vector2(SHIRT_CANVAS_MIN, SHIRT_CANVAS_MIN)
 	_shirt_canvas.changed.connect(_on_shirt_changed)
 	_shirt_canvas.color_picked.connect(_on_shirt_color_picked)  # the Eyedropper tool sampled a colour
 	%CanvasFrame.add_child(_shirt_canvas)
@@ -481,15 +510,18 @@ func _bind_shirt_tab() -> void:
 
 	# Palette: a grid of paint chips (the same chip idiom as the arm/leg swatch rows). Seed the first pick.
 	# The grid itself stays CODE-BUILT (its column count derives from the authored palette's size); only its
-	# centering host row (%PaletteCenter) is authored.
+	# centering host row (%PaletteCenter) is authored. WIDE, not tall: the chips lay out SHIRT_PALETTE_COLUMNS
+	# across so 12 of them cost two 22px rows instead of three — the middle column's height is the Shirt page's
+	# minimum, and the page has ~156px to live in (see SHIRT_PAGE_HEIGHT_BUDGET).
 	var pal: PackedColorArray = _catalog.shirt_palette
 	if not pal.is_empty():
 		_shirt_canvas.set_paint_color(pal[0])
 	var pal_grid := GridContainer.new()
-	pal_grid.columns = maxi(1, mini(pal.size(), 4))  # 4 wide suits the slim middle column (12 chips = 3 rows)
+	pal_grid.columns = maxi(1, mini(pal.size(), SHIRT_PALETTE_COLUMNS))
 	pal_grid.add_theme_constant_override("h_separation", 3)
 	pal_grid.add_theme_constant_override("v_separation", 3)
 	%PaletteCenter.add_child(pal_grid)
+	%PaletteCenter.move_child(pal_grid, 0)  # presets first, then the authored Custom swatch row beside them
 	var chip: int = MenuStyle.skin.body_size * 2 - 2  # matches the arm/leg swatch chip size (real click target)
 	for color in pal:
 		var b := Button.new()
@@ -499,7 +531,7 @@ func _bind_shirt_tab() -> void:
 		sb.bg_color = color
 		sb.set_border_width_all(0)
 		sb.border_color = Color.WHITE
-		for state in ["normal", "hover", "pressed", "disabled"]:
+		for state in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:  # hover_pressed: see the body-swatch note
 			b.add_theme_stylebox_override(state, sb)
 		b.pressed.connect(_on_shirt_swatch.bind(color))
 		pal_grid.add_child(b)
@@ -510,7 +542,9 @@ func _bind_shirt_tab() -> void:
 	# uses (spray_painter.gd), because this project runs embed_subwindows = false in exclusive fullscreen, so a
 	# native ColorPickerButton popup would open as a separate OS window that never shows. The swatch's own fill
 	# tracks the current brush colour (bright border while it's the active pick, like the preset chips).
-	# Row + label authored (%CustomRow / %CustomLabel); the swatch button itself is dynamic chrome.
+	# Row + label authored (%CustomRow / %CustomLabel) — the row sits INSIDE %PaletteCenter, beside the preset
+	# grid rather than on its own line, because a fifth stacked row put the Shirt page over its height budget.
+	# The swatch button itself is dynamic chrome.
 	var custom_row: HBoxContainer = %CustomRow
 	(%CustomLabel as Label).text = PlayerText.CHARACTER_CREATE_SHIRT_CUSTOM
 	_shirt_custom_btn = Button.new()
@@ -520,7 +554,7 @@ func _bind_shirt_tab() -> void:
 	_shirt_custom_sb.bg_color = _shirt_canvas.paint_color if _shirt_canvas != null else Color.BLACK
 	_shirt_custom_sb.border_color = Color.WHITE
 	_shirt_custom_sb.set_border_width_all(0)
-	for state in ["normal", "hover", "pressed", "disabled"]:
+	for state in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:  # hover_pressed: see the body-swatch note
 		_shirt_custom_btn.add_theme_stylebox_override(state, _shirt_custom_sb)
 	# This swatch TOGGLES the wheel, so one button carries two meanings — _on_shirt_custom_open picks the cue
 	# (select on the way up, back on a dismissing second click); mute the generic click so it can't stack.
@@ -770,7 +804,13 @@ func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 	var name_l := Label.new()
 	name_l.text = StatInfo.title(stat)
 	name_l.custom_minimum_size = Vector2(64, 0)
-	MenuStyle.attach_tip(name_l, StatInfo.blurb(stat))  # hover the name for what the stat governs
+	# The name column IS the row's rail: it expands, which pushes the − value + cluster to the grid's
+	# right edge. The hover tip is the stat's whole story (governs-blurb + the live effect of the current
+	# allocation) — _refresh re-attaches it with fresh numbers after every point moved; attach_tip
+	# updates in place even while the tip is showing.
+	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MenuStyle.attach_tip(name_l, StatInfo.blurb(stat))
+	_name_labels[stat] = name_l
 	grid.add_child(name_l)
 
 	var minus := Button.new()
@@ -786,6 +826,7 @@ func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 	var val_l := Label.new()
 	val_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	val_l.custom_minimum_size = Vector2(28, 0)
+	MenuStyle.attach_tip(val_l, StatInfo.blurb(stat))  # same tip as the name — the value is where the eye sits while allocating
 	_value_labels[stat] = val_l
 	grid.add_child(val_l)
 
@@ -796,15 +837,6 @@ func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 	plus.pressed.connect(_on_plus.bind(stat))
 	_plus_buttons[stat] = plus
 	grid.add_child(plus)
-
-	# Effect goes LAST (rightmost) and clips rather than forcing width — so a long blurb can never push the +/−
-	# steppers off-screen. clip_text drops its min width to 0; the name tooltip carries the full breakdown anyway.
-	var effect_l := Label.new()
-	effect_l.clip_text = true
-	effect_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	effect_l.add_theme_color_override(&"font_color", MenuStyle.dim_color())
-	_effect_labels[stat] = effect_l
-	grid.add_child(effect_l)
 
 ## Lower a stat by 1 — frees a point to spend elsewhere (StatBudget clamps at STAT_MIN). A minus is a real penalty.
 ## Both steppers cue on the ACCEPTED move and DENY on the refused one: _refresh disables an arrow that can't move,
@@ -833,16 +865,25 @@ func _refresh() -> void:
 	for stat in STATS:
 		var v: int = int(_budget.values[stat])
 		(_value_labels[stat] as Label).text = str(v)
-		(_effect_labels[stat] as Label).text = _effect_for(stat, v)
+		# The CK3-style breakdown rides the hover tip, re-attached with the LIVE numbers on every change
+		# (attach_tip updates in place, so a tip already showing tracks the click).
+		var tip := _stat_tip(stat, v)
+		MenuStyle.attach_tip(_name_labels[stat] as Label, tip)
+		MenuStyle.attach_tip(_value_labels[stat] as Label, tip)
 		(_plus_buttons[stat] as Button).disabled = not _budget.can_raise(stat)
 		(_minus_buttons[stat] as Button).disabled = not _budget.can_lower(stat)
 	_points_label.text = PlayerText.points_to_spend(_budget.spare())
 
+## The stat's hover breakdown: what it GOVERNS (the authored blurb) + what the CURRENT allocation is
+## actually doing (the live derived effect line). Both halves are the same derived surfaces the in-game
+## Stats screen uses — never fresh prose (the effect-tooltips-derived rule).
+func _stat_tip(stat: StringName, value: int) -> String:
+	return StatInfo.blurb(stat) + "\n" + _effect_for(stat, value)
+
 ## This one stat's live effect string — a throwaway sheet with only this stat set, run through the SAME StatInfo
-## formatter the in-game Stats screen uses (so the wording never drifts). Neutral at baseline.
+## formatter the in-game Stats screen uses (so the wording never drifts). No baseline special case: at 0 the
+## formatter itself reads "+0% …" per token, so the tooltip speaks one voice at every value.
 func _effect_for(stat: StringName, value: int) -> String:
-	if value == 0:
-		return PlayerText.NEUTRAL_EFFECT
 	var s := CharacterStats.new()
 	s.set(stat, value)
 	return StatInfo._effect(stat, s)

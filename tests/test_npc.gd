@@ -68,6 +68,9 @@ func test_npc_is_a_character_actor() -> void:
 func test_npc_outline_exports_default_to_combat_rim() -> void:
 	# NPC owns the combat outline (Phase 2). Defaults reproduce the old hardcoded Character rim,
 	# now actually reaching the shader. Off-tree so _ready -> _setup_outline never runs.
+	# The black rim is CORRECT next to the world's InkOutline ink because actors are EXCLUDED from that
+	# pass (the ACTOR_INK_MASK_LAYER stamp in _apply_overlay_to_meshes — pinned by test_ink_outline.gd);
+	# it briefly shipped transparent to dodge ink-doubling, which was the wrong fix.
 	var n = load(NPC_PATH).new()
 	assert_true(n.has_outline, "NPC.has_outline must default true so combatants still get their outline")
 	assert_eq(n.outline_color, Color.BLACK, "NPC.outline_color must default black — the dark combat rim")

@@ -3,7 +3,7 @@ extends MeshInstance3D
 
 ## @system Ink Outline
 ## @seam A screen-filling quad childed to a Camera3D; ink_outline.gdshader edge-detects that camera's DEPTH + NORMAL_ROUGHNESS buffers to ink the WORLD, while actors (NPCs / props / view model — everything wearing the inverted-hull rim) are excluded per-pixel via a coverage+depth mask SubViewport fed by the ACTOR_INK_MASK_LAYER render-layer stamp.
-## @risk Actor exclusion rests on the ACTOR_INK_MASK_LAYER stamp riding the overlay walks (Character._apply_overlay_to_meshes / NpcOutline.apply_part_overlays / Throwable._setup_overlay_chain / body_part_gib strip) — a new actor path that skips those walks gets inked over its hull rim (the doubled-outline complaint) with no error anywhere.
+## @risk Actor exclusion rests on the ACTOR_INK_MASK_LAYER stamp riding the overlay walks (Character._apply_overlay_to_meshes / NpcOutline.apply_part_overlays / Throwable._setup_overlay_chain / body_part_gib strip / BodyModelSwap._apply_actor_outline / ExplosionMesh._ready) — a new actor path that skips those walks gets inked over its hull rim (the doubled-outline complaint) with no error anywhere, and one that is neither hull-rimmed nor stamped (the player's own first-person body until 2026-08-15, every explosion and hit spark until 2026-08-16) wears the WORLD's line where every NPC beside it wears a rim.
 ## @risk The mask viewport SHARES the main World3D, so anything visual parented inside it is registered with the MAIN scenario too and the main camera would draw it; the resolve quad only stays invisible because it sits on MASK_INTERNAL_LAYER, a render bit above the 20 a default cull_mask carries. Give it an ordinary layer and it paints its raw depth encoding over the whole screen.
 ## @risk The mask's depth channel is a NUMBER encoded in an 8-bit sRGB colour target — it survives only because the resolve shader pre-compensates for that transfer and the mask camera's Environment is pinned to the LINEAR tonemapper. A filmic tonemap, an exposure change, glow or colour adjustments on that Environment all corrupt it silently, and the symptom is actors flickering back to a doubled outline.
 ## @risk The hull rim (outline.gdshader) is a TRANSPARENT material and writes NO depth, so the mask's depth stops at the actor's opaque body and the ink shader has to SEARCH outward (mask_rim_search_px) for it. Author an outline_width whose rim out-reaches that search and the rim degrades to the old always-suppress behaviour — not a break, but the hidden actor's ring-shaped halo comes back on it.
@@ -11,6 +11,8 @@ extends MeshInstance3D
 ## @risk The mask is a SECOND scene render — it costs a full extra pass over every masked actor/prop. It is deliberately stripped to coverage-only (no AA/TAA/shadow atlas, coarse LOD); re-enabling any of that, or letting it inherit the project's 3D supersample again, doubles the frame cost of a level full of props with no visual gain.
 ## @risk The ink's suppression window must be sized off width_px, NEVER off the mask's resolution — scaling it off the mask texel erases world ink several px out from every actor, a distance-invariant bare halo you can spot people by. Nothing resolution-derived may reach the shader; mask_resolution below 1.0 widens that band and is the one saving here that is not free.
 ## @risk If the Forward+ depth prepass is ever disabled the normal buffer stops filling and the CREASE lines quietly disappear, leaving silhouettes only — no error, just fewer lines.
+## @risk The contact merge (contact_merge_m) deletes a real SILHOUETTE whenever the surface behind it is nearer than the threshold, which is exactly what makes a stack of slabs read as one solid — and also what makes a crate parked against a wall, a low ledge, or a doorway into a shallow alcove lose the line that said they were separate things. It is measured in world metres, so it does NOT relax with distance the way every other term here does. Nothing errors; the frame just reads flatter.
+## @risk The seam merge (crease_min_feature_px) is the ONE crease term that only ever REMOVES lines, and it decides by screen-space width alone: raise it and small real features (a reveal, a trim, a stair tread at distance) silently lose their interior lines while their silhouettes stay — nothing errors, the world just reads flatter far away, and a tread that projects narrower than the reach loses its line and gets it back as you approach. It does not touch the depth term, so a genuine gap between two pieces still draws. concave_crease_strength below 1 removes the floor/wall junction and every inside corner along with the slab-on-wall lines it is aimed at — they are the same crease.
 ## @test res://tests/test_ink_outline.gd
 ## Borderlands-style black ink outline, as a DROP-IN: child one of these to any Camera3D and every
 ## surface that camera renders gets the same screen-space black line — EXCEPT the actors. NPCs, props
@@ -31,10 +33,34 @@ extends MeshInstance3D
 ##
 ## HOW: everything hull-outlined renders (additionally) on the ACTOR_INK_MASK_LAYER render layer — the
 ## bit rides the same overlay walks that dress actors (Character._apply_overlay_to_meshes, NpcOutline.
-## apply_part_overlays, Throwable._setup_overlay_chain, body_part_gib's strip pass), so it re-applies on
+## apply_part_overlays, Throwable._setup_overlay_chain, body_part_gib's strip pass, and
+## BodyModelSwap._apply_actor_outline for a rig nobody else dresses), so it re-applies on
 ## body swaps and rebuilds for free. This node renders that layer (plus the view-model layer, which is
 ## already isolated) into a small mask SubViewport sharing the main world, camera-synced each
 ## frame; the shader discards any pixel the mask covers.
+##
+## THE LAYER ALSO CARRIES THINGS THAT ARE NOT ACTORS, and ExplosionMesh (2026-08-16) is the case that
+## widened it: the explosion / bullet-impact flash is an OPAQUE emissive sphere, so it wrote depth like a
+## wall and the edge detect ringed it in black. A muzzle flash is light, not geometry — it owes the world
+## no silhouette. Nothing about this pass is actor-specific; the layer means "the ink does not own this
+## pixel", and a VFX mesh that stamps it without a rim is asking for NO line, which is a legitimate
+## answer here in a way it never is for an actor.
+##
+## ⭐THE RIM AND THE STAMP ARE ONE CONTRACT, and 2026-08-15 is the case that proves it. The player's own
+## first-person body had NEITHER — Character's walk is scoped to `mesh`, and the Player's `mesh` is the
+## GunMesh, so the legs/torso/body-arms rig (a sibling subtree childed straight to the Player) was never
+## reached. It was not double-outlined; it was outlined by the WRONG SYSTEM, wearing the world's line while
+## every NPC beside it wore a rim. Note what "just stamp the mask bit" would have done there: removed the
+## only outline it had. A new actor path owes BOTH halves, which is why BodyModelSwap now applies them
+## through a single switch (`actor_outline`) that cannot be half-set.
+##
+## ⭐THE VIEW MODEL IS THE THIRD SHAPE OF THAT CONTRACT — excluded by LAYER, not by stamp. The gun draws on
+## ViewModelCamera.VIEW_MODEL_LAYER, the mask camera culls that layer, and the ink is discarded over the
+## weapon on purpose — so GunVisuals' hull rim is the gun's ONLY outline and it has to be a visible width
+## on its own. Until 2026-08-18 it was not: GunVisuals.outline_width shipped 0.02 (a leftover from the old
+## world-space outline shader; ~1 visible pixel per unit in the screen-space one, so 5 rim pixels on the
+## whole pistol) and the weapon had no outline at all. The day this pass took the ink off it was the day
+## that became visible. Pinned to NPC parity (2.0) in test_ink_outline.gd — see the export's own note.
 ##
 ## THE MASK IS A SECOND SCENE RENDER — KEEP IT CHEAP. Every hull-rimmed thing in the level carries the
 ## mask layer (each NPC body part, each Throwable prop, the gibs, the view model), and each of those
@@ -179,6 +205,29 @@ const MASK_MIN_SIZE := 2
 ## if genuine edges on steeply-angled surfaces are going missing. The floor/wall junction is NOT this
 ## knob's business — two touching surfaces have no depth step at all, so that line comes from creases.
 @export_range(1.0, 32.0, 0.5) var grazing_tolerance: float = 8.0
+## ⭐⭐ CONTACT MERGE: how far apart (METRES) two surfaces must be at an edge before that edge counts as a
+## real silhouette rather than a JOIN between two pieces that are TOUCHING. 0 = off (every depth step
+## draws a line, the pre-2026-08-18 behaviour).
+##
+## THE ASK: ink the outside of a solid, not the joins inside it — "not where the two actually are
+## touching". A level built from boxes is nothing but pieces that meet: a step on a step, a slab on a
+## wall, a kerb against the road. The silhouette term drew the boundary at every one, so a flight of
+## stairs read as a stack of separately outlined slabs rather than one stepped solid.
+##
+## HOW: at an edge pixel the two taps that found the edge land on two different surfaces, and the 3D
+## distance between those points IS how far apart the pieces are along the view ray — a step's far
+## surface begins at the foot of its riser, so the gap is the riser height (0.5 m on this level) however
+## grazing the view; a box on the floor gives its own height; a facade against one 10 m behind gives 10 m;
+## the sky gives the far plane and can never merge. Closer than this = one solid, and the shoulder runs
+## to 2x so a piece near the threshold fades instead of popping as the camera moves.
+##
+## ⭐ A LOOK KNOB WITH TEETH. The shipped 1.0 merges this level's authored 0.5 m module (stairs, kerbs,
+## slab-on-slab) and keeps everything past ~2 m. RAISE and genuinely separate things start reading as one
+## mass — a crate a metre in front of a wall loses the line between them, and a doorway stops reading as
+## a hole. LOWER (or 0) to get every silhouette back. It only ever REMOVES lines, and only from the DEPTH
+## term — a crease at a contact line is [concave_crease_strength]'s business, and the two together are
+## what make a box-built level read as single solids.
+@export_range(0.0, 8.0, 0.1) var contact_merge_m: float = 1.0
 
 @export_group("Creases")
 ## The interior lines: where two surfaces meet at an angle but are flush in depth — wall corners, the
@@ -188,6 +237,50 @@ const MASK_MIN_SIZE := 2
 ## How sharp a normal change has to be before it draws. Higher = only hard corners survive; lower
 ## starts finding the shading detail on curved and low-poly surfaces, which reads as grime.
 @export_range(0.05, 2.0, 0.01) var crease_threshold: float = 0.4
+## ⭐⭐ SEAM MERGE: the narrowest feature, in pixels of the 3D buffer (the width_px unit — the buffer is
+## twice the 792-wide screen), that still earns a crease line. The confirming taps sit exactly this far
+## either side of the pixel, so a face narrower than this on screen cannot hold one and its creases merge
+## into the surface around it. 0 = off, the pre-2026-08-18 behaviour where any normal change at all drew
+## a line.
+##
+## THE ASK THIS ANSWERS: level geometry built from several boxes should ink as ONE solid, not as its
+## parts. Mostly it already did — a screen-space pass cannot see an interior face, and two boxes sharing
+## a face exactly have no depth step and no normal change between them, so a flush or interpenetrating
+## join comes out as a single clean silhouette (measured, on a synthetic scene AND on the shipped map's
+## flush floor/roof brush joins). The case that broke it is a box a couple of CENTIMETRES out of line:
+## that leaves a sub-pixel sliver of perpendicular face along the join, which is invisible in the art and
+## a full 90-degree corner to a crease term that had no idea how big a feature was. One surface came away
+## split by a faint dotted line that crawls with the camera. On the shipped map that is the 6 cm plank
+## trims over the yard doors seen edge-on (470 px of dashed line, all gone at the default) and a 4 mm
+## decal-plate brush on the tower; on hand-placed blockout it is every join.
+##
+## The fix asks the only question that separates the two: does the normal change PERSIST at a wider
+## radius? A real corner still has two different surfaces either side of it several pixels out; a
+## misalignment sliver has the same surface on both sides. So the crease is re-measured wide (two crosses,
+## the weaker wins, as a RATIO of the narrow result — an absolute second threshold dimmed every shallow
+## crease) and may only ever be reduced by the answer. It is screen-space on purpose — a 4 cm kerb
+## underfoot is many pixels across and keeps its line, the same kerb at 40 m is not and loses it, which is
+## the right answer at both ends. The documented collateral, measured: a reveal, trim or stair tread that
+## projects narrower than this loses its INTERIOR lines at that distance (its silhouette stays), and it
+## comes back as you approach.
+##
+## RAISE to merge sloppier joins (and to drop more fine detail into flat shading at distance); set 0 to
+## get every line back. ⭐ Values between 0 and width_px are floored to width_px in the shader — closer in
+## than that the wide taps sit inside the narrow cross's own footprint and only thin real lines — so the
+## only true "off" is exactly 0. This is the one term here that only ever REMOVES lines, so it ships at
+## the smallest reach that clears the artefact rather than the largest that looks tidy.
+@export_range(0.0, 16.0, 0.5) var crease_min_feature_px: float = 4.0
+## ⭐ CONCAVE creases — the floor/wall junction, the inside corner of an L, the line where a slab sits on
+## a wall, a tread against its riser — versus CONVEX ones (a building's outside corner, a step's nosing,
+## the top of a wall). Both are 90-degree normal changes and normals alone cannot tell them apart; the
+## shader reads which way the surfaces FOLD from the depth taps it already has. On a level built from
+## boxes every "junction between two pieces" is a concave crease, so this is the dial for how much the
+## pieces read as ONE solid: 1.0 draws every junction (the shipped look, unchanged); 0.0 draws only convex
+## edges and silhouettes, so a slab on a wall or a step against a riser shows no line where they meet and
+## the compound reads as one shape — the user's sketch. Note it is the SAME kind of crease as the
+## floor/wall line and the inside corner of an L, so those go with it; try 0.4-0.6 for junctions that are
+## present but lighter than edges. Live, like every knob here.
+@export_range(0.0, 1.0, 0.05) var concave_crease_strength: float = 1.0
 
 @export_group("Distance")
 ## Ink eases out across this window (metres of view depth) so the far skyline does not turn to mush
@@ -580,8 +673,11 @@ func _params(t: float) -> Dictionary:
 	scaled["depth_threshold"] = depth_threshold
 	scaled["min_depth_reference"] = min_depth_reference
 	scaled["grazing_tolerance"] = grazing_tolerance
+	scaled["contact_merge_m"] = contact_merge_m
 	scaled["crease_strength"] = crease_strength
 	scaled["crease_threshold"] = crease_threshold
+	scaled["crease_min_feature_px"] = crease_min_feature_px
+	scaled["concave_crease_strength"] = concave_crease_strength
 	scaled["fade_start"] = fade_start
 	scaled["fade_end"] = fade_end
 	scaled["fog_extinction"] = _fog_sigma * fog_match

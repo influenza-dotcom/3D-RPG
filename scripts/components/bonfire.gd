@@ -35,6 +35,9 @@ func _ready() -> void:
 	_build_outline()
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
+	# The minimap pin. This is the one station with no StationSpeaker (a fire doesn't chirp), so this line is
+	# also the only ensure() in this file — it is a MARKER, not a voice, and every station gets one.
+	StationMarker.ensure(self, StationMarker.Kind.LEISURE)
 
 ## Rest at this bonfire: full heal (HP + limbs) and register it as the respawn point. Always succeeds for a
 ## real player. The respawn is read by Player._respawn_at_checkpoint on death.

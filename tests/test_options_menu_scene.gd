@@ -73,6 +73,12 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 	assert_eq(tabs.size_flags_vertical, Control.SIZE_EXPAND_FILL, "Tabs expand vertically")
 	assert_eq(tabs.get_tab_count(), 0,
 		"the scene authors NO tab pages — _rebuild_tabs generates them from SettingsCatalog/ActionCatalog")
+	# ONE card size for every tab. A TabContainer's minimum is the CURRENT page's minimum unless this is on,
+	# so a wider page (Accessibility's two-up columns) handed the container a wider minimum and Godot grew the
+	# whole panel past its anchor band mid-click. MenuStyle.apply pins it at runtime as well; authored here so
+	# the editor preview tells the same truth. tests/test_menu_layout_stability.gd measures the result.
+	assert_true(tabs.use_hidden_tabs_for_min_size,
+		"the tab block reports ONE minimum for every page (use_hidden_tabs_for_min_size)")
 	# Bottom row: END-aligned, with the in-game-only pair FIRST (left end) so hiding them at the start menu
 	# never moves Apply/Revert/Close/Quit off the right edge.
 	var bottom := inst.get_node("%Bottom") as HBoxContainer

@@ -135,6 +135,83 @@ Acceptance:
   unless the enum itself is the source of truth.
 - After Save, reopening the same resource shows the same data.
 
+### Choice consequences (Dialogue Edit)
+
+The Consequences group makes a choice able to start a quest, give an item or
+money, reward reputation, and aggro the speaker. It is the seam that lets a
+conversation hand out a quest at all, so its failure modes are data loss rather
+than inconvenience.
+
+- **Every field written back on edit must also be pushed on select.**
+  `_write_choice()` is wired to `_c_text.text_changed` and fires on EVERY
+  KEYSTROKE, so a widget that is written back without a matching
+  model→widget push in `_on_choice_selected` stamps its CONSTRUCTION DEFAULT
+  onto the live `DialogueChoice` the moment the designer types a character.
+  `ContentSaveGuard` is one-deep, so a clobber plus one more Save loses the
+  original bytes too. Check by diffing the two field lists, not by eye.
+- Every push uses a no-signal setter (`set_value_no_signal` /
+  `set_pressed_no_signal` / plain `.text =`). A bare `.value =` re-enters the
+  write path.
+- **`start_quest_on_choice` has exactly ONE writer** (`_on_start_quest_picked`)
+  and is deliberately NOT assigned in `_write_choice`. It is a Resource
+  REFERENCE; a keystroke in an unrelated field must never re-resolve it.
+- That writer routes every branch through `PickerRows.resolve_pick`: index 0 →
+  clear (the one intended clear), an out-of-range index → keep (a stale index
+  from a dropdown rebuilt under a queued signal is refused, never guessed), and
+  a row whose value is blank at index > 0 → keep (re-picking the
+  "(inline / unsaved)" row must not wipe an in-memory quest).
+- The Start-quest picker rebuilds its rows from the canonical scan BEFORE
+  applying, so a transient row left over from a previously selected choice can
+  never be clicked into a different choice.
+- Rows are labelled by `Quest.id`, never the filename —
+  `recover_the_package.tres` carries `id = "recover_package"`, and the fields
+  three rows below key on the id. A filename label manufactures a silent
+  runtime no-op.
+- Id fields keep their LineEdit and gain a stamp picker; they are NOT converted
+  to closed dropdowns. `dialogue_choice.gd` uses
+  `PROPERTY_HINT_ENUM_SUGGESTION` precisely so blanks stay valid and ids for
+  not-yet-authored content stay typable.
+- Picking a quest surfaces the states where `QuestTracker.start_quest` returns
+  SILENTLY (blank `Quest.id`, unmet `prereq_quest_id`). Without that, the tab's
+  highest-value write reports success for a choice that starts nothing.
+- New rows live INSIDE the tab's existing `ScrollContainer`; the bottom-panel
+  TabContainer sizes to its tallest tab. Dropdowns are filled through
+  `PickerRows.apply`, which sets `fit_to_longest_item = false` + `clip_text` —
+  this tab disables horizontal scroll, so an unclamped dropdown widens the
+  whole editor.
+
+### The three-site round-trip rule (Quest Edit, and every editor after it)
+
+Quest Edit gained `auto_complete`, `expire_on_flag`, item `rewards[]` and the
+per-objective marker group. Adding a widget to one of these editors is the
+operation most likely to DESTROY authored data, so it has one acceptance rule.
+
+- **Every widget must touch THREE sites.** (1) PUSH — `_load_quest` /
+  `_load_obj_editor` / `_load_reward_row` copy the model into the widget.
+  (2) RESET — `_clear_loaded` / `_load_*_row(null)` return it to the
+  **RESOURCE's** default. (3) WRITE — the write-through handler and `_on_save`
+  push it back. A widget written but never pushed persists its CONSTRUCTION
+  DEFAULT over the designer's authored value, and `ContentSaveGuard` keeps only
+  ONE `.bak`, so a clobber plus one more Save loses the original bytes too.
+  Verify by diffing the widget list against each site, not by eye.
+- **Reset to the resource default, not the widget default.**
+  `_clear_loaded` restores `auto_complete` to **`true`** (`quest.gd:27`).
+  "Tidying" that to `false` would silently flip every quest to self-completing
+  after a failed load.
+- **Every push uses a no-signal setter.** The marker is three SpinBoxes each
+  writing one component of a `Vector3`, so a plain `.value =` fires three
+  write-throughs.
+- `_clear_loaded` must also clear the reward `ItemList` and call
+  `_load_reward_row(null)` — otherwise a failed load leaves the previous
+  quest's rows on screen pointed at a foreign `ItemStack`.
+- `_on_save` normalizes BEFORE `save_with_backup`, then re-renders so the
+  widgets show what was actually written.
+- **`Quest.id` and `QuestObjective.id` are deliberately NOT editable here.**
+  They are primary keys: saves key quest sections by `String(quest.id)` and
+  seed progress as `progress[String(obj.id)]`, and dialogue matches them by
+  value. `QuestOps.normalize` leaves them alone for the same reason, and the
+  test suite pins the omission as intended rather than missing.
+
 ## Text Editor
 
 The **Text** tab bulk-edits the game's player-facing prose over the same `.tres`
@@ -320,6 +397,11 @@ Acceptance:
   `scenes/levels/<name>.tscn` and writes a matching `LevelData` at
   `resources/levels/<name>.tres`; the result line reports both paths plus the
   next authoring steps.
+- New Level SLUGIFIES the typed name through `ContentScaffold.slugify` (the
+  same seam every Content generator uses), so "Raider Camp" becomes
+  `raider_camp.tscn` / `raider_camp.tres` and the raw text is kept as the
+  `LevelData.display_name`. A name with no letters or digits is refused with a
+  message — designer text never reaches a `res://` path unsanitised.
 - New Level REFUSES to overwrite: an existing scene OR `.tres` under that name
   aborts with "… already exists (scene or .tres) — pick another name." before
   anything is written.
@@ -341,8 +423,12 @@ Acceptance:
   edit, no preview dialog. The always-visible hint ("Editing a cell saves that
   faction's .tres.") is the required labeling; it must stay while the write
   behavior stays.
-- Those are disk rewrites with no editor undo — version control is the
-  rollback (Global Gate rule); the status line reports each "Saved <path>".
+- Those are disk rewrites with no editor undo, so the write goes through
+  `ContentSaveGuard.save_with_backup` like every other content editor: the
+  prior bytes are copied to `<path>.tres.bak` BEFORE the overwrite, and the
+  status line names both ("Saved <path>  (previous bytes -> <file>.tres.bak)").
+  Rename the `.bak` back over the `.tres` to undo a mis-click; version control
+  remains the deeper rollback (Global Gate rule).
 - A failed save reports "FAILED to save … — change NOT persisted." on the
   status label, never silently.
 - Storage matches runtime exactly: `Faction.relations` keyed by the OTHER
@@ -409,6 +495,86 @@ Acceptance:
 - Constructs off-tree (compiles + scans in `_init`) — pinned by
   `tests/test_devtools_docks.gd` (`test_arch_view_constructs`).
 
+## AI Bridge (Bridge Tab) + the `cyber` CLI
+
+Two surfaces that let an external AI client read this project. They are
+deliberately split by what needs the live editor:
+
+- **`scripts/tools/cyber.gd`** — a headless read-only CLI over the plugin's PURE
+  modules. Seven verbs (`catalog`, `audit`, `refs`, `graph`, `balance`, `list`,
+  `describe`). Needs no editor. Writes nothing.
+- **The Bridge tab** — an OPT-IN localhost command server for the three things
+  that are impossible headless: refreshing the editor's FileSystem cache after an
+  external write, reading the open scene / selection, and revealing a resource.
+
+`tools/mcp/cyber_mcp.py` is a zero-dependency stdio MCP server exposing all ten
+as tools. It imports nothing outside the Python standard library on purpose — no
+`mcp` package, no SDK version to drift.
+
+Acceptance — the CLI:
+
+- Payload is framed between `<<<CYBER-JSON` and `CYBER-JSON>>>` sentinels.
+  Godot's banner and ~20 UI autoloads print into stdout, so an unframed parse is
+  not merely fragile, it is wrong. `--out=<abs>` writes the JSON to a file and
+  the sentinels then carry only a summary — so a caller always parses the same way.
+- Exit code: 0 all-ok, 1 at least one verb returned `ok:false`, 2 usage error.
+- Every verb degrades to `{"ok": false, "error": "..."}` — an unknown verb or a
+  missing required argument is never a crash and never a stack trace.
+- It NEVER writes a project file and never runs `--import`. Read-only means the
+  tool cannot damage the project even when driven by an AI that misunderstands it.
+- Modules are reached by RUNTIME `load()`, never `preload` — a `-s` script's
+  compile chain runs before autoloads register, so a compile-time preload of
+  anything touching `ItemDb`/`GameSettings` fails at boot. Same trap, same fix as
+  `validate_all.gd:31-39`.
+- A batch (`--batch=<abs .json>`) runs many verbs in ONE boot. This matters: a
+  headless boot on this project measures ~7.6s, so five separate calls cost ~38s
+  and one batch costs ~15s. Prefer batching.
+- `cyber audit` and `validate_all` must not disagree — both call the SAME
+  `scan_disk` / `scan_text` scanners rather than reimplementing them. Verified
+  agreeing at disk=5 / text=0. Note `cyber audit` also runs Domain E
+  (menu-sound) which `validate_all` does not, and does NOT cover navmesh, which
+  `validate_all` does. Neither is a superset of the other; `validate_all` remains
+  the CI gate.
+
+Acceptance — the Bridge tab:
+
+- **OFF by default.** The server never auto-starts; the user presses Start. The
+  tab shows an unmistakable listening/not-listening state, the port, and the
+  handshake path, so a glance answers "is a port open right now?".
+- Binds `127.0.0.1` EXPLICITLY. Godot's `TCPServer` default binds all
+  interfaces — leaving it unset would put a command port on the LAN. Do not
+  "simplify" the bind address away.
+- Token-gated: a random `Crypto`-generated token in
+  `res://.godot/cyber_bridge.json` (gitignored via `.godot/`, so it can never be
+  committed) alongside the port and owning pid. A request with a wrong token is
+  refused.
+- One connect / one line / one response / close per call. No persistent
+  connection, no heartbeat, no reconnect — which deletes the whole stale-listener
+  bug family rather than managing it.
+- On a busy port it FAILS LOUDLY and stays off. It must never silently fall back
+  to port+1: the external proxy would then talk to a dead listener forever (a
+  real reported bug in comparable Unity/Unreal bridges).
+- `poll()` never blocks the editor; a peer that has not sent a full line is
+  dropped on a short deadline.
+- `_exit_tree` stops the server and deletes the handshake file. The user toggles
+  this plugin off/on after every plugin script edit — dozens of times a day — so
+  an unpaired listener strands the port and the next Start fails.
+- All three tools are READ-ONLY with respect to project content. `godot_fs_sync`
+  refreshes the editor's cache; it does not write resources. Placement, baking
+  and any mutation are deliberately NOT exposed yet.
+
+Acceptance — the MCP proxy:
+
+- stdout is protocol-sacred: ONLY JSON-RPC responses. Every log line goes to
+  stderr. One stray `print` corrupts the stream and hangs the client.
+- A JSON-RPC notification (a request with no `id`) gets NO response, ever. That
+  is the single most common way a hand-rolled MCP server hangs.
+- `python tools/mcp/cyber_mcp.py --selftest` prints the resolved environment and
+  the tool table to STDERR and exits 0. Run it after touching either transport.
+- Registered in `.mcp.json` at the Claude Code project root (`C:\Users\dalla\3D
+  RPG\`), which is OUTSIDE this git repo — so it holds machine-specific absolute
+  paths and is not version-controlled. `CYBER_GODOT` / `CYBER_PROJECT` override them.
+
 ## Verification
 
 Before calling a plugin slice done:
@@ -419,3 +585,46 @@ Before calling a plugin slice done:
 - Run `rg` for moved/renamed paths or symbols.
 - Run `git diff --check`.
 - Summarize docs impact in the final response.
+
+## Reach (player-reachability report)
+
+The **Reach** tab walks the real boot chain — `project.godot`'s main scene →
+the menu scenes → `game.tscn` → its `LevelData` → that level — and reports what
+a PLAYER can actually get to. It exists because every other check stays green on
+a quest nothing starts: Stats asks "is it referenced?", the Audit asks "do its
+ids resolve?", and a perfectly-authored unreachable quest passes both.
+
+Acceptance:
+
+- **An empty or all-green report is a FAILURE, not a pass.** It means the
+  folder-scan exclusion over-fired and swallowed the real orphans. This project
+  has a scar exactly here — `text_debt.gd` read `TOTAL: 0` while 132 of 267
+  `PlayerText` strings were unauthored placeholders. Diff a Rescan against the
+  hand-verified ground truth below before believing a clean result.
+- Ground truth as of 2026-08-14, which the report must reproduce:
+  `resources/quests/clear_the_block.tres` is referenced by NOTHING project-wide;
+  `recover_the_package.tres` has a `QuestStarter` only in
+  `scenes/levels/SliceTestLevel.tscn`, and `SliceTestLevel.tres` is itself
+  referenced by nothing — so it is NOT in the boot chain. Neither quest is
+  player-reachable today.
+- The status line reports what was SCANNED as well as what was FOUND, so
+  "0 orphans" is distinguishable from "scanned nothing".
+- **It never materialises the project.** `closure()` takes a `text_of` Callable
+  and pulls text only for the paths its BFS pops. A `{path: text}` map of the
+  tree is a memory bomb — `RefScan.SCANNED_EXTS` includes `"res"` and
+  `addons/text_to_speech/voices/` alone is ~59 MB of `.flitevox.res`, and Godot
+  Strings are UTF-32 internally. This tab drops `"res"` from its ext list: a
+  binary voice blob carries no `res://` edges.
+- **It must NOT call `ScanCache.begin()` / `end()`.** That singleton has ONE
+  window; a Reach `end()` landing inside an Audit window would wipe the audit's
+  cache. Pass `ScanCache.text_of` directly — it is read-through when no window
+  is open, which is the correct standalone default.
+- The ext_resource id regex is anchored (`\bid="`). Godot writes
+  `uid="uid://…"` BEFORE `id="…"`, and the literal `id="` occurs inside `uid="`
+  — an unanchored pattern takes the leftmost match and keys every row by its
+  uid, so `ExtResource("9_quest")` resolves to `""`, `LevelData.scene` never
+  resolves, and the level roster comes back empty. The tab degrades to a wrong
+  verdict that still LOOKS like a finding, which is worse than crashing.
+- Read-only: the tab writes no file.
+- Height-bounded body in a `ScrollContainer`, head/status outside; lazy first
+  reveal behind `_revealed` + `_on_visibility_changed`.

@@ -254,3 +254,51 @@ func test_minimap_toggles_round_trip() -> void:
 	assert_false(Settings.minimap_show_npcs, "NPC dots can be switched off — it is a real gameplay affordance")
 	Settings.set_minimap_show_npcs(true)
 	assert_true(Settings.minimap_show_npcs, "...and back on")
+	Settings.set_minimap_show_stations(false)
+	assert_false(Settings.minimap_show_stations, "station glyphs can be switched off — a busy market is a lot of glyphs on a 108 px box")
+	Settings.set_minimap_show_stations(true)
+	assert_true(Settings.minimap_show_stations, "...and back on")
+
+## The station row ships ON: a shop is a fixture, not a body, so knowing one is there leaks no tactical
+## information — it is a DECLUTTER row, not a difficulty one (unlike minimap_show_npcs beside it).
+func test_minimap_station_row_ships_on() -> void:
+	var fresh = load("res://managers/Settings.gd").new()
+	assert_true(fresh.minimap_show_stations, "stations are marked by default")
+	fresh.free()
+
+## The catalog row has to EXIST and point at the real getter/setter pair, or the toggle above is unreachable
+## from Options (the tests/test_hud_clock.gd catalog-row idiom).
+func test_minimap_station_row_is_in_the_options_catalog() -> void:
+	var cat := load("res://resources/settings/SettingsCatalog.tres") as SettingsCatalog
+	assert_not_null(cat, "the settings catalog must load")
+	if cat == null:
+		return
+	var found: SettingSpec = null
+	for spec in cat.specs:
+		if spec.key == &"minimap_stations":
+			found = spec
+			break
+	assert_not_null(found, "Options -> Accessibility must carry a 'Stations On Minimap' row")
+	if found == null:
+		return
+	assert_eq(found.tab, &"Accessibility", "it belongs beside the rest of the declutter family")
+	assert_eq(found.getter, &"minimap_show_stations", "bound to the Settings field")
+	assert_eq(found.setter, &"set_minimap_show_stations", "...and to its setter")
+	assert_false(found.label.is_empty(), "a row with no label is an invisible row")
+
+func test_clock_defaults() -> void:
+	var fresh = load("res://managers/Settings.gd").new()
+	assert_true(fresh.clock_enabled,
+		"the HUD clock ships ON — the day/night cycle's lighting is otherwise the only time signal, and it is a poor instrument (the moon keeps midnight legible, interiors are lit around the clock)")
+	assert_true(fresh.clock_24_hour, "24-hour is the shipped face")
+	fresh.free()
+
+func test_clock_toggles_round_trip() -> void:
+	Settings.set_clock_enabled(false)
+	assert_false(Settings.clock_enabled, "the clock can be turned off")
+	Settings.set_clock_enabled(true)
+	assert_true(Settings.clock_enabled, "...and back on")
+	Settings.set_clock_24_hour(false)
+	assert_false(Settings.clock_24_hour, "the 12-hour face is reachable")
+	Settings.set_clock_24_hour(true)
+	assert_true(Settings.clock_24_hour, "...and 24-hour restores")

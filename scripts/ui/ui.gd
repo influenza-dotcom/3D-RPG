@@ -7,7 +7,7 @@ extends CanvasLayer
 ## death/scene reload while this layer briefly persists.
 ##
 ## DIEGETIC HUD WEIGHT (the Borderlands 2 feel): the corner "instrument panel" — HP/stamina bars, ammo,
-## money, toasts, quest tracker, minimap, hotbar — rides ONE full-rect carrier (`_weighted`) whose position is a
+## money, toasts, quest tracker, minimap, clock, hotbar — rides ONE full-rect carrier (`_weighted`) whose position is a
 ## damped spring trailing camera turns (HudSway, knobs in GameSettings.hud "HUD weight", scaled 0..1 by
 ## the Options -> Accessibility "HUD Sway" slider). THE MOVED-vs-PINNED RULE: anything that ANNOTATES
 ## THE AIM POINT stays welded to the layer and never sways — the crosshair (already repositioned per
@@ -51,6 +51,36 @@ const SCOPE_FLARE_SHADER := preload("res://resources/shaders/scope_lens_flare.gd
 var _scope_vignette: ColorRect
 var _scope_flare: ColorRect
 
+## CURVED HUD GLASS (resources/shaders/hud_curve.gdshader): the corner instrument panel renders into
+## `_curve_viewport` and is composited back through `_curve_rect`'s barrel warp, so the panel bows away at
+## its edges like the inside of a curved screen. ONLY the `_weighted` carrier goes through it — the
+## crosshair, the stamina ring, the combat arcs and every screen-projected annotation stay direct children
+## of this layer and dead flat. That split is the header's moved-vs-pinned rule reused verbatim, and it is
+## the right one for free: a node that may not MOVE may not be WARPED either, for the same reason.
+##
+## ⭐OFF IS THE OLD TREE, NOT AN IDENTITY PASS. At strength 0 the viewport is torn down and `_weighted` goes
+## back to being a plain direct child, so a player who turns this off pays for nothing and gets
+## pixel-identical rendering (the hud_ghost_scale promise, same reason). That is why the parenting decision
+## lives in _apply_hud_curve, polled every frame, rather than being frozen in _ready: the Options row is applied
+## live like every other HUD dial.
+##
+## ⭐A SubViewport IS NOT A CanvasItem, so hide_hud_for_death's direct-child sweep skips it and hides
+## `_curve_rect` instead — the panel still vanishes for the death cinematic as ONE unit, exactly as the bare
+## carrier used to. The sweep's `is CanvasItem` filter is what makes that work; it is load-bearing here too.
+##
+## ⭐THE PANEL GOES DEAF INSIDE IT. A nested SubViewport receives input only from a SubViewportContainer,
+## and this composite is hand-built, so nothing forwards — the carrier's children stop hearing the keyboard
+## the moment the curve stands up. `_unhandled_input` below is the forwarder that fixes it; read it before
+## putting anything on the carrier that listens for input rather than polling `Input`.
+##
+## ⭐THE GHOST STILL SEES THE PANEL. HudGhost captures this layer's canvas, and the carrier's children are on
+## the VIEWPORT's canvas once the curve is up — but `_curve_rect` is on this one, so the accumulator picks
+## the panel up through its composite and the phosphor tail is of the CURVED panel. Nothing to wire.
+const HUD_CURVE_SHADER := preload("res://resources/shaders/hud_curve.gdshader")
+var _curve_viewport: SubViewport = null
+var _curve_rect: ColorRect = null
+var _curve_mat: ShaderMaterial = null
+
 ## Reputation toasts: fading "[Faction] reputation gained!/lost!" lines stacked in the top-left,
 ## driven by the Reputation autoload's reputation_changed signal.
 var REP_TOAST_HOLD: float = GameSettings.hud.rep_toast_hold       ## seconds a toast holds before fading
@@ -88,7 +118,20 @@ var _quest_tracker: Label  ## top-right active-objective line, refreshed off the
 ## player_hud.gd — "Could not find type X" cascade guard).
 const STAMINA_RING_SCRIPT := preload("res://scripts/ui/stamina_ring.gd")
 const HUD_SWAY_SCRIPT := preload("res://scripts/ui/hud_sway.gd")
-const MINIMAP_SCRIPT := preload("res://scripts/ui/minimap.gd")
+const HUD_CLOCK_SCRIPT := preload("res://scripts/ui/hud_clock.gd")
+const HUD_GHOST_SCRIPT := preload("res://scripts/ui/hud_ghost.gd")
+const WORLD_GHOST_SCRIPT := preload("res://scripts/effects/world_ghost.gd")
+## THE MINIMAP IS AN AUTHORED SCENE, not a script (the "menus are scenes" rule, applied to a HUD widget): the
+## artist owns its box, its draw order and its two art slots by dragging in the 2D editor, and this file only
+## chooses which carrier it rides and then MEASURES the authored box back (see minimap_box) so the clock and the
+## objective tracker under it reflow.
+##
+## A plain String, load()ed at RUNTIME rather than preloaded. A class-scope preload of a SCENE reaches its whole
+## script graph at parse time, and this file is `class_name UI` — the day anything under that scene type-refs UI
+## back, a preload here is a parse-time "Could not resolve member: Cyclic reference", which is a DIFFERENT and
+## much louder failure than the "Could not find type X" cache cascade the by-path preloads above guard against.
+## It is safe today (minimap.gd's graph never names UI); a String const cannot go wrong later.
+const MINIMAP_SCENE := "res://scenes/ui/hud_minimap.tscn"
 
 ## Full-rect carrier for every corner HUD element that has "weight" (see the header): its position IS
 ## the live sway offset, so one write a frame moves the whole instrument panel. Children keep their
@@ -99,12 +142,29 @@ var _weighted: Control
 ## suites build a bare UI.new() without _ready and call the visibility methods directly, so every touch of
 ## it below is null-guarded — that guard is load-bearing, not defensive habit.
 var _minimap = null
+## ROW 2 of the top-right stack: the time-of-day readout (scripts/ui/hud_clock.gd). Untyped and preloaded
+## BY PATH for the same class_name-cache reason as _minimap, and null-guarded everywhere for the same
+## reason too — several suites build a bare UI.new() with no _ready and call the visibility methods.
+var _clock = null
 var _sway = HUD_SWAY_SCRIPT.new()  ## the damped-spring state behind the panel sway (pure math, unit-tested)
 var _sway_fov = HUD_SWAY_SCRIPT.new()  ## SECOND spring, scalar (.x only): the FOV "lens breath" scale delta — kept
 								   ## separate so a dash punch breathing the lens never eats the offset spring's travel
 var _sway_last_yaw: float = 0.0    ## previous frame's camera yaw — the sway target is the per-frame look RATE
 var _sway_last_pitch: float = 0.0
 var _sway_primed: bool = false     ## false until one yaw/pitch sample exists (else frame one reads a huge fake rate)
+## Last measured camera look rate (rad/s, x = yaw, y = pitch) — the sway spring computes it and the ghost
+## reuses THAT SAME sample rather than measuring the basis a second time: two independent measurements of
+## one camera drift apart across a frame boundary, and the panel’s mass and the image’s latency would
+## then narrate slightly different turns. Zero whenever there is no valid camera.
+var _look_rate: Vector2 = Vector2.ZERO
+## CRT phosphor persistence behind the whole HUD (scripts/ui/hud_ghost.gd). Untyped + preloaded BY PATH
+## like the other drop-ins here, and MAY BE NULL: it builds only when this layer is actually in a tree
+## with a viewport, so the bare UI.new() suites keep working untouched.
+var _ghost = null
+## The same persistence extended to the PICTURE (scripts/effects/world_ghost.gd) — a separate component and a
+## separate player dial, because it is a different mechanism (a temporal average of the finished frame, not a
+## second view of this canvas) and a different comfort decision. Same null-guard contract as _ghost.
+var _world_ghost = null
 
 var _hp_bar: Control                    ## bottom-left segmented HP bar (red), rebuilt when max HP changes
 var _hp_fills: Array[ColorRect] = []    ## per-segment fill rects (index = displayed segment, left-to-right)
@@ -222,6 +282,8 @@ func _ready() -> void:
 	# so they can parent straight in; full-rect at the origin so their absolute coords are unchanged.
 	# NOTE for hide_hud_for_death: this is one direct child, so the death sweep hides/restores the whole
 	# panel as a unit (per-element visibility inside it — dialogue-hidden _notices etc. — is preserved).
+	# It is added to the LAYER here even when the HUD curve is on: _apply_hud_curve owns the reparent into
+	# the curve viewport, so there is exactly one place that decides where the carrier lives.
 	_weighted = Control.new()
 	_weighted.name = "WeightedHud"
 	_weighted.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -256,21 +318,54 @@ func _ready() -> void:
 	# on, drawn from the level's baked navmesh (+ its static colliders). Built BEFORE the quest tracker below
 	# because that tracker's offset_top is DERIVED from this box's footprint (quest_tracker_top) instead of
 	# the literal 8.0 it used to carry: the corner is shared now, and one of the two has to own the reflow.
-	_minimap = MINIMAP_SCRIPT.new()
-	_minimap.name = "Minimap"
-	_minimap.anchor_left = 1.0
-	_minimap.anchor_right = 1.0
-	_minimap.offset_right = -GameSettings.hud.minimap_inset.x
-	_minimap.offset_left = -GameSettings.hud.minimap_inset.x - GameSettings.hud.minimap_size.x
-	_minimap.offset_top = GameSettings.hud.minimap_inset.y
-	_minimap.offset_bottom = GameSettings.hud.minimap_inset.y + GameSettings.hud.minimap_size.y
-	# z 1: above the full-screen hurt/kill/dash flashes PlayerHud adds to this layer (z 0), still under the
-	# crosshair (z 2) — the same reasoning as the stamina ring.
-	_minimap.z_index = 1
+	# THE BOX IS AUTHORED, not computed. anchors, offsets, z_index (1: above the full-screen hurt/kill/dash
+	# flashes PlayerHud adds to this layer at z 0, still under the crosshair at z 2 — the stamina ring's
+	# reasoning), clip_contents and texture_filter all live in scenes/ui/hud_minimap.tscn now, alongside the
+	# %MapUnder / %MapOver art slots. Nothing here writes a single one of them back.
+	var packed := load(MINIMAP_SCENE) as PackedScene
+	# A null instance is a legitimate degrade, not a crash: a transient reimport can hand back nothing, and
+	# every touch of _minimap below is already null-guarded for the bare-UI.new() suites.
+	_minimap = packed.instantiate() if packed != null else null
+	if _minimap != null:
+		_minimap.name = "Minimap"
+		# The one thing a .tscn cannot express is WHICH CARRIER it rides, so that branch stays here: the two arms
+		# differ in anti-shimmer and in hide_hud_for_death semantics (see HudSettings.minimap_rides_hud_weight).
+		if GameSettings.hud.minimap_rides_hud_weight:
+			_weighted.add_child(_minimap)  # corner readout -> rides the HUD-weight carrier (the header's rule)
+		else:
+			add_child(_minimap)  # pinned to the layer; still swept by hide_hud_for_death's direct-child loop
+	# TOP-RIGHT STACK, ROW 2: the time-of-day clock, the map's caption. It answers the one question the
+	# day/night cycle's lighting cannot — the moon keeps midnight legible and interiors are lit around the
+	# clock, so "what time is it" was previously a walk outside and a squint at the sun.
+	# Right-aligned in a box the same WIDTH as the map so the two right edges line up into one column, and
+	# parented to whichever carrier the map chose: they are one instrument cluster, and a clock swaying under
+	# a static map (or vice versa) would visibly shear. Built between the map and the tracker because BOTH of
+	# its neighbours' tops are derived from it — see hud_clock_top / quest_tracker_top.
+	_clock = HUD_CLOCK_SCRIPT.new()
+	_clock.name = "HudClock"
+	_clock.anchor_left = 1.0
+	_clock.anchor_right = 1.0
+	# Right rail measured off the AUTHORED map box, not the knob: the two right edges line up into one column,
+	# so sliding the map in the editor must slide the clock's rail with it. Built after the map, so it is set.
+	var map_box := minimap_box(_minimap)
+	_clock.offset_right = -map_box.position.x
+	_clock.offset_left = -map_box.position.x - GameSettings.hud.clock_size.x
+	var clock_top := hud_clock_top(true)   # seeded map-up; _apply_minimap_visibility re-derives it per frame
+	_clock.offset_top = clock_top
+	_clock.offset_bottom = clock_top + GameSettings.hud.clock_size.y
+	_clock.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_clock.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_clock.add_theme_font_size_override(&"font_size", GameSettings.hud.clock_font_size)
+	_clock.add_theme_color_override(&"font_color", MenuStyle.hud.clock_color)
+	# Same black-outline dialect as the quest tracker it stacks with (stamped at build time — a runtime
+	# set_hud_skin needs a HUD rebuild to repaint it, exactly like the tracker below).
+	_clock.add_theme_color_override(&"font_outline_color", MenuStyle.hud.label_outline_color)
+	_clock.add_theme_constant_override(&"outline_size", MenuStyle.hud.toast_outline_size)
+	_clock.z_index = 1  # the minimap's tier: over PlayerHud's full-screen flashes, under the crosshair
 	if GameSettings.hud.minimap_rides_hud_weight:
-		_weighted.add_child(_minimap)  # corner readout -> rides the HUD-weight carrier (the header's rule)
+		_weighted.add_child(_clock)
 	else:
-		add_child(_minimap)  # pinned to the layer; still swept by hide_hud_for_death's direct-child loop
+		add_child(_clock)
 	# Quest tracker: the current active objective, in the top-right corner UNDER the minimap (money/rep/toasts are
 	# top-left, HP/ammo bottom). A FIXED quest_tracker_width column, right-aligned: short lines still hug the
 	# right edge, long authored text word-wraps DOWNWARD over empty screen instead of marching left toward the
@@ -282,7 +377,7 @@ func _ready() -> void:
 	_quest_tracker.anchor_right = 1.0
 	_quest_tracker.offset_left = -8.0 - GameSettings.hud.quest_tracker_width
 	_quest_tracker.offset_right = -8.0
-	_quest_tracker.offset_top = quest_tracker_top(true)
+	_quest_tracker.offset_top = quest_tracker_top(true, true)
 	_quest_tracker.autowrap_mode = TextServer.AUTOWRAP_WORD
 	_quest_tracker.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_quest_tracker.add_theme_font_size_override(&"font_size", REP_TOAST_FONT_SIZE)
@@ -356,7 +451,7 @@ func _ready() -> void:
 	# talkable target (set_look_name). Hidden until then.
 	_look_name = Label.new()
 	# This readout paints composed prompts carrying NAMES — including player-TYPED pet names pushed onto a
-	# host's display_name by Claimable._apply_name ("Take Rex", "[E] Pet Rex"). Typed text must never be
+	# host's display_name by Claimable._apply_name ("Take Rex", "Pet Rex"). Typed text must never be
 	# looked up as a translation msgid, so the label opts out of Godot's automatic Control-text translation.
 	_look_name.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	_look_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -380,6 +475,235 @@ func _ready() -> void:
 	# (its _ready runs AFTER ours — we're its child), which both connects holster_changed and seeds the latch
 	# from the final holster state.
 	set_crosshair_visible(not DialogueManager.is_engaged())
+	_build_ghost()
+	# AFTER _build_ghost, so the composite rect is born on a canvas the accumulator is already watching, and
+	# on frame ONE rather than on the first _process — a HUD that snaps from flat to curved after a frame
+	# reads as a glitch on every level load.
+	_apply_hud_curve()
+
+## THE HUD GHOST (scripts/ui/hud_ghost.gd): re-render this layer's canvas into a never-cleared offscreen
+## buffer that fades a little each frame, and draw that buffer BEHIND the live HUD — so moving readouts drag
+## a soft tail, and while the camera turns the whole ghost image lags a couple of pixels so the screen-locked
+## reticle participates too. Built LAST, after every overlay above exists, because the opt-outs below name
+## the nodes they flag.
+##
+## THE GHOST RULE: an INSTRUMENT READOUT ghosts; a FULL-SCREEN WASH and a WORLD-DIRECTION annotation do not.
+## Opting out is one `visibility_layer` write that carries to the node's whole subtree, and there are exactly
+## three reasons to spend one:
+##   1. IT WOULD BREAK — anything that SAMPLES THE SCREEN. Inside the capture the "screen" is the HUD-only
+##      buffer, so this layer's own state post-process rect (which re-emits the whole sampled frame opaquely)
+##      would paint the accumulator solid, and the reticle's back-buffer copy would read a near-empty screen.
+##      The SCOPED inverting reticle is the same problem and is handled per-transition in set_scoped.
+##   2. IT WOULD BE MUD — a full-screen wash (the hurt / kill / dash flashes, the speed vignette, the blood
+##      splatter, the scope optics) smeared over its own tail is a haze, not an echo. They own their fades.
+##   3. IT WOULD LIE — the directional damage arcs, the "being aimed at" radials and the sniper glints point
+##      at WORLD directions. A lagging bearing reports a threat that is no longer there.
+##   4. IT ISN'T THE HUD — the VIEW MODEL. The gun pass is rendered by its own camera into its own
+##      SubViewport and composited back through a full-rect SubViewportContainer that happens to live on
+##      this layer (ViewModelCamera._attach_container, which flags itself there). That is a compositing
+##      detail, not a readout: ghosted, the whole weapon smears behind itself on every turn.
+## ⭐THE DISPLAY RECT'S SEAT IS THE OTHER HALF OF THIS BLOCK, and it is an INDEX, not a z_index: it goes
+## immediately after this layer's post-process ColorRect, which is what keeps the ghost OUT of that shader's
+## screen fetch. It used to sit at z -1 — below the pass — and the barrel lens then bent the echo off the
+## readout it echoes. hud_ghost.gd `_place_display` carries the full account.
+## Everything else is captured BY DEFAULT (visibility_layer 1) and needs no wiring at all — which is what
+## keeps runtime-built children (a fresh toast, a rebuilt HP segment, a new minimap glyph) ghosting for free.
+func _build_ghost() -> void:
+	if _ghost != null:
+		return
+	_ghost = HUD_GHOST_SCRIPT.new()
+	_ghost.name = "HudGhostDriver"
+	add_child(_ghost)
+	# The post-process ColorRect is handed over TWICE over the next three lines, for two different reasons that
+	# happen to name the same node: it is the screen-space pass the display rect must be seated ABOVE (or the
+	# ghost is drawn through the barrel lens and lands off its own readout — hud_ghost.gd `_place_display`),
+	# and it is exclusion (1) below, because it samples the screen and must not be captured.
+	var screen_pass := get_node_or_null(^"ColorRect") as CanvasItem
+	if not _ghost.build(self, screen_pass):
+		return
+	# (1) would break: the screen samplers this layer owns.
+	HUD_GHOST_SCRIPT.set_ghosted(screen_pass, false)
+	HUD_GHOST_SCRIPT.set_ghosted(_crosshair_bbc, false)
+	# (2) would be mud: the full-screen washes this layer owns directly.
+	HUD_GHOST_SCRIPT.set_ghosted(get_node_or_null(^"BloodSplatter") as CanvasItem, false)
+	HUD_GHOST_SCRIPT.set_ghosted(_scope_vignette, false)
+	HUD_GHOST_SCRIPT.set_ghosted(_scope_flare, false)
+	# PlayerHud's overlays are built later (from Player._ready, which runs after this layer's _ready), so they
+	# flag themselves at the bottom of PlayerHud.build under rules 2 and 3.
+	_build_world_ghost()
+
+## THE WORLD GHOST (scripts/effects/world_ghost.gd): the same persistence, applied very faintly to the picture
+## behind the HUD. Built and driven from here because this layer is where the game already keeps its
+## screen-space passes (the post-process rect is a child of it), but it is NOT on this canvas — it makes its
+## own CanvasLayer ABOVE this one, so the frame it composites over is the same frame its accumulator averaged
+## (this HUD and the weapon included). That is also why it needs no ghost-capture opt-out: a separate canvas
+## is never captured by the HUD ghost, which only borrowed THIS one.
+func _build_world_ghost() -> void:
+	if _world_ghost != null:
+		return
+	_world_ghost = WORLD_GHOST_SCRIPT.new()
+	_world_ghost.name = "WorldGhostDriver"
+	add_child(_world_ghost)
+	_world_ghost.build(self)
+
+
+## The live bend: the authored barrel amount, scaled by the Options -> Accessibility "HUD Curve" dial.
+## Either half at zero means OFF, and OFF tears the whole apparatus down — see the field block.
+func _hud_curve_strength() -> float:
+	return maxf(GameSettings.hud.hud_curve_amount, 0.0) * clampf(float(Settings.hud_curve_scale), 0.0, 1.0)
+
+## Stand the curved-glass pass up / tear it down, and keep its render target and uniforms current. Polled
+## every frame from _process because the Options row applies live. Safe on a bare UI.new(): several suites
+## build one without ever running _ready, so `_weighted` is null there and this returns before touching
+## GameSettings, Settings or the tree.
+func _apply_hud_curve() -> void:
+	if _weighted == null or not is_inside_tree():
+		return
+	if _hud_curve_strength() <= 0.0:
+		_teardown_hud_curve()
+		return
+	if _curve_viewport == null:
+		_build_hud_curve()
+	# ⭐THE CANVAS IS NOT A CONSTANT: stretch aspect "expand" grows it with the window's aspect ratio, so a
+	# render target frozen at the boot size would crop the panel the moment the window changed. `_weighted` is
+	# PRESET_FULL_RECT, so its own size follows this — and _update_hud_sway reads that size for the lens-breath
+	# pivot, which is the second reason this must track the real canvas instead of a hardcoded 792x444.
+	var canvas: Vector2 = get_viewport().get_visible_rect().size
+	var want := Vector2i(maxi(int(roundf(canvas.x)), 1), maxi(int(roundf(canvas.y)), 1))
+	if _curve_viewport.size != want:
+		_curve_viewport.size = want
+	# Park the render target whenever the composite is down (the death cinematic, `hud off`): an invisible
+	# pass should cost nothing, the ink_outline.gd idiom. `_curve_rect` is precisely what the sweep hides.
+	var mode := SubViewport.UPDATE_ALWAYS if _curve_rect.visible else SubViewport.UPDATE_DISABLED
+	if _curve_viewport.render_target_update_mode != mode:
+		_curve_viewport.render_target_update_mode = mode
+	var amount := _hud_curve_strength()
+	# `amount` always drives the Y bend, because that is the one that bows HORIZONTAL lines — the signature
+	# of a monitor curved about a VERTICAL axis, which is the shape being asked for. `axis_ratio` scales the
+	# X bend on top of it: 0 leaves every vertical dead straight (the shipped cylinder), 1 bends both axes
+	# equally (a spherical, eye-like bulge). Positive is CONCAVE — the inside of the cylinder; see the shader.
+	_curve_mat.set_shader_parameter("curve",
+		Vector2(amount * maxf(GameSettings.hud.hud_curve_axis_ratio, 0.0), amount))
+	_curve_mat.set_shader_parameter("edge_fade", clampf(GameSettings.hud.hud_curve_edge_fade, 0.0, 1.0))
+	_curve_mat.set_shader_parameter("chroma", clampf(GameSettings.hud.hud_curve_chroma, 0.0, 1.0))
+
+## Build the curve viewport + its composite rect and move the carrier inside. Never called directly — go
+## through _apply_hud_curve, which owns the on/off decision.
+func _build_hud_curve() -> void:
+	# The carrier's slot in the child list IS its slot in the draw order, and the composite has to inherit it:
+	# the panel used to draw under the full-screen flashes the Player adds later, and appending at the end
+	# would quietly promote it above them.
+	var slot := _weighted.get_index()
+	_curve_viewport = SubViewport.new()
+	_curve_viewport.name = "HudCurveViewport"
+	# transparent_bg or the panel paints an opaque clear colour over the entire world. UPDATE_ALWAYS because a
+	# SubViewport that is NOT under a SubViewportContainer has no reliable visibility signal for
+	# UPDATE_WHEN_VISIBLE to key off — the call every hand-composited pass in this project already makes
+	# (view_model_camera.gd, ink_outline.gd, character_preview.gd). The default CLEAR_MODE_ALWAYS is correct
+	# and deliberately left alone: CLEAR_MODE_NEVER would accumulate last frame's panel.
+	_curve_viewport.transparent_bg = true
+	_curve_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	var canvas: Vector2 = get_viewport().get_visible_rect().size
+	_curve_viewport.size = Vector2i(maxi(int(roundf(canvas.x)), 1), maxi(int(roundf(canvas.y)), 1))
+	# Keep the panel's own art crunchy INSIDE the viewport. This governs how the carrier's children sample
+	# THEIR textures and has no say over how the composite samples the render target — that is the shader's
+	# own filter_nearest hint, which outranks every node-level setting.
+	_curve_viewport.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST
+	add_child(_curve_viewport)
+	_curve_mat = ShaderMaterial.new()
+	_curve_mat.shader = HUD_CURVE_SHADER
+	_curve_mat.set_shader_parameter("hud_tex", _curve_viewport.get_texture())
+	_curve_rect = ColorRect.new()
+	_curve_rect.name = "HudCurve"
+	_curve_rect.material = _curve_mat
+	_curve_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# z 2 is the carrier's TALLEST child (the HP/stamina bars and the corner labels), not its own z 0: those
+	# were deliberately lifted above the full-screen flashes so a hurt wash cannot drown a gauge, and
+	# flattening the panel into one composite collapses that ladder to whatever this rect carries. Taking the
+	# max keeps the authored intent (readouts stay legible through a flash); the cost is that the map, hotbar
+	# and toasts rise with them, which nothing overlaps — they are corner furniture and the flashes are washes.
+	_curve_rect.z_index = 2
+	_curve_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_curve_rect)
+	move_child(_curve_rect, slot)
+	# Inherit the carrier's hidden state: if the death sweep (or `hud off`) is holding the panel DOWN right
+	# now, the composite must be born down too, and it has to TAKE THE CARRIER'S PLACE in the sweep's list —
+	# the restore walks that list, and leaving a node in it that no longer answers for the panel would either
+	# strand the HUD hidden or pop it back over the death fade.
+	if not _weighted.visible:
+		_curve_rect.visible = false
+		var at := _death_hidden_hud.find(_weighted)
+		if at >= 0:
+			_death_hidden_hud[at] = _curve_rect
+		_weighted.visible = true
+	_reparent_weighted(_curve_viewport)
+
+## Tear the curve down and hand the carrier back to the layer, in the composite's draw slot. The tree is then
+## EXACTLY the pre-curve one: no residual viewport, no identity shader pass, nothing left to pay for.
+func _teardown_hud_curve() -> void:
+	if _curve_viewport == null:
+		return
+	var slot := -1
+	var was_down := false
+	if is_instance_valid(_curve_rect):
+		slot = _curve_rect.get_index()
+		was_down = not _curve_rect.visible
+	_reparent_weighted(self)
+	if slot >= 0:
+		move_child(_weighted, slot)
+	# The mirror of the adoption in _build_hud_curve: hand the composite's hidden state, and its seat in the
+	# death sweep's list, back to the carrier before the composite stops existing.
+	if was_down:
+		_weighted.visible = false
+		var at := _death_hidden_hud.find(_curve_rect)
+		if at >= 0:
+			_death_hidden_hud[at] = _weighted
+	if is_instance_valid(_curve_rect):
+		_curve_rect.queue_free()
+	_curve_rect = null
+	_curve_mat = null
+	_curve_viewport.queue_free()
+	_curve_viewport = null
+
+## Move the carrier between this layer and the curve viewport without disturbing anything it holds. Nothing
+## here touches its transform: it is PRESET_FULL_RECT in both homes and both homes are the same canvas size,
+## so every child keeps its absolute coords — the same promise the carrier already makes to anything that
+## parents into it.
+func _reparent_weighted(to: Node) -> void:
+	if _weighted == null or to == null or _weighted.get_parent() == to:
+		return
+	var from := _weighted.get_parent()
+	if from != null:
+		from.remove_child(_weighted)
+	to.add_child(_weighted)
+	_weighted.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+## ⭐THE CURVE VIEWPORT IS DEAF UNTIL SOMEBODY HANDS IT THE KEYBOARD, AND THIS IS THAT SOMEBODY.
+## The root Window pumps only ITS OWN `_unhandled_input` group; a nested SubViewport hears nothing unless a
+## `SubViewportContainer` forwards into it, and this composite is hand-built (a ColorRect sampling the render
+## target — the project's hand-composited idiom), so there is no container. The moment `_weighted` moved inside
+## `_curve_viewport`, every carrier child went deaf. The Hotbar is the one that noticed: its slot keys (1-0) and
+## the weapon wheel live in `_unhandled_input`, so a HUD curve of any strength — and it defaults ON — silently
+## killed the entire bar while it still rendered perfectly. Verified against 4.7.1: a Control inside a bare
+## SubViewport receives ZERO events from the main pump, and `push_input(ev, true)` delivers them
+## (`push_unhandled_input` does too, but 4.7 deprecates it).
+##
+## Forwarded from `_unhandled_input`, so the panel sees only what the world's GUI and `_input` already declined —
+## the same slot the carrier's children used to occupy. `is_input_handled()` carries a consumer's
+## `set_input_as_handled()` back out, so a slot key still STOPS here instead of falling through to the next
+## gameplay consumer, exactly as it did before the curve existed.
+##
+## ⭐UNCONDITIONAL ON PURPOSE — not gated on `_curve_rect.visible`. A hidden CanvasItem still receives unhandled
+## input (verified), so the death sweep and `hud off` never silenced the bar in the pre-curve tree and must not
+## start to now: OFF IS THE OLD TREE is the promise the whole curve block is built on, and a curve that quietly
+## changed WHICH KEYS WORK would break it just as badly as one that changed the pixels.
+func _unhandled_input(event: InputEvent) -> void:
+	if _curve_viewport == null or not _curve_viewport.is_inside_tree():
+		return  # curve off -> `_weighted` is a plain child of this layer and hears the pump directly
+	_curve_viewport.push_input(event, true)
+	if _curve_viewport.is_input_handled():
+		get_viewport().set_input_as_handled()
+
 
 ## Build one full-rect, input-ignoring HUD overlay carrying `shader`, hidden by default.
 func _make_scope_overlay(shader: Shader) -> ColorRect:
@@ -482,35 +806,110 @@ func _apply_stamina_mode() -> void:
 	if _stamina_bar != null:
 		_stamina_bar.visible = _gameplay_hud_visible and not ring_mode
 
+## THE TOP-RIGHT STACK, as three derived tops. Row 1 is the minimap at its own inset; row 2 is the clock;
+## row 3 is the objective tracker. Each row's top is computed from the row ABOVE it, and every row can be
+## switched off independently by the player, so the two functions below are the whole reflow rule.
+##
+## Pure: the y the CLOCK's top sits at. Under the map when the map is up (inset + box height + gap); with
+## the map off (Options -> Accessibility -> "Minimap") it lifts to GameSettings.hud.clock_bare_top rather
+## than leaving a 114 px hole where the map used to be. Static + unit-tested for the reason its sibling
+## below is: "the top-right stack does not collide" is a layout INVARIANT, not something to eyeball once.
+static func hud_clock_top_for(map_visible: bool, inset_y: float, map_h: float, gap: float, bare: float) -> float:
+	return (inset_y + map_h + gap) if map_visible else bare
+
 ## Pure: the y the top-right objective column's first line starts at. WITH the minimap up it sits under it
 ## (inset + box height + gap); with the map off (Options -> Accessibility -> "Minimap") it returns to
 ## GameSettings.hud.minimap_tracker_bare_top, which ships as 8.0 — byte-identical to the pre-minimap
 ## layout, so turning the map off restores the historical corner exactly instead of leaving a hole where
-## it used to be. Static + unit-tested, because "the top-right stack does not collide" is a layout
-## INVARIANT and not something to eyeball once and hope about.
-static func quest_tracker_top_for(map_visible: bool, inset_y: float, map_h: float, gap: float, bare: float) -> float:
+## it used to be.
+##
+## The CLOCK row is an ADDITIVE trailing argument, defaulting to "no clock": with it omitted this returns
+## exactly what it always did, so the pre-clock pins in tests/test_minimap_hud_layout.gd still describe the
+## live rule rather than a rewritten one. When the clock IS up the tracker drops by its box plus its own
+## gap — measured from wherever the clock actually landed, which is why the map's own visibility only
+## enters once (through the clock's top) and is never double-counted here.
+static func quest_tracker_top_for(map_visible: bool, inset_y: float, map_h: float, gap: float, bare: float,
+		clock_visible: bool = false, clock_h: float = 0.0, clock_gap: float = 0.0,
+		clock_map_gap: float = 0.0, clock_bare: float = 0.0) -> float:
+	if clock_visible:
+		return hud_clock_top_for(map_visible, inset_y, map_h, clock_map_gap, clock_bare) + clock_h + clock_gap
 	return (inset_y + map_h + gap) if map_visible else bare
 
-## The same rule bound to the live knobs.
-func quest_tracker_top(map_visible: bool) -> float:
-	var h := GameSettings.hud
-	return quest_tracker_top_for(map_visible, h.minimap_inset.y, h.minimap_size.y,
-			h.minimap_tracker_gap, h.minimap_tracker_bare_top)
+## Pure: THE AUTHORED MINIMAP BOX, as {position = the (right, top) INSET from the screen's top-right corner,
+## size = the drawn box}. This is what makes scenes/ui/hud_minimap.tscn the measurement rather than just the
+## art: drag the box in the 2D editor and the clock and the objective tracker under it move with it, because
+## both derive their tops from what this returns.
+##
+## Fed the four ANCHOR OFFSETS the .tscn authors, never the Control's `size`/`position`: a freshly instantiated,
+## unparented Control is 0x0 until the first layout sort, and the clock/tracker seeds below run before that sort.
+## A non-positive box — a bare Control.new() with all-zero offsets, a failed instantiate — answers `fallback`,
+## which is how the knob-derived layout survives a missing map completely unchanged.
+##
+## Right-anchored, so the offsets are NEGATIVE distances from the right screen edge: the inset is -offset_right.
+static func minimap_box_from(offset_left: float, offset_top: float, offset_right: float,
+		offset_bottom: float, fallback: Rect2) -> Rect2:
+	var w := offset_right - offset_left
+	var h := offset_bottom - offset_top
+	if w <= 0.0 or h <= 0.0:
+		return fallback
+	return Rect2(-offset_right, offset_top, w, h)
 
-## The minimap's visibility, polled live off Settings.minimap_enabled so the Options toggle bites the same
-## frame with no rebuild (the loot_beacons / detection_meter / stamina_ring family), composed with the
-## dialogue-hide flag. It ALSO re-derives the quest tracker's top, because that tracker was pushed down to
-## clear a map the player may have just switched off. BAILS during the death cinematic for exactly the
-## reason _apply_stamina_mode does: hide_hud_for_death has already hidden these and remembered which, and a
-## per-frame re-show here would resurrect the panel over the fade.
+## The same rule bound to the live widget, with GameSettings.hud's knobs as the fallback box. Computed per call
+## rather than cached in a field: there is no seeding order to get wrong, and a bare UI.new() whose _minimap is
+## still null automatically reads the knobs. Untyped param + an `is Control` gate (not a duck-typed .get()) so
+## the suites that substitute a bare Control.new() land on the fallback with no special-casing.
+func minimap_box(map) -> Rect2:
+	var fallback := Rect2(GameSettings.hud.minimap_inset, GameSettings.hud.minimap_size)
+	if not (map is Control):
+		return fallback
+	var c := map as Control
+	return minimap_box_from(c.offset_left, c.offset_top, c.offset_right, c.offset_bottom, fallback)
+
+## The clock rule bound to the live knobs — and, for the two terms the artist owns, to the AUTHORED box.
+func hud_clock_top(map_visible: bool) -> float:
+	var h := GameSettings.hud
+	var b := minimap_box(_minimap)
+	return hud_clock_top_for(map_visible, b.position.y, b.size.y,
+			h.clock_map_gap, h.clock_bare_top)
+
+## The same rule bound to the live knobs. Note the two pure statics above keep their exact signatures: the
+## authored box enters HERE, at the live-binding layer, so every literal pin in tests/test_minimap_hud_layout.gd
+## still describes the real rule rather than a rewritten one.
+func quest_tracker_top(map_visible: bool, clock_visible: bool = false) -> float:
+	var h := GameSettings.hud
+	var b := minimap_box(_minimap)
+	return quest_tracker_top_for(map_visible, b.position.y, b.size.y,
+			h.minimap_tracker_gap, h.minimap_tracker_bare_top,
+			clock_visible, h.clock_size.y, h.clock_tracker_gap, h.clock_map_gap, h.clock_bare_top)
+
+## THE WHOLE TOP-RIGHT STACK's visibility and reflow, polled live off Settings.minimap_enabled and
+## Settings.clock_enabled so either Options toggle bites the same frame with no rebuild (the loot_beacons /
+## detection_meter / stamina_ring family), composed with the dialogue-hide flag. Kept under its original
+## name — tests/test_hud_feedback.gd calls it directly — but it now owns three rows, not one: the map, the
+## clock under it, and the objective tracker under that. The two lower rows re-derive their tops here
+## because each was pushed down to clear a row the player may have just switched off. BAILS during the
+## death cinematic for exactly the reason _apply_stamina_mode does: hide_hud_for_death has already hidden
+## these and remembered which, and a per-frame re-show here would resurrect the panel over the fade.
 func _apply_minimap_visibility() -> void:
 	if not _death_hidden_hud.is_empty():
 		return
-	var want: bool = _gameplay_hud_visible and Settings.minimap_enabled
+	# `_minimap != null` is part of the QUESTION, not a guard: a failed instantiate must lift the clock into the
+	# corner and pull the tracker up with it, exactly as switching the map off in Options does — not leave a
+	# 114 px hole under a map that is not there.
+	var want: bool = _minimap != null and _gameplay_hud_visible and Settings.minimap_enabled
+	var want_clock: bool = _gameplay_hud_visible and Settings.clock_enabled
 	if _minimap != null:
 		_minimap.visible = want
+	# The clock re-derives its OWN top too: switching the map off in Options must lift the clock into the
+	# corner, not just slide the tracker up underneath a clock that stayed put.
+	if _clock != null:
+		_clock.visible = want_clock
+		var clock_top := hud_clock_top(want)
+		if not is_equal_approx(_clock.offset_top, clock_top):
+			_clock.offset_top = clock_top
+			_clock.offset_bottom = clock_top + GameSettings.hud.clock_size.y
 	if _quest_tracker != null:
-		var top := quest_tracker_top(want)
+		var top := quest_tracker_top(want, want_clock)
 		if not is_equal_approx(_quest_tracker.offset_top, top):
 			_quest_tracker.offset_top = top
 
@@ -752,12 +1151,14 @@ func _update_hud_sway(delta: float) -> void:
 		var yaw := atan2(-fwd.x, -fwd.z)
 		var pitch := asin(clampf(fwd.y, -1.0, 1.0))
 		var look := Vector2.ZERO
+		_look_rate = Vector2.ZERO
 		if _sway_primed:
 			# wrapf on the yaw delta: the +-PI seam would otherwise read a full-circle fake flick.
 			var yaw_rate := wrapf(yaw - _sway_last_yaw, -PI, PI) / delta
 			var pitch_rate := (pitch - _sway_last_pitch) / delta
 			look = HUD_SWAY_SCRIPT.look_target(yaw_rate, pitch_rate,
 					GameSettings.hud.hud_sway_gain, GameSettings.hud.hud_sway_max)
+			_look_rate = Vector2(yaw_rate, pitch_rate)  # the ghost’s latency rides this same sample
 		_sway_last_yaw = yaw
 		_sway_last_pitch = pitch
 		_sway_primed = true
@@ -783,6 +1184,7 @@ func _update_hud_sway(delta: float) -> void:
 					GameSettings.hud.hud_fov_scale_gain, GameSettings.hud.hud_fov_scale_max) * sway_scale
 	else:
 		_sway_primed = false  # re-prime on the next valid sample (a respawn/teleport won't fake a flick)
+		_look_rate = Vector2.ZERO
 	_weighted.position = _sway.step(target, GameSettings.hud.hud_sway_stiffness, GameSettings.hud.hud_sway_damping, delta)
 	# AIM CLUSTER sway (user call): the crosshair rides the SAME spring at a whisper of the amplitude
 	# (hud_sway_aim_scale), so reticle and panel move as one mass — and the stamina ring re-stamps its
@@ -827,6 +1229,12 @@ func set_scoped(scoped: bool) -> void:
 	# Only pay for the full-screen back-buffer copy while the inverting disc is actually up.
 	if _crosshair_bbc:
 		_crosshair_bbc.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT if scoped else BackBufferCopy.COPY_MODE_DISABLED
+	# ...and the reticle leaves the HUD-ghost capture for exactly as long as it wears that shader. Inside the
+	# ghost’s offscreen buffer the "screen" is the HUD alone, so `1.0 - screen` resolves to near-white there
+	# and the ghost would trail a bright disc behind a reticle whose entire job is contrast. Scoping is also
+	# where a second reticle image is least wanted, so the aim point simply stops ghosting while you are down
+	# the scope and resumes on the way out — the panel and the rest of the HUD keep ghosting throughout.
+	HUD_GHOST_SCRIPT.set_ghosted(crosshair, not scoped)
 
 ## Resolve what the reticle rect shows: scoped -> the inverting disc shader (always — it's functional);
 ## unscoped -> the artist texture from the HUD skin when authored, else the shader-drawn flat dot.
@@ -1193,7 +1601,21 @@ func _process(delta: float) -> void:
 	# Deliberately NOT gated on a live player: the Options toggle has to work on any frame, including the
 	# ones around a death/respawn where `player` is briefly invalid.
 	_apply_minimap_visibility()
+	_apply_hud_curve()
 	_update_hud_sway(delta)
+	# AFTER the sway, so the ghost lags the panel position this frame actually settled on — and it is fed the
+	# look rate the sway just measured rather than re-reading the camera. `may_show` mirrors the
+	# _apply_stamina_mode / _apply_crosshair_visibility rule: the ghost’s display rect is a direct child of
+	# this layer, so hide_hud_for_death has already hidden it and remembered it, and a blind re-show here
+	# would resurrect it over the death fade.
+	if _ghost != null:
+		_ghost.poll(delta, _look_rate.x, _look_rate.y, _death_hidden_hud.is_empty())
+	# The world ghost takes no `may_show`: its composite lives on its OWN layer, so the death sweep (which
+	# only walks this layer's direct CanvasItem children) never hid it and there is no latch to respect. It
+	# stays up through the cinematic on purpose — like the post-process rect, it is the picture's look rather
+	# than a HUD readout, and switching it off mid-death would read as the image changing character.
+	if _world_ghost != null:
+		_world_ghost.poll(delta, _look_rate.x, _look_rate.y)
 	if is_instance_valid(ammo_count) and _hud_ammo != null:
 		_hud_ammo.text = _ammo_text()
 		# Low-clip warning (parity with the HP/stamina bars). Caliber-less weapons (blank readout) never warn.

@@ -23,6 +23,9 @@ extends Control
 ## The rendering camera, for unproject_position / is_position_behind. Set by the owner.
 var camera: Camera3D
 var _glints: Dictionary = {}  # source instance id -> { pos, charge, t }
+## True while the canvas still HOLDS a painted flare -- see the same flag on AimIndicators. A CanvasItem
+## repaints only on queue_redraw(), so dropping the last glint without one leaves the flare frozen on screen.
+var _painted: bool = false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE  # never eat input
@@ -39,13 +42,22 @@ func report(source: Object, world_pos: Vector3, charge: float) -> void:
 		return
 	var id := source.get_instance_id()
 	if charge <= 0.0:
-		_glints.erase(id)
+		# Clearing the glint must queue a redraw just like the set path below, or the flare drawn last frame
+		# stays painted. The player feeds charge 0 here the instant the enemy loses the clear shot, and the
+		# enemy then reports 0 EVERY frame while out of range -- so _process has nothing left to expire and
+		# nothing else would ever repaint. Same defect as AimIndicators.report(); fixed the same way.
+		if _glints.erase(id):
+			queue_redraw()
 		return
 	_glints[id] = {"pos": world_pos, "charge": clampf(charge, 0.0, 1.0), "t": Time.get_ticks_msec()}
 	queue_redraw()
 
 func _process(_delta: float) -> void:
 	if _glints.is_empty():
+		# Nothing to expire -- but if the canvas still holds the last flare, queue the ONE redraw that clears
+		# it, so no future way of emptying _glints can strand a glint on screen (mirrors AimIndicators).
+		if _painted:
+			queue_redraw()
 		return
 	var now := Time.get_ticks_msec()
 	for id in _glints.keys():
@@ -56,8 +68,12 @@ func _process(_delta: float) -> void:
 	queue_redraw()  # reproject every frame so the flare tracks the enemy as you both move
 
 func _draw() -> void:
+	# This run defines what stays on the (freshly cleared) canvas item; record it for the _process guard.
+	# Conservative on purpose -- an extra clearing redraw is free, a missed one strands a flare.
+	_painted = false
 	if _glints.is_empty() or not is_instance_valid(camera):
 		return
+	_painted = true
 	var hud = MenuStyle.hud  # untyped on purpose: HudSkin's class_name may not be cached yet
 	var eye := camera.global_position
 	var now := Time.get_ticks_msec()

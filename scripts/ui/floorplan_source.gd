@@ -3,7 +3,7 @@ extends RefCounted
 
 ## @system Minimap
 ## @seam gather(root, hide_group) is the ONE place level geometry becomes minimap geometry: it walks a level subtree once and converts every STATIC collider into a world-space convex hull or triangle soup, which slice() then cuts at any height. Split out of FloorplanSection precisely so that file can stay pure and provable.
-## @risk The static gate is `is StaticBody3D and not is AnimatableBody3D` — a PHYSICS LAYER cannot be used, because Player.tscn and enemy.tscn are both collision_layer 2, the same layer as level ground, so a mask would freeze every NPC in the room into the map as a wall blob.
+## @risk The static gate is `is StaticBody3D and not is AnimatableBody3D` — a TYPE, never a physics layer. Not because the layers overlap: characters are collision_layer 2 (Player.tscn, enemy.tscn) and level brush geometry is collision_layer 1 / collision_mask 0 (func_godot worldspawn / func_geo / func_detail), so a mask COULD tell a body from a wall. Layer 1 is the ENGINE DEFAULT, though, so it is also where every static thing that never touches the field lands — world brushes, props and door bodies alike (door.tscn's DoorPivot/DoorBody is a bare StaticBody3D). A mask cannot make the one distinction this picture needs, wall vs. movable leaf, and would silently drop any prefab a future author puts on another layer.
 ## @risk AnimatableBody3D INHERITS StaticBody3D (verified against the engine), so the naive `is StaticBody3D` gate silently includes door leaves and bakes them shut forever. The exclusion is load-bearing, not tidiness.
 ## @risk CSGShape3D is NOT a CollisionObject3D — in Godot 4.7 that `is` check will not even parse — so a CollisionShape3D walk finds NOTHING on a CSG blockout level. Those need the separate bake_collision_shape() branch, and CLAUDE.md names CSG as the blockout pipeline for new levels.
 ## @test res://tests/test_floorplan_source.gd
@@ -15,7 +15,9 @@ extends RefCounted
 ## A solid is one of two shapes, kept in WORLD space so a re-slice at a new height costs no transforms:
 ##   {"hull":  PackedVector3Array}  a convex point cloud (box, brush, cylinder, capsule, sphere)
 ##   {"faces": PackedVector3Array}  a triangle soup (trimesh collider, CSG bake)
-## Convex hulls cut to closed RINGS (rooms read as outlines); soups cut to loose SEGMENTS.
+## Convex hulls cut to closed RINGS (rooms read as outlines); soups cut to loose SEGMENTS. slice() then hands
+## the rings to FloorplanSection.silhouette, which differences them against each other so overlapping and
+## abutting solids print ONE outline rather than a wireframe of the brushwork.
 
 ## Every solid found by the last gather(), in world space.
 var solids: Array[Dictionary] = []
@@ -60,11 +62,14 @@ func _add_collision_shape(cs: CollisionShape3D) -> void:
 	var body := cs.get_parent() as CollisionObject3D
 	if body == null:
 		return
-	# THE STATIC GATE. Type, never a physics layer: Player.tscn and enemy.tscn are both collision_layer 2,
-	# which is also TestLevel's ground layer, so no mask can separate characters from geometry here — and a
-	# character that slipped through would be frozen into the deck cache as a wall blob that never moves.
-	# AnimatableBody3D is excluded explicitly because it INHERITS StaticBody3D: a door leaf baked in whatever
-	# pose it happened to hold would draw a closed door forever. Floorplans draw openings, not leaves.
+	# THE STATIC GATE. Type, never a physics layer — though NOT because the layers overlap: characters are
+	# collision_layer 2 (Player.tscn, enemy.tscn) and brush geometry is collision_layer 1 / mask 0, so a mask
+	# could in fact tell a body from a wall. Layer 1 is the ENGINE DEFAULT, so it is equally where props and
+	# door bodies land (door.tscn's DoorPivot/DoorBody is a bare StaticBody3D); a mask cannot make the one
+	# distinction that matters here, wall vs. movable leaf, and would silently drop any prefab authored onto
+	# another layer. AnimatableBody3D is then excluded explicitly because it INHERITS StaticBody3D: a door
+	# leaf baked in whatever pose it happened to hold would draw a closed door forever. Floorplans draw
+	# openings, not leaves.
 	if not (body is StaticBody3D) or body is AnimatableBody3D:
 		return
 	var solid := shape_solid(cs.shape, cs.global_transform)
@@ -119,11 +124,24 @@ static func shape_solid(shape: Shape3D, xf: Transform3D) -> Dictionary:
 
 ## Cut every solid at plane `y` into flat draw_multiline pairs, shell- and noise-rejected. Cheap enough to
 ## run per floor band; the result is what the deck caches.
-func slice(y: float, max_span: float, min_span: float) -> PackedVector2Array:
-	var out := PackedVector2Array()
+##
+## `merge` = draw the cut as ONE SILHOUETTE (FloorplanSection.silhouette): a level is built out of overlapping
+## boxes, but a floorplan drawn as overlapping boxes reads as a wireframe of the brushwork rather than as
+## rooms, so every side buried inside a neighbouring solid is removed. `weld` is how far apart two solids may
+## be and still count as one — brushes that share a face exactly are the normal case and need it nonzero.
+## Off = every solid draws its own closed ring, the original look and the escape hatch.
+##
+## THE ORDER IS THE CONTRACT: reject FIRST, merge SECOND. A rejected ring must never become an occluder — a
+## void-seal brush encloses the whole map, and one promoted to an occluder would erase every wall inside it.
+func slice(y: float, max_span: float, min_span: float, merge: bool = true,
+		weld: float = 0.0) -> PackedVector2Array:
+	var rings: Array[PackedVector2Array] = []
+	var soup := PackedVector2Array()
 	for s in solids:
 		if s.has("faces"):
-			out.append_array(FloorplanSection.slice_faces(s["faces"], y))
+			# A trimesh cut is an unordered segment set, never a ring — see FloorplanSection.silhouette on why
+			# it is clipped by the rings but never clips them.
+			soup.append_array(FloorplanSection.slice_faces(s["faces"], y))
 			continue
 		var ring := FloorplanSection.slice_hull(s["hull"], y)
 		if ring.size() < 3:
@@ -132,7 +150,13 @@ func slice(y: float, max_span: float, min_span: float) -> PackedVector2Array:
 			continue
 		if FloorplanSection.ring_is_noise(ring, min_span):
 			continue
-		out.append_array(FloorplanSection.ring_edges(ring))
+		rings.append(ring)
+	if merge:
+		return FloorplanSection.silhouette(rings, soup, weld)
+	var out := PackedVector2Array()
+	for r in rings:
+		out.append_array(FloorplanSection.ring_edges(r))
+	out.append_array(soup)
 	return out
 
 

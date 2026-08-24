@@ -11,7 +11,7 @@ extends Area3D
 ## config + the per-object reaction (heart / sound / signal).
 ##
 ## Why a DEDICATED layer (not the talk layer): the player's E-interact ray (ray_cast.gd) masks ONLY
-## TalkHelpers.TALK_LAYER, so a Pettable on PET_LAYER is invisible to the talk system — no stray "[E]" prompt — while
+## TalkHelpers.TALK_LAYER, so a Pettable on PET_LAYER is invisible to the talk system — no stray "[F]" prompt — while
 ## PetInteraction's ray (which masks every layer EXCEPT the talk layer, and also hits bodies) still finds us AND is
 ## occluded by a solid wall between the player and the object, so you can't pet through walls.
 ##
@@ -192,7 +192,10 @@ func _play_sound() -> void:
 	p.stream = pet_sound
 	p.bus = &"sfx"
 	add_child(p)
-	p.play()
+	# NOTE the base pitch here is a flat 1.0: unlike a Throwable's own yap this does NOT read the host's
+	# `sound_pitch_mult`, so a big dog purrs at the same pitch as a small one. Pre-existing; wire the host's
+	# multiplier in as the base if that ever matters.
+	AudioManager.play_varied(p)
 	p.finished.connect(p.queue_free)
 
 

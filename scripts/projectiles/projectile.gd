@@ -258,7 +258,7 @@ func _emit_impact(sfx: AudioStreamPlayer3D, pitch: float, survives: bool = false
 		one_shot.unit_size = sfx.unit_size
 		one_shot.max_db = sfx.max_db
 		one_shot.max_distance = sfx.max_distance
-		one_shot.pitch_scale = pitch
+		one_shot.pitch_scale = AudioManager.vary_pitch(pitch)  # the caller's impact pitch is the BASE; see AudioManager.vary_pitch
 		get_tree().root.add_child(one_shot)
 		one_shot.global_position = global_position
 		one_shot.play()
@@ -267,7 +267,7 @@ func _emit_impact(sfx: AudioStreamPlayer3D, pitch: float, survives: bool = false
 	# Projectile is leaving — hand its own impact player to the root so it outlives queue_free.
 	if sfx.get_parent() == self:
 		sfx.reparent(get_tree().root)
-	sfx.pitch_scale = pitch
+	sfx.pitch_scale = AudioManager.vary_pitch(pitch)  # ditto — both branches of this impact vary
 	sfx.volume_db = volume
 	sfx.play()
 	sfx.finished.connect(sfx.queue_free)

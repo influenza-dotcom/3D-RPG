@@ -3,7 +3,7 @@ extends Area3D
 
 
 ## Drop-in "you can CLAIM this" component (designer-first: drag onto any object — a stray dog, a drone, a robot — set
-## it up in the Inspector, no scripting). While the player is aimed at this object, pressing the Claim key (default T)
+## it up in the Inspector, no scripting). While the player is aimed at this object, pressing the Claim key (default B)
 ## adopts it: the player names it, and the object starts FOLLOWING the player. The one-time, ownership twin of the
 ## petting verb — pet for affection (repeatable), claim to make it YOURS (once).
 ##
@@ -48,7 +48,7 @@ signal unclaimed(by: Node)
 ## ClaimInteraction probes its aim ray to this slider's max (8.0), so any authored value up to the ceiling is
 ## reachable — keep the two in sync if the ceiling changes (raise ClaimInteraction.RAY_REACH to match a higher ceiling).
 @export_range(0.5, 8.0, 0.1) var max_range: float = 3.0
-## Verb shown in the prompt: "[T] <verb> <name>". "Befriend" by default (friendlier than "Claim" for adopting a
+## Verb shown in the prompt: "[B] <verb> <name>". "Befriend" by default (friendlier than "Claim" for adopting a
 ## stray); could be "Adopt", "Tame", "Recruit", "Claim", …
 @export var prompt_verb: String = PlayerText.PROMPT_BEFRIEND
 ## Name shown after the verb in the prompt. Empty => the host's resolved name (a Throwable's "Dog") or its node name.
@@ -170,7 +170,7 @@ func can_unclaim() -> bool:
 	return _claimed and allow_unclaim
 
 
-## The prompt name shown as "[T] Claim <name>": our explicit display_name override; else the HOST's resolved/authored
+## The prompt name shown as "[B] Claim <name>": our explicit display_name override; else the HOST's resolved/authored
 ## name; else its node name. Same resolution order as Pettable.pet_name so "Claim Dog" reads identically.
 func claim_name() -> String:
 	var host := get_parent()
@@ -347,7 +347,7 @@ func _play_sound() -> void:
 	p.stream = claim_sound
 	p.bus = &"sfx"
 	add_child(p)
-	p.play()
+	AudioManager.play_varied(p)  # base 1.0 — this does not read the host's sound_pitch_mult; see Pettable._play_sound
 	p.finished.connect(p.queue_free)
 
 

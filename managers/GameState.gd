@@ -4,8 +4,10 @@ extends Node
 ## @risk Breaking _write_atomic's tmp->bak->rename rotation (e.g. dropping the Windows remove-before-rename guard) only loses the sole save on a real crash; the happy path keeps succeeding, so tests never surface it.
 ## @risk A field wired into only some of capture/save_to_disk/load_from_disk silently defaults on Continue; a STAT_NAMES rename with no SAVE_VERSION migration drops those points (cf. load_from_disk's legacy stat folds).
 ## @risk Dropping capture()'s Zorkmids.ITEM_ID skip double-counts money on load; applying respawn_position while ignoring respawn_level_matches teleports the player into the wrong level.
+## @risk The dev sandbox (enable_sandbox / resolve_save_path) redirects the five canonical save paths at exactly six seams — a new read/write of SAVE_PATH / QUICKSAVE_PATH / slot_path that skips resolve_save_path silently sees or writes the REAL profile while a console `sandbox on` is in force.
 ## @test res://tests/test_game_save.gd
 ## @test res://tests/test_save_slots.gd
+## @test res://tests/test_debug_sandbox.gd
 
 ## @system Save Model
 ## @seam The additive per-object ledger world_objects[level][key]=state (record_object_state/object_state/has_object_state) persists Door open/locked + consumed-pickup/destroyed-prop 'gone' bits per authored object.
@@ -264,10 +266,11 @@ var _world_snapshot_pending: bool = false
 var _reload_pending: bool = false
 
 ## Save paths whose profile came off a FALLBACK rung (.tmp / .bak) instead of the primary. An entry is added by
-## load_from_disk and erased by the first _write_atomic to that SAME path that actually lands. While a path is
-## listed, its write must NOT rotate the file at `path` into ".bak": the file it would rotate is the primary the
-## ladder just REJECTED, so the rotation would bury the last intact checkpoint under the corrupt one — a
-## fallback-recovered run survived exactly one autosave before its only good copy was gone.
+## load_from_disk and erased by the first swap onto that SAME path that actually lands (_swap_into_place — reached
+## from _write_atomic, or from a sandbox commit's copy-back) and by enable_sandbox for the sandbox paths it just
+## replaced. While a path is listed, its write must NOT rotate the file at `path` into ".bak": the file it would
+## rotate is the primary the ladder just REJECTED, so the rotation would bury the last intact checkpoint under the
+## corrupt one — a fallback-recovered run survived exactly one autosave before its only good copy was gone.
 ##
 ## ⭐KEYED BY PATH, NOT A SINGLE FLAG. Saves are multi-file: the autosave profile, the F5 quicksave and three
 ## named slots each round-trip through save_to_disk(path) / _write_atomic(path). One shared flag is spent by
@@ -364,7 +367,8 @@ func _ready() -> void:
 
 ## True if an autosave file exists on disk — the start menu gates its "Continue" button on this.
 func has_save_file() -> bool:
-	return FileAccess.file_exists(SAVE_PATH)
+	# Resolved so a sandboxed session asks about the SANDBOX's autosave (the one its writes land in), not the real one.
+	return FileAccess.file_exists(resolve_save_path(SAVE_PATH))
 
 ## Load the autosave at `path` into the fields above. Returns false — leaving `loaded` UNCHANGED — when NO rung of
 ## the recovery ladder below yields a usable profile: at boot that's the fresh-game false it started with, and on a
@@ -376,6 +380,10 @@ func has_save_file() -> bool:
 ## non-Array yields NULL (which would crash the restore loop), and a junk type hard-fails a typed assignment
 ## (respawn_position: Vector3). Junk degrades to the field's default instead of a boot crash.
 func load_from_disk(path := SAVE_PATH) -> bool:
+	# SANDBOX: resolved FIRST, before the ladder derives its .tmp/.bak siblings and before it keys
+	# _recovered_from_fallback — so a sandboxed load walks the SANDBOX's rung set and a sandboxed and a real
+	# profile never share a rung (or a fallback flag). Identity when the sandbox is off / for a non-canonical path.
+	path = resolve_save_path(path)
 	# THE ATOMIC-WRITE RECOVERY LADDER (H1) — the primary, then ".tmp" (the interrupted NEWEST write, left behind when
 	# a crash struck the tiny rename window in save_to_disk), then ".bak" (the previous good checkpoint). Two things
 	# decide whether a rung counts, and BOTH are load-bearing:
@@ -734,16 +742,32 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 ## emit a stray engine error). The absolute DirAccess statics need no opened directory, so there's no dir-open edge.
 ## ONE exception to the rotation, per save file, and only for the first write to that file after a
 ## fallback-recovered load of it: see `_recovered_from_fallback` — rotating there would bury the checkpoint we
-## just recovered from.
+## just recovered from. The rotate+rename tail lives in _swap_into_place (shared with commit_sandbox).
+## THIS IS THE ONE FUNNEL every save takes: save_to_disk (-> autosave / _capture_and_write -> quicksave /
+## save_to_slot) all end here — which is why the sandbox redirect and the disk-write telemetry both live here.
 func _write_atomic(cfg: ConfigFile, path: String) -> Error:
+	# SANDBOX: resolved BEFORE the .tmp/.bak siblings are derived, so a sandboxed write's WHOLE rung set (primary +
+	# temp + backup) lives in the sandbox folder and the real profile's primary AND recovery siblings stay untouched.
+	path = resolve_save_path(path)
 	var tmp_path := path + ".tmp"
-	var bak_path := path + ".bak"
 	var err := cfg.save(tmp_path)
 	if err != OK:
 		push_warning("GameState: save to %s FAILED (Error %d) — the profile did NOT persist." % [tmp_path, err])
 		if FileAccess.file_exists(tmp_path):
 			DirAccess.remove_absolute(tmp_path)  # don't strand a partial temp
+		_note_save_result(path, err)
 		return err
+	err = _swap_into_place(tmp_path, path)
+	_note_save_result(path, err)
+	return err
+
+## The rotate-and-rename TAIL of the atomic write, in ONE place so _write_atomic and commit_sandbox's copy-back can
+## never drift on the rules: rotate the file at `path` to ".bak" (or DISCARD it when the fallback guard says the
+## ladder rejected it — see _recovered_from_fallback), then rename `tmp_path` onto `path`. On Windows a rename onto
+## an EXISTING file fails, so the destination is always removed/rotated away first (guarded by file_exists so a
+## missing sibling can't emit a stray engine error). `tmp_path` must already hold the COMPLETE new bytes.
+func _swap_into_place(tmp_path: String, path: String) -> Error:
+	var bak_path := path + ".bak"
 	if FileAccess.file_exists(path):
 		if _recovered_from_fallback.get(path, false):
 			# THE ONE WRITE THAT MUST NOT ROTATE: the profile in memory came off .tmp/.bak because the ladder REFUSED
@@ -755,12 +779,25 @@ func _write_atomic(cfg: ConfigFile, path: String) -> Error:
 			if FileAccess.file_exists(bak_path):
 				DirAccess.remove_absolute(bak_path)     # clear the old .bak first (Windows rename fails onto an existing dest)
 			DirAccess.rename_absolute(path, bak_path)   # rotate the prior good save to .bak (recoverable prior checkpoint)
-	err = DirAccess.rename_absolute(tmp_path, path)  # atomically swap the new save into place
+	var err := DirAccess.rename_absolute(tmp_path, path)  # atomically swap the new save into place
 	if err != OK:
 		push_warning("GameState: atomic swap into %s FAILED (Error %d) — the profile did NOT persist." % [path, err])
 	else:
 		_recovered_from_fallback.erase(path)  # one good write later THIS path's primary is trustworthy again — rotate normally from here
 	return err
+
+## Disk-write telemetry, stamped at the tail of EVERY _write_atomic (success and failure alike) — see the
+## save_count / last_save_* fields. `saved` fires here too. Never autosaves and never touches the profile: this is
+## a passive counter, and a listener that reacts by saving again would recurse straight back into _write_atomic.
+func _note_save_result(path: String, err: Error) -> void:
+	last_save_msec = Time.get_ticks_msec()
+	last_save_path = path
+	last_save_err = err
+	if err == OK:
+		save_count += 1
+	else:
+		save_fail_count += 1
+	saved.emit(path, err)
 
 ## Read the live run off `player` into the in-memory profile (money, stats, the unlocked mechanics). The
 ## respawn fields aren't touched here — set_respawn keeps them current (a bonfire rest / the initial spawn).
@@ -985,11 +1022,12 @@ func slot_path(slot: int) -> String:
 
 ## Does a quicksave / the given manual slot exist on disk? (Read by the SaveLoadScreen to gate its Load buttons
 ## and paint empty rows, by the start menu to decide whether "Load Game" appears, plus the editor Saves dock + tests.)
+## Both resolve through the sandbox first, so a sandboxed session gates its Load rows on the files ITS saves wrote.
 func has_quicksave() -> bool:
-	return FileAccess.file_exists(QUICKSAVE_PATH)
+	return FileAccess.file_exists(resolve_save_path(QUICKSAVE_PATH))
 
 func has_slot(slot: int) -> bool:
-	return FileAccess.file_exists(slot_path(slot))
+	return FileAccess.file_exists(resolve_save_path(slot_path(slot)))
 
 ## Capture `player` and write a quicksave. Returns true on a successful write. Off-tree (a bare unit-test
 ## player) it does NOTHING — like autosave, so a test run never clobbers the user's real save files.
@@ -1029,7 +1067,10 @@ func load_from_slot(slot: int) -> bool:
 	return _load_and_reload(slot_path(slot))
 
 func _load_and_reload(path: String) -> bool:
-	if not FileAccess.file_exists(path):
+	# The existence gate resolves through the sandbox exactly as load_from_disk (handed the same RAW path below)
+	# will, so the two agree: a sandboxed quickload can't be refused for a file only the REAL folder lacks, or
+	# accepted for one only the real folder has.
+	if not FileAccess.file_exists(resolve_save_path(path)):
 		return false
 	if not load_from_disk(path):  # sets loaded = true on success so the reloaded Player applies the build
 		return false
@@ -1041,6 +1082,207 @@ func _load_and_reload(path: String) -> bool:
 		_reload_pending = true
 		get_tree().reload_current_scene()
 	return true
+
+# --- Dev SANDBOX (debug console `sandbox on|off|status|commit`) + disk-write telemetry (`saves`) ---------------
+## THE PROBLEM THIS SOLVES: autosaves fire constantly and behind your back — every wallet change, inventory change,
+## flag flip, object-state record and interest posting queues a real write of user://gamestate.cfg. So a console
+## `give` / `money` / `advance` overwrites the player's REAL profile the moment it runs, and there was no dev-save
+## sandbox. While the sandbox is ACTIVE, every canonical save path — the autosave, the F5 quicksave and the three
+## named slots — RESOLVES into `_sandbox_dir` (resolve_save_path), at the six seams that touch those files by
+## path: has_save_file / has_quicksave / has_slot (existence gates), load_from_disk + _load_and_reload (reads),
+## and _write_atomic (THE write funnel). Cheats can then run for hours and the real profile is byte-identical
+## until the dev explicitly `sandbox commit`s. A crash / relaunch simply boots the REAL profile (the sandbox flag
+## is session state, never persisted) and the sandboxed hours sit in user://sandbox/ for a later commit or grab.
+##
+## SCOPE: this redirects GameState's own file access ONLY. Surfaces that read the save files by RAW path (the
+## SaveLoadScreen's per-row `slot_metadata(path)` — which decides BOTH the caption AND whether the row shows a
+## Load button — and the editor Saves dock) still describe the REAL files while the sandbox is on: a sandboxed
+## quicksave nobody's real file backs paints Empty with no Load button, and a real-only slot offers a Load that
+## then fails against the box. A known limitation of this slice (the fix is `slot_metadata(resolve_save_path(path))`
+## at SaveLoadScreen._add_row), listed so nobody trusts a caption over `sandbox status`.
+const SANDBOX_DIR := "user://sandbox"
+## The active sandbox folder, or "" = off. Session state, deliberately NEVER written into a save: a sandbox flag
+## that persisted would make the next boot's REAL load resolve into the sandbox — the exact leak this exists to
+## prevent. Only enable_sandbox / disable_sandbox write it.
+var _sandbox_dir: String = ""
+
+## Disk-write telemetry — the autosave-storm bug class ("a cheat loops money and hammers the disk") needs to be
+## VISIBLE, and these are how the console's `saves` row and the F3 overlay see it. Stamped by _note_save_result at
+## the tail of every _write_atomic. `save_count` = successful swaps this session; `last_save_path` is the RESOLVED
+## path actually written (the sandbox path while sandboxed), so the readout can never claim a real write that went
+## into the box. Session counters, never persisted.
+var save_count: int = 0
+var save_fail_count: int = 0
+var last_save_msec: int = -1     ## Time.get_ticks_msec() of the last attempt; -1 = no write yet this session
+var last_save_path: String = ""
+var last_save_err: int = OK
+## Fired at the tail of EVERY _write_atomic, success AND failure — `path` is the resolved path, `err` the Error.
+## A passive observation seam (an event ticker, the debug overlay); a listener must NEVER save from it (recursion).
+signal saved(path: String, err: int)
+
+func sandbox_active() -> bool:
+	return not _sandbox_dir.is_empty()
+
+## The active sandbox folder ("" when off). `sandbox status` prints it, so a dev can grab an old sandbox before
+## `sandbox on` forks a fresh one over it (see enable_sandbox).
+func sandbox_dir() -> String:
+	return _sandbox_dir
+
+## The five REAL canonical save paths the sandbox redirects — the autosave, the quicksave, and slots 1..SLOT_COUNT.
+## Derived from the same constants/formatter the writers use, so a new slot count or a renamed file can't drift
+## out of the allowlist. Order is stable (status lines / tests key on it).
+func sandbox_files() -> PackedStringArray:
+	var out := PackedStringArray([SAVE_PATH, QUICKSAVE_PATH])
+	for slot in range(1, SLOT_COUNT + 1):
+		out.append(slot_path(slot))
+	return out
+
+## THE redirect. An ALLOWLIST rewrite, exact-path: ONLY the five canonical paths (sandbox_files) map to
+## `_sandbox_dir/<basename>` while the sandbox is active; ANY other path — a test's user://test_*.cfg scratch file,
+## a dump path, an already-resolved sandbox path, even a file that merely SHARES a canonical basename in another
+## folder (user://elsewhere/gamestate.cfg) — passes through UNCHANGED, and everything is identity while off. Exact
+## paths rather than basenames because the redirect must be idempotent (a resolved path resolves to itself) and must
+## never hijack a caller's explicit path: the sandbox exists to protect the five real files, nothing else.
+func resolve_save_path(path: String) -> String:
+	if _sandbox_dir.is_empty() or not sandbox_files().has(path):
+		return path
+	return _sandbox_path_for(path)
+
+## Where a canonical real path lives inside the active sandbox: the same basename under `_sandbox_dir`.
+func _sandbox_path_for(real_path: String) -> String:
+	return _sandbox_dir.path_join(real_path.get_file())
+
+## Turn the sandbox on: create `dir`, FORK the real profile into it, and arm the redirect. Returns the first Error
+## met, or OK. Contract, in order:
+##   * IDEMPOTENT: already active on this very `dir` -> OK and NO FILE is touched (a second `sandbox on` must not
+##     clobber the sandboxed run with the real profile again; `off` then `on` is how you deliberately re-fork). The
+##     only thing it may do is re-create the folder itself if it was swept mid-session (see the body).
+##   * REFUSES the real folder itself ("" / user://): the redirect would map each file onto ITSELF and commit would
+##     then copy a file over itself — a truncate-then-read of the only checkpoint. ERR_INVALID_PARAMETER.
+##   * ALWAYS OVERWRITES: a fresh session forks from the CURRENT real profile — each of the five real files that
+##     exists is copied over the sandbox's copy, and a sandbox file whose real counterpart does NOT exist is
+##     removed, so after `on` the sandbox is an exact mirror of the real five (no ghost quicksave from a previous
+##     session, no `has_quicksave()` that the real profile can't back). A stale sandbox from an earlier session
+##     is therefore replaced, not merged: `sandbox status` shows the folder precisely so a dev can grab (copy out
+##     or `commit`) an old sandbox FIRST. Simplest mental model wins over silent preservation.
+##   * SKIPS .tmp/.bak: only the five primaries are copied, never the real files' recovery siblings, and any stale
+##     .tmp/.bak rungs already in the sandbox are cleared — otherwise load_from_disk's ladder could resurrect a
+##     PREVIOUS sandbox session's rung under a freshly forked primary.
+##   * ARMS ON MKDIR SUCCESS even if a copy failed: the invariant worth keeping is "while active, the real profile
+##     is never written" — a partial fork plus a reported Error beats a live redirect the caller assumes is off.
+##     The in-memory profile is untouched (it IS the current run; the next autosave lands in the sandbox).
+## Works on a bare instance (no tree access) — the debug tests build one.
+func enable_sandbox(dir: String = SANDBOX_DIR) -> Error:
+	if dir.is_empty():
+		return ERR_INVALID_PARAMETER
+	# Normalised ("user://sandbox/" and "user://sandbox" are ONE folder) so the idempotency check below can't be
+	# defeated by a trailing slash and re-fork the real profile over a live sandbox. simplify_path keeps the scheme.
+	dir = dir.simplify_path()
+	if _sandbox_dir == dir:
+		# No re-fork — but do re-create the FOLDER if a dev swept user://sandbox/ mid-session (`sandbox status` invites
+		# a grab, and a grab is one keystroke from a delete): every sandboxed write would otherwise fail on the
+		# missing directory (save_fail_count climbing, ConfigFile.save can't create parents) while `sandbox on`
+		# keeps answering "already ON". Creating an empty folder touches no file, so the idempotency holds.
+		return DirAccess.make_dir_recursive_absolute(dir)
+	# The self-copy guard: compare the two folders as absolute filesystem paths, so "user://", "user://." and
+	# "user:///" all read as the real folder. Lower-cased because the only filesystem this can bite on (Windows) is
+	# case-insensitive; on a case-sensitive one a folder that differs from user:// by case alone isn't a real case.
+	var real_dir := ProjectSettings.globalize_path("user://").simplify_path().rstrip("/").to_lower()
+	var box_dir := ProjectSettings.globalize_path(dir).simplify_path().rstrip("/").to_lower()
+	if box_dir == real_dir or box_dir.is_empty():
+		return ERR_INVALID_PARAMETER
+	var err := DirAccess.make_dir_recursive_absolute(dir)  # OK when it already exists (ERR_ALREADY_EXISTS is folded)
+	if err != OK:
+		return err
+	_sandbox_dir = dir
+	var first_err := OK
+	for real_path in sandbox_files():
+		var boxed := _sandbox_path_for(real_path)
+		# Clear the previous session's rungs first (see SKIPS .tmp/.bak above); the primary is decided just below.
+		for stale in [boxed + ".tmp", boxed + ".bak"]:
+			if FileAccess.file_exists(stale):
+				DirAccess.remove_absolute(stale)
+		if FileAccess.file_exists(real_path):
+			# copy_absolute is an ENGINE error (not just a returned Error) on a missing source — the file_exists gate
+			# above is what keeps a fork from a partial real profile quiet. WRITE truncates, so it overwrites in place.
+			var copy_err := DirAccess.copy_absolute(real_path, boxed)
+			if copy_err != OK and first_err == OK:
+				first_err = copy_err
+		elif FileAccess.file_exists(boxed):
+			DirAccess.remove_absolute(boxed)  # mirror the real set exactly: no real file -> no sandbox file
+		# Whatever sat at the sandbox path before was just replaced or removed, so a fallback flag describing it
+		# (a previous sandbox load that recovered from .bak) is stale: the next sandbox write must rotate normally.
+		_recovered_from_fallback.erase(boxed)
+	return first_err
+
+## Turn the redirect off: clears `_sandbox_dir` ONLY. The sandbox files stay on disk (for a later `commit` or a
+## grab), and the in-memory profile is left as-is — the CONSOLE COMMAND does the real-profile reload + scene
+## reload (load_from_disk mid-play mutates only memory and would desync the live world; see _load_and_reload).
+func disable_sandbox() -> void:
+	_sandbox_dir = ""
+
+## Copy every sandbox file that exists back OVER its real counterpart. Each copy is crash-safe: the sandbox bytes
+## are copied to `real + ".tmp"` first and then swapped into place through _swap_into_place — the SAME rotate
+## rules as a normal write, so the pre-commit real file rotates to `.bak` (a one-step undo for a regretted commit)
+## unless that real path is still flagged fallback-recovered, in which case the rejected primary is discarded and
+## the real .bak left alone, exactly as _write_atomic would. A landed swap clears the real path's fallback flag
+## (the real primary is trustworthy again — it IS the sandbox's good file now). No sandbox counterpart -> the
+## real file is left untouched (a commit never deletes). Not a "save": save_count / `saved` don't move — this is
+## a copy, and the sandbox STAYS ACTIVE afterwards (keep playing in the box; commit again later). Returns the
+## first Error, ERR_UNCONFIGURED when the sandbox is off.
+func commit_sandbox() -> Error:
+	if not sandbox_active():
+		return ERR_UNCONFIGURED
+	var first_err := OK
+	for real_path in sandbox_files():
+		var err := _commit_file(_sandbox_path_for(real_path), real_path)
+		if err != OK and first_err == OK:
+			first_err = err
+	return first_err
+
+## One file of a commit: `boxed` -> `real_path` via the crash-safe temp + swap. Split out (and path-explicit) so
+## the debug tests can drive the copy-back on SCRATCH paths — commit_sandbox itself targets the five REAL files,
+## which no test may write. OK (and nothing touched) when `boxed` doesn't exist.
+func _commit_file(boxed: String, real_path: String) -> Error:
+	if not FileAccess.file_exists(boxed):
+		return OK
+	var tmp_path := real_path + ".tmp"
+	var err := DirAccess.copy_absolute(boxed, tmp_path)
+	if err != OK:
+		if FileAccess.file_exists(tmp_path):
+			DirAccess.remove_absolute(tmp_path)  # don't strand a partial temp beside the real save
+		return err
+	return _swap_into_place(tmp_path, real_path)
+
+## Terse developer lines for `sandbox status` — returned as data, never painted here (debug modules only return
+## Strings). Active?, the folder, then one line per canonical file with its REAL and SANDBOX presence/size/mtime
+## side by side, so "which is newer / which is a ghost" is answerable before a `commit` or a re-fork.
+func sandbox_status_lines() -> PackedStringArray:
+	var out := PackedStringArray()
+	if sandbox_active():
+		out.append("sandbox ON — every canonical save resolves into %s (the real profile is untouched until `sandbox commit`)" % _sandbox_dir)
+	else:
+		out.append("sandbox OFF — saves go to the real user:// files (default folder %s%s)" % [SANDBOX_DIR, "" if DirAccess.dir_exists_absolute(SANDBOX_DIR) else ", not created yet"])
+	var box := _sandbox_dir if sandbox_active() else SANDBOX_DIR
+	for real_path in sandbox_files():
+		var boxed := box.path_join(real_path.get_file())
+		out.append("  %-16s real: %-28s sandbox: %s" % [real_path.get_file(), _describe_file(real_path), _describe_file(boxed)])
+	return out
+
+## "missing", or "<bytes> B @ <local datetime>" for a file that exists. Guarded by file_exists first: the mtime
+## read on a missing path is at best a verbose log line and on older builds an engine error.
+func _describe_file(path: String) -> String:
+	if not FileAccess.file_exists(path):
+		return "missing"
+	var size := -1
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f != null:
+		size = int(f.get_length())
+		f.close()
+	# get_modified_time is UTC unix; shift by the system zone bias (minutes, positive east of UTC) for a local stamp.
+	var bias_min: int = int(Time.get_time_zone_from_system().get("bias", 0))
+	var local_unix: int = int(FileAccess.get_modified_time(path)) + bias_min * 60
+	return "%d B @ %s" % [size, Time.get_datetime_string_from_unix_time(local_unix, true)]
 
 ## Build a CharacterStats sheet from the saved stat values — handed to the Player BEFORE its super._ready so
 ## _apply_stats stamps max_hp / carry from the saved build. An unset stat defaults to baseline 0.

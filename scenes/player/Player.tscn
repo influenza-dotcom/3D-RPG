@@ -21,6 +21,7 @@
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="19_itxgx"]
 [ext_resource type="Script" uid="uid://du11h7iy2d4iv" path="res://scripts/player/player_light_level.gd" id="22_p1lr0"]
 [ext_resource type="Script" uid="uid://cthjfpp1vvx8v" path="res://scripts/player/crouch.gd" id="30_crch1"]
+[ext_resource type="Script" path="res://scripts/player/lean.gd" id="41_lean1"]
 [ext_resource type="PackedScene" uid="uid://dksmiqh8sovf3" path="res://scenes/weapons/weapon.tscn" id="31_wpnsy"]
 [ext_resource type="Script" uid="uid://dafn10sj02vj8" path="res://scripts/player/coyote_time.gd" id="32_coyot"]
 [ext_resource type="Script" uid="uid://bsmyijtn0wts6" path="res://scripts/player/jump_buffer.gd" id="33_jbuff"]
@@ -53,7 +54,7 @@ return_shake = 0.0
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 height = 1.5292969
 
-[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("walking_sfx", "falling_air_sfx", "crouch", "head", "weapon_system", "coyote_time", "jump_buffer", "bullet_time", "bunnyhop", "landing", "fp_body", "mouse_input", "ui", "player_collision_shape", "grapple_hook_origin") groups=["Player"]]
+[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("walking_sfx", "falling_air_sfx", "crouch", "lean", "head", "weapon_system", "coyote_time", "jump_buffer", "bullet_time", "bunnyhop", "landing", "fp_body", "mouse_input", "ui", "player_collision_shape", "grapple_hook_origin") groups=["Player"]]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
@@ -63,6 +64,7 @@ land_sound = ExtResource("9_ijyjs")
 walking_sfx = NodePath("WalkingSFX")
 falling_air_sfx = NodePath("FallingAirSFX")
 crouch = NodePath("Crouch")
+lean = NodePath("Lean")
 head = NodePath("Head")
 weapon_system = NodePath("Weapon")
 coyote_time = NodePath("CoyoteTime")
@@ -118,6 +120,11 @@ script = ExtResource("30_crch1")
 player = NodePath("..")
 collision_shape = NodePath("../PlayerCollisionShape")
 
+[node name="Lean" type="Node" parent="." node_paths=PackedStringArray("player", "head")]
+script = ExtResource("41_lean1")
+player = NodePath("..")
+head = NodePath("../Head")
+
 [node name="BulletTime" type="Node3D" parent="." unique_id=1700000003 node_paths=PackedStringArray("character", "scope_in", "attack")]
 script = ExtResource("34_btime")
 character = NodePath("..")
@@ -169,6 +176,7 @@ metadata/_custom_type_script = "uid://du11h7iy2d4iv"
 
 [node name="PlayerEmittingLight" type="OmniLight3D" parent="." unique_id=439202026]
 light_color = Color(0.003921569, 1, 1, 1)
+light_volumetric_fog_energy = 0.0
 omni_range = 2.1325576
 
 [node name="CrouchLightDouse" type="Node" parent="." unique_id=308746487 node_paths=PackedStringArray("host", "light")]

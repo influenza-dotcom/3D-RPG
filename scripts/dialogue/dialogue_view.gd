@@ -222,7 +222,7 @@ func show_continue_hint() -> void:
 	_hint.visible = true
 
 ## The continue affordance, using the LIVE advance binding (dialogue advances on action_pickup / click) rather than
-## a hardcoded "[E]" — so a rebind / a controller shows the right prompt, matching the hover-hint convention.
+## a hardcoded "[F]" — so a rebind / a controller shows the right prompt, matching the hover-hint convention.
 func _continue_hint_text() -> String:
 	return PlayerText.dialogue_continue_hint(InputManager.get_action_binding(InputManager.action_pickup))
 
@@ -247,13 +247,25 @@ func _clamp_choices_height() -> void:
 	if _choices_scroll == null:
 		return
 	var max_h := get_viewport().get_visible_rect().size.y * GameSettings.dialogue.choices_scroll_max_height_fraction
+	# ...LESS the box's own chrome. That fraction is really a budget on the BOX's footprint — a many-option
+	# line must not climb into the top letterbox bar — and the panel stylebox's vertical content margins are
+	# box, not menu. Un-subtracted they ride ON TOP of the cap: the artist art's 59px pushed a capped list's
+	# top edge under the bar, and a 3-line line clean off the top of the screen. Subtracting keeps the capped
+	# box exactly the height it was before any art landed (an empty box contributes 0, so the null-slot look
+	# is untouched).
+	var box_sb := _panel.get_theme_stylebox(&"panel")
+	if box_sb != null:
+		max_h -= box_sb.get_margin(SIDE_TOP) + box_sb.get_margin(SIDE_BOTTOM)
 	var content_h := _choices_box.get_combined_minimum_size().y
-	# The scroll now wears the skin's panel stylebox (the legibility backing) — its top+bottom content
-	# margins sit OUTSIDE the choices box's own minimum size, so add them or the last option hides
-	# behind a scrollbar in a list that used to fit exactly.
+	# The scroll wears a backing stylebox (see _build_ui) — its top+bottom content margins sit OUTSIDE the
+	# choices box's own minimum size, so add them or the last option hides behind a scrollbar in a list that
+	# used to fit exactly. get_margin(), NOT the content_margin_* properties: those hold the raw authored
+	# value, which is -1 ("unset") on the StyleBoxEmpty the scroll wears when the dialogue BOX carries the
+	# art — reading it directly would quietly SUBTRACT 2px from the measure. get_margin resolves the -1 to
+	# the box's real default (0 for empty, the texture margin for a 9-patch).
 	var panel_sb := _choices_scroll.get_theme_stylebox(&"panel")
 	if panel_sb != null:
-		content_h += panel_sb.content_margin_top + panel_sb.content_margin_bottom
+		content_h += panel_sb.get_margin(SIDE_TOP) + panel_sb.get_margin(SIDE_BOTTOM)
 	_choices_scroll.custom_minimum_size.y = minf(content_h, max_h)
 
 func _build_ui() -> void:
@@ -284,23 +296,41 @@ func _build_ui() -> void:
 	_panel.offset_top = -GameSettings.dialogue.panel_vertical_margin
 	_panel.offset_bottom = -GameSettings.dialogue.panel_vertical_margin
 	_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	# Invisible background — drop the PanelContainer's default box (the "ugly" bg). The text carries its
-	# own outline (below) so it stays readable floating over the world.
-	_panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	# Background: the skin's OWN dialogue-box art when the artist filled that slot (menu_skin
+	# `dialogue_panel`) — deliberately NOT the theme panel, which is the full screen-card art and would
+	# drown a box this short and wide. With the slot empty the box keeps the background-LESS look it
+	# shipped with: the PanelContainer's default box dropped entirely (the "ugly" bg), the text readable
+	# over the world on its own outline (below). Both are supported looks, so this is a live branch, not a
+	# migration — and the response menu's backing further down is decided from the SAME answer.
+	var box_bg: StyleBox = MenuStyle.make_dialogue_panel_style()
+	_panel.add_theme_stylebox_override("panel", box_bg if box_bg != null else StyleBoxEmpty.new())
+	# Mouse-TRANSPARENT chrome (the bars' rule, applied to the box): click-to-advance lives in
+	# DialogueManager._unhandled_input, and ANY Control at the Control default MOUSE_FILTER_STOP eats the
+	# click first. With no background that was an invisible dead zone over the bottom of the screen; with
+	# art it becomes a visible slab that ignores clicks aimed at the most obvious target on screen. Only the
+	# three chrome containers opt out — _choices_scroll keeps STOP, since its buttons ARE the click targets
+	# (and the manager refuses to advance at all while a response menu is up, so nothing double-fires).
+	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_layer.add_child(_panel)
 	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for side in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, GameSettings.dialogue.panel_inner_padding)
 	_panel.add_child(margin)
 	var vbox := VBoxContainer.new()
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_theme_constant_override("separation", GameSettings.dialogue.panel_vertical_element_spacing)
 	margin.add_child(vbox)
 	_text_label = Label.new()
 	_text_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_text_label.add_theme_font_size_override("font_size", GameSettings.dialogue.dialogue_text_font_size)
-	# Outlined so the text reads against the world now that the panel box is gone.
+	# Outlined so the line still reads with NO box background (box_bg null — the outline is load-bearing
+	# then, and merely a seat for the text once art is under it). The FILL ink comes from DialogueSettings,
+	# never the theme: theme text_color is menu-PANEL ink (dark since the plum palette), while this label
+	# must stay light for BOTH backdrops — the 3D world, and the artist's mid-dark olive box.
 	_text_label.add_theme_constant_override("outline_size", GameSettings.dialogue.dialogue_text_outline_width)
 	_text_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_text_label.add_theme_color_override("font_color", GameSettings.dialogue.dialogue_text_color)
 	vbox.add_child(_text_label)
 	# Choices live in a ScrollContainer so a line with many options scrolls past a ~half-screen cap (set in
 	# _clamp_choices_height) instead of growing the box up off the top of the screen.
@@ -312,12 +342,16 @@ func _build_ui() -> void:
 	# GameSettings.dialogue font sizes (the per-button font-size overrides still beat the theme size).
 	MenuStyle.apply(_choices_scroll)
 	# LOAD-BEARING with the skin applied: the skin's Button "normal" stylebox is TRANSPARENT — its legibility
-	# contract assumes the solid skin panel every menu screen puts behind its buttons. This box has no panel
-	# (the dialogue chrome is outlined text straight over the 3D world), so without a backing the choice text
-	# is illegible against a bright/dithery scene. Back JUST the response menu with the skin's own panel
-	# stylebox — the one surface here that reads as a menu gets the menu's panel, and hover/pressed accent
-	# bars keep rendering on top of it exactly as they do in every other screen.
-	_choices_scroll.add_theme_stylebox_override(&"panel", MenuStyle.theme.get_stylebox(&"panel", &"PanelContainer"))
+	# contract assumes the solid skin panel every menu screen puts behind its buttons. With NO box background
+	# (the dialogue chrome is then outlined text straight over the 3D world) the choice text would be
+	# illegible against a bright/dithery scene, so the response menu — the one surface here that reads as a
+	# menu — gets its own backing: the PLAIN generated panel, deliberately not the theme's, since the theme
+	# box is the artist's full torn-border SCREEN card and painting that across the bottom of the world for
+	# every branch line overwhelms the scene. A quiet solid backing, nothing more.
+	# But once the BOX itself carries art (box_bg above), that art already is the solid backing — stacking a
+	# second panel on it would paint a grey slab over the parchment — so the scroll goes empty and the
+	# buttons sit straight on the box, exactly as they sit on the panel of every other screen.
+	_choices_scroll.add_theme_stylebox_override(&"panel", StyleBoxEmpty.new() if box_bg != null else MenuStyle.make_plain_panel_style())
 	_choices_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_choices_scroll.visible = false  # only shown for branch lines (see set_choices)
 	_choices_box = VBoxContainer.new()

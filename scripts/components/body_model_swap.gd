@@ -96,6 +96,7 @@ const SEATED_REPROBE_DISTANCE := 0.02
 	set(value):
 		body_transparency = value
 		_apply_body_transparency()
+		_apply_outline_uniforms()  # the actor rim dissolves WITH the chest it wraps — see _outline_color_for
 
 # --- Head (sits on the torso; the head-look tracks it) -----------------------------------------------------------
 ## PICK a seated HEAD by name from res://resources/parts/heads/ -- the fastest way to change an NPC's face. See
@@ -173,6 +174,16 @@ const SEATED_REPROBE_DISTANCE := 0.02
 	set(value):
 		arm_color = value
 		_apply_arm_texture()
+## See-through amount for the ARMS only (0 = solid, 1 = invisible) — the exact same dithered screen-door
+## body_transparency gives the torso, on the same per-instance-duplicate machinery. Its reason for existing is
+## the player's first-person BODY arms: they hang off the FP torso, so they must dissolve WITH it (the look-down
+## fade, the crouch hide) or a vanished chest leaves disembodied arms floating under the camera. NPCs leave it 0
+## and take the same zero-cost early-out body_transparency does, so no existing rig changes.
+@export_range(0.0, 1.0, 0.01) var arm_transparency: float = 0.0:
+	set(value):
+		arm_transparency = value
+		_apply_arm_transparency()
+		_apply_outline_uniforms()  # ...and so does the arms' — same reason, their own curve
 ## Build only the LEFT arm (skip the mirrored right) -- for a first-person view-model arm, where you see one hand on the weapon.
 @export var single_arm: bool = false:
 	set(value):
@@ -221,12 +232,57 @@ const SEATED_REPROBE_DISTANCE := 0.02
 	set(value):
 		leg_color = value
 		_apply_leg_texture()
+## See-through amount for the LEGS only (0 = solid, 1 = invisible) — the third sibling of body_transparency /
+## arm_transparency, on the same dithered screen-door machinery and the same zero-cost early-out.
+##
+## ⭐It exists because the legs were the one part of the player's first-person body with NO way to get out of the
+## view. The chest and arms already dissolved on look-down and crouch; the legs did neither, so anything that
+## drops the camera toward them — a crouch (0.61 m), a stair step-smooth (up to 0.7 m), a landing dip (up to
+## 1.0 m) — put your own thighs on screen with nothing able to hide them. NPCs leave it 0 and change nothing.
+@export_range(0.0, 1.0, 0.01) var leg_transparency: float = 0.0:
+	set(value):
+		leg_transparency = value
+		_apply_leg_transparency()
+		_apply_outline_uniforms()  # ...and the legs' rim dissolves with them, like the chest's and the arms'
 ## Whether the swapped meshes CAST SHADOWS. Default true (NPCs cast normal shadows). Set false for the Player's
 ## FIRST-PERSON legs — a shadow cast from under the camera looks wrong. Applied to every spawned mesh on each rebuild.
 @export var casts_shadow: bool = true:
 	set(value):
 		casts_shadow = value
 		_apply_cast_shadow()
+
+# --- Actor rim (the inverted-hull outline + its ink-mask registration, which are ONE thing) ------------------------
+## Wear the ACTOR RIM: the inverted-hull outline every NPC, prop and view model in this game wears, stamped as
+## material_overlay on every spawned part — AND, inseparably, register those meshes with InkOutline's actor mask so
+## the world's screen-space ink pass SKIPS them. The two halves are one contract, not two features: a hull with no
+## mask draws BOTH lines (the doubled outline the whole ink system exists to prevent), and a mask with no hull
+## draws none at all. See scripts/effects/ink_outline.gd — "hull owns actors, ink owns the world".
+##
+## Applied on every rebuild beside casts_shadow / view_model_layer, and that placement IS the point: this rig RESETS
+## the `layers` of the meshes it spawns, so a swap dressed from OUTSIDE strands its next set of parts inked with no
+## error anywhere (the trap NpcOutline.apply_part_overlays exists to work around).
+##
+## OFF by default because on an NPC the rim is not ours to own — NpcOutline builds a DISPOSITION-coloured one
+## (hostile red / friendly green) into this same material_overlay slot and the two would fight over it. This switch
+## is for a rig nobody else dresses: the player's own first-person body, which hangs off a bare BodyModelSwap with
+## no Character `mesh` walk to ride.
+@export var actor_outline: bool = false:
+	set(value):
+		actor_outline = value
+		_apply_actor_outline()
+## Colour of that rim. BLACK is the house look, shared with NPC.outline_color, Throwable.OUTLINE_HIDDEN_COLOR and
+## GunVisuals. Its ALPHA is DRIVEN rather than authored: the rim fades with body_transparency / arm_transparency
+## (see _outline_color_for) so a dissolving chest can never leave a solid black silhouette of itself hanging.
+@export var actor_outline_color: Color = Color(0.0, 0.0, 0.0, 1.0):
+	set(value):
+		actor_outline_color = value
+		_apply_outline_uniforms()
+## Rim thickness, fed to the outline shader's `outline_width` uniform (which scales it x4 in clip space). 2.0 is
+## NPC parity (NPC.outline_width) — match it for anything drawn at real world depth.
+@export var actor_outline_width: float = 2.0:
+	set(value):
+		actor_outline_width = value
+		_apply_outline_uniforms()
 
 # --- Arm + leg animation (RUNTIME only -- the editor shows the static rest pose for placement) --------------------
 ## Animate the arms in-game: swing while walking unarmed, raise to hold a drawn weapon, rest by the side otherwise. Off -> arms stay at their static rest pose.
@@ -439,8 +495,12 @@ var _body_transp_touched: bool = false  ## a non-zero body_transparency has been
 var _head: Node3D = null       ## live head instance (the head-look's target at runtime)
 var _arm_left: Node3D = null   ## live left-arm instance
 var _arm_right: Node3D = null  ## live right-arm instance (a mirror of the left)
+var _arm_transp_touched: bool = false  ## same latch as _body_transp_touched, for arm_transparency
 var _leg_left: Node3D = null   ## live left-leg instance
 var _leg_right: Node3D = null  ## live right-leg instance (a mirror of the left)
+var _leg_transp_touched: bool = false  ## same latch as _body_transp_touched, for leg_transparency
+var _outline_mats: Dictionary = {}  ## part key -> its own actor-rim ShaderMaterial; survives rebuilds (see _outline_material)
+var _outline_touched: bool = false  ## the actor rim has been applied at least once — off must then STRIP, not early-out
 var _swing_phase: float = 0.0    ## walk-cycle phase, advanced only while moving (shared by arms + legs -> one gait)
 var _mode_pitch: float = 0.0     ## smoothed SYMMETRIC pitch (both arms): raised to hold a weapon, else 0
 var _swing_blend: float = 0.0    ## smoothed 0..1 fade for the arms' ANTISYMMETRIC walk swing (left +swing, right -swing)
@@ -1227,6 +1287,8 @@ func _rebuild() -> void:
 	_leg_right = null
 	_arm_reach = -1.0  # a new arm model means a new reach — remeasure lazily on the next seated clamp
 	_body_transp_touched = false  # fresh instances carry pristine materials — a 0-transparency rig skips the walk again
+	_arm_transp_touched = false   # ...same for the arm pair
+	_leg_transp_touched = false   # ...and the leg pair
 	_set_meshes_visible(_target_body(), true)  # restore first, so clearing a model un-hides the Man.glb mesh
 	var eb := _eff_body()
 	var eh := _eff_head()
@@ -1265,6 +1327,7 @@ func _rebuild() -> void:
 	_register_head()
 	_apply_cast_shadow()  # re-instanced meshes inherit the current casts_shadow setting
 	_apply_view_model_layer()  # ...and the view-model render layer, if this rig is a first-person part
+	_apply_actor_outline()  # ...and the actor rim + its ink-mask bit, which a fresh mesh's reset `layers` just lost
 	if Engine.is_editor_hint():  # snapshot the resolved look so the editor poll only rebuilds on an ACTUAL change
 		_host_model_sig = str(eb["model"]) + "|" + str(eh["model"])
 		_host_xf_sig = _xf_sig(eb, eh)
@@ -1392,7 +1455,32 @@ func _apply_body_transparency() -> void:
 	if not is_instance_valid(_body):
 		return
 	_body_transp_touched = _body_transp_touched or body_transparency > 0.0
-	var stack: Array[Node] = [_body]
+	_see_through_walk(_body, body_transparency)
+
+## The same, for the ARM pair (arm_transparency) — so the player's first-person body arms dissolve with the
+## torso they hang off instead of floating on after it fades. Same early-out, same latch, same duplicates.
+func _apply_arm_transparency() -> void:
+	if arm_transparency <= 0.0 and not _arm_transp_touched:
+		return
+	_arm_transp_touched = _arm_transp_touched or arm_transparency > 0.0
+	for arm in [_arm_left, _arm_right]:
+		if is_instance_valid(arm):
+			_see_through_walk(arm, arm_transparency)
+
+## ...and for the LEG pair (leg_transparency). Third verse, same as the second — see the export's own note for
+## why the legs needed a fade channel of their own.
+func _apply_leg_transparency() -> void:
+	if leg_transparency <= 0.0 and not _leg_transp_touched:
+		return
+	_leg_transp_touched = _leg_transp_touched or leg_transparency > 0.0
+	for leg in [_leg_left, _leg_right]:
+		if is_instance_valid(leg):
+			_see_through_walk(leg, leg_transparency)
+
+## Stamp `amount` of dithered see-through onto every MeshInstance3D under `root`, over WHATEVER material path
+## that mesh took — the _skin override or the model's own baked surface materials.
+func _see_through_walk(root: Node, amount: float) -> void:
+	var stack: Array[Node] = [root]
 	while not stack.is_empty():
 		var node: Node = stack.pop_back()
 		for child in node.get_children():
@@ -1401,27 +1489,32 @@ func _apply_body_transparency() -> void:
 		if mi == null:
 			continue
 		if mi.material_override != null:
-			mi.material_override = _see_through_variant(mi.material_override)
+			mi.material_override = _see_through_variant(mi.material_override, amount)
 		elif mi.mesh != null:
 			for s in mi.mesh.get_surface_count():
 				var base := mi.get_surface_override_material(s)
 				if base == null:
 					base = mi.mesh.surface_get_material(s)
-				var variant := _see_through_variant(base)
+				var variant := _see_through_variant(base, amount)
 				if variant != null:
 					mi.set_surface_override_material(s, variant)
 
-## A per-instance duplicate of `mat` carrying the current body_transparency (alpha-hash + albedo alpha). The
+## A per-instance duplicate of `mat` carrying `amount` of see-through (alpha-hash + albedo alpha). The
 ## planar drawn-shirt override is special-cased: it is a ShaderMaterial (already per-mesh, no duplication
 ## needed) whose shader carries a matching `see_through` dither uniform — without this branch a custom-shirt
 ## player's torso would silently stay OPAQUE through the crouch fade. FOREIGN ShaderMaterials (e.g. a
 ## PS1-pass shader) are left alone, and null stays null. The meta tag marks OUR BaseMaterial3D duplicates so
 ## they're mutated in place on later applications.
-func _see_through_variant(mat: Material) -> Material:
+##
+## ⭐The tag name is `bms_body_transp` but it tags ARM copies too, and that is LOAD-BEARING, not laziness:
+## BodyPartGib._walk_strip finds every faded material by exactly this tag to force a flying limb back to solid
+## (a crouched death would otherwise fling near-invisible parts). Giving arms their own tag name would silently
+## exempt them from that strip. If you ever rename it, rename it there in the same change.
+func _see_through_variant(mat: Material, amount: float) -> Material:
 	var sm := mat as ShaderMaterial
 	if sm != null:
 		if sm.shader == ShirtPlanarShader:
-			sm.set_shader_parameter(&"see_through", body_transparency)
+			sm.set_shader_parameter(&"see_through", amount)
 		return mat
 	var bm := mat as BaseMaterial3D
 	if bm == null:
@@ -1429,8 +1522,8 @@ func _see_through_variant(mat: Material) -> Material:
 	if not bm.has_meta(&"bms_body_transp"):
 		bm = bm.duplicate() as BaseMaterial3D
 		bm.set_meta(&"bms_body_transp", true)
-	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_HASH if body_transparency > 0.0 else BaseMaterial3D.TRANSPARENCY_DISABLED
-	bm.albedo_color.a = clampf(1.0 - body_transparency, 0.0, 1.0)
+	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_HASH if amount > 0.0 else BaseMaterial3D.TRANSPARENCY_DISABLED
+	bm.albedo_color.a = clampf(1.0 - amount, 0.0, 1.0)
 	return bm
 
 func _apply_head_texture() -> void:
@@ -1441,11 +1534,13 @@ func _apply_arm_texture() -> void:
 	var c := _eff_arm_color()
 	_skin(_arm_left, arm_texture, c)
 	_skin(_arm_right, arm_texture, c)
+	_apply_arm_transparency()  # LAST, the _apply_body_texture rule: _skin just swapped the override, so re-wrap whatever won
 
 func _apply_leg_texture() -> void:
 	var c := _eff_leg_color()
 	_skin(_leg_left, leg_texture, c)
 	_skin(_leg_right, leg_texture, c)
+	_apply_leg_transparency()  # LAST, the _apply_body_texture rule: _skin just swapped the override, so re-wrap whatever won
 
 ## Apply casts_shadow to every spawned part's meshes, so re-instanced meshes inherit it after a rebuild.
 func _apply_cast_shadow() -> void:
@@ -1478,6 +1573,75 @@ func _set_render_layer(node: Node, layers: int) -> void:
 		(node as VisualInstance3D).layers = layers
 	for c in node.get_children():
 		_set_render_layer(c, layers)
+
+## Stamp (or strip) the actor rim + its ink-mask layer bit on every spawned part. Called from _rebuild beside
+## _apply_cast_shadow / _apply_view_model_layer, so freshly instanced parts are dressed before they are ever drawn,
+## and from the toggle so the editor preview follows the tick box. See `actor_outline` for why the rim and the
+## mask bit are ONE operation and can never be separated.
+##
+## The strip path is deliberate rather than "leave it to the next rebuild": this is a @tool component, so a
+## designer un-ticking the box has to SEE the rim go. It only clears an overlay it recognises as its own (the
+## `bms_actor_rim` meta — the bms_body_transp idiom), so it can never wipe an outline another system owns.
+func _apply_actor_outline() -> void:
+	# The _body_transp_touched idiom: a rig that has never worn the rim has nothing to strip either, so every NPC
+	# (actor_outline off, forever) takes a zero-cost early-out on each of its rebuilds instead of walking its whole
+	# mesh set to un-set a bit it never had — and can never have its overlay slot touched by this code at all.
+	if not actor_outline and not _outline_touched:
+		return
+	_outline_touched = _outline_touched or actor_outline
+	for entry in character_parts():
+		var key: String = entry["key"]
+		var root: Node3D = entry["node"]
+		var mat: ShaderMaterial = _outline_material(key) if actor_outline else null
+		for m in TalkHelpers.collect_meshes(root, null, true):
+			if actor_outline:
+				m.layers |= InkOutline.ACTOR_INK_MASK_LAYER
+				m.material_overlay = mat
+			else:
+				m.layers &= ~InkOutline.ACTOR_INK_MASK_LAYER
+				if m.material_overlay != null and m.material_overlay.has_meta(&"bms_actor_rim"):
+					m.material_overlay = null
+
+## Get-or-create the rim material for one part key. ONE PER PART rather than one shared, because their alphas
+## diverge: the torso dissolves on the player's look-down / crouch fade, the arms take a third curve of their own
+## (they also hide when the view model owns your hands), and the legs never fade at all. Persistent across
+## rebuilds, like NpcOutline's per-part flash materials, so a model swap doesn't churn materials.
+func _outline_material(key: String) -> ShaderMaterial:
+	var mat: ShaderMaterial = _outline_mats.get(key, null)
+	if mat == null:
+		mat = TalkHelpers.make_outline_material(_outline_color_for(key), actor_outline_width)
+		mat.set_meta(&"bms_actor_rim", true)  # so the strip path above can tell OUR overlay from anyone else's
+		_outline_mats[key] = mat
+	return mat
+
+## The rim's live colour for one part: the authored tint with its alpha scaled by that part's OWN see-through, so
+## the outline dissolves exactly in step with the geometry it wraps. Without this a crouched player would keep a
+## solid black outline of the chest and arms that just dithered away — strictly worse than either extreme, the
+## same failure the arm_transparency field was added to prevent for the geometry itself.
+func _outline_color_for(key: String) -> Color:
+	var solid := 1.0
+	if key == "torso" or key == "head":
+		solid = 1.0 - body_transparency
+	elif key == "arm_l" or key == "arm_r":
+		solid = 1.0 - arm_transparency
+	elif key == "leg_l" or key == "leg_r":
+		solid = 1.0 - leg_transparency
+	var c := actor_outline_color
+	c.a *= clampf(solid, 0.0, 1.0)
+	return c
+
+## Push the authored tint/width and the live see-through alpha onto every rim material. Idempotent and cheap (a
+## couple of uniform writes over at most six materials); called from the two transparency setters, which is what
+## keeps a fading part's outline fading with it. Zero cost on every rig that leaves actor_outline off.
+func _apply_outline_uniforms() -> void:
+	if not actor_outline:
+		return
+	for key in _outline_mats:
+		var mat: ShaderMaterial = _outline_mats[key]
+		if mat == null:
+			continue
+		mat.set_shader_parameter("outline_color", _outline_color_for(String(key)))
+		mat.set_shader_parameter("outline_width", actor_outline_width)
 
 ## Override every MeshInstance3D under `root` with an albedo material from `tex` and/or `color` -- a texture OR any
 ## NON-WHITE colour builds the override (the colour tints the texture, or is a flat skin on its own). No texture +

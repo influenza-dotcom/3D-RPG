@@ -286,11 +286,16 @@ func _refresh() -> void:
 			int(rating["score"]), rating["band"])
 	_statement.add_theme_color_override(&"font_color",
 		MenuStyle.danger() if owed > 0.0 else MenuStyle.gold())
-	# ⭐THE QUOTED RATE IS THE GLOBAL ONE, VERBATIM. There is deliberately no per-terminal multiplier: purchases
+	# ⭐THE QUOTED RATES ARE THE GLOBAL ONES, VERBATIM. There is deliberately no per-terminal multiplier: purchases
 	# are charged in Player._split from GameSettings.economy.bank_noncash_fee_fraction with no terminal in scope,
 	# so a screen that scaled the number it quoted was printing a receipt the till would not honour (the whole
-	# argument, and the deleted `Atm.fee_multiplier` it retired, is recorded in the Atm header).
-	_hint.text = PlayerText.atm_hint(GameSettings.economy.bank_noncash_fee_fraction)
+	# argument, and the deleted `Atm.fee_multiplier` it retired, is recorded in the Atm header). The interest
+	# rates are the same story: LedgerAccrual posts them globally at dawn with no terminal in scope, so every
+	# terminal advertises the true numbers — the savings rate while solvent, the debt rate while in the red
+	# (the hint swaps whole templates on the account's sign, exactly like the statement above it).
+	_hint.text = PlayerText.atm_hint(GameSettings.economy.bank_noncash_fee_fraction,
+			GameSettings.economy.bank_savings_interest_rate,
+			GameSettings.economy.bank_debt_interest_rate, owed > 0.0)
 	# Deposit doubles as "settle" — the caption is the ONLY difference, selected by the account's sign.
 	_deposit_btn.text = PlayerText.atm_deposit_button(owed > 0.0)
 	_withdraw_btn.text = PlayerText.ATM_WITHDRAW

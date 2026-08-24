@@ -139,6 +139,10 @@ func setup(p_player: Character, p_inventory: Inventory, p_attack: Attack, p_ammo
 		if sp:
 			sp.set("inventory", p_inventory)
 			p_attack.flash_muzzle.connect(Callable(sp, "_on_attack_flash_muzzle"))
+		var sm := muzzle_node.get_node_or_null("MuzzleSmoke")
+		if sm:
+			sm.set("inventory", p_inventory)
+			p_attack.flash_muzzle.connect(Callable(sm, "_on_attack_flash_muzzle"))
 		var sd := muzzle_node.get_node_or_null("ShellDrop")
 		if sd:
 			p_attack.shell_particle.connect(Callable(sd, "emit"))
@@ -186,6 +190,11 @@ func reload() -> void:
 	# bails while holstered — so this only bites the refused-draw-during-carry case, exactly the reveal to suppress.
 	if attack and attack.holstered:
 		return
+	# Shut the fire gate THIS instant rather than waiting for GunPose's next poll: the gun starts going down
+	# now, and the mirror is refreshed once a frame by a node that only happens to run before the trigger is
+	# read. is_raised() keeps it shut for the rest of the dip — this just removes the dependence on tree order.
+	if attack:
+		attack.gun_raised = false
 	if tween:
 		tween.kill()
 	# Down-and-back "hands are busy" dip; pose + timing are designer knobs on GameSettings.effects.
@@ -268,14 +277,30 @@ func unholster() -> void:
 	_recoil_pos = GameSettings.effects.gun_holster_position_offset
 	_recoil_rot = GameSettings.effects.gun_holster_rotation_offset
 	_raise_until_msec = Time.get_ticks_msec() + int(t * 1000.0)
+	if attack:
+		attack.gun_raised = false  # same-frame close, as in reload(): the draw starts from the holster park, muzzle at the floor
 	tween = create_tween().set_parallel()
 	tween.set_trans(Tween.TRANS_CUBIC)
 	tween.tween_property(self, "_recoil_pos", Vector3.ZERO, t)
 	tween.tween_property(self, "_recoil_rot", Vector3.ZERO, t)
 
-## True once the gun has finished tweening back into view after a swap/reload. The laser sight
-## checks this so it only appears with the gun fully out, not mid-raise.
+## True once the gun has finished tweening back into view after a swap/reload — the gate a shot fires behind
+## (GunPose mirrors this into attack.gun_raised every frame), so a round never leaves a muzzle that is still
+## swung down at your feet.
+##
+## ⭐ The reload/swap DIP has to be part of the answer, not just the raise. _raise_until_msec is stamped when
+## the RAISE starts, so all through the dip it still held the PREVIOUS raise's long-past deadline and this read
+## "settled" while the gun was at the bottom of its swing. Attack's own `reload.is_stopped()` gate hid that for
+## the whole reload — except on the ONE frame the two hand over. Idle processing runs in tree order, and under
+## Player that is GunPose (under Head) BEFORE the Reload Timer (under Weapon) BEFORE MouseInput (last): so on a
+## reload's final frame gun_raised was already cached true from the top of the frame, reload.is_stopped() had
+## just become true, and a held trigger put exactly one round out of the fully-dipped barrel — the "reload,
+## then hold M1 and you fire into the ground" bug. Asking Attack whether a reload/swap is still in flight closes
+## the dip half by construction, with no latch that could ever strand the gate shut. A null attack (a bare
+## unit-test instance) keeps the old pure answer.
 func is_raised() -> bool:
+	if attack != null and attack.is_reload_or_swap_active():
+		return false
 	return Time.get_ticks_msec() >= _raise_until_msec
 
 func _on_swap_finished() -> void:

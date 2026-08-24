@@ -40,6 +40,13 @@ var action_attack: StringName = &"Attack"
 var action_reload: StringName = &"Reload"
 var action_zoom: StringName = &"Zoom"
 var action_pickup: StringName = &"PickUp"
+## FLASHLIGHT toggle (defaults F **and** L on the keyboard, left-stick click on a pad). ⭐F is DELIBERATELY
+## shared with `action_pickup` above, so the torch is a CONTEXTUAL FALLBACK on it exactly as the lean is on Q:
+## flash_light.gd defers the press to Interact whenever the ray holds a live target, and toggles otherwise.
+## ⭐L is the second binding and NEVER defers — it exists because `interact_available()` stays true for the whole
+## time you carry a prop (and for any throwable within 3 m), which would otherwise pin the beam shut in exactly
+## the cluttered dark room you want it in. Rebindable; rebinding replaces BOTH keyboard events with the one you
+## pick, which ends the sharing and makes the torch unconditional — the same escape hatch a lean side gets.
 var action_light: StringName = &"Light"
 var action_grapple: StringName = &"Grapple"
 ## Run modifier (default Shift): HOLD to move at full speed while stamina allows. Polled by the Player movement loop.
@@ -81,17 +88,33 @@ var action_journal: StringName = &"Journal"
 ## Open the Implants screen (default I) — its rows toggle an implant off/on. Rebindable; no controller default (the obvious pads are
 ## taken — matches Stats/Journal/Factions).
 var action_implants: StringName = &"Implants"
-## Grab-to-throw (Z): picks up the aimed throwable to CARRY/THROW it. Distinct from PickUp/Interact (E),
+## Grab-to-throw (Z): picks up the aimed throwable to CARRY/THROW it. Distinct from PickUp/Interact (F),
 ## which adds a dual item to the inventory instead — so an item that's both takeable AND throwable uses E
 ## to stash and Z to throw.
 var action_throw: StringName = &"Throw"
 ## Silent takedown (default Q): HOLD behind an unaware NPC to quietly kill it (Slice 6b). Polled by SilentTakedown.
 ## Rebindable; no controller default (the obvious pads are taken — matches Stats/Journal).
 var action_takedown: StringName = &"Takedown"
-## Claim a pet (default T): TAP while aimed at a Claimable object (a stray dog) to adopt it — name it and make it
-## follow you (see [[claim_interaction.gd]] / claimable.gd). Polled by ClaimInteraction. Rebindable; no controller
-## default (the obvious pads are taken — matches Takedown/Stats/Journal).
+## LEAN left / right (defaults Q / E on the keyboard, L1 / R1 on a pad): HOLD to peek the camera round a corner
+## (scripts/player/lean.gd). ⭐LeanLeft DELIBERATELY SHARES Q with `Takedown` (itself already shared with the pet
+## verb), so THAT side is CONTEXTUAL: the Lean component decides ON THE PRESS which of the two the key meant,
+## using actions_share_binding() below plus whatever the verb drivers report as pending. LeanRight has E to
+## itself — Interact/`PickUp` moved off E onto F — so the right peek is unconditional. That is the same escape
+## hatch a player gets by rebinding a lean side onto its own key in Options → Controls: no shared event, no
+## arbitration. Rebindable; the pad defaults are the shoulders, which nothing else uses.
+var action_lean_left: StringName = &"LeanLeft"
+var action_lean_right: StringName = &"LeanRight"
+## Claim a pet (default B, for "Befriend" — the word the in-game prompt uses): TAP while aimed at a Claimable
+## object (a stray dog) to adopt it — name it and make it follow you (see [[claim_interaction.gd]] /
+## claimable.gd). Polled by ClaimInteraction. Rebindable; no controller default (the obvious pads are taken —
+## matches Takedown/Stats/Journal). ⭐MOVED OFF T so Wait could take it: T is the Fallout 3/NV wait key and the
+## muscle memory this game is trading on, while Claim is a rare contextual verb that only fires when you are
+## aimed at a stray. If you rebind, keep them apart — they are both TAP verbs with no modifier.
 var action_claim: StringName = &"Claim"
+## Wait (default T, the Fallout 3/NV key): opens the WaitScreen, where the player picks a number of in-game
+## hours to let pass. Polled by WaitScreen itself (the QuestJournal idiom — the screen owns its own key).
+## Rebindable; no controller default (the obvious pads are taken — matches Takedown/Claim/Journal).
+var action_wait: StringName = &"Wait"
 ## Hand verb (default H): with hands EMPTY it takes your WIELDED weapon (knife/gun) out of the holster and into your
 ## hands as a carriable/throwable prop; pressing it AGAIN on that weapon puts it straight back and re-wields it (a
 ## toggle). Carrying anything else — a world-grabbed or hotbar-pulled prop — it sets that down WITHOUT throwing it.
@@ -101,6 +124,12 @@ var action_drop_held: StringName = &"DropHeld"
 ## Rotate the item being DRAGGED in the inventory grid (default R, shared with Reload — harmless since gameplay
 ## is suppressed while the bag is open). Read only by GridInventoryView mid-drag. Rebindable; no controller default.
 var action_rotate_item: StringName = &"RotateItem"
+## Cycle the HUD minimap's zoom (default M) through GameSettings.hud.minimap_zoom_steps, wrapping at the end.
+## Polled by the Minimap widget itself (the WaitScreen/QuestJournal idiom — the surface owns its own key), which
+## writes through Settings.set_minimap_zoom, so the key and the Options -> Accessibility "Minimap Zoom" slider
+## move ONE value and the choice persists. Does nothing while the map is hidden or a modal is up. Rebindable; no
+## controller default (the obvious pads are taken — matches Throw/Takedown/Claim/Wait).
+var action_minimap_zoom: StringName = &"MinimapZoom"
 ## Quicksave / quickload (F5 / F9) — the immersive-sim save loop (ML-1). Polled by the Player; quickload reloads
 ## the scene. Rebindable; no controller default (a pad shouldn't fat-finger a save/load).
 var action_quicksave: StringName = &"Quicksave"
@@ -122,10 +151,12 @@ func get_vector(neg_x: StringName, pos_x: StringName, neg_y: StringName, pos_y: 
 func get_movement_vector() -> Vector2:
 	return Input.get_vector(action_left, action_right, action_forward, action_backward)
 
-## THE single modal registry (M5 / T1). Every player-facing modal screen appears in ONE authored list, and all four
+## THE single modal registry (M5 / T1). Every player-facing modal screen appears in ONE authored list, and all five
 ## surfaces derive from it: gameplay_suppressed (per-frame control gate), any_modal_open (don't-stack-a-menu guard),
-## any_tab_blocking_open (Pip-Boy-tab refusal), and close_all_modals (the death/quickload sweep). Registering a new
-## screen = ONE row here + its project.godot [autoload] line — nothing else.
+## any_tab_blocking_open (Pip-Boy-tab refusal), any_station_music_open (the station-radio gate the StationMusic
+## autoload polls), and close_all_modals (the death/quickload sweep). Registering a new screen = ONE row here + its
+## project.godot [autoload] line — nothing else. A row carries BOTH flags, always: an omitted key is a crash, and
+## writing `false` with a one-line reason is how the next screen author sees why a screen was left out.
 ## Built LAZILY: the screen autoloads register AFTER InputManager in [autoload], so they don't exist at _ready(); every
 ## query runs at runtime by which point they do.
 ##
@@ -144,22 +175,23 @@ func _ensure_modal_reg() -> void:
 	if not _modal_reg.is_empty():
 		return
 	_modal_reg = [
-		{screen = OptionsMenu, blocks_tabs = true},              # the settings menu is a takeover, not a tab
-		{screen = InventoryScreen, blocks_tabs = false},         # ⌄ the Pip-Boy tab group: these five switch among themselves
-		{screen = LootScreen, blocks_tabs = true},               # a container/corpse you are rummaging — owns the cursor
-		{screen = ShopScreen, blocks_tabs = true},               # ⌄ the STATION screens: all real-time, all own the player's hands
-		{screen = StatsScreen, blocks_tabs = false},
-		{screen = ReputationScreen, blocks_tabs = false},
-		{screen = LevelUpScreen, blocks_tabs = true},
-		{screen = RespecScreen, blocks_tabs = true},
-		{screen = HealScreen, blocks_tabs = true},
-		{screen = AtmScreen, blocks_tabs = true},                # the Ledger terminal — the first station to go real-time (2026-08-08)
-		{screen = ChipInstallScreen, blocks_tabs = true},
-		{screen = ChessScreen, blocks_tabs = true},
-		{screen = QuestJournal, blocks_tabs = false},
-		{screen = ImplantsScreen, blocks_tabs = false},          # the implants tab (rows toggle an implant off/on)
-		{screen = CharacterInspectScreen, blocks_tabs = false},  # fullscreen hero-view; a tab hotkey takes over FROM it by design
-		{screen = SaveLoadScreen, blocks_tabs = false},          # manual save/load slot menu (the Options Dark-Souls posture)
+		{screen = OptionsMenu, blocks_tabs = true, station_music = false},              # the settings menu is a takeover, not a tab — and it opens over the MAIN MENU where there is no world, and is where you go to turn music DOWN
+		{screen = InventoryScreen, blocks_tabs = false, station_music = false},         # ⌄ the Pip-Boy tab group: these five switch among themselves; the PLAYER's own device, opened anywhere including mid-firefight — not a vendor's panel
+		{screen = LootScreen, blocks_tabs = true, station_music = false},               # a container/corpse you are rummaging — owns the cursor; no proprietor and no speaker (it grabs the mouse BARE), so no radio
+		{screen = ShopScreen, blocks_tabs = true, station_music = true},                # ⌄ the STATION screens: all real-time, all own the player's hands — and all answer with a StationSpeaker chirp, which is exactly why they all play the machine's radio
+		{screen = StatsScreen, blocks_tabs = false, station_music = false},
+		{screen = ReputationScreen, blocks_tabs = false, station_music = false},
+		{screen = LevelUpScreen, blocks_tabs = true, station_music = true},
+		{screen = RespecScreen, blocks_tabs = true, station_music = true},
+		{screen = HealScreen, blocks_tabs = true, station_music = true},
+		{screen = AtmScreen, blocks_tabs = true, station_music = true},                 # the Ledger terminal — the first station to go real-time (2026-08-08), and the chirp whose filter chain the radio's bus clones
+		{screen = ChipInstallScreen, blocks_tabs = true, station_music = true},
+		{screen = ChessScreen, blocks_tabs = true, station_music = true},               # a wagering kiosk is still a kiosk; flip this ONE word if a long match wears the loop thin
+		{screen = QuestJournal, blocks_tabs = false, station_music = false},
+		{screen = ImplantsScreen, blocks_tabs = false, station_music = false},          # the implants tab (rows toggle an implant off/on)
+		{screen = CharacterInspectScreen, blocks_tabs = false, station_music = false},  # fullscreen hero-view; a tab hotkey takes over FROM it by design
+		{screen = SaveLoadScreen, blocks_tabs = false, station_music = false},          # manual save/load slot menu (the Options Dark-Souls posture)
+		{screen = WaitScreen, blocks_tabs = true, station_music = false},               # the Wait panel — real-time, and it owns the cursor while you pick hours; waiting happens on a rooftop, not at a counter
 	]
 	for e in _modal_reg:
 		_modal_screens_cache.append(e.screen)
@@ -226,6 +258,23 @@ func any_tab_blocking_open() -> bool:
 			return true
 	return false
 
+## True while a screen whose MACHINE has a radio is open — the `station_music` rows: the seven STATION screens
+## (shop / level-up / respec / heal / atm / install / chess), which are EXACTLY the set that answers with a
+## StationSpeaker.chirp() at its commit point. That identity is the rule, and keeping it in this one table is
+## what stops the music boundary and the chirp boundary from ever drifting apart: the bed plays through a
+## clone of that speaker's filter chain, so the music is coming out of the thing that just chirped. The
+## Pip-Boy tabs, Loot, Wait and Options are deliberately OUT — the player's own device, a corpse, a rooftop,
+## and the volume sliders themselves. Deliberately NOT the same set as any_tab_blocking_open(), which is a
+## strict superset by exactly those last three.
+## The StationMusic autoload POLLS this every frame; it never hooks the screens' opened/closed signals, which
+## fire on REFUSE paths too and so cannot be refcounted.
+func any_station_music_open() -> bool:
+	_ensure_modal_reg()
+	for e in _modal_reg:
+		if e.station_music and e.screen.is_open():
+			return true
+	return false
+
 ## Close EVERY open modal (the death/respawn sweep and the quickload/quicksave chokepoint). Drives off the one
 ## registry, so a newly-registered screen is closed here automatically — no more hand-list drift (T1). Includes the
 ## NameEntryDialog (not a menu, but must not survive a death cinematic / scene reload floating over the world).
@@ -284,6 +333,10 @@ func _add_default_controller_bindings() -> void:
 	_bind_button(action_pickup, JOY_BUTTON_Y)
 	_bind_button(action_light, JOY_BUTTON_LEFT_STICK)
 	_bind_button(action_grapple, JOY_BUTTON_RIGHT_STICK)
+	# The shoulders are the only face controls nothing else claims, and L1/R1 is where a console shooter puts lean.
+	# On a pad they're NOT shared with Interact/Takedown (those are Y and unbound), so a pad lean is unconditional.
+	_bind_button(action_lean_left, JOY_BUTTON_LEFT_SHOULDER)
+	_bind_button(action_lean_right, JOY_BUTTON_RIGHT_SHOULDER)
 	_bind_axis(action_attack, JOY_AXIS_TRIGGER_RIGHT, 1.0)
 	_bind_axis(action_zoom, JOY_AXIS_TRIGGER_LEFT, 1.0)
 	_bind_button(action_weapon_slot_1, JOY_BUTTON_DPAD_UP)
@@ -316,7 +369,7 @@ func _bind_axis(action: StringName, axis: JoyAxis, value: float) -> void:
 ## The display label for `action`'s CURRENT binding ("E", "Mouse 1", ...): prefer the keyboard/mouse event
 ## (what's usually rebound), else the first event. Read LIVE from the InputMap each call, so a rebind shows
 ## immediately. THE single binding-query seam — the Options rebind buttons, the interact key-hints on the hover
-## readout ("[E] Talk to Kyle", "[Z] Pick Up"), tutorial `{action}` tokens, and dialogue prompts all resolve a
+## readout ("[F] Talk to Kyle", "[Z] Pick Up"), tutorial `{action}` tokens, and dialogue prompts all resolve a
 ## key through here, so a rebind can't leave one surface stale. Returns "(none)" for an unknown action and
 ## "(unbound)" for a known action with no events.
 func get_action_binding(action: StringName) -> String:
@@ -329,6 +382,46 @@ func get_action_binding(action: StringName) -> String:
 	if not events.is_empty():
 		return event_label(events[0])
 	return "(unbound)"
+
+## True when two actions are bound to the SAME physical control — the seam the CONTEXTUAL-KEY rule runs on
+## (scripts/player/lean.gd): "would pressing my lean key ALSO fire the verb that's waiting?". Read LIVE from the
+## InputMap, so a rebind answers correctly the instant it lands — bind Lean Right off E and it stops sharing with
+## Interact, so the lean stops deferring to it. An action always shares with itself. Compares the CONTROL, not the
+## event object: modifiers, echo and pressed-state are irrelevant to "same key".
+func actions_share_binding(a: StringName, b: StringName) -> bool:
+	if a == b:
+		return true
+	if not InputMap.has_action(a) or not InputMap.has_action(b):
+		return false
+	for ea in InputMap.action_get_events(a):
+		for eb in InputMap.action_get_events(b):
+			if same_binding(ea, eb):
+				return true
+	return false
+
+## Do these two InputEvents name the same physical control? Keys match on physical_keycode when both carry one
+## (this project's [input] defaults are all physical) and fall back to keycode, so a hand-authored keycode-only
+## event still compares. Different event CLASSES never match.
+func same_binding(a: InputEvent, b: InputEvent) -> bool:
+	var ka := a as InputEventKey
+	var kb := b as InputEventKey
+	if ka != null and kb != null:
+		if ka.physical_keycode != 0 and kb.physical_keycode != 0:
+			return ka.physical_keycode == kb.physical_keycode
+		return ka.keycode != 0 and ka.keycode == kb.keycode
+	var ma := a as InputEventMouseButton
+	var mb := b as InputEventMouseButton
+	if ma != null and mb != null:
+		return ma.button_index == mb.button_index
+	var ja := a as InputEventJoypadButton
+	var jb := b as InputEventJoypadButton
+	if ja != null and jb != null:
+		return ja.button_index == jb.button_index
+	var xa := a as InputEventJoypadMotion
+	var xb := b as InputEventJoypadMotion
+	if xa != null and xb != null:
+		return xa.axis == xb.axis and signf(xa.axis_value) == signf(xb.axis_value)
+	return false
 
 ## Legacy alias for get_action_binding(). Kept so pre-existing call sites / tests keep resolving; prefer
 ## get_action_binding() in new code. Both read the same live InputMap logic — one implementation, two names.

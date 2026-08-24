@@ -212,3 +212,41 @@ func test_a_stale_auto_release_does_not_cut_the_next_lines_dip() -> void:
 	bed._release_speech_duck(stale)
 	assert_eq(bed._speech_duck_db, -4.0, "a stale (superseded) auto-release must leave the dip alone")
 	bed.free()
+
+# --- The station-terminal handover (the THIRD summed level) -------------------------------------------
+
+func test_three_levels_compose_into_one_volume() -> void:
+	# A dialogue-hosted Trade / Heal / Bank suspends the conversation without ending it, so this bed keeps
+	# playing while the station's OWN tinny radio starts. It steps aside rather than stopping — and its
+	# handover level has to compose with the two that were already there, not stomp them. All three tweens can
+	# be live at once: the conversation is still fading in, the NPC is mid-line, and you open the shop.
+	var bed := _make_bed()
+	bed._set_base_db(-10.0)
+	bed._set_speech_duck_db(-4.0)
+	bed._set_menu_duck_db(-60.0)
+	assert_eq(bed.volume_db, -74.0, "all three levels must sum into volume_db")
+	bed._set_menu_duck_db(0.0)
+	assert_eq(bed.volume_db, -14.0, "closing the terminal restores exactly the envelope + talk duck")
+	bed.free()
+
+func test_the_menu_handover_is_latched_so_a_per_frame_assert_is_free() -> void:
+	# StationMusic asserts note_menu_music() EVERY FRAME rather than on the edge — that is what removes the
+	# ordering hazard between its poll and a conversation starting or ending. It is only affordable because the
+	# latch makes a repeat call a no-op; without it every frame would kill and rebuild a tween.
+	var bed := _make_bed()
+	assert_false(bed._menu_ducked, "a fresh bed is not menu-ducked")
+	bed.note_menu_music(false)
+	assert_null(bed._menu_fade, "asserting the state it is already in must not build a tween")
+	bed.free()
+
+func test_a_conversation_settles_the_menu_duck_on_the_way_in_and_out() -> void:
+	# The symmetric trap to the talk duck's: a conversation that ENDED while a terminal was up would otherwise
+	# freeze a -60 dB dip in and the NEXT conversation would open inaudible. set_bed_playing settles it both
+	# directions; StationMusic simply re-asserts next frame if a terminal really is still open.
+	var bed := _make_bed()
+	bed._menu_ducked = true
+	bed._menu_duck_db = -60.0
+	bed.set_bed_playing(true)  # inert without an authored stream, so drive the settle directly
+	bed.note_menu_music(false)
+	assert_false(bed._menu_ducked, "the latch must clear so the swell-back actually runs")
+	bed.free()

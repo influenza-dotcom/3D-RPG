@@ -93,7 +93,10 @@ var _identity_key: StringName = &""
 
 ## Master switch for this actor's combat outline. Off => flash-only overlay (no rim).
 @export var has_outline: bool = true
-## Outline rim colour. Combatants default to black; a friendly NPC can override per instance.
+## Outline rim colour. Combatants default to black; a friendly NPC can override per instance. (History:
+## this briefly shipped TRANSPARENT to dodge doubling under the InkOutline screen-space pass — wrong
+## fix; actors are now EXCLUDED from the ink via ACTOR_INK_MASK_LAYER, so the classic black rim IS the
+## NPC's outline again. Keep in lockstep with NpcData.outline_color, which stamps over this at spawn.)
 @export var outline_color: Color = Color.BLACK
 ## Outline thickness fed to the shader's `outline_width` uniform (shader scales it x4 in clip
 ## space). 2.0 is the standard combat rim every NPC scene ships.
@@ -348,10 +351,11 @@ enum ThreatResponse { FIGHT, FLEE }
 # preloads explosion_area.tscn -> closing the load-time loop, so Godot hands back a 0-node scene.
 # A runtime load() (cached by Godot) breaks the cycle; do NOT change this back to a const preload.
 const WEAPON_SCENE_PATH := "res://scenes/weapons/weapon.tscn"
-## Muzzle FX on the held gun — the SAME authored scenes the player's rig instances (spark burst + ejected
-## casing), loaded lazily like weapon.tscn so npc.gd stays light at parse time.
+## Muzzle FX on the held gun — the SAME authored scenes the player's rig instances (spark burst, barrel-smoke
+## trail + ejected casing), loaded lazily like weapon.tscn so npc.gd stays light at parse time.
 const SPARK_FX_SCENE_PATH := "res://scenes/effects/spark_attack.tscn"
 const SHELL_FX_SCENE_PATH := "res://scenes/effects/shell_drop.tscn"
+const SMOKE_FX_SCENE_PATH := "res://scenes/effects/muzzle_smoke.tscn"
 const LASER_MAX_LENGTH := 60.0
 ## --- Audio-cue timing the firing CADENCE owns (the sound ASSETS + mix live on the NpcAudioCues child) ---
 ## The shared (static) cooldown so a swarm spotting you at once plays one MGS "!" sting. Kept here as the
@@ -504,6 +508,14 @@ var _home_return: Node = null
 ## the bare class_name — see _build_components) so this @tool root doesn't name a newly-added class at parse time.
 ## Null off-tree / before _build_components, so the facades no-op on a bare unit-test NPC.
 var _distraction: Node = null
+
+## AI level of detail — the cadence gate on THIS script's decision layer (see _physics_process's LOD block and
+## scripts/components/ai_lod.gd). Auto-built in _build_components from GameSettings.npc_ai's lod_* seeds, UNLESS a
+## designer already dropped a configured AiLod under this NPC (the NpcHomeReturn idiom: an authored child wins).
+## Node-typed + built by SCRIPT PATH for the same new-classname-cascade reason as _distraction above. Null off-tree
+## / before _build_components, and _ai_think_delta degrades to "think every tick" when it is — so a bare unit-test
+## NPC and an @tool editor instance behave exactly as they did before LOD existed.
+var _ai_lod: Node = null
 
 ## Editor-only: populate the faction_id dropdown from the factions on disk (resources/factions/*.tres) so a new
 ## faction .tres appears automatically -- no hand-maintained suggestion string. @tool makes the editor honor this;
@@ -960,6 +972,24 @@ func _build_components() -> void:
 	_distraction = load("res://scripts/npc/npc_distraction.gd").new()
 	_distraction.host = self
 	add_child(_distraction)
+	# AI level of detail. An AUTHORED AiLod child wins (a designer tuned this NPC deliberately); otherwise build one
+	# from the species-wide seeds on GameSettings.npc_ai. Same script-path load + find-first-child idiom as the
+	# NpcHomeReturn leash, so dropping a configured AiLod into an NPC scene overrides the defaults with no code.
+	var lod_script := "res://scripts/components/ai_lod.gd"
+	for c in get_children():
+		var ls: Variant = c.get_script()
+		if ls != null and ls.resource_path == lod_script:
+			_ai_lod = c
+			break
+	if _ai_lod == null:
+		var lod: Node = load(lod_script).new()
+		lod.enabled = GameSettings.npc_ai.lod_enabled
+		lod.near_distance = GameSettings.npc_ai.lod_near_distance
+		lod.far_distance = GameSettings.npc_ai.lod_far_distance
+		lod.mid_interval = GameSettings.npc_ai.lod_mid_interval
+		lod.far_interval = GameSettings.npc_ai.lod_far_interval
+		add_child(lod)
+		_ai_lod = lod
 	# The GOAP brain — drives every NPC's AI as the sole decision layer. Plain
 	# RefCounted, not a child Node. See _build_goap_actions/_goals for the library it plans over.
 	_executor = GoapExecutor.new()
@@ -1231,7 +1261,9 @@ func react_to_caught_theft(thief: Node3D, witness_radius: float) -> void:
 		_last_attacker = thief
 		_set_target(thief)
 	if _perception != null:
-		_perception.alert_to(spot)
+		# The alert is ABOUT the thief (Perception.noticed -> a 2D "!" when it's the player). Freed-guarded: a typed
+		# Node param rejects a freed handle, and `spot` above already degrades to our own position for that case.
+		_perception.alert_to(spot, thief if is_instance_valid(thief) else null)
 	if witness_radius <= 0.0 or not is_inside_tree():
 		return
 	# Only ENEMIES (NPCs already hostile to the player) turn to look — a caught thief draws the guards' eyes, not
@@ -1244,7 +1276,9 @@ func react_to_caught_theft(thief: Node3D, witness_radius: float) -> void:
 		if not other.is_hostile():
 			continue
 		if global_position.distance_to(other.global_position) <= witness_radius:
-			other.investigate(spot, true)  # turn toward + come check the commotion (alerting: shows the "!")
+			# turn toward + come check the commotion (alerting: shows the "!"); the commotion is the THIEF, so that's who
+			# they noticed (freed-guarded — a typed Node param rejects a freed handle)
+			other.investigate(spot, true, NAN, thief if is_instance_valid(thief) else null)
 
 ## Taking a hit: (1) a PLAYER hit on a non-hostile NPC provokes it (flip hostile + drop faction rep);
 ## (2) turn toward the source so a shot in the back spins us around — no free backstabs. Wired from
@@ -1287,10 +1321,12 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 		return
 	# Turn toward the source so a hit from any angle spins us around; fall back to the current
 	# target's aim point for a hit we can't localize (preserving the old turn-toward-shooter behaviour).
+	# The second arg names WHO the alert is about (Perception.noticed -> the "!" sting reads 2D iff it's the
+	# player): the attacker when we know them, else the target we snap onto. Both are is_instance_valid-guarded.
 	if is_instance_valid(atk):
-		_perception.alert_to(atk.global_position)
+		_perception.alert_to(atk.global_position, atk)
 	elif is_instance_valid(_target):
-		_perception.alert_to(_aim_point())
+		_perception.alert_to(_aim_point(), _target)
 	# Wounded-ally cry: a following ally that drops to/below HURT_BARK_HP_FRAC of its HP calls out, once.
 	if is_following() and not _hurt_bark_said and hp > 0.0 and hp <= max_hp * GameSettings.npc_bark.hurt_bark_hp_frac:
 		_hurt_bark_said = true
@@ -1562,6 +1598,11 @@ func reset_for_reuse() -> void:
 	# restore_snapshot_state does on a save reload) — else a reused wanderer drifts back toward its old spot.
 	_spawn_position = global_position
 	_spawn_yaw = rotation.y
+	# AI level of detail: drop the banked think-time, the band state, and the cached player handle (which may
+	# point at a freed player across a respawn). The stagger slot is instance-id derived and deliberately
+	# survives, so a reused wave stays fanned out instead of coming back as a convoy. See ai_lod.gd.
+	if _ai_lod != null:
+		_ai_lod.reset_for_reuse()
 	# Targeting: drop every sticky reference (some may point at freed nodes) so we never engage a ghost on frame 1.
 	_set_target(null)
 	set_last_attacker(null)
@@ -1751,10 +1792,12 @@ func is_fists_out() -> bool:
 	return is_in_combat() and not _can_fight_with_gun()
 
 ## True while this NPC is in combat OR actively HUNTING — locked on (ALERTED) or sweeping the last-known
-## position (INVESTIGATING). The MusicDirector polls this so the combat music holds through a broken line
-## of sight instead of fading out mid-search (MGS-style: the hunt is still the fight). Deliberately a
-## SEPARATE predicate from is_in_combat, whose ALERTED-only meaning gates dialogue refusal + the reckless-
-## fire remarks — an investigating NPC should still refuse none of those differently.
+## position (INVESTIGATING). MusicDirector polls this for its CAUTION tier, so the score doesn't drop out
+## the moment line of sight breaks: it sustains, ducked by caution_duck_db, for as long as somebody is still
+## hunting (MGS-style — the hunt is still the fight, just quieter). Radio polls it too, as the broad half of
+## its combat duck (combat_strict = false). Deliberately a SEPARATE predicate from is_in_combat, whose
+## ALERTED-only meaning gates dialogue refusal + the reckless-fire remarks — and which MusicDirector still
+## reads separately for its FULL tier, so an active firefight outranks a search.
 func is_hunting() -> bool:
 	if _perception == null or not is_instance_valid(_target):
 		return false
@@ -1853,6 +1896,21 @@ func detection_of(who: Node) -> float:
 		return 0.0
 	return _perception.detection
 
+## The graded SUSPICION TIER this NPC holds toward `who` — CALM / WARY / SUSPICIOUS / ALERTED — or CALM when it
+## isn't tracking `who`. The third member of the awareness_of / detection_of family, gated identically, and the
+## same reason all three exist: a HUD reads how noticed the player is without reaching into the Perception child.
+##
+## WHY A TIER AND NOT THE RAW METER. Perception.suspicion() already folds `state` and `detection` into four
+## buckets against two global thresholds; a HUD that re-derived them from awareness_of + detection_of would put
+## that mapping in a second place, and the two would drift the first time a threshold moved. The minimap's
+## hostile alert ring is the first consumer (one ring step per tier).
+##
+## Returns a Perception.SuspicionTier int. Off-tree safe: a bare NPC has no Perception child -> CALM.
+func suspicion_of(who: Node) -> int:
+	if _perception == null or _perception.target != who:
+		return Perception.SuspicionTier.CALM
+	return _perception.suspicion()
+
 # --- Companion contract (Feature I) — the dialogue "join me" option drives these ---
 ## True when this NPC may be recruited as a companion: it must currently treat the player as FRIENDLY
 ## (resolved_disposition FRIENDLY), so it's neither hostile/provoked nor merely neutral, and not
@@ -1944,15 +2002,35 @@ func _build_perception() -> void:
 	add_child(_perception)
 
 ## First-noticed handler (wired to Perception.just_spotted in _build_perception). Plays the MGS "!" sting
-## (NpcAudioCues, positional) and — gated on the SAME shared cooldown via the sting's return — pops the
-## "!" head-icon. The audio child owns the FLEE-mute + cooldown so the sting and the popup stay in lockstep;
-## the popup itself stays on the root (with POPUP_*). Off-tree (no _audio_cues) -> no sting, no popup.
+## (NpcAudioCues — 2D + distance-independent when it's the PLAYER we noticed, positional at us otherwise) and —
+## gated on the SAME shared cooldown via the sting's return — pops the "!" head-icon. The audio child owns the
+## FLEE-mute + cooldown so the sting and the popup stay in lockstep; the popup itself stays on the root (with
+## POPUP_*). Off-tree (no _audio_cues) -> no sting, no popup.
 func _on_spotted() -> void:
 	if _dead or hp <= 0.0:
 		return  # a one-shot kill (the hit forces the spot via _on_damaged_by) shouldn't still sting/popup/bark
-	if _audio_cues != null and _audio_cues.on_spotted(global_position):
+	# 2D "you've been seen" sting iff what we noticed is the PLAYER (noticed_player — read off Perception.noticed, NOT
+	# the proximity-locked _target); positional at us otherwise.
+	if _audio_cues != null and _audio_cues.on_spotted(global_position, noticed_player()):
 		_popup_icon(POPUP_EXCLAMATION, true)  # "!" over the head — follows us, in sync with the bark bubble; shares the sting's cooldown gate
 	_try_detection_bark()  # Feature #7: a nearby hostile talker shouts "Over here!" the moment it spots you
+
+## True when WHAT this NPC most recently noticed (Perception.noticed — written on the just_spotted edge, right before
+## the emit: the seen/heard target, the attacker / thief handed to alert_to, the noise's emitter handed to
+## investigate_point) is the PLAYER — or a companion in the &"Player" group, the same Groups.PLAYER reading as
+## _aim_targeting_player / is_alerted_on_player. Deliberately NOT derived from _target: that's a PROXIMITY lock
+## (NpcTargeting binds the nearest hostile by range while we're still UNAWARE — NPC.tscn ships sight_range 500), so it
+## names the player even when what we actually noticed was a thrown decoy or another NPC's gunfire, and those must NOT
+## read as "you've been seen". Nobody in particular (a decoy, a scripted point, an unattributed hit) -> false. Null-safe
+## off-tree (no _perception) and freed-safe (a stimulus can be freed under us). Drives the "!" sting's 2D-vs-positional
+## split in _on_spotted; pinned by tests/test_npc_audio_cues.gd.
+func noticed_player() -> bool:
+	if _perception == null:
+		return false
+	# Bare Variant, NOT an Object-typed local: a typed assignment of a previously freed instance is a script error, and
+	# the stimulus can legitimately be freed by now (a decoy expired, an attacker died).
+	var who: Variant = _perception.noticed
+	return is_instance_valid(who) and who.is_in_group(Groups.PLAYER)
 
 ## Feature #7 — detection bark: when an NPC spots a HOSTILE (the PLAYER, OR an enemy NPC) and it's a
 ## speaking character (has a Talkable child), it calls out — a short line shown as floating text above its
@@ -2406,6 +2484,30 @@ func _physics_process(delta: float) -> void:
 		if _aim_sfx_delay < 0.0 and _audio_cues != null \
 				and _current_weapon_uses_ranged_attack_telegraphs():
 			_audio_cues.play_charge_sting(_aim_targeting_player)
+	# ---- AI LEVEL OF DETAIL: the ONE cadence gate on everything below. -------------------------------------
+	# Everything ABOVE this line is presentation or an override branch and still runs every tick. Everything
+	# BELOW is the DECISION layer (retarget, outline poll, perception, GOAP, the _react_* helpers), and a
+	# distant unaware NPC runs it on a cadence instead of 120 times a second.
+	# MOVEMENT IS NEVER THROTTLED: the skip path still calls super._physics_process (gravity + blast +
+	# apply_velocity/move_and_slide) with the REAL delta, so a throttled NPC keeps walking its last decided
+	# heading perfectly smoothly — it decides less often, it does not move less often.
+	# Two invariants make the skip safe, and both are why this gate sits exactly HERE:
+	#   1. It is ABOVE the `_desired_velocity = Vector3.ZERO` reset. Skipping therefore PRESERVES last think's
+	#      steering; had it gone below, every skipped tick would zero the velocity and throttled NPCs would
+	#      stutter-walk (move one tick in N, freeze the rest).
+	#   2. `think_dt` is the time BANKED since the last think, not this tick's delta, and everything below
+	#      consumes `delta` — so _fire_timer / _retarget_timer / perception / GOAP all advance in real seconds.
+	#      A throttled NPC reacts less OFTEN; nothing about it runs in slow motion.
+	# The real delta is kept for the movement calls, which must never be handed the banked value or a throttled
+	# NPC would teleport forward on each think tick.
+	var tick_delta := delta
+	if _ai_lod != null:
+		var think_dt: float = _ai_lod.think_delta(tick_delta,
+				_ai_lod.player_distance(global_position), _ai_force_full_think())
+		if think_dt <= 0.0:
+			super._physics_process(tick_delta)  # gravity + locomotion still run — see MOVEMENT above
+			return
+		delta = think_dt
 	_desired_velocity = Vector3.ZERO  # default: hold position; states below may drive it
 	# Bleed the fire charge back down every frame by default; _act_alerted overcomes this only while it
 	# has a clear, in-range shot. So whenever the enemy can't see or can't hit you, its wind-up decays
@@ -2444,7 +2546,7 @@ func _physics_process(delta: float) -> void:
 			_executor.tick(self, delta)
 		_react_music(delta)  # passive: turn to FACE + comment on a nearby playing radio (body yaw only, no travel). AFTER the executor so the face overrides the idle facing
 		_hide_laser()
-		super._physics_process(delta)
+		super._physics_process(tick_delta)  # REAL delta, never the LOD's banked think delta (see the LOD block)
 		return
 	# We have a real target now: clear the no-target distraction flag so a noise/body investigation that got
 	# PROMOTED into combat doesn't leave _was_distracted armed and mutter a phantom "lost interest" later.
@@ -2494,7 +2596,33 @@ func _physics_process(delta: float) -> void:
 	# hidden body must register while a hostile holds the player in range but hasn't noticed them yet (P0-4).
 	_react_distraction(delta)
 	_react_music(delta)
-	super._physics_process(delta)  # gravity + blast + locomotion move (uses _desired_velocity)
+	super._physics_process(tick_delta)  # gravity + blast + locomotion move (uses _desired_velocity). REAL delta — see the LOD block
+
+## Whether this NPC must think EVERY tick regardless of distance — the LOD's safety net. Anything the player is
+## interacting with, or that is interacting with them, is exempt: throttling these is exactly the visible
+## regression the feature must not cause. Deliberately generous; the win comes from the idle ambient cast, and
+## buying it by making a fight feel laggy would be a bad trade.
+##   - perception past UNAWARE  -> detecting / alerted / investigating: mid-reaction, must stay crisp
+##   - scripted investigating   -> a director/trigger pointed it somewhere and owns its timing
+##   - a companion              -> follows the player, so it is always "on screen" in practice
+## Dialogue needs no case here: DialogueManager PAUSES the tree, so a conversing NPC isn't ticking at all, and
+## the pre-talk walk-up returns from _physics_process ABOVE this gate (the _talk.is_approaching() branch).
+##
+## ⭐ HOLDING A `_target` IS DELIBERATELY *NOT* AN EXEMPTION, and this is the subtle part. `_acquire_target`
+## locks the nearest foe by pure PROXIMITY with no LOS/perception gate (see the comment at the _react_music
+## call site), and NPC.tscn ships `sight_range = 500` — the whole map. So every hostile NPC in the level holds
+## the player as `_target` from the moment the level loads, whether or not it has actually noticed them.
+## Exempting target-holders would therefore switch the LOD OFF for the entire cast and this feature would
+## measure as a no-op. PERCEPTION state is the honest "is it actually engaged" signal, so that is what gates.
+## The cost of being wrong here is bounded and small: an unaware NPC in the far band notices the player up to
+## `lod_far_interval` (0.25 s) later than before, and only ever beyond `lod_far_distance` (45 m).
+func _ai_force_full_think() -> bool:
+	if _perception != null and _perception.state != Perception.State.UNAWARE:
+		return true
+	if _scripted_investigating:
+		return true
+	return is_following()
+
 
 ## Settle the give-up bark bookkeeping at the END of an engagement — the ONE place the combat-over / lost-interest
 ## call-out fires AND the ONE place the engagement latches (_saw_combat / _was_aware / _alerted_allies) clear. Called
@@ -2896,18 +3024,43 @@ func _body_discovery_on() -> bool:
 ## a scripted noise). Routes through Perception (-> INVESTIGATING: walk there and search); `alerted` shows the
 ## "!" reaction sting. The no-target GOAP tick walks + searches the spot, and the scripted flag keeps
 ## _react_unaware from snapping it to idle before it gets there. No-op without a Perception.
-func investigate(point: Vector3, alerted: bool = false, sector_phase: float = NAN) -> void:
+## `source` = WHO this is about, if anyone (Perception.noticed): the caught thief for a pickpocket witness, the
+## player for a cutscene "the guard notices you"; leave null for a bare point — the "!" sting then stays
+## positional at this NPC instead of the 2D "you've been seen" cue.
+func investigate(point: Vector3, alerted: bool = false, sector_phase: float = NAN, source: Node = null) -> void:
 	if _perception == null:
 		return
-	_perception.investigate_point(point, alerted, 0.0, sector_phase)  # sector_phase (GA-4) = a squad-coordinated sweep sector; NAN = per-NPC default
+	_perception.investigate_point(point, alerted, 0.0, sector_phase, source)  # sector_phase (GA-4) = a squad-coordinated sweep sector; NAN = per-NPC default
 	_scripted_investigating = true
 
 # --- Target acquisition ---
+## DEV-ONLY "ghost" seam (the debug console's `notarget`, DebugActionsWorld._cmd_notarget). A node carrying this
+## meta is NEVER treated as an enemy by ANY NPC: _treats_as_enemy() short-circuits false before is_hostile_to(),
+## and _treats_as_enemy is THE gate NpcTargeting acquires and keeps by (npc_targeting.gd _target_invalid /
+## attacker lock / player scan / peer scan) AND the per-frame `_perception.is_hostile` writer below, so a target
+## already held is dropped on the next tick and can_see()/can_hear() read false with no target — the whole cast
+## keeps wandering / scheduling / fighting each other but never acquires, sees or hears the ghost. It is a META,
+## not a group or a field, so it never touches Groups.PLAYER membership (kill-XP / HUD / AiLod key on that) and
+## costs nothing when absent (one has_meta on a Dictionary miss). Deliberately NOT applied to is_hostile_to():
+## provoke / faction rep / the outline rim keep working — shooting a ghost still sours the faction, it just
+## cannot shoot back. Nothing in gameplay sets this meta; only the debug tools do.
+const DEBUG_NOTARGET_META := &"debug_notarget"
+
 ## Whether this NPC should ENGAGE `node` in combat. Normally this is exactly is_hostile_to() — so a
 ## non-following NPC's targeting/perception is completely unchanged. While FOLLOWING, it ALSO covers a
 ## generic unaligned-hostile attacker (the leader's assailant) so a companion can defend its leader
 ## against a foe it has no faction reason to hate, but still NEVER an ally/neutral (no faction conflict).
 func _treats_as_enemy(node: Node) -> bool:
+	# Dev-only ghost gate (DEBUG_NOTARGET_META above) — FIRST, so a ghost is never engaged via the protectee branch
+	# either (a bodyguard does not fight a ghost that is hostile to its charge; the branch itself is otherwise
+	# unchanged). `node != null` is the operative guard (has_meta on null is a crash, and _treats_as_enemy(null) is a
+	# normal call — is_hostile_to(null) below answers it as before). is_instance_valid is belt-and-braces only: a
+	# freed handle cannot even reach this body through the `Node`-typed parameter (the VM rejects it at the call —
+	# the F-C46 "previously freed" trap, options_menu.gd), and every caller runs _is_live / is_instance_valid first
+	# anyway (npc_targeting.gd _target_invalid + both scans, the `_perception.is_hostile` writer under the
+	# is_instance_valid(_target) branch above). It stays so the gate survives an untyping of the param unchanged.
+	if node != null and is_instance_valid(node) and node.has_meta(DEBUG_NOTARGET_META):
+		return false
 	if is_hostile_to(node):
 		return true
 	# While defending a protectee (a player companion OR a bodyguard for any character), also engage anyone
@@ -3099,10 +3252,11 @@ func _build_weapon_mesh() -> void:
 		_weapon.projectile_spawner.muzzle = _gun_muzzle
 	_build_muzzle_fx()
 
-## Muzzle FX on the held gun: the spark burst + ejected-casing scenes the player's rig also instances,
-## parented under the gun's barrel marker (so a re-equip frees them with the old model and rebuilds) and
-## fired by the SAME Attack signals (flash_muzzle / shell_particle) the player path uses. The spark gates
-## itself on the equipped weapon's has_muzzle_flash via its `attack` ref; Attack resizes the casing per
+## Muzzle FX on the held gun: the spark burst, barrel-smoke trail + ejected-casing scenes the player's rig
+## also instances, parented under the gun's barrel marker (so a re-equip frees them with the old model and
+## rebuilds) and fired by the SAME Attack signals (flash_muzzle / shell_particle) the player path uses. The
+## spark and the smoke both gate themselves on the equipped weapon's has_muzzle_flash via their `attack`
+## ref (the smoke also reads WeaponData.muzzle_smoke_scale); Attack resizes the casing per
 ## WeaponData.casing_size_scale through attack.shell_drop. Falls back to the weapon-mesh root when the
 ## model has no Muzzle marker.
 func _build_muzzle_fx() -> void:
@@ -3115,6 +3269,11 @@ func _build_muzzle_fx() -> void:
 	spark.attack = _weapon.attack
 	anchor.add_child(spark)
 	_weapon.attack.flash_muzzle.connect(spark._on_attack_flash_muzzle)
+	# Barrel smoke, on the same signal as the spark. Untyped for the same class-cache reason.
+	var smoke = load(SMOKE_FX_SCENE_PATH).instantiate()
+	smoke.attack = _weapon.attack
+	anchor.add_child(smoke)
+	_weapon.attack.flash_muzzle.connect(smoke._on_attack_flash_muzzle)
 	var shell: ShellDrop = load(SHELL_FX_SCENE_PATH).instantiate()
 	anchor.add_child(shell)
 	_weapon.attack.shell_particle.connect(shell.emit)

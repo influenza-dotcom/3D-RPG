@@ -3,11 +3,15 @@ extends GutTest
 ## The row-button geometry contract behind the menus' selection "cursor" (MenuStyle.size_row_button).
 ## The list screens build multi-column rows as an EMPTY-TEXT Button carrying full-rect child Labels inset
 ## by the stylebox content margins — but an empty text buffer contributes ZERO height to
-## Button.get_minimum_size(), so a bare row button collapses to its v-margins (~10px) and lays out half a
-## line ABOVE the glyphs its labels draw: the hover/pressed/focus accent bar (the menu "cursor") and the
-## click hitbox stop wrapping the text (first reported on the implant chooser). size_row_button pins the
-## button back to the exact box a one-line caption would earn. These tests pin the engine premise, the
-## helper's math, and that the row builders actually route through it.
+## Button.get_minimum_size(), so a bare row button collapses to its v-margins (~12px under the shipped art
+## skin) and lays out half a line ABOVE the glyphs its labels draw: the hover/pressed/focus accent bar (the
+## menu "cursor") and the click hitbox stop wrapping the text (first reported on the implant chooser).
+## size_row_button pins the button back to the exact box a one-line caption would earn. These tests pin the
+## engine premise, the helper's math, and that the row builders actually route through it.
+##
+## Probes here measure IN-tree: an off-tree Control with `.theme` assigned resolves the ThemeDB FALLBACK
+## theme (theme-owner assignment happens on tree entry), which is exactly the blindness the helper itself
+## had to fix — reference and helper must both measure the real menu theme or the compare is fiction.
 
 ## Every screen that builds empty-text row buttons with child-label content — extend when a new screen
 ## adopts the idiom (the helper's doc comment names the rule).
@@ -18,12 +22,15 @@ const ROW_BUILDER_FILES := [
 ]
 
 
-## The reference box: what one line of caption text earns a Button under the live menu theme.
+## The reference box: what one line of caption text earns a Button under the live menu theme (measured
+## in-tree — see the header note).
 func _captioned_height() -> float:
 	var b := Button.new()
 	b.theme = MenuStyle.theme
 	b.text = "X"
+	add_child(b)
 	var h: float = b.get_minimum_size().y
+	remove_child(b)
 	b.free()
 	return h
 
@@ -33,8 +40,10 @@ func test_empty_button_still_collapses_without_the_helper() -> void:
 	# for empty-text buttons — size_row_button is then redundant and can be retired (harmless meanwhile).
 	var empty := Button.new()
 	empty.theme = MenuStyle.theme
+	add_child(empty)
 	assert_lt(empty.get_minimum_size().y, _captioned_height(),
 		"an empty-text Button reports less min height than a captioned one (margins-only vs margins+line)")
+	remove_child(empty)
 	empty.free()
 
 

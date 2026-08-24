@@ -28,7 +28,28 @@ var _fog_default_captured: bool = false
 
 var base_amt: float
 var bob_amount: float = GameSettings.camera.bob_amount
-var base_fov: float = GameSettings.camera.default_fov
+## The resting (un-scoped) field of view in degrees, READ LIVE from the one source of truth rather than cached.
+##
+## ⭐ DO NOT TURN THIS BACK INTO A STORED FIELD. It was `var base_fov: float = GameSettings.camera.default_fov` —
+## a plain initializer, evaluated once when the camera is instantiated, that nothing ever re-seeded. Options →
+## Video → Field of View calls `Settings.set_fov()`, which writes `GameSettings.camera.default_fov` and persists
+## it, and that is ALL it writes. So after any mid-run FOV change this camera kept composing `_target_fov`
+## against the OLD rest FOV (see `composed_fov` in _process) while `ScopeIn._process` eased the SAME `fov`
+## property toward the NEW one on its un-scoped branch — two writers pulling one value toward two different
+## targets every frame. `fov` settled between them, so the slider looked half-broken until the level reloaded
+## and a fresh camera re-ran the initializer. A getter makes that staleness structurally impossible.
+##
+## This also puts the setting back in line with its two siblings: `GameSettings.camera.mouse_sensitivity`
+## (mouse_input.gd) and `GameSettings.screen_shake.intensity_multiplier` (screen_shake.gd) are the other two
+## fields `Settings` writes into `GameSettings`, and both are read AT THE POINT OF USE, never cached. base_fov
+## was the only one that cached, and the only one with this bug.
+##
+## Read-only on purpose: nothing has ever assigned `base_fov`, and the way to move the rest FOV is
+## `Settings.set_fov()` (which clamps to FOV_MIN/FOV_MAX and saves). Assigning here would just be a second
+## source of truth — the exact shape that caused this.
+var base_fov: float:
+	get:
+		return GameSettings.camera.default_fov
 
 var _time: float = 0.0
 ## Camera's rest local position; bob + impact offsets are layered on top of it.
@@ -49,8 +70,8 @@ var _scope_fov_active: bool = false  ## true while ScopeIn owns camera.fov for A
 func _ready() -> void:
 	base_amt = bob_amount
 	_origin = position
-	# base_fov stays at GameSettings.camera.default_fov — the ONE rest-FOV source of
-	# truth (see the field's initializer). We deliberately do NOT capture the scene
+	# base_fov READS GameSettings.camera.default_fov live — the ONE rest-FOV source of
+	# truth (see the property's getter). We deliberately do NOT capture the scene
 	# node's authored `fov` here: that value (a wider editor-preview default) used to
 	# overwrite base_fov, which left CameraEffects resting wide while ScopeIn pulled
 	# un-scoped toward default_fov — the two fought over `fov` every un-scoped frame.
@@ -119,8 +140,9 @@ func _process(delta: float) -> void:
 	# Ease FOV and strafe-tilt (roll into the strafe direction) frame-rate-
 	# independently.
 	# COUPLING: ScopeIn.gd also assigns `fov` every frame. While NOT scoped it eases
-	# toward GameSettings.camera.default_fov — the SAME value base_fov rests at — so
-	# the two writers agree and no longer fight over the un-scoped rest FOV. While ADS'd
+	# toward GameSettings.camera.default_fov — which base_fov now READS, so the two
+	# writers can never disagree, not even for the frames after a mid-run FOV change
+	# (that used to leave this one stale; see the property's getter). While ADS'd
 	# ScopeIn owns `fov` (pulls to the scoped FOV); `_scope_fov_active` suppresses this writer while scoped.
 	var fov_t := 1.0 - exp(-GameSettings.camera.fov_lerp_speed * delta)
 	var tilt_t := 1.0 - exp(-GameSettings.camera.tilt_speed * delta)

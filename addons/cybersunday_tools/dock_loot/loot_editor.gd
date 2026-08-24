@@ -181,7 +181,9 @@ func _open_table(path: String) -> void:
 
 
 ## Recursively scan SCAN_ROOT for .tres/.res that load as a LootTable. The registries are non-@tool (empty in-editor),
-## so we discover by loading + type-checking, exactly like item_placer_dock scans items.
+## so we discover by type-checking; a TEXT .tres is pre-filtered on its `script_class="LootTable"` header first (the
+## scan_disk.gd idiom) so the scan doesn't load — and drag in the whole dependency graph of — every resource in the
+## project just to find a handful of tables. A BINARY .res has no readable header, so it still needs the load().
 static func _scan_loot_tables() -> Array[String]:
 	var out: Array[String] = []
 	_scan_dir_for_tables(SCAN_ROOT, out)
@@ -200,6 +202,9 @@ static func _scan_dir_for_tables(dir_path: String, out: Array[String]) -> void:
 		if not (fname.ends_with(".tres") or fname.ends_with(".res")):
 			continue
 		var p := dir_path.path_join(fname)
+		# Cheap text-header gate before the expensive load(). A .tres that doesn't declare LootTable can't BE one.
+		if fname.ends_with(".tres") and not ("script_class=\"LootTable\"" in FileAccess.get_file_as_string(p)):
+			continue
 		var res := load(p)
 		if res is LootTable:
 			out.append(p)

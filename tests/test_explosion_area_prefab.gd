@@ -35,6 +35,10 @@ func test_wired_node_refs_resolve_to_the_right_children() -> void:
 
 	var mesh := e.get_node_or_null(^"MeshInstance3D")
 	assert_true(mesh is MeshInstance3D, "`mesh_instance` points at a MeshInstance3D child (the flash mesh)")
+	# The SCRIPT, not just the type: ExplosionMesh._ready is what builds the pulsing flash material AND what
+	# stamps InkOutline.ACTOR_INK_MASK_LAYER. Drop the script and the blast silently becomes a plain opaque
+	# sphere that the world's ink pass edge-detects into a black ring (the 2026-08-16 report).
+	assert_true(mesh is ExplosionMesh, "the flash node carries the ExplosionMesh script (pulse + ink-mask stamp)")
 
 	var col := e.get_node_or_null(^"CollisionShape3D")
 	assert_true(col is CollisionShape3D, "`collision_shape` points at a CollisionShape3D child (the push collider / dual-mode switch)")

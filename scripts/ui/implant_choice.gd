@@ -207,7 +207,7 @@ func _chip_roster() -> Array[Item]:
 ## in the shared skin price column. Mirrors ChipInstallScreen._make_row (same columns — this one just bills at
 ## Begin instead of on click).
 func _make_row(text: String, ability_name: String, price_text: String) -> Button:
-	var btn := MenuStyle.size_row_button(Button.new())  # empty-text button: without the pin its rect (selection bar + hitbox) collapses above the labels
+	var btn := MenuStyle.style_list_row(MenuStyle.size_row_button(Button.new()))  # empty-text row: height-pinned, and pinned to ROW language (its child Labels carry their own inks — artist button-body art would bury them)
 	btn.toggle_mode = true
 	# MUTE the auto-wired generic click: the cue belongs to _on_row_toggled, which knows the DIRECTION of the
 	# flip. Same contract as implants_screen._make_toggle_row — order-free, since _wire_button skips a button

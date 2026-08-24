@@ -115,7 +115,12 @@ func scan_distractions(delta: float, noise_on: bool, corpse_on: bool) -> void:
 			if src != null:
 				# alerting "!" — the player wants to see the lure land; seed the search ring from how LOUD it was
 				# (a crash searches a wider area than a faint step), scaled by SearchSettings.noise_radius_scale.
-				host._perception.investigate_point(src.global_position, true, src.radius * GameSettings.search.noise_radius_scale)
+				# Hand WHO made the noise along (NoiseSource.emitter: the Player for its own steps/shots, an NPC for
+				# its gunfire pulse, null for a decoy) so the "!" handler can tell "I heard YOU" (2D sting) from "I
+				# heard a can rattle" (positional) — it must not read that off host._target, a mere proximity lock.
+				# Sanitized: a one-shot source can outlive its emitter, and a typed Node param rejects a freed handle.
+				var who: Node = src.emitter if is_instance_valid(src.emitter) else null
+				host._perception.investigate_point(src.global_position, true, src.radius * GameSettings.search.noise_radius_scale, NAN, who)
 		# Corpse discovery is PERSISTED (discover_corpse -> GameState.mark_corpse_discovered) — so gate it on a
 		# GENUINELY idle NPC (UNAWARE), not merely "not INVESTIGATING": a stale DETECTING/ALERTED beat from a
 		# just-lost target must NOT permanently mark a body discovered with zero real investigation. sense() (called

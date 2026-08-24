@@ -39,7 +39,19 @@ func test_fields_exist_per_component_group() -> void:
 		# Compass / minimap
 		"compass_fallback_color", "compass_marker_texture", "minimap_player_color", "minimap_npc_color",
 		"minimap_wall_color", "minimap_walkable_color", "minimap_backing_color", "minimap_outline_color",
+		"clock_color",
 		"minimap_frame_texture",
+		# Marker glyph paint (2026-08-13): the neutral body tint split OFF minimap_npc_color (which stays the
+		# POI-beacon fallback), the hostile alert ring, the station family + its exit exception, the north tick.
+		"minimap_neutral_color", "minimap_alert_color", "minimap_station_color", "minimap_exit_color",
+		"minimap_north_color",
+		# Minimap ART (2026-08-19): the drop-in marker slots that landed with the authored-scene conversion —
+		# the caret, the POI beacon and the station alphabet, the three families a %MapOver scene node cannot
+		# draw because their positions are recomputed every frame. See scripts/ui/minimap_art.gd.
+		"minimap_player_texture", "minimap_poi_texture", "minimap_station_texture",
+		"minimap_station_shop_texture", "minimap_station_bank_texture", "minimap_station_heal_texture",
+		"minimap_station_train_texture", "minimap_station_tech_texture",
+		"minimap_station_leisure_texture", "minimap_station_exit_texture",
 		# Label + hotbar chrome
 		"label_outline_color", "toast_outline_size", "look_name_outline_size",
 		"corner_label_outline_size", "corner_label_outline_color", "corner_label_color",
@@ -105,6 +117,22 @@ func test_artist_texture_slots_default_null() -> void:
 	s = null
 
 
+## THE MINIMAP'S DROP-IN MARKER ART. Ten slots, all null, which is what makes the shipped map pixel-identical
+## and lets a delivered PNG land ONE AT A TIME — the MenuSkin widget-art rule, verbatim.
+##
+## Deliberately NOT folded into test_defaults_match_the_former_literals for the same reason the two tests
+## below are not: that test's contract is "the default equals the literal the consumer used to hardcode", and
+## new art has no former literal. What matters here is only that every one of them ships EMPTY.
+func test_minimap_art_slots_default_null() -> void:
+	var s := _fresh()
+	for field in ["minimap_player_texture", "minimap_poi_texture", "minimap_station_texture",
+			"minimap_station_shop_texture", "minimap_station_bank_texture", "minimap_station_heal_texture",
+			"minimap_station_train_texture", "minimap_station_tech_texture",
+			"minimap_station_leisure_texture", "minimap_station_exit_texture"]:
+		assert_null(s.get(field), "%s defaults null (the code-drawn glyph is the shipped look)" % field)
+	s = null
+
+
 ## The minimap PLAN's paint (walls / walkable fill / backing / rim). Deliberately NOT folded into
 ## test_defaults_match_the_former_literals: that test's contract is "the default equals the literal the
 ## consumer script used to hardcode", and these four slots have no former literal — the procedural
@@ -119,6 +147,17 @@ func test_minimap_plan_paint_defaults() -> void:
 	assert_eq(s.minimap_outline_color, Color(0.35, 0.95, 0.85, 0.55), "rim default")
 	assert_lte(float(s.minimap_walkable_color.a), float(s.minimap_wall_color.a),
 			"the ground fill never out-inks the wall strokes drawn on top of it")
+	s = null
+
+## The HUD clock's one paint slot (the time readout under the map). Deliberately NOT in
+## test_defaults_match_the_former_literals: the widget is new, so this colour was never a literal that was
+## lifted out — there is nothing to preserve, only a default to pin.
+func test_clock_paint_default() -> void:
+	var s := _fresh()
+	assert_eq(s.clock_color, Color(0.35, 0.95, 0.85, 0.9),
+			"the clock's digits ship on the map's own cyan, so the map and its caption read as one instrument")
+	assert_eq(s.clock_color, s.minimap_wall_color,
+			"...which means it tracks minimap_wall_color exactly until a skin deliberately parts them")
 	s = null
 
 ## MenuStyle exposes the skin (the MenuStyle.skin twin): preloaded from the authored .tres, never null
@@ -145,7 +184,7 @@ func test_ui_gd_reads_the_hud_skin() -> void:
 	for field in [
 		"label_outline_color", "toast_outline_size", "look_name_outline_size",
 		"corner_label_outline_size", "corner_label_outline_color", "corner_label_color",
-		"crosshair_texture",
+		"crosshair_texture", "clock_color",
 	]:
 		assert_true(src.contains("MenuStyle.hud.%s" % field), "ui.gd reads MenuStyle.hud.%s" % field)
 	assert_false(src.contains("font_outline_color\", Color.BLACK"),

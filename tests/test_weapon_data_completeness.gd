@@ -38,6 +38,14 @@ func _check_weapon(path: String) -> void:
 	_check_field(w, "max_ammo", TYPE_INT, path)
 	_check_field(w, "pellet_count", TYPE_INT, path)
 	_check_field(w, "pellet_spread", TYPE_FLOAT, path)
+	# Per-weapon multiplier on the global per-shot stamina cost (GameSettings.player_movement.stamina_shot_cost).
+	# Declared `float = 1.0`, so an int-looking .tres literal (`stamina_cost_mult = 2`) still parses as a FLOAT —
+	# the same trap damage above documents. The BALANCE of the authored values is swept by test_combat_data.gd.
+	_check_field(w, "stamina_cost_mult", TYPE_FLOAT, path)
+	# Does a round from this weapon explode? A pricing/authoring FACT, not a behaviour switch - nothing on
+	# WeaponData can otherwise tell an explosive apart (explosion_radius defaults 4.0 on every weapon and
+	# max_explosion_force defaults 20.0, so the PISTOL nominally out-blasts the launcher's authored 10.0).
+	_check_field(w, "projectile_explodes", TYPE_BOOL, path)
 	# Phase 4 additions
 	_check_field(w, "screen_shake_amount", TYPE_FLOAT, path)
 	_check_field(w, "self_knockback", TYPE_FLOAT, path)
@@ -57,6 +65,10 @@ func _check_weapon(path: String) -> void:
 	# npc_hold_override weapons keep their authored npc_hold_scale exactly). Display-only: the FP view-model,
 	# ground drops, icons, and preview never read it.
 	_check_field(w, "npc_held_display_scale", TYPE_FLOAT, path)
+	# In-flight streak for a THROWN copy (WorldItem._make_throwable stamps a ThrowTrail child from these; the
+	# effect is scripts/components/throw_trail.gd). Off by default — a gun tumbles away without one.
+	_check_field(w, "thrown_trail", TYPE_BOOL, path)
+	_check_field(w, "thrown_trail_color", TYPE_COLOR, path)
 
 func _check_field(obj: Object, field: String, expected_type: int, src: String) -> void:
 	assert_true(field in obj, "%s must have field '%s'" % [src, field])
@@ -158,3 +170,19 @@ func test_non_knife_weapons_do_not_override_npc_hold() -> void:
 		assert_not_null(w, "%s must load as a WeaponData" % path)
 		assert_false(w.npc_hold_override,
 			"%s mounts correctly via rotation-only weapon_mesh_rotation — it must NOT set npc_hold_override" % wep)
+
+# The in-flight streak is game-wide: EVERY weapon draws a white tracer through the arc of a real throw, not just
+# the blade it shipped for. This pins the whole roster ON — the inverse of what it pinned before — because the
+# failure mode is silent and per-resource: a weapon whose `thrown_trail` gets un-ticked (or a NEW weapon .tres
+# authored from a stale template) just quietly throws bare, and nothing else in the suite would notice. The one
+# WHITE assert covers the colour drifting per weapon, which would break the "every throw looks like a throw" read
+# the effect exists for. `fists` is in the roster even though there is no fists Item to drop: it costs nothing,
+# and it keeps this list identical to the hold-override roster above rather than subtly different.
+func test_every_weapon_streaks_when_thrown() -> void:
+	for wep in ["melee", "pistol", "shotgun", "smg", "sniper_wep", "rock_weapon", "spray_paint", "fists"]:
+		var path := "res://resources/weapons/%s.tres" % wep
+		var w := load(path) as WeaponData
+		assert_not_null(w, "%s must load as a WeaponData" % path)
+		assert_true(w.thrown_trail, "%s must draw a streak in flight — the tracer is on every thrown weapon" % wep)
+		assert_eq(w.thrown_trail_color, Color(1.0, 1.0, 1.0, 1.0),
+			"%s's streak is WHITE, like every other weapon's" % wep)

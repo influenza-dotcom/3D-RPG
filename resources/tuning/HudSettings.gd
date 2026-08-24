@@ -158,6 +158,90 @@ extends Resource
 ## Hard cap on the lens-breath scale delta (fraction; 0.04 = the panel never leaves 96%..104%).
 @export var hud_fov_scale_max: float = 0.04
 
+@export_group("HUD ghosting")
+# CRT phosphor persistence for the HUD (scripts/ui/hud_ghost.gd, driven per frame in ui.gd). The HUD's own
+# canvas is rendered a SECOND time into a never-cleared offscreen buffer that is multiplied down a little
+# each frame; that buffer is drawn BEHIND the live HUD, so anything that moves or changes drags a soft
+# tail and anything that sits still is hidden exactly behind itself. Two knob families: PERSISTENCE (how
+# strong + how long the tail is) and LATENCY (how far the ghost image lags the live HUD while the camera
+# turns — the half that makes the screen-locked RETICLE participate, since a static image has no tail).
+# The player scales the whole effect 0..1 via Options -> Accessibility -> "HUD Ghosting"
+# (Settings.hud_ghost_scale); these are the AUTHORED amplitudes that dial multiplies.
+## How strongly the accumulated ghost is composited behind the HUD, 0..1. This is the master amplitude:
+## 0 shuts the whole effect down (the offscreen pass stops rendering entirely, so OFF is free), and the
+## HUD is then pixel-identical to a build without this feature. 0.32 reads as a soft echo rather than a
+## double image — push past ~0.5 and moving readouts start to look like they are printing twice.
+@export_range(0.0, 1.0, 0.01) var hud_ghost_strength: float = 0.32
+## Persistence time constant (seconds): the buffer loses 1/e of itself every tau, so the tail is the same
+## LENGTH at 30 fps and at 144 (the decay is exp(-delta/tau), not a per-frame constant). 0.10 is roughly
+## a 5-frame visible tail at 60 fps. Longer smears the corner panel into a comet under heavy shake;
+## shorter collapses toward no effect at all. 0 = no persistence (the buffer is wiped every frame).
+@export_range(0.0, 0.6, 0.005) var hud_ghost_tau: float = 0.13
+## Px of ghost LAG per rad/s of camera look rate (x = yaw, y = pitch). This is what makes the reticle
+## ghost: it is welded to screen centre, so persistence alone would never show on it — instead the whole
+## captured HUD is drawn a couple of pixels behind where it actually is while you turn, and the
+## persistence smears that offset into a tail. Signs match HudSway.look_target: the ghost trails the turn.
+@export var hud_ghost_drag_gain: Vector2 = Vector2(1.7, 1.4)
+## Hard cap (px) on that lag, before the player's 0..1 dial scales it. THE SUBTLETY KNOB: 3 px on the
+## 792-wide canvas is ~7 screen px at 1080p — visible as motion smear on a flick, invisible when standing
+## still (the offset returns to zero and the ghost hides behind the live HUD). Set 0 for pure persistence
+## with no double vision at all; past ~6 the reticle starts reading as two reticles mid-turn.
+@export_range(0.0, 12.0, 0.5) var hud_ghost_drag_max: float = 3.0
+## Seconds for the lag to close 1/e of the gap to its target. A first-order lag, NOT the panel's spring:
+## the panel is under-damped on purpose so it settles with one overshoot (that sells mass), but an image's
+## latency has no mass and an overshoot here reads as the ghost oscillating around a still reticle.
+@export_range(0.0, 0.4, 0.005) var hud_ghost_drag_response: float = 0.045
+## Alpha subtracted from the ghost at DISPLAY time to kill the 8-bit decay residue. An RGBA8 buffer
+## multiplied by d each frame has a fixed point — once round(n*d) == n the value never falls again (~8/255
+## at a typical d) — so without this cut every place the HUD has ever been keeps a permanent faint smear.
+## Raise it if a stale outline ever survives; lower it to let the tail's last few steps live longer.
+@export_range(0.0, 0.5, 0.005) var hud_ghost_residue_floor: float = 0.06
+
+@export_group("HUD curve")
+# CURVED GLASS. The corner instrument panel is rendered into a SubViewport and composited back through
+# resources/shaders/hud_curve.gdshader's cylindrical warp (ui.gd `_apply_hud_curve`), so the panel wraps
+# TOWARD you at its edges like the inside of a curved monitor. Same CRT fiction as the ghosting group, and the
+# same scope: an INSTRUMENT READOUT curves; the reticle, the stamina ring, the combat arcs and every other
+# screen-projected annotation stay dead flat, because they annotate the aim point or a world bearing and a
+# warped one would lie. ui.gd's moved-vs-pinned rule already draws exactly that line, so this reuses it
+# rather than inventing a second list -- whatever rides the `_weighted` carrier curves, nothing else does.
+# AUTHOR-TIME numbers: the player-facing dial is Options -> Accessibility -> "HUD Curve"
+# (Settings.hud_curve_scale, polled live), which SCALES hud_curve_amount 0..1 -- the ps1_warp_intensity
+# idiom, so this knob is the ceiling and the player picks how much of it they want.
+## How far the panel bends, as the fraction of the half-canvas its EDGE MIDPOINTS travel. The bend is
+## CONCAVE -- the panel wraps toward you at its edges, the inside of a curved monitor -- and it is FITTED,
+## meaning the corners are pinned to the screen corners and the edges bow inward from them. Nothing can
+## ever be pushed off the canvas, so this is safe to crank. At 0.08 the bottom-centre content rides ~18 px
+## up on the 792x444 canvas; past ~0.2 the panel stops reading as a screen and starts reading as a tube.
+@export_range(0.0, 0.3, 0.005) var hud_curve_amount: float = 0.08
+## How much the OTHER axis bends too, as a fraction of hud_curve_amount.
+## 0 = a monitor curved about a VERTICAL axis (the shipped look): horizontal lines bow, and every vertical
+##     stays dead straight -- the plain curved-ultrawide silhouette.
+## 1 = SPHERICAL: both axes bow at once, which reads as an eye or a fishbowl rather than a monitor.
+## Anything between mixes them; above 1 the verticals bow MORE than the horizontals, which looks wrong on a
+## canvas this wide but is left reachable rather than clamped away.
+@export_range(0.0, 2.0, 0.05) var hud_curve_axis_ratio: float = 0.0
+## Alpha lost toward the bent edge as the panel turns away from the light -- full strength in the corners,
+## half at the edge midpoints. Small on purpose: this sells the curve as a SURFACE, and a heavy value just
+## dims the HP bar in the exact corner it lives in. 0 = an evenly lit panel.
+@export_range(0.0, 1.0, 0.01) var hud_curve_edge_fade: float = 0.12
+## Lens fringe at the bent edges, as a FRACTION OF THE WARP (so it grows with hud_curve_amount instead of
+## fighting it). OFF BY DEFAULT: the three taps are recombined in premultiplied space, so it fringes the
+## anti-aliased edge of every glyph as well as the colour, and on a text-heavy panel that reads as blur
+## before it reads as chromatic aberration. Worth trying only alongside a LOW hud_curve_amount.
+@export_range(0.0, 1.0, 0.01) var hud_curve_chroma: float = 0.0
+
+## How far the ghost's colour is replaced by the skin's age ramp (HudSkin.ghost_gradient), 0..1. 0 = the
+## trail is a dimmed copy of whatever colour the HUD element is; 1 = pure ramp, so a red HP bar and a gold
+## money readout leave the SAME coloured trail and the ghost reads as one signal artefact rather than as
+## smudged UI. 0.85 keeps a whisper of the source so a trail still belongs to the thing that cast it.
+@export_range(0.0, 1.0, 0.01) var hud_ghost_tint: float = 0.85
+## Gamma on the trail's displayed alpha — the knob that decides whether the ramp's COLD end is ever seen.
+## The buffer's alpha IS the trail's age, and it decays exponentially, so at gamma 1 the oldest third of
+## the tail is too faint to show any colour at all and the gradient is wasted. Below 1 lifts that tail
+## (0.65 roughly doubles the presence of a 10%-alpha pixel); above 1 crushes it back toward the fresh end.
+@export_range(0.15, 2.0, 0.05) var hud_ghost_tail_lift: float = 0.55
+
 @export_group("Money readout")
 @export var money_font_size: int = 16
 @export var money_delta_font_size: int = 15
@@ -196,21 +280,37 @@ extends Resource
 @export var load_warning_color: Color = Color(1.0, 0.7, 0.3)
 
 @export_group("Minimap")
-# The shipped top-right HUD minimap (scripts/ui/minimap.gd, code-built by ui.gd). A procedural VECTOR
+# The shipped top-right HUD minimap (scripts/ui/minimap.gd, an AUTHORED SCENE — scenes/ui/hud_minimap.tscn —
+# instanced by ui.gd). A procedural VECTOR
 # floorplan: the walkable navmesh fill for the player's own floor band, plus a section cut of the level's
 # STATIC colliders at chest height. No authored texture, no per-level MapData, no second 3D pass — and a
 # canvas item cannot be touched by ps1.gdshader's vertex snap, so the plan is immune to the warp.
-# AUTHOR-TIME numbers only: the player-facing on/off, rotate mode and zoom are Options -> Accessibility rows
-# (Settings.minimap_*, polled live), and every COLOUR is artist paint on MenuStyle.hud.minimap_*.
-# THE TIGHT ONE: this corner is SHARED with the quest tracker, whose quest_tracker_width column starts at
-# x 484 on the 792x444 canvas and WRAPS DOWNWARD with no bound. ui.gd derives _quest_tracker.offset_top from
-# minimap_inset.y + minimap_size.y + minimap_tracker_gap, so these three knobs move the whole top-right stack
-# together. Keep minimap_inset.x + minimap_size.x <= 8 + quest_tracker_width (pinned by a test) or the
+# WHAT IS LEFT IN THIS GROUP, after the 2026-08-19 split: the numbers that decide which GEOMETRY the map
+# gathers and where the box sits — not how any of it is inked. Every PAINT knob (each colour AND the
+# width/size of the thing it colours: wall stroke + its optional glow, rim, the four marker sizes, glyph
+# stroke, alert-ring gap/step, off-floor tick + fade, north tick, rim-pin margin) now lives together on
+# MenuStyle.hud -> resources/ui/hud_skin.tres, so an artist changing the look never has to open a tuning
+# resource full of navmesh numbers. THE RULE: looks -> the skin; does -> here or the scene.
+# The player-facing on/off, rotate mode and zoom are Options -> Accessibility rows (Settings.minimap_*,
+# polled live), and the per-channel draw switches are the widget's own inspector in hud_minimap.tscn.
+# THE TIGHT ONE: this corner is SHARED — it is a three-row stack (map, then the "Clock" group below, then
+# the quest tracker, whose quest_tracker_width column starts at x 484 on the 792x444 canvas and WRAPS
+# DOWNWARD with no bound). ui.gd derives EACH row's top from the row above it (hud_clock_top_for /
+# quest_tracker_top_for), so these knobs move the whole stack together; with the clock switched off the
+# tracker falls back to minimap_inset.y + minimap_size.y + minimap_tracker_gap exactly as it always did.
+# Keep minimap_inset.x + minimap_size.x <= 8 + quest_tracker_width (pinned by a test) or the
 # enemy-health-bar clearance maths in tests/test_enemy_health_bar.gd stops bounding this corner.
 ## Drawn map box, w x h px. WHOLE pixels — fractional sizes rasterize into a ragged comb under the 792x444
 ## canvas's ~2.4x nearest upscale (the same trap ui.gd's hp_display_seg_width note documents).
+##
+## THE BOX ITSELF IS AUTHORED NOW, in scenes/ui/hud_minimap.tscn's root offsets — ui.gd measures it back out
+## through UI.minimap_box() and reflows the clock and the tracker off THAT. These two knobs are the FALLBACK
+## box (no widget: a bare UI in a test, a failed instantiate) and the numbers the shipped scene was authored
+## from, which is why every clearance rule above is still pinned against them. Move the box in the editor and
+## you MUST mirror it here; tests/test_minimap_scene.gd fails when the two stop describing one rectangle.
 @export var minimap_size: Vector2 = Vector2(108, 108)
-## Inset from the canvas's TOP-RIGHT corner: x in from the right edge, y down from the top.
+## Inset from the canvas's TOP-RIGHT corner: x in from the right edge, y down from the top. Authored in the
+## scene as the root's offsets (right = -inset.x, top = inset.y) — see minimap_size.
 @export var minimap_inset: Vector2 = Vector2(8, 8)
 ## Px between the map box's bottom edge and the quest tracker's first line.
 @export var minimap_tracker_gap: float = 6.0
@@ -238,26 +338,65 @@ extends Resource
 ## the widget keys off the last GROUNDED height, not live altitude, so leaving the ground cannot change which
 ## floor you are shown.) Ships above one 0.5 m stair riser, so a single step near a boundary does not swap it.
 @export var minimap_band_hysteresis: float = 0.6
-## Wall stroke px. 0 or less = Godot's transform-INDEPENDENT hairline (the shipped look and the safe
-## default); a positive value routes through FloorplanSection.stroke_width so it does not fatten with zoom.
-@export var minimap_wall_width: float = 0.0
 ## Reject the Quake "void seal" — a worldspawn brush enclosing the whole map cuts to one giant rectangle
 ## that would draw a frame around every room. A cut ring wider than this on BOTH axes is dropped.
 @export var minimap_max_solid_span: float = 120.0
 ## Reject micro-detail (trim, sign backers, pipe collars) that reads as speckle at ~2.7 px/m.
 @export var minimap_min_solid_span: float = 0.35
-## Alpha a marker a full band away is drawn at (0 = invisible off-floor, 1 = no fade). A beacon two storeys
-## up FADES rather than lying about being in this room.
-@export var minimap_marker_floor_alpha: float = 0.3
-## Inset (px) of the off-box marker chevron ring from the map's border — Compass.project_to_edge's margin,
-## reusing that pure projection rather than writing a second edge projector.
-@export var minimap_marker_edge_margin: float = 5.0
-## Contrast rim px around the box. 0 = no rim (the enemy_hp_outline_width idiom).
-@export var minimap_outline_width: float = 1.0
+## Draw the wall layer as ONE SILHOUETTE rather than a stack of outlines: where two solids overlap (or abut),
+## the sides buried inside the neighbour are dropped, so a room built from four wall brushes prints as a room
+## instead of four rectangles crossing at the corners. A level is BUILT from overlapping boxes; a floorplan is
+## not DRAWN as one. Off = every solid draws its own closed ring — the original look, and the escape hatch if
+## a level's brushwork actually wants those seams. Costs nothing per frame: it runs inside the per-floor bake.
+@export var minimap_merge_solids: bool = true
+## How far apart (metres) two solids may be and still count as ONE for the merge above. NONZERO IS THE POINT:
+## brushes that share a face exactly are the normal case, and an edge lying precisely ON its neighbour's
+## boundary survives any clipper (verified against 4.7.1), so only a tolerance makes a shared face cancel from
+## BOTH sides. Only the hidden-line TEST is grown — every stroke drawn is the solid's own untouched cut — and
+## at the shipped 2.7 px/m this is ~0.14 px, far under one pixel. 0 = exact overlaps only.
+@export var minimap_merge_weld: float = 0.05
 ## Metres of player motion before a repaint — a standing, still player costs literally zero.
 @export var minimap_redraw_pos_eps: float = 0.02
 ## Radians of turn before a repaint (the other half of the same idle gate).
 @export var minimap_redraw_yaw_eps: float = 0.004
+
+# MARKER GLYPHS. Markers paint AFTER the view matrix is reset, so every px below is a real screen pixel and a
+# glyph is zoom-invariant by construction (walls and floor fill scale with zoom; markers never do). The SHAPE
+# vocabulary itself is pure maths in scripts/ui/map_glyph.gd — these are only its sizes.
+# ⭐WHOLE-ISH PIXELS. The 792x444 canvas is nearest-upscaled ~2.4x, so a glyph sized in fractions rasterizes
+# into a lopsided blob. Half-pixel steps survive; finer ones do not.
+## Zoom steps the "Cycle Minimap Zoom" key walks through, in order, wrapping at the end. Each is the same
+## multiplier Options -> Accessibility -> "Minimap Zoom" sets, so the key and the slider write ONE value
+## (Settings.minimap_zoom) and can never disagree. Values outside Settings.MINIMAP_ZOOM_MIN/MAX are clamped by
+## the setter; an EMPTY list disables the key entirely.
+@export var minimap_zoom_steps: PackedFloat32Array = PackedFloat32Array([1.0, 1.5, 2.25])
+
+@export_group("Clock")
+# The HUD time-of-day readout (scripts/ui/hud_clock.gd, code-built by ui.gd). ROW 2 OF THE TOP-RIGHT STACK:
+# minimap, then this, then the quest tracker — and ui.gd derives EVERY row's top from the row above it
+# (hud_clock_top_for / quest_tracker_top_for), so these knobs slide the stack instead of colliding with it.
+# The clock rides whatever carrier the map does (minimap_rides_hud_weight): they read as ONE instrument
+# cluster, and a clock that swayed while the map above it stood still would visibly shear.
+# AUTHOR-TIME numbers only — the player-facing on/off and the 12/24-hour face are Options -> Accessibility
+# rows (Settings.clock_enabled / Settings.clock_24_hour, polled live), and the tint is MenuStyle.hud.clock_color.
+## The clock line's box, w x h px. WIDTH deliberately matches minimap_size.x so the right edges of the map and
+## the digits line up into one column; the digits are RIGHT-aligned inside it. WHOLE pixels — a fractional box
+## rasterizes into a ragged comb under the 792x444 canvas's ~2.4x nearest upscale (the minimap_size rule).
+## ⭐HEIGHT MUST CLEAR THE FONT'S RENDERED LINE BOX, NOT JUST clock_font_size. A Label's minimum height is its
+## ascent+descent, which for the default face at size 16 measures 21 px — so an "obviously fine" 18 was
+## silently overridden to 21 by the Label, while the quest tracker below still reckoned 18 and sat 3 px closer
+## than the gap said. Probe-verified in a real windowed boot; keep a few px of headroom over the font size.
+@export var clock_size: Vector2 = Vector2(108, 22)
+## Px between the map box's bottom edge and the clock's top. Ships tighter than minimap_tracker_gap: the clock
+## is the map's caption, and the quest tracker below is the separate thing that needs the breathing room.
+@export var clock_map_gap: float = 3.0
+## Px between the clock's bottom edge and the quest tracker's first line.
+@export var clock_tracker_gap: float = 5.0
+## Where the clock's top sits when the MINIMAP is off — the minimap_tracker_bare_top role, one row up. Ships
+## at 8.0 so switching the map off in Options lifts the clock into the corner rather than leaving a 114 px hole.
+@export var clock_bare_top: float = 8.0
+## Digit size. Bigger than the quest tracker's line on purpose: this is a glanceable instrument, not prose.
+@export var clock_font_size: int = 16
 
 @export_group("Centre prompts")
 ## Shared centre-screen prompt size (ui.gd's look-at name + player_hud.gd's takedown/pet/claim cues).

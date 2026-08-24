@@ -43,6 +43,23 @@ func test_enemy_body_placeholder_removed_and_mesh_retargeted() -> void:
 	enemy.free()
 
 
+func test_enemy_scene_wires_hurt_and_death_voice() -> void:
+	# The NPC VOICE, both halves, authored in the SCENE: Damage.stream is the hurt grunt damage.gd replays on every
+	# damage tick, and Death.death_cry is the last cry death.gd layers over the gore splash. Neither has a code
+	# default, and clearing either is SILENT — damage.gd play()s a null stream as a no-op and AudioManager.play_sfx
+	# early-outs on null — so an NPC would go mute with no error anywhere to find it by. Everything humanoid
+	# (civilian / chip_mechanic / medicine_person) inherits enemy.tscn, so this one pin covers the whole roster.
+	# instantiate() only: the wiring is scene data, no _ready required. .get() because get_node_or_null types as Node.
+	var enemy: Character = ENEMY_SCENE.instantiate()
+	var damage_node := enemy.get_node_or_null("Damage")
+	assert_not_null(damage_node, "enemy.tscn must keep the Damage node (damage.gd hurt-SFX player, wired to the damaged signal)")
+	assert_not_null(damage_node.get(&"stream"), "Damage.stream must stay authored — damage.gd only plays this node (via AudioManager.play_varied), and a null stream is a silent no-op")
+	var death_node := enemy.get_node_or_null("Death")
+	assert_not_null(death_node, "enemy.tscn must keep the Death node (death.gd death-SFX player, wired to the died signal)")
+	assert_not_null(death_node.get(&"death_cry"), "Death.death_cry must stay authored — it is the dying NPC voice layered over the splash, and null plays nothing without erroring")
+	enemy.free()
+
+
 func test_character_default_blast_damp() -> void:
 	var character_script: Script = load("res://scripts/player/character.gd")
 	var character: Character = character_script.new()
@@ -388,6 +405,35 @@ func test_muzzle_whiz_constants_present() -> void:
 	assert_eq(typeof(GameSettings.audio.muzzle_whiz_pitch_max), TYPE_FLOAT)
 	assert_gt(GameSettings.audio.muzzle_whiz_pitch_max, GameSettings.audio.muzzle_whiz_pitch_min,
 		"Max pitch must be greater than min pitch for the randf_range to make sense")
+
+
+## The barrel-smoke trail is authored INTO the view model (under the same PlayerMuzzle marker as the flash,
+## sparks and casing) and wired by GunMesh.setup, so nothing in the firing pipeline knows it exists. That
+## makes the scene node + the one signal connection the whole contract — pin both, plus the three emitter
+## flags that keep it a small cluster WELDED to the barrel rather than a world-space trail.
+func test_muzzle_smoke_node_present_and_connected() -> void:
+	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
+	var instance := player_scene.instantiate()
+	add_child_autofree(instance)
+	var smoke := instance.find_child("MuzzleSmoke", true, false) as GPUParticles3D
+	assert_not_null(smoke, "Player.tscn must contain a MuzzleSmoke emitter somewhere under the gun rig")
+	if smoke == null:
+		return
+	assert_true(smoke.has_method("_on_attack_flash_muzzle"),
+		"MuzzleSmoke must have the _on_attack_flash_muzzle handler so flash_muzzle can arm the hot-barrel window")
+	assert_false(smoke.one_shot,
+		"The barrel-smoke emitter must NOT be one_shot — smoke is a CONTINUOUS stream gated by the hot-barrel window, and a one_shot emitter would restart (and so wipe) the trail on every round of a burst")
+	assert_true(smoke.local_coords,
+		"The barrel-smoke emitter must simulate in LOCAL space — it is welded to the barrel on purpose. World space looks right standing still and loses the whole cluster behind the camera the moment you advance, and inherit_velocity_ratio does not rescue it (0.75 still lost it at 3.2 m/s, and damping bleeds even 1.0 back off)")
+	assert_almost_eq((smoke.process_material as ParticleProcessMaterial).inherit_velocity_ratio, 0.0, 0.0001,
+		"inherit_velocity_ratio must stay 0 while local_coords is on — in local space the emitter's own motion is already accounted for, and inheriting it again double-counts")
+	assert_false(smoke.emitting,
+		"The barrel-smoke emitter must sit idle in the authored scene — it only ever runs because a shot fired it")
+	var attack: Attack = instance.get_node("Weapon/Attack")
+	assert_true(attack.flash_muzzle.is_connected(smoke._on_attack_flash_muzzle),
+		"Attack.flash_muzzle must be connected to MuzzleSmoke._on_attack_flash_muzzle (wired in GunMesh.setup)")
+	assert_not_null(smoke.get("inventory"),
+		"GunMesh.setup must hand MuzzleSmoke the player's Inventory — without it the per-weapon muzzle_smoke_scale / has_muzzle_flash gate can never be read")
 
 
 func _orient_basis_for_normal(normal: Vector3) -> Basis:
@@ -846,6 +892,81 @@ func test_contrast_setting_defaults_and_clamps() -> void:
 	assert_eq(s.contrast, s.CONTRAST_MAX, "contrast clamps to CONTRAST_MAX")
 	s.set_contrast(0.0)
 	assert_eq(s.contrast, s.CONTRAST_MIN, "contrast clamps to CONTRAST_MIN")
+	s.free()
+
+
+func test_post_process_shader_has_bayer_dither_uniforms() -> void:
+	var content := _read_file("res://resources/shaders/post_process.gdshader")
+	assert_true("uniform int bayer_order" in content,
+		"post_process.gdshader must declare bayer_order (0 off / 1 2x2 / 2 4x4 / 3 8x8), authored per material in ui.tscn")
+	assert_true("uniform float dither_strength" in content,
+		"post_process.gdshader must declare dither_strength, driven by player.gd from Settings.dither_strength")
+	assert_true("float bayer(ivec2" in content,
+		"post_process.gdshader must carry the bayer() threshold function the dither reads its threshold from")
+
+
+func test_post_process_dither_is_folded_into_one_quantisation() -> void:
+	# ⭐ THE REGRESSION THIS PINS, and it shipped undetected for a long time: the shader used to posterize
+	# FIRST (final_color = floor(c * steps + 0.5) / steps) and add the Bayer threshold in a SECOND pass
+	# AFTER. That is a mathematical no-op — the second pass computes floor(k + d) for an already-integral k
+	# and d < 1, which is k, every pixel, every colour, every matrix cell. The 4x4 table sitting above it
+	# could not change a single output value.
+	#
+	# The invariant that keeps the dither alive is therefore structural, not cosmetic: there must be exactly
+	# ONE quantisation, and the matrix must supply ITS threshold. Two of them means someone re-split the
+	# steps and the dither is silently dead again — which no other test in this suite can see, because
+	# headless never compiles shaders and no assertion can look at a dither pattern.
+	var content := _read_file("res://resources/shaders/post_process.gdshader")
+	assert_eq(content.count("floor(final_color * steps"), 1,
+		"post_process.gdshader must quantise final_color EXACTLY ONCE — a second quantisation makes the Bayer dither a no-op")
+	assert_true("mix(0.5, bayer(" in content,
+		"the dither threshold must come from bayer() blended against 0.5 (round-to-nearest), so dither_strength 0 degenerates to a plain posterize")
+	assert_false("d / steps" in content,
+		"the dead post-posterize dither form (`+ d / steps` applied after quantising) must not come back — that is the no-op this replaced")
+
+
+func test_bayer_recursion_reproduces_the_canonical_matrices() -> void:
+	# A GDScript mirror of the recursion post_process.gdshader's bayer() implements, so the ALGORITHM is
+	# pinned by an executable assertion rather than only by the shader's own comment. It is a spec, not the
+	# shader itself (nothing headless can run GLSL) — its job is to fail loudly if someone "simplifies" the
+	# recursion in either place into something that is no longer a Bayer matrix.
+	assert_eq(_bayer_cells(1), [0, 2, 3, 1],
+		"order 1 must be the canonical 2x2 Bayer matrix")
+	assert_eq(_bayer_cells(2), [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5],
+		"order 2 must reproduce the exact 4x4 table post_process.gdshader used to spell out by hand")
+	# The property that MAKES it a dither matrix: every threshold 0..N*N-1 appears exactly once, so the
+	# thresholds spread evenly across one quantisation step. A duplicate or a gap biases the pattern.
+	var eight := _bayer_cells(3)
+	eight.sort()
+	assert_eq(eight, range(64), "order 3 must be a permutation of 0..63 — every threshold used exactly once")
+
+
+## Row-major cells of the order-`order` Bayer matrix, by the same recursion as the shader:
+##   M_2N = [[4*M_N + 0, 4*M_N + 2], [4*M_N + 3, 4*M_N + 1]], i.e. offset(xb, yb) = 2*(xb ^ yb) + yb
+## walked LOW bit to HIGH with v = v*4 + offset.
+func _bayer_cells(order: int) -> Array:
+	var size := 1 << order
+	var cells := []
+	for y in size:
+		for x in size:
+			var v := 0
+			for k in order:
+				var xb := (x >> k) & 1
+				var yb := (y >> k) & 1
+				v = v * 4 + 2 * (xb ^ yb) + yb
+			cells.append(v)
+	return cells
+
+
+func test_dither_strength_setting_defaults_and_clamps() -> void:
+	# Bare off-tree instance: _ready never ran, so _loaded stays false and save_settings() early-returns —
+	# the clamp tests without touching the user's real settings.cfg (the contrast test's shape).
+	var s = load("res://managers/Settings.gd").new()
+	assert_eq(s.dither_strength, 1.0, "dither_strength defaults to 1.0 — the authored full-strength matrix")
+	s.set_dither_strength(99.0)
+	assert_eq(s.dither_strength, 1.0, "dither_strength clamps to 1.0")
+	s.set_dither_strength(-5.0)
+	assert_eq(s.dither_strength, 0.0, "dither_strength clamps to 0.0 (no dither = plain round-to-nearest banding)")
 	s.free()
 
 

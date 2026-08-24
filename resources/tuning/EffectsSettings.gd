@@ -2,10 +2,11 @@ class_name EffectsSettings
 extends Resource
 
 ## Visual-FX tuning, grouped below: decal fade/placement, dust puffs (jump/land/slide),
-## the on-screen blood overlay (BloodSplatter), explosion/muzzle-flash visuals, the
-## floating damage numbers, and the first-person view-model pose feel (kick / holster /
-## reload / landing). Consumed across the effects scripts, bloody_mess, the decals,
-## Explosion, DamageNumberPopup, and GunMesh.
+## the on-screen blood overlay (BloodSplatter), the gore/body-part gibs and the PIN kill,
+## the thrown-weapon trail, explosion / muzzle-flash / barrel-smoke visuals, the floating damage numbers,
+## and the first-person view-model pose feel (kick / holster / reload / landing). Consumed
+## across the effects scripts, bloody_mess, the decals, Explosion, DamageNumberPopup,
+## ThrowTrail, MuzzleSmoke, and GunMesh.
 
 @export_group("Decals")
 ## How fast a bullet-hole / blood decal fades its alpha toward 0 each frame (higher = decals vanish sooner).
@@ -183,6 +184,47 @@ extends Resource
 ## above — loose gore competes with the thing you want looked at. -1 inherits body_part_gib_meat_count.
 @export var pinned_part_meat_count: int = 0
 
+@export_group("Thrown weapon trail")
+## Master switch for the white STREAK a thrown weapon drags behind it in flight — the thrown-weapon tracer.
+## Off = thrown props fly bare, as they did before the effect existed. Only props carrying a `ThrowTrail`
+## child are involved at all (a weapon drop gets one from `WeaponData.thrown_trail`, which is ON for EVERY
+## weapon by default — knife, guns and all), so this is the global kill switch for that whole family, not a
+## per-prop toggle.
+@export var throw_trail_enabled: bool = true
+## Ribbon width (metres) at the head — the end still attached to the prop, where the streak is widest before
+## it tapers to a point behind. Sized for a KNIFE and deliberately left there when the streak went game-wide:
+## wide enough to read across a room at this game's internal resolution, narrow enough that it stays a streak of
+## light rather than a flag — and a width that reads as a tracer on a blade does NOT want scaling up for a
+## shotgun, because the ribbon is a light source, not a silhouette. A prop can override it with its own
+## `ThrowTrail.width`.
+@export var throw_trail_width: float = 0.05
+## Distance (metres) at which the streak is drawn at exactly `throw_trail_width`. Past it the ribbon is widened
+## in proportion, so a knife thrown down a long street still reads as a line instead of thinning to a flickering
+## sub-pixel dotted trail — the same perspective compensation, and the same never-thinner-than-authored clamp,
+## that `tracer_reference_dist` gives bullet tracers. Closer than this nothing changes. Bigger = distant streaks
+## stay thinner (and eventually break up); smaller = they fatten sooner.
+@export var throw_trail_reference_dist: float = 6.0
+## Seconds a point of streak lingers before it fades out — the tail's length in TIME, not in metres, so a
+## harder throw automatically draws a longer streak. Long values turn the tracer into a lingering rope that
+## marks where the knife has been; short ones read as a glint on the blade.
+@export var throw_trail_lifetime: float = 0.22
+## Speed (m/s) a prop must be moving to keep laying new streak — a FLOOR, so faster is what streaks. This is
+## what ends the effect on landing (the tail then ages out over `throw_trail_lifetime`), and what keeps a slow
+## lob or a bounced knife rolling across the floor from scribbling.
+## KEEP THIS UNDER `PhysicsDamageSettings.pickup_throw_impulse` (12 m/s — the speed an ORDINARY throw leaves
+## the hand at). Above it the streak silently reverts to knife-only: the knife's 2.5x `thrown_impulse_mult` puts
+## it at ~30 m/s and clears any plausible floor, while every gun — which throws at the flat 12 — would draw
+## nothing at all, and a designer retuning this knob would have no way to tell the effect had half broken. That
+## ordering is pinned by `tests/test_managers_tuning.gd`. (Clearing the floor at RELEASE is enough for the whole
+## arc: a thrown prop tends to speed UP, since gravity adds vertical speed while the horizontal component barely
+## decays — which is also why the streak never gaps mid-flight.)
+@export var throw_trail_min_speed: float = 7.0
+## Cap on live samples per streak — the effect's whole cost, since the ribbon is 2 vertices per sample and is
+## rebuilt every physics frame. Reached only when the lifetime is long enough to hold more than this many
+## ticks (at 60 Hz, 24 samples ≈ 0.4 s of flight), after which the tail stops growing rather than the streak
+## breaking.
+@export_range(2, 128, 1) var throw_trail_max_points: int = 24
+
 @export_group("Death freeze")
 ## Seconds an enemy holds its pose — frozen in place — after the killing blow BEFORE it bursts into gore (the
 ## gib + ragdoll "explosion"). A short beat that makes a kill read as a punchy freeze-then-pop instead of an
@@ -222,10 +264,43 @@ extends Resource
 @export var explosion_flash_energy_per_radius: float = 4.0
 
 @export_group("Sky FX")
-## Seconds the on-kill sky flash snaps UP to full (StarSky.flash_kill — the Hotline-Miami whole-sky pop).
-@export var sky_flash_up_time: float = 0.04
-## Seconds the on-kill sky flash fades back out.
-@export var sky_flash_down_time: float = 0.35
+## Colour the whole sky pops to when the player kills an NPC — StarSky.flash_kill writes it onto the horizon
+## shader's `flash_color` uniform every kill, so it is live-tunable in the Remote inspector while playing.
+## Ships RED. At sky_flash_peak = 1 the sky becomes SOLID this colour, so choose it for the silhouette read
+## (buildings/wires against a flat field) rather than for subtlety. Alpha is ignored (the uniform is a vec3).
+## Deliberately a HOTTER, brighter red than sky_hurt_color's darker blood red: both cues are red now, so what
+## keeps them apart is the SHAPE (this one goes solid and holds ~1 s; the hurt wash is partial and half as long)
+## plus that brightness gap. Shift one of the two if you ever want them to read as different colours again.
+@export var sky_flash_color: Color = Color(1.0, 0.1, 0.08)
+## How far the flash pushes the sky TOWARD sky_flash_color at its peak: 1 = solid sky_flash_color (the shipped
+## Hotline-Miami pop), lower = the authored sky tinted that far. Clamped 0..1 at the read site.
+@export_range(0.0, 1.0, 0.01) var sky_flash_peak: float = 1.0
+## Seconds the on-kill sky flash snaps UP to the peak (StarSky.flash_kill — the Hotline-Miami whole-sky pop).
+@export var sky_flash_up_time: float = 0.06
+## Seconds the flash SUSTAINS the peak before fading. Without a hold the pop is only a RAMP through the colour and
+## reads as a brightness blip, not as "the sky went red" — same reason the per-part hit flash sustains.
+@export var sky_flash_hold_time: float = 0.3
+## Seconds the on-kill sky flash fades back out. up + hold + down is the WHOLE beat the player sees, and the
+## shipped 0.06 + 0.3 + 0.64 is deliberately ~1.0 s — retune all three together if you want a different length.
+@export var sky_flash_down_time: float = 0.64
+## Colour the sky washes to when the PLAYER TAKES DAMAGE — StarSky.flash_hurt writes it onto the horizon shader's
+## `hurt_flash_color` uniform on every hit. Ships the SAME red as the screen-space hurt flash
+## (PlayerFeedbackSettings.hurt_flash_color) so the two read as one cue rather than two different alarms.
+## Darker than the kill flash's hot red on purpose — see sky_flash_color for how the two red cues stay apart.
+@export var sky_hurt_color: Color = Color(0.85, 0.0, 0.0)
+## How far the hurt wash pushes the sky TOWARD sky_hurt_color at its peak. Ships PARTIAL, unlike the kill flash's
+## solid 1.0, and that asymmetry is the point: you take damage far more often than you kill, so a solid red sky
+## would sit through a whole firefight, blind the player, and smear into the kill flash it must stay distinct from.
+## Raise to 1.0 only if you want being shot to black out the skyline as hard as a kill does.
+@export_range(0.0, 1.0, 0.01) var sky_hurt_peak: float = 0.55
+## Seconds the hurt wash snaps UP to the peak. Fast — a damage cue that ramps in reads as ambience, not as a hit.
+@export var sky_hurt_up_time: float = 0.04
+## Seconds the hurt wash SUSTAINS the peak. Short: enough to register as red rather than as a brightness blip,
+## without holding the sky red under sustained fire (each new hit restarts the beat, so a burst already holds it).
+@export var sky_hurt_hold_time: float = 0.06
+## Seconds the hurt wash fades back out. up + hold + down is the whole beat (ships ~0.45 s: 0.04 + 0.06 + 0.35),
+## deliberately under half the kill flash's second. Retune all three together.
+@export var sky_hurt_down_time: float = 0.35
 ## Dim, cool-blue fixed ambient StarSky pins over the level so the bright horizon sky never washes the scene white (warmer/brighter to taste).
 @export var sky_ambient_fill: Color = Color(0.05, 0.07, 0.13)
 
@@ -282,6 +357,35 @@ extends Resource
 @export var hit_spark_speed_to_scale: float = 32.0
 ## Radius (metres) of the overkill-penetration burst — bigger than the ordinary spark so a shot punching THROUGH an enemy into the next reads clearly.
 @export var overkill_burst_radius: float = 0.9
+## Opacity of ONE smoke puff (MuzzleSmoke), 0..1. The puffs are meant to read INDIVIDUALLY — a small cartoon
+## cluster, not a haze — so this is high and the particle count is low, and the two must move together.
+## ⭐Every failure mode here was photographed before these numbers were picked (the harness is
+## scripts/tools/muzzle_smoke_qa_shots.gd): hundreds of near-transparent puffs fuse into a realistic
+## connected haze, a few hundred at middling alpha saturate into a featureless solid-white ball, and a
+## handful at low alpha vanish entirely. Multiplies the per-particle fade the colour ramp already does, so
+## it is "how solid is one puff", never "when does it fade". Everything else about the look — the disc-with-
+## a-rim falloff on resources/materials/muzzle_smoke.tres, the growth curve, the buoyancy and the curl —
+## is authored in the Inspector on that material and scenes/effects/muzzle_smoke.tscn.
+@export_range(0.0, 1.0, 0.01) var muzzle_smoke_alpha: float = 0.42
+## How long (seconds) the stream takes to SWELL IN when it starts. Emission eases up from nothing across this
+## window instead of snapping to full flow, so the smoke wells up out of the barrel rather than a whole cluster
+## of puffs popping into existence in one frame. This is the other half of making the smoke its own beat: the
+## delay separates it from the flash, this stops the separation reading as a hard pop. 0 restores the snap.
+@export var muzzle_smoke_attack: float = 0.14
+## How long (seconds) the stream takes to PETER OUT at the end of the hold. Emission eases to nothing across
+## this window (via the emitter's amount_ratio) instead of being cut at full flow, which reads as the smoke
+## being switched off mid-puff. Longer = a lazier, more gradual die-away. 0 restores the hard cut.
+@export var muzzle_smoke_taper: float = 0.25
+## The beat between the BANG and the smoke, in seconds. A round is long gone before a barrel smokes, so smoke
+## that blooms on the same frame as the muzzle flash reads as part of the flash — the two events fuse and the
+## shot loses its punch. This is what separates them. 0 restores the old same-frame behaviour; much above ~0.3
+## and the smoke stops feeling caused by the shot at all. The hold below is NOT ticked during this window, so
+## it always means "this long of actual smoke" however the delay is tuned.
+@export var muzzle_smoke_delay: float = 0.05
+## How long (seconds) the barrel keeps STREAMING smoke after a shot. Each shot re-arms this window rather
+## than restarting the emitter, so a full-auto burst makes ONE continuous trail that keeps going this long
+## after the last round. Longer = a heavier, more persistent trail; ~0.1 gives a quick single wisp per shot.
+@export var muzzle_smoke_hold: float = 0.5
 
 @export_group("View-Model Kick (per shot / per swing)")
 ## The whole view model's KICK when you attack — GunMesh.fire() tweens the rig out to these and back, and any
@@ -340,3 +444,35 @@ extends Resource
 @export var gun_land_in_time: float = 0.08
 ## Seconds to recover back to rest afterward — slower than the sink so the settle reads soft.
 @export var gun_land_out_time: float = 0.18
+
+@export_group("World ghost")
+# Temporal persistence over the whole PICTURE (scripts/effects/world_ghost.gd) — the HUD's phosphor ghost
+# extended, very faintly, to the world behind it. A never-cleared offscreen buffer keeps a running average
+# of the finished frame and a full-rect shader adds the DIFFERENCE between that average and the live frame
+# back over the picture, so the effect exists only where something moved: at rest the average has converged
+# on the frame, the difference is zero, and the composite re-emits the picture unchanged. The view model is
+# masked out per pixel, and menus / dialogue / cutscenes switch the whole pass off. The player scales it
+# 0..1 via Options -> Accessibility -> "World Ghosting" (Settings.world_ghost_scale).
+## How much of the lag is added back over the picture, 0..1 — the master amplitude, and the one knob that
+## decides whether this reads as "a faint memory of the frame" or as motion blur. 0 stops the pass
+## rendering entirely (OFF is free and the frame is bit-identical). Keep it LOW: this is a full-screen
+## effect over a game that is already posterised and dithered, and past ~0.25 it stops being a ghost and
+## starts being smear on every wall you walk past.
+@export_range(0.0, 1.0, 0.01) var world_ghost_strength: float = 0.12
+## Persistence time constant (seconds): the average closes 1/e of the gap to the live frame every tau, so
+## the trail is the same LENGTH at 30 fps and at 144. Short on purpose — the world fills the screen, so a
+## tail that would read as elegant on a 4 px HUD segment reads as drunk when it is the whole picture.
+@export_range(0.0, 0.5, 0.005) var world_ghost_tau: float = 0.055
+## Per-channel difference below which the trail is clipped to nothing. A never-cleared 8-bit buffer chasing
+## a target stalls a few steps short of it (round-to-nearest), so the difference never quite reaches zero
+## and a still frame would carry a permanent sub-percent haze. ~0.01 (about 2.5/255) is the smallest value
+## that reliably clears that stall; raising it shortens the tail's faint end, lowering it lets the haze back.
+@export_range(0.0, 0.2, 0.002) var world_ghost_dead_zone: float = 0.01
+## Pixels of CHROMATIC SPLIT on the trail at full look rate: the accumulator's red and blue are sampled
+## either side of green along the direction the view is moving, so a moving edge fringes the way an analog
+## signal does instead of just blurring. This is what keeps the world's ghost in the same family as the
+## HUD's coloured one without painting the world. 0 = a clean achromatic trail.
+@export_range(0.0, 6.0, 0.1) var world_ghost_chroma_px: float = 0.8
+## Px of that split per rad/s of camera look rate (x = yaw, y = pitch), before the cap above. Sized so an
+## ordinary look reaches roughly half the cap and only a hard flick pins it.
+@export var world_ghost_chroma_gain: Vector2 = Vector2(0.45, 0.36)

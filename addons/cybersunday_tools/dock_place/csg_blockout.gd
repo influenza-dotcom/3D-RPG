@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 
 ## PURE, testable builders for the CYBER SUNDAY "Place" tab CSG-blockout buttons (scene_placer.gd). NO

@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/tools/__ghost_align_probe.gd" id="1_galign"]
+
+[node name="GhostAlignProbe" type="Node"]
+script = ExtResource("1_galign")

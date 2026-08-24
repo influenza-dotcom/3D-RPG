@@ -15,6 +15,8 @@ extends Resource
 const ItemIds = preload("res://scripts/items/item_ids.gd")
 ## Faction registry (preloaded by path) for the reputation gate / reward dropdowns (WR-1/WR-3).
 const Factions = preload("res://scripts/faction/factions.gd")
+## Perk registry (preloaded by path — like the two above it carries NO class_name) for the perk gate dropdown.
+const Perks = preload("res://scripts/player/perks.gd")
 
 ## Which tracked state a quest gate (required_quest_id) checks for: ANY = the player merely KNOWS the quest
 ## (active OR completed OR failed); ACTIVE / COMPLETED / FAILED = exactly that state (WR-6 adds FAILED).
@@ -87,7 +89,18 @@ enum QuestGate { ANY, ACTIVE, COMPLETED, FAILED }
 @export var aggro_speaker: bool = false
 
 ## Self-populate the `required_stat` dropdown from the CharacterStats attribute names, and `give_item_id` from
-## the item ids on disk (SUGGESTION hints, so blanks stay valid and custom names are still typable).
+## the item ids on disk (SUGGESTION hints, so blanks stay valid and custom names are still typable). Same for the
+## faction ids (rep gate + rep reward) and — since the perk registry gained an id scan — `required_perk_id`, which
+## until now had suggestions in NEITHER surface (the CYBER SUNDAY dialogue tab still offers none — it leaves that
+## one field a bare LineEdit on purpose). The registries are plain folder scanners that touch no autoload, which
+## is why const-preloading them from a @tool Resource is safe.
+##
+## NOT covered — do not read the list above as "every drift-prone id on this Resource is handled". Still bare:
+## the quest ids (`required_quest_id` / `complete_quest_id` / `advance_quest_id`), `advance_objective_id`, and the
+## flag names (`required_flag` / `set_flag`). The quest ids are the ones that would pay off most, and the drift
+## they are exposed to is LIVE on disk — recover_the_package.tres carries id &"recover_package" — so a suggestion
+## scan there must LOAD each resources/quests/*.tres and read Quest.id, because the filename lies. Objective ids
+## nest inside a Quest rather than sitting in a folder, and flag names have no registry to scan at all.
 func _validate_property(property: Dictionary) -> void:
 	if property.name == "required_stat":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
@@ -98,3 +111,8 @@ func _validate_property(property: Dictionary) -> void:
 	elif property.name == "required_faction_id" or property.name == "reward_reputation_faction_id":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = Factions.ids_csv()
+	elif property.name == "required_perk_id":
+		# The gate compares against PerkManager._unlocked (keyed on Perk.id), so suggest the INTERNAL ids
+		# Perks.ids() reads off resources/perks/ — not the filenames.
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = Perks.ids_csv()

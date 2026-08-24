@@ -10,7 +10,7 @@ extends Node3D
 ##
 ## It's a LOOK-AT target: the `range_area` Area3D is repurposed as a hitbox on the talk physics
 ## layer, so the player's interaction ray detects it when aimed. Looking highlights the node;
-## pressing interact (E / PickUp) turns it to face you (if turn_to_face) and starts `dialogue`.
+## pressing interact (F / PickUp) turns it to face you (if turn_to_face) and starts `dialogue`.
 ##
 ## SETUP: give it an Area3D child (with a CollisionShape3D covering the body) assigned to
 ## `range_area`, a visible mesh, and a DialogueResource in `dialogue`.
@@ -56,7 +56,12 @@ func _ready() -> void:
 		# ray detects it, and clear its mask (we're aimed at, we don't sense bodies).
 		range_area.collision_layer = TalkHelpers.TALK_LAYER
 		range_area.collision_mask = 0
-	_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
+	# An INVISIBLE highlight (alpha 0 / zero width) builds NO material, and set_look_highlight then no-ops —
+	# the overlay slot is shared with whatever else dresses these meshes, so writing a transparent material
+	# into it would strip that for as long as you look. Same invariant as LookAtInteractable._build_outline.
+	_outline_mat = null
+	if highlight_color.a > 0.0 and highlight_width > 0.0:
+		_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
 	_meshes = TalkHelpers.collect_meshes(self, range_area)
 
 ## Editor warnings: a DialogueNPC's whole job is to be interfaced with, so it needs both a conversation
@@ -91,6 +96,8 @@ func _dialogue() -> DialogueResource:
 
 ## Toggled by the interaction ray as the player's aim enters/leaves this node.
 func set_look_highlight(on: bool) -> void:
+	if _outline_mat == null:
+		return  # invisible highlight — never touch the shared overlay slot (see _ready)
 	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)
 
 ## The name to show on the look-at hover readout (this node IS the speaker — a car / terminal / sign).

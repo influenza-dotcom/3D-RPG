@@ -50,11 +50,25 @@ func _ready() -> void:
 
 ## (Re)build the outline material + collect the host's meshes. Split out so a subclass can call it after it
 ## sets its own collision layer (Merchant) rather than going through _ready's default.
+##
+## ⭐AN INVISIBLE HIGHLIGHT BUILDS NO MATERIAL, and set_look_highlight() then never writes. `material_overlay`
+## is ONE slot per mesh, SHARED with the NPC combat rim and the Throwable hull: TalkHelpers.set_overlay stashes
+## whatever is there into `talk_prev_overlay` and swaps ours in, so even a fully transparent, zero-width outline
+## EVICTS the outline that was showing for as long as the player looks at us. Zeroing `highlight_color.a` or
+## `highlight_width` is exactly how a designer says "this one gets no hover outline" (the shipping ATM does),
+## and honouring that literally — by never touching the slot — is the only reading that can't strip someone
+## else's rim. `_meshes` is still collected either way: `auto_fit_collider` sizes the hitbox from it.
 func _build_outline() -> void:
-	_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
+	_outline_mat = null
+	if highlight_color.a > 0.0 and highlight_width > 0.0:
+		_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
 	var host := _host()
 	if host != null:
-		_meshes = TalkHelpers.collect_meshes(host, self)
+		# ⭐PRUNE the actors and props under the host — see TalkHelpers.owns_its_overlay. `highlight_target` is
+		# usually blank, so the host is our PARENT, and a station dropped straight under the level root (a wall
+		# terminal has no prop node of its own) takes the WHOLE MAP as its host. Without this prune, hovering
+		# that one terminal would collect every NPC and prop in the level and strip their outlines.
+		_meshes = TalkHelpers.collect_meshes(host, self, false, TalkHelpers.owns_its_overlay)
 
 ## Fit our look-at hitbox to the host's visual bounds (opt-in via auto_fit_collider): size a BoxShape3D
 ## CollisionShape3D — created if absent — to the host meshes' combined AABB in our local space, so you don't
@@ -142,8 +156,12 @@ func _on_dialogue_host() -> bool:
 			return true
 	return false
 
-## Look-at highlight toggle — outlines the host's meshes.
+## Look-at highlight toggle — outlines the host's meshes. A null `_outline_mat` means the highlight is
+## INVISIBLE (alpha 0 / zero width, or we were never built): return before touching the shared overlay slot
+## rather than writing a transparent material into it — see _build_outline.
 func set_look_highlight(on: bool) -> void:
+	if _outline_mat == null:
+		return
 	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)
 
 ## No NPC behind a world interactable (so the FNV hover won't greet/tint it; player.gd null-guards this).

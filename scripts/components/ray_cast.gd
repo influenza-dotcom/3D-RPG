@@ -4,8 +4,10 @@ extends RayCast3D
 ## @system Interaction
 ## @seam _query_talk_handler is THE line-of-sight wall-gate for every look-at interactable (pickup/loot/talk/doors): its talk-ray is gated by _interaction_occluded (a second solid-body ray, target's own bodies excluded).
 ## @risk Broaden the occlusion mask or drop the target-own-body exclusion (_interaction_occluded's collision_mask + _target_body_exclusions): silent interact-through-walls, or a dropped item self-occludes and is unpickable on open floor.
-## @risk Break the closer-prop block (the _talk_distance / is_ancestor_of guard, duplicated in _unhandled_input and _update_talk_target): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
-## @risk Remove either liveness bail (the `player as Character` is_alive() gates at the TOP of _unhandled_input AND _physics_process): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic — or the corpse camera keeps painting the hover outlines/readout and greeting NPCs it sweeps across.
+## @seam interact_available()/pending_verb_action() answer "would an F press DO something right now?" — the Interact half of the contextual-key rule for BOTH fallbacks that share a key with it (scripts/player/lean.gd on Q, scenes/player/flash_light.gd on F); it must stay in lockstep with the PickUp branch of _unhandled_input.
+## @risk Break the closer-prop block (_closer_prop_blocks — the _talk_distance / is_ancestor_of guard, now shared by the PickUp press, _update_talk_target and interact_available): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
+## @risk Add an outcome to the PickUp branch without adding it to interact_available(): a fallback claims that press instead and the new interact silently never fires — the lean swallows it on Q, and on F the FLASHLIGHT toggles over it. The reverse is now just as costly: widen interact_available() and F stops reaching the torch for as long as the new condition holds (this is why carrying a prop, which is true the whole time you carry it, needs L as the torch's second key).
+## @risk Remove either liveness bail (the `player as Character` is_alive() gates at the TOP of _unhandled_input AND _physics_process): a mid-death-cinematic F/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic — or the corpse camera keeps painting the hover outlines/readout and greeting NPCs it sweeps across.
 ## @risk Fold the per-prop throw_impulse_mult multiply INTO the throw test (launch_impulse / is_throw_release read the RAW impulse first): a fast-throw prop's gentle tap-DROP then scales past the throw threshold and silently noses, plays the throw sound, and credits the player with an attack.
 ## @test res://tests/test_interaction_occlusion.gd
 ## @test res://tests/test_pickup_ray_liveness.gd
@@ -13,7 +15,7 @@ extends RayCast3D
 ## @test res://tests/test_carry_step_over.gd
 ## @test res://tests/test_throw_release_policy.gd
 ## Physics-object pickup / carry / throw. A RayCast3D from the camera detects the aimed Throwable.
-## TWO-PRESS model (see _grab_or_arm_release / _release_held): press PickUp (E) or Throw (Z) aimed at a
+## TWO-PRESS model (see _grab_or_arm_release / _release_held): press PickUp (F) or Throw (Z) aimed at a
 ## Throwable to GRAB it and carry it hands-free — the key-up does NOT drop it, so you keep carrying with the
 ## key released. Press the SAME key AGAIN while carrying to ARM the release; the duration you hold that second
 ## press decides the outcome on ITS key-up — a long hold THROWS (impulse), a quick tap gently DROPS. The first
@@ -88,7 +90,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# A menu, cutscene, or the name-entry dialog is up? Don't start a talk / grab / pickup, and DON'T consume the
 		# event — let it propagate so a transaction screen (loot/shop/heal/…) can close on the same key. M5/T2: gate over
 		# any menu (any_modal_open) PLUS cutscenes + the pet-naming NameEntryDialog (gameplay_suppressed is the strict
-		# superset), matching every other combat input — pressing E over a menu/cutscene used to leak an interact.
+		# superset), matching every other combat input — pressing F over a menu/cutscene used to leak an interact.
 		if InputManager.gameplay_suppressed():
 			return
 		# While a conversation is up, the interact key advances the box (DialogueManager handles
@@ -102,10 +104,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			# ...unless a grabbable prop CLOSER to the camera than the target blocks interacting THROUGH it
 			# (grab the prop instead) — UNLESS that prop IS the target's own body (a dual item), where E
 			# must still run the interact rather than carry it.
-			var blocked := is_colliding() and get_collider() is Throwable \
-				and global_position.distance_to(get_collision_point()) < _talk_distance \
-				and not (get_collider() as Node).is_ancestor_of(_talk_handler)
-			if not blocked:
+			if not _closer_prop_blocks(_talk_handler):
 				_talk_handler.start_talk(player)
 				get_viewport().set_input_as_handled()
 				return
@@ -126,12 +125,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		# ALTERNATE THROW (default LEFT-CLICK). While you're carrying a prop the gun is holstered AND draw-locked
 		# (Player._on_carry_changed — "no gun while your hands are full"), so a fire click can't shoot anyway.
 		# Repurpose it as a quick, full-impulse throw straight down the look ray — ONE click launches what you're
-		# holding, bypassing the two-press E/Z carry-then-hold-to-release model. The freshly-drawn gun is kept from
+		# holding, bypassing the two-press F/Z carry-then-hold-to-release model. The freshly-drawn gun is kept from
 		# firing on this SAME held click by Attack.suppress_fire_for_carry_release() (fired from
 		# Player._on_carry_changed), mirroring the draw-click rule.
 		# Because this branch STANDS IN FOR the fire click while your hands are full, suppress it in exactly the
 		# states firing is suppressed: MouseInput gates the shot on InputManager.gameplay_suppressed() — the same gate
-		# the E/Z grab presses above now use — which covers any registered modal PLUS cutscenes and the pet-naming
+		# the F/Z grab presses above now use — which covers any registered modal PLUS cutscenes and the pet-naming
 		# NameEntryDialog, neither of which pauses the tree. Match it, or a left-click / trigger-pull would fling
 		# the prop across a cutscene when you can't even shoot. (gameplay_suppressed omits dialogue, so keep that.)
 		if DialogueManager.is_active() or InputManager.gameplay_suppressed():
@@ -142,13 +141,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		# event is flushed, so the latch is already up here. Not consumed — the same click may still close a screen.
 		if _refocus_latched():
 			return
-		_release_timer_started_us = -1  # discard any E/Z-armed release timer — this click owns the throw now
+		_release_timer_started_us = -1  # discard any F/Z-armed release timer — this click owns the throw now
 		_release(GameSettings.physics_damage.pickup_throw_impulse)
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed(InputManager.action_drop_held):
 		# DEDICATED DROP/HOLD (default H): empty your hands one stage at a time — a carried prop goes to the ground
 		# WITHOUT a throw, while an empty-handed press takes the WIELDED weapon INTO your hands instead (see
-		# _drop_held_in_hand). Same suppression gate as the E/Z/Attack presses above — nothing over a menu / cutscene /
+		# _drop_held_in_hand). Same suppression gate as the F/Z/Attack presses above — nothing over a menu / cutscene /
 		# name-entry box — and, like them, DON'T consume the event when suppressed so the key can still close a
 		# transaction screen.
 		if DialogueManager.is_active() or InputManager.gameplay_suppressed():
@@ -165,7 +164,7 @@ func _unhandled_input(event: InputEvent) -> void:
 ##   * Carrying anything else (a world-grabbed prop, a hotbar-pulled prop — both the SAME _holding carry,
 ##     distinguished downstream in Player._on_carry_changed): a gentle DROP at the tap-drop impulse, never a throw.
 ## Throwing the weapon is unchanged and still uses the ordinary carry verbs (left-click, or a Z-hold), and an
-## E/Z tap still sets it down — so the toggle costs no way of getting the knife OUT of your hands.
+## F/Z tap still sets it down — so the toggle costs no way of getting the knife OUT of your hands.
 ## Gate on `_holding`, NOT `held_object`: a prop freed out from under us leaves held_object falsy while _holding
 ## stays true (see the _holding docstring), and _release already cleans that freed case up. `player` is exported as
 ## CharacterBody3D, so both weapon branches downcast `as Player` (the same idiom _drive_readout uses) — the two
@@ -188,7 +187,7 @@ func _refocus_latched() -> bool:
 	return pl != null and is_instance_valid(pl.mouse_input) and pl.mouse_input.fire_blocked_by_refocus()
 
 ## Grab the aimed Throwable (start carrying), or — if already carrying — arm the release timer so the
-## key-up becomes a drop/throw by hold time. Shared by the PickUp (E) and Throw (Z) presses.
+## key-up becomes a drop/throw by hold time. Shared by the PickUp (F) and Throw (Z) presses.
 func _grab_or_arm_release() -> void:
 	if held_object:
 		_release_timer_started_us = Time.get_ticks_usec()
@@ -197,7 +196,7 @@ func _grab_or_arm_release() -> void:
 		if target:
 			_pick_up(target)
 
-## Release the carried object: a long hold throws (impulse), a tap gently drops. Shared by the PickUp (E)
+## Release the carried object: a long hold throws (impulse), a tap gently drops. Shared by the PickUp (F)
 ## and Throw (Z) releases. The `> 0` gate makes an UN-ARMED release a no-op: the key-up of the GRAB press
 ## (which never arms the timer) leaves the prop held so you can carry it hands-free — see the class header.
 func _release_held() -> void:
@@ -425,9 +424,7 @@ func _update_talk_target() -> void:
 		# never light up or read out through a crate) — UNLESS the prop IS the target's own body (a dual item
 		# like a dropped weapon, whose CanPickUp sits on the Throwable). NOTE: a target we CAN'T act on (a
 		# hostile / in-combat NPC) is NOT dropped here any more — it still reads out its name (below).
-		if handler != null and is_colliding() and get_collider() is Throwable \
-				and global_position.distance_to(get_collision_point()) < _talk_distance \
-				and not (get_collider() as Node).is_ancestor_of(handler):
+		if _closer_prop_blocks(handler):
 			handler = null
 		# No talk target under the crosshair: a bare Throwable there becomes the READOUT target instead, so
 		# the hover prompt teaches the carry key ("[Z] Pick Up"). Interact behaviour is untouched — a
@@ -484,6 +481,46 @@ func _refresh_readout(handler: Node) -> void:
 	var pl := player as Player
 	if pl != null:
 		pl.refresh_look_readout(handler)
+
+## THE "interacting THROUGH a prop" block, factored out of the three places that had it inline (the PickUp press,
+## the per-frame talk-target update, and interact_available below) — the duplication the class header flags as a
+## drift risk. A grabbable prop CLOSER to the camera than `handler` blocks it, so a covered NPC can't be talked to
+## or lit up through a crate — UNLESS the prop IS the handler's own body (a dual item, e.g. a dropped weapon whose
+## CanPickUp sits on the Throwable), where the interact must still run instead of carrying it. Reads whatever
+## `_talk_distance` currently holds, so the press path (last frame's) and the per-frame path (this frame's, set by
+## the _query_talk_handler call right above it) keep exactly the freshness each always had.
+func _closer_prop_blocks(handler: Node) -> bool:
+	if handler == null or not is_colliding():
+		return false
+	var prop := get_collider() as Throwable
+	if prop == null:
+		return false
+	return global_position.distance_to(get_collision_point()) < _talk_distance and not prop.is_ancestor_of(handler)
+
+## True when an Interact (PickUp / F) press would DO something at this instant — the exact three outcomes the
+## PickUp branch of _unhandled_input can produce: arm the release of a carried prop, run a look-at interactable,
+## or grab a bare Throwable.
+##
+## THIS IS THE E HALF OF THE LEAN'S CONTEXTUAL-KEY RULE (scripts/player/lean.gd): the lean claims the Interact key
+## only on a press where this is FALSE, so exactly one of the two ever answers a given press. Keep it in lockstep
+## with that input branch — an outcome added there but not here becomes an interact that a lean swallows.
+## Deliberately does NOT gate on menus / dialogue: E means something in both (advance the box, close the screen),
+## but the lean already refuses to run in either, so that gate lives once, in Lean._input_is_ours().
+func interact_available() -> bool:
+	var pl := player as Character
+	if pl != null and not pl.is_alive():
+		return false  # mirrors the liveness bail at the top of _unhandled_input — a dead player's E does nothing
+	if _holding or held_object != null:
+		return true   # E arms the carried prop's release (the two-press carry model)
+	if _talk_handler != null and _is_interactable(_talk_handler) and not _closer_prop_blocks(_talk_handler):
+		return true   # E talks / loots / stashes
+	return is_colliding() and get_collider() is Throwable  # E grabs the aimed prop
+
+## The contextual verb this ray is holding a target for, as an ACTION name (&"" = nothing). Duck-typed by
+## Player.pending_verb_actions(), which the lean asks before it claims a key. Only the INTERACT verb is reported:
+## Throw (Z) and DropHeld (H) are unconditional verbs on their own keys, not contextual fallbacks.
+func pending_verb_action() -> StringName:
+	return InputManager.action_pickup if interact_available() else &""
 
 ## Whether the look-at `handler` can be acted on right now: TALKED to / looted / picked up (is_talkable_now),
 ## OR PICKPOCKETED by our player (is_pickpocketable_now — offered even on a hostile NPC, when crouched behind
@@ -567,7 +604,7 @@ func _target_body_exclusions(hit_collider: Object) -> Array[RID]:
 		depth += 1
 	return rids
 
-## Programmatically grab `target` and carry it hands-free, exactly as an aimed E/Z grab would — the entry point
+## Programmatically grab `target` and carry it hands-free, exactly as an aimed F/Z grab would — the entry point
 ## for the hotbar's "hold from backpack" action (Player.hold_item builds the prop, then hands it here). No-op if
 ## already carrying or the target isn't a live Throwable, so a double-press can't stack two grabs.
 func carry(target: Throwable) -> void:
@@ -585,7 +622,7 @@ func _pick_up(target: Throwable) -> void:
 	# body overlapping static geometry. unpin() also lifts it clear of the surface. No-op on everything else.
 	target.unpin()
 	held_object = target
-	_holding = true  # the sole grab entry (aimed E/Z AND the hotbar carry() both land here); paired with every _release / recovery
+	_holding = true  # the sole grab entry (aimed F/Z AND the hotbar carry() both land here); paired with every _release / recovery
 	_pickup_grace_remaining = PICKUP_GRACE_TIME
 	_stack_wake_origin = target.global_position
 	_stack_wake_remaining = STACK_WAKE_TIME
@@ -674,10 +711,12 @@ func _release(impulse: float, credit_thrower: bool = true) -> void:
 	dropped.on_dropped(is_throw)  # a real throw plays the prop's throw_sound (if it authors one) instead of its drop sound
 	if credit_thrower:
 		dropped.mark_thrown_by(player)  # credit the player so a thrown prop that damages an NPC aggros them (counts as an attack)
-		# A real THROW noses the prop toward its travel direction if it opts in; a tap-DROP (low impulse) and the
-		# forced release (credit_thrower false) never do — see Throwable.face_travel_when_thrown.
+		# A real THROW noses the prop toward its travel direction if it opts in, and drags its streak if it
+		# carries a ThrowTrail; a tap-DROP (low impulse) and the forced release (credit_thrower false) never do
+		# — see Throwable.face_travel_when_thrown / Throwable.mark_thrown_for_trail.
 		if is_throw:
 			dropped.mark_thrown_for_facing()
+			dropped.mark_thrown_for_trail()
 	if player:
 		var t := get_tree().create_timer(GameSettings.physics_damage.pickup_drop_exception_delay, true, true, true)
 		t.timeout.connect(_restore_player_collision.bind(dropped))
