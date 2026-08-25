@@ -52,6 +52,9 @@ func _check_weapon(path: String) -> void:
 	_check_field(w, "enemy_knockback", TYPE_FLOAT, path)
 	_check_field(w, "enemy_lift", TYPE_FLOAT, path)
 	_check_field(w, "bullet_gravity_scale", TYPE_FLOAT, path)
+	# AI dodge-window dial: multiplies projectile_speed ONLY for an AI wielder's rounds (ProjectileSpawner
+	# round_speed) — enemies never hitscan, so this is what makes their fire visibly dodgeable per weapon.
+	_check_field(w, "npc_projectile_speed_mult", TYPE_FLOAT, path)
 	_check_field(w, "launch_angle", TYPE_FLOAT, path)
 	_check_field(w, "max_explosion_force", TYPE_FLOAT, path)
 	_check_field(w, "explosion_radius", TYPE_FLOAT, path)

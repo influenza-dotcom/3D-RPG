@@ -6,6 +6,10 @@ const DamageNumberPopupScript := preload("res://scripts/combat/damage_number_pop
 ## the segment-walk raycast, hit FX, damage application
 ## (through DamageApplier + ShotResolver), victim/wielder feedback, hitstop, knockback, decals, impact audio,
 ## and the overkill pierce-through that carries leftover damage into whoever is behind the kill.
+## WHO STILL TRACES (2026-08-25): the PLAYER's every shot, and an AI wielder's MELEE swings (plus any ranged
+## weapon authored with no projectile_scene). An AI RANGED shot never runs this — enemies never hitscan; their
+## pellets spawn as live projectiles in attack.gd (ShotResolver.ai_fires_live_projectile) and projectile.gd
+## lands the mirrored damage/knockback/status/collateral at physical contact instead.
 ##
 ## Stateless static in the ShotResolver / GunFX / DamageApplier mold. Every tree-dependent handle (space
 ## state, FX root, camera) is sampled ONCE by the caller and passed in — a static must not fetch them, and

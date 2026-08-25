@@ -15,6 +15,19 @@ const PITCH_AXIS_MIN_LENGTH_SQ: float = 0.0001
 
 var current_weapon: WeaponData
 
+## The launch speed a spawned round actually flies at: the weapon's authored projectile_speed, times its
+## npc_projectile_speed_mult when the wielder is an AI — enemy rounds fly slower than the player's identical
+## gun so incoming fire is dodgeable (AI fire is ALWAYS live rounds; see ShotResolver.ai_fires_live_projectile).
+## `wielder_is_player` must be true for a NULL/unwired wielder too (spawn_projectile derives it that way): an
+## unattributed round keeps the authored speed, matching the old single-speed behaviour. Pure + static so
+## tests pin it against the authored .tres without a tree.
+static func round_speed(weapon: WeaponData, wielder_is_player: bool) -> float:
+	if weapon == null:
+		return 0.0
+	if wielder_is_player:
+		return weapon.projectile_speed
+	return weapon.projectile_speed * weapon.npc_projectile_speed_mult
+
 func _ready() -> void:
 	inventory.weapon_changed.connect(_on_weapon_changed)
 	current_weapon = inventory.equipped_weapon
@@ -38,7 +51,9 @@ func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool, _
 	_bullet.direction = _direction
 	_bullet.damage = current_weapon.damage
 	_bullet.life_time = current_weapon.projectile_life_time
-	_bullet.speed = current_weapon.projectile_speed
+	# AI rounds may fly slower than the player's (npc_projectile_speed_mult — the dodge-window dial); a null
+	# wielder reads as player-side so an unwired spawner keeps the authored speed.
+	_bullet.speed = round_speed(current_weapon, player == null or player.is_in_group(Groups.PLAYER))
 	_bullet.visual_only = _visual_only
 	_bullet.shooter = player
 	_bullet.headshot_multiplier = current_weapon.headshot_multiplier

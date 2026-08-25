@@ -131,3 +131,34 @@ func test_scaled_damage_is_melee_flag_uses_strength_and_skips_gunplay_headshot()
 	assert_almost_eq(ShotResolver.scaled_damage(10.0, 2.0, 1.0, true, false, 1.0, false, bruiser, 0.0, true, 0.0), 24.0, 0.0001,
 		"melee crit: 10 * weapon crit 2 * strength 1.2 = 24 (no gunplay headshot bonus)")
 	bruiser = null
+
+
+## THE "enemies never hitscan" rule (2026-08-25): ai_fires_live_projectile decides whether an AI wielder's
+## shot skips the instant damage trace and rides a LIVE spawned round instead. Pinned against the AUTHORED
+## .tres roster (the NpcCombat.attempt_fire_range test idiom) because the carve-outs are load-bearing: the
+## knife is the DEFAULT NPC.tscn weapon and its swing damage IS the trace — a blanket skip would zero it.
+func test_ai_fires_live_projectile_matrix() -> void:
+	assert_false(ShotResolver.ai_fires_live_projectile(null),
+		"null weapon -> no live-round path (the trace branch handles the nothing-equipped case)")
+	var bare := WeaponData.new()
+	assert_false(ShotResolver.ai_fires_live_projectile(bare),
+		"a ranged weapon authored with NO projectile_scene falls back to the trace — its damage must stay real")
+	bare = null
+	var knife := load("res://resources/weapons/melee.tres") as WeaponData
+	assert_true(knife.is_melee and knife.projectile_scene == null,
+		"premise: melee.tres is the is_melee, no-projectile default NPC weapon this rule must carve out")
+	assert_false(ShotResolver.ai_fires_live_projectile(knife),
+		"MELEE keeps the hitscan trace — a knife swing's reach IS the trace; skipping it zeroes every default-knife NPC")
+	knife = null
+	var spray := load("res://resources/weapons/spray_paint.tres") as WeaponData
+	assert_false(ShotResolver.ai_fires_live_projectile(spray),
+		"spray paint is carved out — its fire path is the damage-free _do_spray_paint short-circuit, and 8 live paint rounds per squeeze would weaponize the graffiti tool")
+	spray = null
+	var pistol := load("res://resources/weapons/pistol.tres") as WeaponData
+	assert_true(ShotResolver.ai_fires_live_projectile(pistol),
+		"a ranged gun with a projectile_scene (pistol) ALWAYS fires live rounds for AI — enemies never hitscan")
+	pistol = null
+	var rock := load("res://resources/weapons/rock_weapon.tres") as WeaponData
+	assert_true(rock.effective_range == 0.0 and ShotResolver.ai_fires_live_projectile(rock),
+		"the effective_range-0 lob (rock) is ALSO live — unlike the grace band, this rule has no range qualifier: its 0m trace never dealt damage anyway")
+	rock = null

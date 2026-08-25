@@ -269,6 +269,31 @@ func test_projectile_spawner_class_shape() -> void:
 	s.free()
 
 
+## The AI dodge-window dial (2026-08-25): round_speed is the pure static spawn_projectile stamps onto every
+## round — the authored projectile_speed for the player (and a NULL/unwired wielder), times the weapon's
+## npc_projectile_speed_mult for an AI wielder. Enemies never hitscan, so this is what makes their fire
+## visibly slower than the player's identical gun. Pinned against the authored .tres so a rebalance shows here.
+func test_projectile_spawner_round_speed_slows_ai_rounds_only() -> void:
+	assert_eq(ProjectileSpawner.round_speed(null, true), 0.0,
+		"null weapon -> 0 speed (the spawn path never reaches round_speed without a weapon; the 0 is a safe inert)")
+	var w := WeaponData.new()
+	w.projectile_speed = 60.0
+	assert_eq(ProjectileSpawner.round_speed(w, true), 60.0,
+		"a PLAYER wielder always gets the authored projectile_speed — the mult must never touch the player's feel")
+	assert_eq(ProjectileSpawner.round_speed(w, false), 60.0,
+		"default npc_projectile_speed_mult 1.0 -> AI rounds at authored speed (no behavior change until a .tres opts in)")
+	w.npc_projectile_speed_mult = 0.5
+	assert_eq(ProjectileSpawner.round_speed(w, false), 30.0,
+		"an AI wielder's rounds fly projectile_speed x npc_projectile_speed_mult — the per-weapon dodge window")
+	assert_eq(ProjectileSpawner.round_speed(w, true), 60.0,
+		"the same weapon in the player's hands still fires at full authored speed")
+	w = null
+	var pistol := load("res://resources/weapons/pistol.tres") as WeaponData
+	assert_eq(ProjectileSpawner.round_speed(pistol, false), pistol.projectile_speed * 0.5,
+		"pistol.tres authors npc_projectile_speed_mult 0.5 — enemy pea-shooter rounds fly at half the player's, the shipped dodge window")
+	pistol = null
+
+
 func test_projectile_spawner_spawn_with_no_weapon_is_noop() -> void:
 	var s := ProjectileSpawner.new()  # no add_child: current_weapon stays null (_ready never ran)
 	assert_eq(s.current_weapon, null,

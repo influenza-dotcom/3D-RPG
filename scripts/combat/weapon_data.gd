@@ -279,6 +279,17 @@ func power_score() -> float:
 @export var projectile_scene: PackedScene
 ## Launch speed (m/s) of the spawned projectile. Higher = flatter, faster shot; lower = lobbed and dodgeable.
 @export var projectile_speed: float = 80.0
+## Multiplier on projectile_speed ONLY when an AI wielder fires this weapon (ProjectileSpawner checks the
+## wielder's group). Enemy rounds fly slower than the player's identical gun so incoming fire is visibly
+## dodgeable — the classic AI-fairness trick — without touching the player's feel. 1.0 (default) = NPC rounds
+## fly at the authored speed. Matters because AI ranged fire is ALWAYS live projectiles (never hitscan, the
+## 2026-08-25 design rule — see ShotResolver.ai_fires_live_projectile): this is the dodge-window dial per
+## weapon. Leave 1.0 on a lobbed/ballistic weapon (the grenade launcher) whose arc is tuned to its speed, and
+## on the sniper (its terror IS the fast bolt; the charge/beep telegraph is the counterplay). NOTE a value
+## well below 1.0 also multiplies gravity DROP at a given distance (drop ~ 1/speed²) while launch_angle still
+## compensates for the FULL authored speed — keep bullet_gravity_scale low or re-aim launch_angle if rounds
+## start landing short.
+@export var npc_projectile_speed_mult: float = 1.0
 ## Seconds the projectile lives before it despawns. Caps range for slow rounds; 0 or less skips the travel hit-flash.
 @export var projectile_life_time: float = 10.0
 ## Gravity pull on the projectile, as a fraction of normal gravity. 0 = flat laser; 1 = full drop (grenade arc).

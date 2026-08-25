@@ -3149,9 +3149,10 @@ func _aim_range() -> float:
 	var base: float = w.effective_range if w.effective_range > 0.0 else GameSettings.npc_ai.unranged_aim_fallback
 	return NpcCombat.attempt_fire_range(base, w, GameSettings.npc_ai.fire_grace_range)
 
-## The distance this NPC engages a target at — the standoff it closes to (and, for a pure-hitscan weapon,
-## how far it will fire; a projectile GUN also fires through the grace band beyond this while closing — see
-## NpcCombat.attempt_fire_range) — so it SCALES with the equipped weapon: a shotgunner closes right in, a
+## The distance this NPC engages a target at — the standoff it closes to (and, for a MELEE weapon, how far
+## it will swing; a projectile GUN also fires through the grace band beyond this while closing — see
+## NpcCombat.attempt_fire_range; its rounds are always LIVE, so effective_range shapes only this standoff,
+## never where its damage stops) — so it SCALES with the equipped weapon: a shotgunner closes right in, a
 ## long-range weapon holds back. Unarmed uses the FISTS' reach; otherwise see _engage_range_for.
 func _engage_range() -> float:
 	if not _can_fight_with_gun():
@@ -3184,6 +3185,18 @@ func _attack_damage() -> float:
 	if not _can_fight_with_gun():
 		return FISTS.damage
 	return _weapon.equipped_weapon.damage if (_weapon != null and _weapon.equipped_weapon != null) else 0.0
+
+## The stat half of "NPCs are not aimbots": the per-shot aim-error cone (radians) attack.gd adds to every
+## RANGED pellet this NPC fires (Character.aim_error_spread override; melee swings are exempt at the call
+## site). Base cone = GameSettings.npc_ai.aim_error_deg, scaled by the SAME gunplay steadiness formula the
+## player's aim wander uses — CharacterStats.sway_mult, 8% tighter per gunplay point over baseline, floored
+## at perfectly accurate — with any live gunplay status buff folded in. So a sheetless mook sprays the full
+## cone, the sniper archetype (gunplay 2) shoots 16% tighter, and a gunplay 12.5+ elite is surgical: WHO the
+## NPC is (its NpcData stat sheet) decides how well it shoots. Pairs with the always-live-projectile rule
+## (ShotResolver.ai_fires_live_projectile): error + travel time is what makes incoming fire dodgeable.
+func aim_error_spread() -> float:
+	var base_deg: float = maxf(GameSettings.npc_ai.aim_error_deg, 0.0)
+	return deg_to_rad(base_deg) * stats_or_default().sway_mult(status_stat_modifier(&"gunplay"))
 
 ## Deflect a shot wide so it clearly MISSES: rotate `dir` by a random angle in the tuned deflection range
 ## (GameSettings.npc_ai.miss_deflect_min/max_deg) around a random axis perpendicular to it. Used for an
@@ -3584,8 +3597,9 @@ func _aim_laser_at(point: Vector3, charge: float, report_aim: bool = true) -> Di
 
 # --- WeaponHost aim contract: from the muzzle toward the target, no camera ---
 ## Shot + laser origin: the held gun's barrel marker when one resolved, else the bare hand anchor
-## (_muzzle), else the body origin. Both the hitscan ray (attack.gd) and the laser (_aim_laser_at)
-## route through here, so preferring the barrel moves both onto the gun in one place.
+## (_muzzle), else the body origin. The shot's aim ray (attack.gd — a melee swing's damage trace, or the
+## aim line a RANGED shot's live round launches down), the projectile spawn point, and the laser
+## (_aim_laser_at) all route through here, so preferring the barrel moves them onto the gun in one place.
 func get_aim_origin() -> Vector3:
 	if is_instance_valid(_gun_muzzle):
 		return _gun_muzzle.global_position

@@ -1083,7 +1083,11 @@ func test_npc_ai_settings_defaults() -> void:
 	assert_gt(s.unranged_aim_fallback, 0.0,
 		"unranged_aim_fallback must be > 0 so a weapon with no effective_range still has a usable engage range")
 	assert_gt(s.fire_grace_range, 0.0,
-		"fire_grace_range must be > 0 so a projectile weapon fires into its grace band — at 0 a kiting player can never be hit by a short-range gun (projectiles outfly the hitscan cap; that band is the counter)")
+		"fire_grace_range must be > 0 so a projectile weapon fires into its grace band — at 0 a kiting player can never be pressured by a short-range gun (AI rounds are always live; the band is where the trigger still pulls past the engage standoff)")
+	assert_gte(s.aim_error_deg, 0.0,
+		"aim_error_deg must be >= 0 — a negative base cone is meaningless (0 = aimbot-perfect NPCs, the pre-2026-08-25 behaviour)")
+	assert_lt(s.aim_error_deg, s.miss_deflect_min_deg,
+		"aim_error_deg must sit BELOW miss_deflect_min_deg — the organic aim-error cone has to stay tighter than a DELIBERATE warning-shot deflection, or rolled misses would be indistinguishable from ordinary spray")
 	assert_gt(s.point_blank_range, 0.0,
 		"point_blank_range must be > 0 so the self-occluded-LOS fire-anyway carve-out exists at all")
 	assert_lt(s.point_blank_range, s.unranged_aim_fallback,

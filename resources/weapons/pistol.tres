@@ -14,6 +14,7 @@ pellet_spread = 0.009
 attack_speed = 0.44
 caliber = &"pistol"
 projectile_scene = ExtResource("1_52pn7")
+npc_projectile_speed_mult = 0.5
 self_knockback = 0.4
 enemy_knockback = 1.0
 enemy_lift = 1.5

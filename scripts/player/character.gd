@@ -892,6 +892,13 @@ func encumbrance_launch_multiplier() -> float:
 func limb_spread_penalty() -> float:
 	return crippled_arm_spread if is_limb_crippled(BodyPart.ARMS) else 0.0
 
+## Extra shot spread (radians) from the WIELDER's own marksmanship, added by attack.gd to every RANGED
+## (non-melee) pellet. 0.0 here — the PLAYER's accuracy already runs through AimSway/bloom/hip_sway_mult, so a
+## second cone would double-punish. NPC overrides this with its gunplay-scaled aim-error cone (npc.gd), which
+## is what makes an enemy's stat sheet decide how well it shoots instead of every NPC being an aimbot.
+func aim_error_spread() -> float:
+	return 0.0
+
 ## Hook: a limb was just crippled by `attacker` (null if unattributed). Base plays the cripple SFX
 ## (player + NPC) and routes head crippling to the overridable stagger hook. NPC extends this to cry out
 ## "My [part]!" + (when the player did it) toast the player; the Player toasts its own head cripple.

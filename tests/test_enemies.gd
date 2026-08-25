@@ -348,6 +348,40 @@ func test_ranged_enemy_exported_defaults() -> void:
 	n.free()
 
 
+## The stat half of "NPCs are not aimbots" (2026-08-25): aim_error_spread is the per-shot cone (radians)
+## attack.gd adds to every ranged pellet an NPC fires. Base = GameSettings.npc_ai.aim_error_deg, scaled by
+## the SAME CharacterStats.sway_mult formula the player's aim wander uses — so WHO the NPC is (its NpcData
+## stat sheet's gunplay) decides how well it shoots. Off-tree .new() per the header rule; expectations are
+## computed from the same live tuning the method reads, so re-tuning aim_error_deg can't break the test.
+func test_npc_aim_error_spread_scales_with_gunplay() -> void:
+	var base_rad: float = deg_to_rad(maxf(GameSettings.npc_ai.aim_error_deg, 0.0))
+	var n = load("res://scripts/npc/npc.gd").new()  # no add_child: _ready MUST NOT run
+	assert_almost_eq(n.aim_error_spread(), base_rad, 0.000001,
+		"a sheetless NPC (stats null -> baseline gunplay 0, sway_mult 1.0) sprays the FULL base cone")
+	var marksman := CharacterStats.new()
+	marksman.gunplay = 5  # sway_mult 0.6 — the same 8%-per-point steadiness the player's aim wander uses
+	n.stats = marksman
+	assert_almost_eq(n.aim_error_spread(), base_rad * 0.6, 0.000001,
+		"gunplay 5 shoots 40% tighter — the identical sway_mult formula, so stats mean the same thing on both sides of a fight")
+	var elite := CharacterStats.new()
+	elite.gunplay = 20  # sway_mult floors at 0.0 — perfectly accurate, never negative (an inverted cone)
+	n.stats = elite
+	assert_almost_eq(n.aim_error_spread(), 0.0, 0.000001,
+		"very high gunplay floors the cone at 0 — an elite is surgical, and the mult can never go negative")
+	n.free()
+	marksman = null
+	elite = null
+
+
+## The PLAYER side of the same seam must stay 0: its accuracy already runs through AimSway/bloom, so a
+## second cone would double-punish. Character's base is what the Player inherits (no override).
+func test_character_base_aim_error_spread_is_zero() -> void:
+	var c = load("res://scripts/player/character.gd").new()  # no add_child (Character._ready builds overlays)
+	assert_eq(c.aim_error_spread(), 0.0,
+		"Character.aim_error_spread base is 0.0 — only the NPC override adds the gunplay aim-error cone")
+	c.free()
+
+
 func test_ranged_enemy_constants() -> void:
 	# Constants need no instance — read straight off the class. These pin the laser cap and the
 	# shared alert-sting throttle window.

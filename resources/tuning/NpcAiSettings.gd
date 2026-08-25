@@ -15,13 +15,24 @@ extends Resource
 ## (and telegraphs) shots — only with a weapon that spawns physical rounds (WeaponData.projectile_scene)
 ## AND authors a positive effective_range. An unranged lob (the rock, effective_range 0) gets no band: it
 ## engages at the unranged_aim_fallback guess already and its flat ballistic arc grounds inside it.
-## A fired projectile keeps flying past the hitscan raycast's effective_range cap and genuinely hits out
-## there, so holding fire at the nominal range made a kiting player untouchable: a shotgunner
+## Why it exists: holding fire at the nominal engage range made a kiting player untouchable — a shotgunner
 ## (effective_range 5) simply never fired at a backpedaling target. Inside the band the NPC fires WHILE
 ## still closing (the engage standoff itself is unchanged), so the pressure is dodgeable projectile fire
-## instead of a silent chase. Pure-hitscan weapons get no grace — their trace stops dead at
-## effective_range, so an out-of-range attempt would be guaranteed-miss theater. 0 disables the band.
+## instead of a silent chase. Since the 2026-08-25 "enemies never hitscan" rule EVERY ranged AI shot is a
+## live round (ShotResolver.ai_fires_live_projectile) that flies projectile_speed x life_time metres, so
+## effective_range no longer caps AI damage anywhere — this band only decides how far past the engage
+## standoff the TRIGGER still pulls. Melee weapons get no band (their reach really is the trace).
+## 0 disables the band.
 @export var fire_grace_range: float = 8.0
+## Base AIM-ERROR cone (degrees) for every RANGED shot an NPC fires — the "NPCs are not aimbots" dial. Each
+## pellet deflects by an independent roll in [-error, +error] on both aim axes (the same math as weapon
+## pellet_spread; attack.gd sums the two, so it widens spread rather than replacing it). Scaled PER NPC by
+## the same gunplay steadiness formula the player's aim wander uses (CharacterStats.sway_mult — 8% tighter
+## per gunplay point over baseline, floored at perfectly accurate), so an NpcData stat sheet is what makes a
+## marksman a marksman: a sheetless mook sprays the full cone, the sniper archetype (gunplay 2) shoots 16%
+## tighter, gunplay 12.5+ never misses. For scale: at 2.5 deg a stationary man-sized target ~10 m out is
+## roughly a coin flip per bullet; point-blank shots still land. 0 = every NPC is back to perfect aim.
+@export var aim_error_deg: float = 2.5
 ## Within this (m) a combatant treats its shot as CLEAR even when the LOS ray self-occludes
 ## (a target crowded onto the muzzle starts the ray inside its own collider) — fire anyway.
 @export var point_blank_range: float = 2.0

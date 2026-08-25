@@ -43,7 +43,9 @@ func test_explosion_bridge_has_and_forwards_explosion_damage() -> void:
 	bridge.free()
 	var src := FileAccess.get_file_as_string("res://scripts/effects/explosion.gd")
 	assert_true(src.contains("explosion.explosion_damage = _damage"), "the bridge's _spawn_at must forward explosion_damage onto the spawned Explosion")
-	assert_true(src.contains("explosion_radius, explosion_damage)"), "the rock/rocket path must pass explosion_damage into _spawn_at (the spark path stays at the -1 fallback)")
+	# Anchored WITHOUT the closing paren: _spawn_at grew a trailing deals_damage arg after this pin was written
+	# (the exact source-text-pin drift CLAUDE.md warns about), so pin only the pass-through pair itself.
+	assert_true(src.contains("explosion_radius, explosion_damage"), "the rock/rocket path must pass explosion_damage into _spawn_at (the spark path stays at the -1 fallback)")
 
 
 func test_barrel_does_not_override_explosion_damage() -> void:

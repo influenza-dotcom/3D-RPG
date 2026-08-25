@@ -21,6 +21,7 @@ max_ammo = 2
 caliber = &"shells"
 reload_time = 1.0
 projectile_scene = ExtResource("1_4cern")
+npc_projectile_speed_mult = 0.5
 launch_angle = -0.1
 self_knockback = 5.0
 enemy_knockback = 20.0

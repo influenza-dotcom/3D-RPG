@@ -41,7 +41,9 @@ func reset_for_reuse() -> void:
 func act_alerted(delta: float) -> void:
 	var aim: Vector3 = host._aim_point()
 	# How close we WANT to be SCALES with the weapon (see _engage_range): close until comfortably inside that
-	# engage range (engage_range_fraction pulls it just inside), then hold + fire.
+	# engage range (engage_range_fraction pulls it just inside), then hold + fire. Every ranged shot we take
+	# is a LIVE projectile (enemies never hitscan — ShotResolver.ai_fires_live_projectile), so all of this
+	# gating decides when the trigger pulls, never where damage stops.
 	var engage_dist: float = host._engage_range()
 	# How far we'll actually TAKE the shot: the engage range plus the projectile GRACE BAND (attempt_fire_range).
 	# Between the two the NPC fires WHILE still closing, so a kiting target takes dodgeable projectile fire out
@@ -136,15 +138,16 @@ func act_alerted(delta: float) -> void:
 
 ## The distance an armed NPC still ATTEMPTS a shot at: the weapon-scaled engage range, extended by the
 ## projectile grace band (GameSettings.npc_ai.fire_grace_range) for a weapon that spawns physical rounds
-## (WeaponData.projectile_scene). A projectile keeps flying past the hitscan raycast's effective_range cap
-## and can genuinely hit out there — projectile.gd deals its damage "past the raycast's effective_range" —
-## so the trigger works in the band instead of letting a kiting target backpedal a short-range gun forever.
-## A pure-hitscan weapon (or none) gets NO grace: its trace stops dead at effective_range, so an out-of-band
-## attempt would be a guaranteed miss. An effective_range-0 weapon (the lobbed rock) gets no grace EITHER,
-## even though it spawns projectiles: its engage range is already the unranged-fallback guess — there is no
-## hitscan cap for its rounds to outfly — and its flat ballistic lob grounds inside that fallback, so band
-## shots would be the same guaranteed-miss theater while burning finite thrown ammo. Negative grace clamps
-## to none — it must never SHRINK the fire range.
+## (WeaponData.projectile_scene). Since the "enemies never hitscan" rule (2026-08-25,
+## ShotResolver.ai_fires_live_projectile) EVERY ranged AI shot is a live round whose damage rides the flight
+## — effective_range caps nothing for AI any more — so this band is purely about how far past the engage
+## standoff the trigger still pulls, instead of letting a kiting target backpedal a short-range gun forever.
+## A weapon with NO projectile_scene gets no grace: for AI that now means MELEE, whose reach really is the
+## short damage trace, so an out-of-band attempt would be a guaranteed miss. An effective_range-0 weapon
+## (the lobbed rock) gets no grace EITHER, even though it spawns projectiles: its engage range is already
+## the unranged-fallback guess, and its flat ballistic lob grounds inside that fallback, so band shots would
+## be guaranteed-miss theater while burning finite thrown ammo. Negative grace clamps to none — it must
+## never SHRINK the fire range.
 ## Pure + static (the should_chase_while_alerted idiom) so tests pin it against the authored WeaponData .tres.
 static func attempt_fire_range(engage_range: float, weapon: WeaponData, grace_range: float) -> float:
 	if weapon != null and weapon.projectile_scene != null and weapon.effective_range > 0.0:

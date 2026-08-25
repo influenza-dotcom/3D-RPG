@@ -289,7 +289,33 @@ func test_weapon_data_default_projectile_fields() -> void:
 		"launch_angle is a float (upward firing tilt in radians)")
 	assert_eq(w.launch_angle, 0.0,
 		"Default launch_angle is 0.0 — ordinary guns fire straight, no lob")
+	assert_eq(typeof(w.npc_projectile_speed_mult), TYPE_FLOAT,
+		"npc_projectile_speed_mult is declared 'float = 1.0' so int-looking .tres literals still parse float")
+	assert_eq(w.npc_projectile_speed_mult, 1.0,
+		"Default npc_projectile_speed_mult is 1.0 — NPC rounds fly at the authored projectile_speed unless a .tres slows them for dodgeability")
 	w = null
+
+
+## THE "enemies never hitscan" flight-range ratchet (2026-08-25). Every ranged AI shot is a LIVE round
+## (ShotResolver.ai_fires_live_projectile) whose damage exists only while the projectile does — so each
+## shipped gun's AI-speed flight distance (projectile_speed x npc_projectile_speed_mult x life_time) must
+## cover the farthest point its OWN trigger pulls at (effective_range + the fire_grace_range band, per
+## NpcCombat.attempt_fire_range). The sniper shipped exactly this bug: 100 x 5.0 = 500m flight vs a 508m
+## attempt band, so max-range bolts despawned 8m short — masked back when hitscan covered in-range damage.
+## effective_range-0 lobs (the rock) get no band and ground ballistically, so they're skipped like melee/spray.
+func test_shipped_ai_rounds_outfly_the_attempt_band() -> void:
+	var grace: float = (load("res://resources/tuning/NpcAiSettings.tres") as NpcAiSettings).fire_grace_range
+	var weapons := _priced_ranged_weapons()
+	assert_gt(weapons.size(), 0, "expected at least one ranged weapon to validate")
+	for f in weapons:
+		var w: WeaponData = weapons[f]
+		if w.projectile_scene == null or w.effective_range <= 0.0:
+			continue  # no live rounds / no band — nothing to outfly
+		var flight := w.projectile_speed * w.npc_projectile_speed_mult * w.projectile_life_time
+		var attempt := w.effective_range + maxf(grace, 0.0)
+		assert_gte(flight, attempt,
+			"weapon '%s': AI rounds fly %.0fm (speed %.0f x npc mult %.2f x life %.1fs) but its trigger pulls out to %.0fm (effective_range %.0f + %.0fm grace band) — max-range shots would despawn mid-air; raise projectile_life_time or npc_projectile_speed_mult" \
+			% [f, flight, w.projectile_speed, w.npc_projectile_speed_mult, w.projectile_life_time, attempt, w.effective_range, grace])
 
 
 func test_weapon_data_default_ammo_is_int_ten() -> void:

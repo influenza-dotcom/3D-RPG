@@ -149,6 +149,10 @@ Every NPC must satisfy these behaviours:
   it - `npc_ai.fire_grace_range`, see `NpcCombat.attempt_fire_range`; the
   unranged rock lob gets no band), laser charges, incoming beep plays before
   the shot, fires on cadence, reloads as soon as it runs dry, and dodge-weaves.
+  Every ranged shot it takes is a LIVE projectile (enemies never hitscan -
+  `ShotResolver.ai_fires_live_projectile`; melee swings keep the trace), spread
+  by its gunplay-scaled aim-error cone (`npc.gd aim_error_spread`), so incoming
+  fire has travel time and can genuinely be dodged.
 - **ALERTED, unarmed/disarmed** - closes and punches with the same charge
   telegraph, grabs a nearby gun, and switches to shooting after receiving one.
 - **INVESTIGATING** - walks to the last-known spot, slow-sweeps, gives up after

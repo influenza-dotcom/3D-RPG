@@ -8,6 +8,21 @@ class_name ShotResolver
 ## GameSettings.weapon_general (hitstop_damage_reference / hitstop_crit_multiplier /
 ## hitstop_max_multiplier).
 
+## THE "enemies never hitscan" rule (2026-08-25): whether an AI wielder's shot with `weapon` is delivered as a
+## LIVE projectile INSTEAD of the instant hitscan damage trace. True for every RANGED weapon that spawns
+## physical rounds — attack.gd's fire loop then skips DamageTrace.run_pellet for the pellet and emits
+## spawn_projectile with visual_only=false, so the flying round itself carries the damage: it has travel time,
+## it can be strafed/dodged, and an NPC's perfect aim at where you ARE misses where you WILL BE. The carve-outs
+## are exactly the weapons whose damage cannot ride a round: MELEE (the knife is the DEFAULT NPC.tscn weapon and
+## its swing damage IS the short hitscan trace — skipping it would zero every default-knife NPC), spray paint
+## (its fire path is the damage-free _do_spray_paint short-circuit), and any ranged weapon authored WITHOUT a
+## projectile_scene (ProjectileSpawner would spawn nothing — falling back to the trace keeps its damage real).
+## The PLAYER's fire path never consults this: player shots keep the crisp hitscan-in-range hybrid.
+## Pure + static (the attempt_fire_range idiom) so tests pin it against the authored WeaponData .tres.
+static func ai_fires_live_projectile(weapon: WeaponData) -> bool:
+	return weapon != null and not weapon.is_melee and not weapon.is_spray_paint \
+			and weapon.projectile_scene != null
+
 ## Scatter a single pellet off the aim direction by `spread` radians on each of the aim basis's local
 ## X (pitch) and Y (yaw) axes. Two independent random rolls in [-spread, spread] — same two rolls, same
 ## order as the inline loop, so a fixed RNG seed reproduces the exact spread cone.

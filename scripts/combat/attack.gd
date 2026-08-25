@@ -13,6 +13,11 @@ extends Node3D
 ## add_child) they stay null and every facade that touches them null-guards back to the monolith's
 ## old value.
 
+## Per-pellet round spawn, consumed by ProjectileSpawner (weapon.tscn wires it). _visual_only=true means the
+## hitscan trace already resolved this pellet's damage and the round is cosmetic — that is every in-range
+## PLAYER hit. _visual_only=false is a LIVE damaging round: a player pellet whose trace missed (the
+## beyond-effective_range case), and — since 2026-08-25 — EVERY ranged AI pellet (enemies never hitscan; see
+## ShotResolver.ai_fires_live_projectile and the fire loop below).
 signal spawn_projectile(_from, _direction, _visual_only: bool, _apply_status: bool)
 signal play_animation
 signal reload_started
@@ -513,13 +518,35 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false, alt := f
 
 	# CT-3: roll the on-hit status ONCE per shot (not per pellet). The null-effect short-circuit means a normal
 	# weapon never calls randf(), so its shot stays deterministic; run_pellet applies it on the first character hit.
+	# Computed for BOTH branches below — an AI live round carries the roll via ProjectileSpawner/projectile.gd.
 	var apply_status := current_weapon.on_hit_effect != null and randf() < current_weapon.on_hit_chance
+
+	# THE "enemies never hitscan" rule (2026-08-25): an AI wielder's RANGED shot skips the instant damage
+	# trace entirely and every pellet spawns as a LIVE projectile — travel time + the wielder's aim error
+	# make incoming fire dodgeable. Melee/spray/no-scene weapons keep the trace (their damage can't ride a
+	# round — the default-knife NPC would deal zero); the player's path is untouched.
+	var _ai_live_rounds := from_ai and ShotResolver.ai_fires_live_projectile(current_weapon)
 
 	for i in range(current_weapon.pellet_count):
 		var spread := current_spread
 		if character != null and character.has_method(&"limb_spread_penalty"):
 			spread += character.limb_spread_penalty()  # a crippled arm shakes the wielder's aim
+		# The WIELDER's marksmanship widens RANGED shots: 0 for the player (its accuracy is AimSway/bloom's
+		# job) — an NPC returns its gunplay-scaled aim-error cone (npc.gd aim_error_spread), so who an enemy
+		# IS shapes how it shoots. Melee is exempt: a knife swing is reach, not marksmanship.
+		if character != null and not current_weapon.is_melee and character.has_method(&"aim_error_spread"):
+			spread += character.aim_error_spread()
 		var pellet_direction := ShotResolver.spread_direction(_direction, _aim_basis, spread)
+		if _ai_live_rounds:
+			# No trace ran, so aim the round at a far point down the pellet's own eye-ray (the same
+			# visual_tracer_fallback_distance endpoint run_pellet reports on a whiff) — converging the
+			# muzzle-spawned round onto the aim line. visual_only=false: THIS round carries the damage;
+			# projectile.gd lands crit/status/knockback/collateral/impact-audio at physical contact.
+			var _far_target: Vector3 = _ray_origin + pellet_direction * GameSettings.weapon_general.visual_tracer_fallback_distance
+			spawn_projectile.emit(_spawn_point, (_far_target - _spawn_point).normalized(), false, apply_status)
+			if current_weapon.has_tracer:
+				GunFX.spawn_tracer(get_tree().root, _spawn_point, _far_target, _active_camera)
+			continue
 		# The pellet's whole pierce-trace walk lives in DamageTrace (a stateless static, like ShotResolver /
 		# GunFX / DamageApplier): raycast, damage application, overkill pierce-through, hit FX + impact
 		# audio. Tree-dependent handles (space state, FX root, camera) were sampled ONCE above and are

@@ -20,6 +20,7 @@ max_ammo = 30
 caliber = &"smg"
 reload_time = 1.1
 projectile_scene = ExtResource("2_v2t4f")
+npc_projectile_speed_mult = 0.5
 bullet_gravity_scale = 0.11
 launch_angle = 1.0
 max_explosion_force = 0.0
