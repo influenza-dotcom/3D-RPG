@@ -510,8 +510,11 @@ class AwareNpcStub extends Node3D:
 
 ## THE COST BUG THIS FIXED. The liveness probe read the DESIGNER switch (dot_npcs) but not the PLAYER's row
 ## (Settings.minimap_show_npcs), so switching NPC dots off in Options still forced a full repaint every single
-## frame for bodies that were never drawn — the exact cost the row exists to remove. Both owners now gate it,
-## matching the paint site exactly.
+## frame for bodies that were never drawn — the exact cost the row exists to remove. All THREE owners now gate
+## it — and they do so by reading the one field the paint site reads, `_scan_r`, so the two cannot drift apart.
+##
+## The third owner is the SCANNER IMPLANT, and it is the one that ships closed: a fresh game has no chip, so the
+## common case is now a level full of bodies that costs this widget nothing at all.
 func test_the_idle_gate_asks_the_same_question_the_paint_site_does() -> void:
 	var mm = load(MINIMAP_SCRIPT).new()
 	add_child_autofree(mm)
@@ -521,11 +524,19 @@ func test_the_idle_gate_asks_the_same_question_the_paint_site_does() -> void:
 	var was_npcs: bool = Settings.minimap_show_npcs
 	var was_stations: bool = Settings.minimap_show_stations
 	Settings.minimap_show_npcs = true
+	# What _process does every frame before it asks the gate. Through the SHIPPED sampler, never a bare number,
+	# so this seed cannot drift from what a real frame produces.
+	mm._scan_r = mm._sample_scan_range(_scanner())
 	assert_true(mm._has_live_markers(), "with dots ON a living body keeps the map repainting — it moves")
 	Settings.minimap_show_npcs = false
 	Settings.minimap_show_stations = false
+	mm._scan_r = mm._sample_scan_range(_scanner())
 	assert_false(mm._has_live_markers(),
 			"with BOTH body channels off the same body must cost NOTHING — nothing drawn from it can move")
+	Settings.minimap_show_npcs = true
+	mm._scan_r = mm._sample_scan_range(_scanner(0.0))
+	assert_false(mm._has_live_markers(),
+			"and a player with NO scanner implant must pay nothing either — the channel draws no bodies at all, so a body moving is not a fact this map is showing")
 	Settings.minimap_show_npcs = was_npcs
 	Settings.minimap_show_stations = was_stations
 
@@ -593,7 +604,29 @@ func _idle_minimap():
 	mm._deck_dirty = false
 	add_child_autofree(mm)
 	mm.size = GameSettings.hud.minimap_size  # the shipped box, so a marker at the origin lands inside it
+	# ...AND WEARING A SCANNER. The body channel is implant-gated now (Minimap._sample_scan_range) and these
+	# tests hand-step the gate instead of running _process, so nothing else here would ever sample it — a widget
+	# left at _scan_r 0.0 draws no bodies, and every body-channel test below would pass for the wrong reason.
+	# Sampled through the SHIPPED function, so the seed is whatever a real frame would have produced.
+	mm._scan_r = mm._sample_scan_range(_scanner())
 	return mm
+
+
+## A STAND-IN FOR A PLAYER WEARING A SCANNER IMPLANT. minimap.gd asks the human player for body_scan_range()
+## and for nothing else on this path (has_method + call), so this really is the whole contract — no Player, no
+## AbilityManager, no chip. Origin-parked, which puts every stub body in these tests well inside the range.
+class ScannerStub extends Node3D:
+	var reach: float = 40.0
+	func body_scan_range() -> float:
+		return reach
+
+
+## One of those, at a chosen reach. 0.0 is the CHIP-LESS player — the shipped state of a fresh game.
+func _scanner(reach: float = 40.0) -> Node3D:
+	var s := ScannerStub.new()
+	s.reach = reach
+	autofree(s)
+	return s
 
 
 ## One painted frame. Two process frames like the aim-arc tests: a queued redraw lands at the end of the frame.
@@ -756,6 +789,10 @@ func test_switching_body_dots_off_repaints_the_map_that_frame() -> void:
 	await _repaint(mm)
 	assert_true(mm._painted, "precondition: a body dot is on the canvas")
 	Settings.minimap_show_npcs = false  # Options -> Accessibility -> "NPCs On Minimap"
+	# THE ROW REACHES THE GATE THROUGH THE SAMPLER now, not by being re-read inside it: _process re-runs
+	# _sample_scan_range every frame BEFORE asking _needs_repaint, and that is what collapses _scan_r to 0.0.
+	# These tests hand-step the gate, so they stand in for that one line — through the shipped sampler.
+	mm._scan_r = mm._sample_scan_range(_scanner())
 	assert_false(mm._has_live_markers(), "precondition: the row that shut the dots off also shut the gate")
 	assert_true(mm._needs_repaint(false),
 			"switching body dots off must repaint the map that frame; nothing else will, so the dots the player just turned off would stay painted")
@@ -905,3 +942,99 @@ func test_the_live_skin_is_wired_for_remote_edits() -> void:
 	assert_eq(MenuStyle.hud.changed.get_connections().filter(
 			func(c): return c["callable"] == Callable(mm, "queue_redraw")).size(), 1,
 			"...exactly once, however many times it repaints")
+
+
+# --- the per-instance view overrides (the map tab's whole mechanism) --------------------------------------
+
+## THE SECOND HOST. scripts/ui/map_screen.gd draws the map tab with a SECOND instance of this widget, and the
+## only thing that makes it a different picture is the "Instance view" exports. They must ship INERT, or the
+## shipped HUD box (and the ~39 bare `.new()` sites above) silently changes behaviour the day they land. The
+## VIEW half is pinned here; the waypoint channel's two (waypoint_pin_offscreen, and waypoint_labels beside it)
+## are pinned in tests/test_waypoint_map.gd, next to the paint they govern.
+func test_the_instance_view_overrides_ship_inert() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	assert_almost_eq(mm.world_span_override, 0.0, 0.0001, "0 = follow GameSettings.hud.minimap_world_span")
+	assert_almost_eq(mm.zoom_override, 0.0, 0.0001, "0 = follow the player's Settings.minimap_zoom row")
+	assert_eq(mm.heading, mm.Heading.FOLLOW_SETTING, "the HUD box follows the player's Rotate Minimap row")
+	assert_true(mm.zoom_key_enabled, "the HUD box IS the zoom key's owner")
+	assert_eq(mm.view_offset, Vector2.ZERO, "and it is player-CENTRED: only the map tab ever drags the view")
+	assert_almost_eq(mm.effective_world_span(), GameSettings.hud.minimap_world_span, 0.001,
+			"an un-overridden widget reads the tuning resource")
+	assert_almost_eq(mm.effective_zoom(), Settings.minimap_zoom, 0.0001,
+			"...and the player's Options row")
+	assert_eq(mm.effective_rotates(), Settings.minimap_rotates, "...and the player's heading row")
+
+## Overridden, each one answers ITSELF and stops tracking the Settings row it replaced. Zero stays the
+## "not overridden" sentinel for both numbers — a real zero span or zero zoom is a divide-by-nothing.
+func test_an_overridden_widget_answers_its_own_view() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	mm.world_span_override = 200.0
+	mm.zoom_override = 2.0
+	mm.heading = mm.Heading.NORTH_UP
+	assert_almost_eq(mm.effective_world_span(), 200.0, 0.001, "the override wins over the tuning resource")
+	assert_almost_eq(mm.effective_zoom(), 2.0, 0.0001, "...and over the Options zoom row")
+	assert_false(mm.effective_rotates(), "NORTH_UP is forced regardless of the player's row")
+	mm.heading = mm.Heading.HEADING_UP
+	assert_true(mm.effective_rotates(), "...and HEADING_UP likewise, the other way")
+
+## ⭐THE TRAP THIS PAIR EXISTS FOR. The drawn-options stamps compare the EFFECTIVE view, not the raw Settings
+## rows. Stamping against Settings.minimap_zoom on a widget that draws zoom_override would leave the idle gate
+## permanently open (a mismatch that no repaint can ever resolve) while a change to the value it ACTUALLY
+## draws from asks for nothing — the map tab's zoom would move and the picture would not.
+func test_the_drawn_stamps_track_the_overridden_view_not_the_settings_row() -> void:
+	var mm = _idle_minimap()
+	mm.world_span_override = 100.0
+	mm.zoom_override = 1.0
+	mm.heading = mm.Heading.NORTH_UP
+	await _repaint(mm)
+	assert_false(mm._needs_repaint(false),
+			"precondition: an overridden widget settles idle just like the HUD box — the stamp it made matches the view it drew")
+	mm.zoom_override = 1.5
+	assert_true(mm._needs_repaint(false), "moving the widget's OWN zoom must repaint it")
+	await _repaint(mm)
+	assert_false(mm._needs_repaint(false), "...once")
+	mm.world_span_override = 140.0
+	assert_true(mm._needs_repaint(false), "and so must its OWN span — it rescales every metre on the map")
+	await _repaint(mm)
+	assert_false(mm._needs_repaint(false), "...once")
+
+## THE PAN, through a real paint. view_offset is the map tab's drag and the sixth member of the stamp family
+## above, so it has to settle exactly the way the zoom and the span do — a permanently-open gate here would
+## repaint a full-panel map every frame the tab is up.
+##
+## It also EXERCISES the ink, which is the part no off-tree test can reach. With the view dragged off the
+## player, `view * _centre_xz` is no longer size * 0.5, so the player caret and the noise ring take a projected
+## point like any other marker (clipped to the box, never rim-pinned) instead of the box centre they used to
+## assume. GUT 9.6 fails a whole suite on ONE engine error, so "it painted panned and the suite is still green"
+## is a real signal that the projected path holds — the geometry itself is playtest-verified.
+func test_a_panned_view_paints_and_settles() -> void:
+	var mm = _idle_minimap()
+	mm.world_span_override = 120.0
+	mm.heading = mm.Heading.NORTH_UP     # the map tab's view: a page you READ has a fixed bearing
+	await _repaint(mm)
+	assert_false(mm._needs_repaint(false), "precondition: an un-panned widget settles idle")
+	mm.view_offset = Vector2(60.0, -40.0)
+	assert_true(mm._needs_repaint(false),
+			"a drag made while the player stands still must ask for the one repaint that moves the picture")
+	await _repaint(mm)
+	assert_eq(mm._drawn_view_offset, mm.view_offset, "the paint stamps the pan it drew")
+	assert_false(mm._needs_repaint(false), "...and settles ONCE, rather than pinning the gate open every frame")
+	# The ring is centred on the player's PROJECTED point now — off-centre here, and partly off the box.
+	# _process bails at the missing human player, so this sample survives the frames below (the noise-suite idiom).
+	mm._noise_r = 12.0
+	await _repaint(mm)
+	assert_almost_eq(mm._drawn_noise_r, 12.0, 0.0001,
+			"the caret and the noise ring painted off-centre, and the gate stamped what they drew")
+
+## The zoom key has ONE owner. A second live widget polling it would write Settings.minimap_zoom from the map
+## tab and move the corner box under the player's HUD on a keypress meant for neither.
+func test_the_zoom_key_gate_is_switchable_per_instance() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	mm.zoom_key_enabled = false
+	var before: float = Settings.minimap_zoom
+	mm._poll_zoom_key()  # must bail on the export before it ever reaches Input / the steps list
+	assert_almost_eq(Settings.minimap_zoom, before, 0.0001,
+			"a widget with the key switched off never writes the shared zoom row")

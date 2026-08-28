@@ -1,0 +1,129 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/map_screen.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/ui/minimap.gd" id="2"]
+
+[node name="MapScreen" type="CanvasLayer"]
+layer = 120
+script = ExtResource("1")
+
+[node name="Root" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Dim" type="ColorRect" parent="Root"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Panel" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.12
+anchor_top = 0.12
+anchor_right = 0.88
+anchor_bottom = 0.88
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="Root/Panel"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="TabSlot" type="VBoxContainer" parent="Root/Panel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="MapHost" type="Control" parent="Root/Panel/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 120)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="Map" type="Control" parent="Root/Panel/VBox/MapHost"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+clip_contents = true
+texture_filter = 1
+script = ExtResource("2")
+bake_delay = 0.0
+heading = 1
+zoom_override = 1.0
+zoom_key_enabled = false
+
+[node name="MapUnder" type="Control" parent="Root/Panel/VBox/MapHost/Map"]
+unique_name_in_owner = true
+show_behind_parent = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="MapOver" type="Control" parent="Root/Panel/VBox/MapHost/Map"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Empty" type="Label" parent="Root/Panel/VBox/MapHost"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Footer" type="HBoxContainer" parent="Root/Panel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Hint" type="Label" parent="Root/Panel/VBox/Footer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+
+[node name="ZoomOut" type="Button" parent="Root/Panel/VBox/Footer"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ZoomValue" type="Label" parent="Root/Panel/VBox/Footer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+
+[node name="ZoomIn" type="Button" parent="Root/Panel/VBox/Footer"]
+unique_name_in_owner = true
+layout_mode = 2

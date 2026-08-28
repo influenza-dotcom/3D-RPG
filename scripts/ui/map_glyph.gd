@@ -193,6 +193,21 @@ static func alert_ring_px(tier: int, glyph_px: float, gap_px: float, step_px: fl
 	return glyph_px + gap_px + step_px * float(mini(tier, 3) - 1)
 
 
+## HOW MANY SEGMENTS A BIG DRAWN CIRCLE NEEDS — the player's noise ring, whose radius is a WORLD distance in
+## pixels and so ranges from a few px to well past the box, rather than sitting at one authored glyph size.
+##
+## ⭐THE FLOOR IS THE POINT, and it is deliberately far above CIRCLE_SIDES. This file strokes every station
+## badge as an ngon at minimap_station_glyph_px (~5 px), so a lightly-segmented ring is not merely "a bit
+## faceted" — at a walk ring's ~11 px a 16-gon has 4.3 px chords, which is the exact size AND construction of a
+## station glyph, and the noise ring would read as a large badge rather than as a circle. Shape is this map's
+## primary channel, so the two alphabets must not be able to collide. Segments are free; the facets are not,
+## especially in RETRO where the ~2.4x nearest upscale hardens every chord.
+##
+## Ceiling at 64: past that the chords are sub-pixel and the extra vertices buy nothing.
+static func ring_segments(radius_px: float) -> int:
+	return clampi(int(radius_px * 1.2), 28, 64)
+
+
 ## WHICH WAY AN OFF-FLOOR MARKER LIES: +1 above the drawn storey, -1 below, 0 on it. The widget draws a tiny
 ## tick on that side of the glyph, which is the fix for the honest-but-mute alpha fade — a beacon two storeys
 ## up used to just dim, leaving the player to guess whether it was far away or overhead.

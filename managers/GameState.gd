@@ -3,7 +3,7 @@ extends Node
 ## @seam capture() -> save_to_disk atomically write the versioned user://gamestate.cfg; load_from_disk restores it and sets loaded/profile_active, the flags gating Player._ready — a checkpoint, not a world snapshot.
 ## @risk Breaking _write_atomic's tmp->bak->rename rotation (e.g. dropping the Windows remove-before-rename guard) only loses the sole save on a real crash; the happy path keeps succeeding, so tests never surface it.
 ## @risk A field wired into only some of capture/save_to_disk/load_from_disk silently defaults on Continue; a STAT_NAMES rename with no SAVE_VERSION migration drops those points (cf. load_from_disk's legacy stat folds).
-## @risk Dropping capture()'s Zorkmids.ITEM_ID skip double-counts money on load; applying respawn_position while ignoring respawn_level_matches teleports the player into the wrong level.
+## @risk Dropping capture()'s Zorkmids.ITEM_ID skip lets a stray coin tile restore as cash the wallet never counted; applying respawn_position while ignoring respawn_level_matches teleports the player into the wrong level.
 ## @risk The dev sandbox (enable_sandbox / resolve_save_path) redirects the five canonical save paths at exactly six seams — a new read/write of SAVE_PATH / QUICKSAVE_PATH / slot_path that skips resolve_save_path silently sees or writes the REAL profile while a console `sandbox on` is in force.
 ## @test res://tests/test_game_save.gd
 ## @test res://tests/test_save_slots.gd
@@ -229,9 +229,10 @@ var discovered_corpses: Dictionary = {}
 ## display name, so for every id-less NPC the key is still the name string exactly as v3 wrote it). reveal_name also
 ## records the display-name string when it differs from the identity key — the DISPLAY-COMPAT bridge for the
 ## string-keyed public_name surfaces (see reveal_name). Until a character's key is in here, every player-facing
-## surface shows PlayerText.STRANGER in its place (see public_name) — a designer opens the gate by ticking
-## DialogueLine.reveals_name on the line where the NPC says who they are, which calls reveal_name during that
-## conversation. Persisted in [world].known_names and CLEARED on New Game (a fresh run re-meets everyone as a
+## surface shows PlayerText.STRANGER in its place (see public_name) — and the gate opens the moment the player
+## TALKS to them: DialogueManager.start calls reveal_name on any real character speaker, so one conversation (of
+## any length, from any line) is the whole introduction. DialogueLine.reveals_name still calls reveal_name but is
+## redundant for a character. Persisted in [world].known_names and CLEARED on New Game (a fresh run re-meets everyone as a
 ## stranger). Two NPCs sharing one display_name AND no ids are still "the same person" once introduced (v3
 ## behaviour); give them distinct NpcData.ids to keep their identities separate.
 var known_names: Dictionary = {}
@@ -248,6 +249,39 @@ var stranger_names_enabled: bool = true
 ## exact world snapshot — untouched objects, dynamically-spawned entities, and NPC positions are not captured.
 var world_objects: Dictionary = {}
 
+## THE PLAYER'S OWN MAP PINS: { level_path -> Array[Dictionary] }, each entry a WaypointBook record
+## ({pos, name, note, icon, tint}, plus an optional {tracked} — see scripts/world/waypoint_book.gd for the
+## shape and its clamps). Placed by hand from the Map tab (click the plan) or in the world with the Mark
+## Waypoint key, painted by scripts/ui/minimap.gd on BOTH its hosts and by the top-centre heading tape, and
+## persisted in [waypoints].
+##
+## PER LEVEL, like world_objects beside it and for the same reason: a pin is a place, and the map only ever
+## draws one level. Cleared on New Game — a fresh run has not been anywhere yet.
+##
+## ⭐AT MOST ONE PIN IN THIS WHOLE DICTIONARY carries "tracked" — the profile's single active navigation
+## marker, which is why the flag is a fact about the LEDGER rather than about a record and why nothing
+## outside set_tracked_waypoint / the load fold below may write it. The invariant spans every level on
+## purpose: tracking a pin in the next district and walking there is the loop it exists to serve.
+##
+## ⭐THIS IS PLAYER-AUTHORED TEXT, so nothing here may be painted through a Control that translates its own
+## text (auto_translate_mode must be DISABLED at those sites — the menu_style.gd translation-seam rule) and
+## nothing may reach a BBCode-parsing label. Every entry that enters memory comes through WaypointBook's
+## sanitize/clean fold, including the ones a player hand-edits into their save file.
+var waypoints: Dictionary = {}
+
+## Bumped on EVERY waypoint mutation, and read by the minimap's idle gate as a drawn-options stamp.
+##
+## ⭐IT EXISTS BECAUSE A CanvasItem REPAINTS ONLY ON queue_redraw(). The map widget deliberately withholds
+## that from a player who is standing still, so a pin added, renamed, re-iconed or deleted while nothing else
+## on the map is moving would simply never appear (or never leave). Comparing one int per frame is what turns
+## this ledger into a live surface — the same trailing-edge shape as the drawn-options / drawn-skin stamps,
+## and cheap enough for the per-frame gate because it allocates nothing.
+##
+## Deliberately NOT persisted: it is a within-session change detector, not a fact about the profile, and a
+## saved value would only ever be wrong on the next boot (the widget seeds its own stamp to a value no
+## revision can equal, so the first paint after a load is forced regardless).
+var waypoints_rev: int = 0
+
 ## --- EXACT-snapshot save tier (WorldSnapshot; manual quicksave/slots ONLY) -----------------------------------
 ## The in-memory exact snapshot for the manual save tier. NON-NULL only after a manual quicksave/slot save built
 ## one (in _capture_and_write) or a load pulled one off disk; the lean autosave/Continue path leaves it NULL and
@@ -258,7 +292,7 @@ var world_snapshot: WorldSnapshot = null
 ## exactly once to apply the snapshot (a twin of _clock_apply_pending / consume_clock_apply). False on a
 ## profile-only load, a death-respawn reload, or a fresh game — so those never apply a snapshot.
 var _world_snapshot_pending: bool = false
-## Latched between "a quickload/slot-load has loaded a save into memory + requested a scene reload" and "the fresh scene's
+## Latched between "a quickload / slot-load / death reload (load_autosave) has loaded a save into memory + requested a scene reload" and "the fresh scene's
 ## GameRoot has booted" (cleared in set_current_level). While set, autosave() refuses to run: a one-frame-deferred autosave
 ## flush queued in the SAME frame as the load (a kill bounty / a door fire) would otherwise run AFTER load_from_disk, on the
 ## still-in-tree OLD player, and overwrite the just-loaded profile (and null the pending world_snapshot) with the abandoned
@@ -561,6 +595,30 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 						clean[str(ok)] = per[ok]
 				if not clean.is_empty():
 					world_objects[str(lvl)] = clean
+	# The player's map pins: one nested Dictionary under [waypoints].data, level_path -> Array of records.
+	# EVERY record goes through WaypointBook.sanitize, which drops the un-repairable ones (no position),
+	# re-clamps the two text fields and truncates a level past the per-level cap — so a hand-edited save can
+	# neither smuggle a control character onto the map nor grow the ledger without bound. A level whose whole
+	# list sanitizes to empty is dropped rather than stored as an empty array.
+	#
+	# NO SAVE_VERSION MIGRATION, deliberately: this section is purely additive, and its absence (every save
+	# written before the feature) is already the correct "no pins yet" state — and so is the absence of the
+	# optional "tracked" key inside a record.
+	#
+	# The one rule sanitize CANNOT enforce is folded in here: at most one pin across the WHOLE ledger may be
+	# tracked, and sanitize only ever sees one level's list. FIRST WINS (Dictionary iteration is insertion
+	# order, so a hand-edited file that tracked three pins loads with the topmost one tracked rather than with
+	# a nondeterministic winner or none at all) — a save cannot be allowed to seed two navigation markers,
+	# because every consumer asks tracked_waypoint() for THE one and would silently see only the first anyway.
+	waypoints.clear()
+	var raw_wp = cfg.get_value("waypoints", "data", {})
+	if raw_wp is Dictionary:
+		var tracked_seen := false
+		for lvl in raw_wp:
+			var clean_wp := WAYPOINT_BOOK.sanitize(raw_wp[lvl])
+			if not clean_wp.is_empty():
+				tracked_seen = _fold_tracked(clean_wp, tracked_seen)
+				waypoints[str(lvl)] = clean_wp
 	# Exact-snapshot tier: a MANUAL quicksave/slot file carries a [world_snapshot] section; the lean autosave does
 	# not. Its ABSENCE is the back-compat path (a profile-only load leaves world_snapshot null + nothing pending —
 	# byte-identical to today). A version we don't understand is ignored (profile still loads). On a real snapshot
@@ -587,6 +645,11 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	status_effects = raw_fx if raw_fx is Array else []
 	var raw_level = cfg.get_value("level", "path", "")  # active LevelData path; junk-typed / missing -> "" (GameRoot uses its export)
 	current_level_path = raw_level if raw_level is String else ""
+	# A load REPLACES the waypoint ledger wholesale, so its paint stamp must move even when the new content
+	# happens to match the old — the widgets compare the revision, not the contents. Emitted HERE, after the
+	# level path above is folded from the SAME file, so a waypoints_changed listener that re-validates a
+	# selection reads the new ledger against the new level — never the new ledger keyed by the old path.
+	_waypoints_loaded()
 	has_respawn = _cfg_bool(cfg, "respawn", "has", false)
 	respawn_position = _cfg_vec3(cfg, "respawn", "position", Vector3.ZERO)
 	respawn_yaw = _cfg_float(cfg, "respawn", "yaw", 0.0)
@@ -702,6 +765,12 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 		cfg.set_value("world", "known_names", name_keys)
 	if not world_objects.is_empty():
 		cfg.set_value("world_objects", "data", world_objects)  # nested Dictionary round-trips through ConfigFile
+	# The player's map pins, same nested-Dictionary round trip. Skipped entirely when nobody has placed one, so
+	# a profile that never used the feature carries no [waypoints] section at all — the load path treats a
+	# missing section and an empty one identically. Written RAW (the records were already clamped by
+	# WaypointBook.make on the way in), and re-sanitized on the way back out because the file is editable.
+	if not waypoints.is_empty():
+		cfg.set_value("waypoints", "data", waypoints)
 	# Exact-snapshot tier: write [world_snapshot] ONLY when a manual save populated one (autosave nulls world_snapshot
 	# first, so it can never leak into gamestate.cfg). Its own version stamp is decoupled from [meta].version. Empty
 	# snapshots are skipped so the section never bloats a save. This is what keeps the profile and the snapshot separate.
@@ -847,9 +916,10 @@ func capture(player: Node) -> void:
 					push_warning("GameState: item '%s' has no id — not saved" % it.label())
 				continue
 			if it.id == Zorkmids.ITEM_ID:
-				# The zorkmids coin pile is a DERIVED mirror of the wallet float (MoneyPurse), and the wallet is
-				# already persisted as [player] `money` above. Skipping it here keeps ONE source of truth: saving
-				# the stack too would double-count on load (money restored AND the stack restored, then re-mirrored).
+				# BELT AND BRACES. The player's cash is the `money` float, already persisted as [player] `money`
+				# above, and no live path puts a zorkmids stack in their bag (loot converts to money on take,
+				# MoneyPickUp credits the wallet, the debug `give` refuses the id). If one ever slipped in, saving
+				# it here would restore as cash the wallet never counted — so it is skipped, not persisted.
 				continue
 			if it == inv.equipped_item:
 				equipped_index = inventory_stacks.size()
@@ -868,7 +938,7 @@ func capture(player: Node) -> void:
 		# A prop pulled from the backpack to be HELD in hand (Hotbar hold -> Player.hold_item) was REMOVED from `inv`
 		# above, so the loop didn't capture it. Fold it back into the snapshot as {id, count:1} (auto-placed on load)
 		# so a save taken while it's in your hands never loses it — a reload isn't carrying anything, so the item just
-		# lands back in the bag. Skipped for an id-less item (can't round-trip) or the money pile (mirrored elsewhere).
+		# lands back in the bag. Skipped for an id-less item (can't round-trip) or a coin tile (see above).
 		var held_it: Item = player.held_inventory_item() if player.has_method(&"held_inventory_item") else null
 		if held_it != null and held_it.id != &"" and held_it.id != Zorkmids.ITEM_ID:
 			var held_entry := {"id": String(held_it.id), "count": 1}
@@ -905,7 +975,8 @@ func capture(player: Node) -> void:
 func autosave(player: Node) -> void:
 	if player == null or not player.is_inside_tree():
 		return
-	# A quickload/slot-load is mid-flight (load_from_disk done, scene reload requested but not yet booted): the OLD player
+	# A quickload / slot-load / RELOAD_LAST_SAVE death reload is mid-flight (load_from_disk done, scene reload requested
+	# but not yet booted): the OLD player
 	# is still in-tree, so a same-frame deferred flush must NOT capture it over the freshly-loaded profile. Bail — the
 	# fresh scene will autosave normally once GameRoot boots (which clears this latch via set_current_level).
 	if _reload_pending:
@@ -997,7 +1068,15 @@ func set_current_level(path: String) -> void:
 	# The fresh scene's GameRoot has booted — a quickload/slot-load reload (if any) is complete, so lift the autosave
 	# freeze. Harmless on every non-reload level load (the latch is already false).
 	_reload_pending = false
+	var moved := current_level_path != path
 	current_level_path = path
+	# WHICH PINS ARE ON THE MAP just changed, even though no pin did: the waypoint ledger is keyed by level,
+	# and every paint site reads waypoints_for(current_level_path). Bumping the revision here is what gives
+	# the minimap's idle gate a trailing edge for a LevelDoor swap — without it the previous district's pins
+	# can sit on the new level's map until something unrelated asks for a repaint. Guarded on a real change so
+	# a re-entrant set (a death reload re-stamping the same path) costs nothing.
+	if moved:
+		_waypoints_loaded()  # bump + notify, but never autosave — a level swap is not a checkpoint
 
 # --- Manual save / quicksave / named slots (ML-1) -----------------------------------------------------------
 ## These layer over the path-parameterized save_to_disk(path) / load_from_disk(path). They are SEPARATE files from
@@ -1065,6 +1144,16 @@ func quickload() -> bool:
 
 func load_from_slot(slot: int) -> bool:
 	return _load_and_reload(slot_path(slot))
+
+## Death-respawn twin of quickload (the Player's DeathMode.RELOAD_LAST_SAVE branch): load the rolling AUTOSAVE
+## (SAVE_PATH — the same file every coalesced world-state autosave writes) and re-apply it via the scene reload.
+## The routing is the point, not convenience: _load_and_reload arms _reload_pending, so an autosave flush queued
+## in the SAME frame the death resolved (a door, a pickup, a kill bounty) can't capture the abandoned timeline
+## over the checkpoint it just loaded. A bare load_from_disk() + reload_current_scene() at the call site is how
+## exactly that save-destroying race once existed. Returns false (NO reload happened) when there's no autosave /
+## it's unreadable — the caller owns the degrade (the Player falls back to a plain reload of the in-memory run).
+func load_autosave() -> bool:
+	return _load_and_reload(SAVE_PATH)
 
 func _load_and_reload(path: String) -> bool:
 	# The existence gate resolves through the sandbox exactly as load_from_disk (handed the same RAW path below)
@@ -1379,6 +1468,8 @@ func reset_for_new_game() -> void:
 	discovered_corpses.clear()
 	known_names.clear()  # ...and re-meets every NPC as a Stranger until they re-introduce themselves
 	world_objects.clear()  # a fresh run forgets every door/pickup/prop world-state marker
+	waypoints.clear()      # ...and every map pin the previous run placed
+	_waypoints_loaded()    # (no autosave — a reset must not write over the file it is replacing)
 	world_snapshot = null          # ...and any in-memory exact snapshot (matters on a RELOAD_CHECKPOINT_FRESH death,
 	_world_snapshot_pending = false #    which keeps in-memory GameState — a fresh run must never apply a stale snapshot)
 	_dead_authored.clear()
@@ -1451,7 +1542,8 @@ func mark_corpse_discovered(key: String) -> void:
 
 # --- "Stranger until introduced" name ledger (see known_names / stranger_names_enabled) ----------------------
 ## Learn a character — from now on public_name returns `real_name` outright instead of "Stranger", everywhere and
-## across a save. Called by DialogueManager when a line with reveals_name = true plays, which passes the speaker's
+## across a save. Called by DialogueManager the moment a conversation OPENS with a real character speaker (talking
+## to someone is the introduction), and again by any line with reveals_name = true; both pass the speaker's
 ## `identity` key (Slice 3: NPC.identity_key — NpcData.id, else the authored display name). Omitted/blank identity
 ## (a legacy caller / id-less NPC) keys by the name string — exactly the v3 behaviour. When the identity key
 ## DIFFERS from the display name (an id-authored NPC), the name string is ALSO recorded: the DISPLAY-COMPAT
@@ -1520,6 +1612,214 @@ func object_state(level_path: String, key: String) -> Dictionary:
 func has_object_state(level_path: String, key: String) -> bool:
 	var per = world_objects.get(level_path)
 	return per is Dictionary and per.has(key)
+
+# --- The player's own map pins (waypoints + notes) -----------------------------------------------------------
+## Emitted after ANY change to the waypoint ledger — an add, an edit, a delete, a level's list being cleared,
+## and the fold that pulls a save off disk. Consumers that hold a SELECTION (the Map tab's selected index)
+## re-validate on this rather than trusting an index across a mutation.
+##
+## The PAINT surfaces deliberately do NOT connect here. They compare `waypoints_rev` once per frame instead,
+## because a signal-driven queue_redraw would have to be wired from a widget that legitimately exists as a
+## bare off-tree .new() in ~39 test sites, and a duplicate connect / a disconnect on a freed listener is an
+## engine error that fails a whole GUT suite. A stamp needs no wiring and cannot leak a connection.
+signal waypoints_changed
+
+## Rules + record shape for everything below. Preloaded BY PATH and left untyped: the file carries NO
+## class_name (see its own @risk), so nothing here depends on the editor's global class cache being current.
+const WAYPOINT_BOOK := preload("res://scripts/world/waypoint_book.gd")
+
+## Every pin placed on `level_path`, oldest first, or [] when that level has none. Returns the LIVE array —
+## callers read it (the paint sites do, every frame) and must not mutate it; every mutation below goes
+## through this file so the revision stamp and the signal can never be skipped.
+func waypoints_for(level_path: String) -> Array:
+	var per: Variant = waypoints.get(level_path)
+	return per if per is Array else []
+
+## One pin, or {} for an out-of-range index. Never null, so a caller reads `.get("name", "")` on the result
+## without a second guard — the object_state() convention next door.
+func waypoint_at(level_path: String, index: int) -> Dictionary:
+	var list := waypoints_for(level_path)
+	if index < 0 or index >= list.size():
+		return {}
+	var d: Variant = list[index]
+	return d if d is Dictionary else {}
+
+## Place a pin. Returns its index, or -1 when the level is already at WaypointBook.MAX_PER_LEVEL — a REFUSAL
+## the caller must answer with a denial cue rather than a success one, because a silently-dropped pin looks
+## exactly like a broken map. Every field goes through WaypointBook.make, so a caller cannot store an
+## over-long label, a control character, or an icon ordinal outside the vocabulary.
+func add_waypoint(level_path: String, pos: Vector3, name: String, note: String,
+		icon: int = 0, tint: int = 0) -> int:
+	if level_path.is_empty():
+		return -1  # no level = nowhere to file it; a boot with no level loaded must not accumulate orphans
+	if not (waypoints.get(level_path) is Array):
+		waypoints[level_path] = []
+	var list: Array = waypoints[level_path]
+	if list.size() >= WAYPOINT_BOOK.MAX_PER_LEVEL:
+		return -1
+	list.append(WAYPOINT_BOOK.make(pos, name, note, icon, tint))
+	_waypoints_touched()
+	return list.size() - 1
+
+## Re-author an existing pin's label / note / icon / tint. Its POSITION is deliberately immutable: a pin is a
+## place you marked, and letting an edit move it would make "rename" and "re-place" the same gesture with
+## different undo consequences. To move one, delete it and mark again. Returns false for a bad index.
+##
+## ⭐IT REBUILDS THE RECORD through WaypointBook.make (which is 5-field on purpose), so the tracked flag would
+## be silently dropped by a rename — the player's navigation marker vanishing off the compass because they
+## fixed a typo. Carried across explicitly here; there is nowhere else to do it, since make() must not learn
+## about a flag whose invariant only the ledger can police.
+func update_waypoint(level_path: String, index: int, name: String, note: String,
+		icon: int, tint: int) -> bool:
+	var list := waypoints_for(level_path)
+	if index < 0 or index >= list.size() or not (list[index] is Dictionary):
+		return false
+	var old := list[index] as Dictionary
+	var pos: Variant = old.get("pos")
+	if not (pos is Vector3):
+		return false
+	var rec := WAYPOINT_BOOK.make(pos as Vector3, name, note, icon, tint)
+	if WAYPOINT_BOOK.is_tracked(old):
+		rec["tracked"] = true
+	list[index] = rec
+	_waypoints_touched()
+	return true
+
+## Remove one pin. Returns false for a bad index so a caller can tell "deleted" from "there was nothing
+## there" — the Map tab plays a denial cue on the latter rather than reporting a delete that never happened.
+##
+## Deleting THE tracked pin needs no special case and deliberately has none: the flag lives on the record, so
+## it leaves with it and tracked_waypoint() answers {} on the very next ask. Anything that caches the tracked
+## coordinates instead of asking is the bug this shape exists to prevent.
+func remove_waypoint(level_path: String, index: int) -> bool:
+	var list := waypoints_for(level_path)
+	if index < 0 or index >= list.size():
+		return false
+	list.remove_at(index)
+	if list.is_empty():
+		waypoints.erase(level_path)  # keep the ledger (and the save section) free of empty per-level arrays
+	_waypoints_touched()
+	return true
+
+## Drop every pin on one level, or — with no path — the whole ledger. Returns how many were removed, so a
+## "clear all" affordance can report a number and stay silent when there was nothing to clear.
+func clear_waypoints(level_path: String = "") -> int:
+	var n := 0
+	if level_path.is_empty():
+		for lvl: Variant in waypoints.keys():
+			n += waypoints_for(String(lvl)).size()
+		waypoints.clear()
+	else:
+		n = waypoints_for(level_path).size()
+		waypoints.erase(level_path)
+	if n > 0:
+		_waypoints_touched()
+	return n
+
+## Is this level at its pin cap? The Map tab and the in-world Mark key both ask BEFORE opening their entry
+## box, so a player is refused up front instead of typing a name into a pin that cannot be stored.
+func waypoints_full(level_path: String) -> bool:
+	return waypoints_for(level_path).size() >= WAYPOINT_BOOK.MAX_PER_LEVEL
+
+# --- THE TRACKED PIN: one active navigation marker per profile ------------------------------------------
+## Which pin the player is navigating to, as {"level": String, "index": int} — or {} when none is, which is
+## the resting state. A COORDINATE PAIR rather than the record, for two reasons: every consumer needs the
+## LEVEL as well (the heading tape draws a pip only for the current level's tracked pin, the HUD box only
+## rim-pins one it can actually reach), and handing back the record would hand out the ledger's own live
+## Dictionary to a caller with no reason to hold it.
+##
+## Walks the ledger rather than caching an index, because a cached index is precisely what goes stale when a
+## pin below it is deleted — the class of bug the Map tab's selection already has to re-validate against.
+## The walk is bounded by MAX_PER_LEVEL x visited levels and allocates nothing per record; consumers that
+## paint gate on waypoints_rev anyway, so in practice it is asked on change rather than per frame.
+func tracked_waypoint() -> Dictionary:
+	for lvl: Variant in waypoints:
+		var level_path := String(lvl)
+		var list := waypoints_for(level_path)
+		for i in list.size():
+			if WAYPOINT_BOOK.is_tracked(list[i]):
+				return {"level": level_path, "index": i}
+	return {}
+
+## Track (or untrack) one pin — the classic "set active waypoint". Returns false ONLY for a bad index, the
+## same refusal shape update_waypoint / remove_waypoint use; asking for the state a pin is already in
+## succeeds and simply does no work (no stamp, no autosave), so a UI may call it idempotently.
+##
+## ⭐IT CLEARS EVERY OTHER TRACKED FLAG IN EVERY LEVEL FIRST, on the untrack path too. Tracking is a MOVE, not
+## a set: the value of one marker is that the compass pip and the rim-pinned HUD glyph are unambiguous, and a
+## second flag left anywhere in the ledger would quietly win on some surfaces and lose on others (every
+## consumer asks tracked_waypoint(), which answers with the FIRST). Sweeping on both paths costs one bounded
+## walk when the invariant holds and repairs it when a hand-edited save broke it.
+##
+## Routes through _waypoints_touched() like every other mutation: the paint stamp must move or the minimap's
+## idle gate will never draw the ring onto a standing player's box, and waypoints_changed fires
+## SYNCHRONOUSLY — a handler re-entering here reads a ledger whose flag has already finished moving.
+func set_tracked_waypoint(level_path: String, index: int, on: bool) -> bool:
+	var list := waypoints_for(level_path)
+	if index < 0 or index >= list.size() or not (list[index] is Dictionary):
+		return false  # validated BEFORE the sweep: a refusal must not have cleared the flag it failed to move
+	var rec := list[index] as Dictionary
+	var changed := _clear_tracked_except(level_path, index)
+	# `rec` is the ledger's OWN Dictionary (Godot 4 Dictionaries are references), so these write straight into
+	# the stored record — no read-modify-write back into the array.
+	if on:
+		if not WAYPOINT_BOOK.is_tracked(rec):
+			rec["tracked"] = true
+			changed = true
+	elif rec.has("tracked"):
+		rec.erase("tracked")  # erases a junk-typed flag too, so an untrack always leaves a clean record
+		changed = true
+	if changed:
+		_waypoints_touched()
+	return true
+
+## Strip the tracked flag from every pin in every level EXCEPT the one named. Returns whether it cleared
+## anything, so the caller can skip the write barrier — and the coalesced autosave behind it — on a no-op.
+func _clear_tracked_except(keep_level: String, keep_index: int) -> bool:
+	var cleared := false
+	for lvl: Variant in waypoints:
+		var level_path := String(lvl)
+		var list := waypoints_for(level_path)
+		for i in list.size():
+			if level_path == keep_level and i == keep_index:
+				continue
+			var d: Variant = list[i]
+			if d is Dictionary and (d as Dictionary).has("tracked"):
+				(d as Dictionary).erase("tracked")
+				cleared = true
+	return cleared
+
+## The LOAD half of the same invariant, called per level as load_from_disk folds each sanitized list in.
+## `already` is whether an earlier level in the file claimed the flag; the return feeds the next level. FIRST
+## WINS — a hand-edited save that tracked three pins loads with the topmost one tracked rather than with a
+## nondeterministic winner. Separate from _clear_tracked_except on purpose: this walks a list that is NOT in
+## the ledger yet, so it must never read `waypoints`.
+func _fold_tracked(list: Array[Dictionary], already: bool) -> bool:
+	var seen := already
+	for rec: Dictionary in list:
+		if not WAYPOINT_BOOK.is_tracked(rec):
+			continue
+		if seen:
+			rec.erase("tracked")  # a second navigation marker: the first one keeps it, this one loads plain
+		else:
+			seen = true
+	return seen
+
+# --- The ledger's two write barriers --------------------------------------------------------------------
+## The one write barrier: bump the paint stamp, tell the listeners, and queue the same coalesced world-state
+## autosave the object ledger uses — a pin the player placed must survive a crash the way an opened door does.
+func _waypoints_touched() -> void:
+	waypoints_rev += 1
+	waypoints_changed.emit()
+	autosave_world_state()
+
+## The same barrier for a ledger that arrived from DISK (a load, or a New Game reset) rather than from the
+## player. Identical except that it must NOT queue an autosave: writing a save as a direct consequence of
+## reading one is how a half-applied load overwrites the file it came from, and the reset path is explicitly
+## the one place that has to leave the disk alone until a real checkpoint.
+func _waypoints_loaded() -> void:
+	waypoints_rev += 1
+	waypoints_changed.emit()
 
 # --- Quests (FORWARDERS — the tracker itself is the `QuestTracker` autoload) -----------------------------------
 # The quest state, the four quest signals, reward granting and the cfg round-trip all live on QuestTracker now

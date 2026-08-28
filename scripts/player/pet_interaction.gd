@@ -49,6 +49,12 @@ func _physics_process(delta: float) -> void:
 func _can_run() -> bool:
 	if host == null or not is_instance_valid(host) or not host.is_inside_tree():
 		return false
+	# Honour the player's physics suspension (the F1 debug menu's DebugActionsPlayer.suspend_player freezes the
+	# Player by hand, OUTSIDE gameplay_suppressed(), but not its self-ticking verb children) — without this,
+	# typing the pet key's letter into that menu's search field pets whatever the frozen crosshair rests on.
+	# Same guard as WaypointMarker._can_run / SilentTakedown._can_run.
+	if not host.is_physics_processing():
+		return false
 	if host.get(&"_dying"):
 		return false
 	if DialogueManager.is_active() or InputManager.gameplay_suppressed():

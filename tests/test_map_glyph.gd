@@ -225,3 +225,30 @@ func test_north_dir_is_always_unit_length() -> void:
 	for i in 12:
 		var yaw := TAU * (float(i) / 12.0)
 		assert_almost_eq(g.north_dir(yaw, true).length(), 1.0, 0.0001, "unit at yaw %s" % yaw)
+
+
+## RING SEGMENTS — the noise ring's tessellation, and specifically its FLOOR.
+##
+## The claim this pins is not "circles look nicer with more sides", it is that the noise ring must never land
+## inside the STATION GLYPH alphabet. This same file strokes station badges as ngons at
+## minimap_station_glyph_px (~5 px), and shape is the minimap's primary channel, so a lightly-segmented ring at
+## a walk radius would read as a large station badge rather than as a circle. Hence a floor far above
+## CIRCLE_SIDES rather than the 12-16 an "it looks round enough" eyeball would pick.
+func test_ring_segments_never_lands_in_the_station_glyph_alphabet() -> void:
+	# A walk ring (~11 px at the shipped scale) is the dangerous size — it is exactly station-badge territory.
+	assert_gt(MapGlyph.ring_segments(11.0), MapGlyph.CIRCLE_SIDES,
+			"a walk-sized ring must be far better tessellated than a station ngon, or it reads as one")
+	assert_gte(MapGlyph.ring_segments(11.0), 28, "...which is what the floor is for")
+
+
+## Monotone and clamped at both ends: a bigger ring never gets FEWER sides, a degenerate radius still returns a
+## drawable count, and a huge one stops paying for sub-pixel chords.
+func test_ring_segments_is_monotone_and_clamped() -> void:
+	var prev := 0
+	for r in [0.0, 1.0, 11.0, 30.0, 76.0, 400.0, 10000.0]:
+		var n := MapGlyph.ring_segments(float(r))
+		assert_gte(n, prev, "segment count never decreases as the ring grows (at %s px)" % r)
+		assert_between(n, 28, 64, "and stays inside the authored bounds (at %s px)" % r)
+		prev = n
+	assert_eq(MapGlyph.ring_segments(0.0), 28, "a zero radius still returns the floor rather than 0 sides")
+	assert_eq(MapGlyph.ring_segments(10000.0), 64, "and an absurd one is capped")

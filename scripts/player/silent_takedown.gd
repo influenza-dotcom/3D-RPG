@@ -38,7 +38,7 @@ var _press_player: AudioStreamPlayer = null  ## looping wind-up SFX (the press);
 ## there and this is skipped (mirrors Slide._build_slide_sfx) — the pure eligibility tests stay node-free.
 func _ready() -> void:
 	_press_player = AudioStreamPlayer.new()
-	_press_player.bus = &"sfx"  # respect the SFX volume slider (a bare player lands on Master and ignores it)
+	_press_player.bus = AudioManager.WORLD_BUS  # the press is a physical action in the room — diegetic bus, so it takes the indoor echo like a melee swing (and still respects the SFX slider transitively)
 	# Loop for the whole hold: reconnect finished -> play so a clip SHORTER than the wind-up sustains instead of
 	# falling silent. stop() (on release/commit) does NOT emit finished, so cutting the press never re-triggers it.
 	_press_player.finished.connect(_press_player.play)
@@ -113,6 +113,13 @@ func _set_pressing(on: bool, s: SilentTakedownSettings = null) -> void:
 ## live tree with a valid host (a bare .new() unit stub has no host -> safely inert).
 func _can_run() -> bool:
 	if host == null or not is_instance_valid(host) or not host.is_inside_tree():
+		return false
+	# The player's physics being switched OFF is a suspension this verb must honour — the F1 debug menu freezes
+	# the Player by hand (DebugActionsPlayer.suspend_player) while staying OUTSIDE gameplay_suppressed(), and never
+	# touches its self-ticking verb children. Without this, typing the takedown key's letter into that menu's
+	# search field charges a takedown underneath it. Same guard as WaypointMarker._can_run; bailing to _reset()
+	# also cuts a mid-hold wind-up press the instant the suspension lands.
+	if not host.is_physics_processing():
 		return false
 	# The takedown VERB is an UNLOCKABLE ability now — you install the Takedown Chip (resources/items/chip_takedown.tres)
 	# at a ChipInstaller, which adds a SilentTakedownAbility gate node under the Player. This behaviour component is

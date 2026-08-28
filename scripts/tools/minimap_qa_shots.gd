@@ -52,6 +52,15 @@ func _run() -> void:
 		print("QA_FAIL no Minimap in the HUD — ui.gd did not instance the authored scene")
 		get_tree().quit(1)
 		return
+	# THE BODY CHANNEL IS IMPLANT-GATED NOW (Minimap._sample_scan_range): a chip-less player sees no NPC dots at
+	# all, so without this every shot below would document the map with one whole channel missing. Granted at
+	# runtime; the grant path emits mechanic_unlocked, which only ChipInstallScreen listens for, so this driver
+	# still writes nothing to user://.
+	var qa_player := Groups.human_player(get_tree())
+	if qa_player != null:
+		qa_player.call(&"unlock_mechanic", &"deep_scanner")
+	else:
+		print("QA_WARN no human player — the body-dot channel will be blank in these shots")
 	print("QA_MAP rect=", map.get_global_rect(), " decks=", map.deck_count(),
 			" band_floor=", map.active_band_floor())
 	print("QA_MAP slots under=", map.get_node_or_null(^"%MapUnder") != null,
