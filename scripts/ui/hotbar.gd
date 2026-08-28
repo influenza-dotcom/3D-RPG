@@ -153,10 +153,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	# Scroll wheel cycles the WEAPON slots (next/prev with wrap) — never consumables: scrolling past a
 	# medkit must not use it; those stay on their number keys. Yields to the spray paint's palette cycling
-	# while a spray can is drawn (it owns the wheel then), explicitly rather than relying on which
-	# _unhandled_input runs first.
+	# and to a variable-zoom scope's magnification dial while those weapons are AIMED (they own the wheel
+	# then), explicitly rather than relying on which _unhandled_input runs first.
 	if event.is_action_pressed(InputManager.action_hotbar_next) or event.is_action_pressed(InputManager.action_hotbar_prev):
-		if not _spray_owns_wheel():
+		if not _spray_owns_wheel() and not _scope_owns_wheel(event):
 			_wake()  # scrolling the bar wakes it even if it lands on the same weapon
 			_cycle(1 if event.is_action_pressed(InputManager.action_hotbar_next) else -1)
 			get_viewport().set_input_as_handled()
@@ -176,6 +176,23 @@ func _spray_owns_wheel() -> bool:
 	if ws == null or ws.equipped_weapon == null or ws.attack == null:
 		return false
 	return ws.equipped_weapon.is_spray_paint and not ws.attack.holstered and Input.is_action_pressed(&"Zoom")
+
+## True while AIMING a weapon with a variable-zoom scope (WeaponData.scoped_zoom_fov_min/max — the sniper):
+## the wheel then dials its magnification (ScopeIn's wheel zoom) instead of switching weapons. The same
+## explicit-yield contract as _spray_owns_wheel, and the SAME predicate ScopeIn consumes the notch through,
+## so wheel ownership can never split between the bar and the scope. Yields ONLY for a real wheel notch:
+## Hotbar Next/Prev are rebindable, and a rebound KEY has no scope-zoom meaning (ScopeIn serves raw wheel
+## events only) — yielding it would leave that key silently dead mid-ADS, where it has always cycled.
+func _scope_owns_wheel(event: InputEvent) -> bool:
+	if not (event is InputEventMouseButton):
+		return false
+	var button := (event as InputEventMouseButton).button_index
+	if button != MOUSE_BUTTON_WHEEL_UP and button != MOUSE_BUTTON_WHEEL_DOWN:
+		return false
+	var ws := _player.weapon_system
+	if ws == null:
+		return false
+	return ScopeIn.wheel_owns_scope_zoom(ws.attack)
 
 ## Step the equipped weapon to the next/previous OCCUPIED weapon slot (wrapping). From bare fists, wheel
 ## down starts at the first weapon and wheel up at the last. A single carried weapon has nowhere to go.
@@ -298,10 +315,22 @@ func _process(delta: float) -> void:
 # Display
 # ---------------------------------------------------------------------------------------------------
 
+## Give ONE slot line the HUD's shared black-outline treatment. ⭐ALL THREE lines wear it now (key caption,
+## item name, stack count), not just the name: the bar is bottom-right-anchored over LIVE WORLD — no plate,
+## no backing — so where it crosses a bright band (a daylit street, snow, a muzzle flash) an un-outlined glyph
+## has nothing to hold its edge against. Measured in the QA HUD shot: the outlined name stayed crisp over the
+## cyan ground band while the key digits and stack counts went soft and grey, which made them the faintest text
+## on the whole HUD — and the key digit is the ONE thing on a slot that tells you which button to press.
+## The width knob is deliberately the name's (skin.hotbar_name_outline_size): one budget re-inks the whole slot,
+## and it is already proportioned to this widget's ~7-8px fonts (the toast/look-name tiers are far heavier).
+func _ink_outline(l: Label, skin: Resource) -> void:
+	l.add_theme_color_override(&"font_outline_color", skin.label_outline_color)
+	l.add_theme_constant_override(&"outline_size", skin.hotbar_name_outline_size)
+
 func _build_bar() -> void:
 	# Metrics/fonts read from the HudSettings "Hotbar" knobs, once, at build. The slot CHROME (panel
-	# modulate, key/count tints, name outline) is the artist's HudSkin (MenuStyle.hud, hotbar_* fields) —
-	# also read once here, so a runtime set_hud_skin() swap shows on the next bar build, not live.
+	# modulate, key/count tints, the shared line outline) is the artist's HudSkin (MenuStyle.hud, hotbar_*
+	# fields) — also read once here, so a runtime set_hud_skin() swap shows on the next bar build, not live.
 	# Untyped on purpose: a `HudSkin` annotation breaks headless runs until the editor's class cache
 	# rescans (see hud_skin.gd's scope contract).
 	var skin: Resource = MenuStyle.hud
@@ -336,6 +365,7 @@ func _build_bar() -> void:
 		key.text = InputManager.get_action_binding(InputManager.hotbar_actions[i])
 		key.add_theme_font_size_override(&"font_size", GameSettings.hud.hotbar_key_font_size)
 		key.add_theme_color_override(&"font_color", skin.hotbar_key_color)
+		_ink_outline(key, skin)
 		# Same guard as name_l below: a wide binding caption ("Mouse 1") must not beat the slot floor.
 		key.clip_text = true
 		v.add_child(key)
@@ -347,8 +377,7 @@ func _build_bar() -> void:
 		name_l.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 		name_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		name_l.add_theme_font_size_override(&"font_size", GameSettings.hud.hotbar_name_font_size)
-		name_l.add_theme_color_override(&"font_outline_color", skin.label_outline_color)
-		name_l.add_theme_constant_override(&"outline_size", skin.hotbar_name_outline_size)
+		_ink_outline(name_l, skin)
 		name_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		# clip_text keeps the label from contributing its TEXT width as a minimum size: a wide-glyph item
 		# name could otherwise push its PanelContainer past the slot floor and re-widen the whole bar.
@@ -360,6 +389,7 @@ func _build_bar() -> void:
 		count_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		count_l.add_theme_font_size_override(&"font_size", GameSettings.hud.hotbar_count_font_size)
 		count_l.add_theme_color_override(&"font_color", skin.hotbar_count_color)
+		_ink_outline(count_l, skin)
 		count_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		# Same guard as name_l above: without clip_text a pathological stack count ("x99999999") beats the
 		# slot-size floor and the bottom-right-anchored bar re-expands LEFTWARD, sliding every slot mid-game.
