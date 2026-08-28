@@ -42,6 +42,11 @@ extends SpotLight3D
 ## Set `reveals_you = false` to opt out of both: that joins &"stealth_light_exempt" instead (the group the sampler
 ## already honours) and skips &"carried_light", so the beam becomes free stealth-wise.
 ##
+## ⭐THE BEAM IS A GRADIENT, NOT ONE FLAT COLOUR: white through the middle, your HP colour out at the rim
+## (`beam_gradient` below). That shape is a light PROJECTOR — a small radial texture the light multiplies itself
+## by — so it is still ONE SpotLight3D: one shadow map, one entry in the stealth sampler, no second lamp to keep
+## in sync. The export explains what it costs and how to turn it off.
+##
 ## The click is the authored FlashlightClick child (an AudioStreamPlayer3D); delete or mute it for a silent torch.
 
 ## How snappily the beam chases where you are looking. Higher = tighter to the aim, lower = a heavier swing.
@@ -74,15 +79,59 @@ extends SpotLight3D
 ## this cannot change detection, the crouch douse or the light meter.
 @export var match_player_light: bool = true
 
+## ⭐WHITE CORE, HP-TINTED RIM. On (the default) the beam is a radial GRADIENT rather than one flat colour: the
+## middle of the cone stays pure WHITE — a torch bulb reads as white, and white is what actually lets you see the
+## thing you are pointing at — while the outer ring carries the health colour match_player_light tracks. You keep
+## the HP readout in your peripheral vision without staining whatever you are trying to look at. Off = the old
+## behaviour, the whole cone tinted.
+##
+## ⭐HOW, because the mechanism is not obvious: a SpotLight3D has exactly ONE light_color and no gradient of its
+## own, so the shape comes from `light_projector` — a texture the light MULTIPLIES its colour by, thrown down the
+## cone like a gobo. `light_color` is therefore forced to WHITE at runtime and the tint moves into the texture
+## (white in the middle, the glow colour at the edge). Because a multiply can only ever darken, the core is
+## exactly white BY CONSTRUCTION, not by tuning — and it stays one light, so nothing downstream (shadows, the
+## carried-light beacon, the light meter) sees a second lamp appear.
+## ⭐The texture is a radial fill whose radius 0.5 IS the cone's rim: a spot projector covers the light's square
+## frustum, so the lit circle is the one inscribed in the texture and the corners fall outside the cone entirely.
+## That is the whole reason fill_to is (1.0, 0.5) and not (1.0, 1.0).
+##
+## ⭐THE ONE COST — the VOLUMETRIC FOG SHAFT turns white too. Fog reads a light's COLOUR and never its projector,
+## so the beam-in-the-air is white while the surfaces it lands on still redden as you bleed. Switching this off
+## restores the fully-tinted beam and the tinted shaft together.
+@export var beam_gradient: bool = true
+## How much of the cone (as a fraction of its radius) stays PURE white before the tint begins. 0 = the ramp starts
+## at the dead centre and the white "core" is a point; near 1 = an almost entirely white beam with a thin coloured
+## edge. Read when the beam is built in _ready — author it in the Inspector, not at runtime.
+@export_range(0.0, 1.0, 0.01) var beam_core_size: float = 0.22
+## How far the RIM travels toward the HP colour: 1 = the full saturated colour, 0 = white (the gradient becomes
+## invisible). This is the dial to reach for when the coloured ring is too loud — not switching beam_gradient off.
+@export_range(0.0, 1.0, 0.01) var beam_rim_tint: float = 1.0
+
 @onready var flashlight_click: AudioStreamPlayer3D = $FlashlightClick
 
 ## The player's body-glow light we copy our colour from (match_player_light). Resolved lazily off the wielder
 ## and re-resolved if it is ever freed, so a respawned / rebuilt player rig re-links itself.
 const GLOW_NODE := "PlayerEmittingLight"
 
+## The projector texture's resolution. Light projectors sample through the project-wide
+## `rendering/textures/light_projectors/filter` (Nearest here, like every other filter in this retro build), so a
+## magnified texture shows its own texel grid — small enough and the smooth ramp reads as blocky rings on the
+## wall. Big enough to hide that, small enough that re-filling it on an HP change costs nothing you can feel.
+const BEAM_GRADIENT_SIZE := 256
+## Index of the RIM stop in the 3-point ramp (0 = centre, 1 = the end of the white core, 2 = the rim).
+const BEAM_RIM_POINT := 2
+## Ignore a rim move smaller than one 8-bit step: the projector lands in an 8-bit atlas so a finer change cannot
+## render at all, and out-of-combat regen walks the glow colour EVERY tick — without this the texture would be
+## re-filled and re-uploaded on frames where nothing could possibly look different.
+const BEAM_RIM_EPSILON := 1.0 / 255.0
+
 var _light_on: bool = false   ## the toggle state, kept separate from `visible` (death also hides the beam)
 var _wielder: Node = null     ## the owning Player, found by ancestor walk (duck-typed; null on a bare test rig)
 var _glow: Light3D = null     ## the body glow whose colour we track (null = keep the authored beam colour)
+var _authored_color: Color = Color.WHITE  ## the beam colour as authored on the node; the rim's fallback with no glow
+var _beam_ramp: Gradient = null           ## the white->rim ramp behind the projector (null = beam_gradient off)
+var _beam_rim: Color = Color.WHITE        ## last rim colour written, guarding the rebuild (see BEAM_RIM_EPSILON)
+var _beam_rim_set: bool = false           ## has _beam_rim been written once? (the first write must never be skipped)
 
 func _ready() -> void:
 	# Detach from the parent transform so position/rotation are driven manually below (the smoothed follow).
@@ -91,6 +140,11 @@ func _ready() -> void:
 	_light_on = start_on
 	visible = _light_on
 	_wielder = _find_wielder()
+	# Capture the authored beam colour BEFORE the gradient claims light_color for its white core — it is what the
+	# rim falls back to when there is no player glow to read (a bare rig, match_player_light off).
+	_authored_color = light_color
+	if beam_gradient:
+		_build_beam_gradient()
 	# Both halves of the stealth trade are GROUP memberships the existing sampler already checks, never a new branch
 	# in PlayerLightLevel — so "who feeds detection" keeps exactly one home (see _light_contribution_for and
 	# _sample_carried there). CARRIED_LIGHT is what makes the torch a liability at RANGE; STEALTH_LIGHT_EXEMPT is
@@ -135,10 +189,11 @@ func _process(delta: float) -> void:
 	else:
 		global_rotation = target_rot
 
-## Copy the player's body-glow colour onto the beam (see match_player_light). Written only when it actually
-## CHANGED — the glow only moves when HP does, so the common frame costs a comparison instead of a
-## RenderingServer write. Degrades to the authored beam colour whenever there is no glow to read (a bare rig in
-## a test, a player prefab without the node), so the beam is never left black.
+## Copy the player's body-glow colour onto the beam (see match_player_light) — onto the gradient's RIM when
+## beam_gradient is on, onto light_color itself when it is off. Written only when it actually CHANGED: the glow
+## only moves when HP does, so the common frame costs a comparison instead of a RenderingServer write (and, with
+## the gradient, a 256x256 re-fill). Degrades to the authored beam colour whenever there is no glow to read (a
+## bare rig in a test, a player prefab without the node), so the beam is never left black.
 func _match_glow_color() -> void:
 	if not match_player_light:
 		return
@@ -148,8 +203,54 @@ func _match_glow_color() -> void:
 			_glow = _wielder.get_node_or_null(GLOW_NODE) as Light3D
 		if _glow == null:
 			return
-	if light_color != _glow.light_color:
+	if beam_gradient:
+		# The gradient owns the tint: light_color stays WHITE (it IS the core) and the glow lands on the rim stop.
+		_set_beam_rim(_glow.light_color)
+	elif light_color != _glow.light_color:
 		light_color = _glow.light_color
+
+
+## Build the white-core / HP-rim projector once and hand the beam's colour over to it (see beam_gradient):
+## light_color becomes WHITE because the texture is a MULTIPLY, and every later tint writes the ramp's rim stop
+## instead of the light. GradientTexture2D re-renders itself whenever the Gradient emits `changed`, so a rim write
+## is the only thing the per-frame path ever has to do — nothing here polls or ticks.
+func _build_beam_gradient() -> void:
+	_beam_ramp = Gradient.new()
+	# Offsets FIRST: Gradient resizes its point list to match whichever array you assign, so assigning the three
+	# colours to a two-point default ramp and then the offsets would work, but the reverse order is the safe one.
+	# The core stop is clamped off 1.0 so it can never land ON the rim stop and collapse the ramp.
+	_beam_ramp.offsets = PackedFloat32Array([0.0, clampf(beam_core_size, 0.0, 0.99), 1.0])
+	_beam_ramp.colors = PackedColorArray([Color.WHITE, Color.WHITE, Color.WHITE])
+	var tex := GradientTexture2D.new()
+	tex.gradient = _beam_ramp
+	tex.width = BEAM_GRADIENT_SIZE
+	tex.height = BEAM_GRADIENT_SIZE
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	# Centre of the texture out to the midpoint of its EDGE: radius 0.5 in UV, which is exactly the cone's rim,
+	# because a spot projector is thrown across the light's square frustum and the lit circle is the inscribed
+	# one. Reaching to a corner instead would put the rim colour outside the cone where nothing can see it.
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(1.0, 0.5)
+	light_projector = tex
+	light_color = Color.WHITE
+	_set_beam_rim(_authored_color)
+
+
+## Paint the ramp's rim stop with `c` — the live glow colour, or the authored beam colour when there is no glow —
+## pulled back toward white by beam_rim_tint. Alpha is dropped: a projector multiplies RGB and a translucent stop
+## would only ever read as a bug.
+func _set_beam_rim(c: Color) -> void:
+	if _beam_ramp == null:
+		return
+	var rim := Color.WHITE.lerp(Color(c.r, c.g, c.b, 1.0), clampf(beam_rim_tint, 0.0, 1.0))
+	if _beam_rim_set \
+			and absf(rim.r - _beam_rim.r) < BEAM_RIM_EPSILON \
+			and absf(rim.g - _beam_rim.g) < BEAM_RIM_EPSILON \
+			and absf(rim.b - _beam_rim.b) < BEAM_RIM_EPSILON:
+		return
+	_beam_rim = rim
+	_beam_rim_set = true
+	_beam_ramp.set_color(BEAM_RIM_POINT, rim)
 
 ## Toggle on the "Light" action. Deliberately NOT gated on the weapon: a flashlight is not a gun attachment, so
 ## it answers unarmed, mid-reload and with your hands full — the things that stop it are being dead (which would

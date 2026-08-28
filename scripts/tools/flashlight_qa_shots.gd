@@ -1,6 +1,8 @@
 extends Node
-## Flashlight shadow QA screenshot harness — boots the REAL game at night, switches the torch on, drops a
-## controlled shadow probe (a box between the beam and a wall) in front of the camera, and captures the frame.
+## Flashlight LOOK QA screenshot harness — boots the REAL game at night, switches the torch on, drops a
+## controlled probe (a box between the beam and a wall) in front of the camera, and captures the frame. It
+## answers two questions no unit test can: does the beam cast visible SHADOWS, and does its white-core /
+## HP-tinted-rim GRADIENT actually render (shots 02b–02d, each with its own control).
 ##
 ## WHY: "the flashlight casts no shadows" is a LOOK bug — no unit test can see it, and the scene file already
 ## says `shadow_enabled = true`, so the question is what the GPU actually draws. This harness answers it by eye
@@ -87,6 +89,37 @@ func _run() -> void:
 	await _frames(20)
 	print("QA_ON visible=", torch.visible, " offset_now=", torch.global_position.distance_to(eye))
 	await _shot("02_night_torch_on_as_shipped")
+
+	# --- PASS 1b: THE BEAM GRADIENT. The shipped beam is WHITE through the middle and HP-coloured at the rim
+	# (flash_light.gd `beam_gradient`), and that shape is a light PROJECTOR — a radial GradientTexture2D the
+	# light multiplies itself by. Nothing a unit test can read proves the GPU actually threw it: a projector that
+	# failed to reach the decal atlas, or a renderer that ignored it, leaves a plain white cone with every
+	# property still correct. So shoot the ramp against the probe wall, then A/B it against the flat beam it
+	# replaced — if those two frames match, the projector never rendered.
+	var proj: Texture2D = torch.light_projector
+	print("QA_GRADIENT projector=", proj, " light_color=", torch.light_color, " size=",
+			Vector2i(proj.get_width(), proj.get_height()) if proj != null else Vector2i.ZERO)
+	await _shot("02b_beam_gradient_white_core_tinted_rim")
+
+	var glow := player.get_node_or_null("PlayerEmittingLight") as Light3D
+	torch.light_projector = null
+	torch.light_color = glow.light_color if glow != null else Color(0.003921569, 1.0, 1.0)
+	await _frames(10)
+	await _shot("02c_control_flat_beam_no_projector")
+	torch.light_projector = proj
+	torch.light_color = Color.WHITE
+
+	# The rim tracks the player's body glow, which is HP-driven — so drive the glow to the damaged red and the
+	# ring must follow within a frame while the core stays white. (Writing the glow directly is the honest test:
+	# it is exactly what Player._refresh_health_light_color does off the `damaged` signal.)
+	if glow != null:
+		var healthy := glow.light_color
+		glow.light_color = Color(1.0, 0.05, 0.02)
+		await _frames(10)
+		print("QA_GRADIENT_HURT glow=", glow.light_color, " beam_core=", torch.light_color)
+		await _shot("02d_gradient_rim_reddens_with_hp")
+		glow.light_color = healthy
+		await _frames(5)
 
 	# CONTROL for the shipped offset: put the origin BACK on the eye and re-shoot. If 03 is the flat,
 	# shadowless frame and 02 is not, the separation authored on LightPosition is doing the whole job.

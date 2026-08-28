@@ -116,6 +116,76 @@ func test_beam_tracks_the_glow_live_rather_than_copying_a_literal() -> void:
 		"the beam must read the player's actual glow node, so any future retint is inherited for free")
 	assert_true("light_color = _glow.light_color" in src,
 		"the beam must COPY the live glow colour, never re-derive the HP blend (one blend, one home)")
+	assert_false("health_light_color_for" in src,
+		"the torch must never re-derive the HP blend itself — it reads the glow node the blend already wrote")
+
+
+## ⭐THE WHITE CORE. A SpotLight3D has ONE light_color, so "white in the middle, HP colour at the rim" is not a
+## property you can set — it is a light PROJECTOR (a radial GradientTexture2D the light multiplies itself by).
+## These asserts are behavioural: they build the real ramp on a real node and read what came out.
+##
+## Built OFF-TREE deliberately. Adding this script to the tree runs _process, which reads
+## `get_parent().global_rotation` — a GutTest is a plain Node, so that is an engine error, and GUT 9.6 fails the
+## suite on those. _build_beam_gradient touches nothing outside the node, so calling it directly is honest.
+func test_the_beam_is_a_white_cored_gradient_rather_than_one_flat_colour() -> void:
+	var torch: SpotLight3D = load(SCRIPT_PATH).new()
+	var authored := Color(0.003921569, 1.0, 1.0)   # the healthy cyan the rig authors
+	torch.light_color = authored
+	torch.set("_authored_color", authored)          # what _ready captures before the gradient claims light_color
+	torch.call("_build_beam_gradient")
+
+	assert_eq(torch.light_color, Color.WHITE,
+		"the light itself must go WHITE — the projector is a MULTIPLY, so any tint here would stain the core")
+	var tex := torch.light_projector as GradientTexture2D
+	assert_not_null(tex, "the beam's gradient IS the light_projector; without it there is no core/rim at all")
+	if tex != null:
+		assert_eq(tex.fill, GradientTexture2D.FILL_RADIAL,
+			"the ramp must run from the middle of the cone outward, not left-to-right across it")
+		assert_eq(tex.fill_from, Vector2(0.5, 0.5), "the white core sits at the centre of the projected square")
+		# ⭐The rim lands at UV radius 0.5 because a spot projector covers the light's SQUARE frustum and the lit
+		# circle is the one inscribed in it. Reaching to a corner would push the HP colour outside the cone.
+		assert_eq(tex.fill_to, Vector2(1.0, 0.5),
+			"the ramp must END at the cone's rim (radius 0.5), or the tint never fully arrives on screen")
+		var ramp := tex.gradient
+		assert_not_null(ramp, "the projector must be driven by a Gradient — that is what a colour change rewrites")
+		if ramp != null:
+			assert_eq(ramp.get_color(0), Color.WHITE, "the centre stop is white: that is the whole request")
+			assert_almost_eq(ramp.get_color(ramp.get_point_count() - 1).r, authored.r, 0.001,
+				"with no player glow to read, the rim falls back to the AUTHORED beam colour, never white or black")
+
+	# The rim tracks HP live: hand it the damaged red and the ring must follow while the core stays white.
+	torch.call("_set_beam_rim", Color(1.0, 0.05, 0.02))
+	var rim: Color = (torch.light_projector as GradientTexture2D).gradient.get_color(2)
+	assert_almost_eq(rim.r, 1.0, 0.001, "a hurt player's rim must carry the damaged RED")
+	assert_almost_eq(rim.g, 0.05, 0.001, "a hurt player's rim must carry the damaged GREEN")
+	assert_eq(torch.light_color, Color.WHITE, "bleeding must never tint the CORE — that is the point of the split")
+	torch.free()
+
+
+## The loudness dial. beam_rim_tint is what a designer reaches for when the coloured ring is too strong; at 0 the
+## rim is white and the beam is visually back to a plain torch WITHOUT turning the gradient machinery off.
+func test_the_rim_tint_dial_can_pull_the_ring_back_to_white() -> void:
+	var torch: SpotLight3D = load(SCRIPT_PATH).new()
+	torch.beam_rim_tint = 0.0
+	torch.call("_build_beam_gradient")
+	torch.call("_set_beam_rim", Color(1.0, 0.05, 0.02))
+	assert_eq((torch.light_projector as GradientTexture2D).gradient.get_color(2), Color.WHITE,
+		"beam_rim_tint 0 must leave the rim white — the soft opt-out, so nobody has to disable beam_gradient")
+	torch.free()
+
+
+## Switching the gradient OFF must leave the pre-gradient torch exactly as it was: one flat, fully tinted cone
+## and NO projector. This is the escape hatch the class doc promises for the white volumetric shaft.
+func test_the_gradient_can_be_switched_off_back_to_a_flat_tinted_beam() -> void:
+	var src := _code()
+	assert_true("@export var beam_gradient" in src, "the gradient must be a designer switch, not a hidden rule")
+	assert_true("if beam_gradient:" in src and "_build_beam_gradient()" in src,
+		"the projector must only be built when the switch is on — off = the light keeps its authored colour")
+	var torch: SpotLight3D = load(SCRIPT_PATH).new()
+	torch.beam_gradient = false
+	assert_null(torch.light_projector,
+		"with the gradient off nothing may author a projector — a stale one would silently keep the white core")
+	torch.free()
 
 
 func test_beam_colour_is_cosmetic_and_cannot_move_stealth() -> void:
