@@ -1,0 +1,38 @@
+[gd_resource type="Resource" script_class="Item" load_steps=7 format=3]
+
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1_item"]
+[ext_resource type="Script" path="res://scripts/items/weapon_mod.gd" id="2_mod"]
+[ext_resource type="Script" path="res://scripts/items/weapon_stat_delta.gd" id="3_delta"]
+
+[sub_resource type="Resource" id="Delta_clip"]
+script = ExtResource("3_delta")
+property = &"max_ammo"
+op = 1
+amount = 2.0
+
+[sub_resource type="Resource" id="Delta_reload"]
+script = ExtResource("3_delta")
+property = &"reload_time"
+op = 2
+amount = 0.7
+
+[sub_resource type="Resource" id="Mod_quickfeed_mag"]
+script = ExtResource("2_mod")
+slot = 2
+fits_weapon_ids = Array[StringName]([&"sniper"])
+deltas = Array[ExtResource("3_delta")]([SubResource("Delta_clip"), SubResource("Delta_reload")])
+
+[resource]
+script = ExtResource("1_item")
+id = &"mod_quickfeed_mag"
+display_name = "[PH] Quickfeed Breech"
+description = "[PH] A reworked breech and a two-round follower welded where the floorplate used to be. Turns a single-shot bolt gun into something you can argue with."
+category = 3
+max_stack = 10
+weapon = null
+caliber = &""
+weight = 0.8
+value = 90.0
+weapon_mod = SubResource("Mod_quickfeed_mag")
+grid_width = 1
+grid_height = 2

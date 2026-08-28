@@ -21,6 +21,7 @@ const STATION_PINS := {
 	"res://scripts/components/perk_station.gd": "TRAIN",
 	"res://scripts/components/respec_station.gd": "TRAIN",
 	"res://scripts/components/chip_installer.gd": "TECH",
+	"res://scripts/components/weapon_bench.gd": "TECH",
 	"res://scripts/components/bonfire.gd": "LEISURE",
 	"res://scripts/components/chess_match.gd": "LEISURE",
 	"res://scripts/components/level_door.gd": "EXIT",
@@ -168,7 +169,7 @@ func test_find_marker_does_not_reach_into_a_sibling_station() -> void:
 
 ## ROSTER-AS-SPEC (the tests/test_dialogue_speaker_contracts.gd idiom). Every component in STATION_PINS must
 ## call StationMarker.ensure with the Kind this test names. Greps SOURCE TEXT, so it catches the one failure
-## mode that has no runtime symptom: a tenth station whose author never added the line just never appears on
+## mode that has no runtime symptom: a new station whose author never added the line just never appears on
 ## the map, and no other test would notice.
 func test_every_station_component_asks_for_its_pin() -> void:
 	for path in STATION_PINS:

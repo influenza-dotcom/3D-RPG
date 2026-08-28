@@ -101,6 +101,12 @@ static func _effect_lines(item: Item) -> Array[String]:
 	# Upgrade chip: carrying it does nothing until a ChipInstaller consumes it, so name the ability it unlocks.
 	if item.is_upgrade_chip():
 		out.append("Installs %s" % _ability_name(item.installs_ability))
+	# A WEAPON PART: carrying it does nothing until a WeaponBench fits it, so name the slot and what it does.
+	# ONE branch feeds the inventory, shop, loot AND bench tooltips at once — the bench's rows are ItemInfo
+	# tooltips, so this is also the decision surface for the fit itself. Composed by WeaponModInfo (the
+	# ItemInfo._weapon_block precedent: a labeled, derived readout belongs in a formatter, not in PlayerText).
+	if item.is_weapon_mod():
+		out.append(WeaponModInfo.part_line(item))
 	# Passive held buff (the Chrome Grin case): the effect is live WHILE the item sits in the bag.
 	if item.held_passive_effect != null:
 		var parts := _held_effect_parts(item.held_passive_effect)
@@ -197,13 +203,16 @@ static func _timed_effect_parts(fx: StatusEffect) -> Array[String]:
 static func _ability_name(id: StringName) -> String:
 	return AbilityRegistry.display_name_for(id)
 
-## A SIGNED bare/half number: "+3", "-2", "+4.5". Callers skip zeros (is_zero_approx), so 0 never reaches here.
+## A SIGNED bare/half number: "+3", "-2", "+4.5". TextFormat.signed at one decimal in the TERSE voice
+## (zero_plus = false, so a baseline would print a bare "0" rather than StatInfo's "+0") — this file's private
+## copy of the idiom is gone. Byte-identical to it: callers skip zeros (is_zero_approx), so 0 never reaches here.
 static func _signed(x: float) -> String:
-	return ("+" + _num(x)) if x > 0.0 else _num(x)  # a negative already carries its own minus
+	return TextFormat.signed(x, 1, false)
 
-## A SIGNED integer percentage: "+10%", "-25%". Callers skip a rounded 0 (`speed_pct != 0`), so "0%" never reaches here.
+## A SIGNED integer percentage: "+10%", "-25%". TextFormat.signed_pct in the TERSE voice — callers skip a
+## rounded 0 (`speed_pct != 0`), so the "0%" baseline branch is unreachable from here.
 static func _signed_pct(p: int) -> String:
-	return ("+%d%%" % p) if p > 0 else ("%d%%" % p)  # a negative already carries its own minus
+	return TextFormat.signed_pct(p, false)
 
 ## Trim a float to a bare/half readout ("4" / "4.5") — TextFormat.num at one decimal, the single copy of the trim
 ## idiom (this file's private duplicate is gone). Byte-identical to the old copy except TextFormat's "-0" guard:

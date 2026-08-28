@@ -1,0 +1,42 @@
+[gd_scene load_steps=12 format=3]
+
+[ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/characters/NPC.tscn" id="1_npc"]
+[ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="2_talk"]
+[ext_resource type="Resource" uid="uid://d0gt5e4elm8jh" path="res://resources/dialogue/old_man.tres" id="3_dlg"]
+[ext_resource type="Script" path="res://scripts/components/weapon_bench.gd" id="4_bench"]
+[ext_resource type="Script" path="res://scripts/components/stock_entry.gd" id="5_se"]
+[ext_resource type="Resource" path="res://resources/items/mod_ported_muzzle.tres" id="6_p1"]
+[ext_resource type="Resource" path="res://resources/items/mod_extended_mag.tres" id="7_p2"]
+[ext_resource type="Resource" path="res://resources/items/mod_recon_scope.tres" id="8_p3"]
+
+[sub_resource type="Resource" id="SE1"]
+script = ExtResource("5_se")
+item = ExtResource("6_p1")
+count = 1
+
+[sub_resource type="Resource" id="SE2"]
+script = ExtResource("5_se")
+item = ExtResource("7_p2")
+count = 1
+
+[sub_resource type="Resource" id="SE3"]
+script = ExtResource("5_se")
+item = ExtResource("8_p3")
+count = 1
+
+[node name="WeaponMechanic" instance=ExtResource("1_npc")]
+display_name = "[PH] Gunsmith"
+disposition = 1
+threat_response = 1
+wanders = false
+
+[node name="Talkable" parent="." instance=ExtResource("2_talk")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+dialogue = ExtResource("3_dlg")
+display_name = "[PH] Gunsmith"
+
+[node name="WeaponBench" type="Area3D" parent="."]
+script = ExtResource("4_bench")
+bench_name = "[PH] Gunsmith"
+standalone = false
+stock_counts = Array[ExtResource("5_se")]([SubResource("SE1"), SubResource("SE2"), SubResource("SE3")])

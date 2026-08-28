@@ -111,6 +111,39 @@ func equip_weapon(weapon: WeaponData) -> void:
 	elif inventory != null:
 		inventory.equip(weapon)
 
+## THE single entry for a WeaponData object REPLACEMENT — a weapon-bench refit swaps `Item.weapon` for a
+## freshly folded block, so every runtime cache KEYED BY THE RESOURCE INSTANCE has to be handed over or it
+## silently reads a stranger. Fanning out from one method is the point: a caller that did three of the four
+## steps by hand would ship the free-magazine exploit (see Ammo.rekey_weapon), and each new
+## WeaponData-keyed cache adds exactly one line HERE rather than one line at every refit site.
+## ⭐Call this BEFORE the equip, and UNCONDITIONALLY — not gated on "is this the drawn weapon".
+##   • BEFORE, because Attack QUEUES the equip (_pending_swap_weapon) whenever a swap is already in flight;
+##     on that path inventory.equip never runs this frame, so any post-equip clip write lands on the OLD
+##     gun. Pre-seeding is the only ordering that is correct on both paths.
+##   • UNCONDITIONALLY, because a background reload is started precisely when you swap AWAY, so the
+##     canonical orphan is a HOLSTERED weapon nobody would think to migrate.
+## Null-tolerant on both parts: an AI wielder's rig and an off-tree test rig can be missing either child.
+func migrate_weapon_state(from: WeaponData, to: WeaponData) -> void:
+	if from == null or to == null or from == to:
+		return
+	if ammo != null:
+		ammo.rekey_weapon(from, to)
+	if scope_in != null:
+		scope_in.rekey_weapon(from, to)
+
+## The SECOND half of a WeaponData replacement, called AFTER the equip that migrate_weapon_state preceded.
+## Only one thing can be created under the retired object by the equip chain itself: Attack hands an
+## in-progress FOREGROUND reload to the clip as a BACKGROUND reload for the OUTGOING weapon (attack.gd:643),
+## which by then is the block we already retired. Sweeping it here lands that reload on the gun the player is
+## actually holding instead of topping up a key nothing reads. A no-op on every other path (nothing to move),
+## including Attack's mid-swap queue branch, which returns before it can start one.
+## ⭐NOT a second migrate_weapon_state — see Ammo.rekey_background_reload for why that would mint a magazine.
+func migrate_pending_reload(from: WeaponData, to: WeaponData) -> void:
+	if from == null or to == null or from == to:
+		return
+	if ammo != null:
+		ammo.rekey_background_reload(from, to)
+
 ## The wielder's authored weapon loadout (the SwapWeapons slots), or [] if there's no swap node. The
 ## player seeds its starting backpack from this so the inventory lists the weapons it owns.
 func weapon_loadout() -> Array:

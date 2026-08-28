@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="Item" load_steps=8 format=3]
+
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1_item"]
+[ext_resource type="Script" path="res://scripts/items/weapon_mod.gd" id="2_mod"]
+[ext_resource type="Script" path="res://scripts/items/weapon_stat_delta.gd" id="3_delta"]
+
+[sub_resource type="Resource" id="Delta_spread"]
+script = ExtResource("3_delta")
+property = &"pellet_spread"
+op = 2
+amount = 0.55
+
+[sub_resource type="Resource" id="Delta_range"]
+script = ExtResource("3_delta")
+property = &"effective_range"
+op = 1
+amount = 3.0
+
+[sub_resource type="Resource" id="Delta_move"]
+script = ExtResource("3_delta")
+property = &"move_speed_multiplier"
+op = 2
+amount = 0.97
+
+[sub_resource type="Resource" id="Mod_choke_barrel"]
+script = ExtResource("2_mod")
+slot = 1
+fits_weapon_ids = Array[StringName]([&"shotgun"])
+deltas = Array[ExtResource("3_delta")]([SubResource("Delta_spread"), SubResource("Delta_range"), SubResource("Delta_move")])
+
+[resource]
+script = ExtResource("1_item")
+id = &"mod_choke_barrel"
+display_name = "[PH] Choke Barrel"
+description = "[PH] A pinched muzzle that squeezes the shot column into something you could call a group. Buckshot at ranges buckshot has no business at."
+category = 3
+max_stack = 10
+weapon = null
+caliber = &""
+weight = 1.0
+value = 70.0
+weapon_mod = SubResource("Mod_choke_barrel")
+grid_width = 2
+grid_height = 1

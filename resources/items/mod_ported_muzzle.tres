@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="Item" load_steps=8 format=3]
+
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1_item"]
+[ext_resource type="Script" path="res://scripts/items/weapon_mod.gd" id="2_mod"]
+[ext_resource type="Script" path="res://scripts/items/weapon_stat_delta.gd" id="3_delta"]
+
+[sub_resource type="Resource" id="Delta_shake"]
+script = ExtResource("3_delta")
+property = &"screen_shake_amount"
+op = 2
+amount = 0.7
+
+[sub_resource type="Resource" id="Delta_sway"]
+script = ExtResource("3_delta")
+property = &"hip_sway_mult"
+op = 2
+amount = 0.85
+
+[sub_resource type="Resource" id="Delta_smoke"]
+script = ExtResource("3_delta")
+property = &"muzzle_smoke_scale"
+op = 2
+amount = 0.6
+
+[sub_resource type="Resource" id="Mod_ported_muzzle"]
+script = ExtResource("2_mod")
+slot = 4
+fits_weapon_ids = Array[StringName]([&"pistol", &"smg", &"shotgun"])
+deltas = Array[ExtResource("3_delta")]([SubResource("Delta_shake"), SubResource("Delta_sway"), SubResource("Delta_smoke")])
+
+[resource]
+script = ExtResource("1_item")
+id = &"mod_ported_muzzle"
+display_name = "[PH] Ported Muzzle"
+description = "[PH] Gas ports cut into the top of the barrel with a bench grinder. The gun stops trying to climb your face. Whoever is standing beside you pays for it."
+category = 3
+max_stack = 10
+weapon = null
+caliber = &""
+weight = 0.4
+value = 45.0
+weapon_mod = SubResource("Mod_ported_muzzle")
+grid_width = 1
+grid_height = 1

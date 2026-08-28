@@ -1,0 +1,46 @@
+[gd_resource type="Resource" script_class="Item" load_steps=9 format=3]
+
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1_item"]
+[ext_resource type="Script" path="res://scripts/items/weapon_mod.gd" id="2_mod"]
+[ext_resource type="Script" path="res://scripts/items/weapon_stat_delta.gd" id="3_delta"]
+[ext_resource type="AudioStream" uid="uid://baat2g4j65sqc" path="res://assets/audio/sfx/SilencedPistol.mp3" id="4_fire"]
+
+[sub_resource type="Resource" id="Delta_noise"]
+script = ExtResource("3_delta")
+property = &"noise_radius_mult"
+op = 2
+amount = 0.35
+
+[sub_resource type="Resource" id="Delta_flash"]
+script = ExtResource("3_delta")
+property = &"has_muzzle_flash"
+op = 0
+flag = false
+
+[sub_resource type="Resource" id="Delta_damage"]
+script = ExtResource("3_delta")
+property = &"damage"
+op = 2
+amount = 0.92
+
+[sub_resource type="Resource" id="Mod_suppressor"]
+script = ExtResource("2_mod")
+slot = 4
+fits_weapon_ids = Array[StringName]([&"pistol", &"smg", &"sniper"])
+deltas = Array[ExtResource("3_delta")]([SubResource("Delta_noise"), SubResource("Delta_flash"), SubResource("Delta_damage")])
+fire_sound_override = ExtResource("4_fire")
+
+[resource]
+script = ExtResource("1_item")
+id = &"mod_suppressor"
+display_name = "[PH] Suppressor"
+description = "[PH] A baffled can, threaded on and shimmed with a beer tin. Eats the flash and most of the bark, and bleeds a little off the punch on the way out."
+category = 3
+max_stack = 10
+weapon = null
+caliber = &""
+weight = 0.5
+value = 110.0
+weapon_mod = SubResource("Mod_suppressor")
+grid_width = 1
+grid_height = 1

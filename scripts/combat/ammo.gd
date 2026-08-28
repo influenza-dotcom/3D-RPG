@@ -70,6 +70,34 @@ func reset_for_reuse() -> void:
 	_bg_reloads.clear()
 	set_process(false)
 
+## Hand a weapon's banked clip + any in-flight background reload to a REPLACEMENT WeaponData object (a
+## weapon-bench refit rebuilds the stat block into a NEW resource, so every WeaponData-KEYED cache here
+## would otherwise see a stranger: _on_weapon_changed would miss _ammo_per_weapon and call
+## set_to_max_ammo() — a FREE FULL MAGAZINE on every fit, i.e. a repeatable infinite-reload exploit).
+## Reached only through Weapon.migrate_weapon_state, which is the single fan-out for an object swap.
+## ⭐UNCONDITIONAL, not gated on "is it drawn": start_background_reload is called (attack.gd:643) exactly
+## when you swap AWAY mid-reload, so the canonical orphan is a HOLSTERED weapon.
+## ⭐Clamps DOWN to the new magazine but never UP — a bigger mag arrives with the rounds you already had,
+## and a smaller one spills the overflow. An unseen weapon banks the new max, matching the first-sight
+## fill _on_weapon_changed would have done.
+## ⭐Nulls current_weapon when `old` is the live gun so the imminent weapon_changed SKIPS its re-bank of a
+## dead object (which would overwrite the seed we just wrote) and reads the seeded key instead. The HUD
+## ammo readout blanks for the swap's duration (ui.gd:1686 -> _ammo_text() and the low-clip tint are both
+## null-guarded on current_weapon) — which is what a gun being handed back over a bench should look like.
+func rekey_weapon(old: WeaponData, new: WeaponData) -> void:
+	if old == null or new == null or old == new:
+		return
+	var banked: int = current_ammo if old == current_weapon else int(_ammo_per_weapon.get(old, new.max_ammo))
+	_ammo_per_weapon[new] = clampi(banked, 0, maxi(new.max_ammo, 0))
+	_ammo_per_weapon.erase(old)  # no dead key left behind — one per fit would leak for the rig's life
+	if _bg_reloads.has(old):
+		# The remaining seconds ride across untouched: refitting is not a reason to restart a reload, and
+		# _process keys the completion refill on this same dictionary.
+		_bg_reloads[new] = _bg_reloads[old]
+		_bg_reloads.erase(old)
+	if old == current_weapon:
+		current_weapon = null
+
 ## Returns false (and changes nothing) when the clip can't cover one shot — attack.gd
 ## treats false as "empty" and plays the dry-fire click instead of firing.
 func consume_ammo() -> bool:
@@ -124,6 +152,22 @@ func start_background_reload(weapon: WeaponData, normal_seconds: float) -> void:
 		return
 	_bg_reloads[weapon] = normal_seconds
 	set_process(true)
+
+## Move ONLY an in-flight background reload from `old` to `new`, leaving the clip banks alone. The narrow
+## second half of a weapon-bench refit, and it exists because of an ORDERING fact that rekey_weapon cannot
+## reach: Attack converts an in-progress FOREGROUND reload into a background one for the OUTGOING weapon
+## (attack.gd:643) from *inside* the equip chain — i.e. AFTER the refit has already pre-seeded and retired
+## `old`. So a player who refits mid-reload lands a live background reload on a block nothing will ever read
+## again, and its completion silently spends a spare clip out of the backpack into a dead dictionary key.
+## ⭐Deliberately NOT a second rekey_weapon call: by this point `current_weapon` is already `new`, so
+## rekey_weapon's own bank line would re-read `_ammo_per_weapon.get(old, new.max_ammo)`, miss the erased key,
+## and hand back a FULL magazine — the exact exploit the first call exists to prevent.
+func rekey_background_reload(old: WeaponData, new: WeaponData) -> void:
+	if old == null or new == null or old == new or not _bg_reloads.has(old):
+		return
+	# Remaining seconds ride across untouched — a refit is not a reason to restart a reload.
+	_bg_reloads[new] = _bg_reloads[old]
+	_bg_reloads.erase(old)
 
 func is_background_reloading(weapon: WeaponData) -> bool:
 	return _bg_reloads.has(weapon)

@@ -1,0 +1,52 @@
+[gd_resource type="Resource" script_class="Item" load_steps=9 format=3]
+
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1_item"]
+[ext_resource type="Script" path="res://scripts/items/weapon_mod.gd" id="2_mod"]
+[ext_resource type="Script" path="res://scripts/items/weapon_stat_delta.gd" id="3_delta"]
+
+[sub_resource type="Resource" id="Delta_scoped_fov"]
+script = ExtResource("3_delta")
+property = &"scoped_fov_override"
+op = 0
+amount = 25.0
+
+[sub_resource type="Resource" id="Delta_zoom_max"]
+script = ExtResource("3_delta")
+property = &"scoped_zoom_fov_max"
+op = 0
+amount = 45.0
+
+[sub_resource type="Resource" id="Delta_zoom_min"]
+script = ExtResource("3_delta")
+property = &"scoped_zoom_fov_min"
+op = 0
+amount = 12.0
+
+[sub_resource type="Resource" id="Delta_sway"]
+script = ExtResource("3_delta")
+property = &"hip_sway_mult"
+op = 2
+amount = 1.5
+
+[sub_resource type="Resource" id="Mod_recon_scope"]
+script = ExtResource("2_mod")
+slot = 3
+fits_weapon_ids = Array[StringName]([&"pistol", &"smg"])
+min_gunplay = 4
+deltas = Array[ExtResource("3_delta")]([SubResource("Delta_scoped_fov"), SubResource("Delta_zoom_max"), SubResource("Delta_zoom_min"), SubResource("Delta_sway")])
+fit_labour_mult = 1.4
+
+[resource]
+script = ExtResource("1_item")
+id = &"mod_recon_scope"
+display_name = "[PH] Recon Scope"
+description = "[PH] A salvaged variable optic with the reticle re-etched by hand after the last owner cracked it. Wonderful at distance. Useless from the hip."
+category = 3
+max_stack = 10
+weapon = null
+caliber = &""
+weight = 1.2
+value = 140.0
+weapon_mod = SubResource("Mod_recon_scope")
+grid_width = 2
+grid_height = 1

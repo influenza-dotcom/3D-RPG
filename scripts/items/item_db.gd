@@ -9,6 +9,12 @@ extends Node
 ## Folder scanned at boot for item resources: a weapon-item buckets by its WeaponData, an ammo-item by caliber.
 const ITEMS_DIR := "res://resources/items"
 
+## The weapon-mod FOLD (const-preloaded, NO class_name — the Calibers idiom). Used on the restore path only:
+## rebuild_weapon_mods re-derives a modded gun's stat block from its saved slot ids. ⭐The dependency is
+## ONE-WAY — the kit never names ItemDb (that would close a preload cycle), so the id -> WeaponMod lookup it
+## needs is passed IN as `_resolve_weapon_mod` below.
+const WeaponModKit = preload("res://scripts/items/weapon_mod_kit.gd")
+
 var _by_weapon: Dictionary = {}    ## WeaponData -> Item (weapon template)
 var _by_caliber: Dictionary = {}   ## StringName caliber -> Item (ammo template)
 var _by_id: Dictionary = {}        ## StringName Item.id -> Item (template) — the save system's stable key
@@ -82,11 +88,51 @@ func restore_item(id: StringName) -> Item:
 
 ## Restore one serialized inventory stack entry. Plain ids use restore_item(); weapon entries may also carry a
 ## `weapon_delta` dict of script-export scalar values that differ from the registered template.
+## ⭐THE one funnel every reader goes through — the player bag (Player._restore_saved_inventory), the held item,
+## and every stash / corpse / WorldSnapshot container (CharacterInventory.restore_serialized_stacks) — which is
+## why the weapon-mod re-derive hangs off its tail rather than being repeated at each caller.
 func restore_item_from_save(entry: Dictionary) -> Item:
 	var item := restore_item(StringName(str(entry.get("id", ""))))
 	if item == null:
 		return null
-	return apply_weapon_delta(item, entry.get("weapon_delta", {}))
+	item = apply_weapon_delta(item, entry.get("weapon_delta", {}))
+	return rebuild_weapon_mods(item)  # the CATALOG is authoritative over the saved scalars — see below
+
+## Re-derive a modded weapon's stat block from its saved SLOT IDS rather than trusting the saved scalars, so
+## retuning a part's .tres reaches guns already sitting in save files and the two halves of the delta (the ids
+## and the numbers they produced) can never drift apart. Deliberate, and worth a patch note: a balance pass on
+## mod_long_barrel.tres changes every long-barrelled gun in every existing save.
+##
+## It is also the SELF-HEAL: a part id deleted from the game resolves to null inside the fold, is dropped with a
+## warning naming it, and its slot comes back BLANK — so the next capture writes a save with the dangling id gone.
+##
+## ⭐It must NEVER turn a valid item into null. Both readers funnel through restore_item_from_save, so a null
+## here would silently delete items out of the player's bag AND out of every stash and corpse in the world. Every
+## failure path returns `item` unchanged; a weapon whose template has left resources/items/ keeps the restored
+## scalars with a warning rather than being dropped.
+## ⭐Safe even when `item.weapon` is still the SHARED template object (the empty-delta path never clones):
+## WeaponModKit.rebuild ASSIGNS a fresh duplicate and never writes through the pointer it was handed.
+## Pure no-op — one loop over six blanks, no duplicate, no reflection, no lookup — for an unmodded weapon,
+## which is nearly every weapon in nearly every save.
+func rebuild_weapon_mods(item: Item) -> Item:
+	if item == null or not item.is_weapon() or item.weapon == null:
+		return item
+	var ids := WeaponModKit.slot_map(item.weapon)
+	if WeaponModKit.is_empty_map(ids):
+		return item
+	var tmpl := item_by_id(item.id)
+	if tmpl == null or not tmpl.is_weapon() or tmpl.weapon == null:
+		push_warning("ItemDb: '%s' carries weapon mods but has no registered template — keeping the restored scalars." % item.id)
+		return item
+	item.weapon = WeaponModKit.rebuild(tmpl.weapon, ids, _resolve_weapon_mod)
+	return item
+
+## The id -> WeaponMod resolver WeaponModKit calls back into. Lives HERE, not in the kit, so the kit never names
+## ItemDb — naming it back would close an ItemDb <-> WeaponModKit preload cycle, and a cycle here would break
+## every level load, not just modded weapons. Passed as a Callable; a test supplies its own lambda instead.
+func _resolve_weapon_mod(id: StringName) -> WeaponMod:
+	var it := item_by_id(id)
+	return it.weapon_mod if it != null else null
 
 ## Difference between this weapon item's WeaponData and its registered template. Only script-export scalar values
 ## are serialized; asset refs/resources stay authored on the template.

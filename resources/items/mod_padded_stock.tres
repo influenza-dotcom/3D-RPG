@@ -1,0 +1,50 @@
+[gd_resource type="Resource" script_class="Item" load_steps=9 format=3]
+
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1_item"]
+[ext_resource type="Script" path="res://scripts/items/weapon_mod.gd" id="2_mod"]
+[ext_resource type="Script" path="res://scripts/items/weapon_stat_delta.gd" id="3_delta"]
+
+[sub_resource type="Resource" id="Delta_sway"]
+script = ExtResource("3_delta")
+property = &"hip_sway_mult"
+op = 2
+amount = 0.8
+
+[sub_resource type="Resource" id="Delta_move"]
+script = ExtResource("3_delta")
+property = &"move_speed_multiplier"
+op = 2
+amount = 0.98
+
+[sub_resource type="Resource" id="Delta_shake"]
+script = ExtResource("3_delta")
+property = &"screen_shake_amount"
+op = 2
+amount = 0.8
+
+[sub_resource type="Resource" id="Delta_recovery"]
+script = ExtResource("3_delta")
+property = &"recoil_recovery"
+op = 2
+amount = 1.4
+
+[sub_resource type="Resource" id="Mod_padded_stock"]
+script = ExtResource("2_mod")
+slot = 5
+fits_weapon_ids = Array[StringName]([&"smg", &"shotgun", &"sniper"])
+deltas = Array[ExtResource("3_delta")]([SubResource("Delta_sway"), SubResource("Delta_move"), SubResource("Delta_shake"), SubResource("Delta_recovery")])
+
+[resource]
+script = ExtResource("1_item")
+id = &"mod_padded_stock"
+display_name = "[PH] Padded Stock"
+description = "[PH] A recoil pad off a hunting rifle and a weighted cheekpiece packed with lead shot. Soaks up the kick and keeps the muzzle roughly where you left it."
+category = 3
+max_stack = 10
+weapon = null
+caliber = &""
+weight = 0.9
+value = 55.0
+weapon_mod = SubResource("Mod_padded_stock")
+grid_width = 2
+grid_height = 1

@@ -76,6 +76,16 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## item (not a chip). Author the chip's microchip look via `world_model` and its install economy via `value` (the
 ## installer's fee/markup multiply it). See scripts/components/chip_installer.gd + scripts/ui/chip_install_screen.gd.
 @export var installs_ability: StringName = &""
+@export_group("Weapon Mod")
+## When set, this item is a WEAPON PART: carrying it does nothing, but a WeaponBench FITS it into one of a
+## weapon's six slots for a labour fee (and pulls it back out for a smaller one, returning the part). Blank =
+## an ordinary item. The economy rides `value` exactly as a chip's does — the bench's fit / remove / buy
+## multipliers all scale it — and `display_name` / `description` / `icon` stay HERE rather than on the payload,
+## so a part is named once whether it's on a shelf, in your pack, or fitted to a gun.
+## Authored INLINE (a new WeaponMod sub-resource on this .tres, with its WeaponStatDelta lines inline in turn),
+## so a new part is one file in resources/items/ that ItemDb's boot folder scan registers for free.
+## See scripts/items/weapon_mod.gd + scripts/components/weapon_bench.gd.
+@export var weapon_mod: WeaponMod
 @export_group("World Model")
 ## OPTIONAL unique 3D model for this item when it sits in the WORLD — a dropped / looted / code-spawned
 ## CanPickUp with `build_model_from_item` set builds this and auto-fits its hover hitbox to it. Accepts model
@@ -129,19 +139,30 @@ func is_stackable() -> bool:
 func is_upgrade_chip() -> bool:
 	return installs_ability != &""
 
+## True when this item is a WEAPON PART a WeaponBench can fit into a gun. The WeaponMod payload keys on this —
+## the bench, the bench screen and ItemInfo's part tooltip all gate here, never on `category` (a part is an
+## ordinary MISC item so it loots / stacks / sells like one).
+func is_weapon_mod() -> bool:
+	return weapon_mod != null
+
 ## True when this item can be pulled from the HOTBAR and CARRIED in your hands as a physics prop — a `world_prop`
 ## like the dog / crate, or any item with a `world_model` (WorldItem.build wraps both in a Throwable). Excludes
-## weapons (equipped), consumables (used), ammo, and upgrade chips (installed) — those have their own slot/UI
-## action. Also EXCLUDES the Zorkmids coin tile: it wears a `world_model` (the money-bag mesh) but is MONEY, not a
-## carryable prop. Drives Hotbar.assign + _activate's "hold" branch (Player.hold_item does the pull-out/stash-back).
+## weapons (equipped), consumables (used), ammo, upgrade chips (installed) and weapon parts (FITTED at a bench)
+## — those have their own slot/UI action. Also EXCLUDES the Zorkmids coin tile a LOOT bag carries: it wears a
+## `world_model` (the money-bag mesh) but is MONEY, not a carryable prop. Drives Hotbar.assign + _activate's "hold" branch
+## (Player.hold_item does the pull-out/stash-back).
 func is_holdable() -> bool:
-	# The wallet coin tile carries a `world_model` (the bag mesh) yet is MONEY, not a prop. Slotting it on the hotbar
+	# A coin tile carries a `world_model` (the bag mesh) yet is MONEY, not a prop. Slotting it on the hotbar
 	# (hotbar.assign) then activating it (hotbar._activate) would pull a physics money-bag into the hands out of
-	# nothing while MoneyPurse instantly re-mints the debited wallet. Guarding this ONE chokepoint covers both the
-	# assign guard and the _activate holdable branch (both funnel through is_holdable). (F-C13-C28)
+	# nothing — cash that no wallet was ever debited for. The player's own zorkmids never reach a bag any more
+	# (they are the `money` float), but a LOOT source's coin tile is a real Item, so the guard still earns its
+	# keep. One chokepoint covers both the assign guard and the _activate holdable branch. (F-C13-C28)
 	if id == Zorkmids.ITEM_ID:
 		return false
-	if is_weapon() or is_consumable() or is_ammo() or is_upgrade_chip():
+	# A weapon PART is fitted at a bench, never carried in the hands as a physics prop — the same reasoning that
+	# excludes a chip. It ships a `world_model` for its dropped/loot look, which is exactly what would otherwise
+	# let the hotbar pull a scope out into your fists.
+	if is_weapon() or is_consumable() or is_ammo() or is_upgrade_chip() or is_weapon_mod():
 		return false
 	return not world_prop.is_empty() or world_model != null
 

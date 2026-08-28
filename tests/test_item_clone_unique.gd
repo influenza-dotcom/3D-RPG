@@ -39,6 +39,28 @@ func test_clone_unique_preserves_the_weapon_kind_id() -> void:
 	assert_true(c.is_weapon(), "clone is still a weapon")
 
 
+## ⭐The @export_storage keystone, seen from the Item side. clone_unique() deep-copies the WeaponData with
+## Resource.duplicate(), which carries STORAGE-usage properties and SILENTLY DROPS a plain `var` (probed on
+## 4.7.1: @export_storage = usage 4098, a bare var = 4096). If the six mod slot ids ever lost that usage, every
+## acquired / restored / looted modded gun would come back STOCK with no error anywhere — the fitted parts would
+## simply evaporate. Item.id matters just as much on this path: ItemDb.rebuild_weapon_mods looks the pristine
+## weapon TEMPLATE up by it on load, so a clone that lost its id would re-derive from nothing.
+func test_clone_unique_preserves_the_fitted_mod_slot_ids_and_the_item_id() -> void:
+	var template := ItemDb.item_by_id(&"pistol")
+	assert_not_null(template, "the authored pistol item is registered")
+	var src := template.clone_unique()
+	# All six slots, not just one: they are six independent fields, and a broken MOD_SLOT_PROPS row would show
+	# up as exactly one of them failing to survive.
+	for slot in WeaponData.MOD_SLOT_PROPS.size():
+		src.weapon.set_mod_id(slot, StringName("test_part_" + str(slot)))
+	var c := src.clone_unique()
+	assert_eq(c.id, template.id, "the clone keeps Item.id — the key the load path re-derives the stat block from")
+	assert_true(c.weapon != src.weapon, "...and still gets its OWN WeaponData")
+	for slot in WeaponData.MOD_SLOT_PROPS.size():
+		assert_eq(c.weapon.mod_id(slot), StringName("test_part_" + str(slot)), "slot " + str(slot) + "'s fitted part id survives clone_unique")
+	assert_eq(template.weapon.mod_id(WeaponData.ModSlot.BARREL), &"", "the registered template is still unmodded (a template with a fitted id would give every instance a permanent delta)")
+
+
 func test_clone_unique_on_nonweapon_returns_shared_template() -> void:
 	# Ammo / consumables stack by shared-template identity — clone_unique must NOT fork them, or stacking breaks.
 	var ammo := ItemDb.item_by_id(&"ammo_pistol")
