@@ -3,8 +3,8 @@ extends Node
 
 ## The two POST-MOVE ground beats, lifted off `Player._physics_process` (M13 residual — the half of the plan
 ## `GroundMovement` did not take). Owns exactly two things:
-##   • `on_land()` — the touchdown burst: one impact number told by camera, gun, shake, HUD panel, audio, dust,
-##     the Slide ability, and fall damage, so every channel reads the SAME landing.
+##   • `on_land()` — the touchdown burst: one impact number told by camera, gun, shake, HUD panel, audio, the
+##     STEALTH noise channel, dust, the Slide ability, and fall damage, so every channel reads the SAME landing.
 ##   • `tick_footsteps()` — the footstep cadence + its two stacking dB cuts, and the timer/interval state behind it.
 ##
 ## ⚠ It does NOT own the jump / bhop / blast-jump / slide-jump / edge-friction interleave. That stays inline on the
@@ -129,7 +129,14 @@ func on_land(pre_landing_velocity: float, pre_velocity: Vector3) -> void:
 			impact
 		)
 		AudioManager.play_sfx(host.global_position, host.land_sound, land_vol, land_pitch,
-			AudioManager.SFX_BUS, host.land_sound_max_db - land_cut)
+			AudioManager.WORLD_BUS, host.land_sound_max_db - land_cut)
+	# STEALTH: the thud on the noise channel enemies hear, scaled by this same impact (NoiseEmitter.land owns the
+	# radius math + the shared land_sfx_min_impact_to_play cutoff, so "a thump played" and "an NPC heard a thump"
+	# can never drift apart). RAW impact, like the SFX and the fall damage above and unlike every presentation
+	# channel: crouching changes how a landing LOOKS, not how far you fell or how loud you hit. `_noise` is null on
+	# an off-tree unit-test Player, hence the guard — the same shape as host.gun_mesh / host.screen_shake above.
+	if host._noise != null:
+		host._noise.land(impact)
 	if impact >= GameSettings.effects.dust_land_min_impact_to_spawn:
 		host.spawn_dust(GameSettings.effects.dust_land_base_intensity + impact * GameSettings.effects.dust_land_impact_bonus)
 	var slide: Slide = host._slide

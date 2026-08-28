@@ -207,8 +207,9 @@ static func sample_state(tree: SceneTree, want_stealth: bool = true, want_input:
 
 ## The STEALTH facts (2026-08-18). Every read is a bare host FIELD or a duck-typed method: the two light meters and
 ## the noise radius are plain vars on the Player that the drop-ins WRITE (PlayerLightLevel stamps `light_exposure` +
-## `carried_light` every sample_interval, player_light_level.gd:79-80; NoiseEmitter writes `noise_radius` per frame,
-## noise_emitter.gd:34) and enemy Perception READS the same way — so this shows exactly the numbers the AI sees.
+## `carried_light` every sample_interval, player_light_level.gd:79-80; NoiseEmitter writes `noise_radius` per frame
+## from NoiseEmitter.tick — the loudest of footsteps, the gunfire spike, and the jump/landing impact spike) and
+## enemy Perception READS the same way — so this shows exactly the numbers the AI sees.
 ##
 ## Printed RAW, on purpose: `light_exposure` RESTS at 1.0 when no PlayerLightLevel is present (player.gd:314), so
 ## "1.00" means "fully lit OR unmeasured", never "measured bright" — the formatter must not dress it up. And a
