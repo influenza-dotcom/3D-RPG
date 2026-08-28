@@ -1,9 +1,9 @@
 extends RefCounted
-## Shared behaviour for the five PLAYER-MENU overlays — Inventory / Stats / Implants / Reputation / Journal — so they act as a
+## Shared behaviour for the six PLAYER-MENU overlays — Inventory / Stats / Implants / Map / Reputation / Journal — so they act as a
 ## Deus Ex / Pip-Boy style TAB GROUP: a tab strip switches between them, and pressing one's hotkey while another
 ## is open jumps STRAIGHT to it (each screen's open() calls close_others first, so opening one switches off a
 ## sibling rather than being blocked). No class_name on purpose (preloaded const where used) — static helpers
-## over the five screen autoloads (plus the shared mouse-mode bookkeeping statics below). The settings menu
+## over the six screen autoloads (plus the shared mouse-mode bookkeeping statics below). The settings menu
 ## (OptionsMenu, Esc) is deliberately NOT in the group; it stays a separate system menu. The fullscreen
 ## CharacterInspectScreen takeover is not a tab either, but enter() closes it so a tab hotkey SWITCHES out of
 ## it instead of stacking a menu invisibly beneath its layer-121 cover.
@@ -14,7 +14,7 @@ extends RefCounted
 ## (_screen_for), by which point the whole autoload list is live. build_tab_strip touches NO sibling autoload at
 ## build time. Keys are ROUTING ids and are never painted — display text lives in PlayerText via TAB_LABELS.
 
-const TABS: Array[StringName] = [&"inventory", &"stats", &"implants", &"reputation", &"journal"]  ## tab order; each entry is the stable ROUTING key (screens resolved lazily; painted text via TAB_LABELS)
+const TABS: Array[StringName] = [&"inventory", &"stats", &"implants", &"map", &"reputation", &"journal"]  ## tab order; each entry is the stable ROUTING key (screens resolved lazily; painted text via TAB_LABELS)
 
 ## key -> painted button text. The labels are PlayerText consts (display prose lives there, never inline),
 ## so re-wording a tab can't silently change the routing key above — the two were one string before.
@@ -22,6 +22,7 @@ const TAB_LABELS := {
 	&"inventory": PlayerText.MENU_TAB_INVENTORY,
 	&"stats": PlayerText.MENU_TAB_STATS,
 	&"implants": PlayerText.MENU_TAB_IMPLANTS,
+	&"map": PlayerText.MENU_TAB_MAP,
 	&"reputation": PlayerText.MENU_TAB_REPUTATION,
 	&"journal": PlayerText.MENU_TAB_JOURNAL,
 }
@@ -39,6 +40,7 @@ static func _screen_for(key: StringName) -> Variant:
 		&"inventory": return InventoryScreen
 		&"stats": return StatsScreen
 		&"implants": return ImplantsScreen
+		&"map": return MapScreen
 		&"reputation": return ReputationScreen
 		&"journal": return QuestJournal
 	return null
@@ -57,7 +59,7 @@ static func _screens() -> Array:
 			out.append(s)
 	return out
 
-## True while any of the five player menus is open.
+## True while any of the six player menus is open.
 static func any_open() -> bool:
 	for s in _screens():
 		if s.is_open():
@@ -143,7 +145,7 @@ static func leave() -> void:
 static func switching() -> bool:
 	return _switching
 
-## A full-width row of tab buttons — [Inventory | Stats | Implants | Reputation | Journal] — added at the top of each screen.
+## A full-width row of tab buttons — [Inventory | Stats | Implants | Map | Reputation | Journal] — added at the top of each screen.
 ## `current_key` is the host screen's own tab KEY (&"stats" etc. — never the painted label); that button is
 ## disabled (you're on it) and wears the accent underline so the current tab reads as ACTIVE, not greyed-out.
 ## The others resolve their screen autoload ON CLICK and open() it (which closes the current one via

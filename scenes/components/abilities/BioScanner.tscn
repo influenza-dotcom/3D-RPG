@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/components/abilities/bio_scanner.gd" id="1_bioscan"]
+
+[node name="BioScanner" type="Node"]
+script = ExtResource("1_bioscan")
+display_name = "Bio-Scanner"

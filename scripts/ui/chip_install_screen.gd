@@ -6,6 +6,9 @@ extends CanvasLayer
 ## backpack — click to install for the labour fee) and FOR SALE — BUY & INSTALL below (chips the mechanic stocks
 ## that you don't carry — click to buy the chip AND fit it in one payment). Installing consumes the chip and calls
 ## Player.unlock_mechanic, so the ability comes online immediately.
+## ⭐AND IT TAKES TWO CLICKS, NOT ONE: because the act spends money AND destroys the chip, a row ARMS on its first
+## press (its caption swaps to "Confirm — <total>") and only charges on a second press of that same row — the
+## full argument, and the disarm rules, live on _on_row_pressed.
 ## Opened by ChipInstaller.start_talk (standalone) or the dialogue "Install" option (open_install).
 ##
 ## AUTHORED SCENE: the layout lives in scenes/ui/chip_install_screen.tscn (this autoload IS that scene — see
@@ -28,6 +31,17 @@ var _money_player: Label       ## your wallet — the header readout
 var _carried_list: VBoxContainer
 var _stock_list: VBoxContainer
 var _first_focus: Button = null  ## first install row built by the LAST _rebuild = the pad landing spot open_install seeds (never a stale ref — the fills re-record it each rebuild, and the old rows are freed)
+## THE TWO-STAGE COMMIT (see _on_row_pressed). `_armed_item` is the row waiting for its CONFIRM press, null when
+## nothing is armed; `_armed_is_buy` says which of the two lists that row lives in, so the two sections can never
+## be confused for one another even if the same chip appeared in both. Pure UI state — it is deliberately NOT
+## saved, NOT signalled, and cleared by every _rebuild: the moment the wallet, the bag or the rail moves under an
+## armed row, the price it is quoting may be stale, and a stale quote is the one thing a confirm must never do.
+var _armed_item: Item = null
+var _armed_is_buy := false
+## The rows built by the LAST _fill pass, as {btn, name, price, item, is_buy, charge, label, affordable} — kept so
+## arming can repaint ONE row's caption without a full _rebuild (a rebuild would free the row under the cursor and
+## clear the arm it was setting). Rebuilt from scratch every _rebuild; never outlives the Buttons it points at.
+var _rows: Array = []
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
@@ -104,6 +118,7 @@ func close() -> void:
 	ModalMenu.restore_mouse(_prev_mouse_mode)
 	_installer = null
 	_player = null
+	_armed_item = null  # an armed row must never survive the card being closed — walking away IS a cancel
 	closed.emit()
 
 ## (Dis)connect the signals that should refresh the rows: the player's bag (a chip installed / consumed), the
@@ -138,7 +153,84 @@ func _unhandled_input(event: InputEvent) -> void:
 # Transactions + lists
 # ---------------------------------------------------------------------------------------------------
 
+## A row was pressed. ⭐TWO CLICKS BUY A CHIP, NEVER ONE — the safety this screen shipped without.
+##
+## Installing is the most irreversible act in the game's economy: it spends the money AND CONSUMES THE CHIP, and
+## it ran off a single click on a row whose whole caption was the chip's name. In the QA shot that was one click
+## away from turning 202 zorkmids into 2, with no confirm, no statement that the chip is destroyed, and the only
+## description of what the ability even does behind a mouse-hover tooltip a pad player never sees. The sibling
+## cards (respec, heal) all put a Confirm between the player and the debit; this row now does the same without
+## needing a modal on top of a modal:
+##   * FIRST press ARMS the row — its caption swaps to "Confirm — <all-in total>", so the price is stated at the
+##     moment of commitment, in the row being committed, in this game's other last-thing-you-press wording.
+##   * SECOND press on the SAME row commits. Anything else disarms: pressing a different row arms that one
+##     instead, and merely MOVING to another row (hover or pad focus) drops the arm entirely — so an arm can
+##     never be spent by a click the player believes is landing somewhere else.
+## The arm is dropped BEFORE the commit runs: a successful install rebuilds the lists and would clear it anyway,
+## but a REFUSED one does not, and a row left armed after a refusal would charge on the next single click.
+func _on_row_pressed(item: Item, is_buy: bool) -> void:
+	if item == _armed_item and is_buy == _armed_is_buy:
+		_armed_item = null
+		if is_buy:
+			_buy(item)
+		else:
+			_install(item)
+		# Repaint either way. On a refusal these are the SAME rows and the confirm caption must come back off
+		# them; on a success _rebuild has already replaced _rows, so this just re-paints the fresh set.
+		_paint_rows()
+		return
+	_arm(item, is_buy)
+
+## Arm one row and repaint the list. SOUND: the plain click voice — this press changed the screen and charged
+## nothing, which is exactly what an ordinary click means. It is spelled out here because _make_row MUTES the
+## row's auto-wired click (the commit cue belongs to ChipInstaller._grant); without this the first of the two
+## presses would be silent, and a silent press is the failure mode the whole cue system exists to end. It also
+## keeps the three outcomes audibly distinct — arm (click), commit (commit), refusal (denied) — so a refused
+## press can never be mistaken for an armed one.
+func _arm(item: Item, is_buy: bool) -> void:
+	_armed_item = item
+	_armed_is_buy = is_buy
+	_paint_rows()
+	MenuStyle.play_select()
+
+## Moving onto a DIFFERENT row (mouse hover or pad focus) disarms whatever was armed. Silent by design: the
+## player has not acted, they have only looked somewhere else. Wired to every row, including the disabled
+## can't-afford ones — leaving the arm alive while the cursor sits on an unaffordable row would be the same
+## "my click landed somewhere I didn't expect" trap in reverse.
+func _disarm_unless(item: Item, is_buy: bool) -> void:
+	if _armed_item == null or (item == _armed_item and is_buy == _armed_is_buy):
+		return
+	_armed_item = null
+	_paint_rows()
+
+## Repaint every row recorded by the last _fill for the current arm state. ARMED rows swap their NAME cell for
+## the confirm caption in the accent ink and BLANK the price column — the money phrase now lives inside the
+## caption, and printing it twice on one row reads as two separate numbers. Nothing moves: both cells keep their
+## size flags and the price column keeps its skin-budget minimum width, so the swap can never shift the list.
+func _paint_rows() -> void:
+	for r: Dictionary in _rows:
+		_paint_row(r)
+
+## Paint ONE row record for the current arm state — the single owner of both cells' text and the name cell's ink
+## (see _make_row). The liveness guard is defensive rather than load-bearing: `_rows` is cleared and refilled by
+## the same `_rebuild` that queue_frees the old Buttons, so a record here should always point at live nodes —
+## but a commit repaints from inside a signal cascade, and a repaint is not worth an error if that ever changes.
+func _paint_row(r: Dictionary) -> void:
+	var name_l: Label = r["name"]
+	var price_l: Label = r["price"]
+	if not is_instance_valid(name_l) or not is_instance_valid(price_l):
+		return
+	if r["item"] == _armed_item and bool(r["is_buy"]) == _armed_is_buy:
+		name_l.text = PlayerText.chip_install_confirm(float(r["charge"]))
+		name_l.add_theme_color_override(&"font_color", MenuStyle.accent())  # the one accent row on the card = "this is the press that spends"
+		price_l.text = ""
+	else:
+		name_l.text = String(r["label"])
+		name_l.add_theme_color_override(&"font_color", MenuStyle.text_color() if bool(r["affordable"]) else MenuStyle.skin.disabled_text_color)
+		price_l.text = Zorkmids.money_text(float(r["charge"]))  # the whole money phrase — the "zm" word lives in Zorkmids.MONEY_TEMPLATE
+
 ## Install ONE carried `item` (ChipInstaller.install_carried gates on chip / not-installed / held / wallet).
+## Reached ONLY from the CONFIRM press of _on_row_pressed's two-stage commit — never from a bare click.
 ## SOUND: the SUCCESS cue lives on ChipInstaller._grant (the shared tail both transaction paths reach, past
 ## the charge), so only the REFUSAL is cued here — at the one place the installer's bool actually comes back.
 ## Splitting the pair across two files is deliberate: duplicating the commit here would double it, and
@@ -149,7 +241,7 @@ func _install(item: Item) -> void:
 			MenuStyle.play_denied()
 
 ## Buy & install ONE stocked `item` (ChipInstaller.buy_and_install gates on chip / not-installed / stock / wallet).
-## Refusal cued here for the same reason as _install's — see its note.
+## Reached only from the CONFIRM press, and its refusal is cued here, for the same reasons as _install's — see its note.
 func _buy(item: Item) -> void:
 	if is_instance_valid(_installer) and is_instance_valid(_player):
 		if not _installer.buy_and_install(item, _player):
@@ -163,6 +255,11 @@ func _rebuild() -> void:
 	_money_player.text = PlayerText.wallet_you(_player.money)
 	_money_player.add_theme_color_override(&"font_color", MenuStyle.wallet_color(_player.money))  # gold, or danger while in debt
 	_first_focus = null  # the fills below re-record it; holding the OLD first row would hand open_install a queue_freed Button
+	# EVERY rebuild disarms (see _armed_item). This is not tidiness: a rebuild means the wallet, the bag, the
+	# mechanic's stock or the armed RAIL just moved, so the total the armed row is quoting may no longer be the
+	# total the till would charge — and the rows carrying that quote are about to be freed anyway.
+	_armed_item = null
+	_rows.clear()
 	_fill(_carried_list, _installer.installable_carried(_player), false)  # your chips -> INSTALL (fee)
 	_fill(_stock_list, _installer.installable_stock(_player), true)       # shelf -> BUY & INSTALL
 	# Re-seed the pad landing spot when THIS rebuild just destroyed it (the level_up_screen idiom): every
@@ -204,6 +301,8 @@ func _fill(list: VBoxContainer, chips: Array, is_buy: bool) -> void:
 ## One install row: a full-width Button carrying an HBox of two Labels — the chip name on the left (trims with
 ## "…" when long) and the PRICE as its own right-aligned column. Mirrors ShopScreen._make_row. `price` is the
 ## BASE fee from the installer; the column paints the armed rail's ALL-IN total (see the paint-site note).
+## Builds the SHAPE only — both cells' text is painted by _paint_row, which owns the resting look AND the armed
+## confirm caption, and the press is routed through the two-stage commit rather than straight at the till.
 func _make_row(item: Item, price: int, affordable: bool, is_buy: bool) -> Button:
 	var btn := MenuStyle.style_list_row(MenuStyle.size_row_button(Button.new()))  # empty-text row: height-pinned, and pinned to ROW language (its child Labels carry their own inks — artist button-body art would bury them)
 	# FOCUS_ALL, NOT the FOCUS_NONE these rows shipped with (the atm_screen _add_chip lesson): the rows ARE the
@@ -222,24 +321,41 @@ func _make_row(item: Item, price: int, affordable: bool, is_buy: bool) -> Button
 	row.offset_bottom = -sb.content_margin_bottom
 	btn.add_child(row)
 	var name_l := Label.new()
-	name_l.text = item.label()
+	# TEXT + INK ARE _paint_row's, NOT SET HERE: this cell carries either the chip's name or the armed confirm
+	# caption, and one owner for both keeps the two states from drifting apart. Only the shape is authored here.
 	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name_l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # a long name trims; the price column never moves
+	name_l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # a long name (or confirm caption) trims; the price column never moves
 	name_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	name_l.add_theme_color_override(&"font_color", MenuStyle.text_color() if affordable else MenuStyle.skin.disabled_text_color)
 	row.add_child(name_l)
 	var price_l := Label.new()
-	# Paint the ALL-IN number (ShopScreen parity): a ledger-funded install carries the account's service charge,
-	# so the sticker price alone would under-quote what actually leaves the player. ChipInstaller charges via
+	# The ALL-IN number (ShopScreen parity): a ledger-funded install carries the account's service charge, so the
+	# sticker price alone would under-quote what actually leaves the player. ChipInstaller charges via
 	# player.charge(), which re-derives this same charge_total — the label and the till can never disagree. Note
 	# can_pay above still takes the BASE price (it applies the fee itself; feeding it the total would fee the fee).
-	price_l.text = Zorkmids.money_text(_player.charge_total(float(price)))  # the whole money phrase — the "zm" word lives in Zorkmids.MONEY_TEMPLATE
+	# Computed ONCE here and carried on the row record, because the CONFIRM caption must quote the identical
+	# number this column does — two calls could not drift today, but a row that priced itself twice could.
+	var charge := _player.charge_total(float(price))
 	price_l.size_flags_horizontal = Control.SIZE_SHRINK_END
 	price_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	price_l.custom_minimum_size.x = float(MenuStyle.skin.price_col_width)  # fixed-ish floor -> every row's price lands in one aligned column (skin budget, shared with ShopScreen)
 	price_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	price_l.add_theme_color_override(&"font_color", MenuStyle.gold() if affordable else (MenuStyle.danger() if price > 0 else MenuStyle.dim_color()))
 	row.add_child(price_l)
+	# Record the row BEFORE painting it: _paint_row is the single place either cell's text is ever set (resting
+	# name + price, or the armed confirm caption), so the row is never painted twice by two different rules.
+	var rec := {
+		"btn": btn, "name": name_l, "price": price_l,
+		"item": item, "is_buy": is_buy, "charge": charge,
+		"label": item.label(),  # snapshot: a pet-named / renamed Item must repaint as what the row was BUILT as
+		"affordable": affordable,
+	}
+	_rows.append(rec)
+	_paint_row(rec)
+	# The two-stage commit's disarm edge (see _on_row_pressed): moving to another row — by cursor OR by pad —
+	# drops whatever was armed, so an arm can only ever be spent by a second press on the row that set it. Wired
+	# on EVERY row, disabled ones included: those emit no `pressed`, but the cursor still crosses them.
+	btn.mouse_entered.connect(_disarm_unless.bind(item, is_buy))
+	btn.focus_entered.connect(_disarm_unless.bind(item, is_buy))
 	# Hover a row to see the chip's derived breakdown — "Installs <Ability>" + weight/value (ItemInfo._effect_lines).
 	# This IS the surface where you decide to fit a chip, so it must say what the chip unlocks, not just its [PH] name;
 	# mirrors ShopScreen._make_row (a disabled, can't-afford row tips too). `_player.inventory` feeds the shared formatter.
@@ -247,9 +363,13 @@ func _make_row(item: Item, price: int, affordable: bool, is_buy: bool) -> Button
 	# MUTE the row's auto-wired generic click: the install's commit cue fires from ChipInstaller._grant, the shared
 	# success tail of BOTH transaction paths, so a click here as well would double up. Muted unconditionally —
 	# a can't-afford row is disabled (never emits pressed), but the mute is what makes the funnel the sole voice.
+	# ⭐The mute is why _arm speaks for itself: with the two-stage commit the FIRST press has no other voice, and
+	# a press that changes the screen and says nothing is exactly what this cue system exists to prevent.
 	MenuStyle.set_button_sound(btn, &"")
 	if affordable:
-		btn.pressed.connect((_buy if is_buy else _install).bind(item))
+		# ⭐NOT wired straight to _buy/_install any more — every press goes through the two-stage commit, so the
+		# first click can only ARM this row and the charge needs a second, deliberate press (see _on_row_pressed).
+		btn.pressed.connect(_on_row_pressed.bind(item, is_buy))
 	return btn
 
 # ---------------------------------------------------------------------------------------------------

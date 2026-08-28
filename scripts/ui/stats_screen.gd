@@ -24,12 +24,13 @@ signal closed
 
 const PANEL_MARGIN := 0.12  ## same border as the inventory/shop/loot screens — shared menu chrome (authored on the scene's Panel anchors; tests pin the band)
 const STATS: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"larceny"]
-const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Implants/Reputation/Journal)
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Implants/Map/Reputation/Journal)
 
 var _root: Control
 var _name_label: Label   ## the character's chosen name, shown under the title (hidden when unnamed)
 var _preview: CharacterPreview   ## a live 3D head-and-shoulders portrait of the player's chosen appearance
 var _summary: Label
+var _inspect_btn: Button   ## "Inspect" — this tab's ONLY control, and therefore its only pad/keyboard focus target
 var _list: GridContainer   ## the 2-column grid holding the six stat blocks (rebuilt on every open)
 var _is_open := false
 var _player: Player = null
@@ -66,6 +67,12 @@ func open() -> void:
 	_rebuild()
 	_preview.set_active(true)  # start the portrait's live render + turntable only while the screen is up
 	_root.visible = true
+	# Seed pad/keyboard focus on Inspect — the tab's ONE control (the implants_screen / chip_install_screen
+	# idiom). AFTER %Root shows, since grab_focus on a hidden Control does nothing; the tab strip above is
+	# FOCUS_NONE by cross-screen contract, so without this seed ui navigation has nowhere to start and the
+	# hand-off to Character Inspect is mouse-only.
+	if is_instance_valid(_inspect_btn):
+		_inspect_btn.grab_focus()
 	opened.emit()
 
 func close() -> void:
@@ -157,13 +164,21 @@ func _bind_ui() -> void:
 	%PortraitFrame.add_child(_preview)  # the frame sizes it — no custom_minimum_size / size flags needed
 
 	# "Inspect" hands off to the fullscreen hero view (full body + the equipped weapon in hand, drag to rotate).
-	var inspect_btn: Button = %InspectButton  # focus_mode NONE authored: mouse-driven; don't steal focus
-	inspect_btn.text = PlayerText.STATS_INSPECT_BUTTON
+	_inspect_btn = %InspectButton
+	# ⭐PROMOTED TO FOCUSABLE. The scene still authors focus_mode = NONE (the old "mouse-driven, don't steal
+	# focus" stance) and the tab strip is FOCUS_NONE by cross-screen contract — which together left this tab with
+	# ZERO focusable controls, so a pad or keyboard player could open Stats and never reach Character Inspect
+	# from it. The stance confused two things: NOT SEEDING focus is a choice, being UNREACHABLE is a bug (the
+	# atm_screen ⭐CONTROLLER PARITY rule). We now do both properly — focusable here, and open() seeds it once
+	# the panel is actually on screen. The .tscn value is unchanged (that's the designer's surface, and
+	# tests/test_stats_screen_scene.gd pins it alongside this promotion).
+	_inspect_btn.focus_mode = Control.FOCUS_ALL
+	_inspect_btn.text = PlayerText.STATS_INSPECT_BUTTON
 	# Mute the generic click: the takeover routes through PlayerMenus.enter (inside CharacterInspectScreen.open),
 	# which plays the SIDEWAYS cue for the hand-off — the tab-strip idiom. Unmuted, one press would click AND
 	# swipe; muted, a refused open (mid-death, a modal that beat us to the screen) also stays correctly silent.
-	MenuStyle.set_button_sound(inspect_btn, &"")
-	inspect_btn.pressed.connect(_open_inspect)
+	MenuStyle.set_button_sound(_inspect_btn, &"")
+	_inspect_btn.pressed.connect(_open_inspect)
 
 	# The stat column: six blocks in a 2x3 grid (columns + the ONE 8px gap on both axes authored on %StatGrid —
 	# the gap halves the stack vs one column) so the whole set lands in/near the ~194px body at 792x444

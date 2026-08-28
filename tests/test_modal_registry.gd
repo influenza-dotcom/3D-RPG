@@ -3,8 +3,8 @@ extends GutTest
 ## M5: modal-exclusion guards are centralized on InputManager (any_modal_open / any_tab_blocking_open) instead of a
 ## long inline is_open() list duplicated in every screen. This fixes the asymmetry where a station screen
 ## (shop/heal/level-up/respec) would open OVER the QuestJournal (and level-up over Respec), and gates the ray_cast
-## interact key AND the weapon hotbar's slot keys over ALL menus. The Pip-Boy tab group (Inventory/Stats/Implants/Reputation/
-## Journal) still opens over its OWN siblings (it switches via PlayerMenus.close_others), so those are NOT blocked.
+## interact key AND the weapon hotbar's slot keys over ALL menus. The Pip-Boy tab group (Inventory/Stats/Implants/Map/
+## Reputation/Journal) still opens over its OWN siblings (it switches via PlayerMenus.close_others), so those are NOT blocked.
 ## gameplay_suppressed() is unchanged.
 ##
 ## ⭐2026-08-09: NO SCREEN IN THE REGISTRY PAUSES THE TREE ANY MORE. The station screens froze the world because
@@ -88,12 +88,12 @@ func test_hotbar_slot_key_gate_blocks_realtime_tabs_but_not_backpack() -> void:
 func test_guards_route_through_the_shared_helpers() -> void:
 	# Drift guard: station screens guard via any_modal_open(self); tab-group screens via any_tab_blocking_open();
 	# ray_cast's interact gate via gameplay_suppressed(). One place (InputManager) registers a screen, not every guard.
-	for path in ["res://scripts/ui/shop_screen.gd", "res://scripts/ui/heal_screen.gd", "res://scripts/ui/level_up_screen.gd", "res://scripts/ui/respec_screen.gd"]:
+	for path in ["res://scripts/ui/shop_screen.gd", "res://scripts/ui/heal_screen.gd", "res://scripts/ui/level_up_screen.gd", "res://scripts/ui/respec_screen.gd", "res://scripts/ui/weapon_bench_screen.gd"]:
 		assert_true(FileAccess.get_file_as_string(path).contains("InputManager.any_modal_open(self)"), "%s (station) should guard via InputManager.any_modal_open(self)" % path)
 	# ⭐The tab guards must name NOTHING but the registry predicate. Hand-naming a screen beside it is exactly the
 	# drift this registry exists to kill: the refusal set changed twice in two days (the ATM, then every station),
 	# and a guard carrying its own list would have silently missed both.
-	for path in ["res://scripts/ui/stats_screen.gd", "res://scripts/ui/reputation_screen.gd", "res://scripts/ui/inventory_screen.gd", "res://scripts/ui/quest_journal.gd", "res://scripts/ui/implants_screen.gd", "res://scripts/ui/character_inspect_screen.gd"]:
+	for path in ["res://scripts/ui/stats_screen.gd", "res://scripts/ui/reputation_screen.gd", "res://scripts/ui/inventory_screen.gd", "res://scripts/ui/quest_journal.gd", "res://scripts/ui/implants_screen.gd", "res://scripts/ui/map_screen.gd", "res://scripts/ui/character_inspect_screen.gd"]:
 		var tab_src := FileAccess.get_file_as_string(path)
 		assert_true(tab_src.contains("InputManager.any_tab_blocking_open()"), "%s (tab group) should guard via InputManager.any_tab_blocking_open()" % path)
 		assert_false(tab_src.contains("LootScreen.is_open()"), "%s should NOT hand-name LootScreen — it is a blocks_tabs row in the registry now" % path)
@@ -103,7 +103,8 @@ func test_guards_route_through_the_shared_helpers() -> void:
 	# screen itself can flip get_tree().paused, so the registry row cannot pin this — the source has to.
 	for path in ["res://scripts/ui/atm_screen.gd", "res://scripts/ui/shop_screen.gd", "res://scripts/ui/heal_screen.gd",
 			"res://scripts/ui/level_up_screen.gd", "res://scripts/ui/respec_screen.gd",
-			"res://scripts/ui/chip_install_screen.gd", "res://scripts/ui/chess_screen.gd"]:
+			"res://scripts/ui/chip_install_screen.gd", "res://scripts/ui/weapon_bench_screen.gd",
+			"res://scripts/ui/chess_screen.gd"]:
 		assert_false(FileAccess.get_file_as_string(path).contains("get_tree().paused"),
 			"%s must NOT touch get_tree().paused — the station screens are real-time; the only pause left in the game is DialogueManager's" % path)
 	assert_true(FileAccess.get_file_as_string("res://scripts/components/ray_cast.gd").contains("InputManager.gameplay_suppressed()"), "ray_cast interact gate should route through InputManager.gameplay_suppressed() (T2 hardened it from any_modal_open to also cover cutscenes + the name-entry dialog; gameplay_suppressed still derives from the modal registry)")
@@ -133,6 +134,7 @@ func test_self_opening_screens_all_gate_on_the_mid_death_predicate() -> void:
 		"res://scripts/ui/reputation_screen.gd",
 		"res://scripts/ui/quest_journal.gd",
 		"res://scripts/ui/implants_screen.gd",          # the implants tab (I)
+		"res://scripts/ui/map_screen.gd",               # the map tab (M)
 		"res://scripts/ui/character_inspect_screen.gd", # fullscreen hero-view takeover
 		"res://scripts/ui/save_load_screen.gd",         # reached from the Options bottom row
 		"res://scripts/ui/wait_screen.gd",              # Wait (T)
@@ -144,15 +146,17 @@ func test_self_opening_screens_all_gate_on_the_mid_death_predicate() -> void:
 func test_registry_size_and_membership() -> void:
 	# T1: pin the registry so the historically-forgotten screens force a deliberate test edit when a new screen lands.
 	var screens := InputManager._modal_screens()
-	assert_eq(screens.size(), 17, "the modal registry holds all 17 player-facing screens")
+	assert_eq(screens.size(), 19, "the modal registry holds all 19 player-facing screens")
 	assert_true(screens.has(AtmScreen), "AtmScreen is registered (the Ledger terminal; real-time, unlike its station siblings)")
 	assert_true(screens.has(ChessScreen), "ChessScreen is registered (was missed by the death sweep)")
 	assert_true(screens.has(ChipInstallScreen), "ChipInstallScreen is registered")
+	assert_true(screens.has(WeaponBenchScreen), "WeaponBenchScreen is registered (the gunsmith bench — a station like its siblings: it grabs the mouse, and it chirps)")
 	assert_true(screens.has(QuestJournal), "QuestJournal is registered (historically forgotten)")
 	assert_true(screens.has(CharacterInspectScreen), "CharacterInspectScreen is registered")
 	assert_true(screens.has(SaveLoadScreen), "SaveLoadScreen is registered (the manual save/load slot menu; non-pausing)")
 	assert_true(screens.has(ImplantsScreen), "ImplantsScreen is registered (the implants tab; non-pausing)")
-	assert_true(screens.has(WaitScreen), "WaitScreen is registered (the newest — the Wait panel; real-time, and it owns the cursor while you pick hours)")
+	assert_true(screens.has(WaitScreen), "WaitScreen is registered (the Wait panel; real-time, and it owns the cursor while you pick hours)")
+	assert_true(screens.has(MapScreen), "MapScreen is registered (the newest — the map tab; non-pausing, and a tab like its five siblings)")
 
 
 func test_gameplay_suppressed_fires_for_every_registered_modal() -> void:
@@ -180,8 +184,8 @@ func test_chess_and_chipinstall_are_registered_stations() -> void:
 ## where false belongs makes a Pip-Boy tab refuse to open with no feedback at all.
 func test_every_registry_row_declares_the_right_tab_posture() -> void:
 	var blocks := [OptionsMenu, LootScreen, ShopScreen, LevelUpScreen, RespecScreen, HealScreen, AtmScreen,
-			ChipInstallScreen, ChessScreen, WaitScreen]
-	var allows := [InventoryScreen, StatsScreen, ReputationScreen, QuestJournal, ImplantsScreen,
+			ChipInstallScreen, WeaponBenchScreen, ChessScreen, WaitScreen]
+	var allows := [InventoryScreen, StatsScreen, ReputationScreen, QuestJournal, ImplantsScreen, MapScreen,
 			CharacterInspectScreen, SaveLoadScreen]
 	for s in blocks:
 		s.set(&"_is_open", true)

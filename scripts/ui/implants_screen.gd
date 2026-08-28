@@ -1,7 +1,7 @@
 extends CanvasLayer
 ## ImplantsScreen — the IMPLANTS screen, opened with its own key (InputManager.action_implants, default I).
-## Registered as an autoload, mirroring StatsScreen / QuestJournal, and the fifth member of the Pip-Boy tab
-## group (Inventory / Stats / Implants / Reputation / Journal). Two sections stacked in one scrolling list
+## Registered as an autoload, mirroring StatsScreen / QuestJournal, and a member of the Pip-Boy tab
+## group (Inventory / Stats / Implants / Map / Reputation / Journal). Two sections stacked in one scrolling list
 ## (the chip-install shape): INSTALLED — the microchip abilities fitted into your head (Player.installed_list),
 ## where each row is a TOGGLE that switches the implant off / back on (Player.set_mechanic_active — gameplay
 ## reads it off via has_mechanic, but the implant stays OWNED and persists via GameState.disabled_unlocks) —
@@ -109,8 +109,8 @@ func _bind(on: bool) -> void:
 ## a connected callable must accept a signal's FULL arg count (GDScript never drops extras).
 ##
 ## Rebuilds only when the painted roster ACTUALLY changed (the StatsScreen _current_stat_signature idiom).
-## `inventory.changed` fires for things this screen doesn't paint — most often the MoneyPurse syncing its
-## coin stack when a delayed kill bounty lands — and a rebuild frees every row, INCLUDING one the player is
+## `inventory.changed` fires for things this screen doesn't paint — ammo spent, loot arriving, a stack dragged
+## to a new cell — and a rebuild frees every row, INCLUDING one the player is
 ## holding the mouse down on. A Button's `toggled` fires on RELEASE, so that click would land on a freed
 ## node and be silently swallowed. Same-signature changes are therefore ignored entirely.
 func _on_changed(_a: Variant = null, _b: Variant = null) -> void:

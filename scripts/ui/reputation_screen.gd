@@ -24,7 +24,7 @@ signal closed
 
 const PANEL_MARGIN := 0.12  ## same border as the other inventory-style screens — shared chrome (authored on the scene's Panel anchors; tests pin the band)
 const Factions := preload("res://scripts/faction/factions.gd")  # registry (no class_name; preloaded where used)
-const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Implants/Reputation/Journal)
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Implants/Map/Reputation/Journal)
 ## Disposition display words single-sourced from PlayerText's ALIGNMENT_*_WORD consts (the same words the
 ## HUD's standing-change toast keys its templates on) — a reword can't drift between this screen and the toast.
 const DISPOSITION_NAME := {
@@ -112,7 +112,7 @@ func _bind_ui() -> void:
 	# starts at one height). The strip stays CODE-BUILT by PlayerMenus into the authored %TabSlot: its
 	# one-Button-per-tab EXPAND_FILL structure is a cross-screen contract (tests/test_player_menus.gd), so the
 	# scene authors only the slot.
-	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"reputation"))  # [Inventory | Stats | Implants | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
+	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"reputation"))  # [Inventory | Stats | Implants | Map | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
 
 	# The faction list scrolls vertically only (horizontal scroll authored OFF on %Scroll, so a runaway-long
 	# faction name trims — see _make_faction_row — instead of widening the panel past its anchors). The

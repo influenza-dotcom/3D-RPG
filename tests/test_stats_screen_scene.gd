@@ -94,8 +94,13 @@ func test_layout_contracts_for_the_player_menu_group() -> void:
 	assert_eq(grid.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "the grid fills the scroll width")
 	var frame := inst.get_node("%PortraitFrame") as AspectRatioContainer
 	assert_almost_eq(frame.ratio, 0.8, 0.001, "the portrait letterboxes at the authored card ratio")
+	# Inspect ships FOCUS_NONE in the .tscn and is PROMOTED to FOCUS_ALL by _bind_ui at boot (the tab strip is
+	# FOCUS_NONE by cross-screen contract, so without the promotion this tab had zero focusable controls and a
+	# pad could never open Character Inspect from it). This pin is the authored half — the live half is
+	# tests/test_stats_screen.gd::test_inspect_is_reachable_without_a_mouse. If a designer ever authors the
+	# promotion into the scene instead, flip this to FOCUS_ALL; the two must not silently disagree.
 	assert_eq((inst.get_node("%InspectButton") as Button).focus_mode, Control.FOCUS_NONE,
-		"Inspect takes no focus (mouse-driven)")
+		"the .tscn still ships Inspect focus-less; stats_screen.gd promotes it in _bind_ui")
 	assert_eq((inst.get_node("%NameLabel") as Node).auto_translate_mode, Node.AUTO_TRANSLATE_MODE_DISABLED,
 		"the player-typed name never routes through auto-translate (not a msgid)")
 	inst.free()

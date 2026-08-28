@@ -114,7 +114,7 @@ func test_ability_scene_filename_matches_ability_id() -> void:
 			assert_eq(String((inst as Ability).ability_id()), f.trim_suffix(".tscn").to_snake_case(),
 				"ability scene '%s' filename must snake-case to its ability_id() (the unlock_id dropdown relies on it)" % f)
 		inst.free()
-	assert_eq(checked, 7, "expected the 7 shipped ability scenes (AirDash/Grapple/Slide/WallClimb/FallImmunity/ChessVisualizer/SilentTakedown) — the laser sight was retired when the flashlight took F")
+	assert_eq(checked, 10, "expected the 10 shipped ability scenes (AirDash/Grapple/Slide/WallClimb/FallImmunity/ChessVisualizer/SilentTakedown/Bunnyhop/BioScanner/DeepScanner) — the laser sight was retired when the flashlight took F")
 
 func test_ability_scripts_covers_registry_ids() -> void:
 	# C21 drift guard (post-extraction): every ability id the editor dropdown can suggest (AbilityRegistry, scanned

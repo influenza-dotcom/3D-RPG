@@ -188,6 +188,28 @@ func test_a_checked_row_never_greys_so_it_can_always_come_off_the_bill() -> void
 		"…and the moment it comes off the bill it greys like any other unpayable row")
 
 
+func test_roster_rows_are_pad_reachable_and_ready_seeds_the_landing_spot() -> void:
+	# CONTROLLER PARITY. The rows shipped focus_mode = FOCUS_NONE, which left Back and Begin as the ONLY
+	# focusables on New Game's second screen: a pad player could start a run but could never buy a starting
+	# implant — on the one screen in the game that sells them. _make_screen add_child's the real scene, so
+	# _ready has already run _bind_ui -> _refresh_tally -> _seed_focus by the time we look.
+	var s := _make_screen()
+	for r in s._rows:
+		assert_eq((r as Button).focus_mode, Control.FOCUS_ALL,
+			"every roster row is focusable — focus-less rows are unreachable, not merely un-seeded")
+	# The seed prefers the first row the Ledger still covers: _refresh_tally disables every unchecked row whose
+	# price no longer fits, and a disabled Button is a dead landing spot. A bare instantiation presents no build,
+	# which fails OPEN to the full cap, so row 0 is affordable here.
+	var want: Button = null
+	for r in s._rows:
+		if not (r as Button).disabled:
+			want = r as Button
+			break
+	assert_not_null(want, "precondition: the fail-open absent-application limit leaves at least one affordable row")
+	assert_eq(s.get_viewport().gui_get_focus_owner(), want,
+		"_ready seeded focus on the first affordable row, so ui_up/ui_down have somewhere to start")
+
+
 func test_back_emits_cancelled() -> void:
 	var s := _make_screen()
 	watch_signals(s)

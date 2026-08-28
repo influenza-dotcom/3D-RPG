@@ -34,7 +34,9 @@ extends Control
 ## (chip_takedown installs silent_takedown — the ids don't mirror). Rows paint Item.label() raw ([PH] marker
 ## and all, the chip-install idiom) plus the AUTHORED ability name (AbilityRegistry.display_name_for) and the
 ## price (Zorkmids.money_text) — every chip shares one microchip model/icon, so the ability name is the real
-## differentiator. Hover = the shared derived ItemInfo.tooltip ("Installs …"), never authored prose.
+## differentiator. Hover = the shared derived ItemInfo.tooltip ("Installs …"), never authored prose. Every row
+## is FOCUS_ALL and _ready seeds the first affordable one (_seed_focus): this screen is the ONLY place a
+## starting implant can be bought, so a pad that couldn't reach the rows couldn't buy one at all.
 ##
 ## The PINNED footer tally (%Tally, under the roster, outside the scroll) shows the running bill + the
 ## resulting starting balance, projected from GameSettings.economy.player_starting_money — truthful for
@@ -79,6 +81,35 @@ func _ready() -> void:
 	_compute_credit()  # score the (possibly absent) build BEFORE binding — _bind_ui paints the verdict line
 	_bind_ui()
 	_refresh_tally()  # boots at "bill: 0 · balance: base · credit left: full" — nothing checked yet
+	_seed_focus()     # AFTER the tally, which is what decides which rows are still affordable (and focusable)
+
+## Seed pad/keyboard focus on the first roster row — the implants_screen / chip_install_screen idiom. Runs at
+## the END of _ready, which is the "after the overlay is visible" moment for this screen: StartMenu add_child's
+## it already-visible (there is no open() to hook), so by here the panel is in the tree and grab_focus can
+## actually take — it is a no-op on a hidden Control, hence the visibility guard, which also keeps a bare
+## unparented instantiation (a test, a tool) silent instead of erroring.
+## Prefers the first row the Ledger still covers: _refresh_tally has just DISABLED every unchecked row whose
+## price no longer fits the credit, and a disabled Button is a dead landing spot. If the whole roster is out of
+## reach (a build rated so low nothing fits) the never-gated Begin takes the seed, so navigation always has
+## somewhere to start — without a focus owner, ui_up/ui_down do nothing at all and the screen is pad-inert.
+##
+## ⭐WHY THIS SEEDS WHEN ITS MENU-TIME SIBLINGS DELIBERATELY DON'T. The start menu and the TOS gate are
+## MOUSE-FIRST on purpose (test_start_menu / test_terms_of_service pin it): they open with nothing focused and
+## seed only on the first navigation press. Both reasons for that stance are absent here. (1) Their focus lands
+## on a DECISION PAIR — a pre-highlighted "Decline" on a consent gate, with Enter wired to press it, is a trap;
+## our seed lands on a roster ROW, whose Enter just flips a reversible line on a bill nothing has charged yet
+## (Begin is a separate, unfocused button). (2) Their focus ring is the skin's push-button chrome, which read as
+## a permanent highlight fighting the mouse hover; a row's focus box IS its hover box (style_list_row paints
+## both as the same translucent accent bar), so a seeded row looks exactly like a hovered one.
+func _seed_focus() -> void:
+	if not is_visible_in_tree():
+		return
+	for row in _rows:
+		if not row.disabled:
+			row.grab_focus()
+			return
+	if _begin_btn != null:
+		_begin_btn.grab_focus()
 
 ## StartMenu hands the pending creation's stat build here BEFORE add_child, so _ready scores it (the same
 ## Dictionary the profile stamp will write into GameState.stat_values). Tests may also call it on a LIVE
@@ -213,7 +244,12 @@ func _make_row(text: String, ability_name: String, price_text: String) -> Button
 	# flip. Same contract as implants_screen._make_toggle_row — order-free, since _wire_button skips a button
 	# already carrying the semantic meta. Hover is untouched.
 	MenuStyle.set_button_sound(btn, &"")
-	btn.focus_mode = Control.FOCUS_NONE
+	# ⭐FOCUSABLE — the pad's only way ONTO this roster. These rows shipped FOCUS_NONE, which left Back and Begin
+	# as the sole focusables on New Game's second screen: a controller player could start a run but could never
+	# buy a starting implant, on the one screen in the game that offers them. style_list_row already gave the row
+	# a translucent accent-bar `focus` box, so a focused row reads exactly like a hovered one. (The atm_screen
+	# ⭐CONTROLLER PARITY rule; the landing spot itself is seeded in _seed_focus at the end of _ready.)
+	btn.focus_mode = Control.FOCUS_ALL
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var sb: StyleBox = MenuStyle.theme.get_stylebox(&"normal", &"Button")
 	var row := HBoxContainer.new()

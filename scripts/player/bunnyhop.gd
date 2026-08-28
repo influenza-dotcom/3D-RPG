@@ -8,6 +8,10 @@ extends Node
 ##
 ## State only — never touches velocity. player.gd calls try_engage() on each jump
 ## and, if it returns true, overrides horizontal velocity with get_target_speed().
+##
+## The STANCE gates live on the host, not here: an over-encumbered or CROUCHED jump goes
+## straight to break_chain() and never reaches try_engage(), so a sneaking player can't hop
+## their way past the crouch speed penalty. This node only knows timing + movement input.
 @export var character: CharacterBody3D
 
 ## Consecutive well-timed hop count. 0 = not bhopping (plain max_speed).
@@ -49,10 +53,11 @@ func _physics_process(delta: float) -> void:
 	_was_on_floor = on_floor
 
 
-## Called by player.gd at the instant of a jump. `has_movement_input` = the player
-## is holding a move direction. Returns true if the bhop system engaged (player
-## then applies get_target_speed()); false for a standing jump that shouldn't
-## carry chain speed.
+## Called by player.gd at the instant of a jump — only for jumps that PASSED the host's
+## stance gates (see the header: crouched / over-encumbered never get here).
+## `has_movement_input` = the player is holding a move direction. Returns true if the bhop
+## system engaged (player then applies get_target_speed()); false for a standing jump that
+## shouldn't carry chain speed.
 func try_engage(has_movement_input: bool) -> bool:
 	# A bhop is a moving maneuver — a stationary jump never chains.
 	if not has_movement_input:

@@ -70,7 +70,7 @@ func open() -> void:
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player):
 		return
-	# Full takeover: switch off any open real-time tab (Inventory/Stats/Implants/Reputation/Journal) before we
+	# Full takeover: switch off any open real-time tab (Inventory/Stats/Implants/Map/Reputation/Journal) before we
 	# cover the screen, and free the cursor so the player can drag/zoom the model — enter() does both.
 	# Through enter(null), NOT a bare close_others(null): `keep` stays null because we are not a tab, but the
 	# outgoing tab's close() MUST happen inside enter's _switching window. Outside it, PlayerMenus.leave() read

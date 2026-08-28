@@ -22,6 +22,9 @@ extends GutTest
 ##   - Bunnyhop._physics_process() airborne window-bleed, and its null-character guard.
 ##   - Bunnyhop.try_engage() return value + chain growth on an existing chain in-window.
 ##   - Bunnyhop.get_target_speed() mid-range linear growth (+boost_per_hop/hop) below cap.
+##   - Player.bhop_blocked_by_stance(): the crouched / encumbered gate in front of try_engage().
+##   - Player.bhop_chain_allowed(): the full jump-block gate — the BUNNY-HOP IMPLANT (has_mechanic) AND the
+##     stance predicate — plus BunnyhopAbility.on_deactivated()'s switch-off chain-break hygiene.
 ##   - BulletTime.is_active() maps to State.ACTIVE only (READY/EXHAUSTED both false).
 ##   - BulletTime._on_scoped_in(false) disarms _is_scoped and _scope_entered_in_air.
 ##
@@ -35,8 +38,9 @@ extends GutTest
 ##   - The tuning constants themselves (coyote_time, jump_buffer_time, land_window,
 ##     boost_per_hop, max_speed): type-guarded by smoke's test_game_tuning_constants_present.
 ##     These tests read them for expected values but never mutate the shared singletons.
-##   - Crouch entirely: a bare instance's _ready() dereferences unset @export vars
-##     (head.position, collision_shape.shape) and its queries need a live physics world.
+##   - Crouch's own behaviour: a bare instance's _ready() dereferences unset @export vars
+##     (head.position, collision_shape.shape) and its queries need a live physics world. The stance-gate
+##     tests below CONSTRUCT one and write crouch_t by hand, which reaches none of that.
 ##
 ## GameSettings.player_movement / .bunnyhop are mutable shared singletons (preloaded
 ## .tres). They are only READ here for expected values; mutating them would leak into
@@ -224,6 +228,163 @@ func test_bunnyhop_target_speed_grows_linearly_below_cap() -> void:
 		GameSettings.player_movement.max_speed + GameSettings.bunnyhop.boost_per_hop, 0.001,
 		"A chain of 1 must add exactly one boost_per_hop above max_speed (linear, pre-clamp)")
 	bh.free()
+
+
+# ---------------------------------------------------------------------------
+# Player.bhop_blocked_by_stance() — the STANCE gate in front of try_engage(). The jump block routes a
+# blocked jump to break_chain() instead, so this predicate is the whole difference between "the crouch
+# speed penalty is real" and "a sneaking player hops up to the 12 m/s bhop ceiling".
+#
+# Off-tree Player SUBCLASS stub, the same sanctioned actor-in-a-test pattern as test_ground_movement.gd:
+# never add_child'd, so _ready() never runs and the unset @export wiring is never dereferenced. Crouch is
+# likewise only ever constructed (never entered), so its _ready()/physics-world queries stay unreached —
+# crouch_t is written by hand, which is exactly what Crouch._physics_process would have written.
+# ---------------------------------------------------------------------------
+
+class _StanceStub extends Player:
+	pass
+
+
+func _make_stance_stub() -> _StanceStub:
+	var p := _StanceStub.new()
+	p.crouch = Crouch.new()  # crouch_t defaults 0.0 = standing; inventory stays null so is_encumbered() is false
+	return p
+
+
+func _free_stance_stub(p: _StanceStub) -> void:
+	if p.crouch != null:
+		p.crouch.free()
+	p.free()
+
+
+func test_stance_gate_open_while_standing() -> void:
+	# Upright + unloaded is the ONLY stance that earns chain speed. If this ever reads true the bhop
+	# mechanic is dead, not merely restricted.
+	var p := _make_stance_stub()
+	assert_false(p.bhop_blocked_by_stance(),
+		"A standing, unencumbered player must be free to earn bhop speed")
+	_free_stance_stub(p)
+
+
+func test_stance_gate_blocks_a_crouched_jump() -> void:
+	# The regression this exists for: crouching costs speed_mult (half pace) and buys stealth, and a
+	# crouch-hop chain used to refund the speed while keeping the stealth. Pinned at the is_crouching()
+	# threshold so it stays the codebase's ONE definition of "crouched" (perception reads the same blend).
+	var p := _make_stance_stub()
+	p.crouch.crouch_t = 1.0
+	assert_true(p.bhop_blocked_by_stance(),
+		"A fully crouched player must NOT earn bhop speed — sneaking has to stay slow")
+	p.crouch.crouch_t = 0.6
+	assert_true(p.bhop_blocked_by_stance(),
+		"Past the is_crouching() threshold still counts as crouched — the gate follows that one definition")
+	p.crouch.crouch_t = 0.0
+	assert_false(p.bhop_blocked_by_stance(),
+		"Standing back up must re-open the gate (the block is a stance, not a latch)")
+	_free_stance_stub(p)
+
+
+func test_stance_gate_survives_a_missing_crouch_child() -> void:
+	# is_crouching() is null-guarded; a Player built without a Crouch child (some test rigs, and the
+	# window between spawn and wiring) must read as STANDING rather than crash or block jumps forever.
+	var p := _StanceStub.new()
+	assert_false(p.bhop_blocked_by_stance(),
+		"No Crouch child must degrade to standing, not to a permanent bhop block")
+	p.free()
+
+
+# ---------------------------------------------------------------------------
+# Player.bhop_chain_allowed() — the FULL gate the jump block actually asks: the BUNNY-HOP IMPLANT
+# (has_mechanic(&"bunnyhop"), granted by the BunnyhopAbility node) AND the stance predicate above. The two
+# stay separate on purpose — bhop_blocked_by_stance() answers "can this body chain right now" and is pinned
+# by the tests above; this one adds "does this character own the mechanic at all".
+#
+# Same off-tree Player stub: unlock_mechanic() reaches AbilityManager.unlock -> _build -> host.add_child(),
+# which works on a parentless node, so the whole grant path runs with no tree and no _ready().
+# ---------------------------------------------------------------------------
+
+func test_chain_gate_is_shut_without_the_implant() -> void:
+	# THE regression this feature exists for. A fresh game ships with zero abilities, so an upright,
+	# unencumbered player must earn NO chain speed until the Bunny-Hop Chip is installed. If this ever reads
+	# true the implant grants nothing and the movement tech is free again from the first frame.
+	var p := _make_stance_stub()
+	assert_false(p.has_mechanic(&"bunnyhop"),
+		"A bare Player must not start with the bunny-hop implant (starting_unlocks ships empty)")
+	assert_false(p.bhop_chain_allowed(),
+		"Without the bunny-hop implant a jump must NOT be allowed to chain — the jump block routes it to break_chain()")
+	assert_false(p.bhop_blocked_by_stance(),
+		"...and the denial must come from the IMPLANT, not the stance: the stance predicate stays open here")
+	_free_stance_stub(p)
+
+
+func test_chain_gate_opens_once_the_implant_is_installed() -> void:
+	# The grant path end to end: the id resolves a buildable script by the AbilityRegistry naming convention
+	# (bunnyhop -> scripts/components/abilities/bunnyhop.gd), so a chip install really does open the gate.
+	var p := _make_stance_stub()
+	p.unlock_mechanic(&"bunnyhop")
+	assert_true(p.has_mechanic(&"bunnyhop"),
+		"unlock_mechanic must build the BunnyhopAbility node from the registry (the scene<->script naming convention)")
+	assert_true(p.bhop_chain_allowed(),
+		"Installed implant + upright stance is the ONE combination that earns chain speed")
+	_free_stance_stub(p)
+
+
+func test_chain_gate_still_obeys_stance_with_the_implant_on() -> void:
+	# The two denials are independent: buying the chip must not refund the crouch speed penalty, which is the
+	# whole cost of sneaking (see the stance tests above).
+	var p := _make_stance_stub()
+	p.unlock_mechanic(&"bunnyhop")
+	p.crouch.crouch_t = 1.0
+	assert_false(p.bhop_chain_allowed(),
+		"A crouched jump must not chain even with the implant installed — owning the chip doesn't buy out the stance gate")
+	p.crouch.crouch_t = 0.0
+	assert_true(p.bhop_chain_allowed(),
+		"Standing back up with the implant on must re-open the gate")
+	_free_stance_stub(p)
+
+
+func test_chain_gate_shuts_when_the_implant_is_switched_off() -> void:
+	# The Implants-tab toggle. Switched OFF must keep the implant INSTALLED (it rides GameState.disabled_unlocks,
+	# so one autosave can't uninstall it) while reading as no mechanic everywhere gameplay asks.
+	var p := _make_stance_stub()
+	p.unlock_mechanic(&"bunnyhop")
+	p.set_mechanic_active(&"bunnyhop", false)
+	assert_true(p.mechanic_installed(&"bunnyhop"),
+		"Switching an implant off must keep it INSTALLED — installed_list is what the economy/UI asks")
+	assert_false(p.bhop_chain_allowed(),
+		"A switched-off bunny-hop implant must shut the chain gate: has_mechanic is the ACTIVE predicate")
+	p.set_mechanic_active(&"bunnyhop", true)
+	assert_true(p.bhop_chain_allowed(),
+		"Switching it back on must re-open the gate")
+	_free_stance_stub(p)
+
+
+func test_switching_the_implant_off_drops_a_banked_chain() -> void:
+	# BunnyhopAbility.on_deactivated() hygiene (the Slide.end() / Grapple.detach() contract): a chain banked at
+	# 5 must not survive the switch-off, or the readouts lie while the implant reads "off". The jump block would
+	# break it on the next jump anyway — this pins the immediate half.
+	var p := _make_stance_stub()
+	var bh := BUNNYHOP.new()
+	p.bunnyhop = bh  # never add_child'd: the hook reads the @export through host.get(), which is all it needs
+	p.unlock_mechanic(&"bunnyhop")
+	bh.chain = 5
+	p.set_mechanic_active(&"bunnyhop", false)
+	assert_eq(bh.chain, 0,
+		"Switching the bunny-hop implant off must break the live chain, so re-enabling it can't resume a stale boost")
+	bh.free()
+	_free_stance_stub(p)
+
+
+func test_switching_the_implant_off_survives_a_missing_bunnyhop_child() -> void:
+	# AbilityManager.set_active fires on_deactivated() unconditionally, so the hook must tolerate a host with no
+	# Bunnyhop wired (every off-tree test Player, and the window between spawn and wiring). A direct
+	# host.bunnyhop read would raise "Invalid access to property or key" here and GUT fails on any engine error.
+	var p := _make_stance_stub()
+	p.unlock_mechanic(&"bunnyhop")
+	assert_null(p.bunnyhop, "the stub deliberately has no Bunnyhop child wired")
+	p.set_mechanic_active(&"bunnyhop", false)
+	assert_false(p.has_mechanic(&"bunnyhop"),
+		"Switching off must still take effect when there is no chain state machine to clear")
+	_free_stance_stub(p)
 
 
 # ---------------------------------------------------------------------------

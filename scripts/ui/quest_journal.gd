@@ -1,7 +1,7 @@
 extends CanvasLayer
 ## QuestJournal — a read-only QUEST LOG screen, opened with its own key (InputManager.action_journal, default J).
 ## Registered as an autoload, mirroring StatsScreen / ReputationScreen, and a member of the
-## Pip-Boy tab group (Inventory / Stats / Implants / Reputation / Journal). Lists ACTIVE quests (title + each objective with
+## Pip-Boy tab group (Inventory / Stats / Implants / Map / Reputation / Journal). Lists ACTIVE quests (title + each objective with
 ## a checkbox + progress) and COMPLETED ones. Like the other player menus it does NOT pause the world; it frees
 ## the mouse (restored on close). Refreshes live off QuestTracker.quest_started / objective_advanced / quest_completed.
 ##

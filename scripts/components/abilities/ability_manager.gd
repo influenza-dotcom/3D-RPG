@@ -68,6 +68,29 @@ func is_installed(id: StringName) -> bool:
 			return true
 	return false
 
+## THE WIDEST BODY-SCAN RADIUS any ENABLED ability grants, in metres — 0.0 when none does (no scanner implant
+## installed, or every one switched off in the Implants tab). Forwarded by Player.body_scan_range() and read by
+## scripts/ui/minimap.gd, which draws Groups.NPC dots out to exactly this far and NOTHING at all at 0.0; that is
+## what stopped the Map tab being a free through-wall census of every body in the level.
+##
+## MAX, not first-hit or sum: the two shipped tiers (BioScanner 22 m, DeepScanner 55 m) are the same mechanic at
+## different reaches, so owning both is simply the deep one, and switching the deep one off falls back to the
+## short read instead of blanking the map.
+##
+## DUCK-TYPED on scan_range_m() rather than on a class or an id list, so this manager stays ignorant of which
+## abilities exist (its whole design) and a future implant that happens to grant map presence joins in by
+## answering the method. `enabled` is checked here, which makes this the ACTIVE predicate like has() — a
+## switched-off scanner reads as no scanner, which is the entire point of the tab's toggle.
+func scan_range() -> float:
+	var best := 0.0
+	for a in _abilities:
+		if a == null or not a.enabled or not a.has_method(&"scan_range_m"):
+			continue
+		var v: Variant = a.call(&"scan_range_m")
+		if v is float or v is int:
+			best = maxf(best, float(v))
+	return best
+
 ## Switch an INSTALLED implant off / back on (the Implants-tab toggle). Flips `enabled` on every node granting
 ## `id` (matching set_unlocks' all-nodes sweep); switching OFF also fires each node's on_deactivated() hygiene
 ## hook (Slide ends a live slide, Grapple severs a live rope) so a later re-enable can't resume stale state.

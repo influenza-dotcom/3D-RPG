@@ -42,7 +42,7 @@ func test_catalog_rows_carry_a_category_and_name() -> void:
 const KNOWN_DROPPABLES := ["Readable", "Switch", "Claimable", "FallImmunity",
 	"RandomCoat", "SprayPaintable", "RandomInventory", "PropFollow",
 	"RewardStinger", "CrippleCallout", "NoisePulser", "DebugOverlay",
-	"ChessMatch", "ChessVisualizer", "SilentTakedownAbility", "RandomSize",
+	"ChessMatch", "ChessVisualizer", "SilentTakedownAbility", "BunnyhopAbility", "RandomSize",
 	"IndoorAmbienceDucker",
 	# The in-game debug suite (2026-08-18): the backtick console, the F1 cheat menu, F2 noclip flight and the
 	# F4 look-at inspector. All debug-build-gated drop-ins; absent from the palette they are undiscoverable.
