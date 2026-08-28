@@ -73,7 +73,7 @@ these are the `npc.gd`-owned members (the renameable ones a rename would break).
 | `companion_follow.gd` (CompanionFollow) | `_leader`, `_nav`, `_move_toward`, `_face_point`, `_face_travel`, `_height_above_floor`, `_dead` |
 | `weapon_stance.gd` (WeaponStance) | `_target`, `_weapon`, `_weapon_mesh`, `_perception`, `_can_fight_with_gun`, `_hide_laser`, `is_predisposed_hostile`, `move_speed`, `threat_response` |
 | `talk_approach.gd` (TalkApproach) | `_move_toward`, `_face_point`, `_face_travel`, `_desired_velocity`, `is_hostile`, `is_in_combat`, `is_sitting` (string-literal `call()` — dynamic, NO compile signal even from this NPC-typed host), `talk_approach_distance`, `talk_approach_timeout` |
-| `npc_outline.gd` (NpcOutline) | `_apply_overlay_to_meshes`, `_flash_material`, `_outline_color_for_disposition`, `has_outline`, `outline_width`, `resolved_disposition`, `_find_body_swap`, `body_part_at`, `_build_flash_tween`, `flash_red` (per-part hit-flash, H2b) |
+| `npc_outline.gd` (NpcOutline) | `_apply_overlay_to_meshes`, `_flash_material`, `has_outline`, `is_following`, `resolved_disposition`, `is_alerted_on_player`, `outline_target_fade_s`, `_find_body_swap`, `body_part_at`, `_build_flash_tween`, `flash_red` (per-part hit-flash, H2b) |
 | `npc_laser.gd` (NpcLaser) | `_outline_color_for_disposition` |
 | `npc_audio_cues.gd` (NpcAudioCues) | `threat_response` |
 
@@ -104,3 +104,31 @@ coupling table above** because it reads NO host members: it's a *generic* drop-i
 the `LocomotionFx` idiom) that works on any `Node3D`, and the NPC merely seeds its Inspector knobs from the
 `*_noise_*` exports and calls `pulse(radius, throttled)`. Prefer this shape — a portable component the root drives
 through a public method — when extracting new behaviour off the root; it's the direction the whole class is headed.
+
+## Sight rays go through `SightRay`, never straight to `intersect_ray`
+
+Every "can this NPC SEE / HEAR past that?" ray in this folder is cast by **`SightRay.cast(world, query)`**
+(`sight_ray.gd`) instead of `world.direct_space_state.intersect_ray(query)`. It is the same query the caller
+already built — mask, exclude, from/to unchanged — with one extra rule: a hit on **see-through geometry** does not
+stop the ray, it resumes just past it. So what comes back is always the first genuinely OPAQUE thing in the way,
+and a chain-link fence, a wire grille or a shop window stops hiding you from a guard standing behind it.
+
+Current callers: `Perception.can_see`, `Perception.can_see_node`, `Perception._wall_between` (hearing occlusion),
+`NpcSenses._corpse_occluded`, `NpcHomeReturn._occluded` (the "can the player see this NPC blink?" gate), and
+`NPC._aim_laser_at` — the AIM ray, which feeds `NpcCombat.act_attack`'s clear-shot test and the laser beam's
+endpoint. **Add new perception rays here too.**
+
+**Gunfire passes through the same geometry**, which is why the aim ray is on that list: an NPC that can see you
+through a fence can also shoot you through it, so it should stand and fire instead of running around looking for
+a gap. The other two fire paths reach the same rule by their own routes — `DamageTrace.run_pellet` (hitscan)
+calls `SightRay.is_see_through_hit` inside its pierce walk, and `Projectile._ready` adds a physics collision
+exception with every body in `Groups.SEE_THROUGH`.
+
+Deliberately NOT routed through it: the player's look-at interaction ray (no looting through the wire), the
+grapple hook, `SilentTakedown`'s reach ray, and anything that asks about the FLOOR. A fence is still a solid you
+cannot walk through, props still bounce off it, and the navmesh still carves around it.
+
+Geometry is marked by the two drop-ins in `scripts/components/`: **`SeeThrough`** (tags a whole prop's bodies)
+and **`SeeThroughBrushes`** (splits a func_godot map's transparent-textured brushes into their own `StaticBody3D`
+and tags that — a whole TrenchBroom map compiles into ONE body, and a flying round can only be excepted per
+body). See `docs/AUTHORING_GUIDE.md`.

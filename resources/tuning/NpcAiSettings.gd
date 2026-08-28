@@ -33,6 +33,29 @@ extends Resource
 ## tighter, gunplay 12.5+ never misses. For scale: at 2.5 deg a stationary man-sized target ~10 m out is
 ## roughly a coin flip per bullet; point-blank shots still land. 0 = every NPC is back to perfect aim.
 @export var aim_error_deg: float = 2.5
+## TARGET LEADING (0..1): how much of the computed INTERCEPT offset an NPC aims ahead of a MOVING target —
+## the "stop strafing forever" dial. Before this every AI round was fired at where the target IS, so once the
+## 2026-08-25 "enemies never hitscan" rule gave those rounds travel time, a player who simply held a strafe
+## walked out of every bullet: at 15 m an SMG round (40 m/s for AI) takes 0.375 s to arrive and a 4 m/s strafe
+## carries you 1.5 m in that time — two body-widths clear of a perfectly-aimed shot. The NPC now solves for
+## where you WILL be (NpcCombat.lead_aim_point: a real quadratic intercept against your HORIZONTAL velocity,
+## using the round's own AI-scaled speed) and aims there instead. 1.0 = a perfect intercept solution, so a
+## CONSTANT-velocity strafe never dodges anything again; 0 = the old shoot-at-your-navel behaviour.
+## The default deliberately UNDER-leads: the residual (0.15 x your drift) plus the aim_error_deg cone above
+## keeps a straight strafe a coin flip rather than a death sentence, and leaves headroom for the gunplay
+## scaling below to mean something. Vertical velocity is NOT led (a jump/fall is aimed at flat), so hopping
+## still throws aim off — and because the solve reads your velocity at the instant the trigger pulls, CHANGING
+## DIRECTION is the counterplay it cannot predict. That is the intended dodge: juke, don't hold a strafe.
+## Scaled PER NPC by the SAME gunplay steadiness the aim cone uses (divided by CharacterStats.sway_mult, then
+## clamped to 1.0), so WHO the NPC is decides how well it predicts: a sheetless mook leads at this value, the
+## sniper archetype (gunplay 2) at 0.92, and a gunplay 12.5+ elite solves the intercept exactly.
+@export_range(0.0, 1.0) var aim_lead_fraction: float = 0.85
+## Hard cap (seconds) on the flight time the lead solve is allowed to predict over. A target further out than
+## its round can usefully reach — or one whose ground speed makes the intercept solve degenerate — would
+## otherwise be led metres into a wall. At the shipped ranges nothing comes close to this (a 40 m/s AI SMG
+## round covers the whole grace band in ~0.4 s), so it is purely a sanity clamp; lower it to blunt leading at
+## long range only. Irrelevant when aim_lead_fraction is 0.
+@export var aim_lead_max_time: float = 1.5
 ## Within this (m) a combatant treats its shot as CLEAR even when the LOS ray self-occludes
 ## (a target crowded onto the muzzle starts the ray inside its own collider) — fire anyway.
 @export var point_blank_range: float = 2.0
@@ -43,6 +66,25 @@ extends Resource
 ## How many seconds before a shot lands the incoming-shot warning beep plays (it also gates the in-sync
 ## aim-radial blink) — part of the NPC's firing cadence. Higher = more warning before the hit lands.
 @export var beep_lead_time: float = 0.5
+## BREATHING ROOM (seconds): the SHORTEST gap an NPC may leave between two RANGED shots, whatever its gun's
+## authored attack_speed says. A floor, not an offset — a weapon already slower than this is untouched, so
+## only the fast guns are paced down and the slow ones keep their authored rhythm.
+## Why it exists: every ranged shot drags a full telegraph package behind it (the lock-on charge sting, the
+## laser/aim-radial ramp from 0 to 1, and the incoming-shot BEEP a beep_lead_time beat before impact), and
+## that package is sized by the SHOT CADENCE. A gun whose cadence is at or under beep_lead_time therefore
+## telegraphs continuously: the shipped pistol (attack_speed 0.44) beeps every 0.44 s with a ~0.04 s gap and
+## re-locks its aim ramp just as fast, and the SMG (0.125) is a flat strobe. A warning that never stops is
+## not a warning, and the run-up to "he is about to shoot" has no room to read. Flooring the cadence gives
+## the whole package an audible/visible OFF beat between shots — fire, breathe, wind up, fire.
+## ⭐ Keep this comfortably ABOVE beep_lead_time or the beep has no silence to sit in (the difference between
+## the two IS the quiet gap: 0.9 − 0.5 = 0.4 s). npc.gd additionally caps the aim-radial blink at 90% of the
+## live cadence, so an under-tuned value degrades to a strobe rather than a stuck-on light.
+## RANGED ONLY — melee/fists/spray-paint cadences are untouched (they carry no beep or radial to space out),
+## keyed off the same NPC._weapon_uses_ranged_attack_telegraphs predicate that gates the telegraphs.
+## Applied AFTER the per-NPC rate_of_fire_factor, so it is a hard species-wide ceiling on rate of fire: a
+## profile cannot author its way under the floor. 0 = no floor, i.e. every NPC is back to firing at its
+## weapon's raw authored cadence.
+@export var min_shot_interval: float = 0.9
 
 @export_group("Self care")
 ## An NPC reaches for a medkit below this HP fraction...

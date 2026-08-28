@@ -220,6 +220,141 @@ func test_muzzle_sync_is_a_noop_without_a_body_swap() -> void:
 	assert_eq(muzzle.position, n.muzzle_offset, "so the hand anchor is untouched")
 	n.free()
 
+# --- Muzzle FX cancel the scale they inherit from the barrel anchor ------------------------------------
+# _build_muzzle_fx PARENTS three emitters (spark, barrel smoke, ejected casing) to the held gun's Muzzle
+# marker, so each one inherits that marker's whole transform — SCALE included — from two multipliers that
+# have nothing to do with how big an effect should be: the view-model's baked ROOT scale (identity on
+# ak_472, 0.001 Sketchfab millimetres on the pistol's silenced.tscn) and the npc_held_display_scale
+# readability boost _build_weapon_mesh multiplies onto the MESH. Composed, NPC muzzle FX ran at 1.75x on a
+# clean gun and 0.00175x on the pistol — a 571x spread across weapons, i.e. smoke puffs ~45 MICROMETRES
+# wide. _unscale_muzzle_fx normalises every one of them to 1.0, so an NPC emits the same authored effect
+# the player's rig does and per-weapon sizing stays on the dial designed for it (muzzle_smoke_scale).
+#
+# These asserts watch the NODE transform on purpose, because that is the only thing that moved: the bug
+# was invisible to this suite twice over. --headless never compiles a particle shader, so nothing
+# automated can SEE particle size; and the emitter's own properties all round-trip perfectly —
+# scale_min / scale_max read identically on a working gun and a broken one, because what collapsed is the
+# transform underneath them. Never judge this one from the process material. To judge it with your eyes,
+# run scripts/tools/muzzle_smoke_qa_shots.gd (its NPC section prints QA_NPC_SCALE and shoots the barrel).
+#
+# The rig below is IN-TREE (add_child_autofree) because global_transform raises an engine error on an
+# off-tree Node3D and GUT fails a test on any engine error. The NPC stays OFF-tree as usual:
+# _unscale_muzzle_fx reads nothing but its two arguments, so it is a pure call with an NPC for a namespace.
+
+## Build the real parent chain — hand anchor -> weapon mesh -> barrel marker -> FX — in-tree, and hand back
+## the FX node (its anchor is fx.get_parent()). `mesh_scale` is the view-model's baked root scale already
+## multiplied by the display boost; `marker_scale` is whatever the Muzzle marker's OWN basis bakes on top of
+## that (the spray can bakes 0.015 there rather than on the root).
+func _muzzle_fx_rig(mesh_scale: Vector3, marker_scale: Vector3) -> Node3D:
+	var hand := Node3D.new()
+	add_child_autofree(hand)
+	var mesh := Node3D.new()
+	mesh.scale = mesh_scale
+	hand.add_child(mesh)
+	var marker := Marker3D.new()
+	marker.scale = marker_scale
+	mesh.add_child(marker)
+	var fx := Node3D.new()
+	marker.add_child(fx)
+	return fx
+
+func test_muzzle_fx_come_out_at_world_scale_one_whatever_the_gun_bakes() -> void:
+	var n = load(NPC_PATH).new()
+	var boost := 1.75  # WeaponData.npc_held_display_scale's default; _build_weapon_mesh puts it on the MESH
+	# [label, view-model ROOT scale, extra scale baked into the Muzzle marker itself]
+	var guns := [
+		["ak_472 — identity root, so the FX fight only the display boost", 1.0, 1.0],
+		["silenced.tscn — 0.001 baked on the ROOT (this is the pistol whose smoke went invisible)", 0.001, 1.0],
+		["the spray can — 0.015 baked into the Muzzle marker's OWN basis instead of the root", 1.0, 0.015],
+		["sniper_rifle.tscn — millimetres kept on a model CHILD with the marker as its sibling", 1.0, 1.0],
+	]
+	var corrections: Array[float] = []
+	for g in guns:
+		var fx := _muzzle_fx_rig(Vector3.ONE * (float(g[1]) * boost), Vector3.ONE * float(g[2]))
+		n._unscale_muzzle_fx(fx, fx.get_parent() as Node3D)
+		var s: Vector3 = fx.global_transform.basis.get_scale()
+		assert_almost_eq(s.x, 1.0, EPS,
+			"%s: the FX must sit at WORLD scale 1.0 once unscaled — it is the node transform, not any material property, that decides how big an NPC's muzzle effect draws" % g[0])
+		assert_almost_eq(s.y, 1.0, EPS, "%s: same on Y" % g[0])
+		assert_almost_eq(s.z, 1.0, EPS, "%s: same on Z" % g[0])
+		corrections.append(fx.scale.x)
+
+	assert_lt(corrections[0], 1.0,
+		"1.0 is the target DELIBERATELY, so a clean-root gun's FX SHRINK from the 1.75x they used to inherit — that inflation was accidental, and matching the player's authored effect beats matching the old look")
+	assert_almost_eq(corrections[1] / corrections[0], 1000.0, 0.01,
+		"the pistol needs a 1000x bigger correction than the clean gun (its root bakes 0.001) — that entire spread used to reach the particles instead, which is why one weapon smoked and another emitted nothing visible")
+
+	n.free()
+
+func test_muzzle_fx_unscale_is_per_axis() -> void:
+	# A non-uniform anchor — a squashed view-model root, or one axis stretched by an importer — must come
+	# back to 1.0 on ALL THREE axes. Dividing by one uniform factor would leave the plume stretched, which
+	# reads as a "wrong-looking" effect nobody would trace back to the gun's transform.
+	var n = load(NPC_PATH).new()
+	var fx := _muzzle_fx_rig(Vector3(0.5, 2.0, 4.0), Vector3.ONE)
+	n._unscale_muzzle_fx(fx, fx.get_parent() as Node3D)
+	var s: Vector3 = fx.global_transform.basis.get_scale()
+	assert_almost_eq(s.x, 1.0, EPS, "a squashed X must be cancelled on X alone")
+	assert_almost_eq(s.y, 1.0, EPS, "a stretched Y must be cancelled on Y alone")
+	assert_almost_eq(s.z, 1.0, EPS, "and Z too — the correction is per-axis, never one averaged divisor")
+	n.free()
+
+func test_muzzle_fx_unscale_leaves_the_authored_position_and_rotation_alone() -> void:
+	# LOCAL scale only. SparkAttack bakes a barrel roll into its own root and all three FX roots sit at the
+	# origin, so writing a whole global_transform here would flatten that roll (and there is no offset to
+	# un-crush anyway). Whatever the FX scene authored has to survive the correction untouched.
+	var n = load(NPC_PATH).new()
+	var fx := _muzzle_fx_rig(Vector3.ONE * 0.00175, Vector3.ONE)
+	fx.position = Vector3(0.0, 0.02, 0.1)
+	fx.rotation_degrees = Vector3(0.0, 0.0, 37.0)
+	n._unscale_muzzle_fx(fx, fx.get_parent() as Node3D)
+	assert_eq(fx.position, Vector3(0.0, 0.02, 0.1),
+		"the FX scene's authored offset must survive — the fix writes scale, not the full transform")
+	assert_almost_eq(fx.rotation_degrees.z, 37.0, 0.001,
+		"and so must its authored roll: SparkAttack's barrel roll is baked into the scene, not applied at runtime")
+	n.free()
+
+func test_muzzle_fx_unscale_leaves_a_degenerate_anchor_alone() -> void:
+	# A collapsed axis (a broken import, or a designer typing 0 into the mesh scale) would make the divisor
+	# INF and put the emitter's transform beyond recovery. Warn and leave it as-is instead: a wrongly-sized
+	# plume is a thing you can see and fix, a NaN transform is not. The 1e-9 below says "collapsed" rather
+	# than "a designer typed 0" — the float32 transform stores it as a flat 0.0 either way, and the guard's
+	# is_zero_approx catches anything under ~1e-5, so both spellings take the same branch.
+	var n = load(NPC_PATH).new()
+	var fx := _muzzle_fx_rig(Vector3(1.0, 1e-9, 1.0), Vector3.ONE)
+	fx.scale = Vector3.ONE * 3.0
+	n._unscale_muzzle_fx(fx, fx.get_parent() as Node3D)
+	assert_eq(fx.scale, Vector3.ONE * 3.0,
+		"a degenerate anchor must leave the FX exactly as it was found — no INF, no NaN written into the transform")
+	assert_true(is_finite(fx.global_transform.basis.get_scale().y),
+		"and the composed world scale stays finite, so the emitter is still a recoverable node")
+	n.free()
+
+func test_every_fx_hung_on_the_muzzle_anchor_cancels_its_scale() -> void:
+	# The regression this file cannot catch any other way: a FOURTH emitter added to _build_muzzle_fx
+	# without its _unscale_muzzle_fx line. Nothing would complain at runtime — it would simply be born the
+	# wrong size on every weapon, and per the section header no property assert can tell. So pair the two
+	# calls in TEXT. If the cancel ever moves somewhere else (a helper that adds AND unscales, say), retire
+	# this assert deliberately rather than loosening it — but keep the pairing guaranteed somehow.
+	var n = load(NPC_PATH).new()
+	assert_true(n.has_method("_unscale_muzzle_fx"),
+		"NPC must keep _unscale_muzzle_fx — it is the single seam that stops the held gun's display scale from resizing its muzzle effects")
+	n.free()
+
+	var src := _read_file(NPC_PATH)
+	var start := src.find("func _build_muzzle_fx()")
+	assert_gt(start, -1,
+		"npc.gd must still define _build_muzzle_fx — it is what parents the spark, smoke and casing to the barrel")
+	var end := src.find("\nfunc ", start + 1)
+	if end < 0:
+		end = src.length()
+	var body := src.substr(start, end - start)
+	var adds := body.count("anchor.add_child(")
+	var cancels := body.count("_unscale_muzzle_fx(")
+	assert_gt(adds, 0, "_build_muzzle_fx must still hang its emitters on the barrel anchor")
+	assert_eq(cancels, adds,
+		"every node added to the muzzle anchor needs its own _unscale_muzzle_fx right after it — %d add_child vs %d cancels means an emitter is inheriting the gun's display scale, which on the pistol is 0.00175x and invisible" % [adds, cancels])
+
 # --- Anti-stuck navigation (pathfinding fix: steer ALONG a wall instead of grinding into it) -----------
 # The full stuck-detection (is_on_floor + wall-vs-floor contact + speed-vs-intended) is in-tree physics
 # state -> playtested. The unit-testable slices: the wall-slide steering MATH (a static) and the unstick

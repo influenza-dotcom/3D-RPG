@@ -11,6 +11,12 @@ const DamageNumberPopupScript := preload("res://scripts/combat/damage_number_pop
 ## pellets spawn as live projectiles in attack.gd (ShotResolver.ai_fires_live_projectile) and projectile.gd
 ## lands the mirrored damage/knockback/status/collateral at physical contact instead.
 ##
+## SEE-THROUGH GEOMETRY (2026-08-26): a hit on a `Groups.SEE_THROUGH` body — a chain-link fence, a wire grille,
+## a shop window — does not stop the pellet. It carries on from just past the surface, spending no penetration and
+## leaving no spark, because it never touched anything. Same rule perception uses (`SightRay`), so what an NPC can
+## see through, both sides can shoot through; the AI's own rounds get there differently (they are live
+## projectiles, and `Projectile` takes a physics collision exception with those bodies instead).
+##
 ## Stateless static in the ShotResolver / GunFX / DamageApplier mold. Every tree-dependent handle (space
 ## state, FX root, camera) is sampled ONCE by the caller and passed in — a static must not fetch them, and
 ## the bare-Attack unit tests never reach here. The per-pellet RESULT is returned (visual_target /
@@ -43,6 +49,10 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 	## while enemy -> gib -> enemy still is (the first enemy died to the same pellet).
 	var pellet_has_killed := false
 	var penetrations := 0
+	## Separate budget from `penetrations`: punching through a chain-link fence is NOT an overkill pierce (it
+	## costs no damage and needs no kill), so it must not eat the weapon's penetration allowance — but it still
+	## needs its own backstop so a degenerate zero-thickness shape can never spin this loop.
+	var pass_throughs := 0
 	var visual_target: Vector3 = ray_origin + pellet_direction * GameSettings.weapon_general.visual_tracer_fallback_distance
 	var hit_anything := false
 	var hit_npc := false
@@ -52,6 +62,18 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 		var _result := space_state.intersect_ray(_query)
 		if not _result:
 			break
+		# SEE-THROUGH GEOMETRY (a chain-link fence, a wire grille, a shop window) does not stop a round — the
+		# same rule perception uses (SightRay), so what an NPC can see through, both sides can shoot through.
+		# The pellet carries on from just past the surface with NO spark, NO damage and NO penetration spent:
+		# it never touched anything. `hit_anything` / `visual_target` stay untouched too, so a shot that only
+		# crosses a fence still reads as a clean miss and its tracer flies the full distance.
+		if pass_throughs < SightRay.MAX_PASS_THROUGH and SightRay.is_see_through_hit(_result):
+			pass_throughs += 1
+			seg_range = maxf(seg_range - seg_origin.distance_to(_result.position) - SightRay.SKIN, 0.0)
+			seg_origin = _result.position + pellet_direction * SightRay.SKIN
+			if seg_range <= 0.0:
+				break
+			continue
 		visual_target = _result.position
 		hit_anything = true
 		GunFX.spawn_hit_spark(fx_root, _result.position, pellet_direction)

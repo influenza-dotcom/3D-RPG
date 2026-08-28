@@ -61,6 +61,23 @@ const VIP := &"vip"                             ## bodyguard-protectee role — 
 ## on screen. Dev-build only in practice — the surfaces gate on OS.is_debug_build() before joining.
 const DEBUG_SURFACE := &"debug_surface"
 
+## Colliders that SIGHT and GUNFIRE pass straight through: a chain-link fence, a wire mesh, a pane of glass —
+## anything you can see through and shoot through but still walk into. Three systems consult it: `SightRay` skips
+## such a hit and keeps casting to whatever is BEHIND it (so a guard spots you across a fence instead of being
+## blinded by a solid box wearing a see-through texture); `DamageTrace` carries a hitscan pellet past it without
+## a spark or a spent penetration; and `Projectile` adds a physics collision exception with every member at spawn,
+## so live rounds fly through.
+##
+## ⭐MEMBERS MUST BE WHOLE BODIES, because a flying round collides with a BODY — there is no per-shape exception.
+## That is why `SeeThroughBrushes` SPLITS a func_godot map's fence brushes into their own `StaticBody3D` (one
+## worldspawn body carries the entire map) rather than tagging shapes, and why the `SeeThrough` drop-in marks
+## every `CollisionObject3D` under the prop it is childed to, not just the prop root.
+##
+## Still SOLID: walking into it, props bouncing off it, the player's look-at interaction ray ("press F" cannot
+## reach through the wire), the grapple hook, and the navmesh bake. The split body keeps the source body's
+## collision layer and mask, so nothing outside these three systems can tell the difference.
+const SEE_THROUGH := &"see_through"
+
 
 ## The HUMAN player node — the single `Player` member of the PLAYER group (recruited companions join PLAYER for
 ## targeting but are NPCs, not Player, so they're excluded). Returns null if there's no human in `tree` yet, or a

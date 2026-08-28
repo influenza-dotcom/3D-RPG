@@ -95,7 +95,9 @@ func _corpse_occluded(eye: Vector3, cpos: Vector3) -> bool:
 	# A prop the player is CARRYING (parked on the held layer, floated in front of their face) must not hide a body
 	# from our sight — raycasts ignore the carrier's collision exception, so mask the held bit out.
 	q.collision_mask = 0xFFFFFFFF & ~TalkHelpers.held_prop_collision_layer()
-	var hit: Dictionary = world.direct_space_state.intersect_ray(q)  # annotate: `world` is Variant (see above), so `:=` can't infer
+	# SightRay, not a raw intersect_ray: a body lying behind a chain-link fence is in plain view, so see-through
+	# geometry must not hide it (the caster steps past it and reports the first genuinely opaque thing).
+	var hit: Dictionary = SightRay.cast(world, q)  # annotate: `world` is Variant (see above), so `:=` can't infer
 	if hit.is_empty():
 		return false
 	var hit_pos: Vector3 = hit.get("position")

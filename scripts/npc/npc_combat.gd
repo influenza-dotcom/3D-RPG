@@ -18,6 +18,12 @@ extends Node
 const FISTS: WeaponData = preload("res://resources/weapons/fists.tres")
 ## SANITY FLOOR: the dodge re-arm interval is clamped to at least this so an over-tuned dodge_interval can't jitter.
 const DODGE_MIN_INTERVAL := 2.0
+## Below this ground speed (m/s, squared) a target counts as STANDING STILL and gets no lead — collision
+## jitter and a single frame of navmesh drift are not movement worth predicting.
+const LEAD_MIN_SPEED_SQ := 0.04  # (0.2 m/s)^2
+## Coefficient magnitude under which the intercept quadratic is treated as degenerate (target receding at
+## exactly the round's own speed) and solved as a linear equation instead.
+const LEAD_QUADRATIC_EPSILON := 0.0001
 
 var host: Node = null  ## the NPC we fight for (Node-typed to avoid the class cycle)
 
@@ -153,6 +159,71 @@ static func attempt_fire_range(engage_range: float, weapon: WeaponData, grace_ra
 	if weapon != null and weapon.projectile_scene != null and weapon.effective_range > 0.0:
 		return engage_range + maxf(0.0, grace_range)
 	return engage_range
+
+
+## TARGET LEADING — where to actually aim a travelling round so it MEETS a moving target instead of
+## chasing it. Solves the real intercept quadratic: find the flight time t at which the round (launched
+## from `origin` at `round_speed`) and the target (at `target_pos`, drifting at `target_velocity`) are in
+## the same place, then return the point the target reaches at t.
+##
+## WHY: since the "enemies never hitscan" rule (2026-08-25, ShotResolver.ai_fires_live_projectile) EVERY
+## ranged AI shot is a physical round with real travel time — but the NPC still aimed at the target's
+## CURRENT position, so holding a strafe walked you out of the bullet's path and incoming fire could be
+## dodged indefinitely without ever changing direction. Aiming at the intercept is what makes travel time a
+## dodge WINDOW (juke and the prediction is wrong) instead of a free pass.
+##
+## Only the HORIZONTAL component of `target_velocity` is led. A jumping or falling target is on a gravity
+## arc, and extrapolating its instantaneous vertical velocity linearly would sling the aim metres over its
+## head on the way up (and into the floor on the way down) — strafing is the dodge this is here to answer,
+## so vertical is deliberately left un-led and hopping still throws aim off.
+##
+## `lead_fraction` scales the resulting OFFSET, not the solve: 1.0 is the exact intercept, 0 aims at the
+## target's navel (the old behaviour), and anything between under-leads by that share of the drift — the
+## per-NPC marksmanship dial (NPC.aim_lead_fraction). `max_lead_time` clamps the predicted flight so a
+## degenerate solve (or a target further out than its round usefully reaches) can't aim metres into a wall.
+##
+## Degenerate inputs all fall back to `target_pos` — no lead is always a legal aim point: no round speed,
+## no lead budget, a target that isn't meaningfully moving, or a target moving AWAY faster than the round
+## flies (no real root: nothing can catch it, so don't invent a lead).
+## Pure + static (the attempt_fire_range idiom) so tests pin the geometry without a tree.
+static func lead_aim_point(
+		origin: Vector3,
+		target_pos: Vector3,
+		target_velocity: Vector3,
+		round_speed: float,
+		lead_fraction: float,
+		max_lead_time: float) -> Vector3:
+	if round_speed <= 0.0 or lead_fraction <= 0.0 or max_lead_time <= 0.0:
+		return target_pos
+	var vel := target_velocity
+	vel.y = 0.0  # horizontal only — see the note above on gravity arcs
+	if vel.length_squared() < LEAD_MIN_SPEED_SQ:
+		return target_pos  # standing still (or drifting imperceptibly): nothing to lead
+	var to_target := target_pos - origin
+	# |to_target + vel*t| = round_speed*t  ->  (|vel|^2 - speed^2) t^2 + 2 (to_target . vel) t + |to_target|^2 = 0
+	var a := vel.length_squared() - round_speed * round_speed
+	var b := 2.0 * to_target.dot(vel)
+	var c := to_target.length_squared()
+	var t := -1.0
+	if absf(a) < LEAD_QUADRATIC_EPSILON:
+		# Target receding at exactly the round's speed: the quadratic collapses to a line.
+		if absf(b) > LEAD_QUADRATIC_EPSILON:
+			t = -c / b
+	else:
+		var disc := b * b - 4.0 * a * c
+		if disc >= 0.0:
+			var root := sqrt(disc)
+			# Two candidate flight times; take the SOONEST one that lies in the future. (While the round
+			# outruns the target — every shipped case — a is negative and exactly one root is positive.)
+			var t1 := (-b + root) / (2.0 * a)
+			var t2 := (-b - root) / (2.0 * a)
+			for candidate: float in [minf(t1, t2), maxf(t1, t2)]:
+				if candidate > 0.0:
+					t = candidate
+					break
+	if t <= 0.0:
+		return target_pos  # unreachable / no intercept — aim at the body rather than at a guess
+	return target_pos + vel * minf(t, max_lead_time) * lead_fraction
 
 
 static func should_chase_while_alerted(

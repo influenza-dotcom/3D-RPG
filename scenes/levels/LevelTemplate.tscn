@@ -5,6 +5,7 @@
 [ext_resource type="Texture2D" uid="uid://cf8j6srje245o" path="res://assets/textures/dda61fd3-14cc-4f8e-b474-b60606de4ced.png" id="3"]
 [ext_resource type="PackedScene" path="res://scenes/world/PlayerSpawn.tscn" id="4"]
 [ext_resource type="Script" uid="uid://b5ph8hgbcwb4b" path="res://scripts/components/quest_marker_sync.gd" id="5"]
+[ext_resource type="Script" path="res://scripts/components/see_through_brushes.gd" id="6"]
 
 [sub_resource type="NavigationMesh" id="navmesh"]
 geometry_source_geometry_mode = 1
@@ -87,6 +88,9 @@ shape = SubResource("ground_shape")
 
 [node name="QuestMarkerSync" type="Node" parent="."]
 script = ExtResource("5")
+
+[node name="SeeThroughBrushes" type="Node" parent="."]
+script = ExtResource("6")
 
 [node name="PlayerSpawn" parent="." instance=ExtResource("4")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)

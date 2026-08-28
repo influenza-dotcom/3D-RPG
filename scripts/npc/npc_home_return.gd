@@ -447,7 +447,9 @@ func _occluded(from: Vector3, to: Vector3) -> bool:
 		return false
 	var query := PhysicsRayQueryParameters3D.create(from, to)
 	query.collision_mask = 0xFFFFFFFF & ~TalkHelpers.held_prop_collision_layer()
-	var hit := world.direct_space_state.intersect_ray(query)
+	# SightRay, not a raw intersect_ray: this asks whether the PLAYER can see the NPC, and the player can see
+	# straight through a fence -- blinking an NPC that is only "hidden" behind one would happen in full view.
+	var hit := SightRay.cast(world, query)
 	if hit.is_empty():
 		return false
 	return hit.get("collider") != host

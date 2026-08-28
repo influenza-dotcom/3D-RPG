@@ -15,7 +15,8 @@ extends Character
 ## (NpcVoice.emit) / bark UI / targeting / locomotion (+ the Locomotor nav brain) / scavenge / combat dispatch /
 ## mortality / senses / home leash / cripple callout / distraction+unaware reactions (NpcDistraction).
 ## REMAINING ON THE ROOT BY CONTRACT (deliberate — do NOT re-extract): aim computation (_aim_point /
-## get_aim_origin / get_aim_direction — DEFER verdict, see ARCHITECTURE_REVIEW.md "NPC Gravity"), the charge-sting
+## get_aim_origin / get_aim_direction / _lead_aim_point — DEFER verdict, see ARCHITECTURE_REVIEW.md "NPC
+## Gravity"; the lead solve's GEOMETRY lives in NpcCombat.lead_aim_point, only the wiring is here), the charge-sting
 ## scheduling (_on_locked_on / _on_aim / _last_aim_msec — bare-instance test-poked), the bark DATA + host-owned
 ## latches + *_LINES consts (test anchors), and the _physics_process branch ORDER (the @risk lines above).
 ## New behaviour goes on a component / Resource with a thin facade here — never a new branch on the root.
@@ -64,11 +65,10 @@ const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")  # canoni
 ##                            noticed the target — no 360 degree omniscience.
 ##
 ## Extends Character for HP / damage / gore / blast / knockback (shared with the Player, which is
-## deliberately NOT an NPC). Owns the combat OUTLINE — built via TalkHelpers.make_outline_material()
-## (the one shared outline builder, also used by the look-at talk highlight) and chained IN FRONT of
-## Character's damage-flash overlay (outline.next_pass = flash) so a single material_overlay produces
-## both the inflated-hull rim and the hit-flash — and the FNV-style hostility model (faction +
-## disposition + reputation + provoke-on-attack).
+## deliberately NOT an NPC). Owns the combat OUTLINE — nowadays a disposition ID stamped onto
+## InkOutline's screen-space ring by the NpcOutline child, with Character's damage flash alone in the
+## material_overlay slot the retired inverted hull used to share — and the FNV-style hostility model
+## (faction + disposition + reputation + provoke-on-attack).
 ##
 ## Designer surface: drop the scene in, optionally point weapon_data at a .tres, set faction /
 ## disposition / threat_response / wanders, and tune the perception + firing values in the inspector.
@@ -98,12 +98,25 @@ var _identity_key: StringName = &""
 ## fix; actors are now EXCLUDED from the ink via ACTOR_INK_MASK_LAYER, so the classic black rim IS the
 ## NPC's outline again. Keep in lockstep with NpcData.outline_color, which stamps over this at spawn.)
 @export var outline_color: Color = Color.BLACK
-## Outline thickness fed to the shader's `outline_width` uniform (shader scales it x4 in clip
-## space). 2.0 is the standard combat rim every NPC scene ships.
+## ⭐ INERT since the NPC hull was retired (2026-08-25) and dead everywhere since the hull itself was
+## deleted (2026-08-27): the ring is a constant PIXEL width for every actor in the game, set once on
+## InkOutline.highlight_width_px, because a screen-space ring has no per-mesh geometry to thicken.
+## Kept as a field only because NpcData stamps it (PROFILE_STAMPED_FIELDS is a matched set pinned both
+## ways by test_npc_data) and several authored .tres files carry a 2.0 — dropping it is a save/profile
+## edit, not a rendering one. Nothing reads it.
 @export var outline_width: float = 2.0
-## Rim colour by resolved_disposition(): HOSTILE -> red, FRIENDLY -> green, NEUTRAL -> the
-## `outline_color` export (black by default). So the rim reads the NPC's attitude at a glance and
-## re-tints live when that attitude changes (provoke / reputation shift) — see _apply_outline().
+## Seconds for the ring's hostile red to FADE IN when this NPC locks onto the player (Perception
+## ALERTED with the player — or a &"Player"-group companion — as its live target: is_alerted_on_player()),
+## and to fade back out when the lock breaks. While locked the red is FULL AT ANY DISTANCE, flooring the
+## close-range bloom (InkOutline.highlight_color_near_m/far_m) — an enemy shooting at you must read red
+## from across the map, not only inside 8 m. 0 = snap. Driven per frame by NpcOutline._drive_engaged_mix.
+@export_range(0.0, 5.0, 0.05, "or_greater") var outline_target_fade_s: float = 0.4
+## Colour by resolved_disposition(): HOSTILE -> red, FRIENDLY -> green, NEUTRAL -> the `outline_color`
+## export (black by default). So the outline reads the NPC's attitude at a glance and re-tints live when
+## that attitude changes (provoke / reputation shift) — see _apply_outline(). ⭐ These consts are also
+## what NpcLaser tints its beam with, which is why `outline_color` is NOT dead the way `outline_width`
+## is: NpcOutline maps the disposition to a tint ID and InkOutline's LUT decides what that ID paints,
+## but the laser still reads the colour directly.
 const OUTLINE_HOSTILE := Color(0.9, 0.1, 0.1)   ## red — attacks the player on sight
 const OUTLINE_FRIENDLY := Color(0.1, 0.8, 0.2)  ## green — allied
 ## Blue rim worn ONLY while this NPC is following the player as a recruited companion (Feature I). It
@@ -612,6 +625,7 @@ func _derive_identity_key() -> StringName:
 ## these; the full-clobber path sets them in _stamp_profile_full. Keep in sync with _stamp_profile_full.
 const PROFILE_STAMPED_FIELDS: Array[StringName] = [
 	&"display_name", &"popup_positive", &"max_hp", &"stats", &"has_outline", &"outline_color", &"outline_width",
+	&"outline_target_fade_s",
 	&"faction_id", &"faction", &"disposition", &"disposition_overrides_faction", &"friendly_aggro_threshold",
 	&"weapon_data", &"muzzle_offset", &"weapon_mesh_rotation", &"rate_of_fire_factor", &"miss_chance", &"fire_range",
 	&"target_height", &"immune_to_weapon_knockback", &"starts_unloaded", &"item_stacks",
@@ -667,6 +681,7 @@ func _stamp_profile_full() -> void:
 	has_outline = profile.has_outline
 	outline_color = profile.outline_color
 	outline_width = profile.outline_width
+	outline_target_fade_s = profile.outline_target_fade_s
 	faction_id = profile.faction_id
 	faction = profile.faction
 	disposition = profile.disposition
@@ -739,7 +754,10 @@ func _equip_initial_weapon() -> void:
 	if witem != null and inventory != null:
 		inventory.add(witem)
 	# Draw the STRONGEST weapon in the bag: weapon_data only SEEDS the backpack now — if item_stacks
-	# carried something better, THAT gets drawn. Falls back to the bare hub equip for a bag-less host.
+	# carried something better, THAT gets drawn. Falls back to the bare hub equip for a bag-less host —
+	# and for an NPC AUTHORED with a weapon the AI ranking refuses (spray paint: best_weapon_item skips
+	# it as a zero-damage tagging tool), whose bag then ranks empty; such an NPC brawls unarmed, which
+	# still deals real damage where the can would not.
 	var best: Item = inventory.best_weapon_item() if inventory != null else null
 	if best != null:
 		inventory.equip_item(best)  # -> equip_weapon_requested -> _on_equip_weapon_requested below
@@ -2463,6 +2481,13 @@ func _physics_process(delta: float) -> void:
 	# releases control, so the NPC can never get stuck frozen.
 	if _cutscene_control:
 		_tick_cutscene_movement(delta)
+		# The outline poll still runs under cutscene control (raw delta — this branch is above the LOD
+		# gate and ticks every frame): a scene that pacifies an ENGAGED enemy (stand_down -> UNAWARE)
+		# must let its full-red lock-on ring fade out on camera, not hold a frozen "targeting you" tell
+		# for the whole scene. The disposition retint riding along is equally welcome — a rep/attitude
+		# shift a cutscene causes now shows while it plays instead of popping on release.
+		if _outline != null:
+			_outline.poll(delta)
 		super._physics_process(delta)  # gravity + locomotion consume _desired_velocity
 		return
 	# Keep the gun stance in step with combat: drawn while fighting, holstered (and topped up) out of
@@ -2525,10 +2550,12 @@ func _physics_process(delta: float) -> void:
 		_acquire_target()
 		_retarget_timer = GameSettings.npc_ai.retarget_interval
 	# Re-tint the rim if our attitude changed with no provoke (a faction-rep shift — Reputation has
-	# no signal, so it must be polled). O(1) per frame; the material only rebuilds on a real change.
+	# no signal, so it must be polled). O(1) per think; the material only rebuilds on a real change.
 	# The NpcOutline child holds the last-tinted Kind + does the has_outline / _flash_material guard.
+	# `delta` here is the BANKED think delta (the gate above rebinds it), which the lock-on fade inside
+	# poll() consumes — invariant 2 of the AI-LOD gate: nothing below it runs in slow motion.
 	if _outline != null:
-		_outline.poll()
+		_outline.poll(delta)
 	if not is_instance_valid(_target):
 		# No enemy: SENSE the environment first (stealth distraction + body-discovery), THEN let the planner act.
 		# _react_unaware only senses now — on a noise/body it points Perception at it (-> INVESTIGATING); when
@@ -3168,16 +3195,36 @@ func _engage_range_for(w: WeaponData) -> float:
 	return minf(fire_range, GameSettings.npc_ai.unranged_aim_fallback)
 
 ## Seconds between this NPC's shots: the equipped WEAPON's own attack cadence (attack_speed) scaled by
-## rate_of_fire_factor. The weapon is the single source of truth for the rate (this replaced the per-NPC
-## fire_cooldown). Floored so the charge math never divides by zero; falls back to a 1s base pre-equip.
+## rate_of_fire_factor, then held to the species-wide RANGED breathing floor
+## (GameSettings.npc_ai.min_shot_interval) so a fast gun cannot telegraph continuously. The weapon is the
+## single source of truth for the rate (this replaced the per-NPC fire_cooldown). Floored so the charge math
+## never divides by zero; falls back to a 1s base pre-equip.
 func _shot_interval() -> float:
 	# Unarmed (disarmed / dry): pace to the FISTS cadence so the close-range wind-up applies to
-	# a punch instead of a stale or absent gun.
+	# a punch instead of a stale or absent gun. NOT floored — a punch carries no beep or aim radial, so
+	# there is no telegraph rhythm to give room to (and the fists cadence is source-pinned by tests).
 	if not _can_fight_with_gun():
 		return maxf(0.05, FISTS.attack_speed * rate_of_fire_factor)
 	var w: WeaponData = _weapon.equipped_weapon if _weapon else null
+	return shot_interval_for(w, rate_of_fire_factor, GameSettings.npc_ai.min_shot_interval)
+
+## Pure + static (the NpcCombat.attempt_fire_range idiom) so tests can pin the cadence against the shipped
+## WeaponData .tres with no live NPC: the weapon's authored attack_speed scaled by the per-NPC `rate` factor,
+## then held to the RANGED breathing floor `min_interval` (GameSettings.npc_ai.min_shot_interval — see its
+## doc for WHY: the charge sting, laser/aim-radial ramp and incoming beep are all sized by this cadence, so a
+## sub-beep_lead_time gun telegraphs nonstop and the warning stops meaning anything).
+## The floor applies ONLY to a weapon carrying that ranged telegraph package — melee, fists and spray paint
+## keep their authored swing cadence, keyed off the SAME _weapon_uses_ranged_attack_telegraphs predicate that
+## gates the telegraphs themselves, so the two can never disagree. Applied AFTER `rate`, so the floor is a
+## hard ceiling on rate of fire that a profile's rate_of_fire_factor cannot author its way under. A null /
+## unequipped weapon keeps the old 1 s base (and is never floored — it has no telegraphs either). Always at
+## least 0.05 s so the charge math that divides by this never divides by zero; a negative floor is ignored.
+static func shot_interval_for(w: WeaponData, rate: float, min_interval: float) -> float:
 	var base: float = w.attack_speed if w != null else 1.0
-	return maxf(0.05, base * rate_of_fire_factor)
+	var interval: float = maxf(0.05, base * rate)
+	if _weapon_uses_ranged_attack_telegraphs(w):
+		interval = maxf(interval, maxf(0.0, min_interval))
+	return interval
 
 ## Damage the player's threat indicator shows for our current attack: the equipped weapon's, or the FISTS'
 ## when we're fighting unarmed — so a winding-up punch reads as the weak threat it is, not a stale gun.
@@ -3193,7 +3240,9 @@ func _attack_damage() -> float:
 ## at perfectly accurate — with any live gunplay status buff folded in. So a sheetless mook sprays the full
 ## cone, the sniper archetype (gunplay 2) shoots 16% tighter, and a gunplay 12.5+ elite is surgical: WHO the
 ## NPC is (its NpcData stat sheet) decides how well it shoots. Pairs with the always-live-projectile rule
-## (ShotResolver.ai_fires_live_projectile): error + travel time is what makes incoming fire dodgeable.
+## (ShotResolver.ai_fires_live_projectile): error + travel time is what makes incoming fire dodgeable — and
+## with aim_lead_fraction() off the SAME stat, which is what stops that travel time from making a plain held
+## strafe an infinite dodge. Error scatters the shot; leading decides what it scatters AROUND.
 func aim_error_spread() -> float:
 	var base_deg: float = maxf(GameSettings.npc_ai.aim_error_deg, 0.0)
 	return deg_to_rad(base_deg) * stats_or_default().sway_mult(status_stat_modifier(&"gunplay"))
@@ -3246,8 +3295,12 @@ func _build_weapon_mesh() -> void:
 	# Guns (no override) keep the rotation-only mount and get the weapon's npc_held_display_scale readability
 	# boost: their FP-tuned world size is squint-small at NPC viewing distance — MULTIPLIED onto the surviving
 	# scale, never overwritten (the pistol's baked 0.001 root is load-bearing). The boost also scales the
-	# child "Muzzle" marker outward to the enlarged barrel tip, which is correct: every consumer (shot/laser/
-	# tracer origin, muzzle FX anchors) reads its POSITION only.
+	# child "Muzzle" marker outward to the enlarged barrel tip, which is correct for every consumer that reads
+	# its POSITION — the shot, laser and tracer origins, and attack.muzzle / projectile_spawner.muzzle below.
+	# ⭐⭐BUT "position only" IS NOT TRUE OF EVERYTHING, and believing it was is what broke the muzzle FX for
+	# two years: _build_muzzle_fx PARENTS three emitters to that same marker, so they inherit its full
+	# transform — SCALE included. Anything you hang off this marker must cancel that scale itself; see
+	# _unscale_muzzle_fx. Read the marker's position freely; never inherit its basis without thinking.
 	if wd != null and wd.npc_hold_override:
 		_weapon_mesh.position = wd.npc_hold_position
 		_weapon_mesh.rotation_degrees = wd.npc_hold_rotation
@@ -3281,16 +3334,63 @@ func _build_muzzle_fx() -> void:
 	var spark = load(SPARK_FX_SCENE_PATH).instantiate()
 	spark.attack = _weapon.attack
 	anchor.add_child(spark)
+	_unscale_muzzle_fx(spark, anchor)
 	_weapon.attack.flash_muzzle.connect(spark._on_attack_flash_muzzle)
 	# Barrel smoke, on the same signal as the spark. Untyped for the same class-cache reason.
 	var smoke = load(SMOKE_FX_SCENE_PATH).instantiate()
 	smoke.attack = _weapon.attack
 	anchor.add_child(smoke)
+	_unscale_muzzle_fx(smoke, anchor)
 	_weapon.attack.flash_muzzle.connect(smoke._on_attack_flash_muzzle)
 	var shell: ShellDrop = load(SHELL_FX_SCENE_PATH).instantiate()
 	anchor.add_child(shell)
+	_unscale_muzzle_fx(shell, anchor)
 	_weapon.attack.shell_particle.connect(shell.emit)
 	_weapon.attack.shell_drop = shell
+
+
+## ⭐⭐CANCEL THE SCALE THIS FX JUST INHERITED FROM THE BARREL MARKER. Call it on ANY node parented to the
+## held gun's muzzle anchor, immediately after add_child.
+##
+## The anchor is a child of the held weapon MESH, so it carries two multipliers that have nothing to do with
+## how big an effect should be:
+##  * the view-model's own baked ROOT scale — most guns are a clean 1.0 (ak_472) or keep their millimetre
+##    Sketchfab scale on a model CHILD with the marker as its sibling (sniper_rifle, the pattern to copy),
+##    but the pistol's silenced.tscn bakes 0.001 on the ROOT itself and the spray can bakes 0.015 into the
+##    Muzzle marker's own basis; and
+##  * `npc_held_display_scale` (1.75), which _build_weapon_mesh multiplies on so the GUN reads at NPC
+##    viewing distance. That is a readability boost for the MESH — it was never meant to resize the effects.
+##
+## Composed, an NPC's muzzle FX were running at 1.75x on a clean gun, 0.0263x on the spray can and 0.00175x
+## on the pistol — a 571x spread across weapons, i.e. the pistol's smoke puffs were ~45 MICROMETRES wide and
+## simply invisible. Normalising to 1.0 gives every NPC the same authored effect the player's rig gets (the
+## player only dodged this because view_model.tscn's PlayerMuzzle re-multiplies by 1000 to undo its own
+## model's 0.001), and leaves per-weapon sizing to the dial designed for it, WeaponData.muzzle_smoke_scale.
+##
+## ⭐Why the bug hid so long: it is invisible to the whole test suite twice over. --headless never compiles a
+## particle shader, so nothing automated can SEE particle size; and the emitter's own properties all
+## round-trip perfectly — `scale_min`/`scale_max` on the process material read identically on a working gun
+## and a broken one, because what collapsed is the NODE transform underneath them. Judge it from a windowed
+## screenshot (scripts/tools/muzzle_smoke_qa_shots.gd photographs an NPC firing a pistol) or from the node's
+## printed `global_transform.basis.get_scale()`, never from a green test.
+##
+## ⭐It matters even for the two emitters whose SIZE is scale-proof. SparkAttack and ShellDrop simulate in
+## WORLD space (`local_coords` off), where the node's scale genuinely does not touch particle size — that is
+## why ShellDrop has its own `set_casing_scale`. But a world-space emitter still pushes its initial velocity
+## through the emission transform, so on the pistol the casing's 2.0 m/s eject became 3.5 mm/s: brass that
+## dribbles out of the breech instead of flying. Size-proof is not transform-proof.
+func _unscale_muzzle_fx(fx: Node3D, anchor: Node3D) -> void:
+	if not is_instance_valid(fx) or not is_instance_valid(anchor):
+		return
+	var s: Vector3 = anchor.global_transform.basis.get_scale()
+	if is_zero_approx(s.x) or is_zero_approx(s.y) or is_zero_approx(s.z):
+		push_warning("NPC muzzle anchor '%s' has a degenerate scale %s — leaving '%s' at inherited size"
+				% [anchor.name, s, fx.name])
+		return
+	# Local scale only: position and rotation stay exactly as the FX scene authored them (all three roots sit
+	# at the origin, and SparkAttack's baked barrel roll has to survive). Set once at build time — the anchor's
+	# scale never changes afterwards, so this stays correct as the gun swings around with the NPC.
+	fx.scale = Vector3(1.0 / s.x, 1.0 / s.y, 1.0 / s.z)
 
 ## Find a marker named "Muzzle" anywhere under a node, case-insensitively. Copied (not imported) from
 ## GunMesh._find_muzzle_marker to keep the NPC self-contained — npc.gd deliberately avoids pulling in
@@ -3358,9 +3458,12 @@ func _report_aim(charge: float, clear_shot: bool = true) -> void:
 	if is_instance_valid(_target) and _target.has_method(&"indicate_aimed_from"):
 		var dmg := _attack_damage()
 		# Blink the radial in the final pre-shot window. Clamp the lead BELOW the shot cadence so a fast weapon whose
-		# beep_lead_time >= shot_interval (pistol/SMG) doesn't hold the warning on EVERY frame (constant strobe that stops
-		# meaning "a shot is imminent"). The 0.9× cap leaves a visible off-gap between shots; a slow weapon (sniper) keeps
+		# beep_lead_time >= shot_interval doesn't hold the warning on EVERY frame (constant strobe that stops meaning
+		# "a shot is imminent"). The 0.9× cap leaves a visible off-gap between shots; a slow weapon (sniper) keeps
 		# its full beep_lead_time window untouched (its interval dwarfs the lead, so the min picks beep_lead_time).
+		# Since 2026-08-26 npc_ai.min_shot_interval floors the ranged cadence above beep_lead_time, so at the shipped
+		# tuning the min always picks beep_lead_time and this cap is the SAFETY NET for a floor tuned down to 0
+		# (which is what the raw pistol 0.44 / SMG 0.125 cadences used to hit head-on) — keep both.
 		var lead: float = minf(GameSettings.npc_ai.beep_lead_time, _shot_interval() * 0.9)
 		var warning := _fire_timer <= lead
 		# Report from our actual HEAD, not the body origin at the feet — so the sniper glint/flare the player
@@ -3584,7 +3687,12 @@ func _aim_laser_at(point: Vector3, charge: float, report_aim: bool = true) -> Di
 	if world == null:
 		_hide_laser()
 		return {}
-	var hit := world.direct_space_state.intersect_ray(query)
+	# SightRay, not a raw intersect_ray: see-through geometry (a chain-link fence, a wire grille) is stepped past,
+	# so this ray reports the first thing that would actually STOP the round. That keeps the clear-shot test in
+	# npc_combat.act_attack honest — an enemy that can see you through a fence can also shoot you through it
+	# (Projectile excepts those bodies), so it should stand and fire rather than run around looking for a gap.
+	# It also stops the laser beam from terminating on the wire.
+	var hit := SightRay.cast(world, query)
 	# Beam VISUAL hands off to the NpcLaser child. The show_laser export gate, no-beam case (civilian /
 	# off-tree), and weapon has_laser_sight flag all hide here and return the ray; otherwise compute the
 	# endpoint (where the ray hit, else the full reach) and let the child stretch + tint the beam.
@@ -3608,11 +3716,77 @@ func get_aim_origin() -> Vector3:
 func get_aim_direction() -> Vector3:
 	if not is_instance_valid(_target) or not _muzzle:
 		return global_basis.z
-	var dir := (_aim_point() - get_aim_origin()).normalized()
+	var origin := get_aim_origin()
+	# Aim where the target WILL BE, not where it is — see _lead_aim_point. Every ranged AI shot is a
+	# travelling round now, so without this a held strafe simply walks out of the bullet.
+	var dir := (_lead_aim_point(origin) - origin).normalized()
 	if _shot_miss:
 		_shot_miss = false  # consume: this deflection applies only to the one shot we rolled to miss
 		dir = _deflect_for_miss(dir)  # send it wide so it whiffs past the target
 	return dir
+
+
+## The point this shot is actually AIMED at: the target's body (_aim_point) offset forward along its own
+## motion by the intercept solve (NpcCombat.lead_aim_point), so a round with travel time MEETS a strafing
+## target instead of trailing it. The prediction is deliberately confined to THIS seam — the shot direction —
+## and never leaks into _aim_point() itself, which is also the pathing goal, the ally alert point, the
+## body-facing target and the clear-shot LOS ray: leading THOSE would send the NPC walking at empty floor,
+## call allies to a spot nobody is standing on, and break the `hit.collider == _target` clear-shot test that
+## gates firing at all. The laser telegraph likewise stays painted on the body — it answers "am I targeted?",
+## not "where is the bullet going".
+##
+## Leading applies to exactly the shots that FLY: ShotResolver.ai_fires_live_projectile is the same predicate
+## attack.gd uses to decide an AI shot spawns a live round, so the carve-outs come along for free — a MELEE
+## swing (whose damage is a 3 m instant trace; leading it would swing at air beside you), spray paint, and any
+## ranged weapon with no projectile_scene all keep aiming straight at the body. Speed comes from
+## ProjectileSpawner.round_speed with wielder_is_player=false, so the solve uses the AI-scaled muzzle velocity
+## the round will really fly at (npc_projectile_speed_mult — pistol/SMG/shotgun fly at half speed for AI),
+## NOT the player's faster authored figure; getting that wrong would under-lead by exactly the dodge window
+## the multiplier was added to create.
+func _lead_aim_point(origin: Vector3) -> Vector3:
+	var point := _aim_point()
+	var w: WeaponData = _weapon.equipped_weapon if _weapon != null else null
+	if w == null or not ShotResolver.ai_fires_live_projectile(w):
+		return point
+	return NpcCombat.lead_aim_point(
+			origin,
+			point,
+			_target_velocity(),
+			ProjectileSpawner.round_speed(w, false),
+			aim_lead_fraction(),
+			GameSettings.npc_ai.aim_lead_max_time)
+
+
+## How fast our target is moving RIGHT NOW, for the lead solve. Duck-typed (`get`) rather than cast: both the
+## player and an NPC are CharacterBody3D and carry `velocity`, but _target is only ever Node3D-typed here and a
+## scripted / prop target may carry no such property at all — a missing one reads as null and we simply don't
+## lead. Sampled fresh at the instant the trigger pulls (never smoothed) ON PURPOSE: that is what makes a
+## direction CHANGE the counterplay leading cannot predict, while a constant strafe is fully solved for.
+func _target_velocity() -> Vector3:
+	if not is_instance_valid(_target):
+		return Vector3.ZERO
+	var raw: Variant = _target.get(&"velocity")
+	var vel := Vector3.ZERO
+	if raw is Vector3:
+		vel = raw
+	return vel
+
+
+## The marksmanship half of target leading — how much of the computed intercept offset THIS NPC applies (0..1),
+## the twin of aim_error_spread(). Base is GameSettings.npc_ai.aim_lead_fraction, divided by the SAME gunplay
+## steadiness factor the aim cone is multiplied by (CharacterStats.sway_mult, with any live gunplay status buff
+## folded in) — so the two dials move together off one stat: a steadier shooter both scatters less AND predicts
+## better. A sheetless mook leads at the authored base, the sniper archetype (gunplay 2, sway_mult 0.92) at
+## 0.92 of full lead, and a gunplay 12.5+ elite clamps to a perfect intercept. A NEGATIVE gunplay pushes
+## sway_mult above 1 and leads WORSE, which is the right direction. Clamped to [0, 1] so no stat sheet can
+## make an NPC OVER-lead (aiming past you was never the failure mode), and the sway_mult divisor is floored
+## off zero — a gunplay 12.5+ sheet drives it to exactly 0.
+func aim_lead_fraction() -> float:
+	var base: float = GameSettings.npc_ai.aim_lead_fraction
+	if base <= 0.0:
+		return 0.0
+	var steadiness: float = maxf(stats_or_default().sway_mult(status_stat_modifier(&"gunplay")), 0.001)
+	return clampf(base / steadiness, 0.0, 1.0)
 
 func get_aim_basis() -> Basis:
 	var dir := get_aim_direction()

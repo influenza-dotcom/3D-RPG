@@ -63,9 +63,32 @@ signal queued_for_deletion(_last_pos: Vector3)
 func _ready() -> void:
 	contact_monitor = true
 	max_contacts_reported = 1
+	_pass_see_through_geometry()
 	linear_velocity = direction * speed
 	if direction != Vector3.ZERO:
 		look_at(global_position + direction, Vector3.UP)
+
+## Fly THROUGH see-through geometry — a chain-link fence, a wire grille, a shop window. Those bodies stay solid to
+## everything else (you still can't walk through one, props still bounce off, the navmesh still carves round it);
+## a fired round is the exception, so both sides of a fence can shoot each other, matching the fact that they can
+## SEE each other through it (`SightRay`).
+##
+## ⭐It has to be a per-body collision EXCEPTION, and that is the whole reason see-through brushes are split into
+## their own `StaticBody3D` by `SeeThroughBrushes`. A flying round collides with a BODY: `collision_mask` is
+## per-body and so is `add_collision_exception_with`, so with the fences still inside func_godot's one
+## 558-shape worldspawn there would be no way to let a round through the wire without letting it through the whole
+## level. (The hitscan path has no such limit — `DamageTrace` re-casts per segment — but they agree on the rule.)
+##
+## Exceptions are added ONCE at spawn, before the first physics step. Fences never appear mid-flight, and the list
+## is short (one map body plus any tagged props), so this is a handful of calls on a node that lives ~2 seconds.
+func _pass_see_through_geometry() -> void:
+	if not is_inside_tree():
+		return
+	for node in get_tree().get_nodes_in_group(Groups.SEE_THROUGH):
+		# The SeeThrough drop-in marks a prop's ROOT as well as its bodies, and a root is usually a plain Node3D.
+		var other := node as CollisionObject3D
+		if other != null:
+			add_collision_exception_with(other)
 	# The whiz falloff is a GLOBAL tuning knob (AudioSettings.bullet_whiz_max_distance) — stamp it onto the
 	# scene's authored WhizSFX so tuning it actually changes the game. Volume deliberately stays scene-authored
 	# (the pistol round's 80 dB crack vs the lobbed variants' -2 dB are per-scene mixes, not one global).

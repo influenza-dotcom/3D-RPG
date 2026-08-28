@@ -431,14 +431,21 @@ func can_see() -> bool:
 	if flat_to.length_squared() > 0.0001 and flat_fwd.length_squared() > 0.0001:
 		if rad_to_deg(flat_fwd.angle_to(flat_to)) > fov_degrees * 0.5:
 			return false
-	# Line of sight: nothing solid between the eyes and the target.
+	# World guard: SightRay answers "clear line" for a dead space, and a bare/off-tree Perception must never read
+	# as omniscient -- no space to test in means no sighting. (Before SightRay this line crashed instead.)
+	var world := get_world_3d()
+	if world == null or not world.space.is_valid():
+		return false
+	# Line of sight: nothing solid between the eyes and the target. "Solid" is SightRay's definition, not the
+	# physics engine's -- see-through geometry (a chain-link fence, a shop window) is stepped past instead of
+	# stopping the ray, so a guard is not blinded by a mesh you can plainly see each other through.
 	var query := PhysicsRayQueryParameters3D.create(eye, tp)
 	query.exclude = [get_parent()]
 	# A prop the TARGET is carrying (parked on the held-prop layer, floated in front of their face) must NOT read
 	# as a wall — raycasts ignore the carrier's collision exception, so without this you could turn invisible by
 	# holding a box up. Mask out exactly the bit PickupRay sets on a held prop; every other solid still occludes.
 	query.collision_mask = 0xFFFFFFFF & ~TalkHelpers.held_prop_collision_layer()
-	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	var hit := SightRay.cast(world, query)
 	return hit.is_empty() or hit.get("collider") == target
 
 ## True if this enemy can SEE `node` right now: within sight_range, inside the horizontal view cone, and with a
@@ -467,7 +474,7 @@ func can_see_node(node: Node3D) -> bool:
 	query.exclude = [get_parent()]
 	# Same as can_see: a prop the node is carrying in front of its face must not occlude us noticing it.
 	query.collision_mask = 0xFFFFFFFF & ~TalkHelpers.held_prop_collision_layer()
-	var hit := world.direct_space_state.intersect_ray(query)
+	var hit := SightRay.cast(world, query)  # see-through geometry never blocks a sighting (see can_see)
 	return hit.is_empty() or hit.get("collider") == node
 
 ## Sight range for the CURRENT target: the base range SHORTENED while they crouch (stealth) and LENGTHENED while
@@ -624,4 +631,6 @@ func _wall_between(from: Vector3, to: Vector3) -> bool:
 	q.exclude = [get_parent()]
 	# A prop the source is carrying must not muffle its own noise (it floats on the held-prop layer at the source).
 	q.collision_mask = 0xFFFFFFFF & ~TalkHelpers.held_prop_collision_layer()
-	return not world.direct_space_state.intersect_ray(q).is_empty()
+	# SightRay, not a raw intersect_ray: a chain-link fence muffles nothing, so see-through geometry must not
+	# count as the wall that attenuates a noise either.
+	return not SightRay.cast(world, q).is_empty()
