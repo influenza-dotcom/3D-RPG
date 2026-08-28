@@ -410,7 +410,7 @@ func test_muzzle_whiz_constants_present() -> void:
 ## The barrel-smoke trail is authored INTO the view model (under the same PlayerMuzzle marker as the flash,
 ## sparks and casing) and wired by GunMesh.setup, so nothing in the firing pipeline knows it exists. That
 ## makes the scene node + the one signal connection the whole contract — pin both, plus the three emitter
-## flags that keep it a small cluster WELDED to the barrel rather than a world-space trail.
+## flags that keep the curl WELDED to the barrel rather than becoming a world-space trail.
 func test_muzzle_smoke_node_present_and_connected() -> void:
 	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
 	var instance := player_scene.instantiate()
@@ -424,7 +424,7 @@ func test_muzzle_smoke_node_present_and_connected() -> void:
 	assert_false(smoke.one_shot,
 		"The barrel-smoke emitter must NOT be one_shot — smoke is a CONTINUOUS stream gated by the hot-barrel window, and a one_shot emitter would restart (and so wipe) the trail on every round of a burst")
 	assert_true(smoke.local_coords,
-		"The barrel-smoke emitter must simulate in LOCAL space — it is welded to the barrel on purpose. World space looks right standing still and loses the whole cluster behind the camera the moment you advance, and inherit_velocity_ratio does not rescue it (0.75 still lost it at 3.2 m/s, and damping bleeds even 1.0 back off)")
+		"The barrel-smoke emitter must simulate in LOCAL space — it is welded to the barrel on purpose. World space looks right standing still and loses the whole strand behind the camera the moment you advance, and inherit_velocity_ratio does not rescue it (0.75 still lost it at 3.2 m/s, and back when damping was non-zero it bled even 1.0 straight back off). Note the cost this buys: direction and gravity are then LOCAL vectors, which is why MuzzleSmoke._drive_wave has to re-aim them at true world up every frame")
 	assert_almost_eq((smoke.process_material as ParticleProcessMaterial).inherit_velocity_ratio, 0.0, 0.0001,
 		"inherit_velocity_ratio must stay 0 while local_coords is on — in local space the emitter's own motion is already accounted for, and inheriting it again double-counts")
 	assert_false(smoke.emitting,

@@ -357,25 +357,32 @@ extends Resource
 @export var hit_spark_speed_to_scale: float = 32.0
 ## Radius (metres) of the overkill-penetration burst — bigger than the ordinary spark so a shot punching THROUGH an enemy into the next reads clearly.
 @export var overkill_burst_radius: float = 0.9
-## Opacity of ONE smoke puff (MuzzleSmoke), 0..1. The puffs are meant to read INDIVIDUALLY — a small cartoon
-## cluster, not a haze — so this is high and the particle count is low, and the two must move together.
+## Opacity of ONE smoke puff (MuzzleSmoke), 0..1. ⭐The puffs are NOT meant to read individually any more —
+## they are strung 4-7 deep along a curling strand, and what you are setting is how fast that overlap
+## ACCUMULATES into the visible rope. That inverts the old rule: this number is now LOW and the count is high,
+## and the two must still move together.
 ## ⭐Every failure mode here was photographed before these numbers were picked (the harness is
 ## scripts/tools/muzzle_smoke_qa_shots.gd): hundreds of near-transparent puffs fuse into a realistic
 ## connected haze, a few hundred at middling alpha saturate into a featureless solid-white ball, and a
-## handful at low alpha vanish entirely. Multiplies the per-particle fade the colour ramp already does, so
-## it is "how solid is one puff", never "when does it fade". Everything else about the look — the disc-with-
-## a-rim falloff on resources/materials/muzzle_smoke.tres, the growth curve, the buoyancy and the curl —
-## is authored in the Inspector on that material and scenes/effects/muzzle_smoke.tscn.
-@export_range(0.0, 1.0, 0.01) var muzzle_smoke_alpha: float = 0.42
+## handful at low alpha vanish entirely. At the shipped 112 puffs, 0.42 accumulates to ~0.98 — a solid white
+## cotton rope with no shape left in it — which is why this came DOWN when the smoke became a line.
+## Multiplies the per-particle fade the colour ramp already does, so it is "how solid is one puff", never
+## "when does it fade". Everything else about the look — the disc-with-a-rim falloff on
+## resources/materials/muzzle_smoke.tres, the growth curve and the buoyancy — is authored in the Inspector on
+## that material and scenes/effects/muzzle_smoke.tscn; the CURL is the two wave fields below.
+@export_range(0.0, 1.0, 0.01) var muzzle_smoke_alpha: float = 0.24
 ## How long (seconds) the stream takes to SWELL IN when it starts. Emission eases up from nothing across this
 ## window instead of snapping to full flow, so the smoke wells up out of the barrel rather than a whole cluster
 ## of puffs popping into existence in one frame. This is the other half of making the smoke its own beat: the
 ## delay separates it from the flash, this stops the separation reading as a hard pop. 0 restores the snap.
-@export var muzzle_smoke_attack: float = 0.14
+@export var muzzle_smoke_attack: float = 0.10
 ## How long (seconds) the stream takes to PETER OUT at the end of the hold. Emission eases to nothing across
 ## this window (via the emitter's amount_ratio) instead of being cut at full flow, which reads as the smoke
 ## being switched off mid-puff. Longer = a lazier, more gradual die-away. 0 restores the hard cut.
-@export var muzzle_smoke_taper: float = 0.25
+## ⭐It does double duty now that the smoke is a coherent LINE: it thins the NEWEST end of the strand, so the
+## curl tapers to a point where it leaves the barrel instead of ending in a blunt stub that then drifts off
+## as one detached bar.
+@export var muzzle_smoke_taper: float = 0.30
 ## The beat between the BANG and the smoke, in seconds. A round is long gone before a barrel smokes, so smoke
 ## that blooms on the same frame as the muzzle flash reads as part of the flash — the two events fuse and the
 ## shot loses its punch. This is what separates them. 0 restores the old same-frame behaviour; much above ~0.3
@@ -385,7 +392,25 @@ extends Resource
 ## How long (seconds) the barrel keeps STREAMING smoke after a shot. Each shot re-arms this window rather
 ## than restarting the emitter, so a full-auto burst makes ONE continuous trail that keeps going this long
 ## after the last round. Longer = a heavier, more persistent trail; ~0.1 gives a quick single wisp per shot.
-@export var muzzle_smoke_hold: float = 0.5
+## ⭐⭐IT IS ALSO THE LENGTH OF THE CURL, and that is the non-obvious half. The strand you can see is made of
+## the particles alive right now, and they can only span as many seconds of AGE as emission actually ran — so
+## the visible hump count is 2 x muzzle_smoke_wave_hz x THIS, never x lifetime. Cut this to 0.4 and a single
+## shot shows barely one bend no matter how the wave is tuned. Raise it and the serpent gets longer, not wider.
+@export var muzzle_smoke_hold: float = 0.85
+## How fast the emission point sweeps side to side, in cycles per second — the WAVELENGTH knob for the cartoon
+## serpentine. ⭐The visible hump count is 2 x this x muzzle_smoke_hold (NOT x lifetime — see above), so 1.15
+## against a 0.85 hold is the authored "one lazy S". Raise it for a tighter corkscrew, lower it for a single
+## lazy bend. 0 = a straight column, which is the honest way to turn the curl off.
+@export_range(0.0, 4.0, 0.05) var muzzle_smoke_wave_hz: float = 1.15
+## How far to each side the sweep reaches, in metres — HALF the peak-to-peak width of the wave.
+## ⭐It has to stay at least ~1.5x the puff diameter at death (scale_max on scenes/effects/muzzle_smoke.tscn's
+## process material) or the strand's own thickness swallows the wave and you photograph a fat wobbling rope
+## instead of an S. At the authored scale_max 0.032 that floor is about 0.024.
+## ⭐And the SLOPE of the serpentine is amp x TAU x wave_hz / initial_velocity — keep it near 1.2 (about 50
+## degrees off vertical); past 2.0 it stops reading as a curl and starts reading as a scribble, because the
+## puffs are then travelling further sideways than upward. Scaled by the SQUARE ROOT of the per-weapon puff
+## size, so a big-bore belch is wider without swinging clean out of frame.
+@export_range(0.0, 0.2, 0.001) var muzzle_smoke_wave_amp: float = 0.045
 
 @export_group("View-Model Kick (per shot / per swing)")
 ## The whole view model's KICK when you attack — GunMesh.fire() tweens the rig out to these and back, and any
