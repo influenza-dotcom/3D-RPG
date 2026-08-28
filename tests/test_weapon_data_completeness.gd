@@ -42,6 +42,10 @@ func _check_weapon(path: String) -> void:
 	# Declared `float = 1.0`, so an int-looking .tres literal (`stamina_cost_mult = 2`) still parses as a FLOAT —
 	# the same trap damage above documents. The BALANCE of the authored values is swept by test_combat_data.gd.
 	_check_field(w, "stamina_cost_mult", TYPE_FLOAT, path)
+	# The weapon-side STEALTH lever: multiplies how far this gun's shot carries (player.gd on_weapon_fired ->
+	# NoiseEmitter.gunfire(mult)). Declared `float = 1.0`, so an authored `noise_radius_mult = 0` in a .tres
+	# would still parse FLOAT — the same int-literal trap damage above documents. A suppressor MULTs it down.
+	_check_field(w, "noise_radius_mult", TYPE_FLOAT, path)
 	# Does a round from this weapon explode? A pricing/authoring FACT, not a behaviour switch - nothing on
 	# WeaponData can otherwise tell an explosive apart (explosion_radius defaults 4.0 on every weapon and
 	# max_explosion_force defaults 20.0, so the PISTOL nominally out-blasts the launcher's authored 10.0).
@@ -72,6 +76,20 @@ func _check_weapon(path: String) -> void:
 	# effect is scripts/components/throw_trail.gd). Off by default — a gun tumbles away without one.
 	_check_field(w, "thrown_trail", TYPE_BOOL, path)
 	_check_field(w, "thrown_trail_color", TYPE_COLOR, path)
+	# The six fitted-mod slot ids (weapon_data.gd @export_group("Modifications")). These are @export_STORAGE:
+	# invisible in the inspector, never authored, written only by WeaponBench via WeaponModKit.rebuild — but
+	# they are still SCRIPT_VARIABLE, which is precisely what makes ItemDb.weapon_delta_for diff them onto the
+	# EXISTING weapon_delta save key with no new save plumbing. Two things are pinned here and nowhere else:
+	#   • the declared type stays TYPE_STRING_NAME — it is in ItemDb._is_weapon_delta_type's allow-list, so a
+	#     drift to String/int would silently drop every fitted part from the save with no error anywhere;
+	#   • a shipped weapon .tres ships BLANK (asserted below) — a stray authored id in a TEMPLATE would give
+	#     every instance of that gun a permanent non-empty delta and a mod nobody fitted.
+	# Iterating MOD_SLOT_PROPS rather than a second hand-list means a seventh slot stays the three coordinated
+	# edits weapon_data.gd promises; the array's own order/length is pinned by tests/test_weapon_mods.gd.
+	for prop in WeaponData.MOD_SLOT_PROPS:
+		_check_field(w, String(prop), TYPE_STRING_NAME, path)
+		assert_eq(StringName(w.get(String(prop))), &"",
+			"%s.%s must ship BLANK — mod slots are runtime-owned, never authored into a template" % [path, prop])
 
 func _check_field(obj: Object, field: String, expected_type: int, src: String) -> void:
 	assert_true(field in obj, "%s must have field '%s'" % [src, field])
@@ -173,6 +191,33 @@ func test_non_knife_weapons_do_not_override_npc_hold() -> void:
 		assert_not_null(w, "%s must load as a WeaponData" % path)
 		assert_false(w.npc_hold_override,
 			"%s mounts correctly via rotation-only weapon_mesh_rotation — it must NOT set npc_hold_override" % wep)
+
+# The held pose is game-wide too, for the same reason the streak is: a weapon in your HANDS that ignores where you
+# are looking reads as a bug, not as flavour. Every weapon must have `held_faces_aim` on, and every weapon whose
+# model follows the project's barrel-is-+X convention must carry the matching +90 front correction — the value that
+# swings that +X onto the aim's -Z (the NPC hand mount's `weapon_mesh_rotation` default of -90 is the same
+# convention mirrored for an NPC's +Z forward). Both are DEFAULTS on WeaponData, so this catches a resource that
+# turned one off by hand as much as one authored from a stale template. The knife is the documented exception on
+# the rotation only: its blade points -X, so it needs 180 (pinned separately below by its own throw test), and it
+# is excluded here rather than special-cased so a NEW weapon that quietly picks 180 gets caught.
+func test_every_weapon_is_held_pointing_down_your_aim() -> void:
+	for wep in ["melee", "pistol", "shotgun", "smg", "sniper_wep", "rock_weapon", "spray_paint", "fists"]:
+		var path := "res://resources/weapons/%s.tres" % wep
+		var w := load(path) as WeaponData
+		assert_not_null(w, "%s must load as a WeaponData" % path)
+		assert_true(w.held_faces_aim,
+			"%s must point its business end down your look while carried — held_faces_aim is on for every weapon" % wep)
+	for wep in ["pistol", "shotgun", "smg", "sniper_wep", "rock_weapon", "spray_paint", "fists"]:
+		var w := load("res://resources/weapons/%s.tres" % wep) as WeaponData
+		assert_almost_eq(w.thrown_face_rotation_degrees.y, 90.0, 0.001,
+			"%s's barrel points mesh +X, so its front correction must be +90 to lie along the aim's -Z" % wep)
+		assert_almost_eq(w.thrown_face_rotation_degrees.x, 0.0, 0.001, "%s's front correction has no pitch" % wep)
+		assert_almost_eq(w.thrown_face_rotation_degrees.z, 0.0, 0.001, "%s's front correction has no roll" % wep)
+
+func test_knife_keeps_its_blade_front_correction() -> void:
+	var w := load("res://resources/weapons/melee.tres") as WeaponData
+	assert_almost_eq(w.thrown_face_rotation_degrees.y, 180.0, 0.001,
+		"the knife's blade points mesh -X, which npc_hold_rotation maps to the drop's +Z — the TAIL of the aim — so it needs 180, not the guns' 90")
 
 # The in-flight streak is game-wide: EVERY weapon draws a white tracer through the arc of a real throw, not just
 # the blade it shipped for. This pins the whole roster ON — the inverse of what it pinned before — because the

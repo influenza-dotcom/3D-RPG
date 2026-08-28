@@ -141,8 +141,10 @@ static func _make_throwable(item: Item, amount: int, visual: Node, body_size: Ve
 	#   • throw_sound ← weapon.thrown_sound — a signature throw sound, played instead of the drop's release sound.
 	#   • face_travel_when_thrown / face_carrier_rotation_degrees ← weapon.thrown_faces_travel /
 	#     thrown_face_rotation_degrees — a THROWN weapon that opts in noses toward its travel direction (the knife
-	#     leads with its point; guns leave it off and tumble). The rotation is the mesh-front correction
-	#     Throwable._integrate_forces applies inside the aim basis.
+	#     leads with its point; guns leave it off and tumble). The rotation is the mesh-front correction, applied
+	#     inside BOTH aim bases — Throwable._integrate_forces' thrown facing and face_carrier's carry pose. It
+	#     defaults to Y=+90, the barrel-is-+X convention every gun model here follows, so it is authored per weapon
+	#     only by a model that breaks it (the knife's blade is -X, hence its 180).
 	#   • a ThrowTrail CHILD ← weapon.thrown_trail / thrown_trail_color — the white streak the drop drags while it
 	#     flies. ON for EVERY weapon (thrown_trail defaults true), so this branch is the common case, not the knife's
 	#     special case; the flag stays a per-weapon OPT-OUT for a throw that shouldn't be readable. The only stamp
@@ -156,8 +158,11 @@ static func _make_throwable(item: Item, amount: int, visual: Node, body_size: Ve
 	#   • face_carrier_while_held + face_carrier_reversed ← weapon.held_faces_aim — and THAT is what decides whether
 	#     the same rotation also poses the drop while it's CARRIED. ONE weapon flag sets BOTH Throwable fields because
 	#     a weapon has only one sensible carry pose: the dog's face-carrier machinery, REVERSED, so the business end
-	#     points AWAY down your aim (a knife held ready to throw) instead of back at your face. A gun leaves it off, so
-	#     on a gun the rotation stays thrown-only exactly as before.
+	#     points AWAY down your aim (held ready to throw) instead of back at your face. ON for EVERY weapon by
+	#     default — like the trail above, this is the common case and not the knife's special case: a weapon in your
+	#     hands that ignores where you are looking reads as a bug whether the look is sideways or pitched. The pose
+	#     tracks the FULL look including pitch (Throwable.face_carrier), which is the same vector PickupRay._release
+	#     throws along, so what is in your hands lies along the throw it is about to make.
 	if item != null and item.is_weapon():
 		t.destructible = false
 		t.impact_damage_mult = item.weapon.thrown_impact_damage_mult
@@ -188,10 +193,18 @@ static func _make_throwable(item: Item, amount: int, visual: Node, body_size: Ve
 
 ## Make an instanced first-person VIEW MODEL render like a normal world object: FP guns live on the view-model
 ## render layer (4), drawn on top by a dedicated camera with no-depth materials -- so dropped as-is they'd draw
-## THROUGH walls. Move every mesh to the world layer (1) and turn no_depth_test off so it depth-tests geometry.
+## THROUGH walls. Move every VISIBLE mesh to the world layer (1) and turn no_depth_test off so it depth-tests
+## geometry. InkOutline's tint duplicates are the one exception -- see the skip below.
 static func _make_world_renderable(node: Node) -> void:
 	if node is MeshInstance3D:
 		var mi := node as MeshInstance3D
+		# InkOutline's invisible tint duplicate (meta &"npc_tint_dup", parented under a visible mesh by NpcOutline /
+		# Throwable) must KEEP its ACTOR_TINT_LAYER bit and nothing else: layer 1 is the MAIN camera, and it would
+		# then DRAW ink_tint.gdshader's raw R/G log-depth bytes as moving yellow/green stripe bands over the dropped
+		# weapon -- the failure reported 2026-08-25 (see scripts/effects/body_part_gib.gd:186). A duplicate has no
+		# children, so returning here skips nothing else.
+		if mi.has_meta(&"npc_tint_dup"):
+			return
 		mi.layers = 1
 		if mi.mesh != null:
 			for i in mi.mesh.get_surface_count():

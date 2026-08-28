@@ -19,7 +19,8 @@ extends GutTest
 ##   • face_carrier_while_held + face_carrier_reversed == WeaponData.held_faces_aim — ...and THIS is what decides
 ##     whether the carry pose runs at all. ONE weapon flag drives BOTH, because a weapon has exactly one sensible
 ##     carry pose: the dog's face-carrier machinery REVERSED, so the blade points AWAY down your aim (held ready to
-##     throw) rather than back at your face. A gun leaves it off and the correction stays thrown-only.
+##     throw) rather than back at your face. ON for every weapon by default; the pose follows the FULL look
+##     including pitch, so it lies along the throw it is about to make.
 ##   • the drop's CanPickUp gets item_light_always_lit == WeaponData.dropped_item_light_always_lit, so a carried /
 ##     in-flight weapon keeps its red item light instead of being faded out by the ground-loot near-distance ramp.
 ## Plus the drop's SHAPE, which the thrown facing makes load-bearing (it pins local +Z along travel, so a badly
@@ -96,7 +97,8 @@ func test_dropped_weapon_is_indestructible_and_carries_its_thrown_mult() -> void
 	assert_eq(t.continuous_cd, item.weapon.thrown_impulse_mult > 1.0,
 		"a drop opting into a faster-than-normal throw gets continuous collision detection (and only then)")
 	# The mesh-front correction becomes a CARRY pose only when the weapon opts in: face_carrier() is gated on this
-	# predicate. The knife opts in; a gun leaves it thrown-only.
+	# predicate. Every weapon opts in by default (see tests/test_weapon_data_completeness.gd for the roster pin);
+	# read back off the resource here so turning it off on one weapon still checks the stamp rather than the value.
 	assert_eq(t.faces_carrier_while_held(), item.weapon.held_faces_aim,
 		"WeaponData.held_faces_aim is what turns the carry pose on — the thrown rotation alone can't")
 	# ...and it must be the REVERSED pose. Both flags come off the one weapon field, so they can never disagree: a

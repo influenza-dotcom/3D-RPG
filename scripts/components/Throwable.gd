@@ -4,7 +4,6 @@ extends RigidBody3D
 
 const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 const DamageNumberPopupScript = preload("res://scripts/combat/damage_number_popup.gd")
-const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
 const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
 const PARTY_HORN = preload("uid://v2yom7vyodag")
@@ -14,10 +13,13 @@ const DESTROY_DECAL_PROBE: float = 3.0
 const DESTROY_DECAL_CULL_MASK: int = 2
 const DESTROY_DECAL_PARALLEL_THRESHOLD: float = 0.99
 
-## The at-rest rim: the classic BLACK hull ("hidden in plain sight" — it reads as the prop's outline,
-## and flips white on hover). Props are EXCLUDED from the InkOutline screen-space pass via the
-## ACTOR_INK_MASK_LAYER stamp in _setup_overlay_chain, so this black never doubles with the world's ink.
-## (It briefly shipped transparent to dodge that doubling — wrong fix; the mask is the right one.)
+## The at-rest and hovered outline COLOURS a prop used to author on its own inverted-hull material. Kept as
+## documentation of the intended look and as the default `_persistent_outline_color`, but they no longer paint
+## anything: since 2026-08-27 a prop's outline is InkOutline's screen-space ring, whose colour comes from the
+## global LUT slot its tint id selects (rest black = InkOutline.highlight_neutral via TINT_ID_PROP_REST, hover
+## white = highlight_hover via TINT_ID_HOVER, claimed blue = highlight_companion via TINT_ID_PROP_CLAIMED).
+## Props stay EXCLUDED from the world ink via the ACTOR_INK_MASK_LAYER stamp in _setup_overlay_chain, so the
+## ring is a prop's only line at every distance.
 const OUTLINE_HIDDEN_COLOR: Color = Color(0.0, 0.0, 0.0, 1.0)
 const OUTLINE_VISIBLE_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
 const FLASH_PEAK_STRENGTH: float = 2.0
@@ -75,18 +77,21 @@ const GIB_HELD_DESPAWN_RECHECK: float = 0.5
 @export var sound_pitch_mult: float = 1.0
 
 @export_group("Carry Pose")
-## While carried, yaw this prop so its front faces back toward the player/camera. Off preserves old physics-prop rotation.
+## While carried, pose this prop so its front faces back toward the player/camera (a YAW — the presented pose stays
+## upright). Off preserves old physics-prop rotation.
 @export var face_carrier_while_held: bool = false
-## REVERSE that carry pose: point the prop's front AWAY from the carrier, down your look direction, instead of back at
-## you. The dog is PRESENTED to you (off — you want to see its face); a knife is held READY TO THROW, blade forward
-## (on). Only meaningful with face_carrier_while_held on. Implemented by flipping the aim DIRECTION, not by adding
+## REVERSE that carry pose: point the prop's front AWAY from the carrier, down your look direction — PITCH INCLUDED,
+## so it lies along the throw it is about to make — instead of back at you. The dog is PRESENTED to you (off — you
+## want to see its face, and it stays level); a knife is held READY TO THROW, blade forward (on).
+## Only meaningful with face_carrier_while_held on. Implemented by flipping the aim DIRECTION, not by adding
 ## another 180 to face_carrier_rotation_degrees — that field is shared with the thrown facing, where the correction is
 ## mandatory (the knife's Y=180 is what makes the blade lead in flight), so a rotation-based flip here would spin the
 ## prop in the air too. Flipping the direction also means the carried pose already MATCHES the thrown pose, so a knife
 ## doesn't visibly snap around when you release it.
 @export var face_carrier_reversed: bool = false
-## Extra local rotation, in degrees, applied after the face-carrier yaw. Add this if the mesh's authored
-## front is not Godot's -Z (common fix: Y=180 for a backward-facing import). Also corrects the THROWN facing below.
+## Extra local rotation, in degrees, applied after the face-carrier aim. Add this if the mesh's authored
+## front is not Godot's -Z (common fixes: Y=180 for a backward-facing import; Y=90 for a gun, whose barrel is +X).
+## Also corrects the THROWN facing below.
 @export var face_carrier_rotation_degrees: Vector3 = Vector3.ZERO
 
 @export_group("Throw Pose")
@@ -230,7 +235,6 @@ const GIB_HELD_DESPAWN_RECHECK: float = 0.5
 var hp: int
 var _impact_cooldown: float = 0.0
 var _damage_cooldown: float = 0.0
-var _outline_material: ShaderMaterial
 var _flash_material: ShaderMaterial
 var _flash_tween: Tween
 var _pre_step_velocity: Vector3 = Vector3.ZERO
@@ -253,11 +257,16 @@ var _breathe_base_scale: Vector3 = Vector3.ONE  ## authored mesh_instance scale;
 var _data_model_root: Node3D = null  ## live PackedScene visual instanced from ThrowableData.mesh, parented under mesh_instance
 var _authored_mesh: Mesh = null  ## mesh_instance.mesh before data overrides, so clearing data.mesh can restore the authored visual
 var _has_authored_mesh_snapshot: bool = false
-## While true the outline is PINNED to _persistent_outline_color and the hover toggle (set_outline_visible, driven by
-## PickupRay) can't override it — used to mark a CLAIMED prop with the blue "this is mine" rim (see Claimable /
-## set_persistent_outline). Off by default so an unclaimed prop behaves exactly as before (black rim, white on hover).
+## While true the outline is PINNED to the CLAIMED ring and the hover toggle (set_outline_visible, driven by
+## PickupRay) can't override it — used to mark a CLAIMED prop with the blue "this is mine" outline (see Claimable /
+## set_persistent_outline). Off by default so an unclaimed prop behaves exactly as before (black, white on hover).
 var _persistent_outline_active: bool = false
 var _persistent_outline_color: Color = OUTLINE_VISIBLE_COLOR
+## Whether the player is currently AIMED at this prop (PickupRay drives it through set_outline_visible). State
+## rather than a live uniform write, because the ring is stamped as a discrete id and _tint_id() has to be able to
+## re-derive the whole answer — hover beats rest, claimed beats hover — from scratch on every re-stamp (a model
+## swap, a re-dress, a claim that lands mid-hover).
+var _outline_hovered: bool = false
 ## Befriended "loyal" THROWN-combat mode (set by Claimable on befriend, cleared on release). While on, a thrown hit
 ## SPARES friendly/neutral NPCs (no damage) and deals _loyal_damage_mult× to hostiles. _loyal is false on every normal
 ## prop, so _loyal_damage_scale returns 1.0 and damage is unchanged — zero effect unless something befriends this prop.
@@ -320,6 +329,12 @@ func _apply_data_to_visuals() -> void:
 	if impact_sfx and data.impact_sound:
 		impact_sfx.stream = data.impact_sound
 
+## ⭐ EVERY `mesh` WRITE HERE IS FOLLOWED BY `InkOutline.sync_tint_mesh`. A prop wears the screen-space
+## ring, and a tint duplicate SNAPSHOTS its host's mesh — so a `data` reassigned at RUNTIME (this runs
+## again from _apply_data_to_visuals) would leave the previous model's silhouette outlined in mid-air
+## around whatever replaced it. At BOOT the order saves us (_ready applies the data model before
+## _setup_overlay_chain stamps the ring), which is exactly what makes this the latent half of the bug the
+## view model shipped: see WeaponModelSwapper._set_placeholder_hidden and InkOutline.sync_tint_mesh.
 func _apply_data_model_resource(model: Resource) -> void:
 	if mesh_instance == null:
 		return
@@ -327,10 +342,12 @@ func _apply_data_model_resource(model: Resource) -> void:
 	if model == null:
 		_clear_data_model_root()
 		mesh_instance.mesh = _authored_mesh
+		InkOutline.sync_tint_mesh(mesh_instance)
 		return
 	if model is Mesh:
 		_clear_data_model_root()
 		mesh_instance.mesh = model as Mesh
+		InkOutline.sync_tint_mesh(mesh_instance)
 		return
 	if model is PackedScene:
 		var root: Node3D = ModelResourceUtil.instantiate(model, "ThrowableModel")
@@ -339,6 +356,7 @@ func _apply_data_model_resource(model: Resource) -> void:
 			return
 		_clear_data_model_root()
 		mesh_instance.mesh = null
+		InkOutline.sync_tint_mesh(mesh_instance)
 		mesh_instance.add_child(root)
 		_data_model_root = root
 		return
@@ -423,23 +441,22 @@ func _setup_overlay_chain() -> void:
 	_flash_material = ShaderMaterial.new()
 	_flash_material.shader = FLASH_OVERLAY_SHADER
 	_flash_material.set_shader_parameter("flash_strength", 0.0)
-	_outline_material = ShaderMaterial.new()
-	_outline_material.shader = OUTLINE_SHADER
-	_outline_material.set_shader_parameter("outline_color", OUTLINE_HIDDEN_COLOR)
-	# outline_width = 1.0 IS the shipped look (the chunky shell): this code previously set a non-existent
-	# `outline_thickness` uniform (the same latent no-op talk_helpers.gd documents) plus a dead
-	# `use_smooth_normals` toggle, so the shader's 1.0 DEFAULT is what has always rendered. Codified
-	# explicitly so a future shader-default change can't silently restyle every throwable. (The old
-	# smooth-normal vertex-colour bake was authored for an outline shader that never shipped — the live
-	# shader reads only NORMAL — so the whole mesh-rebuild pass was dead work and is gone; see git.)
-	_outline_material.set_shader_parameter("outline_width", 1.0)
-	_outline_material.next_pass = _flash_material
 	var targets := TalkHelpers.collect_meshes(self, null, true)
 	for m in targets:
-		# Register with the ink-outline actor mask: a hull-rimmed prop is EXCLUDED from the screen-space
-		# ink pass (the rim is its outline — ink on top doubles it; see InkOutline's class doc).
+		# Register with the ink-outline actor mask: an outlined prop is EXCLUDED from the screen-space
+		# ink pass (the ring is its outline — ink on top doubles it; see InkOutline's class doc).
 		m.layers |= InkOutline.ACTOR_INK_MASK_LAYER
-		m.material_overlay = _outline_material
+		# The flash goes straight into the overlay slot now. It used to be the inverted hull's `next_pass`,
+		# because the hull needed that one slot and the flash had to ride behind it; with the hull gone
+		# nothing competes for it.
+		m.material_overlay = _flash_material
+	# ⭐ THE PROP'S OUTLINE: a screen-space ring (InkOutline.apply_tint), at every distance. Until
+	# 2026-08-27 this was only the FAR half of a crossfade — an inverted hull owned close range and the ring
+	# faded in as that hull faded out — which is why the ring knobs used to carry a "prop band". The hull is
+	# deleted; the ring owns the whole distance, which is also what finally makes a prop's line
+	# constant-width, so it can never out-thicken a knife blade the way a shell does.
+	# Re-stamped by the outline setters below.
+	InkOutline.apply_tint(self, _tint_id())
 
 # `want_visible` is a sentinel-defaulted Variant, not `bool = visible`: a default expression is captured at
 # the DECLARING node's scope, so `= visible` would bake in THIS Throwable's visible flag (semantically
@@ -447,27 +464,35 @@ func _setup_overlay_chain() -> void:
 # With the null sentinel a no-arg call falls back to the node's CURRENT `visible` at call time; the callers
 # (ray_cast.gd) pass an explicit bool, which is used as-is.
 func set_outline_visible(want_visible = null) -> void:
-	if not _outline_material:
-		return
-	# A claimed prop PINS its rim colour (the blue "mine" outline) — the hover toggle PickupRay drives can't override
+	_outline_hovered = bool(want_visible) if want_visible != null else visible
+	# A claimed prop PINS its outline (the blue "mine" ring) — the hover toggle PickupRay drives can't override
 	# it, so the dog reads as yours whether or not you're aiming at it. clear_persistent_outline() lifts the pin.
+	# _tint_id() encodes that precedence, so this is one unconditional re-stamp.
+	InkOutline.apply_tint(self, _tint_id())
+
+## This prop's ring id — its WHOLE outline (see _setup_overlay_chain), resolved fresh every time so a
+## re-stamp can never lose a state. PRECEDENCE, highest first:
+##   CLAIMED (companion blue) — pinned, and deliberately survives hover: a claimed dog must read as yours
+##       whether or not you happen to be aiming at it.
+##   HOVER (white) — you are aimed at this and Interact will do something.
+##   REST (black) — the classic "hidden in plain sight" prop line.
+## ⭐ One id per mesh, so these are alternatives rather than layers — which is exactly why the hover can be
+## a ring at all now. Under the old hull the white was a second material fighting for the same overlay slot,
+## and the reason the ring deliberately had no hover id.
+func _tint_id() -> int:
 	if _persistent_outline_active:
-		_outline_material.set_shader_parameter("outline_color", _persistent_outline_color)
-		return
-	var want: bool = bool(want_visible) if want_visible != null else visible
-	_outline_material.set_shader_parameter(
-		"outline_color",
-		OUTLINE_VISIBLE_COLOR if want else OUTLINE_HIDDEN_COLOR
-	)
+		return InkOutline.TINT_ID_PROP_CLAIMED
+	return InkOutline.TINT_ID_HOVER if _outline_hovered else InkOutline.TINT_ID_PROP_REST
 
 ## Pin a persistent outline colour on this prop, shown regardless of hover (set_outline_visible's toggle is overridden
 ## while active). Used to mark a CLAIMED prop with the blue companion rim so it reads as "mine" at a glance — the same
 ## blue an NPC companion wears (NPC.OUTLINE_FOLLOWING). Applied immediately. clear_persistent_outline() lifts it.
+## The ring is re-stamped alongside, so a claimed prop reads blue at range too — the state whose whole point is
+## long-range readability, and the one the hull fade had silently blinded past ~16 m.
 func set_persistent_outline(color: Color) -> void:
 	_persistent_outline_active = true
 	_persistent_outline_color = color
-	if _outline_material:
-		_outline_material.set_shader_parameter("outline_color", color)
+	InkOutline.apply_tint(self, _tint_id())
 
 ## Lift the persistent outline, restoring the HIDDEN (default) rim. We deliberately do NOT restore the white "hovered"
 ## look here: the claimed rim is driven by ClaimInteraction's ray, which is INDEPENDENT of the PickupRay that owns the
@@ -478,8 +503,8 @@ func set_persistent_outline(color: Color) -> void:
 ## the next time you look away and back.
 func clear_persistent_outline() -> void:
 	_persistent_outline_active = false
-	if _outline_material:
-		_outline_material.set_shader_parameter("outline_color", OUTLINE_HIDDEN_COLOR)
+	_outline_hovered = false  # see the note above: an unclaim can land on a frame PickupRay is not targeting us
+	InkOutline.apply_tint(self, _tint_id())  # back to the rest-black ring
 
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
@@ -1268,7 +1293,7 @@ func _start_held_loop_sound() -> void:
 	_held_loop_player = AudioStreamPlayer3D.new()
 	_held_loop_player.name = "HeldLoopSFX"
 	_held_loop_player.stream = stream
-	_held_loop_player.bus = &"sfx"
+	_held_loop_player.bus = AudioManager.WORLD_BUS
 	_held_loop_player.max_distance = AudioManager.DEFAULT_3D_MAX_DISTANCE
 	_held_loop_player.finished.connect(_on_held_loop_finished)
 	add_child(_held_loop_player)
@@ -1408,25 +1433,41 @@ func _face_carrier_offset_radians() -> Vector3:
 		deg += data.face_carrier_rotation_degrees
 	return Vector3(deg_to_rad(deg.x), deg_to_rad(deg.y), deg_to_rad(deg.z))
 
-## Portal-style presentation pose: keep the prop upright, but rotate its Godot-forward (-Z) toward the
-## carrier/camera while held. Imported meshes can use face_carrier_rotation_degrees to correct their front axis.
-## faces_carrier_reversed() flips the AIM (not the correction) so the front points away down your look direction
-## instead — a knife held blade-forward, ready to throw. See face_carrier_reversed for why the flip lives here and
-## not in the rotation offset.
+## The carry pose. TWO shapes, picked by faces_carrier_reversed():
+##  • PRESENTED (off — the dog): keep the prop UPRIGHT and merely yaw its Godot-forward (-Z) back toward the
+##    carrier, so you see its face. Level whatever you do with the look: a dog held out at arm's length should not
+##    tip nose-down because you glanced at the floor.
+##  • READY TO THROW (on — every weapon): point the front AWAY, straight down the carrier's own forward axis,
+##    PITCH INCLUDED. That axis (-basis.z of the carrier transform, which is the PickupRay under the camera) is the
+##    EXACT vector PickupRay._release launches along, so the weapon in your hands lies along the throw it is about
+##    to make — aim up and the muzzle/blade rises with you, aim down and it dips. Flattening it (what this did
+##    before) pinned every held weapon dead level, so the pose read the same whether you were about to lob the
+##    thing over a railing or spike it at your feet.
+## Imported meshes correct their front axis with face_carrier_rotation_degrees (a gun's barrel is +X, so it takes
+## Y=+90 to lie along the aim's -Z). See face_carrier_reversed for why the flip lives in the AIM and not in that
+## correction.
+## The up-hint follows the same split. The presented pose is world-upright; the ready pose borrows the CARRIER's up
+## axis, which is perpendicular to its forward by construction — Vector3.UP would be degenerate (look_at errors,
+## then flips the prop) at the top of the look range, and the wall-climb pitch clamp opens to 150°, well past
+## vertical. Riding the carrier's up also rolls the prop with the camera, which is right for a thing in your hands.
 func face_carrier(carrier_transform: Transform3D) -> void:
 	if not faces_carrier_while_held():
 		return
 	var carried_scale := global_transform.basis.get_scale()
-	var to_carrier := carrier_transform.origin - global_position
-	to_carrier.y = 0.0
-	if to_carrier.length_squared() < 0.0001:
-		to_carrier = carrier_transform.basis.z
-		to_carrier.y = 0.0
-	if to_carrier.length_squared() < 0.0001:
-		return
+	var aim: Vector3
+	var up := Vector3.UP
 	if faces_carrier_reversed():
-		to_carrier = -to_carrier  # aim AWAY from the carrier: the prop's front now leads down the carrier's forward
-	look_at(global_position + to_carrier.normalized(), Vector3.UP)
+		aim = -carrier_transform.basis.z  # down the carrier's look, pitch and all — the throw vector itself
+		up = carrier_transform.basis.y
+	else:
+		aim = carrier_transform.origin - global_position
+		aim.y = 0.0
+		if aim.length_squared() < 0.0001:
+			aim = carrier_transform.basis.z  # carrier standing on top of us: fall back to its own backward axis
+			aim.y = 0.0
+	if aim.length_squared() < 0.0001:
+		return
+	look_at(global_position + aim.normalized(), up)
 	var t := global_transform
 	var held_basis := t.basis.orthonormalized()
 	var offset := _face_carrier_offset_radians()

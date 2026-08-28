@@ -955,6 +955,80 @@ func test_throwable_face_carrier_preserves_scale_with_rotation_offset() -> void:
 		"face_carrier must preserve authored Z scale when applying a rotation offset.")
 
 
+# The READY-TO-THROW carry pose (face_carrier_reversed — every weapon) must follow the carrier's look UP AND DOWN,
+# not just its yaw. The pose flattened the aim before, so a held weapon sat dead level no matter where you aimed;
+# it also disagreed with the throw, which PickupRay._release always launched along the carrier's FULL forward
+# (-basis.z). These pin the two halves of that: the reversed pose takes the pitch, and it takes it EXACTLY (same
+# vector as the launch), so what is in your hands lies along the throw it is about to make.
+func test_throwable_reversed_carry_pose_follows_carrier_pitch() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	inter.face_carrier_while_held = true
+	inter.face_carrier_reversed = true
+	add_child_autofree(inter)  # face_carrier reads global_transform / calls look_at — off-tree those are identity
+	inter.global_transform = Transform3D(Basis.IDENTITY, Vector3.ZERO)
+	# A carrier looking 40° DOWN, standing back and above the prop (the hold anchor sits ahead of the camera).
+	var carrier := Transform3D(Basis.from_euler(Vector3(deg_to_rad(-40.0), 0.0, 0.0)), Vector3(0.0, 1.0, 1.5))
+	inter.face_carrier(carrier)
+	var prop_front: Vector3 = (-inter.global_transform.basis.z).normalized()
+	var carrier_front: Vector3 = (-carrier.basis.z).normalized()
+	assert_almost_eq(prop_front.dot(carrier_front), 1.0, 0.0001,
+		"the ready-to-throw pose must point down the carrier's FULL forward — the same vector PickupRay._release throws along")
+	assert_lt(prop_front.y, -0.5,
+		"looking 40 degrees down must dip the held weapon's business end, not leave it level")
+
+
+# ...and the PRESENTED pose (the dog, face_carrier_reversed OFF) must NOT take the pitch: a dog held out at arm's
+# length should keep its feet under it when you glance at the floor. Same carrier, opposite expectation — this is
+# the guard that the pitch fix stayed on the weapon side of the branch.
+func test_throwable_presented_carry_pose_stays_level_through_pitch() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	inter.face_carrier_while_held = true  # reversed left OFF: presented, not ready-to-throw
+	add_child_autofree(inter)
+	inter.global_transform = Transform3D(Basis.IDENTITY, Vector3.ZERO)
+	var carrier := Transform3D(Basis.from_euler(Vector3(deg_to_rad(-40.0), 0.0, 0.0)), Vector3(0.0, 1.0, 1.5))
+	inter.face_carrier(carrier)
+	var prop_front: Vector3 = (-inter.global_transform.basis.z).normalized()
+	assert_almost_eq(prop_front.y, 0.0, 0.0001,
+		"the presented pose stays upright — only the reversed ready-to-throw pose follows the look up and down")
+
+
+# The mesh-front correction has to survive the pitch, on the axis a GUN actually uses. Every gun view_model here
+# points its barrel down mesh +X (its Muzzle marker sits at +X), which is why WeaponData.thrown_face_rotation_degrees
+# defaults to Y=+90 — that is the yaw that swings +X onto the aim's -Z. Pin that the corrected axis, not the raw -Z,
+# is what ends up along a PITCHED look.
+func test_throwable_reversed_carry_pose_aims_the_corrected_gun_axis() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	inter.face_carrier_while_held = true
+	inter.face_carrier_reversed = true
+	inter.face_carrier_rotation_degrees = Vector3(0.0, 90.0, 0.0)  # the gun convention: barrel is local +X
+	add_child_autofree(inter)
+	inter.global_transform = Transform3D(Basis.IDENTITY, Vector3.ZERO)
+	var carrier := Transform3D(Basis.from_euler(Vector3(deg_to_rad(25.0), deg_to_rad(70.0), 0.0)), Vector3(0.0, 1.0, 1.5))
+	inter.face_carrier(carrier)
+	var barrel: Vector3 = inter.global_transform.basis.x.normalized()
+	var carrier_front: Vector3 = (-carrier.basis.z).normalized()
+	assert_almost_eq(barrel.dot(carrier_front), 1.0, 0.0001,
+		"with the +90 gun correction the drop's local +X (the barrel) must lie along the look, pitch included")
+
+
+# Straight up is inside the normal look range (the pitch clamp is 89 degrees, and wall-climbing opens it to 150 —
+# past vertical). Vector3.UP as the look_at hint is degenerate there: the engine errors and the prop flips. The
+# reversed pose borrows the CARRIER's up axis, which is perpendicular to its forward by construction, so this must
+# come out finite and still aimed. GUT 9.6 fails a test on an engine error, so a regression here shows up as a
+# failure either way.
+func test_throwable_reversed_carry_pose_survives_looking_straight_up() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	inter.face_carrier_while_held = true
+	inter.face_carrier_reversed = true
+	add_child_autofree(inter)
+	inter.global_transform = Transform3D(Basis.IDENTITY, Vector3.ZERO)
+	var carrier := Transform3D(Basis.from_euler(Vector3(deg_to_rad(90.0), 0.0, 0.0)), Vector3(0.0, 1.0, 0.0))
+	inter.face_carrier(carrier)
+	var prop_front: Vector3 = (-inter.global_transform.basis.z).normalized()
+	assert_almost_eq(prop_front.y, 1.0, 0.001,
+		"looking straight up must point the held weapon straight up, not error out or flip it")
+
+
 func test_throwable_held_visibility_defaults_to_fade() -> void:
 	var inter = load("res://scripts/components/Throwable.gd").new()
 	assert_true(inter.fades_while_held(),

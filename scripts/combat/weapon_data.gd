@@ -9,6 +9,23 @@ extends Resource
 ## Drives the `caliber` dropdown from the ammo calibers on disk (const-preloaded, NO class_name — see calibers.gd).
 const Calibers = preload("res://scripts/items/calibers.gd")
 
+## THE FO4 slot vocabulary — and the SAVE vocabulary: each entry has exactly one @export_storage
+## StringName field below holding the fitted part's Item.id. One mod per slot, by construction.
+## ⭐Adding a seventh slot is THREE coordinated edits, all in this file: an enum entry, a new
+## @export_storage field, and a MOD_SLOT_PROPS row (in the same ordinal position). Nothing else in
+## the game hardcodes the mapping — mod_id()/set_mod_id() index the array.
+##
+## It lives on WeaponData ON PURPOSE: WeaponData is what STORES the six ids, so the save vocabulary and
+## the save fields sit together, and WeaponData gains no new class dependency (WeaponMod -> WeaponData,
+## one direction only — the part names the slot, the slot never names the part).
+enum ModSlot { RECEIVER, BARREL, MAGAZINE, SIGHT, MUZZLE, STOCK }
+
+## Enum ordinal -> the @export_storage property that stores that slot's fitted part id. MUST stay in
+## enum order and the same length; tests/test_weapon_mods.gd pins both.
+const MOD_SLOT_PROPS: Array[StringName] = [
+	&"mod_receiver", &"mod_barrel", &"mod_magazine", &"mod_sight", &"mod_muzzle", &"mod_stock",
+]
+
 @export_group("General")
 ## Max hitscan reach (metres) — the raycast stops here, so beyond it a hip/scoped shot hits nothing.
 ## Also the NPC standoff distance when this weapon sets it (>0). 0 = unranged: AI falls back to npc_ai.unranged_aim_fallback.
@@ -16,6 +33,11 @@ const Calibers = preload("res://scripts/items/calibers.gd")
 ## Movement-speed multiplier applied to the wielder WHILE THIS WEAPON IS DRAWN (not holstered).
 ## 1.0 = no penalty; a heavier weapon sets this lower (e.g. 0.8) to slow the holder down, FNV-style.
 @export var move_speed_multiplier: float = 1.0
+## Multiplies how far this weapon's GUNSHOT carries (Player.noise_gunfire_radius) — the one weapon-side
+## stealth lever. 1.0 = a normal gun; a suppressor MULTs this down. ⭐is_infinite_ammo is NOT this knob:
+## it silences the noise emission AND the reckless-fire remark, but it also stops the clip depleting, so it
+## can never be repurposed. Threaded at exactly one site: Player.on_weapon_fired -> NoiseEmitter.gunfire(mult).
+@export var noise_radius_mult: float = 1.0
 
 @export_group("Damage")
 ## MELEE weapon? A melee weapon's damage scales with the wielder's STRENGTH (CharacterStats.melee_damage_mult) and
@@ -81,14 +103,17 @@ const Calibers = preload("res://scripts/items/calibers.gd")
 ## left-click while carrying, or a long Z/E hold — never on the H tap-drop or a death/quickload release.
 ## FALSE (default) = the drop tumbles end over end, which is right for a gun.
 @export var thrown_faces_travel: bool = false
-## Mesh-front correction (Euler degrees) for that thrown facing, stamped onto Throwable.face_carrier_rotation_degrees
-## — the SAME field the CARRY pose uses, because Throwable shares one correction between the two. Whether it ALSO
-## poses the drop in your hands is decided by `held_faces_aim` below: OFF (guns) leaves this thrown-only, ON (the
-## knife) reuses it for the carry pose too. The aim basis points the drop's LOCAL -Z along travel,
-## so a model whose business end isn't -Z *in the drop's local space* needs a correction here. The knife needs Y=180:
-## its blade points mesh -X, and npc_hold_rotation's (0,90,0) maps that onto the drop's +Z — the TAIL of the aim — so
-## uncorrected it would fly HANDLE-first.
-@export var thrown_face_rotation_degrees: Vector3 = Vector3.ZERO
+## Mesh-front correction (Euler degrees) for BOTH poses a drop of this weapon can take — the thrown facing AND the
+## carry pose — stamped onto Throwable.face_carrier_rotation_degrees, the one field Throwable shares between them.
+## Either aim basis points the drop's LOCAL -Z at the target (travel for the throw, your look for the carry), so a
+## model whose business end isn't -Z *in the drop's local space* needs a correction here.
+## DEFAULT Y=+90 — the project's gun convention: every gun view_model in the repo points its BARREL down mesh +X
+## (its `Muzzle` marker sits at +X, and the NPC hand mount's `weapon_mesh_rotation` defaults to the mirror -90
+## because an NPC's forward is +Z), and +90 is what swings that +X onto the aim's -Z. So a new gun authored from a
+## clean import is held and thrown pointing the right way with nothing to tick.
+## The knife overrides it with Y=180: its blade points mesh -X, and npc_hold_rotation's (0,90,0) maps that onto the
+## drop's +Z — the TAIL of the aim — so uncorrected it would fly (and be held) HANDLE-first.
+@export var thrown_face_rotation_degrees: Vector3 = Vector3(0.0, 90.0, 0.0)
 ## Multiplier on the LAUNCH SPEED of a real throw of a dropped copy (stamped onto Throwable.throw_impulse_mult, which
 ## PickupRay._release applies to GameSettings.physics_damage.pickup_throw_impulse). 1.0 (default) = a gun tumbles away
 ## at the same speed as a tossed crate; raise it for a weapon meant to be HURLED — the knife should leave the hand
@@ -122,15 +147,19 @@ const Calibers = preload("res://scripts/items/calibers.gd")
 ## sound. Null (default) = a throw is as quiet as a drop, which is right for a gun you toss aside; author it for a
 ## weapon with a signature throw (the knife's whip). Distinct from `audio`, the SWING/fire sound of the wielded weapon.
 @export var thrown_sound: AudioStream
-## While the drop is CARRIED in your hands, yaw it so its business end points DOWN YOUR LOOK DIRECTION — a knife held
-## blade-forward, ready to throw. Stamped onto Throwable.face_carrier_while_held + face_carrier_reversed (a weapon has
-## only one sensible carry pose, so the one flag sets both: it uses the dog's face-carrier machinery, REVERSED — the
-## dog turns to present its face to you, a weapon points away from you). OFF (default) = the drop keeps whatever
-## rotation it was grabbed at, which is right for a gun. Because the pose already matches where the throw will send
-## it, releasing doesn't visibly snap the model around. It reuses thrown_face_rotation_degrees as the mesh-front
-## correction (Throwable shares one field between the carry and thrown poses) — do NOT try to flip the held facing by
-## adding 180 there, since that same value is what makes the blade lead in FLIGHT and it would spin in the air too.
-@export var held_faces_aim: bool = false
+## While the drop is CARRIED in your hands (the H verb), pose it so its business end points DOWN YOUR LOOK DIRECTION,
+## PITCH INCLUDED — a weapon held ready to throw, lying along the throw it is about to make. Stamped onto
+## Throwable.face_carrier_while_held + face_carrier_reversed (a weapon has only one sensible carry pose, so the one
+## flag sets both: it uses the dog's face-carrier machinery, REVERSED — the dog turns to present its face to you, a
+## weapon points away from you).
+## ON BY DEFAULT, for EVERY weapon. It shipped knife-only, on the theory that only a blade reads as "held ready";
+## in play the opposite is true — a gun frozen at whatever angle you happened to grab it at reads as a bug, and a
+## held weapon that ignores your look is exactly as wrong when the look is UP or DOWN as when it is sideways. Turn
+## it OFF only for a weapon that should keep the rotation it was grabbed at. It reuses thrown_face_rotation_degrees
+## as the mesh-front correction (Throwable shares one field between the carry and thrown poses) — do NOT try to flip
+## the held facing by adding 180 there, since that same value is what makes a nosing weapon lead in FLIGHT and it
+## would spin in the air too.
+@export var held_faces_aim: bool = true
 ## Keep the dropped copy's red weapon ITEM LIGHT burning at full brightness at every range, instead of fading out as
 ## you close on it (stamped onto CanPickUp.item_light_always_lit -> PickupBeacon.always_lit). The normal fade is built
 ## for loot on the ground and is fully OFF inside 3 m, so a weapon in your hands or just leaving them has no glow at
@@ -450,6 +479,21 @@ func held_view_model() -> PackedScene:
 ## very deep zoom at every FOV. ScopeIn clamps it to Camera3D's legal 1..179 range, so anything below 1 degree
 ## is the SAME ~75x scope; author the angle you actually want to look through.
 @export var scoped_fov_override: float = 0.0
+## Variable-zoom scope (the sniper): the WIDEST (most zoomed-out) FOV the mouse wheel can dial while scoped,
+## in degrees. Author BOTH ends (0 < scoped_zoom_fov_min < scoped_zoom_fov_max) to turn the wheel zoom on —
+## while AIMING, the wheel then steps the scope between them (ScopeIn owns the notch; the Hotbar yields,
+## exactly like the spray can's palette) instead of switching weapons. Leave both 0 for a fixed optic: the
+## wheel keeps switching weapons straight through the scope. Like scoped_fov_override these are ABSOLUTE
+## angles (a variable scope is still a real optic), so the range does not ride the player's FOV setting.
+## Scope-in lands on the authored resting zoom (scoped_fov_override clamped into the range; with NO
+## override, the global magnification solve — kept LIVE and FOV-slider-invariant until the wheel's first
+## notch, after which the dialed angle is absolute). The dial lasts until the player rig is rebuilt (level
+## reload / quickload resets it) and is never saved.
+@export var scoped_zoom_fov_max: float = 0.0
+## The DEEPEST (most zoomed-in) FOV the wheel can dial while scoped, degrees. Clamped like
+## scoped_fov_override (Camera3D's legal 1..179), so an end under 1 degree pins at the same ~75x floor.
+## See scoped_zoom_fov_max above for how the pair switches the wheel zoom on.
+@export var scoped_zoom_fov_min: float = 0.0
 ## When true the camera's depth-of-field blur is turned OFF while scoped (a clear, crisp scope picture);
 ## when false, scoping merely LESSENS the DoF.
 @export var disable_dof_while_scoped: bool = false
@@ -457,6 +501,12 @@ func held_view_model() -> PackedScene:
 ## normal wander; a sniper sets this high so it's wildly inaccurate un-scoped and steady only down the scope.
 ## (Scoped, the wander is governed by PlayerAimSettings.sway_ads_mult instead, so this doesn't apply.)
 @export var hip_sway_mult: float = 1.0
+
+## True when this weapon authors a usable wheel-zoom range (see scoped_zoom_fov_max above). The single
+## eligibility truth for BOTH sides of the wheel contract — ScopeIn's zoom stepping and the Hotbar's yield
+## read it through ScopeIn.wheel_owns_scope_zoom, so wheel ownership can never split between them.
+func has_variable_scope_zoom() -> bool:
+	return scoped_zoom_fov_min > 0.0 and scoped_zoom_fov_max > scoped_zoom_fov_min
 
 @export_group("Scoped-Attack Launch")
 ## When true, ATTACKING WHILE SCOPED (ADS) launches the player in the look direction instead of doing a
@@ -479,6 +529,46 @@ func held_view_model() -> PackedScene:
 	Color(0.92, 0.12, 0.15), Color(0.13, 0.45, 0.95), Color(0.18, 0.85, 0.22),
 	Color(0.97, 0.85, 0.12), Color(0.93, 0.22, 0.82), Color(0.12, 0.9, 0.9),
 ]
+
+@export_group("Modifications")
+# ── The FITTED PARTS. Each holds the Item.id of the WeaponMod part in that slot (&"" = empty).
+# ⭐@export_storage, NOT a plain var and NOT a visible @export — and BOTH halves are load-bearing:
+#   • STORAGE usage is what makes Resource.duplicate() carry the value. A bare `var` (usage 4096) is
+#     SILENTLY DROPPED by duplicate(), so every ItemDb.make_weapon_item / clone_unique would hand back
+#     a stock gun with no error anywhere. (Probed on 4.7.1: @export_storage = 4098, bare var = 4096.)
+#   • SCRIPT_VARIABLE usage is what ItemDb._is_saved_weapon_property requires, and TYPE_STRING_NAME is
+#     already in _is_weapon_delta_type — so these ride the EXISTING weapon_delta seam with no new key.
+#   • Hiding them from the inspector is what stops a designer typing a value into a TEMPLATE .tres and
+#     silently giving every instance of that gun a permanent non-empty delta.
+# Templates ship BLANK; only WeaponBench (via WeaponModKit.rebuild) ever writes them.
+@export_storage var mod_receiver: StringName = &""
+@export_storage var mod_barrel: StringName = &""
+@export_storage var mod_magazine: StringName = &""
+@export_storage var mod_sight: StringName = &""
+@export_storage var mod_muzzle: StringName = &""
+@export_storage var mod_stock: StringName = &""
+
+## The fitted part id in `slot` (&"" = empty). The ONE indexed accessor — nothing else maps enum -> field.
+func mod_id(slot: int) -> StringName:
+	if slot < 0 or slot >= MOD_SLOT_PROPS.size():
+		return &""
+	return StringName(get(String(MOD_SLOT_PROPS[slot])))
+
+## Stamp `slot`'s fitted part id (&"" clears it). Out-of-range is a deliberate silent no-op: callers index
+## with a WeaponMod.slot that a broken .tres could have left outside the enum, and a bench refit must not
+## crash the whole transaction over one bad part.
+func set_mod_id(slot: int, id: StringName) -> void:
+	if slot < 0 or slot >= MOD_SLOT_PROPS.size():
+		return
+	set(String(MOD_SLOT_PROPS[slot]), id)
+
+## How many slots are filled — the weapon-row "2/6" readout.
+func fitted_mod_count() -> int:
+	var n := 0
+	for i in MOD_SLOT_PROPS.size():
+		if mod_id(i) != &"":
+			n += 1
+	return n
 
 ## Self-populate the `caliber` dropdown from the ammo calibers on disk (a SUGGESTION hint, so blank "no
 ## reserve" stays valid and a brand-new caliber is still typable while you're also authoring its ammo). Stops

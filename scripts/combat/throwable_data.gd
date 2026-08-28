@@ -62,14 +62,17 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 ## When ON, the prop becomes partially see-through while carried so it does not block the camera.
 ## Turn OFF for props that should stay opaque in the player's hands, such as Dog.
 @export var fade_while_held: bool = true
-## While carried, yaw the prop so its front faces back toward the player/camera (Portal-style presentation).
+## While carried, yaw the prop so its front faces back toward the player/camera (Portal-style presentation). The
+## presented pose stays UPRIGHT — only the reversed pose below follows the look up and down.
 @export var face_carrier_while_held: bool = false
-## REVERSE that pose: point the prop's front AWAY from the carrier, down the look direction, instead of back at them.
-## OFF = presented to you (the dog, so you see its face); ON = held ready to throw, business end forward (a knife).
+## REVERSE that pose: point the prop's front AWAY from the carrier, down the look direction — PITCH INCLUDED, so it
+## lies along the throw it is about to make — instead of back at them.
+## OFF = presented to you (the dog, so you see its face, level); ON = held ready to throw, business end forward (a knife).
 ## Only meaningful with face_carrier_while_held on. A placed Throwable can also enable it per-instance.
 @export var face_carrier_reversed: bool = false
-## Extra local rotation, in degrees, applied after the face-carrier yaw. Use this when an imported mesh's
-## authored front is not Godot's -Z (e.g. set Y=180 if it faces backward). Also corrects the THROWN facing below.
+## Extra local rotation, in degrees, applied after the face-carrier aim. Use this when an imported mesh's
+## authored front is not Godot's -Z (e.g. set Y=180 if it faces backward, Y=90 for a gun whose barrel is +X).
+## Also corrects the THROWN facing below.
 @export var face_carrier_rotation_degrees: Vector3 = Vector3.ZERO
 ## When THROWN (not merely dropped), the prop noses toward its travel direction (a knife/spear leads with its
 ## point and tips over as it arcs). OFF for crates. A placed Throwable can also enable this per-instance. Uses
