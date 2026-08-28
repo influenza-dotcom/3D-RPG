@@ -29,8 +29,14 @@ extends Node3D
 @export_group("Idle Lower")
 ## After this long without firing (and not aiming), the view model sinks muzzle-down to read as "not alert".
 @export var idle_lower_time: float = 4.0
-## Extra muzzle droop (degrees) when idle-lowered, on top of the readiness tilt.
-@export var idle_lower_pitch_deg: float = 32.0
+## How far the muzzle swings down (degrees) when idle-lowered. Applied through apply_idle_lower(), which
+## knows which euler channel actually pitches this rig — see the trap documented on that static.
+## ⭐RETUNED 32 → 18 alongside that fix: the old 32 was authored against the broken channel, where it spun
+## the gun about its own barrel and cost NO screen space. As a real pitch it swings the weapon down and out
+## of frame — measured on the pistol at the player's ~120° fov, 32° leaves ~24% of the resting silhouette
+## on screen, 18° leaves ~78%. Taste knob: drag it in the editor's REMOTE inspector mid-game (this whole
+## group is read live), then author the number back here.
+@export_range(0.0, 60.0, 0.5) var idle_lower_pitch_deg: float = 18.0
 ## How far the gun sinks (metres) when idle-lowered.
 @export var idle_lower_drop: float = 0.05
 ## Ease speed into/out of the idle-lowered pose.
@@ -118,6 +124,38 @@ func _ready() -> void:
 func add_mouse_sway(amt: Vector2) -> void:
 	_mouse_sway = (_mouse_sway + amt).limit_length(mouse_sway_max)
 
+## Which way the barrel runs in the weapon MODEL's own space. Every view-model weapon in this project is
+## authored barrel-down-local-+X (the same fact behind `WeaponData.thrown_face_rotation_degrees`' (0, 90, 0)
+## default for a weapon dropped into the world), which is why GunMesh carries a baked 90° yaw to aim it
+## forward — see apply_idle_lower().
+const BARREL_AXIS := Vector3.RIGHT
+
+## Where the barrel points, in the camera's space, for a given `rotation_degrees` triple. Camera forward is
+## -Z, so a NEGATIVE `.y` on the returned vector means the muzzle is angled down at the floor. Pure — the
+## honest way to ask "does this pose actually droop?" instead of eyeballing an euler channel (which is what
+## made the bug below survive), and what tests/test_gun_pose.gd asserts over.
+static func barrel_direction(rot_deg: Vector3) -> Vector3:
+	var rads := Vector3(deg_to_rad(rot_deg.x), deg_to_rad(rot_deg.y), deg_to_rad(rot_deg.z))
+	return Basis.from_euler(rads, EULER_ORDER_YXZ) * BARREL_AXIS
+
+## Add `pitch_deg * t` of MUZZLE-DOWN droop to a `rotation_degrees` triple. Pure, so the idle-lower can be
+## pinned off-tree without a player/tree/render.
+##
+## ⭐⭐WHY THIS IS NOT `rot.x -= pitch_deg * t`. It was, and that was the "the gun tilts over to the left
+## instead of pointing down" bug (2026-08-27). GunMesh is authored with a baked 90° YAW —
+## `base_rotation` is `(0, 90, 0)` (camera_rig.tscn's GunMesh transform; confirmed live) — because the
+## meshes run their barrel down local +X (BARREL_AXIS) and the yaw is what aims that forward. Node3D
+## composes euler angles in YXZ order (`basis = Ry * Rx * Rz`), so with a 90° yaw sitting in the middle
+## the CHANNELS ARE NOT what their names suggest:
+##   - `.x` rotates about the CAMERA'S FORWARD axis ⇒ a pure SCREEN ROLL. The gun leans over on its side
+##     and the muzzle does not move a single degree (`barrel_direction((-32, 90, 0)).y == 0.0`).
+##   - `.z` rotates about the camera's RIGHT axis ⇒ the real muzzle pitch. NEGATIVE = muzzle down.
+## So the droop belongs on `.z`. ⭐The rest of this file's `pitch` terms (readiness tilt, vertical velocity
+## pitch, breath pitch) and GunMesh's `_recoil_rot` kicks (fire / reload dip / land / holster) still write
+## `.x` and are subject to the same mix-up — deliberately left alone here, they were not part of this fix.
+static func apply_idle_lower(rot_deg: Vector3, pitch_deg: float, t: float) -> Vector3:
+	return rot_deg - Vector3(0.0, 0.0, pitch_deg * t)
+
 func _process(delta: float) -> void:
 	var player: Character = host.player
 	if !is_instance_valid(player) or !player:
@@ -190,8 +228,10 @@ func _process(delta: float) -> void:
 	var target_pos := aim_pos + Vector3(sway_x + bob_x + mouse_off_x, sway_y + bob_y + breath_y + mouse_off_y, forward_off) * sway_damp
 	var target_rot := aim_rot + Vector3(pitch + mouse_pitch + breath_pitch + ready_pitch, 0.0, roll + bob_roll + mouse_roll) * sway_damp
 	# Apply the idle-lower on top (outside sway_damp so it isn't diluted): a drop + muzzle-down tilt.
+	# The tilt goes through apply_idle_lower because the baked 90° yaw moves which euler channel pitches
+	# the muzzle — writing it here by hand is how this read as a leftward lean for so long.
 	target_pos.y -= idle_lower_drop * _idle_lower_t
-	target_rot.x -= idle_lower_pitch_deg * _idle_lower_t
+	target_rot = apply_idle_lower(target_rot, idle_lower_pitch_deg, _idle_lower_t)
 
 	var t := 1.0 - exp(-motion_smooth * delta)
 	# Smooth the swayed/aimed rest pose, then add the recoil kick ON TOP — so fire/reload/land kicks
