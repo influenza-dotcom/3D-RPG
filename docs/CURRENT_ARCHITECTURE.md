@@ -52,9 +52,40 @@ paints as a disk-write line — the autosave-storm bug class made visible. Pinne
 player progression, stats, inventory, equipped item, money, reputation, story
 flags, quests, perks, ability unlocks (installed microchip upgrades), XP, status
 effects, clock, respawn transform, current level identity, lightweight
-discovered `Corpse` markers, and the set of **learned NPC names**
+discovered `Corpse` markers, the set of **learned NPC names**
 (`GameState.known_names`, in `[world].known_names`) that drives the
-"Stranger until introduced" masking.
+"Stranger until introduced" masking, and the player's own **map waypoints**.
+
+**Waypoints (`[waypoints].data`, additive — no `SAVE_VERSION` migration).**
+`GameState.waypoints` is `{ level_path -> Array[Dictionary] }`, keyed per level exactly like
+`world_objects` beside it, each record `{pos: Vector3, name, note, icon: int, tint: int}` — plus an
+**optional `tracked: true`** — shaped and clamped by `scripts/world/waypoint_book.gd`. The API is
+`add_waypoint` / `update_waypoint` / `remove_waypoint` / `clear_waypoints` / `waypoints_for` /
+`waypoint_at` / `waypoints_full` / `set_tracked_waypoint` / `tracked_waypoint`; every
+mutation funnels through one write barrier that bumps `waypoints_rev`, emits `waypoints_changed`, and
+queues the same coalesced world-state autosave a door uses. A record stores a **palette index**, never
+a `Color`, and an **icon ordinal**, never a shape — so an artist restyling
+`HudSkin.minimap_waypoint_palette` restyles every pin already in every profile, and the enum's order is
+an append-only compatibility contract. The load path re-runs `WaypointBook.sanitize` (drop records with
+no position, re-clamp both text fields, truncate past `MAX_PER_LEVEL` = 32) because the file is
+hand-editable; a profile that placed no pins writes no section at all. Cleared on New Game.
+**The text is PLAYER-TYPED**, so every Control that paints it sets
+`auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED` — never a msgid.
+
+⭐**At most ONE pin in the whole ledger carries `tracked`** — the profile's single active navigation
+marker (the pin the HUD corner box rim-pins and rings, and the one the top-centre `HudCompass` tape
+draws a pip for). The flag is therefore a fact about the LEDGER, not about a record, and nothing
+outside `GameState` may write it: `WaypointBook.make` stays deliberately 5-field, `is_tracked` is the
+one definition of how the key reads (absent = false, and a hand-edited `tracked=1` counts), and
+`update_waypoint` — which rebuilds the record through `make` to keep a pin's position immutable —
+carries the old flag across the rebuild by hand. `set_tracked_waypoint(level, index, on)` **moves**
+the flag: it clears every other tracked pin across **every** level first (on the untrack path too),
+returns false only for a bad index, and does no work at all when the pin is already in the asked-for
+state. `tracked_waypoint()` walks the ledger and answers `{"level":…, "index":…}` (or `{}`) rather
+than caching an index, because an index is exactly what goes stale when a pin below it is deleted.
+The invariant is enforced on LOAD as well — `_fold_tracked` runs per level as each sanitized list is
+folded in and **first wins**, since `sanitize` only ever sees one level's list while the rule spans
+the whole ledger.
 
 **Quests live on the `QuestTracker` autoload, but persist through `GameState` (M1).**
 The tracker dicts (active / completed / failed + objective progress), the four quest
@@ -81,9 +112,12 @@ and expires (auto-fails) any quest whose `expire_on_flag` matches.
 > pins both directions.
 
 **Stranger-until-introduced naming.** Every NPC's `display_name` is shown to the
-player as `PlayerText.STRANGER` until a `DialogueLine` with `reveals_name = true`
-plays and calls `GameState.reveal_name`, after which `known_names` carries the
-character across saves (wiped on New Game). The single display seam is
+player as `PlayerText.STRANGER` until the player **talks to them**:
+`DialogueManager.start` calls `GameState.reveal_name` on any real character
+speaker as the conversation opens (gated on `_speaker_is_character`, so a
+terminal / sign / note never enters the ledger), after which `known_names`
+carries the character across saves (wiped on New Game). `DialogueLine.reveals_name`
+still fires the same call from `_show_line` but is redundant for a character. The single display seam is
 `GameState.public_name(real_name)` — the dialogue speaker label, look-at readout
 (`Talkable.look_name`), corpse loot header, death card, takedown prompt, and cripple
 toast all route through it; identity/quest matching (`notify_kill` / `notify_talk`)
@@ -122,36 +156,41 @@ re-stamp (plus the `endurance`→stamina re-seed) runs through **one**
 `PassiveItemBuffs`, so their clamp/floor/heal-on-gain/HUD-refresh semantics can't drift
 apart (a level-up, a perk, and a carried trinket all move HP/carry identically).
 
-The player's **zorkmids show up as a real coin Item** in the backpack, but the wallet
-itself stays the authoritative fractional `Character.money` float (what the whole
-economy — merchants, pickups, bounties, the death settlement — reads). Dying MOVES
-that float rather than destroying it: `Player._bequeath_wallet` hands
-`economy.death_purse_loss_fraction` (all of it, by default) to whoever killed you — where
-it rides their wallet into their corpse's loot bag — or, when nobody is credited, spills
-it on the ground as a physics `MoneyBag` (`_spill_death_purse`, deferred out of the
-physics flush and the gore burst). A `RELOAD_*` death mode settles nothing, since the
-rebuilt world would hold neither. `MoneyPurse`
-(`scripts/inventory/money_purse.gd`, built on the Player) mirrors that float into a
-single `zorkmids` stack (one unit = one `Zorkmids.QUANTUM`, so the integer stack stays
-fractional), self-healing against any external bag change. That coin stack is therefore
-**excluded from the save** (`GameState.capture` skips `Zorkmids.ITEM_ID`): `money`
-already persists as the `[player]` wallet float, and the purse rebuilds the stack from it
-on load — so, like the passive buffs above, the mirror can't double-count across a save.
-`MoneyPurse._ready` also calls `CharacterInventory.register_mirror(Zorkmids.ITEM_ID)` on the
-player's backpack, so `CharacterInventory.is_mirrored(item)` is the single predicate — true
-only on the player — for "this coin tile is a wallet VIEW, not real cash." And because the
-purse listens to `inventory.changed`, `CharacterInventory.transfer_to` now **coalesces its
-own `changed` across the remove + rollback** and checks `add()`'s return (restoring any
-un-refit remainder via `restore_stack`), emitting once at the end: a mirror listener can
-never fire on the intermediate post-remove state and grab the freed cells before a bounced
-loot stack is rolled back (which would leave the loot unplaced/lost).
+**The player's zorkmids are NOT an inventory item.** The wallet is the authoritative
+fractional `Character.money` float (what the whole economy — merchants, pickups, bounties,
+the death settlement — reads), and it is SHOWN, never stored, in the bag: the HUD readout
+plus a **wallet row** above the backpack grid (`InventoryScreen._paint_wallet`) and under
+your column in the loot screen. Dying MOVES that float rather than destroying it:
+`Player._bequeath_wallet` hands `economy.death_purse_loss_fraction` (all of it, by default)
+to whoever killed you — where it rides their wallet into their corpse's loot bag — or, when
+nobody is credited, spills it on the ground as a physics `MoneyBag` (`_spill_death_purse`,
+deferred out of the physics flush and the gore burst). A `RELOAD_*` death mode settles
+nothing, since the rebuilt world would hold neither.
+
+The two gestures that used to live on a coin tile in the grid live on that wallet row, via
+the shared **`AmountPrompt`** (`scripts/ui/amount_prompt.gd`, code-built into both screens
+like `GridInventoryView`): **Drop…** spills a chosen slice of the purse as a `MoneyBag`
+(`Player.drop_money`), and **Stash…** in the loot screen deposits a chosen amount into the
+source as a coin tile (`LootScreen._deposit_coins_to_source`). The prompt seeds itself with
+the full wallet and clamps to it, so Enter alone still means "all of it".
+
+(HISTORY, because the seams it left are still load-bearing: `money` was for a while
+*mirrored* into a real `zorkmids` stack in the backpack by a `MoneyPurse` component, whose
+grid footprint grew with the amount — a fat purse ate 1×1..3×3 cells of backpack. That
+component is gone. `GameState.capture` still **skips `Zorkmids.ITEM_ID`** as belt-and-braces
+— no live path puts a coin tile in the player's bag, and one that slipped in would restore
+as cash the wallet never counted. `CharacterInventory.transfer_to` still **coalesces its own
+`changed` across the remove + rollback** and checks `add()`'s return, restoring any un-refit
+remainder via `restore_stack`: a listener that writes back into the bag on `changed` — the
+pickpocket wallet freeze below is the shipped one — must never fire on the intermediate
+post-remove state and grab the freed cells before a bounced loot stack is rolled back.)
 
 **All loot cash is a coin tile now — there is no "Take N zm" button anywhere.** A dead
 NPC's / crate's wallet is seeded as a real `zorkmids` coin tile in the loot bag
 (`LootableCorpse.setup`, `ItemContainer._seed_money_coins` — a fixed 1×1, so it always
 places), taken by clicking it (`LootScreen._take` converts the stack to real `add_money`,
 never a loose backpack stack) and deposited as a tile (`_deposit_coins_to_source`). NPCs
-themselves keep an abstract `money` float (no `MoneyPurse`), so a **live pickpocket**
+themselves keep an abstract `money` float, so a **live pickpocket**
 target's wallet is FROZEN into a coin tile in its pockets on open (`_freeze_live_wallet`)
 and THAWED back into that float on close (`_refloat_live_wallet`, folding in any un-taken
 or planted coins) — so it loots as a clickable tile while you're in its pockets but stores
@@ -161,16 +200,16 @@ back untouched. `LootScreen` wallet modes are now just `TILE` (every cash source
 `NONE` (gear exchange — a cash deposit is refused, since gifting a friend's wallet isn't
 "exchanging"). Corpses aren't saved, so their coin tiles re-seed from the
 authored/earned `money` on the next spawn; a CONTAINER's coin tile is real loot and
-DOES ride the exact-snapshot tier (`serialize_stacks` skips only a MIRRORED
-player-wallet tile), so a quickload restores exactly the cash you left in the crate —
-it re-seeds from `money` only on the profile/Continue tier. The `CharacterInventory.is_mirrored(item)` guard
-still protects `LootScreen._take`: taking a non-mirrored coin tile must never also debit a
-`money` float on the source — `is_mirrored` is true only on the player's own MoneyPurse
-mirror (never a loot source), so a loot take can never destroy cash by double-debiting.
+DOES ride the exact-snapshot tier (`serialize_stacks`), so a quickload restores exactly the
+cash you left in the crate — it re-seeds from `money` only on the profile/Continue tier.
+`LootScreen._take` credits the player through `add_money` and debits **nothing else**: a
+corpse / container has no `money` float at all, and a pickpocket target's is already 0
+(frozen into the very tile being lifted), so there is no second ledger a take could
+double-charge.
 
 **Player abilities are microchip upgrades.** Each unlockable mechanic (wall-climb,
-grapple, slide, air-dash, fall-immunity, board-visualizer, and the
-**silent takedown** stealth kill) is a drag-drop `Ability` node
+grapple, slide, air-dash, fall-immunity, board-visualizer, the **bunny-hop** jump-chain
+speed boost, and the **silent takedown** stealth kill) is a drag-drop `Ability` node
 whose presence grants it; a fresh game starts with **none** (`Player.tscn`
 `starting_unlocks` is empty) beyond any implants **bought on credit** at New Game's
 implant-purchase step (`scripts/ui/implant_choice.gd`, raised by StartMenu after
@@ -214,6 +253,45 @@ look) and paying a `ChipInstaller` mechanic (`scripts/components/chip_installer.
 `add_money`, and calls `player.unlock_mechanic`, which persists in `GameState.unlocks`
 (re-applied via `set_unlocks` on load). The instant-grant `UpgradePickup` remains for
 special "online immediately" pickups.
+
+**Weapon modifications ride the EXISTING `weapon_delta` — no new save key.** A weapon part is
+an ordinary `Item` carrying a `WeaponMod` payload (`resources/items/mod_*.tres`), and a
+`WeaponBench` fits it into one of six FO4 slots. What persists is **six `@export_storage`
+`StringName` fields on `WeaponData`** (`mod_receiver`/`mod_barrel`/`mod_magazine`/`mod_sight`/
+`mod_muzzle`/`mod_stock`, indexed through `WeaponData.mod_id` / `set_mod_id` off
+`MOD_SLOT_PROPS`), each holding the fitted part's `Item.id`. `@export_storage` is the keystone
+and both halves of it are load-bearing: the STORAGE usage is what makes `Resource.duplicate()`
+carry the value (a bare `var` is silently dropped, so every `ItemDb.make_weapon_item` /
+`clone_unique` would hand back a stock gun with no error anywhere), and the SCRIPT_VARIABLE
+usage is what `ItemDb._is_saved_weapon_property` requires — so all three existing write sites
+(`GameState.capture`'s bag stack loop, its held-item fold, and
+`CharacterInventory.serialize_stacks`) diff the slot ids automatically through
+`ItemDb.weapon_delta_for`. Hiding them from the inspector is what stops a designer typing an id
+into a TEMPLATE `.tres` and giving every instance of that gun a permanent non-empty delta
+(`tests/test_weapon_mods.gd` pins all three properties).
+
+⭐**On load the CATALOG is authoritative, not the saved numbers.** `restore_item_from_save` ends
+`return rebuild_weapon_mods(item)` (`ItemDb.rebuild_weapon_mods` → `WeaponModKit.rebuild`), which
+throws away the restored scalars and re-derives the whole stat block from the live weapon
+template plus the live part `.tres`. That is a **deliberate, patch-note-worthy trade**: retuning
+`mod_long_barrel.tres` or `pistol.tres` reaches guns already sitting in existing save files, so a
+balance pass changes a player's modded gun under them — and in exchange the two halves of the
+delta (the ids and the numbers they produced) can never drift apart, and the seven
+resource-valued overrides (`view_model_override`, `fire_sound_override`, `projectile_scene_override`,
+`on_hit_effect_override`, the two other sounds, `caliber_override`) survive a quickload at all,
+which storing numbers could never do — `_is_weapon_delta_type` rejects those types by design. The
+derived scalars are still written alongside the ids, redundantly and on purpose, so a save written
+today stays restorable by a build without `rebuild_weapon_mods`. A part id deleted from the game
+resolves to null, is dropped with a `push_warning` naming it, and the slot is re-stamped blank —
+the save self-heals. `rebuild_weapon_mods` is a strict no-op for an unmodded weapon and must never
+return `null` where it previously returned an item; a modded gun whose template has left
+`resources/items/` keeps its restored scalars with a warning rather than being nulled.
+
+What survives where follows the ordinary rules: a modded gun in the player's bag or hands rides
+the **profile** tier (autosave, Continue, quicksave, slots); one in an authored `ItemContainer` or
+stash rides the **manual quicksave/slot** tier only (`WorldSnapshot`); one dropped as a `WorldItem`
+is persisted by neither, exactly like every other dropped item. The parts themselves are plain
+stacking `Item`s keyed on `Item.id` — no special case anywhere.
 
 The grant/revoke/persistence plumbing behind those calls lives in a **Player-owned
 `AbilityManager`** (`scripts/components/abilities/ability_manager.gd`, a `RefCounted`
@@ -409,6 +487,14 @@ Repeated content should live in Resources:
 - `NpcData` for reusable NPC archetypes.
 - `BarkSet` and `GoapProfile` for NPC voice and decision tuning.
 - `WeaponData` and `Item` for equipment and inventory.
+- `WeaponMod` and `WeaponStatDelta` for weapon PARTS — the slot/fitment/overrides payload
+  and the one-arithmetic-line stat change it applies. A part is an ordinary `Item` `.tres`
+  carrying a `WeaponMod` in an inline `SubResource` (`resources/items/mod_*.tres`), exactly
+  as a weapon Item carries a `WeaponData`, so `ItemDb`'s boot scan of `resources/items/`
+  registers it for free — **no new folder, no new registry, no new folder scan**. The
+  `property` field of a delta is dropdown-suggested from `WeaponData`'s own scalar exports
+  (`scripts/items/weapon_fields.gd`), so a designer cannot author a change the save cannot
+  carry. All fold math lives in the one const-preloaded `scripts/items/weapon_mod_kit.gd`.
 - `LootTable` and `ItemStack` for random and fixed loot.
 - `ActionCatalog` and `SettingsCatalog` for player-facing controls/options.
 - `BootQuotes` and `TermsOfService` for the boot intro quote and the first-launch
@@ -464,15 +550,15 @@ interaction base is `LookAtInteractable` (`extends Area3D`), which supplies the
 talk-layer hitbox and look-at outline contract, and a duck-typed talk-handler
 surface — `look_name()` / `start_talk()` / `can_be_talked_to()` / `host_npc()` —
 that the player's interaction ray (`PickupRay`) calls by name, so a new subclass
-needs zero ray changes. Twenty scripts extend it (plus `DogPickup`, which
+needs zero ray changes. Twenty-one scripts extend it (plus `DogPickup`, which
 extends `CanPickUp`, so the tree is three levels deep): pickups (`CanPickUp`,
 `MoneyPickUp`, `UpgradePickup`), loot/trade screens (`ItemContainer`,
 `LootableCorpse`, `Merchant`), service stations (`Healer`, `Bonfire`, `LevelUp`,
-`PerkStation`, `RespecStation`, `ChipInstaller`, `ChessMatch`, `Atm`), and world objects
-(`Door`, `LevelDoor`, `Radio`, `Readable`, `Switch`, `QuestStarter`). The full
+`PerkStation`, `RespecStation`, `ChipInstaller`, `WeaponBench`, `ChessMatch`, `Atm`), and
+world objects (`Door`, `LevelDoor`, `Radio`, `Readable`, `Switch`, `QuestStarter`). The full
 inheritance tree, base contract, and "add a new interactable" recipe live in
 [`scripts/components/README.md`](../scripts/components/README.md#the-lookatinteractable-hierarchy);
-per-component `@export` knobs are in `docs/AUTHORING_GUIDE.md`. The seven dual-mode
+per-component `@export` knobs are in `docs/AUTHORING_GUIDE.md`. The eight dual-mode
 stations also carry the two-method dialogue-station contract
 (`dialogue_station_option()` / `open_dialogue_station()`) that grows their dialogue
 option — documented in that same README. Note `Corpse`
@@ -557,16 +643,17 @@ sharing, on the PRESS only:
   `tests/test_lean.gd` pins the binding-share seam, the claim, and the pose math.
 
 **Dialogue-suspend contract.** The station options themselves (Trade/Heal/Rest/Level Up/
-Install/Chess/Bank) are discovered via the **dialogue-station contract**: `DialogueManager`
+Install/Modify/Chess/Bank) are discovered via the **dialogue-station contract**: `DialogueManager`
 scans the speaker's direct children by `has_method` for the
 `dialogue_station_option()`/`open_dialogue_station()` pair and paints the options sorted by
-each component's explicit `DIALOGUE_ORDER` key (`10..70` = the fixed Trade → Bank sequence;
-see `scripts/components/README.md`). Six of the seven suspend through the unchanged
+each component's explicit `DIALOGUE_ORDER` key (`10..70` incl. `WeaponBench`'s `55` = the fixed
+Trade → Bank sequence; see `scripts/components/README.md`). Seven of the eight suspend through
+the unchanged
 `DialogueManager._suspend_for_menu`, which hides the box and connects the sub-menu's `closed`
 as a `CONNECT_ONE_SHOT` resume BEFORE calling the open; `Bonfire` is the one act-and-close
 station (its contract omits `closed` — rest, then the conversation ends, no suspension).
 So every suspending screen (`ShopScreen`/`LootScreen`/`HealScreen`/`LevelUpScreen`/
-`ChipInstallScreen`/`ChessScreen`/`AtmScreen`) MUST emit `closed` on EVERY refuse path — each
+`ChipInstallScreen`/`WeaponBenchScreen`/`ChessScreen`/`AtmScreen`) MUST emit `closed` on EVERY refuse path — each
 funnels its guard early-returns through a private `_refuse_open()` that just `closed.emit()`s
 (`AtmScreen` emits inline at each guard, same contract; `RespecScreen` keeps the same funnel
 as insurance although nothing dialogue-hosts it yet). A refuse that returns silently would
@@ -576,16 +663,18 @@ the standalone open path nothing listens to `closed`, so the emit is a harmless 
 ## Effect And Audio Seams
 
 `AudioManager` (autoload) is the one-shot SFX seam: `play_sfx` / `play_2d_sfx`
-route through the `sfx` bus so the audio-options sliders apply, and `play_applause`
+default to the diegetic `world` bus (which sends into `sfx`, so the audio-options
+sliders apply — and which carries the indoor room echo the roof duck toggles); a
+non-diegetic caller passes `&"sfx"` explicitly, and `play_applause`
 is the single shared reward cheer. Player one-shot SFX now go through it — with one
 deliberate carve-out, the death sting (below): `AudioManager` one-shots are parented to
 `get_tree().root` with no `process_mode`, so they are pausable and would outlive a scene
 reload into the next life, neither of which a death-cinematic sound can afford.
 
 **Station music** (`managers/StationMusic.gd`, autoload) is the machine's own radio: while a self-serve
-terminal's screen is open — shop / ATM / heal / level-up / respec / chip-install / chess — one looping shop
+terminal's screen is open — shop / ATM / heal / level-up / respec / chip-install / weapon-bench / chess — one looping shop
 theme plays through the `station_music` bus, a parameter-for-parameter clone of the `StationSpeaker` chirp's
-filter chain that sends into `music` rather than `sfx` (the chain is the tinny character; the send decides
+filter chain that sends into `music` rather than `world` (the chain is the tinny character; the send decides
 which volume slider owns it, and a minute-long loop is music). The seam has three properties worth knowing:
 
 * **It POLLS the modal registry, it does not hook the screens.** `InputManager.any_station_music_open()` reads
@@ -603,6 +692,19 @@ which volume slider owns it, and a minute-long loop is music). The seam has thre
   ducks by a third summed level (`dialogue_music_menu_duck_db`) so a shop hosted inside a conversation sounds
   identical to a bare kiosk. The forced-loop logic both beds need now lives in one place,
   `scripts/audio/loopable_stream.gd`.
+* **And the conversation's BUS duck stands down for it** — the other half of that "identical to a bare kiosk"
+  rule, through a **second, tighter** published flag: `is_screen_open()`. `MusicDucker` used to have one input
+  ("a conversation is up") and therefore stayed armed through a dialogue-hosted Trade, which suspends the
+  conversation rather than ending it — so the machine's radio played `music_duck_amount_db` (-12 dB) under the
+  kiosk two metres away, with nobody speaking over it. It now composes `talking AND NOT station_radio`
+  (`MusicDucker.wants_duck`, pure and pinned by `tests/test_music_ducker.gd`), fed per-frame through
+  `DialogueManager.note_station_screen()` beside the bed's existing `note_menu_music()`. **The two flags are
+  deliberately not the same signal:** the bed reads `is_bed_wanted()`, which rides the `hold_seconds` grace
+  window out so it does not stutter back in over the shop tune's tail; the duck reads `is_screen_open()`, which
+  drops the instant the screen closes so the resumed line still lands over ducked music. `MusicDucker.reset()`
+  (Player.die) clears both composed **inputs**, not just the latch — StationMusic keeps asserting straight
+  through the death cinematic, and a `_talking` left armed would re-duck the bus that reset just handed to
+  `DeathMix`.
 
 **The wandering bed** (`scripts/components/wander_music.gd`, an authored `AudioStreamPlayer` in
 `scenes/game.tscn` under `Player`) is the quiet exploration score. **It currently ships INERT** — its
@@ -722,7 +824,8 @@ because every bus chain in Godot terminates at Master, that left no route for a 
 survive the player's own death. The duck therefore moved down onto the four **world** buses
 (`GameSettings.player_feedback.death_cinematic_buses` = `ambient` / `sfx` / `music` /
 `voice`, which covers all authored audio since `radio` and `station_music` send into
-`music`, `ambient_bed` into `ambient`, and `speaker` into `sfx`), and the death sting plays on `sting` — a bus
+`music`, `ambient_bed` into `ambient`, and the diegetic `world` trunk — fed by `speaker`
+and the `gunshots` echo — sends into `sfx`), and the death sting plays on `sting` — a bus
 deliberately absent from that list, sending straight to Master. The Player's cinematic
 reaches it through exactly four seams (`begin` / `set_world_duck` / `restore_world` /
 `begin_revive`), one on each
@@ -868,7 +971,7 @@ thing to shove it — a blast, a grapple reel-in, a fall off a ledge — draws a
 which is exactly what `require_thrown` promises cannot happen.
 (2) **The ribbon is parented to the tree ROOT, never under the prop.** Two sweeps over a `Throwable`'s descendants
 would otherwise dress it as part of the prop, both through `TalkHelpers.collect_meshes` — `_setup_overlay_chain`
-(the black inverted hull **and** the `InkOutline` actor-mask bit, i.e. a second full scene render of the streak)
+(the outline ring's tint duplicate **and** the `InkOutline` actor-mask bit, i.e. two extra scene renders of the streak)
 and `_set_carried_transparency`. Child `_ready` runs before the parent's, so an eagerly-built ribbon would always
 be there in time to be caught. (`Ps1Applier` is *not* one of them — its walk returns on `node is Throwable` before
 recursing — so do not cite it as a reason here.) Root-parenting also puts the geometry in plain world space against an identity
@@ -933,33 +1036,39 @@ scoped hook — `GameRoot` owns the level-load seam and calls `Ps1Warp.cover()` 
 `load_level`, so the PS1 warp is applied exactly on level load and costs zero per-node tax.)
 `tests/test_global_node_added_listeners.gd` fails if the count drifts from two.
 
-**There are TWO black-outline systems and they are not interchangeable.** Confusing them is the
-mistake to avoid when touching either.
+**There is ONE outline technique and it runs as TWO passes on one node.** Both live on `InkOutline`
+(`scripts/effects/ink_outline.gd`, a quad childed to the player camera in `camera_rig.tscn`), and
+neither is authored per mesh:
 
-- `resources/shaders/outline.gdshader` is the **inverted hull**, and it **owns the ACTORS**: the
-  resting black rim on NPCs and `Throwable` props, plus every coloured signal (white = hovered,
-  blue = yours, red = hostile, green = friendly), built in exactly one place —
-  `TalkHelpers.make_outline_material()` — chained through `material_overlay` ahead of `Character`'s
-  damage-flash pass. It is deliberately NOT applied to the world.
-- `resources/shaders/ink_outline.gdshader` (`InkOutline`, on the player camera in `camera_rig.tscn`)
-  is the **art style**: one screen-space depth + normal edge detect that inks the whole frame. It is
-  per-*camera*, not per-mesh — nothing is authored on any object to receive it.
+- **The world's INK** — `resources/shaders/ink_outline.gdshader`, a screen-space depth + normal edge
+  detect over whatever that camera renders. This is the art style, and it is per-*camera*.
+- **Everything else's RING** — the same shader's second half, dilating a flat ID buffer
+  (`resources/shaders/ink_tint.gdshader`, rendered into a tint `SubViewport`) into a constant-PIXEL-width
+  coloured outline. NPCs, props, gibs, corpses, the look-at hover and the first-person view model all
+  wear this and nothing else. A consumer opts in by stamping an ID —
+  `InkOutline.apply_tint(root, id)` / `apply_tint_mesh(mesh, id)` — never by building a material.
 
-The hull was not extended to the world on purpose. It costs a second draw call per mesh, contends with
-`ps1_applier`'s surface overrides on every piece of level geometry, shatters along the unwelded
-func_godot brush mesh's hard edges instead of forming a silhouette, and fills the screen with black
-when the camera stands inside an extruded room. Borderlands' own ink was a post-process filter, which
-is what the screen-space pass is.
+**The inverted hull that used to own actors is DELETED (2026-08-27).** `resources/shaders/outline.gdshader`,
+`resources/materials/outline_black.tres` and `TalkHelpers.make_outline_material()` are all gone, on the
+brief "replace all the shitty existing outlines with the new outline shader we added for enemies — this
+includes view models and everything". The reasons were already on the record: a constant-screen-width
+shell's WORLD thickness grows with distance until it out-thickens the ~10 cm Lego limbs and shatters
+into confetti (which is what retired it for NPCs on 2026-08-25); it costs a second draw call per mesh;
+it contends for the ONE `material_overlay` slot per mesh, which is why the look-at highlight needed a
+stash-and-restore dance; and being a transparent-pass material it wrote no depth, so the actor mask got
+coverage it could not place in space. The ring has none of those properties. The hull was never applied
+to the WORLD either, and would not have been: it shatters along the unwelded func_godot brush mesh's
+hard edges instead of forming a silhouette, contends with `ps1_applier`'s surface overrides on every
+piece of level geometry, and fills the screen with black when the camera stands inside an extruded room.
+Borderlands' own ink was a post-process filter, which is what the screen-space pass is.
 
 **Actors are EXCLUDED from the ink, and the exclusion is the load-bearing part.** An actor's opaque
 body is a depth discontinuity like any other, so the edge detect draws a line straddling its
-silhouette — which lands half on the hull's rim ring and half on the world, reading as a smeared
+silhouette — which lands half on the actor's own outline and half on the world, reading as a smeared
 second outline hugging the clean one (the round-2 playtest complaint; a first attempt that merely made
-the *resting* rims transparent still double-lined the coloured signal rims). The hull itself is not
-what gets edge-detected: `outline.gdshader` assigns `ALPHA` inside a branch, which puts the whole
-material in the TRANSPARENT pass, and transparent materials write neither depth nor normals — measured
-on 4.7.1, and the opposite of what these docs claimed for months. So everything
-hull-outlined also renders on the reserved `InkOutline.ACTOR_INK_MASK_LAYER` (render layer 20), the
+the *resting* rims transparent still double-lined the coloured signal rims). It is also the wrong LOOK:
+the ink's crease treatment on small organic bodies reads scribbly next to a clean constant-width line.
+So everything ringed also renders on the reserved `InkOutline.ACTOR_INK_MASK_LAYER` (render layer 20), the
 bit stamped inside the same overlay walks that dress actors — `Character._apply_overlay_to_meshes`,
 `NpcOutline.apply_part_overlays` (BodyModelSwap resets `layers` on spawned parts, so the part walk
 must restamp), `Throwable._setup_overlay_chain`, `body_part_gib`'s strip pass,
@@ -967,36 +1076,54 @@ must restamp), `Throwable._setup_overlay_chain`, `body_part_gib`'s strip pass,
 swaps and rebuilds re-register automatically. `InkOutline` renders that layer plus the view-model
 layer into a mask `SubViewport` sharing the main world (camera-synced each frame, clear-color
 environment per the godot#84930 sky-under-transparent-bg lesson), and the shader discards any pixel
-the mask covers. A new actor path that dresses meshes WITHOUT those walks gets inked over its rim with
+the mask covers. A new actor path that dresses meshes WITHOUT those walks gets inked over its ring with
 no error anywhere — that is the regression to watch.
 
-**The rim and the stamp are one contract**, which the fifth stamper exists to make unbreakable. The
+**The ring and the stamp are one contract**, which the fifth stamper exists to make unbreakable. The
 player's own first-person body had NEITHER of them until 2026-08-15: `Character`'s walk is scoped to
 `mesh`, and the Player's `mesh` resolves to the `GunMesh`, so the `FirstPersonLegs` rig — a sibling
 subtree childed straight to the Player — was outside the contract entirely and wore the WORLD's ink
-line while every NPC beside it wore a hull rim. Stamping the mask bit alone would have left it with no
-outline at all, so `BodyModelSwap` now owns both halves behind one designer switch
-(`actor_outline` / `actor_outline_color` / `actor_outline_width`, default OFF because on an NPC the rim
-belongs to `NpcOutline`'s disposition colouring). It applies inside `_rebuild`, beside
-`_apply_cast_shadow` / `_apply_view_model_layer`, because that rig re-instances its parts on any model
-reassignment: a stamp applied from OUTSIDE is silently lost on the next appearance swap. The rim's
-alpha is driven from `body_transparency` / `arm_transparency` per part, so a dissolving chest cannot
-leave a solid black silhouette of itself behind.
+line while every NPC beside it wore its own. Stamping the mask bit alone would have left it with no
+outline at all, so `BodyModelSwap` owns both halves behind one designer switch (`actor_outline`,
+default OFF because on an NPC the outline belongs to `NpcOutline`'s disposition colouring). The ID it
+stamps follows what the rig IS: a rig forced onto `view_model_layer` takes `TINT_ID_VIEW_MODEL` (the
+same slot the weapon in your other hand wears), anything else takes `TINT_ID_NEUTRAL`. It applies
+inside `_rebuild`, beside `_apply_cast_shadow` / `_apply_view_model_layer`, because that rig
+re-instances its parts on any model reassignment — and the duplicates die with the parts, so a stamp
+applied from OUTSIDE is silently lost on the next appearance swap.
+⭐ **The dissolve is the one place the ring is measurably WORSE than the hull, and it is accepted.** The
+hull carried a per-material `outline_color.a`, so `BodyModelSwap` could fade a part's outline
+continuously with `body_transparency` / `arm_transparency` / `leg_transparency`. A ring's colour comes
+from a global LUT and its buffer's alpha channel is COVERAGE, not opacity, so there is no per-instance
+alpha to turn down. `_apply_outline_visibility` therefore SWITCHES the duplicate off at the halfway
+point of the dissolve (`InkOutline.set_tint_visible`). A hard cut at half-dissolved beats the
+alternative the original export was added to prevent: a solid black silhouette of your own chest
+hanging under the camera after the chest itself has faded away.
 
-**The view model is the third shape of the same contract: excluded by LAYER, not by stamp — so its rim
-has to be visible on its own.** The gun renders on `ViewModelCamera.VIEW_MODEL_LAYER`, the mask camera
-culls that layer, and the ink is discarded over the weapon on purpose. Which makes `GunVisuals`'
-inverted-hull rim the view model's ONLY outline — and until 2026-08-18 that rim was sub-pixel.
-`GunVisuals.outline_width` defaulted to `0.02` from the day the gun got a rim (2026-06-03), sized against
-the NPC's then-`0.085`, both leftovers from the OLD `outline.gdshader` (a world-space extrusion in
-metres, where a gun 20 cm from the lens needed far less than an NPC). The shader had already gone
-screen-space (2026-05-27: `outline_width` ≈ 1 visible pixel per unit, invariant to distance); the NPC
-was retuned to `2.0` (2026-06-16) and the gun never was — measured 5 rim pixels on the whole silenced
-pistol at `0.02` vs 988 at `2.0`. It hid for months because the weapon had no other outline to compare
-against; the ink pass (2026-08-12) briefly inked it, the actor mask then correctly took the ink off,
-and that was the day the weapon visibly "lost its outline". Now `2.0`, NPC parity, pinned in
-`tests/test_ink_outline.gd` (`test_the_view_model_hull_rim_is_a_visible_width`) against `NPC.outline_width`
-so the two cannot drift apart again; the fists (`FirstPersonBody`) carry the same `2.0`.
+**The view model is the third shape of the same contract: excluded by LAYER, not by stamp — so its ring
+has to stand alone.** The gun renders on `ViewModelCamera.VIEW_MODEL_LAYER`, the mask camera culls that
+layer, and the ink is discarded over the weapon on purpose. `GunVisuals.dress()` stamps
+`TINT_ID_VIEW_MODEL` on every gun mesh — of the rig and of each swapped-in weapon model — skipping the
+Muzzle subtree (the flash stamps its own) and any `outline_skip_name_hints` match, which is why it uses
+the non-walking `apply_tint_mesh`. Miss a mesh and it has NO outline at all.
+Two geometry facts make it work, and both are easy to break:
+- **The gun is NOT drawn by the main camera.** `Head._setup_view_model_camera` sets
+  `ViewModelCamera.enabled = true` unconditionally (the `@export` default of `false` is dead for the
+  player — the node is code-built, so there is no `.tscn` to check), and that pass strips
+  `VIEW_MODEL_LAYER` from the main camera's `cull_mask` and composites its own SubViewport over the
+  frame. The TINT camera, meanwhile, clones the MAIN camera. They line up only because the gun camera
+  copies fov/near/far verbatim and **`ViewModelCamera.fov_offset` ships `0.0`** — a coincidence of
+  tuning, not a construction. Give that offset a value and the weapon's outline slides off the weapon
+  with no error anywhere; `tests/test_ink_outline.gd` pins the default at 0. The classic "longer gun"
+  FOV needs its own view-model tint viewport first, because one camera cannot hold two projections.
+- **The view-model ID is exempt from the ring's occlusion test** (`id == 10` in
+  `ink_outline.gdshader`). The main depth buffer contains no gun, so the depth behind the weapon would
+  read as "the gun is hidden" every time you walk up to a wall, and the outline would blink off while
+  the weapon is plainly still drawn on top.
+History worth keeping: from 2026-06-03 to 2026-08-18 the gun's hull shipped at `outline_width 0.02`, a
+metres-era leftover that measured FIVE rim pixels on a whole pistol (988 at the `2.0` it was eventually
+corrected to). Nobody noticed for two months because the weapon had no other outline to compare against.
+A constant-pixel ring cannot have that failure mode.
 
 **…but the layer is not actor-only, and the sixth stamper is the case that says so.** `ExplosionMesh`
 (the flash on every explosion, bullet-impact spark, paint pop and muzzle flash) builds an OPAQUE
@@ -1005,8 +1132,9 @@ the blend state — which meant it wrote depth like a wall and the edge detect r
 black (reported 2026-08-16). Nothing could have reached it either: an `Explosion` is spawned under the
 SCENE ROOT, not under any actor's `mesh`. It now stamps the bit in its own `_ready`, unconditionally.
 The half-set failure reads differently here than it does on an actor: a mesh carrying the bit with no
-rim is asking for NO line at all, which is wrong for a body and right for light — so `has_outline`
-stays the flash's only line (OFF for a blast, ON for the muzzle flash's thicker rim). Read
+ring is asking for NO line at all, which is wrong for a body and right for light — so `has_outline`
+stays the flash's only line (OFF for a blast, ON for the muzzle flash, which then wears
+`TINT_ID_NEUTRAL` like everything else black). Read
 `ACTOR_INK_MASK_LAYER` as "the ink does not own this pixel", and the rim-plus-stamp contract as the
 rule for ACTORS specifically.
 
@@ -1035,24 +1163,17 @@ handled a pixel at a time. Three things make it work and each is a trap if chang
   Calibrated with `scripts/tools/__ink_gap_probe.gd`, which sweeps actors at increasing clearances
   behind one wall and diffs each against a reference: **detection now holds down to 2 cm of clear air at
   6 m**, against 1.0 m before the split.
-- The hull rim writes no depth (above), so an actor's rim reaches the mask's COVERAGE but not its
-  DEPTH, and the ink shader SEARCHES outward (`mask_rim_search_px`, 12 px — the widest authored
-  `outline_width` of 2.0 spans 8 px of that buffer) for the body the ring belongs to. Fall short and an
-  occluded actor stops punching a solid hole and starts punching a person-shaped *outline* instead.
-  That search must stay on the INK side: the resolve pass can only widen the mask's depth by widening
-  its alpha, and the mask's alpha is coverage, and coverage is suppressed ink — repairing the ring there
-  buys a bare halo around every VISIBLE actor instead. Teaching the hull to write depth
-  (`depth_prepass_alpha`) fixes the ring too, but hands the main pass a second silhouette to edge-detect
-  and put a faint doubled line along visible actors; tried, measured, reverted.
-**The rim must be the same width in both passes.** `outline.gdshader` is drawn twice — once into the
-frame and once into the mask, which renders at half the 3D buffer's resolution — so sizing its extrusion
-by `VIEWPORT_SIZE` made the mask's rim twice as wide as the visible one. The mask then claimed a fatter
-silhouette than the actor had, and the ink stopped short of it: measured, suppression reached 4 px past a
-visible actor whose rim was 2 px. That bare band hugged every actor at every distance, and on a humanoid
-it traced each limb and the gaps between them. `rim_reference_width` pins the extrusion to a fixed
-fraction of the screen instead (aspect still comes from `VIEWPORT_SIZE`), which is identical in both
-passes by construction; re-measured at 2 px, exactly the rim. The frame the player sees is unchanged at
-this project's 1584-wide buffer, and the rim no longer changes apparent thickness with Render Scale.
+- **Coverage without depth still has to be resolved.** Any masked pixel the resolve pass cannot place
+  in space falls into the "cannot vouch → keep suppressing" branch, so an occluded actor stops punching
+  a solid hole and starts punching a person-shaped *outline* instead ("an O shape around it"). The
+  historical source was the inverted hull — a transparent-pass material writing no depth, measured at
+  23 px of mask alpha against 19 px of mask depth on a real box. That shader is deleted and the ring's
+  duplicates are opaque, so the common case now agrees by construction, but the same shape still arises
+  from a `transparency`-faded prop, a coarse-LOD silhouette or an actor at the edge of the encoding
+  window — so the ink shader still SEARCHES outward (`mask_rim_search_px`, 12 px; five cheap gate taps
+  decide whether the search runs at all). That search must stay on the INK side: the resolve pass can
+  only widen the mask's depth by widening its alpha, and the mask's alpha is coverage, and coverage is
+  suppressed ink — repairing the ring there buys a bare halo around every VISIBLE actor instead.
 
 Every case the resolve pass cannot vouch for — a `transparency`-faded prop, a rim wider than the
 dilation, an actor past the encoding window — keeps the old unconditional suppression, so the failure
@@ -1062,9 +1183,9 @@ attempts are recorded in `InkOutline`'s header and must not be rebuilt: stencil 
 silent no-op — `depth_test_disabled` drops the depth-stencil attachment) and a CPU raycast cull (it
 broke the world ink outright).
 
-**That mask is a SECOND SCENE RENDER, and it has to stay a cheap one.** Every hull-rimmed thing in a
+**That mask is a SECOND SCENE RENDER, and it has to stay a cheap one.** Every ringed thing in a
 level carries the mask layer — each NPC body part, each `Throwable` prop, the gibs, the view model —
-and each draws base + hull overlay + flash `next_pass`, so the mask pass re-pays the per-object cost of
+and each draws base + flash `next_pass`, so the mask pass re-pays the per-object cost of
 a prop-heavy level. The first build did that at the frame's full internal resolution *and* inherited
 `rendering/scaling_3d/scale` (2.0) from project settings, so it was rendering 1584×888 — a 4× supersample
 of an image nobody ever looks at — with a per-viewport shadow atlas and full mesh detail. That is what
@@ -1149,13 +1270,14 @@ goes nowhere and a line that quietly stops being drawn.
 
 The pass draws inside the **3D** frame (the quad is a camera child), not on the HUD `CanvasLayer`, so
 the lines are posterised, ordered-dithered and grained by `post_process.gdshader` along with the world instead
-of floating over it as crisp modern vector art, and the camera's far-DOF blurs distant ink together
-with the geometry it belongs to. Its strength is the live `Settings.ink_outline_intensity`
+of floating over it as crisp modern vector art — and when far-DOF is live (ADS only: the resting camera ships
+without far blur since 2026-08-24) distant ink blurs together with the geometry it belongs to. Its strength is the live `Settings.ink_outline_intensity`
 (Options → Video → "Ink Outline"), the `ps1_warp_intensity` idiom: polled each frame, 0% hides the
 quad entirely so "off" costs nothing.
 
-**The ink is fog-matched, and must stay that way.** This world's scene fill IS its volumetric fog, so
-"how far you can see" is set by fog density, not the far plane — but the ink quad renders
+**The ink is fog-matched, and must stay that way.** A level that runs volumetric fog is lit BY it (TestLevel
+and the other sandboxes still are; the main level dropped its fog on 2026-08-24), so there "how far you can
+see" is set by fog density, not the far plane — but the ink quad renders
 `fog_disabled` at 1 m from the lens, so the engine's own fog can never dim the lines (fog attenuates by
 the *fragment's* depth, and our fragments all sit at 1 m). Left alone, the pass draws crisp black lines
 over buildings the fog has fully swallowed — outlines advertising geometry the player cannot see (the
@@ -1163,7 +1285,8 @@ first playtest complaint). So `InkOutline` reads the live `WorldEnvironment`'s f
 (the `world_environment` group — the StarSky / camera_effects lookup) and pushes a matching Beer-Lambert
 extinction (`fog_extinction = density × fog_match`); the shader multiplies the edge term by
 `exp(-extinction × depth)`, making ink lose contrast at exactly the rate the surface it sits on does.
-The `fade_start/fade_end` window remains as the backstop for fogless scenes only.
+The `fade_start/fade_end` window is the backstop for fogless scenes — which, since the main level dropped
+its volumetric fog (2026-08-24), makes that window the whole distance treatment on the main level.
 
 ### HUD ghosting — the second viewer on the HUD canvas (`HudGhost`)
 
@@ -1395,6 +1518,76 @@ them.
 Measured effect at 40 spread NPCs: 66.7 ms → ~36 ms (15 → 28 fps). It cannot
 help a crowd that is genuinely all engaging you at once, by construction.
 
+### See-through geometry — the `SightRay` seam
+
+**The rule:** a chain-link fence, a wire grille, a shop window or a foliage
+card stops neither SIGHT nor GUNFIRE, while staying a solid you cannot walk
+through. Physics knows nothing about a texture, so before this an NPC behind a
+fence was as blind as one behind concrete — you could stand in plain view
+through the wire and never be noticed — and neither side could shoot through it.
+
+**The marking contract** is one group, `Groups.SEE_THROUGH`, tested by the pure
+`SightRay.is_see_through_hit(hit)` (Dictionary in, bool out — unit-tested with
+no physics space). ⭐**Members must be whole BODIES.** A flying round collides
+with a body, and both `collision_mask` and `add_collision_exception_with` are
+per-body, so there is no way to let a round through one shape of a body and stop
+it on the next. Everything below follows from that constraint.
+
+**Three consumers, three routes to the same rule:**
+1. **Perception** — every "can this NPC SEE / HEAR past that?" ray is cast by
+   `SightRay.cast(world, query)` (`scripts/npc/sight_ray.gd`), never by
+   `intersect_ray` directly. Same query the caller built (mask, exclude,
+   from/to untouched); a see-through hit does not stop the ray, the cast resumes
+   `SKIN` (1 cm) past it, and what returns is the first genuinely OPAQUE hit.
+   `query.from` is walked forward during the passes and restored before
+   returning, so a reused query is unchanged. Callers: `Perception.can_see`,
+   `can_see_node`, `_wall_between` (hearing occlusion),
+   `NpcSenses._corpse_occluded`, `NpcHomeReturn._occluded`, `NPC._aim_laser_at`
+   (the AIM ray — see below), and `Player._check_aim_remark`.
+2. **Hitscan** — `DamageTrace.run_pellet` skips see-through hits inside its own
+   pierce walk (it needs the segment bookkeeping, so it calls
+   `is_see_through_hit` rather than `cast`). The pellet carries on with no
+   spark, no damage and **no penetration spent** — passing a fence is not an
+   overkill pierce — under its own `pass_throughs` backstop.
+3. **Live rounds** — `Projectile._pass_see_through_geometry` (called from
+   `_ready`, before the first physics step) adds a collision exception with
+   every `CollisionObject3D` in the group. This covers the NPC ranged path,
+   since enemies never hitscan.
+
+⭐**`NPC._aim_laser_at` is on list 1 on purpose.** Its hit feeds
+`NpcCombat.act_attack`'s `clear` test: an enemy that can see you through a fence
+can also shoot you through it, so it must read the shot as clear and stand and
+fire. Leave it on a raw `intersect_ray` and enemies see you through the wire but
+refuse to shoot, and `should_chase_while_alerted` walks them in circles.
+
+**Still BLOCKED by a fence**, deliberately: walking into it, thrown/dropped
+props bouncing off it, the player's look-at interaction ray (`ray_cast.gd` — no
+looting through the wire), `SilentTakedown`'s reach ray, the grapple hook, and
+the navmesh bake.
+
+**Who does the marking.** `SeeThrough`
+(`scripts/components/see_through.gd`) is the prop drop-in — the `MinimapHide`
+marks-its-parent idiom, extended to every `CollisionObject3D` in the subtree.
+`SeeThroughBrushes` (`scripts/components/see_through_brushes.gd`) handles
+func_godot map geometry, where one `StaticBody3D` carries the entire map (558
+`CollisionShape3D` children on `alive.map`): at `_ready` it walks its parent's
+subtree, and for each body with a `MeshInstance3D` child it collects the
+vertices of every surface whose material has
+`transparency != TRANSPARENCY_DISABLED`, finds each brush whose convex hull has
+EVERY corner on one of those vertices (a 0.05 m-tolerant spatial hash; "every
+corner" is what keeps a wall sharing an edge with a fence opaque), and
+**reparents those shapes into a fresh sibling `StaticBody3D`** in the group. The
+new body copies the source body's collision layer, mask and physics material, so
+the fence is exactly as solid as before to everything outside the three
+consumers. On `alive.map` that resolves to the 13 `fence1_a` brushes plus 4
+`tree` brushes, with no authored ids and no dependence on brush order or node
+names.
+
+⭐**The split is RUNTIME-ONLY** — the component is deliberately not `@tool`, so
+the saved `.tscn`, the editor and the navmesh bake never see it, and a func_godot
+rebuild needs no re-authoring. Put the node under the LEVEL ROOT, never under
+`FuncGodotMap`: a rebuild deletes everything func_godot generated.
+
 ### Darkness stealth — the `light_exposure` seam
 
 Shadow-slows-detection is a one-field duck-typed contract, not a subsystem.
@@ -1586,12 +1779,200 @@ Tests should match the risk:
 Do not run the full GUT suite automatically; `CLAUDE.md` is the source of truth
 for test-running etiquette.
 
+### Presentation: High Fidelity / Retro
+
+The game has two presentation modes, chosen on Options -> Video ("Presentation", a
+`Settings.presentation` index — 0 High Fidelity, 1 Retro) and applied live by
+`Settings.apply_video()` via `Window.content_scale_mode`:
+
+- **High Fidelity (the shipped default)** — `canvas_items` stretch: the root viewport
+  renders at the NATIVE window resolution while every Control keeps laying out against
+  the same logical ~792x444 canvas (Godot's size-2d override — `get_visible_rect()`
+  still reports the logical canvas, and dynamic fonts oversample crisp automatically).
+  3D renders at native x `render_scale`.
+- **Retro** — the original pipeline: `viewport` stretch renders everything into the
+  ~792x444 buffer and the window nearest-upscales it (the chunky pixel look),
+  bit-identical to the pre-presentation-setting game.
+
+The contract (also the `@risk` header on `managers/Settings.gd`): effect knobs
+authored in canvas pixels convert through **`Settings.native_scale()`** (render px per
+logical canvas px — 1.0 in Retro/off-tree, ~2.42 at 1080p HF) and screen-matching
+buffers size from **`Settings.render_size()`** — both read LIVE per frame, never
+cached, so a mid-session toggle bites the consumers' next poll. Compensated consumers:
+the screen post-process (`pixel_scale` dither/grain cell + the pixelation-grid no-op
+push in `player.gd _update_low_hp`), `InkOutline` (px-unit uniforms + mask viewport),
+`HudGhost`/`WorldGhost` (accumulators + capture transforms), the HUD-curve SubViewport
+(`ui.gd`, sized native with a `size_2d_override` pinning layout to the canvas, and a
+`filter_linear` HF twin of `hud_curve.gdshader`), the view-model pass
+(`view_model_camera.gd` — the container is re-rected native and `Control.scale`d back
+onto the canvas; its `stretch` flag must stay TRUE, see the feedback-loop warning
+there), and the minimap hairline strokes (`FloorplanSection.stroke_width`'s
+`native_scale` parameter). The PS1 vertex warp deliberately takes NO compensation (its
+NDC grid is screen-proportional; scaling it would delete the wobble).
+
+Two second-order corrections landed after the first playtest (2026-08-25):
+
+- **Ink px units are RETRO-BUFFER pixels, not canvas pixels.** `InkOutline`'s width/
+  reach knobs were tuned against the 1584-wide buffer (canvas x the authored
+  `scaling_3d/scale` 2.0), and the migration seeds HF at `render_scale` 1.0 — so a
+  bare `native_scale()` multiply DOUBLED every knob's on-screen fraction (fat halo
+  outlines floating off distant NPCs; thin features dropped their lines because the
+  Roberts tap spacing doubled with the width). `InkOutline._px_unit_scale()` is the
+  correction: `native_scale() x live_supersample / AUTHORED_SUPERSAMPLE` in HF,
+  `native_scale()` verbatim in RETRO. Its mask also sizes from `render_size()`
+  exactly — a scalar-rounded 1920x1076 mask skews the mask camera's aspect against
+  the main render.
+- **Screen annotations must go through the lens.** The world barrel warp bends the
+  PICTURE only; anything drawn from `Camera3D.unproject_position` (sniper glints,
+  compass markers, the sky-title overlay) sits above it and detaches by the warp
+  displacement — always true, but invisible under RETRO's chunky upscale and plainly
+  wrong on a crisp native frame ("the glint is completely misaligned").
+  `CameraSettings.lens_display_point()` (pure static, Newton-inverts the shader's
+  `lens_warp`) maps an unprojected point to where the warp displays it; measured
+  sub-pixel in both modes by the QA probe's differential marker test, and pinned by
+  round-trip tests in `tests/test_camera_input_ui.gd`. Any NEW screen-space world
+  annotation must call it.
+- **EVERY outline is SCREEN-SPACE now; the inverted hull is DELETED (2026-08-27).**
+  The hull shell extruded a constant SCREEN fraction, so its WORLD thickness grew
+  with distance until it out-thickened the ~10 cm Lego limbs (~4 m) and the per-part
+  shells shattered into colored confetti — probed on a real NPC, unfixable by
+  cap/fade tuning alone, and exactly why no shipped game (L4D2 glow, League, Deep
+  Rock's stencil IDs) draws long-range team outlines with geometry. That retired it
+  for NPCs on 2026-08-25; the user's "replace all the shitty existing outlines with
+  the new outline shader we added for enemies — this includes view models and
+  everything" retired it everywhere else two days later. The replacement is that
+  shipped architecture:
+  - **The world ink NEVER draws on actors** (user-affirmed contract; a brief
+    ink-outlines-NPCs experiment was reverted). NPCs stay on
+    `ACTOR_INK_MASK_LAYER`; `InkOutline.hull_handoff_*` ships neutralized
+    (290/299 m — inside the encode window on purpose: values past 300 m encode
+    equal and degenerate the smoothstep). The tint RING below is an NPC's ONLY
+    outline, which is why NEUTRAL maps to id 4 (a black ring matching the classic
+    black rim) instead of having no id. The ring is computed BEFORE the ink's
+    actor-exclusion and gates its `discard` (`&& ring_a <= 0.0` — `return` is
+    illegal in a fragment processor), or the suppression band would erase it.
+  - **Disposition color** = the TINT buffer: `NpcOutline._sync_tint_duplicates`
+    parents an invisible flat duplicate under each part mesh
+    (`InkOutline.ACTOR_TINT_LAYER`, one shared material —
+    `InkOutline.tint_material()`), whose shader (`resources/shaders/ink_tint.gdshader`)
+    encodes per-fragment log depth (the resolve pass's two-byte pack, THIRD copy —
+    keep all identical) + `disposition_id` (instance uniform, packed as
+    `id / TINT_ID_SPAN` where the SPAN is a **literal 16 in three files** —
+    `InkOutline.TINT_ID_SPAN`, `ink_tint.gdshader`'s divide and
+    `ink_outline.gdshader`'s decode; a drift re-reads every id as a different one
+    with no error, and a test pins all three. Ids: 1 hostile / 2 friendly /
+    3 companion / 4 neutral-black / 5 prop / 6 claimed prop / 7..8 the continuous
+    engaged-hostile band / 9 look-at hover / 10 view model. It was 8 wide until the
+    hull's retirement needed 9 and 10).
+    `ink_outline.gdshader` ring-dilates that buffer (`highlight_width_px`, LUT
+    exports `highlight_hostile/friendly/companion` — keep in step with
+    `NPC.OUTLINE_*`; with `Settings.colorblind_safe_cues` ON, `_params` pushes
+    `CBPalette.SAFE_HOSTILE/SAFE_FRIENDLY` over the hostile/friendly slots —
+    accessibility wins over per-scene tuning, live on the toggle flip) into a
+    constant-pixel ring. The CLOSE-RANGE COLOR BLOOM
+    (`highlight_color_near_m/far_m`, 8/22, pushed pre-encoded) renders every ring
+    neutral-black at range and fades the disposition color in as the ACTOR closes
+    — full color inside `near`, black past `far`; constant color instead = raise
+    `near` toward the window top. **THE LOCK-ON OVERRIDE (2026-08-27):** a hostile
+    that is TARGETING the player (`NPC.is_alerted_on_player()` — ALERTED with the
+    player as its live target; `_target` alone is a proximity lock and would light
+    every hostile from spawn) stamps the CONTINUOUS 7..8 band
+    (`TINT_ID_HOSTILE_ENGAGED + mix`, `InkOutline.apply_tint`'s `blend` arg)
+    instead of plain id 1, and the shader FLOORS the bloom by the fraction past 7
+    (`max`, never replace) — full red at ANY distance while locked on.
+    `NpcOutline._drive_engaged_mix` (from the same `poll(delta)` — fed the BANKED
+    AiLod think delta, invariant 2 of the LOD gate, and still polled under
+    cutscene control so a scene that pacifies an enemy fades its ring on camera)
+    ramps the mix over `NPC.outline_target_fade_s` (export, profile-stamped from
+    `NpcData`; 0.4 s; 0 = snap) both in and out, so the red fades rather than
+    pops; the mix is per-life state (`reset_for_reuse` zeroes it AND restamps the
+    duplicates — the dead life's ~8.0 stamp would otherwise render full-red at
+    the spawn point until the AiLod-staggered first think). ⭐ The ring follows
+    Colorblind-Safe Cues (gap closed 2026-08-27): `NpcOutline._disposition_id()`
+    resolves the tint id off `is_following()`/`resolved_disposition()` directly
+    — never by comparing the resolver's color, which CBPalette shifts under the
+    toggle (the old exact-color compare degraded every hostile/friendly to the
+    black ring and the promotion never fired) — and the engaged band shares the
+    `highlight_hostile` LUT slot, so the any-distance glow paints orange in safe
+    mode (windowed A/B: `scripts/tools/__ink_cb_ring_shots.gd`). All parts merge into ONE raster
+    silhouette (confetti structurally impossible), overlapping enemies resolve
+    nearest-wins by the duplicates' own z-test, and the ring depth-compares against
+    the scene so it never shows through walls.
+- **World props (weapons, crates, the claimed dog) ring UNCONDITIONALLY.** The
+  mechanism is shared: `InkOutline.apply_tint(root, id)` / `apply_tint_mesh(mesh, id)`
+  / `clear_tint(root)` are the generic API, and `Throwable._tint_id()` resolves the
+  precedence fresh on every re-stamp — CLAIMED (blue, `TINT_ID_PROP_CLAIMED`) beats
+  HOVER (white, `TINT_ID_HOVER`) beats REST (black, `TINT_ID_PROP_REST`), so a claimed
+  dog reads as yours whether or not you happen to be aiming at it. Only the
+  DISPOSITION ids (1..4 and the 7..8 band) take the close-range colour bloom; props,
+  the hover and the view model paint their LUT slot flat at every range.
+  ⭐ Until 2026-08-27 the prop ring was the FAR half of a crossfade with the hull
+  (`highlight_prop_near_m/far_m`, matched to the hull's `rim_fade_start_m/end_m`).
+  Both knobs are DELETED with the shader: a surviving distance gate would now leave
+  every crate and dropped weapon with no outline at exactly the range the player
+  inspects it — the mirror image of the dead zone the crossfade was built to close.
+- **The look-at / talk hover BORROWS an id rather than owning one.**
+  `InkOutline.set_tint_highlight(meshes, on)` stamps `TINT_ID_HOVER` and remembers
+  what each duplicate was wearing (`TINT_BASE_META`), putting it back on look-away —
+  the same stash-and-restore shape the old `material_overlay` swap had, one layer
+  down, and idempotent in both directions because the interaction ray drives it every
+  time the target changes. Scenery with no ring of its own (a terminal, a car) gets a
+  duplicate CREATED for the hover and FREED again (`TINT_HOVER_OWNED_META`), which is
+  what stops a hover stranding a permanent white ring on the level. Because a ring
+  resolves one id to one GLOBAL LUT slot, the per-component `highlight_color` on
+  `Talkable` / `DialogueNPC` / `LookAtInteractable` no longer picks the hue — the hue
+  is `InkOutline.highlight_hover`. Those exports survive as the VISIBILITY switch they
+  already doubled as: alpha 0 or width 0 still means "this one gets no hover outline"
+  (the shipping ATM relies on it), and the component then never borrows at all.
+- **The one consumer with no route to the ring:** `shell_drop.tscn`'s ejected brass is
+  a `GPUParticles3D` draw pass, and `apply_tint` parents a child `MeshInstance3D`
+  under a `MeshInstance3D` — there is nothing to parent it to. It authors no `layers`,
+  so it keeps the WORLD's ink line, which is the same black it had. The
+  physical-casing variant (`bullet_casing.tscn`) is an ordinary body and does get the
+  ring; it also gained the mask stamp it never had, which removes a doubled line
+  nobody had noticed.
+  Duplicates are invisible to every mesh-walker via the `npc_tint_dup` meta skip —
+  centrally in `TalkHelpers.collect_meshes` (root AND children) and individually in
+  the raw walkers that bypass it (`BodyModelSwap` x6, `WorldItem`, `GunVisuals` x3,
+  `WeaponModelSwapper`, `Ps1Applier`, `MeshCoat`, `BodyPartGib`).
+  ⭐ Renaming that meta un-shields all of them with no compile or runtime error.
+- **Skinned meshes are MIRRORED, not skipped** (reversed 2026-08-27). `apply_tint`
+  used to refuse `m.skin != null` — survivable only while the hull covered for those
+  bodies. With the hull gone, the corpse `Ragdoll` spawns, the bare `Man.glb` fallback
+  and three of the seven weapon view models would have had NO outline at all. The
+  plumbing is two properties on the duplicate: copy `skin`, and re-express `skeleton`
+  as a path from the DUPLICATE (it is a child of the mesh, so the source's own
+  relative path resolves one level short).
+- **The ring does NOT ride `Settings.ink_outline_intensity`.** While the hull existed,
+  Options → Video → "Ink Outline" at 0% left every gameplay outline intact, because
+  the rims were not part of this pass. Now that the ring IS every outline in the game,
+  scaling it by that slider would silently make a video option the master switch for
+  hostile red, the colourblind-safe palette, claimed-prop blue, every hover cue and
+  the weapon's line. So the slider owns the WORLD ink alone; the quad stays visible
+  for the ring even at 0% (with `ink_opacity`/`width_px` zeroed), and both
+  SubViewports are gated — the mask with the ink, the tint pass with the ring
+  (`InkOutline.ring_enabled()`). That tint gate is new too: the pass rendered
+  unconditionally until the migration was about to multiply what it draws.
+  Pinned in `tests/test_ink_outline.gd`.
+  ⭐ Probe gotcha: a bare `enemy.tscn` spawn has NO body (looks come from authored
+  NpcData), so outline QA must photograph level-authored NPCs, never raw spawns.
+
+A settings.cfg from before the split migrates once via `Settings.read_presentation`:
+no `presentation` key -> High Fidelity with `render_scale` forced to 1.0 (the saved
+2.0 supersampled the retro buffer; against a native target it would be 4K-on-1080p).
+Verification is the windowed harness `scripts/tools/presentation_qa_shots.tscn`
+(QA_CANVAS must stay logical in both modes; QA_BUFFERS must track `render_size()`;
+the PNG sizes themselves prove the split); `menu_qa_shots` / `hud_curve_qa_shots`
+pin RETRO so the artist reference packs stay deterministic.
+
 ### Menu/UI layout QA
 
-The real UI canvas is **792x444** at 16:9 — the 396x216 base viewport is doubled by
-`window/stretch/scale=0.5`, and `aspect="expand"` varies it with monitor shape
-(height 432 minimum, 495 at 16:10, wider than 792 on ultrawide). Menu code must lay
-out against that, never against 396x216. `scripts/ui/menu_style.gd` documents the same
+The real UI canvas is **792x444** at 16:9 in BOTH presentation modes — the 396x216
+base viewport is doubled by `window/stretch/scale=0.5`, and `aspect="expand"` varies
+it with monitor shape (height 432 minimum, 495 at 16:10, wider than 792 on
+ultrawide); High Fidelity renders it at native resolution without changing its
+coordinates. Menu code must lay out against that, never against 396x216 (and never
+against the window). `scripts/ui/menu_style.gd` documents the same
 fact at the code seam, and `MenuSkin` (`resources/ui/menu_skin.tres`) carries the shared
 layout constants (`content_separation`, `dialog_button_min_width`, `tab_min_width`, …).
 
@@ -1608,6 +1989,21 @@ strip's rest state in button-body chrome). Per-state `button_font_*_color` ink k
 stay a transparent-centred ring (Godot overlays the focus box ON TOP of the state box);
 a missing `button_disabled` derives a dimmed copy of the rest art; and empty-text
 LIST-ROW buttons opt out of button-body art via `MenuStyle.style_list_row()`.
+
+**Scrollbars are the one widget whose skin slot is also a LAYOUT budget.** A `ScrollBar`
+takes its cross-axis size from its track box's CONTENT MARGINS and nothing else, so
+`skin.scrollbar_width` (default 8px) is stamped onto whichever box the bar wears —
+generated or artist art — by `MenuStyle._scrollbar_box`. Before 2026-08-27 no box carried
+margins and every bar in the game drew ZERO px wide, which is why four screens silently
+hid most of their rows (Options→Controls 4 of 44 bindings, Accessibility 14 of 33,
+character creation 4 of 6 stats, the Stats tab cut mid-word). ⚠ A `ScrollContainer`
+RESERVES that width beside its content, so a page with no width to spare buys the gutter
+out of its own margin instead of out of its rows — `options_menu._add_tab` subtracts it
+from the page's right inset and runs every tab at `SCROLL_MODE_SHOW_ALWAYS` so the
+affordance is up before the player wheels and every tab reserves the same rail.
+`scrollbar_track_color` / `scrollbar_grabber_color` (alpha-0 = derived from `text_color`)
+ink the generated pair; the thumb goes ACCENT under the mouse. Pinned by
+`tests/test_menu_skin_art.gd` + `tests/test_options_menu.gd`.
 
 **One light, two halves.** The art PNGs carry a drop shadow BAKED into a transparent pad
 that rides in each box's expand margins (draw-only, so no layout metric moves with a
@@ -1632,11 +2028,22 @@ COMPACT confirm cards ask for `MenuStyle.make_plain_panel_style()` instead becau
 screen-card art is nearly all torn border at popup scale — and `dialogue_panel` (the
 bottom conversation box) has no theme entry at all. `DialogueView._build_ui` reads it
 through `MenuStyle.make_dialogue_panel_style()`, which returns **null** when the slot is
-empty rather than deriving a fallback: for this one surface "no art" is a real authored
-look (outlined text straight over the 3D world, only the response menu backed), so the
-view wears a `StyleBoxEmpty` and — from the same answer — drops the response menu's
-plain-panel backing when the box itself carries art. That art's transparent corner cut
-also constrains its own margins; see THE NOTCH RULE in `AUTHORING_GUIDE.md`.
+empty OR gated off by `MenuSkin.dialogue_panel_enabled` — the SHIPPED state since the
+08-24 box-less dialogue pass: the slot keeps the artist's authored art (and its tests /
+shadow-bake target) while the box wears a `StyleBoxEmpty` and the conversation reads as
+left-aligned outlined subtitles + a left-gutter response column of translucent per-row
+beds between the letterbox bars, the speaker held dead-centre by the camera
+(`dialogue_frame_offset_deg` 0). The response rows
+carry their OWN skin slots (`dialogue_choice_normal`/`_hover`, generated fallbacks in
+`MenuStyle.make_dialogue_choice_*`) — the old plain-panel backing behind the choice list
+is gone. The box art's transparent corner cut still constrains its own margins for
+whoever re-enables it; see THE NOTCH RULE in `AUTHORING_GUIDE.md`. The box-less layout
+itself (subtitle block + response column at the left gutter + scrim, digit selection
+riding the hotbar-slot bindings while the tree is paused, the pinned Goodbye row) lives
+in `DialogueView`/`DialogueManager` with
+its geometry on `GameSettings.dialogue`; judge changes with
+`scripts/tools/dialogue_ui_qa_shots.tscn` (a windowed QA-shot harness — no unit test
+can see a layout).
 
 The in-game HUD has the same seam: `HudSkin` (`resources/ui/hud_skin.tres`,
 `scripts/ui/hud_skin.gd`), exposed as `MenuStyle.hud` beside `MenuStyle.skin` (swap via
@@ -1665,6 +2072,34 @@ reach the idle gate. The contract, end to end: the level's `Groups.NAVMESH` regi
 the view matrix) -> a per-floor "deck" cached in the widget -> ONE `draw_multiline` plus one
 `canvas_item_add_triangle_array`, both under a single `view_transform`, so the plan, an
 optional `MapData` underlay and every marker dot share one projection and cannot fork.
+
+**Two hosts, one widget.** Since the MAP TAB landed (`scripts/ui/map_screen.gd` +
+`scenes/ui/map_screen.tscn`, the sixth Pip-Boy tab, default **M**) this script also draws the
+page-sized map, as a second instance filling a menu panel. Everything above is shared — the same
+gather, the same deck cache, the same marker channels, the same skin, the same idle gate — and the
+ONLY difference is the per-instance `@export`s in the widget's **Instance view** group, all inert
+by default so the HUD box and the ~39 bare `.new()` sites in `tests/test_minimap.gd` are untouched:
+`world_span_override` (0 = follow `HudSettings.minimap_world_span`; the tab pushes `map_world_span`),
+`zoom_override` (0 = follow `Settings.minimap_zoom`; the tab pushes `Settings.map_zoom`), `heading`
+(FOLLOW_SETTING / NORTH_UP / HEADING_UP; the tab forces NORTH_UP), `zoom_key_enabled` (off on the
+tab, so one `MinimapZoom` press can never move two maps), `view_offset` (the PAN, in world metres on
+XZ — ZERO and gestureless on the player-centred HUD box, written by the map screen's drag / movement
+axes and re-zeroed on every open), and the three waypoint knobs `waypoint_labels` /
+`waypoint_pin_offscreen` / `selected_waypoint` (all off/-1 on the HUD box, all pushed on by the tab:
+that surface is where pins are EDITED, so it names every pin and rim-pins the ones off the view,
+while the 108 px box draws only the pins actually on it — plus the tracked one, which always pins).
+⭐**The invariant that makes this safe is
+that every paint site and every drawn-options stamp reads `effective_world_span()` /
+`effective_zoom()` / `effective_rotates()`, never `Settings.minimap_*` directly.** A stamp taken
+against the raw Settings row on a widget that draws an override is a mismatch no repaint can resolve
+— it pins the idle gate open forever while a change to the value actually drawn asks for nothing, so
+the map's zoom moves and the picture does not. `_drawn_span` and `_drawn_view_offset` are the fifth
+and sixth members of that stamp family, added for the same reason. ⭐**The pan is a VIEW term, added
+to `_centre_xz` INSIDE `view_matrix()`** — the widget's single projection construction site — so the
+plan, the click-to-world inverse used by the tab's placement and every marker's screen point (the
+player's own caret included, which is projected rather than assumed to be the box centre) all move
+together and cannot fork. The map tab also gates on the same registry row / mid-death /
+`has_player` guards as its sibling tabs and never pauses the tree.
 
 The wall layer is a **boolean union, drawn as lines** (`FloorplanSection.silhouette`, knobs
 `GameSettings.hud.minimap_merge_solids` / `minimap_merge_weld`). A level is built out of
@@ -1740,10 +2175,21 @@ NPC is two different facts about one body:
   A fixed station cannot move, so scanning its group would pin the gate open forever for nothing;
   but 7 of the 8 stations placed in this project ride a dialogue NPC, so their glyphs DO move — and
   that body is already in `Groups.NPC`. Gating the NPC scan on the NPC toggle alone froze a walking
-  shopkeeper's glyph for any player who turned body dots off. The gate also now reads
-  `Settings.minimap_show_npcs`, not just the designer export: it previously forced a full repaint
-  every frame for bodies the player had already switched off, which was the exact cost that row exists
-  to remove.
+  shopkeeper's glyph for any player who turned body dots off. The gate no longer reads either switch
+  directly: it reads `_scan_r`, the ONE sampled field the paint site reads, which already folds in all
+  three owners of the body channel (`dot_npcs`, `Settings.minimap_show_npcs`, and the scanner implant).
+  It previously forced a full repaint every frame for bodies the player had already switched off, which
+  was the exact cost that row exists to remove — and the same now holds for the far more common case, a
+  player with no scanner chip standing in a level full of bodies.
+- **⭐The body channel is IMPLANT-GATED (`Minimap._sample_scan_range` -> `Player.body_scan_range`).**
+  Bodies are dotted only inside an installed, switched-on scanner's radius in METRES — `bio_scanner`
+  22 m, `deep_scanner` 55 m, widest enabled wins — and with no chip the channel draws nothing at all.
+  The limit had to be in metres rather than in box-pixels because the Map tab is the same widget at
+  120 m, zoomable to 240 and pannable 400: a limit the player's zoom slider can widen is not a limit.
+  The rim fades over `HudSettings.minimap_scan_fade_m` so a walking body does not blink on and off.
+  ⭐The range lives on the ability SCRIPT's export default, never on its `.tscn` — `AbilityManager._build`
+  reconstructs an ability from `load(script_path).new()` for every runtime grant (chip install, save
+  load, pickup) and never reads the scene, so a scene-only range installs as 0 m, silently.
 - **⭐That gate needs TRAILING EDGES, not just live facts.** A `CanvasItem` repaints only on
   `queue_redraw()`, so "is anything live NOW" is the wrong tense: the frame a fact STOPS being true is
   the frame the picture most needs repainting, and it is exactly the frame the gate goes quiet. For a
@@ -1765,6 +2211,43 @@ NPC is two different facts about one body:
   station never sets it. Same defect and same fix as the stuck aim arc (`aim_indicators.gd`'s own
   `_painted`). **A new painted channel added without a trailing edge strands its art on the map
   forever.**
+- **The NOISE RING is the fourth painted channel, and the only one that is a function of TIME.**
+  A circle around the caret at `Player.noise_radius` metres — the scalar enemy `Perception.can_hear()`
+  tests against — drawn in true WORLD METRES (every other marker is a fixed pixel size) so a body dot
+  inside it is a body that can hear you. It is centred at `size * 0.5` with no projection, which is
+  exact rather than approximate: `view_transform` builds `origin = rect * 0.5 - basis_xform(centre_xz)`
+  and `_centre_xz` IS the player's XZ, so the caret and the ring cannot drift.
+  - **It needs no clock, and that is the design.** `NoiseEmitter` recomputes the radius every physics
+    frame and decays a gunshot spike at 45 m/s (and a jump/landing spike at 50 m/s after a 0.35 s
+    full-radius hold), so the ring bursts past the box edge and collapses back over ~0.6 s driven
+    entirely by world state — no phase, no ring pool, no `Time.get_ticks_msec()`, no `process_mode`
+    override, nothing to strand when the tree pauses. What timing the spikes need lives in the EMITTER's
+    own physics tick, on the far side of the `noise_radius` scalar; the minimap still only ever samples a
+    number. It keeps the same shape as every other channel here and sidesteps the whole class of
+    animated-channel bugs. (During a spike's hold the radius is CONSTANT, so the `_drawn_noise_r` stamp
+    matches and no repaint is asked for — the already-painted ring simply persists, which is correct:
+    `CanvasItem` keeps its last paint until something queues a redraw.)
+  - **⭐`Minimap.NOISE_STEP_M` (0.25 m) is load-bearing, not cosmetic.** Ground deceleration is an
+    EXPONENTIAL lerp, so it asymptotes and `noise_radius` never reaches exactly `0.0` for a player who
+    has ever walked. Without the `snappedf`, the gate's float compare mismatches in the last bits every
+    frame and pins a full floorplan repaint open at frame rate, in a silent room, with nothing on
+    screen — and every test still passes. `tests/test_minimap_noise.gd` is the only tripwire.
+  - **Its gate term is a STATE STAMP (`_drawn_noise_r`), not a probe + `_painted` latch.** The stamp is
+    both halves at once: it holds the gate open while the radius moves, and the mismatch when the sound
+    stops buys exactly ONE clearing repaint. It is deliberately kept OUT of `_has_live_markers()` /
+    `_painted` — those two are a matched pair, and folding it in would drag a per-frame
+    `Groups.human_player` scan into the one term documented as allocating. The two-owner switch
+    (`ring_noise and Settings.minimap_show_noise`) is read inside `_sample_noise_radius` and nowhere
+    else, so the gate and the paint site ask literally the same question and no `_drawn_show_noise`
+    stamp is needed — switching the row off collapses the sample to 0.0, which IS the clearing edge.
+  - **It draws sound YOU made, never sound made AT you.** NPC gunfire and death pulses ride the same
+    `&"noise"` channel and are deliberately not drawn: the player has no hearing model at all
+    (`Perception` is instantiated only by NPCs), so an enemy's pulse would be a new sense granted
+    silently, and it would report a firefight through three walls. The ring cannot reveal a body that
+    `minimap_show_npcs` was not already drawing — it is a mirror of your own state, not a sensor. The
+    `debug_noise` export shows the whole channel for TUNING and ships off, an inspector switch rather
+    than an Options row (the `NavDebugOverlay` convention); it is the one gate term that is not
+    self-clearing, and pins the gate open on purpose while it is on.
 - **An authored `MapData.npc_marker` reaches the POI channel ONLY.** It used to be handed to the body
   loop as well, so a level that authored a blip silently retextured every quest beacon — and one
   texture cannot carry an allegiance, which is the distinction the body channel exists to make.
@@ -1831,6 +2314,76 @@ squint at the sun.
 - **It pauses with the tree**, so the face freezes during a dialogue. That is correct — in-game
   time genuinely is not advancing — but it is why a player watching the clock through a long
   conversation sees no movement.
+
+**The HUD compass** (`scripts/ui/hud_compass.gd`, code-built by `ui.gd`) is the top-CENTRE instrument, and
+the other half of the same reasoning as the clock: it exists because the minimap in its shipped HEADING-UP
+mode carries no fixed bearing at all — the plan turns under a fixed caret, so spinning on the spot moves
+every landmark and nothing on screen answers "which way am I facing". (Its north tick is a spoke on a 108 px
+rim; `minimap.gd` records why a LETTER there would be a smudge.) The tape is a horizontal heading scale
+across the top of the screen: the eight rose letters and their degree ticks sliding under a fixed index
+caret, plus a chevron for every `Groups.COMPASS` marker at its bearing.
+
+- **It rides the weight carrier, and that is a deliberate exception.** `ui.gd`'s moved-vs-pinned header rule
+  puts world-direction annotations on the layer rather than on `_weighted`, and clause 3 of the ghost rule
+  (`_build_ghost`) excludes them from the phosphor capture: a lagging bearing is a bearing that lies. The
+  tape would have been the purest case of both — and it is nonetheless on the carrier, swaying, ghosting and
+  bending through the HUD curve with the map and the clock, on a user call that it should read as part of the
+  instrument panel. The cost is bounded and worth naming: the rose lags the turn by the spring's settle, so a
+  bearing read mid-flick is a beat stale. That is affordable *here* precisely because a compass point that
+  arrives a frame late still names the same place in the world, which is exactly what is NOT true of the
+  damage arcs — so this is an exception, not a precedent for them.
+- **Two things the reparent breaks, both handled.** (1) `_weighted` is moved INTO a `SubViewport` whenever
+  the HUD curve is up, and that viewport holds no `Camera3D` — so `get_viewport().get_camera_3d()` answers
+  null and the tape would silently freeze at its last bearing whenever an unrelated Options row was on.
+  `HudCompass._active_camera()` falls back to the root viewport's camera. (`Minimap._camera_yaw` has the same
+  exposure and degrades to the player BODY's rotation instead, which is near enough for a floorplan but would
+  be wrong for a readout that reports where you are LOOKING.) (2) The tape now MOVES while the centre-top
+  column under it stays pinned, so `compass_column_gap` is a **sway budget**, not breathing room — it must
+  absorb `hud_sway_max` plus the lens-breath scale's pull toward canvas centre, or the rose lands on the
+  enemy health bar on the next hard flick. `tests/test_hud_compass.gd` pins that sum against the LIVE sway
+  knobs, so raising either one fails there rather than shipping an overlap. `compass_top` is the same budget
+  in the other direction and is deliberately spent right down to the screen edge, because overrunning it only
+  CROPS a few px of tick row on a hard flick where overrunning the gap COLLIDES. The only floor there is that
+  the band must never leave the screen entirely, which is what that suite pins instead.
+- **It has no backing plate.** `compass_track_color` ships at alpha 0, so the rose floats on the world like
+  every other readout here (the ammo line, the money rail, the quest tracker are all bare outlined text; the
+  minimap's backing is the exception because it is a WINDOW, not a label). Legibility is carried entirely by
+  the black-outline dialect — `compass_outline_size` for the glyphs and `compass_rim_px` for the LINE art.
+  That second knob exists because removing the plate left the degree ticks and the index caret invisible
+  against a bright backdrop; the letters were already covered and the line art was not.
+- **It OWNS THE TOP BAND, and the centre-top column reflows under it.** This is the layout contract, and it
+  is the top-right stack's derived-row rule applied to the other column. `ui.gd` owns a full-rect
+  `_centre_column` carrier (the `_weighted` idiom, one offset write) that `player_hud.gd` parents its whole
+  centre-top ladder into — the enemy health bar, then the stealth badge → detection meter → claim →
+  takedown/pet rows. `UI.centre_column_top_for` (pure static, pinned by `tests/test_hud_compass.gd`) answers
+  how far that carrier drops: `compass_top + compass_size.y + compass_column_gap` with the tape up, and
+  **exactly 0** with it off, so switching the compass off in Options reproduces the pre-compass canvas
+  byte-for-byte rather than approximating it. PlayerHud's hand-tuned, outline-tight offsets
+  (18 → 40 → 56 → 78 → 96 → 118, enemy bar above at `enemy_hp_top`) are therefore unchanged and measured
+  from the COLUMN's top: the reflow is common-mode, so the 2 px clearances inside the ladder survive it.
+  The carrier's `z_index = 1` is load-bearing — it is born in `UI._ready` while the full-screen flashes it
+  must composite over are added later from `PlayerHud.build`, so tree order alone would bury the column.
+- **One marker channel, two surfaces.** The tape reads `Groups.COMPASS` — the same group the screen-edge
+  `Compass` component draws chevrons for and the same one `QuestMarkerSync` feeds. The two answer different
+  questions about one set of markers ("where on screen is it" vs "what bearing is it on"), and a second
+  registry would let them disagree; a `WorldMarker`'s authored `color` drives both.
+- **The bearing basis is shared, not re-derived.** World north is `-Z`, east is `+X`, and the yaw convention
+  (`camera_yaw`) is `Minimap._camera_yaw`'s verbatim — so the tape and the floorplan's north tick cannot
+  disagree. That basis is the thing `tests/test_hud_compass.gd` spends most of its asserts on: a sign flip
+  does not error, it produces a compass that is confidently, silently wrong.
+- **The whole projection is pure statics** (`bearing_from_yaw` / `bearing_between` / `delta_deg` / `tape_x` /
+  `on_tape` / `edge_alpha` / `graduations` / `cardinal_index`), pinned off-tree — the `FloorplanSection` /
+  `Compass.project_to_edge` idiom. `delta_deg`'s wrap is what makes the 360→0 seam invisible.
+- **The rose letters are COPY.** `PlayerText.compass_cardinal` selects between eight whole templates, because
+  a compass rose is initialled from the LOCAL direction words (French writes O for west, and NO/SO follow it).
+  Contrast the minimap's north tick, which is a drawn spoke precisely so it owes `PlayerText` nothing.
+- **A heading gate, not a per-frame repaint**, and `_process` bails on `is_visible_in_tree()` first — the
+  clock's minute-gate idiom, so OFF is a real cost win rather than a hidden node still working.
+- **`_draw` never runs headless**, so `scripts/tools/hud_compass_qa_shots.gd` is the other half of the
+  verification: a windowed run that shoots the band at five headings plus a 4x nearest crop, over a backdrop
+  split dark/near-white so contrast is judged both ways at once. It is what caught the index caret cutting
+  into a centred rose letter, and then the un-rimmed ticks vanishing on the bright half once the track was
+  removed — neither of which any assert in the suite can see.
 
 **The Wait screen** (`scripts/ui/wait_screen.gd`, autoload = `scenes/ui/wait_screen.tscn`, opened by
 `InputManager.action_wait`, default **T**) is the clock's other half, and the asymmetry is the contract worth
@@ -2049,5 +2602,14 @@ current paths, and current field names.
 - Persisted corpse discovery is the exception to general object-state reset:
   authored bodies should use `Corpse.save_id`; fallback path/position keys are
   only stable enough for unchanged hand-placed markers.
+- **Hotbar KIND dedupe degrades for a modded gun.** `hotbar.gd`'s "is this the same
+  weapon?" comparisons are `slotted.weapon == it.weapon`, i.e. WeaponData object identity.
+  A bench refit deliberately produces a NEW `WeaponData` object (that is what makes the
+  swap chain re-run and the view model rebuild), so a modded pistol is no longer the same
+  KIND as a stock one and may claim its own hotbar slot. This is **accepted, not
+  overlooked** — a modded pistol genuinely IS a distinct weapon — but it means same-kind
+  duplicates fall back to exact-instance matching. If it bites, the fix is to re-key
+  `_slot_holds_weapon_kind` / `_is_equipped_kind` onto `Item.id` rather than to make the
+  refit mutate in place.
 - Docs drift quickly when review notes are kept around. Prefer current risk
   lists and delete artifacts that no longer match the code.

@@ -1,12 +1,15 @@
 # CYBERSUNDAY - first-person immersive-sim prototype (Godot 4.7)
 
-A single-player FPS/RPG prototype built in **Godot 4.7**. The presentation is
-deliberately crunchy: a low internal resolution, pixel/downscale post-process,
+A single-player FPS/RPG prototype built in **Godot 4.7**. The stylised look —
 a selectable colour depth (24-bit down to 3-bit, with the PlayStation's own
 15-bit RGB555 on the list) resolved through an ordered Bayer dither, film
 grain, night vision, a Borderlands-style black ink outline over every surface,
-and PS1-style material warping over a dense first-person movement and combat
-sandbox.
+and PS1-style material warping — rides on a dense first-person movement and
+combat sandbox. It **presents at native resolution by default** (Options ->
+Video -> Presentation: *High Fidelity* — crisp text, native-res world, the
+retro effects scale-compensated), with the original chunky low-internal-
+resolution pipeline preserved as the *Retro* option
+(see `docs/CURRENT_ARCHITECTURE.md` -> "Presentation").
 
 Almost every number that affects feel lives in editable `.tres` resources or
 Inspector exports, not hardcoded constants. The editor is the design surface.
@@ -81,6 +84,9 @@ the current `LevelData` as the runtime `Level` child. Run levels through
 | Silent takedown / pet (hold, aimed at an unaware NPC or a pettable) | `Q` |
 | Befriend a stray (aim + tap) | `B` |
 | Wait — let in-game hours pass | `T` |
+| Map — the level's floorplan across the menu panel (the other Pip-Boy tabs are `Tab` / `C` / `I` / `V` / `J`) | `M` |
+| Cycle the HUD minimap's zoom | `K` |
+| Mark waypoint — instantly pins what you are looking at (or where you stand) and makes it the pin you are tracking | `X` |
 | Flashlight | `L` |
 | Night vision | `N` |
 | Weapon slots | number keys |
@@ -143,11 +149,35 @@ rpg/
 
 - **Editor-first authoring.** Gameplay features should appear as a drop-in
   component, an authored Resource, or a tuning `.tres`.
-- **Procedural HUD minimap.** The top-right map is a vector floorplan derived at
-  runtime from the level's baked navmesh and its static colliders — no per-level
-  authoring, no top-down render to keep in sync with the geometry. A time-of-day
+- **Procedural HUD minimap, and the map tab that shares it.** The top-right map is
+  a vector floorplan derived at runtime from the level's baked navmesh and its static
+  colliders — no per-level authoring, no top-down render to keep in sync with the
+  geometry. Pressing `M` opens the same widget across a menu panel (a wider span,
+  north-up, its own zoom), so the full map and the corner box are one picture at two
+  sizes: nothing extra to author, and a restyle or a fix lands on both. **You can drag it, and
+  you can write on it.** Drag the plan to pan (or walk the view with the movement keys / stick),
+  scroll to zoom (about the cursor, so the thing you are pointing at stays under the pointer), and
+  click empty floor to drop a waypoint *immediately* — it is seeded with its
+  ordinal, so there is no name box between you and the mark. An empty map teaches the gestures on
+  the plan itself and stops the moment you drop your first pin. Click a pin to select it and a
+  floating card names it with **Track / Edit / Delete**; click empty floor, right-click, or Esc to
+  dismiss it (the card only ever appears when you ask — placing never pops it), and **Recentre** in
+  the footer walks the view back to you after a long drag. Selecting brings the
+  pin into view — cycle with **Next Pin** and the map follows. Click the selected pin again (or press
+  Edit) to re-author its name, note, one of six marks and one of six colours. **Track** is the
+  navigation loop: one pin per profile is your declared destination, and that one wears a ring on
+  the corner box, pins to the box's rim when it is off-screen, and rides the top-centre heading
+  tape as a pip at its true bearing — so a place you marked is a place you can walk back to, not
+  just one you can look up. `X` does the whole gesture in one press: it pins what you are aiming
+  at (or where you stand, when the ray reaches nothing), tracks it, and toasts the name it used,
+  without opening a menu. Pins are per level, capped at 32, and ride the profile save. A time-of-day
   clock sits under it, so the hour is a readout rather than something to infer
-  from how dark the street looks. Markers carry their meaning in their **shape**
+  from how dark the street looks. A heading tape across the top-centre answers the
+  question the map deliberately cannot: heading-up, the plan turns under a fixed
+  caret, so spinning on the spot moves every landmark and nothing says which way you
+  are pointing — the tape's rose slides under a fixed index instead, and it carries a
+  pip for each objective at its true bearing plus one, in the pin's own colour, for the
+  waypoint you are tracking. Markers carry their meaning in their **shape**
   before their colour — a hostile is a caret, a companion a diamond, a bystander a
   hollow ring, and each kind of station a stroked glyph of its own — because a 4 px
   dot on a 108 px box cannot differentiate by hue alone, least of all with
@@ -252,11 +282,12 @@ off-tree pure tests for planner/combat/math logic.
 
 ## Current Rough Edges
 
-- The HUD minimap draws **one floor — the band you are standing in**. A mezzanine,
-  a catwalk or the top of a staircase is not on the map while you are below it, and
-  a flight of stairs reads as a gap between two floors.
-- `alive.map` ships **no `WorldMarker`s**, so the minimap and compass show no
-  hand-placed point-of-interest dots there until some are placed. A level started from
+- The minimap draws **one floor — the band you are standing in**, and so does the
+  `M` map tab, which is the same widget. A mezzanine, a catwalk or the top of a
+  staircase is not on the map while you are below it, and a flight of stairs reads as
+  a gap between two floors.
+- `alive.map` ships **no `WorldMarker`s**, so the minimap and both compass surfaces
+  show no hand-placed point-of-interest dots there until some are placed. A level started from
   `LevelTemplate.tscn` gets objective markers automatically (it ships a
   `QuestMarkerSync`); `alive.map` predates that and needs them by hand. **Stations are
   the exception** — a `Merchant` / `Atm` / `Healer` / trainer / `ChipInstaller` /
@@ -265,10 +296,14 @@ off-tree pure tests for planner/combat/math logic.
 - **`Healer`, `Bonfire`, `PerkStation`, `RespecStation` and `LevelDoor` are placed in zero
   levels**, so five of the seven station glyphs have no shipped content to point at yet —
   and because `LevelDoor` is unplaced, no authored level transition exists either.
-- The screen-edge **`Compass` is still not on the HUD** — the minimap half of the
-  marker system ships, the chevron half needs a `Compass` Control added.
+- The screen-edge **`Compass` is still not on the HUD** — that is the OPTIONAL overlay
+  that pins a chevron to the border for an off-screen marker, and it needs a `Compass`
+  Control added by hand. The shipped compass is the top-centre `HudCompass` heading
+  tape, which is code-built and needs no authoring; both read the same `WorldMarker`
+  group.
 - A level whose navmesh is not baked draws **no walkable floor fill** on the minimap
-  (walls only). That is the bake, not the map.
+  (walls only). That is the bake, not the map. With nothing sliced at all the `M` map
+  tab says so in words rather than showing an empty panel.
 
 - Save/load preserves profile, active level identity, discovered corpse markers,
   and an additive per-object ledger — `Door` open/locked plus consumed

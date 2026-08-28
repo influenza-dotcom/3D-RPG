@@ -139,7 +139,9 @@ NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in pla
   links arrive, no walk/two-way/drop-out leaves) would strand a pursuing/falling NPC forever (no A* route back up), so
   its cheapest incoming drop is promoted to a climbable `TWO_WAY` (the link-ascent launch scales to any height); only
   pure sinks smaller than the main floor qualify, so a legit one-way cliff to the ground floor is left alone. Caveat:
-  bake first (bad islands → bad links) and eyeball the result.
+  it BLOCKS the editor while it scans (File->Run holds the main thread, so NOTHING reaches the Output
+  panel until it finishes -- ~7 s on the live map; wait for the "planned in N s" line instead of assuming it did
+  nothing), bake first (bad islands → bad links) and eyeball the result.
 - **Blockout shell geometry = CSG (native).** Carve floors/walls/rooms as `CSGBox3D`/`CSGCombiner3D` under
   `Geometry/Blockout` instead of hand-aligning `MeshInstance3D`+`CollisionShape3D` boxes. Verified in Godot 4.6.3:
   CSG with `use_collision` feeds the `navmesh`-group bake in every parser mode, so it drops straight into this same

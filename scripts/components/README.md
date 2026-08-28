@@ -49,15 +49,20 @@ new subclass needs zero ray changes). A subclass overrides the first three; `hos
 **Shared `@export`s** every subclass inherits: `highlight_target` (the `Node3D` to outline; null → parent),
 `highlight_color`, `highlight_width`, and `auto_fit_collider` (opt-in: fit the hitbox to the host meshes at
 runtime instead of hand-sizing a `CollisionShape3D`; default `false`).
+⭐ Since 2026-08-27 `highlight_color` / `highlight_width` are the VISIBILITY switch only — the hover paints
+`InkOutline.highlight_hover` (white) at `InkOutline.highlight_width_px`, because the outline is a screen-space
+ring that resolves one ID to one GLOBAL LUT slot. See the outline section of `docs/CURRENT_ARCHITECTURE.md`.
 
-⭐**The hover outline shares ONE `material_overlay` slot with the NPC combat rim and the `Throwable` hull**, so
-two rules protect the outlines it is not entitled to. (1) **Zero `highlight_color.a` or `highlight_width` = no
-highlight at all** — the component builds no material and never writes the slot, instead of swapping a
-transparent one in and evicting whatever rim was showing. Use it for a terminal you don't want outlined. (2) The
+⭐**The hover BORROWS the host mesh's ONE outline ID** — the same one carrying an NPC's disposition colour or
+a `Throwable`'s rest black — stamping `TINT_ID_HOVER` and putting the old ID back on look-away
+(`InkOutline.set_tint_highlight`). Two rules protect the outlines it is not entitled to. (1) **Zero
+`highlight_color.a` or `highlight_width` = no highlight at all** — the component never borrows, instead of
+borrowing and painting an invisible line over whatever was showing. Use it for a terminal you don't want
+outlined. (2) The
 collect **prunes actor and prop subtrees** (`TalkHelpers.owns_its_overlay`), because `highlight_target` is
 usually blank and the host is then `get_parent()` — an interactable dropped straight under the LEVEL root takes
-the whole map as its host, and without the prune hovering it would strip every NPC and prop outline in the
-level. Still prefer to set `highlight_target` (or child the component under the prop): the prune keeps the
+the whole map as its host, and without the prune hovering it would repaint every NPC and prop outline in the
+level white. Still prefer to set `highlight_target` (or child the component under the prop): the prune keeps the
 damage cosmetic, it does not make a map-wide host correct.
 
 ### The subclass tree
@@ -80,6 +85,7 @@ LookAtInteractable            look_at_interactable.gd   (extends Area3D)
 ├─ PerkStation                perk_station.gd       — E: learn a Perk (permanent bonus / ability grant)
 ├─ RespecStation              respec_station.gd     — E: pay to reverse every perk and refund the points, re-pick from scratch
 ├─ ChipInstaller              chip_installer.gd     — E / dialogue "Install": pay to install an ability microchip
+├─ WeaponBench                weapon_bench.gd       — E / dialogue "Modify": pay to fit / buy & fit / remove a WeaponMod part in a gun's slot
 ├─ ChessMatch                 chess_match.gd        — E / dialogue "Play Chess": blindfold-chess minigame vs a ChessAi
 ├─ Atm                        atm.gd                — E / dialogue "Bank": deposit / withdraw on the signed ledger account (GameState.account)
 ├─ Door                       door.gd               — E: swing a door open/closed (lockable: built-in key/lockpick gate, or a child Lock)
@@ -90,9 +96,10 @@ LookAtInteractable            look_at_interactable.gd   (extends Area3D)
 └─ QuestStarter               quest_starter.gd      — E: accept a Quest (a quest board / giver)
 ```
 
-The seven **dual-mode** subclasses (`Merchant`, `Healer`, `Bonfire`, `LevelUp`, `ChipInstaller`, `ChessMatch`, `Atm`)
+The eight **dual-mode** subclasses (`Merchant`, `Healer`, `Bonfire`, `LevelUp`, `ChipInstaller`, `WeaponBench`,
+`ChessMatch`, `Atm`)
 run standalone by default (aim + E) OR, with `standalone = false`, sit as a data-only child of a `DialogueNPC`
-whose conversation offers the action ("Trade" / "Install" / "Play Chess") — the NPC's `Talkable` owns the ray
+whose conversation offers the action ("Trade" / "Install" / "Modify" / "Play Chess") — the NPC's `Talkable` owns the ray
 in that mode. `_on_dialogue_host()` on the base powers their config warning against stealing the ray.
 
 Each dual-mode station also implements the two-method **dialogue-station contract** that grows the option:
@@ -100,7 +107,7 @@ Each dual-mode station also implements the two-method **dialogue-station contrac
 const, `reason`: `_suspend_for_menu`'s reason string, `closed`: the sub-menu's resume `Signal`) and
 `open_dialogue_station(player)` (the press). `DialogueManager` scans the speaker's **direct** children by
 `has_method` of **both** names (a half-implemented pair paints no button) and sorts by the explicit `order` key —
-`10..70` is today's Trade → Bank sequence, so authored child order never matters. `Bonfire` omits
+`10..70` (incl. `WeaponBench`'s `55`) is today's Trade → Bank sequence, so authored child order never matters. `Bonfire` omits
 `reason`/`closed` = an **act-and-close** station (rest, then the conversation ends — no suspension). Adding a
 station = author the component (pick a free order slot; the consts are spaced by 10) plus one roster row in
 `tests/test_dialogue_speaker_contracts.gd`, which pins the labels, orders, reasons, and the roster itself —
@@ -166,6 +173,37 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
   version that added itself to the group would look identical in the inspector and silently do nothing.
   Second invariant: the group is read ONCE per level, during the gather that makes the map free per frame —
   toggling `enabled` at runtime does nothing until someone calls `Minimap.rebake()`.
+- **`SeeThrough`** (`see_through.gd`, `extends Node`) — the "sight and gunfire pass through me" tag,
+  `MinimapHide`'s sibling for COMBAT/PERCEPTION. It joins `Groups.SEE_THROUGH`, which three systems read:
+  `SightRay` (behind every NPC sight/hearing ray) steps past a hit on the marked body and keeps going,
+  `DamageTrace` carries a hitscan pellet through it, and `Projectile` adds a collision exception so live rounds
+  fly through. A chain-link fence, a wire gate, a railing or a shop window therefore hides nobody and shields
+  nobody — both sides can see AND shoot each other through it.
+  **Invariant — it joins its PARENT** (the `MinimapHide` idiom: a ray reports the COLLIDER it hit, and this tag
+  node owns none), **and every `CollisionObject3D` in that subtree too,** so a multi-panel fence prop needs one
+  component rather than one per panel. Read once, in `_ready`.
+  **The prop is still SOLID** to walking into, to thrown props, to the navmesh bake and to the player's look-at
+  ray (no looting through the wire). Nothing about its layer or mask changes — the three systems above opt out
+  by group name, not by physics layer.
+- **`SeeThroughBrushes`** (`see_through_brushes.gd`, `extends Node`) — the same idea for **func_godot map
+  geometry**, where `SeeThrough` cannot be used: a whole TrenchBroom map compiles into ONE `StaticBody3D` with one
+  `CollisionShape3D` per brush (558 of them on `alive.map`), so tagging the body would make the entire level
+  see-through. This **SPLITS** the fence brushes out into their own sibling `StaticBody3D` and tags that.
+  ⭐**The split is not a stylistic choice — a per-shape mark would not work.** A flying round collides with a
+  BODY, and both `collision_mask` and `add_collision_exception_with` are per-body, so nothing can let a bullet
+  through one brush of a body and stop it on the next. Giving the fences their own body is what makes
+  "shoot through the fence" expressible at all. It happens at RUNTIME only (the component is not `@tool`), so the
+  saved scene, the editor and the navmesh bake never see it, and the new body copies the source body's collision
+  layer/mask verbatim — the fence is exactly as solid as it always was.
+  **Invariant — recognition is by MATERIAL, never by a list of brush numbers.** A mesh surface whose material has
+  transparency switched on is see-through (that is precisely what `tb_materials/textures/fence1_a.tres` already
+  says), and a brush qualifies when EVERY corner of its convex hull is also a vertex of those surfaces. Requiring
+  *every* corner is what keeps a concrete wall sharing an edge with a fence opaque. Nothing depends on brush order
+  or node names, so a func_godot rebuild needs no re-authoring.
+  **Second invariant — put it OUTSIDE the generated subtree** (under the level root, not under `FuncGodotMap`):
+  rebuilding the map deletes every node func_godot generated. It scans its parent's whole subtree, so one
+  component covers the level. Knobs: `extra_surfaces` / `opaque_surfaces` (override the material answer per
+  texture — e.g. put foliage cards back to solid cover), `vertex_tolerance`, `verbose`.
 
 ### Adding a new interactable type
 
@@ -208,6 +246,17 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
    suspends into a NEW screen, that screen still owes the modal-registry row (step 6), a `closed` emit on
    every refuse path (`tests/test_dialogue_suspend_closed.gd`), and its own suspend-contract test row.
 
+**The worked example to copy is `WeaponBench`** (`weapon_bench.gd`, added 2026-08-26) — it is the most recent
+station to run every step of this recipe end to end, so its diff is the checklist made concrete: the component
+(`@tool`, dual-mode, `StationSpeaker.ensure` gated on `standalone` and `StationMarker.ensure` UNgated, all
+guards pre-charge), the `DIALOGUE_ORDER 55` pair, the authored screen + its `[autoload]` line placed by Escape
+priority, the one `InputManager._ensure_modal_reg` row carrying BOTH `blocks_tabs` and `station_music`, and the
+six roster rows across `test_dialogue_speaker_contracts` / `test_station_marker` / `test_station_music` /
+`test_modal_registry` / `test_dialogue_suspend_closed`. Its one genuinely new problem — handing the runtime a
+REPLACEMENT `WeaponData` object without the caches noticing — is solved once in
+`Weapon.migrate_weapon_state`, not at the station; a new station that replaces a live resource should copy
+that shape rather than reach into `Ammo` / `ScopeIn` itself.
+
 **Dual item** — a `CanPickUp` parented under a `Throwable` makes one prop both stashable (E → backpack)
 and throwable (Z → carry/throw). `ray_cast.gd` resolves E-vs-Z by ancestry, so the `CanPickUp` MUST be a
 descendant of the `Throwable`. This is what `WorldItem.build()` constructs for dropped loot, and what
@@ -238,8 +287,8 @@ to parse — the pattern to copy when auto-adding any new drop-in from `npc.gd`.
 and call `pulse()` (from a signal, a `TriggerVolume`, a script) to drop a fading `NoiseSource` burst that
 listening NPCs walk to investigate — a breaking window, a tripped alarm, a beeping machine. Configure
 `radius` / `decay` / `lifetime` / `min_interval` in the Inspector. It's host-agnostic (reads `get_parent()`),
-so it works on anything; an NPC also auto-builds one to make its gunfire + death audible. (The player's
-*continuous* movement noise is the separate `NoiseEmitter` internal helper.) Inert until
+so it works on anything; an NPC also auto-builds one to make its gunfire + death audible. (The player's own noise — continuous
+movement PLUS the gunshot / jump / landing spikes — is the separate `NoiseEmitter` internal helper.) Inert until
 `NpcAiSettings.hearing_initiates` is on — a config warning says so on a placed instance.
 
 `Locomotor` is **drop-in pathfinding + movement for any `CharacterBody3D`**: attach it under the body, call
@@ -354,18 +403,25 @@ degrades to "no fade dimming" instead of a crash. `tests/test_ragdoll_scene.gd` 
 runs — no physics await). Physical bones can't be authored from code — the one-time editor setup lives in the
 `ragdoll.gd` header.
 
-`IndoorAmbienceDucker` is the **"quieter and muffled under a roof" treatment** for an ambient bed: drop it under the
+`IndoorAmbienceDucker` is the **"you're indoors" audio treatment**: drop it under the
 Player next to the `Ambience` AudioStreamPlayer3D and it casts a small fan of rays STRAIGHT UP each tick — when at
 least `coverage_threshold` of them hit geometry within `ceiling_scan_height` (a roof / ceiling / overhang) it applies
-two subtle "you're indoors" treatments and reverses both under open sky. (1) VOLUME: cross-fades the bed from
+three treatments and reverses all of them under open sky. (1) VOLUME: cross-fades the bed from
 `outdoor_db` down to `indoor_db`, moving only the target player's own `volume_db` (never the `ambient` bus) so the
 Ambient slider still governs the level and the two compose in dB — the "fade the node, leave the bus for the slider"
 split `AudioZone` uses. (2) MUFFLE (`enable_muffle`, on by default): sweeps a low-pass `cutoff_hz` from
 `outdoor_cutoff_hz` (transparent) down to `indoor_cutoff_hz` (default ~2500 Hz — a clearly-audible "stepped indoors" roll-off). A low-pass is per-BUS, so the
 bed sits on its own **`ambient_bed`** bus (in `default_bus_layout.tres`, carrying an `AudioEffectLowPassFilter`,
-sending into `ambient` so the slider still applies) — the same shape as the `radio` bus's low-pass. (The full bus
-set is `ambient`, `sfx`, `music`, `voice`, `radio` → `music`, `ambient_bed` → `ambient`, `speaker` → `sfx` (the
-tinny `StationSpeaker` kiosk chain — `docs/AUTHORING_GUIDE.md` §2a), `station_music` → `music` (that SAME chain
+sending into `ambient` so the slider still applies) — the same shape as the `radio` bus's low-pass. (3) ROOM ECHO
+(`enable_room_echo`, on by default): switches the authored-DISABLED tight-room chain (`AudioEffectDelay` slap +
+`AudioEffectReverb`) on the diegetic **`world`** bus ON while covered and OFF under sky, so every world sound —
+footsteps, weapon foley, doors, impacts, gunfire — picks up a close indoor echo behind a roof; UI cues / stings /
+jingles play on plain `sfx`, which never passes through `world`, so they stay dry by construction, and `_exit_tree`
+restores OFF so a duckerless next scene keeps the authored dry mix. (The full bus
+set is `ambient`, `sfx`, `world` → `sfx` (the diegetic trunk with that room chain), `music`, `voice`,
+`radio` → `music`, `ambient_bed` → `ambient`, `speaker` → `world` (the
+tinny `StationSpeaker` kiosk chain — `docs/AUTHORING_GUIDE.md` §2a), `gunshots` → `world` (the outdoor
+city-billow echo gunfire fires through), `station_music` → `music` (that SAME chain
 re-cloned for the shop bed a terminal plays while its screen is up — §1d; the chain is the tinny sound, the
 send is which volume slider owns it), and `sting` → Master,
 which is reserved for the death sting: the death cinematic ducks the world buses rather than Master, so `sting`
@@ -374,8 +430,9 @@ is exempt by routing. Anything left on Master therefore escapes BOTH the volume 
 (not a single ray) plus the vote threshold stop a doorway gap / skylight directly overhead from flickering you
 "outdoors". `target` blank → it auto-finds the first sibling on `bus`; `host` auto-wires to the parent. It also
 WRITES `host.is_indoors` (a bool on the player, declared next to `light_exposure` in `player.gd`) each sample — the
-shared "is there a roof over me" seam a future reverb send / rain cutoff / interior-music swap can read instead of
-re-casting. Ray + throttle + held-prop LOS mask are lifted from `PlayerLightLevel`. Pure vote/fade/sweep math, the
+shared "is there a roof over me" seam other systems read instead of re-casting (live consumer:
+`WeaponAudio.listener_indoors()`, which makes gunfire skip its outdoor billow bus under a roof; a rain cutoff /
+interior-music swap can read the same flag). Ray + throttle + held-prop LOS mask are lifted from `PlayerLightLevel`. Pure vote/fade/sweep math, the
 low-pass resolver, and the in-tree roof detection are unit-tested (`tests/test_indoor_ambience_ducker.gd`).
 
 ⭐**`ambient_bed` IS the duck's entire blast radius.** The volume fade moves one node, and the muffle is a per-bus
