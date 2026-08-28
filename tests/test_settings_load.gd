@@ -75,8 +75,6 @@ func test_camera_settings() -> void:
 	assert_gt(r.sprint_fov_mult, 0.0,
 		"camera.sprint_fov_mult must be > 0 so sprint visibly widens the FOV by default")
 	assert_gt(r.mouse_sensitivity, 0.0, "camera.mouse_sensitivity must be > 0")
-	assert_lte(r.pitch_max_holding_deg, r.pitch_max_deg,
-		"camera.pitch_max_holding_deg must not exceed pitch_max_deg")
 
 func test_screen_shake_settings() -> void:
 	var r := load("res://resources/tuning/ScreenShakeSettings.tres") as ScreenShakeSettings

@@ -326,11 +326,21 @@ func test_dialogue_settings_defaults() -> void:
 	# Box layout (panel / text / choices / speaker name) — all positive pixel/font sizes; the two proportions
 	# (hint opacity, choices scroll cap) stay within 0..1.
 	for px in [s.panel_horizontal_margin, s.panel_vertical_margin, s.panel_inner_padding,
-			s.panel_vertical_element_spacing, s.dialogue_text_font_size, s.dialogue_text_outline_width,
+			s.panel_vertical_element_spacing, s.dialogue_text_font_size,
 			s.choice_button_font_size, s.choice_button_spacing, s.dialogue_continue_hint_font_size,
 			s.speaker_name_font_size, s.speaker_name_outline_width, s.speaker_name_screen_x_offset,
-			s.speaker_name_screen_y_offset]:
+			s.speaker_name_screen_y_offset, s.choice_column_width, s.choice_column_gap]:
 		assert_gt(px, 0, "every dialogue-box pixel/font size must be > 0 (got %d)" % px)
+	# The line outline is a RATIO of font size since the 08-24 box-less pass (px = round(size * em)) —
+	# load-bearing there: with MenuSkin.dialogue_panel_enabled off the text has no box under it.
+	assert_gt(s.dialogue_text_outline_em, 0.0,
+		"dialogue_text_outline_em must be > 0 — the outline carries legibility while the box art is gated off")
+	assert_lt(s.dialogue_text_outline_em, 1.0,
+		"dialogue_text_outline_em is a fraction of font size; >= 1 would smear the strokes shut")
+	# The box-less backdrop: scrim + veil alphas are 0..1 (0 legitimately disables either).
+	for a in [s.dialogue_scrim_max_alpha, s.dialogue_world_veil_alpha, s.dialogue_scrim_height_fraction]:
+		assert_gte(a, 0.0, "scrim/veil fractions are alphas/fractions, never negative")
+		assert_lte(a, 1.0, "scrim/veil fractions cap at 1")
 	assert_gt(s.dialogue_continue_hint_opacity, 0.0,
 		"dialogue_continue_hint_opacity must be > 0 so the continue hint is visible")
 	assert_lte(s.dialogue_continue_hint_opacity, 1.0,

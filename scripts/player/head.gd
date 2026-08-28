@@ -6,7 +6,10 @@ extends Node3D
 ## to MouseInput.rotate). As the rig root it also exposes the camera + screen-shake to the
 ## host and injects the wielder into the rig parts that point back out of it (setup()).
 
-## The carry raycast under the camera; read so the look-pitch clamp tightens while an object is held (no craning the prop into the camera).
+## The carry raycast under the camera — the rig's canonical handle on it, which is why the host reaches
+## the ray through `head.pickup_ray` (Player's force-release / held_object queries, the Hotbar's
+## carry_changed hookup) instead of walking the camera NodePath. It deliberately does NOT feed the
+## look-pitch clamp any more: carrying a prop leaves the FULL look range intact (see _target_max_pitch).
 @export var pickup_ray: PickupRay
 
 ## The wielder, cached in setup() — read to widen the look-pitch clamp while wall-climbing.
@@ -59,12 +62,13 @@ func _setup_view_model_camera(cam: CameraEffects, ui: CanvasLayer) -> void:
 	cam.add_child(vm)
 	vm.setup(cam, ui)
 
-## The pitch limit the look SHOULD currently obey, in RADIANS: tightened while carrying an object (so you
-## can't crane the crate into the camera), widened while wall-climbing (look up + over the wall), else the
-## normal limit. The APPLIED limit (_max_pitch) eases toward this in _process.
+## The pitch limit the look SHOULD currently obey, in RADIANS: widened while wall-climbing (look up + over
+## the wall), else the normal limit. Carrying an object is deliberately NOT a case here — a held prop used to
+## cap the look at `camera.pitch_max_holding_deg` (30°), which read as the camera seizing up the moment you
+## picked anything up; the knob and its branch were removed 2026-08-27 so carrying keeps the full look range
+## and the prop is simply allowed to swing through frame. The APPLIED limit (_max_pitch) eases toward this
+## in _process.
 func _target_max_pitch() -> float:
-	if pickup_ray and pickup_ray.held_object:
-		return deg_to_rad(GameSettings.camera.pitch_max_holding_deg)
 	if _is_climbing():
 		# Past 90° the camera tips backward over the lip — "walking onto a new plane".
 		return deg_to_rad(GameSettings.camera.pitch_max_climbing_deg)
@@ -73,9 +77,9 @@ func _target_max_pitch() -> float:
 ## Apply a mouse pitch delta with two feel tweaks:
 ##  1. Soft ramp: within `pitch_soft_ramp_deg` of the limit the delta is scaled toward zero, so the view
 ##     DECELERATES into the clamp instead of slamming a hard stop.
-##  2. The limit itself flexes (_max_pitch) — tighter while carrying, wider while climbing. It's widened
-##     INSTANTLY here so the very first look already has the new range; shrinking is eased in _process,
-##     so a clamp-down (e.g. a climb ending) never snaps the view.
+##  2. The limit itself flexes (_max_pitch) — wider while climbing. It's widened INSTANTLY here so the very
+##     first look already has the new range; shrinking is eased in _process, so a clamp-down (a climb ending)
+##     never snaps the view.
 func _on_mouse_input_rotate(_amt: Vector2) -> void:
 	var target := _target_max_pitch()
 	if target > _max_pitch:
@@ -105,11 +109,11 @@ func _is_climbing() -> bool:
 	var p := _player as Player
 	return p != null and p.is_climbing()
 
-## Ease the applied pitch clamp toward its target every frame: EXPAND instantly (look up the moment you
-## climb / drop a carried object), but CONTRACT gently — when the limit shrinks below the current look
-## angle (climb ended, or you picked something up) the view reels back into range smoothly instead of
-## snapping on the next mouse move. Re-clamping each frame is what moves the camera during a contraction;
-## while the look already sits within the limit it's a harmless no-op.
+## Ease the applied pitch clamp toward its target every frame: EXPAND instantly (look up the moment you start
+## climbing), but CONTRACT gently — when the limit shrinks below the current look angle (a climb ending) the
+## view reels back into range smoothly instead of snapping on the next mouse move. Re-clamping each frame is
+## what moves the camera during a contraction; while the look already sits within the limit it's a harmless
+## no-op.
 func _process(delta: float) -> void:
 	var target := _target_max_pitch()
 	if target > _max_pitch:

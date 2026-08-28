@@ -41,6 +41,7 @@ const SKIP_FILES: Array[String] = [
 	"res://scripts/components/debug_menu.gd",
 	"res://scripts/components/debug_event_ticker.gd",
 	"res://scripts/components/ai_event_log.gd",
+	"res://scripts/tools/dialogue_ui_qa_shots.gd",
 ]
 
 ## The CURATED paint idioms — every entry is an ENUMERABLE call/assignment shape, NEVER a fuzzy English-word
@@ -59,6 +60,7 @@ const PATTERNS := {
 	"placeholder_assign": "\\.placeholder_text\\s*=\\s*\"([^\"]*)\"",
 	"tooltip_assign": "\\.tooltip_text\\s*=\\s*\"([^\"]*)\"",
 	"add_extra_choice": "\\badd_extra_choice\\(\\s*\"([^\"]*)\"",
+	"add_exit_choice": "\\badd_exit_choice\\(\\s*\"([^\"]*)\"",
 	"notify_toast": "\\bnotify_toast\\(\\s*\"([^\"]*)\"",
 	"ui_toast": "\\bUI\\.toast\\(\\s*\"([^\"]*)\"",
 	"push_toast": "push_toast\\(\\s*\"([^\"]*)\"",

@@ -116,7 +116,7 @@ func test_dropdowns_have_options() -> void:
 	for spec in cat.specs:
 		if spec != null:
 			by_key[spec.key] = spec
-	for key in [&"window_mode", &"colorblind_mode"]:
+	for key in [&"window_mode", &"colorblind_mode", &"presentation"]:
 		assert_true(by_key.has(key), "the catalog must keep the '%s' row" % key)
 		if by_key.has(key):
 			assert_eq(by_key[key].control, SettingSpec.Widget.CUSTOM,

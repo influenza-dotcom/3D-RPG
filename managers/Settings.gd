@@ -7,6 +7,7 @@ extends Node
 ## @risk project.godot `display/window/size/no_focus=true` makes the game window VANISH the moment apply_video enters WINDOWED (Godot's Windows DisplayServer drops WS_VISIBLE + refuses click-activation for a no_focus main window; fullscreen masks it entirely) — pinned by tests/test_windowed_mode.gd, cleared at runtime by apply_video (dev builds also warn once).
 ## @risk Windowed placement is measured, not assumed: apply_video fits the DECORATED frame to the screen's usable rect (largest preset that fits, else clamp — windowed_size is MUTATED to the effective size) and centres it; a frame-counted guard undoes the OS's occasional post-fullscreen restore jump. Re-centring happens only when the mode or size actually changes, so VSync/FPS/scale never yank a dragged window.
 ## @risk mouse_sensitivity is radians per SCREEN pixel (MouseInput reads screen_relative; `relative` is pre-scaled by canvas/window width under the viewport stretch mode, so it made look speed ride the window size). It persists under the cfg key mouse_sensitivity_screen; a pre-switch cfg carries the OLD key mouse_sensitivity in canvas-px units and read_mouse_sensitivity rescales it ONCE by LEGACY_MOUSE_SENS_SCALE (792/1920). Writing the old key again, or reading `relative` again, hands returning players a ~2.4x faster look.
+## @risk presentation decides the ROOT render target (HIGH FIDELITY = canvas_items stretch at native res, RETRO = the classic ~792x444 viewport stretch), applied by apply_video. native_scale() / render_size() are the ONLY sanctioned unit converters for pixel-unit effect knobs and screen-matching buffers, and consumers must call them LIVE per frame — caching the factor (or hardcoding 792/2.4x) breaks the mid-session toggle and re-introduces the low-res assumption this split removed.
 ## @test res://tests/test_settings.gd
 ## @test res://tests/test_difficulty.gd
 ## @test res://tests/test_windowed_mode.gd
@@ -49,6 +50,20 @@ const FOV_MIN := 60.0
 const FOV_MAX := 120.0
 const RENDER_SCALE_MIN := 0.5
 const RENDER_SCALE_MAX := 2.0
+## Presentation (Options -> Video): HOW the finished frame reaches the screen. Index order = the Video cycler
+## (OptionsMenu._emit_presentation) — ARRAY ORDER IS BEHAVIOUR.
+##  0 HIGH_FIDELITY — canvas_items stretch: the root viewport renders at the NATIVE window resolution while every
+##    Control keeps laying out against the same logical ~792x444 canvas (Godot's size-2d override, so no menu
+##    moves), text/vector UI rasterise crisp (per-viewport font oversampling), and 3D renders at native x
+##    render_scale. The shipped default.
+##  1 RETRO — the original pipeline: viewport stretch renders everything into the ~792x444 buffer and the window
+##    nearest-upscales it (the chunky pixel look). Bit-identical to the pre-presentation-setting game.
+## Effects with knobs authored in canvas px convert through native_scale(); buffers that must match the screen
+## size from render_size(). Both must be read LIVE per frame — a cached factor goes stale on a mid-session flip
+## (the cached-base_fov lesson).
+const PRESENTATION_HIGH_FIDELITY := 0
+const PRESENTATION_RETRO := 1
+const PRESENTATION_COUNT := 2
 ## Mouse look range, in radians per SCREEN pixel: MouseInput reads InputEventMouseMotion.screen_relative (raw OS
 ## pixels), never `relative`, which the project's `viewport` stretch mode pre-scales by canvas/window width (792/1920
 ## = 0.41 in 1080p fullscreen, 792/1280 = 0.62 in a 720p window, 792/3840 = 0.21 at 4K — the same hand motion used
@@ -97,6 +112,9 @@ const COLOR_QUANTIZE_LEVELS: Array[Vector3] = [
 ]
 ## Minimap zoom range. >1 shows FEWER metres (zooms IN); the span it divides is the author-time
 ## GameSettings.hud.minimap_world_span, so this stays a player-facing multiplier and never a metre count.
+## SHARED WITH THE MAP TAB (map_zoom below, dividing GameSettings.hud.map_world_span instead): the two rows
+## are the same kind of value on the same widget at two sizes, and one range keeps the Options sliders, the
+## authored minimap_zoom_steps and both clamps describing ONE scale. Widen it and both maps widen together.
 const MINIMAP_ZOOM_MIN := 0.5
 const MINIMAP_ZOOM_MAX := 3.0
 
@@ -105,7 +123,8 @@ var window_mode: int = 2                       ## index into WINDOW_MODES
 var windowed_size: Vector2i = Vector2i(1280, 720)
 var vsync: bool = false
 var max_fps: int = 144
-var render_scale: float = 2.0                  ## Viewport.scaling_3d_scale
+var render_scale: float = 2.0                  ## Viewport.scaling_3d_scale — a fraction of the CURRENT presentation's render target (native in HIGH FIDELITY, the ~792x444 canvas in RETRO); _ready re-seeds 1.0 for HIGH FIDELITY
+var presentation: int = PRESENTATION_HIGH_FIDELITY  ## PRESENTATION_* index: native-res canvas_items stretch (0, the shipped default) vs the classic ~792x444 viewport-stretch pixel look (1). Applied by apply_video (Window.content_scale_mode); pixel-unit effects read native_scale()/render_size() live each frame, so a flip bites without a level reload
 var fov: float = 75.0                          ## -> GameSettings.camera.default_fov
 var contrast: float = 1.0                      ## post-process contrast around mid-gray; 1.0 = the authored look (read live by the player's post-process driver, like colorblind_mode)
 var ink_outline_intensity: float = 1.0         ## 0..1 scale on the Borderlands-style black ink outline over the whole frame — world, NPCs and view model alike (InkOutline on the player camera). 1 = the authored line, lower FADES and THINS it, 0 = no ink (the quad is hidden, so off is free). A SCALE not a bool, the ps1_warp_intensity idiom: it is an art-style dial, so half-strength line work is a real preference and not just "on or off". Lives on VIDEO rather than Accessibility because it is a look, not a comfort setting — nothing about it moves. Polled live by InkOutline each frame, so the slider bites the same frame with no level reload
@@ -134,6 +153,7 @@ var debug_always_show_tos: bool = false          ## DEBUG: replay the first-laun
 var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
 var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/forward-run/sprint/air-dash); ADS zoom unaffected; read live by CameraEffects
 var ps1_warp_intensity: float = 1.0             ## 0..1 accessibility scale on the PS1 vertex-warp visual effect (motion comfort); 1 = full authored warp, 0 = off (level renders normally). Polled live by PS1Applier, which re-applies/rescales/restores without a level reload
+var dialogue_text_scale: float = 1.0            ## 0.75..1.5 accessibility multiplier on ALL dialogue text (spoken line, response rows, speaker name, hint — the DialogueSettings font sizes are the 1.0 baseline). A SCALE, not per-element sizes: the box-less dialogue layout re-measures itself from its fonts, so one dial keeps the hierarchy intact. Read by DialogueView._apply_type_sizes on every conversation open — no apply step, no restart
 var stamina_ring_enabled: bool = true           ## ON = stamina reads as the radial ring around the crosshair (ui.gd StaminaRing); OFF = the classic bottom-left corner bar. The RING is the shipped default: stamina gates twitch verbs (sprint/dash/jump), so its readout belongs at the aim point where the eyes already are — the corner bar forces a glance away mid-fight. The bar stays as this opt-in for players who prefer a stable peripheral readout or find crosshair-adjacent motion distracting (the ring drains/refills at screen centre). Polled live by ui.gd each frame, so the Options toggle swaps modes instantly
 var hud_sway_scale: float = 1.0                 ## 0..1 accessibility scale on the diegetic HUD "weight" — the corner HUD cluster trailing camera turns, rattling under screen shake, leaning against strafe velocity, floating/pressing with vertical motion, breathing scale with the dynamic-FOV kicks, and dipping on landings (ui.gd + HudSway — this ONE dial governs every channel). A SCALE, not a bool, on purpose (the ps1_warp_intensity idiom): HUD motion is exactly the class of effect the view_bob/camera_tilt/fov_effects toggles exist for, and a dial lets a sensitive player keep a hint of it instead of all-or-nothing. 1 = full authored sway, 0 = off (panel welded static + unscaled, kicks silenced). Polled live by ui.gd each frame
 var hud_curve_scale: float = 1.0                ## 0..1 accessibility scale on the HUD CURVE — the corner instrument panel rendered through a barrel warp so it bows away at its edges like the inside of a curved screen (resources/shaders/hud_curve.gdshader, driven by ui.gd._apply_hud_curve). A SCALE, not a bool, for the hud_sway_scale/ps1_warp_intensity reason, and it is the same motion-comfort family: a warped panel is exactly the class of effect a sensitive player wants to dial back rather than switch off. 1 = the full authored bend (GameSettings.hud.hud_curve_amount is the ceiling), 0 = OFF and genuinely free — the SubViewport is torn down and the carrier goes back to being a plain layer child, so the HUD is the pre-curve tree rather than an identity pass. Amplitudes live on GameSettings.hud ("HUD curve"); polled live by ui.gd each frame
@@ -143,10 +163,13 @@ var world_ghost_scale: float = 1.0              ## 0..1 accessibility scale on W
 var minimap_enabled: bool = true                ## OFF = hide the top-right HUD floorplan entirely AND reflow the objective tracker back to the bare 8 px inset (the enemy_health_bar_enabled / detection_meter_enabled / loot_beacons declutter family). Polled live by ui.gd each frame, so the Options toggle bites the same frame with no rebuild; hiding it also stops the widget's gather/slice/redraw completely (Minimap._process bails on is_visible_in_tree), so OFF is a real cost win and not just a hidden node
 var minimap_rotates: bool = true                ## ON = HEADING-UP (the plan turns under a fixed caret); OFF = NORTH-UP (the plan is axis-locked and the caret spins instead). A BOOL rather than a dropdown on purpose: there are exactly two modes, and a generic DROPDOWN spec loses its options on an editor .tres re-save (SettingSpec's own @risk). Read live by Minimap._draw
 var minimap_zoom: float = 1.0                   ## Divides GameSettings.hud.minimap_world_span, so >1 shows FEWER metres (zooms IN). Clamped MINIMAP_ZOOM_MIN..MAX. Read live by Minimap._draw — a zoom change needs no re-slice, only the view matrix moves
+var map_zoom: float = 1.0                       ## The MAP TAB's own zoom (Settings-owned so it persists like any other player choice, and so the Options -> Accessibility "Map Zoom" row and the map's wheel/buttons move ONE value). Divides GameSettings.hud.map_world_span, NOT minimap_world_span — the tab is the same widget at panel size showing a district, so it must be able to move independently of the corner box. Clamped MINIMAP_ZOOM_MIN..MAX (the shared scale). Read live by MapScreen, which pushes it onto its Minimap instance's zoom_override
 var minimap_show_npcs: bool = true              ## OFF = the top-right floorplan draws terrain and objective markers only, no NPC blips. ON, a living NPC within the mapped area shows as a dot tinted by allegiance (CBPalette, matching the hover name / dialogue name / enemy health bar). This is a real gameplay affordance, not just decoration — it is effectively through-wall knowledge of who is nearby — so it belongs to the player, next to the difficulty-adjacent comfort rows. Dots are CLIPPED to the box and never pinned to its rim: a pinned dot would report every body on the level and turn a floorplan into a radar. Read live by Minimap._draw
 var minimap_show_stations: bool = true          ## OFF = the floorplan draws terrain, objective markers and NPC dots only — no station glyphs. ON, every Merchant / Atm / Healer / trainer / ChipInstaller / Bonfire / ChessMatch / LevelDoor with a StationMarker paints its own SHAPE (shop diamond, bank hexagon, clinic cross, trainer triangle, tech square, leisure circle, exit chevron) in MenuStyle.hud.minimap_station_color. A weaker gameplay affordance than minimap_show_npcs — a shop is a fixture, not a body, so knowing where one is leaks no tactical information — but it belongs to the player for the same DECLUTTER reason the rest of the family does: a busy market district is a lot of glyphs on a 108 px box. Read live by Minimap._draw
+var minimap_show_noise: bool = true             ## OFF = the floorplan draws no noise ring. ON, a circle around the player caret shows how far your own footsteps and gunfire currently carry — Player.noise_radius, the very scalar enemy Perception.can_hear() tests against, drawn at TRUE WORLD SCALE so an NPC dot inside the ring is an NPC that can hear you. It draws sound YOU made and never sound made at you, so unlike minimap_show_npcs beside it this leaks NOTHING about anyone else — it is a mirror, not a sensor, and the row is here for DECLUTTER (a gunshot's 28 m ring covers the whole box for half a second) rather than for difficulty. ⭐The ring is a WORST CASE, not a promise: hearing is attenuated per listener through walls (NpcAiSettings hearing_wall_attenuation / hearing_occlusion) and only hostile NPCs act on it, so a body inside the ring MAY have heard you — and with hearing_initiates off nothing hears you at all while the ring still reports the radius. Read live by Minimap._draw
 var clock_enabled: bool = true                  ## OFF = hide the HUD time-of-day readout under the minimap AND reflow the objective tracker back up into the space it used (the minimap_enabled / detection_meter_enabled / loot_beacons declutter family). ON by default because the day/night cycle's LIGHTING is the only other time signal and it is a poor instrument — the moon keeps midnight readable, interiors are lit around the clock, and "is the shop open yet" should not require walking outside to squint at the sun. Polled live by ui.gd each frame, so the Options toggle bites the same frame with no rebuild; hiding it also stops the widget's read/compare entirely (HudClock._process bails on is_visible_in_tree)
 var clock_24_hour: bool = true                  ## ON = the clock face reads 24-hour ("14:35"); OFF = 12-hour with an AM/PM marker ("2:35 PM"). A BOOL rather than a dropdown for the minimap_rotates reason: there are exactly two faces, and a generic DROPDOWN spec loses its options on an editor .tres re-save (SettingSpec's own @risk). Read live by HudClock._process, which re-stamps immediately on a flip rather than waiting for the next in-game minute
+var compass_enabled: bool = true                 ## OFF = hide the top-centre HEADING TAPE (scripts/ui/hud_compass.gd) AND reflow the whole centre-top column back up into the band it used — the enemy health bar returns to GameSettings.hud.enemy_hp_top and the stealth badge -> detection meter -> claim -> takedown/pet ladder returns to its historical offsets byte-for-byte (the minimap_enabled / clock_enabled declutter family, one column over). ON by default because the minimap's shipped HEADING-UP mode has no fixed bearing anywhere on it — the plan turns under a fixed caret, so without this tape "which way am I facing" has no answer on the HUD at all. Polled live by ui.gd each frame, so the Options toggle bites the same frame with no rebuild; hiding it also stops the widget's camera read and marker walk entirely (HudCompass._process bails on is_visible_in_tree), so OFF is a real cost win and not just a hidden node
 var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
 var heartbeat_enabled: bool = true              ## off = silence JUST the low-HP heartbeat pulse (the SFX bus volume is unaffected); read live by the player's _update_low_hp
 var difficulty_level: int = DifficultySettings.Level.NORMAL  ## 0 Easy / 1 Normal / 2 Hard -> GameSettings.difficulty.apply_level (ML-3)
@@ -186,6 +209,12 @@ func _ready() -> void:
 		render_scale = win.scaling_3d_scale
 		if not Engine.is_embedded_in_editor():
 			window_mode = _mode_to_index(win.mode)  # (the editor's embedded Game window is always windowed — not the design)
+	# project.godot's rendering/scaling_3d/scale (2.0) is the RETRO supersample, tuned against the ~792x444 buffer.
+	# The shipped default presentation is HIGH FIDELITY, where the root target is NATIVE and that same 2.0 would
+	# mean 3840x2160 3D on a 1080p screen — seed 1.0 there instead. Must live HERE, not only in the cfg reads:
+	# load_settings early-returns when no cfg exists, so a fresh install never reaches the migration.
+	if presentation == PRESENTATION_HIGH_FIDELITY:
+		render_scale = 1.0
 	for bus in VOLUME_BUSES:
 		volumes[bus] = 1.0
 	load_settings()
@@ -247,8 +276,47 @@ func apply_video() -> void:
 		_placed_mode = window_mode
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if vsync else DisplayServer.VSYNC_DISABLED)
 	Engine.max_fps = max_fps
+	# Presentation: HIGH FIDELITY renders the root viewport at the native window size (Controls keep laying out
+	# against the logical ~792x444 canvas via Godot's size-2d override, so no layout moves); RETRO restores the
+	# authored viewport stretch, where the window nearest-upscales the low-res buffer. Written explicitly BOTH
+	# ways so a mid-session toggle is symmetric; content size/factor/aspect stay authored in project.godot.
+	# Deliberately OUTSIDE the is_embedded_in_editor() guard above: content scale is a viewport-level property
+	# (like scaling_3d_scale below), not an OS mode/size/position call the embedded Game window refuses.
+	win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS if presentation == PRESENTATION_HIGH_FIDELITY else Window.CONTENT_SCALE_MODE_VIEWPORT
 	win.scaling_3d_scale = render_scale
 	GameSettings.camera.default_fov = fov
+
+## Render pixels per LOGICAL canvas pixel on the root viewport — the unit converter for effects whose knobs are
+## authored in canvas px (ink line widths, ghost drag offsets, dither cells): push authored_value * native_scale().
+## 1.0 in RETRO (canvas px ARE render px), ~2.42 at 1080p HIGH FIDELITY. Reads the LIVE window state on every call
+## — never cache it (a mid-session presentation flip or resize must bite the consumer's next per-frame poll) — and
+## floors at 1.0 so headless/off-tree callers (GUT drives effect params with no real screen) degrade to the RETRO
+## identity. For sizing a screen-matching BUFFER use render_size() instead: this scalar rides the x axis, and the
+## flooring of the logical canvas makes the stretch slightly anisotropic, so logical*native_scale() can drift a
+## pixel from the true target on y.
+func native_scale() -> float:
+	var win := get_window()
+	if win == null or win.content_scale_mode != Window.CONTENT_SCALE_MODE_CANVAS_ITEMS:
+		return 1.0
+	var logical := win.get_visible_rect().size
+	if logical.x <= 0.0:
+		return 1.0
+	return maxf(1.0, float(win.size.x) / logical.x)
+
+## The root render-target size in pixels — what a screen-matching buffer (the ghost accumulators, the HUD-curve
+## viewport) must be sized to. Exact by construction: reads the window rather than multiplying the scalar
+## native_scale(), whose per-axis rounding could land a pixel off and break a "texel == pixel, filter nearest"
+## 1:1 contract. Native window size under HIGH FIDELITY, the logical canvas under RETRO; headless (the dummy
+## window is smaller than the canvas) and no-window degrade to the logical canvas, matching native_scale()'s
+## 1.0 floor.
+func render_size() -> Vector2i:
+	var win := get_window()
+	if win == null:
+		return Vector2i(792, 444)  # the 16:9 logical canvas — off-tree fallback only
+	var logical := Vector2i(win.get_visible_rect().size.round())
+	if win.content_scale_mode == Window.CONTENT_SCALE_MODE_CANVAS_ITEMS and win.size.x > logical.x:
+		return win.size
+	return logical
 
 ## Size + place the (already WINDOWED) window so the whole decorated frame sits INSIDE the current screen's usable
 ## rect (work area — the taskbar excluded), centred, caption on-screen. Why this exists: a windowed_size the size
@@ -572,6 +640,14 @@ func set_render_scale(f: float) -> void:
 	apply_video()
 	save_settings()
 
+## Presentation (Options -> Video): an index into the PRESENTATION_* modes, clamped so a stale/hand-edited cfg can
+## only land on a real mode. Applies immediately — apply_video flips Window.content_scale_mode, and every
+## native_scale()/render_size() consumer re-sizes on its own per-frame poll, so the toggle bites with no reload.
+func set_presentation(mode: int) -> void:
+	presentation = clampi(mode, 0, PRESENTATION_COUNT - 1)
+	apply_video()
+	save_settings()
+
 func set_fov(f: float) -> void:
 	fov = clampf(f, FOV_MIN, FOV_MAX)
 	GameSettings.camera.default_fov = fov
@@ -707,6 +783,10 @@ func set_ps1_warp_intensity(f: float) -> void:
 	ps1_warp_intensity = clampf(f, 0.0, 1.0)
 	save_settings()  # no apply step — PS1Applier polls this live each frame and re-applies/restores
 
+func set_dialogue_text_scale(f: float) -> void:
+	dialogue_text_scale = clampf(f, 0.75, 1.5)
+	save_settings()  # no apply step — DialogueView re-reads it on every conversation open (_apply_type_sizes)
+
 func set_stamina_ring_enabled(on: bool) -> void:
 	stamina_ring_enabled = on
 	save_settings()  # no apply step — ui.gd polls this live each frame (_apply_stamina_mode)
@@ -743,12 +823,24 @@ func set_minimap_zoom(f: float) -> void:
 	minimap_zoom = clampf(f, MINIMAP_ZOOM_MIN, MINIMAP_ZOOM_MAX)
 	save_settings()  # no apply step — Minimap reads it live in _draw
 
+## No apply step, and NO push onto the widget: MapScreen re-reads this into its Minimap's zoom_override every
+## time it repaints the readout, and the widget's own _options_changed stamp (which compares the EFFECTIVE
+## zoom) is what asks for the redraw. So the Options slider and the map's wheel are the same value from both
+## directions, and a slider nudge with the tab open bites the next frame.
+func set_map_zoom(f: float) -> void:
+	map_zoom = clampf(f, MINIMAP_ZOOM_MIN, MINIMAP_ZOOM_MAX)
+	save_settings()
+
 func set_minimap_show_npcs(on: bool) -> void:
 	minimap_show_npcs = on
 	save_settings()  # no apply step — Minimap reads it live in _draw
 
 func set_minimap_show_stations(on: bool) -> void:
 	minimap_show_stations = on
+	save_settings()  # no apply step — Minimap reads it live in _draw
+
+func set_minimap_show_noise(on: bool) -> void:
+	minimap_show_noise = on
 	save_settings()  # no apply step — Minimap reads it live in _draw
 
 func set_clock_enabled(on: bool) -> void:
@@ -758,6 +850,10 @@ func set_clock_enabled(on: bool) -> void:
 func set_clock_24_hour(on: bool) -> void:
 	clock_24_hour = on
 	save_settings()  # no apply step — HudClock reads it live in _process
+
+func set_compass_enabled(on: bool) -> void:
+	compass_enabled = on
+	save_settings()  # no apply step — ui.gd polls this live each frame (_apply_compass_visibility)
 
 func set_debug_skip_menu(on: bool) -> void:
 	debug_skip_menu = on
@@ -810,7 +906,11 @@ func load_settings() -> void:
 	windowed_size = ws if ws is Vector2i and ws.x > 0 and ws.y > 0 else windowed_size
 	vsync = _cfg_bool(cfg, "video", "vsync", vsync)
 	max_fps = int(cfg.get_value("video", "max_fps", max_fps))
-	render_scale = float(cfg.get_value("video", "render_scale", render_scale))
+	# Presentation + render_scale travel TOGETHER through read_presentation: a pre-presentation cfg's saved scale
+	# was a supersample of the RETRO buffer and must not be re-read against a native target (see the helper).
+	var pres := read_presentation(cfg, presentation, render_scale)
+	presentation = clampi(int(pres["presentation"]), 0, PRESENTATION_COUNT - 1)
+	render_scale = clampf(float(pres["render_scale"]), RENDER_SCALE_MIN, RENDER_SCALE_MAX)
 	fov = float(cfg.get_value("video", "fov", fov))
 	contrast = clampf(float(cfg.get_value("video", "contrast", contrast)), CONTRAST_MIN, CONTRAST_MAX)
 	ink_outline_intensity = clampf(float(cfg.get_value("video", "ink_outline_intensity", ink_outline_intensity)), 0.0, 1.0)
@@ -845,6 +945,7 @@ func load_settings() -> void:
 	camera_tilt_enabled = _cfg_bool(cfg, "accessibility", "camera_tilt_enabled", camera_tilt_enabled)
 	fov_effects_enabled = _cfg_bool(cfg, "accessibility", "fov_effects_enabled", fov_effects_enabled)
 	ps1_warp_intensity = clampf(float(cfg.get_value("accessibility", "ps1_warp_intensity", ps1_warp_intensity)), 0.0, 1.0)
+	dialogue_text_scale = clampf(float(cfg.get_value("accessibility", "dialogue_text_scale", dialogue_text_scale)), 0.75, 1.5)
 	stamina_ring_enabled = _cfg_bool(cfg, "accessibility", "stamina_ring_enabled", stamina_ring_enabled)
 	hud_sway_scale = clampf(float(cfg.get_value("accessibility", "hud_sway_scale", hud_sway_scale)), 0.0, 1.0)
 	hud_ghost_scale = clampf(float(cfg.get_value("accessibility", "hud_ghost_scale", hud_ghost_scale)), 0.0, 1.0)
@@ -854,10 +955,13 @@ func load_settings() -> void:
 	minimap_enabled = _cfg_bool(cfg, "accessibility", "minimap_enabled", minimap_enabled)
 	minimap_rotates = _cfg_bool(cfg, "accessibility", "minimap_rotates", minimap_rotates)
 	minimap_zoom = clampf(float(cfg.get_value("accessibility", "minimap_zoom", minimap_zoom)), MINIMAP_ZOOM_MIN, MINIMAP_ZOOM_MAX)
+	map_zoom = clampf(float(cfg.get_value("accessibility", "map_zoom", map_zoom)), MINIMAP_ZOOM_MIN, MINIMAP_ZOOM_MAX)
 	minimap_show_npcs = _cfg_bool(cfg, "accessibility", "minimap_show_npcs", minimap_show_npcs)
 	minimap_show_stations = _cfg_bool(cfg, "accessibility", "minimap_show_stations", minimap_show_stations)
+	minimap_show_noise = _cfg_bool(cfg, "accessibility", "minimap_show_noise", minimap_show_noise)
 	clock_enabled = _cfg_bool(cfg, "accessibility", "clock_enabled", clock_enabled)
 	clock_24_hour = _cfg_bool(cfg, "accessibility", "clock_24_hour", clock_24_hour)
+	compass_enabled = _cfg_bool(cfg, "accessibility", "compass_enabled", compass_enabled)
 	tts_enabled = _cfg_bool(cfg, "accessibility", "tts_enabled", tts_enabled)
 	heartbeat_enabled = _cfg_bool(cfg, "accessibility", "heartbeat_enabled", heartbeat_enabled)
 	debug_skip_menu = _cfg_bool(cfg, "debug", "skip_menu", debug_skip_menu)
@@ -885,6 +989,22 @@ static func read_mouse_sensitivity(cfg: ConfigFile, fallback: float) -> float:
 		return float(cfg.get_value("input", MOUSE_SENS_LEGACY_KEY, fallback)) * LEGACY_MOUSE_SENS_SCALE
 	return fallback
 
+## Pure: the presentation mode + render scale a settings.cfg carries — unit-tested off-tree with an in-memory
+## ConfigFile (the read_mouse_sensitivity idiom).
+##  - presentation key present -> both values verbatim (they were saved by a presentation-aware build).
+##  - key ABSENT -> a cfg from the RETRO-only era: HIGH FIDELITY (the new shipped look) with render_scale FORCED
+##    to 1.0. The saved scale (typically the old 2.0 default) supersampled the ~792x444 RETRO buffer; re-read
+##    against a native root target it would mean 3840x2160 3D on a 1080p screen — a silent 4x perf cliff.
+## One-shot by construction: save_settings always writes the presentation key, so the reset can never run twice.
+## NOT clamped here — the caller clamps both values, like every other loader.
+static func read_presentation(cfg: ConfigFile, fallback_mode: int, fallback_scale: float) -> Dictionary:
+	if cfg.has_section_key("video", "presentation"):
+		return {
+			"presentation": int(cfg.get_value("video", "presentation", fallback_mode)),
+			"render_scale": float(cfg.get_value("video", "render_scale", fallback_scale)),
+		}
+	return {"presentation": PRESENTATION_HIGH_FIDELITY, "render_scale": 1.0}
+
 ## bool() has NO String constructor in Godot 4 (bool(<String>) throws "Invalid call. Nonexistent 'bool'
 ## constructor"), yet a hand-edited / legacy / corrupt settings.cfg can persist a bool key as a String. Mirror the
 ## windowed_size / binds Variant-guards in load_settings (and GameState._cfg_bool) so a junk-typed flag degrades to
@@ -902,6 +1022,7 @@ func save_settings() -> void:
 	cfg.set_value("video", "windowed_size", windowed_size)
 	cfg.set_value("video", "vsync", vsync)
 	cfg.set_value("video", "max_fps", max_fps)
+	cfg.set_value("video", "presentation", presentation)  # ALWAYS written — the key's presence is what makes read_presentation's era migration one-shot
 	cfg.set_value("video", "render_scale", render_scale)
 	cfg.set_value("video", "fov", fov)
 	cfg.set_value("video", "contrast", contrast)
@@ -930,6 +1051,7 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled)
 	cfg.set_value("accessibility", "fov_effects_enabled", fov_effects_enabled)
 	cfg.set_value("accessibility", "ps1_warp_intensity", ps1_warp_intensity)
+	cfg.set_value("accessibility", "dialogue_text_scale", dialogue_text_scale)
 	cfg.set_value("accessibility", "stamina_ring_enabled", stamina_ring_enabled)
 	cfg.set_value("accessibility", "hud_sway_scale", hud_sway_scale)
 	cfg.set_value("accessibility", "hud_ghost_scale", hud_ghost_scale)
@@ -939,10 +1061,13 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "minimap_enabled", minimap_enabled)
 	cfg.set_value("accessibility", "minimap_rotates", minimap_rotates)
 	cfg.set_value("accessibility", "minimap_zoom", minimap_zoom)
+	cfg.set_value("accessibility", "map_zoom", map_zoom)
 	cfg.set_value("accessibility", "minimap_show_npcs", minimap_show_npcs)
 	cfg.set_value("accessibility", "minimap_show_stations", minimap_show_stations)
+	cfg.set_value("accessibility", "minimap_show_noise", minimap_show_noise)
 	cfg.set_value("accessibility", "clock_enabled", clock_enabled)
 	cfg.set_value("accessibility", "clock_24_hour", clock_24_hour)
+	cfg.set_value("accessibility", "compass_enabled", compass_enabled)
 	cfg.set_value("accessibility", "tts_enabled", tts_enabled)
 	cfg.set_value("accessibility", "heartbeat_enabled", heartbeat_enabled)
 	cfg.set_value("debug", "skip_menu", debug_skip_menu)

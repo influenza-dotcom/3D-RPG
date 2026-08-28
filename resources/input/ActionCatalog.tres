@@ -185,10 +185,24 @@ label = "Implants Screen"
 section = "Interface"
 section_key = &"sec_interface"
 
+[sub_resource type="Resource" id="as_map"]
+script = ExtResource("1")
+action = &"Map"
+label = "Map Screen"
+section = "Interface"
+section_key = &"sec_interface"
+
 [sub_resource type="Resource" id="as_minimap_zoom"]
 script = ExtResource("1")
 action = &"MinimapZoom"
 label = "Cycle Minimap Zoom"
+section = "Interface"
+section_key = &"sec_interface"
+
+[sub_resource type="Resource" id="as_mark_waypoint"]
+script = ExtResource("1")
+action = &"MarkWaypoint"
+label = "Mark Waypoint"
 section = "Interface"
 section_key = &"sec_interface"
 
@@ -299,4 +313,4 @@ section_key = &"sec_system"
 
 [resource]
 script = ExtResource("2")
-actions = Array[ExtResource("1")]([SubResource("as_forward"), SubResource("as_backward"), SubResource("as_left"), SubResource("as_right"), SubResource("as_jump"), SubResource("as_crouch"), SubResource("as_run"), SubResource("as_lean_left"), SubResource("as_lean_right"), SubResource("as_attack"), SubResource("as_zoom"), SubResource("as_reload"), SubResource("as_throw"), SubResource("as_light"), SubResource("as_grapple"), SubResource("as_nightvision"), SubResource("as_takedown"), SubResource("as_drop_held"), SubResource("as_claim"), SubResource("as_wait"), SubResource("as_pickup"), SubResource("as_inventory"), SubResource("as_stats"), SubResource("as_reputation"), SubResource("as_journal"), SubResource("as_implants"), SubResource("as_minimap_zoom"), SubResource("as_rotate_item"), SubResource("as_slot1"), SubResource("as_slot2"), SubResource("as_slot3"), SubResource("as_slot4"), SubResource("as_slot5"), SubResource("as_slot6"), SubResource("as_slot7"), SubResource("as_slot8"), SubResource("as_slot9"), SubResource("as_slot10"), SubResource("as_hotbar_next"), SubResource("as_hotbar_prev"), SubResource("as_quicksave"), SubResource("as_quickload")])
+actions = Array[ExtResource("1")]([SubResource("as_forward"), SubResource("as_backward"), SubResource("as_left"), SubResource("as_right"), SubResource("as_jump"), SubResource("as_crouch"), SubResource("as_run"), SubResource("as_lean_left"), SubResource("as_lean_right"), SubResource("as_attack"), SubResource("as_zoom"), SubResource("as_reload"), SubResource("as_throw"), SubResource("as_light"), SubResource("as_grapple"), SubResource("as_nightvision"), SubResource("as_takedown"), SubResource("as_drop_held"), SubResource("as_claim"), SubResource("as_wait"), SubResource("as_pickup"), SubResource("as_inventory"), SubResource("as_stats"), SubResource("as_reputation"), SubResource("as_journal"), SubResource("as_implants"), SubResource("as_map"), SubResource("as_minimap_zoom"), SubResource("as_mark_waypoint"), SubResource("as_rotate_item"), SubResource("as_slot1"), SubResource("as_slot2"), SubResource("as_slot3"), SubResource("as_slot4"), SubResource("as_slot5"), SubResource("as_slot6"), SubResource("as_slot7"), SubResource("as_slot8"), SubResource("as_slot9"), SubResource("as_slot10"), SubResource("as_hotbar_next"), SubResource("as_hotbar_prev"), SubResource("as_quicksave"), SubResource("as_quickload")])

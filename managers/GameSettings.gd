@@ -42,7 +42,6 @@ extends Node
 #     CAMERA_RECOVERY_SPEED         -> camera.recovery_speed
 #     CAMERA_SCOPE_ZOOM_SPEED       -> camera.scope_zoom_speed
 #     CAMERA_PITCH_LIMIT_DEG        -> camera.pitch_max_deg
-#     CAMERA_PITCH_LIMIT_HOLDING_DEG-> camera.pitch_max_holding_deg
 #     CAMERA_PITCH_SOFT_RAMP_DEG    -> camera.pitch_soft_ramp_deg
 #     MOUSE_SENSITIVITY             -> camera.mouse_sensitivity
 #

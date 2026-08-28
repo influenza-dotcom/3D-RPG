@@ -42,6 +42,16 @@ step = 1.0
 as_int = true
 value_format = 3
 
+[sub_resource type="Resource" id="presentation"]
+script = ExtResource("1")
+key = &"presentation"
+tab = &"Video"
+control = 5
+label = "Presentation"
+getter = &"presentation"
+setter = &"set_presentation"
+custom_handler = &"_emit_presentation"
+
 [sub_resource type="Resource" id="render_scale"]
 script = ExtResource("1")
 key = &"render_scale"
@@ -283,6 +293,19 @@ label = "Screen Flashes"
 getter = &"screen_flash_enabled"
 setter = &"set_screen_flash_enabled"
 
+[sub_resource type="Resource" id="dialogue_text_scale"]
+script = ExtResource("1")
+key = &"dialogue_text_scale"
+tab = &"Accessibility"
+control = 2
+label = "Dialogue Text Size"
+getter = &"dialogue_text_scale"
+setter = &"set_dialogue_text_scale"
+min_value = 0.75
+max_value = 1.5
+step = 0.05
+value_format = 1
+
 [sub_resource type="Resource" id="ps1_warp"]
 script = ExtResource("1")
 key = &"ps1_warp"
@@ -392,6 +415,14 @@ label = "Stations On Minimap"
 getter = &"minimap_show_stations"
 setter = &"set_minimap_show_stations"
 
+[sub_resource type="Resource" id="minimap_noise"]
+script = ExtResource("1")
+key = &"minimap_noise"
+tab = &"Accessibility"
+label = "Noise On Minimap"
+getter = &"minimap_show_noise"
+setter = &"set_minimap_show_noise"
+
 [sub_resource type="Resource" id="minimap_zoom"]
 script = ExtResource("1")
 key = &"minimap_zoom"
@@ -400,6 +431,19 @@ control = 2
 label = "Minimap Zoom"
 getter = &"minimap_zoom"
 setter = &"set_minimap_zoom"
+min_value = 0.5
+max_value = 3.0
+step = 0.1
+value_format = 5
+
+[sub_resource type="Resource" id="map_zoom"]
+script = ExtResource("1")
+key = &"map_zoom"
+tab = &"Accessibility"
+control = 2
+label = "Map Zoom"
+getter = &"map_zoom"
+setter = &"set_map_zoom"
 min_value = 0.5
 max_value = 3.0
 step = 0.1
@@ -420,6 +464,14 @@ tab = &"Accessibility"
 label = "24-Hour Clock"
 getter = &"clock_24_hour"
 setter = &"set_clock_24_hour"
+
+[sub_resource type="Resource" id="compass"]
+script = ExtResource("1")
+key = &"compass"
+tab = &"Accessibility"
+label = "HUD Compass"
+getter = &"compass_enabled"
+setter = &"set_compass_enabled"
 
 [sub_resource type="Resource" id="view_model_visible"]
 script = ExtResource("1")
@@ -526,4 +578,4 @@ setter = &"set_heartbeat_enabled"
 
 [resource]
 script = ExtResource("2")
-specs = Array[ExtResource("1")]([SubResource("window_mode"), SubResource("resolution"), SubResource("vsync"), SubResource("max_fps"), SubResource("render_scale"), SubResource("fov"), SubResource("contrast"), SubResource("ink_outline"), SubResource("color_quantization"), SubResource("dither"), SubResource("muzzle_smoke"), SubResource("vol_master"), SubResource("vol_music"), SubResource("vol_sfx"), SubResource("vol_ambient"), SubResource("vol_voice"), SubResource("music_folder"), SubResource("difficulty"), SubResource("mouse_sensitivity"), SubResource("controller_look"), SubResource("invert_look_y"), SubResource("auto_equip_pickups"), SubResource("debug_skip_menu"), SubResource("debug_always_show_tos"), SubResource("controls_hint"), SubResource("screen_shake"), SubResource("screen_flash"), SubResource("ps1_warp"), SubResource("hitstop"), SubResource("colorblind_mode"), SubResource("colorblind_cues"), SubResource("view_bob"), SubResource("detection_meter"), SubResource("enemy_health_bar"), SubResource("loot_beacons"), SubResource("stamina_ring"), SubResource("minimap"), SubResource("minimap_rotate"), SubResource("minimap_npcs"), SubResource("minimap_stations"), SubResource("minimap_zoom"), SubResource("clock"), SubResource("clock_24_hour"), SubResource("view_model_visible"), SubResource("view_model_left"), SubResource("camera_tilt"), SubResource("fov_effects"), SubResource("hud_sway"), SubResource("hud_ghost"), SubResource("world_ghost"), SubResource("hud_curve"), SubResource("lens_curve"), SubResource("tts"), SubResource("heartbeat")])
+specs = Array[ExtResource("1")]([SubResource("window_mode"), SubResource("resolution"), SubResource("vsync"), SubResource("max_fps"), SubResource("presentation"), SubResource("render_scale"), SubResource("fov"), SubResource("contrast"), SubResource("ink_outline"), SubResource("color_quantization"), SubResource("dither"), SubResource("muzzle_smoke"), SubResource("vol_master"), SubResource("vol_music"), SubResource("vol_sfx"), SubResource("vol_ambient"), SubResource("vol_voice"), SubResource("music_folder"), SubResource("difficulty"), SubResource("mouse_sensitivity"), SubResource("controller_look"), SubResource("invert_look_y"), SubResource("auto_equip_pickups"), SubResource("debug_skip_menu"), SubResource("debug_always_show_tos"), SubResource("controls_hint"), SubResource("screen_shake"), SubResource("screen_flash"), SubResource("dialogue_text_scale"), SubResource("ps1_warp"), SubResource("hitstop"), SubResource("colorblind_mode"), SubResource("colorblind_cues"), SubResource("view_bob"), SubResource("detection_meter"), SubResource("enemy_health_bar"), SubResource("loot_beacons"), SubResource("stamina_ring"), SubResource("minimap"), SubResource("minimap_rotate"), SubResource("minimap_npcs"), SubResource("minimap_stations"), SubResource("minimap_noise"), SubResource("minimap_zoom"), SubResource("map_zoom"), SubResource("clock"), SubResource("clock_24_hour"), SubResource("compass"), SubResource("view_model_visible"), SubResource("view_model_left"), SubResource("camera_tilt"), SubResource("fov_effects"), SubResource("hud_sway"), SubResource("hud_ghost"), SubResource("world_ghost"), SubResource("hud_curve"), SubResource("lens_curve"), SubResource("tts"), SubResource("heartbeat")])

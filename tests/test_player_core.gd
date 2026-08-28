@@ -124,8 +124,8 @@ func test_player_ram_and_thump_export_defaults() -> void:
 func test_player_noise_export_defaults() -> void:
 	# These gate stealth: enemy Perception.can_hear() reads noise_radius, driven by these.
 	var p = load(PLAYER_SCRIPT_PATH).new()
-	assert_eq(p.noise_move_per_speed, 1.2,
-		"noise_move_per_speed default 1.2 m of audible radius per m/s of ground speed drives footstep hearing")
+	assert_eq(p.noise_move_per_speed, 3.0,
+		"noise_move_per_speed default 3.0 m of audible radius per m/s of ground speed drives footstep hearing — a ~15 m run, ~10.5 m walk against the 25 m sight_range")
 	assert_eq(p.noise_gunfire_radius, 28.0,
 		"noise_gunfire_radius default 28.0 m is how far a gunshot is heard before it decays")
 	assert_eq(p.noise_gunfire_decay, 45.0,

@@ -402,6 +402,21 @@ static func _cmd_station_music() -> PackedStringArray:
 	out.append("wanted: %s   playing: %s   track: %s" % [
 		str(StationMusic.is_bed_wanted()), str(StationMusic.playing),
 		StationMusic.current_track_name() if StationMusic.current_track_name() != "" else "-"])
+	# Both flags, because they answer different questions and their DIFFERENCE is the hold window: `wanted`
+	# rides hold_seconds out (what the dialogue BED steps aside for), `screen open` drops the instant the
+	# screen closes (what the conversation MUSIC DUCK stands down for — MusicDucker.note_station_radio).
+	# ⭐`screen open` reads FALSE here by construction: debug_console.open() refuses over any registered modal,
+	# so you can never type this command WITH a station screen up. It is printed anyway because a `true` would
+	# mean the flag has latched on with the screen already gone — the exact leak that would re-break this.
+	# The DUCK line is the one you actually read after the fact: it is the ducker's real latch (not a
+	# re-derivation of it) beside the live bus level, so a duck stuck armed with no conversation, or a music
+	# bus left sitting low, is visible without reproducing anything.
+	var music_bus := AudioServer.get_bus_index(&"music")
+	out.append("screen open: %s   conversation duck: %s   music bus: %.1f dB (configured %.1f)" % [
+		str(StationMusic.is_screen_open()),
+		"ARMED" if DialogueManager.is_music_ducked() else ("released" if DialogueManager.is_engaged() else "idle"),
+		AudioServer.get_bus_volume_db(music_bus) if music_bus >= 0 else 0.0,
+		Settings.current_bus_db(&"music")])
 	out.append("level: %.1f dB  ->  target %.1f dB   (floor %.1f, fade in %.2fs / out %.2fs, hold %.2fs)" % [
 		StationMusic.volume_db,
 		cfg.volume_db if StationMusic.is_bed_wanted() else cfg.silent_db,
@@ -2994,18 +3009,21 @@ static func _grouped(n: int) -> String:
 
 # --- screenshot -----------------------------------------------------------------------------------------------
 
-## `screenshot [clean]` — save the EXACT retro canvas to user://screenshots/<yyyy-mm-dd_hh-mm-ss>.png.
+## `screenshot [clean]` — save the EXACT root render target to user://screenshots/<yyyy-mm-dd_hh-mm-ss>.png.
 ##
-## THE CANVAS. project.godot runs window/stretch/mode = "viewport" (aspect expand, scale 0.5), so the ROOT viewport IS
-## the low-res canvas the game is drawn at (792x444 at 16:9 — menu_qa_shots.gd:3) and the window merely nearest-
-## upscales it. `tree.root.get_texture().get_image()` is therefore the pixel-exact frame — the same read every `-s`
-## screenshot probe uses (day_night_shots.gd:62, menu_qa_shots.gd:308). Never a DisplayServer window grab: that would
-## be the upscaled, monitor-sized blit, comb artefacts and all.
+## THE TARGET. What the root viewport holds depends on Settings.presentation: RETRO runs the authored viewport
+## stretch (aspect expand, scale 0.5), so the root IS the low-res ~792x444 canvas (menu_qa_shots.gd:3) and the
+## window merely nearest-upscales it; HIGH FIDELITY (canvas_items stretch) renders the root at the NATIVE window
+## resolution. Either way `tree.root.get_texture().get_image()` is the pixel-exact frame — the same read every `-s`
+## screenshot probe uses (day_night_shots.gd:62, menu_qa_shots.gd _shot()) — so the driver's root read is correct
+## in BOTH modes; the report line stamps the presentation + live native_scale() so a shot is self-describing.
+## Never a DisplayServer window grab: that would be the monitor-sized blit (in RETRO an upscaled one, comb
+## artefacts and all).
 ##
 ## WHY A HELPER NODE. run() is a static that returns its lines synchronously, but a capture must wait for a DRAW: an
 ## Image read here, mid-command, is the PREVIOUS frame (the command runs during input dispatch or the exec queue's
 ## physics tick — both before this frame's draw). So this mounts a one-shot _ShotDriver at tree.root (the
-## menu_qa_shots.gd:19-27 "driver at root" idiom: root children survive a reload, and a child of the console or the
+## menu_qa_shots.gd _ready "driver at root" idiom: root children survive a reload, and a child of the console or the
 ## level would die with it) and answers "capturing the next frame"; the driver hides, awaits the draw, captures,
 ## restores and reports through the console's echo() when it is done (see _ShotDriver for the frame timing).
 ##
@@ -3142,7 +3160,7 @@ static func _echo_to_surfaces(tree: SceneTree, lines: PackedStringArray) -> void
 ## _physics_process tick — both come BEFORE this frame's process step, and `process_frame` is emitted at the START of
 ## that step. So `await tree.process_frame` from here resumes in the SAME frame, before anything has been drawn since
 ## the hide, and a read then hands back LAST frame's texture — with the console still in it. `frame_post_draw` is
-## emitted by the RenderingServer right after it has finished drawing the CURRENT frame (menu_qa_shots.gd:307-308 is
+## emitted by the RenderingServer right after it has finished drawing the CURRENT frame (menu_qa_shots.gd _shot() is
 ## the proven read-after-it idiom in this project), i.e. it is unconditionally "the first draw that happens after
 ## now" — whichever callback we were spawned from. Hide -> await frame_post_draw -> read == the frame drawn WITHOUT
 ## the hidden layers, exactly once, then everything is put back before the next draw. One visible flicker frame is
@@ -3209,7 +3227,11 @@ class _ShotDriver extends Node:
 		else:
 			var err := img.save_png(global)
 			if err == OK:
-				lines.append("screenshot: wrote %s  (%dx%d%s)" % [global, img.get_width(), img.get_height(), ", clean" if clean else ""])
+				# Presentation stamp: the same WxH could be a RETRO canvas on one monitor or a HIGH FIDELITY native
+				# frame on another, so the line names the target it read. native_scale() is read LIVE per the
+				# Settings contract (1.0 in RETRO by identity).
+				var pres := "RETRO" if Settings.presentation == Settings.PRESENTATION_RETRO else "HIGH_FIDELITY"
+				lines.append("screenshot: wrote %s  (%dx%d%s, %s native_scale=%.2f)" % [global, img.get_width(), img.get_height(), ", clean" if clean else "", pres, Settings.native_scale()])
 			else:
 				lines.append("screenshot: save_png FAILED (error %d %s) -> %s" % [err, error_string(err), global])
 		if clean:
@@ -3400,8 +3422,13 @@ const DOF_AUTHORED := {
 	"near_enabled": false,
 	"near_distance": 0.5,     # camera_rig.tscn -- authored, and dead until `dof near` flips the switch
 	"near_transition": 1.0,   # absent -> engine default
-	"far_enabled": true,      # camera_rig.tscn
-	"far_distance": 30.0,     # camera_rig.tscn
+	# The far half was RETIRED from camera_rig.tscn on 2026-08-24: its 30 m far blur was tuned when the main
+	# level's volumetric fog had the far field ~78% covered, and the day the level dropped that fog the whole
+	# distance rendered as naked mush ("things in the distance are WAY too blurry"). Both fields are now absent
+	# from the .tscn -> engine defaults. ADS still gets far blur (set_scope_dof pushes it to
+	# GameSettings.camera.dof_scoped_far_distance while scoped); only the RESTING state is blur-free.
+	"far_enabled": false,     # absent -> engine default
+	"far_distance": 10.0,     # absent -> engine default
 	"far_transition": 5.0,    # absent -> engine default
 	"amount": 0.1,            # absent -> engine default
 }
@@ -3412,9 +3439,11 @@ const DOF_AUTHORED := {
 ## WHY THIS IS A LENS DIAL AND NOT A BLUR TOY. Defocus is the one depth cue the FOV slider cannot fake. In a
 ## pinhole projection an object's on-screen size is h / (2 d tan(fov/2)), so for ANY two objects the tan term
 ## cancels: FOV is a UNIFORM scale on the whole image and moves framing, never near-to-far separation. Blur is a
-## function of distance, so it does separate them. THE NEAR HALF IS THE WHOLE EFFECT here: a windowed A/B on the
-## shipped level measured `near 1.0` at ~16% of frame change and `amount` alone at ~1.5%, because `amount` only
-## strengthens blur that already exists and the far field is already ~78% fog at the 30 m onset.
+## function of distance, so it does separate them. THE NEAR HALF IS THE WHOLE EFFECT here: a windowed A/B
+## (2026-08-20, when the rig still authored a 30 m far blur under volumetric fog) measured `near 1.0` at ~16%
+## of frame change and `amount` alone at ~1.5%, because `amount` only strengthens blur that already exists and
+## the far field was ~78% fog at that 30 m onset. Both far blur and the main level's fog are gone since
+## 2026-08-24, which makes the near half MORE of the whole effect, not less.
 ## And it separates them where it is wanted: the weapon and the
 ## carry-hands render through ViewModelCamera's own Camera3D, built with NO CameraAttributes on purpose
 ## (scripts/camera/view_model_camera.gd:116-117), so everything here softens the WORLD while what is in your
@@ -3426,13 +3455,14 @@ const DOF_AUTHORED := {
 ## shipped in exactly that state (0.5 distance against the default 1.0 transition) on top of the missing switch --
 ## so `dof near <m>` auto-sizes the transition unless you give one, and always says where the ramp landed.
 ##
-## THE FAR HALF IS NOT OURS TO HOLD. CameraEffects.set_scope_dof() rewrites dof_blur_far_enabled AND
-## dof_blur_far_distance on every scope and unscope, restoring the distance it snapshotted into
-## `_dof_default_far_distance` in _ready(). So `dof far <d>` writes that snapshot too (and REPORTS whether the
-## write took) -- otherwise the next ADS cycle would silently undo it and read as "the command did nothing". The
-## far ENABLED flag cannot be held down the same way, because unscope sets it true unconditionally: `dof off` and
-## `dof far 0` are honest only until the next aim. Push the blur out with a big distance instead. Nothing at
-## runtime touches the NEAR fields, so a near override is stable.
+## THE FAR HALF IS SHARED WITH THE ADS. CameraEffects.set_scope_dof() rewrites dof_blur_far_enabled AND
+## dof_blur_far_distance on every scope, and on unscope restores the PAIR it snapshotted in _ready()
+## (`_dof_default_far_enabled` / `_dof_default_far_distance`). So every far-side verb here (`far <d>`, `far 0`,
+## `off`, `on`, `reset`) writes that snapshot pair too (and `far <d>` REPORTS whether the write took) --
+## otherwise the next ADS cycle would silently undo it and read as "the command did nothing". Unscope used to
+## force the enabled flag TRUE unconditionally, which made `dof off` honest only until the next aim; since
+## 2026-08-24 (far blur retired from camera_rig.tscn) the restore honours the snapshot, so far-side overrides
+## hold. Nothing at runtime touches the NEAR fields, so a near override is stable without any snapshot.
 ##
 ## HOW LONG AN OVERRIDE LASTS -- longer than you expect, the same trap as `dither`. CameraAttributesPractical is
 ## a SUB-RESOURCE of the cached camera_rig.tscn PackedScene and is not resource_local_to_scene, so the camera a
@@ -3452,12 +3482,14 @@ static func _cmd_dof(ctx: Dictionary, args: PackedStringArray) -> PackedStringAr
 	match verb:
 		"amount":
 			if args.size() < 2:
-				out.append("dof amount needs a value 0-1. It scales the blur RADIUS at BOTH ends without moving where either one starts -- but it only makes EXISTING blur stronger, it cannot create any. Measured on the shipped level with the near blur off, 0.10 -> 0.18 moved the frame about 1.5%: the far field it would act on is already ~78% swallowed by volumetric fog. Turn `dof near` on first; then this is worth something.")
+				out.append("dof amount needs a value 0-1. It scales the blur RADIUS at BOTH ends without moving where either one starts -- but it only makes EXISTING blur stronger, it cannot create any. Both ends ship OFF (the far half was retired 2026-08-24 with the main level's fog), so on the authored state this dial acts on nothing. Turn `dof near` or `dof far` on first; then it is worth something.")
 			else:
 				attrs.dof_blur_amount = clampf(float(args[1]), 0.0, 1.0)
 				out.append("dof amount %.3f -- blur radius, both ends; the onset distances are untouched." % attrs.dof_blur_amount)
-				if not attrs.dof_blur_near_enabled:
-					out.append("  ! near blur is OFF, so this is only scaling the FAR blur -- and the far field is already mostly fog. Expect ~1% of frame change. `dof near 1.0` first.")
+				if not attrs.dof_blur_near_enabled and not attrs.dof_blur_far_enabled:
+					out.append("  ! BOTH ends are OFF (the shipped state), so this is scaling nothing at all. `dof near <m>` or `dof far <m>` first.")
+				elif not attrs.dof_blur_near_enabled:
+					out.append("  ! near blur is OFF, so this is only scaling the FAR blur. `dof near 1.0` for the depth cue.")
 				if attrs.dof_blur_amount > 0.2:
 					out.append("  ! past ~0.2 the near field crawls: project.godot ships use_taa=false, screen_space_aa=0 and msaa_3d=0, so nothing temporally stabilises a screen-space gather.")
 		"near":
@@ -3489,28 +3521,32 @@ static func _cmd_dof(ctx: Dictionary, args: PackedStringArray) -> PackedStringAr
 					attrs.dof_blur_far_transition = maxf(float(args[2]), 0.0)
 				if far_d <= 0.0:
 					attrs.dof_blur_far_enabled = false
-					out.append("dof far OFF -- but only until the next aim. CameraEffects.set_scope_dof() sets dof_blur_far_enabled = true unconditionally on every UNSCOPE and this command cannot hold that flag down; use `dof far 400` to push the blur out of sight instead.")
+					cam.set(&"_dof_default_far_enabled", false)
+					out.append("dof far OFF -- and it HOLDS through aim cycles: unscope restores CameraEffects' snapshot pair, and this just wrote enabled=false into it. (That is also the shipped state since 2026-08-24.)")
 				else:
 					attrs.dof_blur_far_enabled = true
 					attrs.dof_blur_far_distance = far_d
+					cam.set(&"_dof_default_far_enabled", true)
 					cam.set(&"_dof_default_far_distance", far_d)
 					out.append("dof far ON -- sharp until %.2f m, full blur by %.2f m." % [far_d, far_d + attrs.dof_blur_far_transition])
 					# Report whether the snapshot write actually took: set() on a property this camera does not
 					# have is a silent no-op, and the symptom would be "it reverted after I aimed once".
 					var snap: Variant = cam.get(&"_dof_default_far_distance")
 					if snap is float and is_equal_approx(float(snap), far_d):
-						out.append("  also wrote CameraEffects._dof_default_far_distance, so the next unscope restores THIS distance instead of the authored %.1f m." % float(DOF_AUTHORED["far_distance"]))
+						out.append("  also wrote CameraEffects' _dof_default_far_enabled/_distance snapshot pair, so the next unscope restores THIS far blur instead of the authored state (far off).")
 					else:
-						out.append("  ! this camera has no _dof_default_far_distance to update, so the first unscope after an ADS will restore the authored %.1f m and undo the line above." % float(DOF_AUTHORED["far_distance"]))
+						out.append("  ! this camera has no _dof_default_far_distance to update, so the first unscope after an ADS will restore the authored state (far blur OFF) and undo the line above.")
 		"off":
 			attrs.dof_blur_near_enabled = false
 			attrs.dof_blur_far_enabled = false
+			cam.set(&"_dof_default_far_enabled", false)
 			out.append("dof OFF at both ends -- the A/B kill switch, NOT a restore (`dof reset` puts the authored values back).")
-			out.append("  ! the FAR half comes back on the next unscope (set_scope_dof forces it true); the near half stays off.")
+			out.append("  holds through aim cycles: the far half's unscope-restore snapshot was set to off too. (Off IS the shipped state at both ends.)")
 		"on":
 			attrs.dof_blur_near_enabled = true
 			attrs.dof_blur_far_enabled = true
-			out.append("dof ON at both ends, at the CURRENT distances -- not the authored ones. `dof reset` for those.")
+			cam.set(&"_dof_default_far_enabled", true)
+			out.append("dof ON at both ends, at the CURRENT distances -- not the authored ones (which ship both ends OFF). `dof reset` for those. The far half's unscope-restore snapshot was switched ON but keeps its own distance (the last `dof far <d>`, or the authored one), so an aim cycle lands the far blur THERE -- `dof far <d>` to pin a distance.")
 		"reset":
 			attrs.dof_blur_near_enabled = bool(DOF_AUTHORED["near_enabled"])
 			attrs.dof_blur_near_distance = float(DOF_AUTHORED["near_distance"])
@@ -3519,8 +3555,9 @@ static func _cmd_dof(ctx: Dictionary, args: PackedStringArray) -> PackedStringAr
 			attrs.dof_blur_far_distance = float(DOF_AUTHORED["far_distance"])
 			attrs.dof_blur_far_transition = float(DOF_AUTHORED["far_transition"])
 			attrs.dof_blur_amount = float(DOF_AUTHORED["amount"])
+			cam.set(&"_dof_default_far_enabled", bool(DOF_AUTHORED["far_enabled"]))
 			cam.set(&"_dof_default_far_distance", float(DOF_AUTHORED["far_distance"]))
-			out.append("dof reset -- camera_rig.tscn's authored state is back, near blur OFF included. That IS how it ships: the .tscn authors dof_blur_near_distance = 0.5 and never wrote dof_blur_near_enabled, so the near half has been dead since the day it was typed.")
+			out.append("dof reset -- camera_rig.tscn's authored state is back: BOTH ends off. The near half has been dead since the day it was typed (authored near_distance 0.5, switch never written); the far half was retired 2026-08-24 when the main level dropped the volumetric fog that had been hiding its 30 m blur.")
 
 	out.append_array(_dof_report(ctx, attrs))
 	return out
@@ -3542,9 +3579,10 @@ static func _dof_report(ctx: Dictionary, attrs: CameraAttributesPractical) -> Pa
 	out.append("live: amount %.3f | near %s | far %s" % [attrs.dof_blur_amount, near_text, far_text])
 	out.append("  the view model is IMMUNE by construction -- the gun and the carry-hands render through ViewModelCamera's own Camera3D, built with no CameraAttributes on purpose. Only the WORLD softens, which is the whole near/far separation.")
 
-	# Is there anything left out there to blur? This level is lit BY its volumetric fog, and at the engine-default
-	# 0.05/m density the far field is already most of the way to opaque well before the far blur even starts --
-	# which is the difference between "the far blur did nothing" and "the far blur is not the problem".
+	# Is there anything left out there to blur? On a level that runs volumetric fog (TestLevel does; the main
+	# level dropped its 2026-08-24), the engine-default 0.05/m density has the far field most of the way to
+	# opaque well before a far blur even starts -- which is the difference between "the far blur did nothing"
+	# and "the far blur is not the problem". Self-gating: prints only when fog AND far blur are both live.
 	var env := _lens_world_env(ctx)
 	if env != null and env.volumetric_fog_enabled and attrs.dof_blur_far_enabled and attrs.dof_blur_far_distance > 0.0:
 		var opacity := 1.0 - exp(-maxf(env.volumetric_fog_density, 0.0) * attrs.dof_blur_far_distance)

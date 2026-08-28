@@ -31,6 +31,28 @@ extends Resource
 ## The full-screen damage flash tint.
 @export var hurt_flash_color: Color = Color(0.85, 0.0, 0.0)
 
+@export_group("Fall warning (the screen greying out)")
+## Peak grayscale drain (0..1) of the fall warning — the post-process `fall_grey` uniform at a LETHAL fall.
+## 1.0 = the frame goes COMPLETELY grey when the drop below you would kill you, which is the whole read and the
+## shipped value; lower it for a softer tell that keeps some colour at the worst end; 0 switches the feature off
+## entirely and the frame is bit-identical to a build without it. Everything short of lethal scales down from
+## here in proportion to the fraction of your REMAINING HP the landing would cost (FallDamage.lethal_fraction),
+## so the same drop reads greyer when you are already hurt.
+@export_range(0.0, 1.0, 0.01) var fall_grey_max: float = 1.0
+## How fast the grey RELEASES once you are no longer falling (per-second exponential rate; higher = snappier).
+## Only the release is eased — the drain itself tracks your fall speed instantly, because a lagged danger read is
+## a broken danger read. At the default, ~95% of the drain is gone a third of a second after touchdown and the
+## last of it snaps off around two thirds of a second in, so the tail is still visibly draining while the landing
+## lands and reads as part of the impact rather than as an effect of its own. 0 = cut straight back to full
+## colour on the landing frame.
+@export_range(0.0, 30.0, 0.5) var fall_grey_release_rate: float = 9.0
+## Seconds before a CONTINUOUS-FALL death (GameSettings.player_movement.max_continuous_fall_time — the timer that
+## kills you for falling too long, e.g. off the edge of the world) that the grey starts draining in. That death
+## is not scored on impact speed, so it needs its own ramp: without one, a player with the fall-immunity implant
+## — which cancels impact damage but NOT this timer — would fall into a void in full colour and die with no tell
+## at all. Clamped to the timer's own length. 0 switches this second channel off and leaves only the impact one.
+@export_range(0.0, 10.0, 0.1) var fall_grey_void_lead: float = 2.0
+
 @export_group("Damage thud")
 ## Min gap (ms) between damage thuds so a pellet burst plays ONE low body-blow, not a drumroll.
 @export var damage_thud_cooldown_ms: int = 250

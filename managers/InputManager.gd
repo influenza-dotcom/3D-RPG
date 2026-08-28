@@ -88,6 +88,13 @@ var action_journal: StringName = &"Journal"
 ## Open the Implants screen (default I) — its rows toggle an implant off/on. Rebindable; no controller default (the obvious pads are
 ## taken — matches Stats/Journal/Factions).
 var action_implants: StringName = &"Implants"
+## Open the MAP tab (default M) — the sixth Pip-Boy tab, a page-sized draw of the same floorplan widget the
+## HUD minimap uses (scripts/ui/map_screen.gd). Polled by the screen itself (the WaitScreen/QuestJournal
+## idiom — the surface owns its own key). ⭐M USED TO BE `MinimapZoom`; the zoom cycle moved to K when the map
+## tab landed, because M is the map key every player already has muscle memory for and the two cannot share a
+## binding (both fire during gameplay, so one press would open the map AND re-zoom the HUD box). Rebindable;
+## no controller default (the obvious pads are taken — matches Stats/Journal/Factions/Implants).
+var action_map: StringName = &"Map"
 ## Grab-to-throw (Z): picks up the aimed throwable to CARRY/THROW it. Distinct from PickUp/Interact (F),
 ## which adds a dual item to the inventory instead — so an item that's both takeable AND throwable uses E
 ## to stash and Z to throw.
@@ -124,12 +131,29 @@ var action_drop_held: StringName = &"DropHeld"
 ## Rotate the item being DRAGGED in the inventory grid (default R, shared with Reload — harmless since gameplay
 ## is suppressed while the bag is open). Read only by GridInventoryView mid-drag. Rebindable; no controller default.
 var action_rotate_item: StringName = &"RotateItem"
-## Cycle the HUD minimap's zoom (default M) through GameSettings.hud.minimap_zoom_steps, wrapping at the end.
+## Cycle the HUD minimap's zoom (default K — it moved off M when the Map tab claimed that key; see action_map)
+## through GameSettings.hud.minimap_zoom_steps, wrapping at the end.
 ## Polled by the Minimap widget itself (the WaitScreen/QuestJournal idiom — the surface owns its own key), which
 ## writes through Settings.set_minimap_zoom, so the key and the Options -> Accessibility "Minimap Zoom" slider
-## move ONE value and the choice persists. Does nothing while the map is hidden or a modal is up. Rebindable; no
+## move ONE value and the choice persists. Does nothing while the map is hidden or a modal is up — including
+## over the MAP TAB, whose own zoom is Settings.map_zoom, driven by that screen's wheel and footer buttons
+## (its Minimap instance ships zoom_key_enabled = false so one press can never move two maps). Rebindable; no
 ## controller default (the obvious pads are taken — matches Throw/Takedown/Claim/Wait).
 var action_minimap_zoom: StringName = &"MinimapZoom"
+## MARK WAYPOINT (default X): TAP to INSTANTLY pin the spot you are LOOKING AT — or, when the aim ray reaches
+## nothing, the spot you are STANDING ON — into GameState's per-level waypoint ledger, auto-named, made THE
+## tracked pin (the heading tape's nav pip), and confirmed with a toast. No dialog: mid-gameplay is no place
+## to type, and the Map tab's edit card re-authors the pin later. Polled by the WaypointMarker player
+## component (scripts/player/waypoint_marker.gd), which owns the ray and the physics-frame requirement that
+## comes with it.
+##
+## ⭐ONE KEY FOR BOTH GESTURES, deliberately. "Mark what I see" and "mark where I stand" are the same intent
+## with a different answer, and the ray already knows which one the player meant — a second binding would make
+## the player choose in advance what the raycast can just tell them. X was the only unbound letter that reads
+## as "mark" (O / P / U / Y were the others free).
+##
+## Rebindable; no controller default (the obvious pads are taken — matches Throw/Takedown/Claim/Wait/MinimapZoom).
+var action_mark_waypoint: StringName = &"MarkWaypoint"
 ## Quicksave / quickload (F5 / F9) — the immersive-sim save loop (ML-1). Polled by the Player; quickload reloads
 ## the scene. Rebindable; no controller default (a pad shouldn't fat-finger a save/load).
 var action_quicksave: StringName = &"Quicksave"
@@ -164,7 +188,7 @@ func get_movement_vector() -> Vector2:
 ## It only ever fed the Pip-Boy-tab refusal, and "freezes the tree" was a PROXY for the real question — does this
 ## screen own the player's hands right now? That proxy died when shop / heal / level-up / respec / install / chess /
 ## atm stopped pausing (see atm_screen.gd's header for why), so the flag now names the question it actually answers.
-## TRUE = a tab (Inventory / Stats / Implants / Reputation / Journal) refuses to open over it; the tabs still switch
+## TRUE = a tab (Inventory / Stats / Implants / Map / Reputation / Journal) refuses to open over it; the tabs still switch
 ## freely among THEMSELVES via PlayerMenus.close_others. This is not cosmetic: two screens that both grabbed the
 ## mouse fight over Escape, and the loser restores the CAPTURED cursor under a menu that is still up — unclickable.
 ## NOTHING in this registry pauses the tree any more; the only remaining pause in the game is DialogueManager's.
@@ -186,9 +210,11 @@ func _ensure_modal_reg() -> void:
 		{screen = HealScreen, blocks_tabs = true, station_music = true},
 		{screen = AtmScreen, blocks_tabs = true, station_music = true},                 # the Ledger terminal — the first station to go real-time (2026-08-08), and the chirp whose filter chain the radio's bus clones
 		{screen = ChipInstallScreen, blocks_tabs = true, station_music = true},
+		{screen = WeaponBenchScreen, blocks_tabs = true, station_music = true},         # the gunsmith bench — a station like its siblings: it grabs the mouse, and it chirps
 		{screen = ChessScreen, blocks_tabs = true, station_music = true},               # a wagering kiosk is still a kiosk; flip this ONE word if a long match wears the loop thin
 		{screen = QuestJournal, blocks_tabs = false, station_music = false},
 		{screen = ImplantsScreen, blocks_tabs = false, station_music = false},          # the implants tab (rows toggle an implant off/on)
+		{screen = MapScreen, blocks_tabs = false, station_music = false},               # the map tab — the HUD floorplan widget at panel size; read-only, and a tab like its siblings
 		{screen = CharacterInspectScreen, blocks_tabs = false, station_music = false},  # fullscreen hero-view; a tab hotkey takes over FROM it by design
 		{screen = SaveLoadScreen, blocks_tabs = false, station_music = false},          # manual save/load slot menu (the Options Dark-Souls posture)
 		{screen = WaitScreen, blocks_tabs = true, station_music = false},               # the Wait panel — real-time, and it owns the cursor while you pick hours; waiting happens on a rooftop, not at a counter
@@ -246,8 +272,8 @@ func any_modal_open(exclude: Object = null) -> bool:
 			return true
 	return false
 
-## True if a screen that OWNS THE PLAYER'S HANDS is open (the `blocks_tabs` rows: Options, Loot, and the seven
-## station screens). The Pip-Boy tabs (Inventory/Stats/Implants/Reputation/Journal) refuse to open over these —
+## True if a screen that OWNS THE PLAYER'S HANDS is open (the `blocks_tabs` rows: Options, Loot, Wait, and the
+## eight station screens). The Pip-Boy tabs (Inventory/Stats/Implants/Map/Reputation/Journal) refuse to open over these —
 ## but NOT over each other, since they switch siblings via PlayerMenus.close_others. THE WHOLE refusal set lives
 ## here: a guard that hand-names one more screen beside this call is the drift this registry exists to kill.
 ## (Was any_pausing_open() until 2026-08-09 — see the registry header for why the pause stopped being the test.)

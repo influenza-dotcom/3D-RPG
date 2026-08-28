@@ -5,7 +5,7 @@ var current_speed: float = 0.0
 # (The wallet — money / money_changed / add_money / reward_kill — was HOISTED to Character so every NPC
 # carries one too. The player's fresh-game 100 zm default is set in _ready, before the loadout override.)
 
-## --- Unlockable mechanics: each gateable ability (grapple, wall climb, air dash, slide) is a
+## --- Unlockable mechanics: each gateable ability (grapple, wall climb, air dash, slide, bunny hop, ...) is a
 ## drag-drop Ability CHILD NODE -- its presence (+ `enabled`) IS the grant, discovered in _ready. To choose what
 ## a FRESH game starts with, drop the ability scenes you want (scenes/components/abilities/*.tscn) under the
 ## Player; "start with nothing" = add none. An UpgradePickup grants one at runtime by ADDING its node; a loaded
@@ -20,7 +20,7 @@ signal mechanic_toggled(id: StringName, active: bool)
 ## the registry). Pick each from the DROPDOWN -- no more typo'd ids. PREFER dropping the ability scenes under the
 ## Player; this stays empty by default. A loaded save replaces this whole set. Stored as plain strings (the registry
 ## keys); unlock_mechanic takes String or StringName interchangeably.
-@export_enum("grapple", "wall_climb", "air_dash", "slide", "fall_immunity") var starting_unlocks: Array[String] = []
+@export_enum("grapple", "wall_climb", "air_dash", "slide", "fall_immunity", "silent_takedown", "chess_visualizer", "bunnyhop", "bio_scanner", "deep_scanner") var starting_unlocks: Array[String] = []
 ## The ability SUBSYSTEM: grant / revoke / persistence bookkeeping + the live ability list live in AbilityManager
 ## (scripts/components/abilities/ability_manager.gd), not here. Built at var-init and wired in _init so the bare-
 ## Player unit tests (no _ready) can drive it. The Player keeps ONLY the three typed hot-path refs below + the
@@ -40,6 +40,9 @@ var _grapple_ability: Grapple = null  ## owns the GrappleHook; pull forwarded at
 signal stamina_changed(current: float, maximum: float)
 ## Preloaded BY PATH (the manager has no class_name — the StatBudgetRef idiom below).
 const StaminaManagerRef := preload("res://scripts/player/stamina_manager.gd")
+## The Mark Waypoint verb (X). Preloaded BY PATH for the same reason as the two refs around it — it carries
+## no class_name, so this file's parse never waits on the editor's global class cache to register one.
+const WAYPOINT_MARKER_SCRIPT := preload("res://scripts/player/waypoint_marker.gd")
 var _stamina_mgr := StaminaManagerRef.new()
 ## RAW alias into the manager's pool — a bare read/write exactly like the old `var stamina` (no clamp, no emit):
 ## ui.gd's per-frame player.get(&"stamina") poll hits this getter (Object.get() invokes property getters), and
@@ -230,6 +233,10 @@ var _was_on_floor: bool = false
 var _last_grounded_position: Vector3 = Vector3.ZERO
 var _has_last_grounded: bool = false   ## false until we touch floor once, so a never-grounded death falls through to the next rung
 var _continuous_fall_time: float = 0.0
+## Live strength (0..1) of the fall warning — the post-process `fall_grey` grayscale drain. Written ONLY by
+## _update_fall_grey (which also pushes it to the shader) and cleared on respawn; 0 while grounded, and exactly
+## 0 rather than an epsilon so the shader's branch really does early-out.
+var _fall_grey: float = 0.0
 var input_dir: Vector2 = Vector2.ZERO
 var _step_assist_launch_block_timer: float = 0.0
 
@@ -252,6 +259,7 @@ var _noise: NoiseEmitter
 var _takedown: SilentTakedown  ## Slice 6b silent-takedown verb (HOLD Takedown behind an unaware NPC); runs its own _physics_process
 var _pet: PetInteraction  ## Friendly twin of the takedown: HOLD Takedown aimed at a Pettable object to pet it; runs its own _physics_process
 var _claim: ClaimInteraction  ## Ownership twin of pet: TAP Claim aimed at a Claimable object to adopt + name it (it then follows); runs its own _physics_process
+var _waypoint_marker: Node  ## TAP Mark Waypoint (X) to pin what you are looking at — or where you stand — onto the map; runs its own _physics_process (scripts/player/waypoint_marker.gd, preloaded by path so it needs no class_name)
 var _aim_sway: AimSway  ## Deus Ex aim wander: drifts get_aim_direction around the camera centre (aim_sway.gd)
 var _scope: ScopeCoordinator
 var _hurt: HurtFeedback
@@ -301,12 +309,42 @@ func gravity(delta: float) -> void:
 
 @export_group("Noise")
 # --- Noise (drives enemy hearing) ---
-## Audible radius (m) added per m/s of ground speed while not crouching — higher = enemies hear you moving from further off.
-@export var noise_move_per_speed: float = 1.2
+## Audible radius (m) added per m/s of ground speed while not crouching — higher = enemies hear you moving from
+## further off. Against the shipped speeds (PlayerMovementSettings.max_speed 5.0, walk_speed_mult 0.7) 3.0 puts a
+## RUN at ~15 m and a WALK at ~10.5 m, inside a 25 m Perception.sight_range and against the 28 m gunshot below —
+## so moving carries about half as far as a shot, and sprinting past a guard's back now gets you investigated
+## instead of ignored. It was 1.2 (a 6 m run), which was quiet enough that footsteps effectively never initiated
+## anything. Crouch stays exactly silent (NoiseEmitter scales by 1 - crouch_t) and NoiseEmitter's standing-still
+## deadzone keeps a creep silent, so the stealth tiers still read crouch < creep < walk < run.
+@export var noise_move_per_speed: float = 3.0
 ## Audible radius (m) of a gunshot, which then decays back to 0 — higher = a shot alerts enemies further away.
 @export var noise_gunfire_radius: float = 28.0
 ## How fast the gunshot noise radius shrinks (m/s) — higher = the gunshot alert fades sooner.
 @export var noise_gunfire_decay: float = 45.0
+## Audible radius (m) of the JUMP push-off — the grunt and the shove against the floor, which then decays like
+## the gunshot above. Flat, not scaled by anything: you leave the ground with the same shove every time. At 8.0 a
+## jump carries a little less than a WALK (~10.5 m) and half a run — loud enough that hopping past a guard's back
+## gets you investigated, quiet enough that it is not a shot. Crouching does NOT quieten it (NoiseEmitter.jump's
+## ⭐): crouch buys silent movement, not a silent hop, and jump_sound plays at full volume while crouched anyway.
+@export var noise_jump_radius: float = 8.0
+## Audible radius (m) of the softest LANDING that makes any sound at all — the base thud, before the fall is
+## scored. Landings under GameSettings.audio.land_sfx_min_impact_to_play are silent outright (the same cutoff that
+## decides whether the land SFX plays), so this is the radius at that threshold, not at zero: stepping off a kerb
+## costs nothing, and anything you can HEAR land carries at least this far.
+@export var noise_land_radius: float = 7.0
+## Extra audible radius (m) a FULL-STRENGTH landing adds on top of noise_land_radius — the whole scale of "how
+## far did you fall". Total = noise_land_radius + impact * this, where impact is Landing.impact_for()'s 0..1
+## (fall speed / landing_impact_divisor). At 7 + 18 a flat hop lands at ~12.4 m (between the 10.5 m walk and the
+## 15 m run) and a terminal drop at 25 m — under the 28 m gunshot, so falling off a roof is nearly the loudest
+## thing you can do without shooting. Raise it to make height itself the thing that gives you away.
+@export var noise_land_impact_bonus: float = 18.0
+## Seconds the jump/landing spike HOLDS at full radius before it starts decaying. ⭐Keep this ABOVE
+## GameSettings.npc_ai.distraction_scan_interval (0.3 s as shipped): an idle NPC only walks the &"noise" group on
+## that interval, so a spike shorter than one scan window can expire unheard — see NoiseEmitter._spike.
+@export var noise_impact_hold: float = 0.35
+## How fast the jump/landing spike shrinks (m/s) once its hold expires — higher = the thud fades sooner. Faster
+## than the gunshot's 45 because an impact is percussive: it does not ring out the way a shot does.
+@export var noise_impact_decay: float = 50.0
 # Current audible radius (read by enemy Perception.can_hear); 0 = silent. The NoiseEmitter component
 # WRITES this each frame; it stays declared here so enemy Perception can read player.noise_radius.
 var noise_radius: float = 0.0
@@ -323,8 +361,9 @@ var light_exposure: float = 1.0
 var carried_light: float = 0.0
 # Whether a roof/ceiling is currently overhead (we're "indoors"). The optional IndoorAmbienceDucker drop-in WRITES
 # this each sample; default false, so with no ducker in the scene nothing reads a changed value. It's the shared
-# "is there a roof over me" seam other systems can read (ambience duck, a future reverb/rain/interior-music swap)
-# instead of each re-casting an up-ray.
+# "is there a roof over me" seam other systems read instead of each re-casting an up-ray: the ambience duck +
+# world-bus room echo (both in IndoorAmbienceDucker), and WeaponAudio.listener_indoors(), which makes gunfire
+# skip its outdoor billow bus while under a roof.
 var is_indoors: bool = false
 
 var target_speed: float = GameSettings.player_movement.max_speed
@@ -437,6 +476,14 @@ func _on_carry_changed(holding: bool) -> void:
 				# (FNV draw-click rule). No-op unless the fire button is actually held now, so Z/E throws are unaffected.
 				weapon_system.attack.suppress_fire_for_carry_release()
 				weapon_system.attack.set_holstered(_holster_before_carry)
+	# ...and the RETICLE comes BACK for the carry, overriding the hide the holster above just requested: a
+	# carried prop launches straight down the look ray (left-click / Z release), so there IS an aim point to
+	# annotate even with the gun stowed and draw-locked. Routed to ui.gd's own latch (never a
+	# crosshair.visible write here) so it composes with the holster + dialogue reasons instead of racing
+	# them — set_holstered above has already fired holster_changed into the sibling latch, and the derived
+	# apply makes the order irrelevant. Needs no seed: a fresh/loaded Player never starts holding a prop.
+	if ui != null:
+		ui.set_crosshair_carrying(holding)
 	# COSMETIC view-model hands: the FirstPersonBody's half of this same event, called as this handler's TAIL —
 	# ONE connection on carry_changed, relayed, so the holster restore above has always landed synchronously by
 	# the time the component's _unarmed_hands_wanted() reads attack.holstered. A second connection on the signal
@@ -551,6 +598,13 @@ func _ready() -> void:
 	_claim = ClaimInteraction.new()
 	_claim.host = self
 	add_child(_claim)
+	# Mark Waypoint (X): pin the spot under the crosshair — or, when the ray reaches nothing, the spot you are
+	# standing on — into GameState's per-level waypoint ledger, naming it in the same real-time box the claim
+	# verb uses. Self-ticking on its own key; just needs a host. The ray MUST run on the physics frame, which
+	# is why this is a component with its own _physics_process rather than a branch in the polled-input path.
+	_waypoint_marker = WAYPOINT_MARKER_SCRIPT.new()
+	_waypoint_marker.host = self
+	add_child(_waypoint_marker)
 	# Deus Ex aim wander: the true shot direction drifts around the camera centre; STANCE steadies it
 	# (standing still tighter, crouched tighter again — see AimSway / GameSettings.player_aim).
 	_aim_sway = AimSway.new()
@@ -597,7 +651,8 @@ func _ready() -> void:
 	# ...and the RETICLE goes away with it (GameSettings.hud.hide_crosshair_when_holstered): nothing is
 	# aimed, so nothing annotates the aim point. Connected straight to the HUD's own latch — the signal's
 	# `on: bool` matches the setter 1:1, and routing it there (rather than writing crosshair.visible here)
-	# is what lets it COMPOSE with the dialogue hide instead of fighting it. See ui.gd's two latches.
+	# is what lets it COMPOSE with the dialogue hide (and the carry re-show) instead of fighting it. See
+	# ui.gd's three latches.
 	if ui != null:
 		weapon_system.attack.holster_changed.connect(ui.set_crosshair_holstered)
 	# UNARMED HANDS: the bare fists are the SAME rig as the carry hands (FirstPersonBody), so they follow the
@@ -677,24 +732,15 @@ func _ready() -> void:
 		# escape hatch above re-applies and the debt that bought them can never separate on a loaded=false
 		# reboot, and a created run's wallet stays CASH-ONLY and >= 0. Keep that invariant: GameState's
 		# load-time legacy fold reads a negative `money` as pre-ATM debt and MOVES it onto the account, so any
-		# path that let a live wallet go negative would have the next load quietly eat it. Settled BEFORE the
-		# MoneyPurse build below, so the coin tile mirrors the final cash (the debt is never in that tile — the
-		# HUD's OWED row reads the account). A bare dev boot (profile_active false) keeps the knob/loadout seed.
+		# path that let a live wallet go negative would have the next load quietly eat it. The debt is never in
+		# this number — the HUD's OWED row reads the account. A bare dev boot (profile_active false) keeps the
+		# knob/loadout seed.
 		money = GameState.money
 	# Restore the day/night clock onto the free-running WorldClock autoload, but ONLY after a genuine disk-load or New
 	# Game (the one-shot flag) — NOT a death-respawn reload, which should carry the LIVE clock forward instead of
 	# rewinding it to the last autosave. set_time_of_day is silent, so loading can't fire a synthetic dawn (e.g. rent).
 	if GameState.consume_clock_apply():
 		WorldClock.set_time_of_day(GameState.time_of_day)
-	# ZORKMIDS AS A REAL ITEM: mirror the (now-finalized) wallet into a coin stack in the backpack, so money
-	# shows up as a genuine draggable/droppable grid tile. Built AFTER the wallet is settled (seed / loadout /
-	# saved value all applied above) and BEFORE the autosave hookups below, so its initial sync — which emits
-	# inventory.changed — can't trigger a spurious end-of-frame save. Player-only (an NPC wallet stays a float).
-	if inventory != null:
-		_money_purse = MoneyPurse.new()
-		_money_purse._host = self
-		_money_purse.name = &"MoneyPurse"
-		add_child(_money_purse)
 	# Autosave seams, connected LAST so the in-_ready seeding/restoring above can't trigger them: any wallet
 	# change and any bag change (buy/sell, loot, drop, reload taking reserve ammo, consumable use) queue the
 	# one-frame-deferred flush below.
@@ -853,6 +899,30 @@ func _on_equipped_item_lost() -> void:
 func is_crouching() -> bool:
 	return crouch != null and crouch.crouch_t > 0.5
 
+## True while the player's STANCE forbids EARNING bunnyhop speed — the jump still fires, it just doesn't
+## chain (Player._physics_process sends these jumps to Bunnyhop.break_chain() instead of try_engage()):
+##   • over-encumbered — too loaded to build momentum (the hop itself is already lowered by
+##     encumbrance_jump_multiplier), and
+##   • CROUCHED — or a hop chain would buy a sneaking player out of the crouch speed penalty
+##     (GroundMovement's speed_mult lerp), which is the whole cost of sneaking.
+## Named like sprint_blocked_by_scope() and pinned off-tree in tests/test_movement_helpers.gd.
+func bhop_blocked_by_stance() -> bool:
+	return is_encumbered() or is_crouching()
+
+## True when THIS jump may earn bunnyhop chain speed — the single gate the jump block asks. Two independent
+## denials, and the caller BREAKS the chain on either (never merely declines it — see the call site):
+##   • the BUNNY-HOP IMPLANT is not installed / is switched off — has_mechanic(&"bunnyhop"), granted by the
+##     BunnyhopAbility node (the air_dash idiom: the chain state machine is always present as the Player's
+##     Bunnyhop child, but it is inert until the implant is owned). A fresh game ships with no abilities, so
+##     the whole movement kit — dash, slide, wall-climb, grapple AND the hop chain — is bought, not given.
+##   • the STANCE forbids it — bhop_blocked_by_stance() above.
+## Kept SEPARATE from bhop_blocked_by_stance() on purpose: that predicate answers "is this body able to
+## chain right now", which is a live stance question the crouch/encumbrance tests pin on its own; this one
+## adds "does this character own the mechanic at all". Folding the implant check into the stance predicate
+## would make its name lie and would break its off-tree tests (a bare test Player owns nothing).
+func bhop_chain_allowed() -> bool:
+	return has_mechanic(&"bunnyhop") and not bhop_blocked_by_stance()
+
 ## How far the player is currently peeking: -1 = full left lean, 0 = upright, +1 = full right (see Lean).
 ## Cosmetic to the BODY — the capsule never moves — but the camera, and therefore the aim origin, does.
 func lean_amount() -> float:
@@ -948,8 +1018,6 @@ func return_held_weapon_to_hands() -> bool:
 	stash_held_item()
 	return true
 
-## Mirrors Character.money into a real coin Item stack in the backpack (built in _ready) — see MoneyPurse.
-var _money_purse: MoneyPurse
 ## The physics money-bag factory. Preloaded BY PATH (not the MoneyBag class_name) so player.gd never depends on that
 ## brand-new global class being registered — avoids the "unknown type" parse cascade on a cold cache / headless run.
 const MoneyBagBuilder := preload("res://scripts/components/money_bag.gd")
@@ -958,8 +1026,9 @@ const MoneyBagBuilder := preload("res://scripts/components/money_bag.gd")
 ## grabbable, throwable purse that gets BIGGER and hits HARDER the more it holds, with a MoneyPickUp child so aiming +
 ## Interact scoops it back into your wallet (anyone can grab it, same as loose loot). Clamped to what you actually
 ## carry; a non-positive amount or an off-tree player is a no-op. The wallet is debited through add_money (so the HUD
-## floats a -N and the run autosaves), and MoneyPurse then clears the coin tile to match. This is what right-clicking
-## the zorkmids tile in the backpack does — the coin pile IS the wallet, so it spills the whole lot into one bag.
+## floats a -N and the run autosaves). This is what the backpack's WALLET ROW does — its Drop button asks how much
+## through the shared AmountPrompt, so you can spill a slice of the purse and keep the rest (money is not an
+## inventory item, so there is no coin tile to right-click and no all-or-nothing dump).
 ## The OTHER producer of a money bag is dying with nobody to blame (_spill_death_purse) — it shares _place_money_bag
 ## below, so a purse you dumped and a purse you dropped dead are the same reclaimable object.
 # --- THE PAYMENT RAILS — the Player's override of Character's four-method payment seam --------------------
@@ -1091,7 +1160,7 @@ func drop_money(amount: float) -> void:
 	if world == null:
 		return  # nowhere to drop into (off-tree) — don't debit the wallet if we can't spawn the bag
 	_place_money_bag(world, amount, _drop_position())
-	add_money(-amount)  # routes through the money seam -> HUD -N + autosave -> MoneyPurse re-syncs the coin tile
+	add_money(-amount)  # routes through the money seam -> HUD -N + autosave -> the wallet row repaints
 
 ## Build + park a money bag holding `amount` at `at` under `world`. The ONE money-bag spawn site, shared by the
 ## backpack dump (drop_money) and the unclaimed-death spill (_spill_death_purse) so the two can never drift apart.
@@ -1247,6 +1316,17 @@ func has_mechanic(id: StringName) -> bool:
 ## Implants tab lists it; gameplay gates keep polling has_mechanic (ACTIVE) above. Thin forwarder.
 func mechanic_installed(id: StringName) -> bool:
 	return _abilities_mgr.is_installed(id)
+
+## HOW FAR THIS PLAYER READS OTHER BODIES, in metres — the widest range any ENABLED scanner implant grants,
+## and 0.0 when none is installed or all are switched off. The minimap and the Map tab draw Groups.NPC dots out
+## to exactly this far and draw NONE at 0.0, which is what makes knowing where people are an implant you buy
+## rather than something the HUD hands you for free.
+##
+## On the Player (not read off the ability node directly) for the same reason has_mechanic is: minimap.gd is a
+## Control that resolves the human player and duck-types has_method(&"body_scan_range"), so it depends on no
+## ability class and a player stub that cannot answer reads as "no scanner". Thin forwarder.
+func body_scan_range() -> float:
+	return _abilities_mgr.scan_range()
 
 ## Switch an INSTALLED implant off / back on (the Implants-tab toggle). False for an id with no ability node.
 ## Emits mechanic_toggled on a real change; switching off runs the ability's on_deactivated hygiene (a live
@@ -1661,7 +1741,10 @@ func on_weapon_fired(weapon: WeaponData) -> void:
 		screen_shake.shake(weapon.screen_shake_amount)
 	# Real guns are loud; melee (infinite-ammo) swings + the scoped airdash stay silent.
 	if not weapon.is_infinite_ammo and _noise:
-		_noise.gunfire()  # loud — nearby enemies hear the shot
+		# Loud — nearby enemies hear the shot. noise_radius_mult is the weapon's suppressor lever: a fitted
+		# muzzle part MULTs it down (WeaponModKit.rebuild), so a suppressed gun spikes a smaller radius from
+		# the SAME host.noise_gunfire_radius. This is the only site that reads it.
+		_noise.gunfire(weapon.noise_radius_mult)
 	# NOTE: the reckless-fire bystander remark (#2) is NOT fired here — it waits for on_shot_resolved(),
 	# once we know whether the shot connected with an NPC (a hit isn't "reckless discharge").
 
@@ -1722,7 +1805,9 @@ func _check_aim_remark(delta: float) -> void:
 	var to := from + get_aim_direction() * aim_remark_range
 	var params := PhysicsRayQueryParameters3D.create(from, to)
 	params.exclude = [get_rid()]
-	var hit := world.direct_space_state.intersect_ray(params)
+	# SightRay, not a raw intersect_ray: aiming through a chain-link fence is aiming AT the guard behind it —
+	# you can see them and (since the fence stops no rounds) shoot them, so the ray must not die on the wire.
+	var hit := SightRay.cast(world, params)
 	if hit.is_empty():
 		return
 	var npc := hit.get("collider") as NPC
@@ -1774,6 +1859,18 @@ static func health_light_color_for(current_hp: float, maximum_hp: float, full_he
 	var damage_frac := pow(1.0 - hp_frac, 0.75)
 	return full_health_color.lerp(damaged_color, damage_frac)
 
+## scenes/player/ui.tscn's authored shader_parameter/render_scale on the post-process material — a CELL COUNT
+## across the screen width, authored at exactly 2x the 792 px RETRO buffer = post_process.gdshader's documented
+## "effectively no downscale" no-op. Mirrored here (and pinned against the .tscn by test_color_quantization.gd)
+## because the poll below must re-derive the HIGH FIDELITY equivalent from it; re-authoring the .tscn value
+## without moving this const in the same change silently un-no-ops one of the two presentation modes.
+## The retro overlay's shared presentation dials — dither strength, colour depth, colourblind, contrast and
+## the RETRO/HIGH-FIDELITY resample. Preloaded BY PATH and untyped (it carries no class_name, so this file's
+## parse never waits on the editor's global class cache). It exists because the BOOT SCREEN wears this same
+## shader with no Player to drive it and silently ignored every one of these rows; pushing them from one
+## function is what stops the first thing a player sees from drifting away from the rest of the game again.
+const RETRO_POST := preload("res://scripts/ui/retro_post.gd")
+
 ## Low-HP feedback (#11): drive the post-process `low_hp` uniform (black vignette + desaturation) and a
 ## heartbeat that beats faster + louder as HP falls below low_hp_start_frac. Silent + cleared above the
 ## threshold and when dead.
@@ -1787,21 +1884,11 @@ func _update_low_hp(delta: float) -> void:
 		var mat := _nv_rect.material as ShaderMaterial
 		if mat:
 			mat.set_shader_parameter("low_hp", vis_intensity)
-			mat.set_shader_parameter("colorblind_mode", Settings.colorblind_mode)
-			mat.set_shader_parameter("contrast", Settings.contrast)  # Video-tab setting, polled live like colorblind
-			# Ordered-dither (Bayer) strength — the third Video-tab look dial polled here rather than applied
-			# on change, for the same reason as the two above: this ColorRect is rebuilt with the player on
-			# every respawn/level load, so a push-on-change would have to find the new material afterwards.
-			# Polling costs one uniform write a frame and can never go stale. The matrix SIZE is authored on
-			# the material (`bayer_order`), not read from Settings — see Settings.dither_strength.
-			mat.set_shader_parameter("dither_strength", Settings.dither_strength)
-			# Colour Depth — the quantiser the dither above feeds. Pushed as the per-channel STEP COUNT the
-			# shader wants rather than the menu index, so the mapping from "15-bit (PS1)" to vec3(31,31,31)
-			# lives in exactly one place (Settings.color_quantize_levels) and is assertable off-tree; the
-			# shader never learns what a menu index is. Vector3.ZERO is the sentinel for "leave this material
-			# quantising at its authored `color_steps`", which is what the default option pushes — so a player
-			# who never opens the menu gets a byte-identical frame to the one this shipped with.
-			mat.set_shader_parameter("quantize_levels", Settings.color_quantize_levels(Settings.color_quantization))
+			# THE PRESENTATION DIALS, pushed by the shared helper so the boot screen cannot drift from gameplay
+			# again. POLLED rather than pushed on change: this ColorRect is rebuilt with the player on every
+			# respawn and level load, so a push-on-change would have to go and find the new material afterwards.
+			# Everything else in this block is about THIS player's state and stays here.
+			RETRO_POST.apply_dials(mat)
 			# World LENS — the barrel/fisheye bend of the whole frame. Authored amplitude x the player's 0..1
 			# Accessibility scale, resolved HERE so the shader only ever sees one number and never learns that a
 			# preference exists (the quantize_levels shape). Polled rather than pushed on change for the same
@@ -1837,6 +1924,76 @@ func _update_low_hp(delta: float) -> void:
 			_heartbeat.volume_db = heartbeat_db_for(heartbeat_db_min, heartbeat_db_max, hb_intensity, duck_db, is_out_of_combat())
 			_heartbeat.pitch_scale = 1.0  # natural pitch — the real asset already sounds like a heartbeat
 			_heartbeat.play()
+
+## Below this the fall warning is SNAPPED to a hard 0. The release is an exponential ease, which approaches its
+## target without ever arriving, and a permanent 0.001 of desaturation would keep post_process.gdshader's
+## `fall_grey > 0.0` branch alive on every frame of the game for a drain nobody can see. Snapping is what makes
+## the shipped claim — grounded frames are bit-identical to a build without the feature — actually true.
+const FALL_GREY_EPSILON: float = 0.002
+
+## FALL WARNING — Cyberpunk 2077's fall read: while you are in the air the colour drains out of the frame in
+## proportion to how badly the landing is going to go, and a fall that will KILL you drains it completely.
+##
+## The whole mechanic is one number (`_fall_grey`) pushed into the post-process `fall_grey` uniform. What makes it
+## honest rather than decorative is where that number comes from: it is the fraction of your REMAINING HP the
+## landing would cost, scored by the very formula that will score it (FallDamage.lethal_fraction reads the same
+## fall_damage_min_speed / fall_damage_per_speed that Landing.on_land hands to _apply_fall_damage). So the screen
+## cannot lie — full grey means the next contact with the ground kills you, at the HP you have this instant, and a
+## drop that is a scratch at full health greys out completely when you are down to your last point.
+##
+## Two channels, combined with a max because either one alone is a way to die:
+##   • IMPACT — speed vs. the fall-damage curve. Silent below fall_damage_min_speed (no hop ever tints), and dead
+##     silent under the fall-immunity implant, which genuinely makes every landing free.
+##   • THE VOID — the continuous-fall death timer, which kills you for falling too long regardless of impact. It
+##     is the ONLY channel a fall-immune player has, so gating it on immunity would send them into a bottomless
+##     drop in full colour. See FallDamage.void_fraction.
+##
+## ⭐ THE RISE IS INSTANT AND ONLY THE RELEASE IS EASED. Velocity is already continuous, so the drain is smooth on
+## its own; running it through a lerp as well would put the warning BEHIND the danger it is warning about, which
+## for a cue you read in the last half-second of a fall is the difference between useful and cosmetic. The eased
+## release is what stops the colour popping back on the landing frame — it drains out under the impact instead.
+##
+## ⭐ Driven from _physics_process (and from the dialogue-frozen early-out, where a frozen player is not falling
+## and the grey must therefore ease off rather than hang) and NOT from a self-ticking node, for die()'s
+## set_physics_process(false) reason: a fall DEATH must leave the frame grey and hand it to the death cinematic's
+## `death_bw`, which then owns it. _reset_screen_post_process clears the uniform on the way back in.
+func _update_fall_grey(delta: float) -> void:
+	var target := _fall_grey_target()
+	if target >= _fall_grey:
+		_fall_grey = target
+	else:
+		var rate: float = maxf(GameSettings.player_feedback.fall_grey_release_rate, 0.0)
+		_fall_grey = target if rate <= 0.0 else lerpf(_fall_grey, target, 1.0 - exp(-rate * delta))
+		if _fall_grey < FALL_GREY_EPSILON:
+			_fall_grey = 0.0
+	if _nv_rect == null:
+		return
+	var mat := _nv_rect.material as ShaderMaterial
+	if mat:
+		mat.set_shader_parameter("fall_grey", _fall_grey)
+
+## The fall warning's TARGET this frame (0..1), before the release ease. Host state only — the curves themselves
+## are the pure statics on FallDamage, so they can be pinned without a Player.
+func _fall_grey_target() -> float:
+	var fb := GameSettings.player_feedback
+	var peak: float = clampf(fb.fall_grey_max, 0.0, 1.0)
+	if peak <= 0.0 or _dying or _dead or hp <= 0.0:
+		return 0.0  # dying hands the screen to the death cinematic; 0 peak is the designer's off switch
+	# "Am I falling?" — deliberately the SAME predicate _update_continuous_fall_death uses, so the two channels
+	# below can never disagree about whether the fall is happening. Climbing is a controlled descent, not a fall.
+	if is_on_floor() or is_climbing() or velocity.y >= 0.0:
+		return 0.0
+	# IMPACT channel. Skipped entirely under fall immunity, which makes the landing genuinely free — warning about
+	# a landing that costs nothing would train the player to ignore the one that doesn't.
+	var t := 0.0
+	if not has_mechanic(&"fall_immunity"):
+		t = FallDamage.lethal_fraction(-velocity.y, fall_damage_min_speed, fall_damage_per_speed, hp)
+	# VOID channel. Not gated on immunity — see the header.
+	t = maxf(t, FallDamage.void_fraction(
+			_continuous_fall_time,
+			GameSettings.player_movement.max_continuous_fall_time,
+			fb.fall_grey_void_lead))
+	return t * peak
 
 ## PURE heartbeat gain (the StaminaManager.recovery_rate_for / Landing.impact_for idiom — host-free, so a test can
 ## pin the whole curve without building a Player): the existing threshold->near-death lerp, minus the calm duck.
@@ -2357,6 +2514,10 @@ func _physics_process(delta: float) -> void:
 		input_dir = Vector2.ZERO  # also zero input so CameraEffects reads no stale strafe (FOV kick / tilt)
 		_continuous_fall_time = 0.0
 		_update_stamina_recovery(delta)
+		# A frozen player is not falling — but this is the one branch that returns before the driver below, so
+		# without this call the fall warning would HANG at whatever it read on the frame the conversation opened
+		# and hold the whole chat in grayscale. Zeroed velocity means it simply eases out.
+		_update_fall_grey(delta)
 		return
 	if _ground_snap_frames_left > 0:
 		_ground_snap_frames_left -= 1  # retry each frame until a floor is under us (the initial-spawn level loads deferred), then stop
@@ -2368,6 +2529,9 @@ func _physics_process(delta: float) -> void:
 	_update_save_input()
 	_update_health_regen(delta)  # LIVE branch ONLY (see the header) — and BEFORE the low-HP feedback that reads hp
 	_update_low_hp(delta)
+	# AFTER the regen above for the same reason the low-HP feedback is: the fall warning scores the drop against
+	# the HP you have THIS frame, so a point regained mid-fall really does pull the screen back from full grey.
+	_update_fall_grey(delta)
 
 	input_dir = Input.get_vector("left", "right", "forward", "backward")
 	if InputManager.gameplay_suppressed():
@@ -2387,6 +2551,12 @@ func _physics_process(delta: float) -> void:
 		velocity.y = GameSettings.player_movement.jump_velocity * encumbrance_jump_multiplier() * stats_or_default().jump_mult(status_stat_modifier(&"agility"))
 		# one-shot through AudioManager (self-freeing); play_sfx no-ops on a null stream
 		AudioManager.play_sfx(global_position, jump_sound, jump_sound_volume_db)
+		# ...and the same shove on the STEALTH channel: nearby enemies hear you leave the ground. Sits beside the
+		# jump SFX on purpose — what the player hears and what an NPC hears are one event — and INSIDE this branch,
+		# so a jump refused for stamina is silent. The touchdown half is Landing.on_land's. Off-tree (_noise null,
+		# a bare unit-test Player) it no-ops like every other component call here.
+		if _noise:
+			_noise.jump()
 		spawn_dust(GameSettings.effects.dust_jump_intensity)
 		coyote_time.consume()
 		jump_buffer.consume()
@@ -2395,13 +2565,15 @@ func _physics_process(delta: float) -> void:
 		# slide (the Slide ability owns the launch math). No-op when not sliding / no Slide ability.
 		if _slide != null:
 			_slide.jump_launch()
-		# Over-encumbered (backpack OVER carry_capacity): jumping still works — just the lowered hop above —
-		# but you're too loaded to build bhop momentum, so no speed boost. Break any live chain so dropping
-		# the load later doesn't resume a stale boost; you must re-earn it once back under capacity.
-		if is_encumbered():
-			bunnyhop.break_chain()
-		else:
+		# No BUNNY-HOP IMPLANT, over-encumbered, or CROUCHED: the jump fires (already lowered, above) but earns
+		# NO bhop speed — see bhop_chain_allowed(). BREAK any live chain rather than merely declining, so that
+		# standing up, dropping the load, or switching the implant back on inside the land window can't resume a
+		# stale boost; you re-earn it from chain 1. Without the implant this branch is the ONLY one ever taken,
+		# so the chain stays pinned at 0 and get_target_speed() degrades to plain player_movement.max_speed.
+		if bhop_chain_allowed():
 			bhop_engaged = bunnyhop.try_engage(input_dir != Vector2.ZERO)
+		else:
+			bunnyhop.break_chain()
 
 	# Variable jump height: a tap gives a low hop, a hold rides the full arc. Normally we cut the rising
 	# velocity on the jump's RELEASE (the elif). But a buffer-queued jump fires on LANDING, by which point
@@ -3144,6 +3316,14 @@ func die() -> void:
 	# bodies from touching us) — leaving it would fling the fresh life the instant physics comes back.
 	velocity = Vector3.ZERO
 	explosion_velocity = Vector3.ZERO
+	# ...and kill the residual NOISE for the same reason, on the same beat: set_physics_process(false) above stops
+	# NoiseEmitter.tick(), which would otherwise leave whatever radius was last written FROZEN on noise_radius and on
+	# the live &"noise" source — a dead player ringing every hostile in earshot to their own body, permanently. A
+	# FALL death is the case that makes this routine: _apply_fall_damage is called from Landing.on_land, so the
+	# landing thud is armed at full radius the very frame we die. Restored by nothing — the revive turns physics back
+	# on and tick() recomputes from live state.
+	if _noise:
+		_noise.silence()
 	# Compose the death card NOW, while the killer is still a live node (it can die / despawn during the
 	# ~cinematic, so we can't read its name/weapon later in _show_death_card).
 	_death_card_text = _compose_death_message()
@@ -3176,6 +3356,12 @@ func _clear_death_card_override() -> void:
 ## `stranger_fallback` replaces the "Stranger until introduced" mask for this SENTENCE context: the
 ## proper-noun placeholder reads wrong mid-line ("killed by Stranger"), so the death card uses the
 ## indefinite form ("killed by a stranger"). Label contexts (hover, corpse, loot title) keep "Stranger".
+##
+## ANONYMITY IS A LADDER, not a switch, and the FACTION sits one rung above "a stranger": an unknown killer
+## who belongs to a faction reads by their faction's member_noun ("killed by a raider") instead of the
+## faceless generic. Only the anonymous rungs consult it — a name you actually KNOW always wins, because
+## "killed by Vex" tells you strictly more than "killed by a raider" does. An UNALIGNED NPC (no faction)
+## has no rung to climb to and keeps reading "a stranger", which is the whole point of the distinction.
 func _killer_display_name(killer: Object, fallback: String, stranger_fallback: String) -> String:
 	var raw: Variant = killer.get(&"display_name")
 	if raw is String and not (raw as String).is_empty():
@@ -3185,10 +3371,27 @@ func _killer_display_name(killer: Object, fallback: String, stranger_fallback: S
 			var shown: String = GameState.public_name(raw)
 			# shown != raw keeps an NPC literally NAMED "Stranger" reading as-is instead of swapping.
 			if shown == PlayerText.STRANGER and shown != raw:
-				return stranger_fallback
+				var noun := _killer_faction_noun(killer)
+				return noun if noun != "" else stranger_fallback
 			return shown
 		return raw
-	return fallback
+	# Nameless killer: the faction still names them better than "someone" does.
+	var unnamed_noun := _killer_faction_noun(killer)
+	return unnamed_noun if unnamed_noun != "" else fallback
+
+## The in-sentence noun for ONE member of the killer's faction ("a raider"), or "" when there is none to use.
+## Fully duck-typed + guarded, because every caller sits on the death path where the attacker is loosely typed
+## (an NPC, a test double, a titled hazard) and MUST NOT crash: a killer with no `faction` property at all, an
+## UNALIGNED NPC (faction == null — the case the player explicitly wants left reading "a stranger"), or a
+## faction whose member_noun the designer never authored all fall through to "" and let the caller's own
+## fallback stand. Reads `faction`, the RESOLVED resource — NPC._resolve_faction turns the faction_id dropdown
+## into it in _ready, long before anyone can kill us, so the id-authored case is covered by this one read.
+func _killer_faction_noun(killer: Object) -> String:
+	var fac: Variant = killer.get(&"faction")
+	if not (fac is Faction):
+		return ""
+	var noun: String = (fac as Faction).member_noun
+	return noun.strip_edges()
 
 ## The killer's equipped-weapon label, read from the SAME source the UI's equipped marker reads — the drawn
 ## Item's label() off the killer's CharacterInventory BACKPACK (character.inventory.equipped_item). NOT the
@@ -3346,10 +3549,15 @@ func _on_death_sequence_done() -> void:
 	match GameSettings.player_feedback.death_mode:
 		PlayerFeedbackSettings.DeathMode.RELOAD_LAST_SAVE:
 			_restore_death_audio()               # un-duck the (global) world buses before the reload, or the next life boots near-silent
-			GameState.load_from_disk()           # revert to the last autosave (loaded=true -> the fresh Player applies it)
-			# NO grudge settlement here on purpose: the save carries its own [reputation] section, so the load
-			# already rewinds standing to the pre-provoke totals. Reversing the deltas as well would double-count.
-			get_tree().reload_current_scene()
+			# Revert to the last autosave THROUGH GameState's reload seam (loaded=true -> the fresh Player applies it).
+			# Never a bare load_from_disk() + reload_current_scene(): _load_and_reload arms _reload_pending, without
+			# which a coalesced autosave flush queued THIS frame (a door / pickup / kill bounty racing the death) runs
+			# AFTER the load, captures the still-in-tree OLD player, and writes the abandoned timeline over the very
+			# checkpoint it just handed us. NO grudge settlement here on purpose: the save carries its own [reputation]
+			# section, so the load already rewinds standing to the pre-provoke totals. Reversing the deltas as well
+			# would double-count.
+			if not GameState.load_autosave():
+				get_tree().reload_current_scene()  # no readable autosave — degrade to a plain reload of the in-memory run
 		PlayerFeedbackSettings.DeathMode.RELOAD_CHECKPOINT_FRESH:
 			_settle_provoked_grudges()           # BEFORE the reload: the fresh world spawns unprovoked NPCs, but Reputation
 												  # is an autoload that survives it — the provoke deltas must be reversed
@@ -3528,6 +3736,10 @@ func _clear_own_death_gore() -> void:
 ## reload after dying would otherwise keep the screen black/gray.
 func _reset_screen_post_process() -> void:
 	Engine.time_scale = 1.0
+	# The fall warning IS re-driven every frame — but die() stops the physics step, so a FALL death freezes it at
+	# full grey (deliberately: the cinematic's death_bw takes the frame over from there). Nothing would ever write
+	# it back down, so the accumulator and the uniform are both cleared here, before the world fades back up.
+	_fall_grey = 0.0
 	if not _nv_rect:
 		return
 	var mat := _nv_rect.material as ShaderMaterial
@@ -3537,6 +3749,7 @@ func _reset_screen_post_process() -> void:
 	mat.set_shader_parameter("death_vignette", 0.0)
 	mat.set_shader_parameter("death_fade", 0.0)
 	mat.set_shader_parameter("hurt", 0.0)
+	mat.set_shader_parameter("fall_grey", 0.0)
 
 ## Show the death card (the line composed in die() from the killer + weapon) over the now-black screen. Created
 ## lazily as a child of the post-process overlay (the parent of _nv_rect = the `ui` CanvasLayer), added AFTER the

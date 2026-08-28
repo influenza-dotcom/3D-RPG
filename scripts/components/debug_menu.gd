@@ -80,7 +80,9 @@ const LAYER := 149
 ## numbers). 432 minus this panel's own margins is under the 412 default below, so the clamp really does bind
 ## on a wide monitor — a hard-coded height that fitted the author's screen is how a panel walks off the bottom
 ## edge of someone else's.
-## WHOLE PIXELS ONLY — the canvas is nearest-upscaled ~2.4x and a fractional metric rasterises into a comb.
+## WHOLE PIXELS ONLY — in RETRO presentation the canvas is nearest-upscaled ~2.4x and a fractional metric
+## rasterises into a comb (HIGH FIDELITY renders the canvas at native res, but the rule costs nothing there
+## and RETRO must stay clean).
 @export var panel_size: Vector2i = Vector2i(760, 412)
 @export var panel_offset: Vector2i = Vector2i(16, 16)
 @export var category_column_width: int = 96

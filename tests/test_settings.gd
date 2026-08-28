@@ -151,6 +151,73 @@ func test_render_scale_clamps() -> void:
 	Settings.set_render_scale(99.0)
 	assert_eq(Settings.render_scale, Settings.RENDER_SCALE_MAX, "render scale clamps to max")
 
+
+# --- Presentation: native-res HIGH FIDELITY vs the classic ~792x444 RETRO pixel pipeline --------------------
+
+## The shipped default is HIGH FIDELITY. A bare instance never runs _ready, so this pins the var default; the
+## _ready seeding rule (render_scale forced to 1.0 under the HIGH FIDELITY default, because project.godot's
+## scaling_3d/scale 2.0 is the RETRO-buffer supersample and would mean 4K-on-1080p 3D) is pinned as source text
+## below — a live-autoload assertion would just read back this machine's settings.cfg.
+func test_presentation_defaults_high_fidelity() -> void:
+	var fresh = load("res://managers/Settings.gd").new()
+	assert_eq(fresh.presentation, Settings.PRESENTATION_HIGH_FIDELITY, "a fresh Settings defaults to High Fidelity")
+	fresh.free()
+
+func test_set_presentation_clamps_and_round_trips() -> void:
+	var before: int = Settings.presentation
+	Settings.set_presentation(99)
+	assert_eq(Settings.presentation, Settings.PRESENTATION_COUNT - 1, "presentation clamps to the last real mode")
+	Settings.set_presentation(-5)
+	assert_eq(Settings.presentation, 0, "presentation clamps to the first mode")
+	Settings.set_presentation(Settings.PRESENTATION_RETRO)
+	assert_eq(Settings.presentation, Settings.PRESENTATION_RETRO, "Retro is selectable")
+	Settings.set_presentation(before)  # restore the live mode (persistence is off via _loaded, but the window is real)
+
+## A settings.cfg from before the presentation split carries no "presentation" key; its render_scale was a
+## supersample of the RETRO buffer (typically the old 2.0 default) and must NOT be re-read against a native
+## target — the era migration hands such a cfg HIGH FIDELITY at render_scale 1.0, exactly once (save_settings
+## always writes the key afterwards). Driven through the pure static rule with an in-memory ConfigFile so the
+## real user://settings.cfg is never touched.
+func test_presentation_era_migration_resets_render_scale_once() -> void:
+	var old_era := ConfigFile.new()
+	old_era.set_value("video", "render_scale", 2.0)  # the old shipped default, RETRO-buffer units
+	var migrated: Dictionary = Settings.read_presentation(old_era, Settings.PRESENTATION_RETRO, 9.0)
+	assert_eq(int(migrated["presentation"]), Settings.PRESENTATION_HIGH_FIDELITY,
+		"a pre-presentation cfg gets the new shipped look")
+	assert_almost_eq(float(migrated["render_scale"]), 1.0, 0.000001,
+		"...and its RETRO-era render_scale is reset to 1.0 — 2.0 of a native target is 4K-on-1080p 3D")
+	var keyed := ConfigFile.new()
+	keyed.set_value("video", "presentation", Settings.PRESENTATION_RETRO)
+	keyed.set_value("video", "render_scale", 1.5)
+	var kept: Dictionary = Settings.read_presentation(keyed, Settings.PRESENTATION_HIGH_FIDELITY, 9.0)
+	assert_eq(int(kept["presentation"]), Settings.PRESENTATION_RETRO, "a keyed cfg's mode is read verbatim")
+	assert_almost_eq(float(kept["render_scale"]), 1.5, 0.000001, "...and its render_scale survives untouched")
+	var empty := ConfigFile.new()
+	var fresh_install: Dictionary = Settings.read_presentation(empty, Settings.PRESENTATION_RETRO, 2.0)
+	assert_eq(int(fresh_install["presentation"]), Settings.PRESENTATION_HIGH_FIDELITY,
+		"an empty cfg (fresh install reading an empty file) also lands on the shipped default")
+
+## Source-text pins (save_settings writes the real user://settings.cfg, so it is never invoked under GUT):
+## the presentation key must ALWAYS be written — its presence is what makes the era migration one-shot — and
+## both the loader and the _ready seed must go through/respect the presentation-aware rules.
+func test_presentation_persists_and_loads_through_the_pure_rule() -> void:
+	var src := FileAccess.get_file_as_string("res://managers/Settings.gd")
+	assert_true(src.contains('cfg.set_value("video", "presentation", presentation)'),
+		"save_settings must write the presentation key on every save")
+	assert_true(src.contains("read_presentation(cfg, presentation, render_scale)"),
+		"load_settings must go through the pure era-migration rule, not a bare get_value pair")
+	assert_true(src.contains("if presentation == PRESENTATION_HIGH_FIDELITY:\n\t\trender_scale = 1.0"),
+		"_ready must re-seed render_scale to 1.0 under the HIGH FIDELITY default — load_settings early-returns on a fresh install, so only the seed protects first boot")
+
+## native_scale()/render_size() are the unit-converter seam every pixel-unit effect reads live per frame.
+## Off-tree there is no window, so both must degrade to the RETRO identity — GUT drives effect params (e.g.
+## InkOutline._params) off-tree, and a null-window crash here would redden every one of those suites.
+func test_native_scale_degrades_to_retro_identity_off_tree() -> void:
+	var fresh = load("res://managers/Settings.gd").new()
+	assert_almost_eq(fresh.native_scale(), 1.0, 0.000001, "no window -> 1.0 (canvas px ARE render px)")
+	assert_eq(fresh.render_size(), Vector2i(792, 444), "no window -> the 16:9 logical canvas fallback")
+	fresh.free()
+
 func test_hitstop_toggle() -> void:
 	Settings.set_hitstop_enabled(false)
 	assert_false(Settings.hitstop_enabled, "hitstop can be disabled (player immune to freeze-frame slow)")
@@ -229,6 +296,7 @@ func test_minimap_defaults() -> void:
 	assert_true(fresh.minimap_rotates, "heading-up is the shipped mode (the plan turns under a fixed caret)")
 	assert_eq(fresh.minimap_zoom, 1.0, "zoom ships at 1x = GameSettings.hud.minimap_world_span verbatim")
 	assert_true(fresh.minimap_show_npcs, "NPC dots ship visible")
+	assert_eq(fresh.map_zoom, 1.0, "the MAP TAB ships at 1x = GameSettings.hud.map_world_span verbatim")
 	fresh.free()
 
 func test_minimap_zoom_clamps() -> void:
@@ -240,6 +308,21 @@ func test_minimap_zoom_clamps() -> void:
 	assert_almost_eq(Settings.minimap_zoom, 1.5, 0.0001, "an in-range zoom is stored verbatim")
 	assert_lt(Settings.MINIMAP_ZOOM_MIN, Settings.MINIMAP_ZOOM_MAX, "the range is the right way round")
 	Settings.set_minimap_zoom(1.0)  # restore the default so the suite leaves the HUD unzoomed
+
+## The MAP TAB's zoom is its OWN stored value on the SHARED clamp — the two maps are the same widget at two
+## sizes, so one range describes both, but scrolling the page-sized map must never move the corner box (they
+## divide different spans: map_world_span vs minimap_world_span).
+func test_map_zoom_clamps_and_is_independent_of_the_minimap_row() -> void:
+	var was_minimap: float = Settings.minimap_zoom
+	Settings.set_map_zoom(9.0)
+	assert_almost_eq(Settings.map_zoom, Settings.MINIMAP_ZOOM_MAX, 0.0001, "map zoom clamps to the shared MAX")
+	Settings.set_map_zoom(0.0)
+	assert_almost_eq(Settings.map_zoom, Settings.MINIMAP_ZOOM_MIN, 0.0001, "map zoom clamps to the shared MIN")
+	Settings.set_map_zoom(2.0)
+	assert_almost_eq(Settings.map_zoom, 2.0, 0.0001, "an in-range map zoom is stored verbatim")
+	assert_almost_eq(Settings.minimap_zoom, was_minimap, 0.0001,
+		"...and moving the MAP's zoom leaves the HUD minimap's row untouched — a shared field would make scrolling the map re-zoom the corner box")
+	Settings.set_map_zoom(1.0)  # restore the default so the suite leaves the map unzoomed
 
 func test_minimap_toggles_round_trip() -> void:
 	Settings.set_minimap_enabled(false)
