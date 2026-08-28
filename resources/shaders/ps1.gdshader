@@ -13,9 +13,13 @@ shader_type spatial;
 // face owns private vertices, coincident corners are only float-approximately equal, and big
 // faces have T-junctions where small ones butt in. floor() amplifies any of that into a tear up
 // to ONE FULL GRID CELL wide, and a tear in a hollow backface-culled building shows the SKY.
-// Tear width == cell size == wobble amplitude, so the two are one dial: keep the cell at about
-// one pixel of the pixelated output (ui.tscn post_process render_scale) and tears read as pixel
-// crawl; crank it chunkier and buildings visibly hole open. See vertex_snap below.
+// Tear width == cell size == wobble amplitude, so the two are one dial — there is NO parameter
+// that narrows tears without also shrinking the wobble. Under RETRO presentation the cell is one
+// texel of the ~792x444 buffer, so tears read as pixel crawl; crank it chunkier and buildings
+// visibly hole open. Under HIGH FIDELITY (native-res root) the SAME on-screen tear width
+// (~2.4 native px at 1080p — one cell = ~Settings.native_scale() render px) renders crisp and
+// un-quantized: thin sky slivers, not crawl. Accept/reject that by windowed visual QA on the
+// live map (worst case: hollow-building seams) — headless sees nothing. See vertex_snap below.
 //
 // SHADOW PASS: never snap there (see the IN_SHADOW_PASS branch in vertex()). The shadow pass
 // re-runs this vertex shader with the LIGHT's projection, so snapping quantizes the shadow map
@@ -27,11 +31,14 @@ shader_type spatial;
 // opaque — which keeps shadows clean (a forced alpha test would punch holes from stray alpha).
 
 // Grid cells across the screen = 2 * value, so cell width = tear width (see SEAM WARNING above).
-// 396 = one cell per texel of the ACTUAL 792-wide screen buffer (396x216 window x viewport-stretch
-// scale 0.5 -> 792x444; ui.tscn's post_process render_scale 1584 is FINER than that buffer, so the
-// buffer texel is the real pixel size) — the authentic PS1 ratio (their cell was one 320x240 pixel)
-// and the chunkiest setting whose seam tears still read as pixel crawl: every snap step is exactly
-// one screen texel. LOWER = chunkier wobble but proportionally wider sky-holes.
+// The grid is authored in NDC — screen-proportional, never resolution-derived: 396 = a virtual
+// 792-cells-across-the-screen grid, one buffer texel ONLY under RETRO's ~792x444 viewport stretch
+// (the authentic PS1 ratio — their cell was one 320x240 pixel — and the chunkiest setting whose
+// seam tears still read as pixel crawl there). Under HIGH FIDELITY one cell = ~native_scale()
+// render px (~2.4 at 1080p): the same on-screen wobble/tear proportion, tears just render crisp
+// instead of pixel-crawling. FOOT-GUN: multiplying this by native_scale() would DIVIDE the wobble
+// amplitude ~2.4x and delete the PS1 look — no code change is correct here.
+// LOWER = chunkier wobble but proportionally wider sky-holes.
 uniform float vertex_snap = 396.0;
 // Far fade: snap eases out over this view-depth window (metres) and distant geometry renders
 // UNWARPED. Distant buildings are where the warp only does harm — the map's coplanar flush brush

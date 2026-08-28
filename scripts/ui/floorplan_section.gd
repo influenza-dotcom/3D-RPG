@@ -14,9 +14,11 @@ extends RefCounted
 ## NavMeshAudit and Compass.project_to_edge are. The widget keeps the impure half: finding the navmesh
 ## region, caching decks, and painting.
 ##
-## WHY A VECTOR PLAN AND NOT A RENDERED IMAGE. The map box is ~108 px on a 792x444 canvas that is then
-## nearest-upscaled ~2.4x to the window (project.godot: viewport 396x216, stretch scale 0.5). A downscaled
-## 3D render of grey brushwork is mush at that size; a hairline stroke is crisp. A canvas item is also
+## WHY A VECTOR PLAN AND NOT A RENDERED IMAGE. The map box is ~108 px on the LOGICAL 792x444 canvas. In
+## RETRO presentation that canvas IS the render target, nearest-upscaled ~2.4x to the window (project.godot:
+## viewport 396x216, stretch scale 0.5); in HIGH FIDELITY the same canvas item rasterises at NATIVE window
+## resolution, which makes this argument STRONGER — vector strokes come out crisp at full res, while a
+## downscaled 3D render of grey brushwork is mush in a ~108 px box in either mode. A canvas item is also
 ## structurally immune to ps1.gdshader's vertex snap — that is a SPATIAL shader and cannot touch 2D drawing.
 
 ## Pixels per world metre. `world_span` is the metres the SHORT axis of `rect` shows at zoom 1.0; zoom > 1
@@ -59,10 +61,20 @@ static func arrow_angle(yaw: float, rotate: bool) -> float:
 
 ## draw_multiline's `width` is in LOCAL units, and view_transform scales local by `ppm` — so a naive 1.0
 ## would FATTEN as the player zooms in. This converts a wanted PIXEL width into the local units that render
-## as that many pixels. A want_px <= 0 returns -1.0: Godot's transform-INDEPENDENT hairline primitive, which
-## sidesteps the trap entirely and is the shipped default (GameSettings.hud.minimap_wall_width = 0.0).
-static func stroke_width(want_px: float, ppm: float) -> float:
+## as that many pixels. A want_px <= 0 asks for the thinnest crisp stroke — the shipped default
+## (MenuStyle.hud minimap_wall_width = 0.0, hud_skin.gd) — and what that means is presentation-dependent:
+##   native_scale <= 1.0 (RETRO, and off-tree/headless) -> -1.0, Godot's transform-INDEPENDENT hairline
+##     primitive = one RENDER-TARGET pixel. In RETRO the render target IS the logical canvas, so that is
+##     one canvas px, and it sidesteps the fatten trap entirely.
+##   native_scale > 1.0 (HIGH FIDELITY) -> ONE LOGICAL canvas px (1.0 / ppm local units), reproducing the
+##     RETRO hairline's on-screen weight. The -1.0 primitive would be one NATIVE px there (~0.41 logical px
+##     at 1080p) and every wall stroke would silently thin ~2.4x.
+## Callers pass Settings.native_scale() read LIVE per paint (minimap.gd) — this file is STATICS ONLY, no
+## autoload reads. The 1.0 default keeps every legacy call site, and RETRO itself, bit-identical.
+static func stroke_width(want_px: float, ppm: float, native_scale: float = 1.0) -> float:
 	if want_px <= 0.0:
+		if native_scale > 1.0:
+			return 1.0 / maxf(ppm, 0.0001)  # one LOGICAL px — zoom-stable, like any positive width
 		return -1.0
 	return want_px / maxf(ppm, 0.0001)
 

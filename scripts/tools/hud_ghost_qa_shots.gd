@@ -14,8 +14,12 @@ extends Node
 ##      ColorRect; below it (as `z_index -1` used to put it) the ghost is INPUT to that shader, and the barrel
 ##      lens in it bends the echo off its readout — 02 stops being clean and nothing else here changes.
 ##      scripts/tools/__ghost_align_probe.gd measures that seat directly; this shot is how it looks.
-##   3. Does it show on the RETICLE, not just on the swaying corner panel? (03 / 05 — the crosshair is welded to
-##      screen centre, so only the LATENCY half can put a tail on it. 05 isolates that half.)
+##   3. ⭐Is the AIM POINT still CLEAN? (03 / 05 / 06 reticle crops — INVERTED 2026-08-24 on a user call. The
+##      reticle and the stamina ring used to be this half's headline case: welded to screen centre, they could
+##      only trail via the LATENCY offset, and 05 isolates that offset hardest. They are now excluded from the
+##      capture entirely (ui.gd _build_ghost rule 4), so ONE crisp dot in those crops is the pass and a soft
+##      second copy is the regression. The ring half needs a drained pool to show at all —
+##      scripts/tools/__stamina_ring_probe.gd pins it and shoots the annulus.)
 ##   4. Is the tail a COLOUR GRADIENT rather than a dimmer copy? (03 / 06 — the ramp is keyed on trail AGE,
 ##      so a decaying tail should shift hue across HudSkin.ghost_gradient regardless of what colour the HUD
 ##      element it came from is. Compare the red HP bar's trail with the gold money readout's: same hues.)
@@ -111,20 +115,21 @@ func _run() -> void:
 	await _still()
 	await _shot("02_shipped_still")
 
-	# 3. SHIPPED, MID-TURN. The money shot: corner panel trailing on the sway spring AND the reticle carrying a
-	#    tail off the latency offset.
+	# 3. SHIPPED, MID-TURN. The money shot: corner panel trailing on the sway spring, minimap and ammo line
+	#    trailing off the latency offset — and the reticle crop staying CLEAN through all of it (rule 4).
 	_apply(1.0, {})
 	await _turn(TURN_FRAMES)
 	await _shot("03_shipped_turning")
 
-	# 4. PERSISTENCE ONLY (no latency offset). Everything that MOVES still trails; the screen-locked reticle
-	#    goes clean. This is the shot that proves the reticle's tail in 03 comes from the lag and nothing else.
+	# 4. PERSISTENCE ONLY (no latency offset). Everything that MOVES still trails; every screen-locked readout
+	#    goes clean. This is the shot that proves the minimap/ammo tails in 03 come from the lag and nothing else.
 	_apply(1.0, {&"hud_ghost_drag_max": 0.0})
 	await _turn(TURN_FRAMES)
 	await _shot("04_persistence_only_reticle_clean")
 
 	# 5. LATENCY ONLY (persistence collapsed to one frame). A single hard offset copy, no tail — the other half
-	#    isolated. Use this pair to re-balance the two if the shipped mix ever reads as double vision.
+	#    isolated. Use this pair to re-balance the two if the shipped mix ever reads as double vision. ⭐It is
+	#    also the harshest test of the aim-cluster exclusion: a captured reticle shows here as a flat second dot.
 	_apply(1.0, {&"hud_ghost_tau": 0.008})
 	await _turn(TURN_FRAMES)
 	await _shot("05_latency_only_hard_offset")
@@ -149,8 +154,10 @@ func _run() -> void:
 	await _shot("07_after_stop_must_be_clean")
 
 	# 8. SCOPED. The inverting reticle samples the screen, which inside the capture is the HUD-only buffer, so
-	#    ui.set_scoped drops the crosshair out of the ghost for the duration. A white/blown disc here means that
-	#    opt-out is not firing; a normal scoped reticle with a still-ghosting corner panel is the pass.
+	#    a CAPTURED scoped reticle resolves to a white/blown disc. The aim cluster now leaves the capture
+	#    permanently (ui.gd _build_ghost rule 4) rather than per scope transition, so this shot is the standing
+	#    check that the exclusion survives a scope round-trip: a normal scoped reticle with a still-ghosting
+	#    corner panel is the pass.
 	var ui := _find_ui()
 	if ui != null and ui.has_method(&"set_scoped"):
 		ui.call(&"set_scoped", true)

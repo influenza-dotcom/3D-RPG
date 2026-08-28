@@ -13,13 +13,18 @@ extends Camera3D
 # Scope DoF + fog feel tunables live in GameSettings.camera (dof_scoped_far_distance / scoped_fog_density_factor),
 # as do the head-bob ratio/threshold (bob_horizontal_ratio / bob_min_speed). The vars below hold the runtime
 # BASELINES captured from the live scene so unscope can restore them.
-## The authored (hip-fire) far-blur distance, captured in _ready(); scoping pushes it out to
-## GameSettings.camera.dof_scoped_far_distance so the scene reads crisp, then restores this on unscope.
-var _dof_default_far_distance: float = 30.0
+## The authored (hip-fire) far-blur state, captured as a PAIR in _ready(). Far blur ships OFF at rest:
+## camera_rig.tscn stopped authoring its old 30 m far blur when the main level dropped the volumetric fog that
+## had been covering it (2026-08-24) — naked, that blur mushed the whole distance. Scoping still pushes far blur
+## to GameSettings.camera.dof_scoped_far_distance for the ADS feel; unscope restores THIS pair, never a forced
+## `enabled = true` (that force was the old bug: `dof off` lasted only until the next aim). The `dof` debug
+## command writes these two so its overrides survive aim cycles.
+var _dof_default_far_enabled: bool = false
+var _dof_default_far_distance: float = 10.0
 ## The world's volumetric-fog density, captured lazily on the first scope (the WorldEnvironment isn't live in
 ## _ready). A crisp-scope weapon THINS it by GameSettings.camera.scoped_fog_density_factor so the target isn't a
-## blocky grey blob; we THIN rather than disable because this level has no ambient light — the fog IS the scene
-## fill, and killing it outright went pitch black. Restored on unscope.
+## blocky grey blob; we THIN rather than disable because a fogged level is lit BY its fog — killing it outright
+## went pitch black. Restored on unscope, and again in _exit_tree (a quickload can free a scoped camera).
 var _volumetric_fog_default_density: float = 0.05
 var _fog_default_captured: bool = false
 
@@ -78,7 +83,28 @@ func _ready() -> void:
 	# Both writers now agree on default_fov when not scoped (see the COUPLING note below).
 	_target_fov = base_fov
 	if attributes is CameraAttributesPractical:
+		_dof_default_far_enabled = attributes.dof_blur_far_enabled
 		_dof_default_far_distance = attributes.dof_blur_far_distance
+
+
+## Teardown scrub. The attributes are a SHARED sub-resource of the cached camera_rig.tscn (not
+## resource_local_to_scene), so whatever is live when this camera is freed SURVIVES into the next camera the
+## scene instantiates — and an F9 quickload (or the dev End-key scene reset) can tear the player down
+## MID-SCOPE, with the far blur pushed to the scoped state. Without this, the fresh camera's _ready() would
+## snapshot scoped-ADS blur (enabled @ dof_scoped_far_distance) as the "authored" resting pair, and far blur
+## would be stuck ON at rest for the whole process. Restore the resting pair on the way out; near/amount are
+## left alone on purpose (`dof` overrides are documented to outlive reloads, and `dof far` writes THIS
+## snapshot pair, so its override rides through too). The same scrub un-thins the volumetric fog a
+## crisp-scope (sniper) ADS may have left written into the level Environment's density.
+func _exit_tree() -> void:
+	var attrs := attributes as CameraAttributesPractical
+	if attrs != null:
+		attrs.dof_blur_far_enabled = _dof_default_far_enabled
+		attrs.dof_blur_far_distance = _dof_default_far_distance
+	if _fog_default_captured:
+		var we := get_tree().get_first_node_in_group(Groups.WORLD_ENVIRONMENT) as WorldEnvironment
+		if we != null and we.environment != null:
+			we.environment.volumetric_fog_density = _volumetric_fog_default_density
 
 func _process(delta: float) -> void:
 	# Ease the landing dip back toward rest, then compose rest + bob + dip into the
@@ -260,7 +286,9 @@ func set_scope_dof(scoped: bool, disable_dof: bool) -> void:
 	if attrs == null:
 		return
 	if not scoped:
-		attrs.dof_blur_far_enabled = true
+		# Restore the SNAPSHOT PAIR, never a forced `enabled = true`: the resting state is whatever
+		# camera_rig.tscn authors (far blur OFF since 2026-08-24) or what `dof far` wrote at runtime.
+		attrs.dof_blur_far_enabled = _dof_default_far_enabled
 		attrs.dof_blur_far_distance = _dof_default_far_distance
 	elif disable_dof:
 		attrs.dof_blur_far_enabled = false

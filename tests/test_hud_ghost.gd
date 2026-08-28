@@ -205,7 +205,7 @@ func test_shipped_knobs_are_subtle_and_alive() -> void:
 	assert_gt(hud.hud_ghost_tau, 0.0, "a zero tau would leave the latency half with no tail to smear")
 	assert_lte(hud.hud_ghost_tau, 0.25, "a long tau smears the corner panel into a comet under screen shake")
 	assert_lte(hud.hud_ghost_drag_max, 6.0,
-		"the reticle's ghost is capped in the low single-digit pixels; past this it reads as two reticles")
+		"the captured HUD's lag is capped in the low single-digit pixels; past this a static readout prints twice")
 	assert_gt(hud.hud_ghost_residue_floor, 0.0,
 		"without a residue floor the 8-bit decay fixed point leaves a permanent smear wherever the HUD has been")
 	assert_gt(hud.hud_ghost_tint, 0.5,
@@ -278,3 +278,29 @@ func test_with_no_screen_space_pass_the_display_still_sits_under_every_readout()
 		return
 	assert_lt(display.get_index(), readout.get_index(),
 		"with nothing to seat above, the display goes to the very bottom of the layer")
+
+# --- the aim cluster leaves the capture (user call) -------------------------------------------------------
+
+func test_the_aim_cluster_is_permanently_out_of_the_capture() -> void:
+	# ⭐ RULE 4, PINNED AT THE SOURCE. The crosshair and the stamina ring are excluded from the ghost — an
+	# echo at the aim point read as a second, blurred reticle rather than as character (user call). It has
+	# to be a source pin: UI._build_ghost needs a viewport and the full autoload-wired _ready to run, so
+	# there is no off-tree instance whose visibility_layer this could read (the test_dialogue.gd idiom).
+	var src := FileAccess.get_file_as_string("res://scripts/ui/ui.gd")
+	assert_true(src.length() > 0, "ui.gd source readable")
+	assert_true(src.contains("HUD_GHOST_SCRIPT.set_ghosted(crosshair, false)"),
+		"UI._build_ghost must drop the reticle out of the capture — rule 4, the aim point does not ghost")
+	assert_true(src.contains("HUD_GHOST_SCRIPT.set_ghosted(_stamina_ring as CanvasItem, false)"),
+		"...and the stamina ring wrapped around it, or half the aim cluster still trails")
+	# ⭐ THE REGRESSION THIS REALLY GUARDS. set_scoped used to own the reticle's membership per transition
+	# (`set_ghosted(crosshair, not scoped)`): correct while scoped, and the `not scoped` arm opts the
+	# reticle straight back IN, so the cursor would silently start ghosting again the first time the player
+	# left ADS. Any future per-transition owner has the same shape and the same bug.
+	# Scanned over CODE lines only — ui.gd's own "do not reintroduce this" note quotes the very call this
+	# forbids, and a whole-file `contains` would fail on the warning that exists to prevent the bug.
+	for line in src.split("\n"):
+		var code := line.strip_edges()
+		if code.begins_with("#"):
+			continue
+		assert_false(code.contains("set_ghosted(crosshair, not scoped)"),
+			"nothing may opt the reticle back into the capture on unscope — the exclusion is permanent")

@@ -9,12 +9,19 @@ extends GutTest
 ## see a curve. What it CAN do is guard the two failure modes that are otherwise silent:
 ##   1. SOURCE-TEXT pins on the shader — the uniforms code pushes still exist under those names, the
 ##      premultiplied blend mode is still declared, the sampler still refuses to repeat, and no default
-##      contains arithmetic (which fails the WHOLE compile and draws a fallback material instead).
+##      contains arithmetic (which fails the WHOLE compile and draws a fallback material instead) — and
+##      the HIGH FIDELITY twin (HF_SHADER_PATH) still matches this file line for line outside comments.
 ##   2. STRUCTURE — the carrier really moves into the viewport when the bend is on and really comes back out
 ##      at 0, so "off" is the pre-curve tree rather than an identity pass nobody notices they are paying for.
 ## The look itself is verified by EYE through scripts/tools/hud_curve_qa_shots.gd, a real windowed GPU run.
 
 const SHADER_PATH := "res://resources/shaders/hud_curve.gdshader"
+## THE TWIN. Filter hints are COMPILE-TIME, so the HIGH FIDELITY presentation (native-res curve viewport,
+## where a nearest tap at the warp's non-integer offsets stairsteps every bowed line) ships as a sibling
+## file with `filter_linear` on hud_tex; ui.gd._apply_hud_curve swaps the two live by presentation. Both
+## headers promise "ANY edit to this shader must land in BOTH files" — test_the_hf_twin_has_not_forked is
+## what holds them to it.
+const HF_SHADER_PATH := "res://resources/shaders/hud_curve_hf.gdshader"
 const UI_PATH := "res://scripts/ui/ui.gd"
 
 ## Every uniform ui.gd pushes onto the curve material. A rename on either side is invisible at runtime —
@@ -121,6 +128,46 @@ func test_the_bend_is_concave_cross_coupled_and_fitted() -> void:
 		"hud_curve.gdshader's warp() must bend each axis by the SQUARE OF THE OTHER, with a MINUS sign: 'vec2 bend = vec2(1.0 - c.x * d.y * d.y, 1.0 - c.y * d.x * d.x);'. A plus sign turns the panel convex (the outside of a CRT bulge); a radial dot(d, d) term turns it into a fisheye.")
 	assert_true(src.contains("return (d * bend / (vec2(1.0) - c)) * 0.5 + vec2(0.5);"),
 		"hud_curve.gdshader's warp() must divide by the bend at the extreme ('/ (vec2(1.0) - c)') so the panel is FITTED and its corners are pinned to the screen corners. Drop that and a concave bend flares the corners outward, pushing the bottom-left HP bar off the canvas.")
+
+
+## The twin rule, mechanised. Returns PATH's code as {n: line number, s: text} rows: comment-only and blank
+## lines dropped (each twin's header paragraph is the one PROSE difference allowed), and the hud_tex filter
+## hint — the one CODE difference allowed — replaced by a placeholder after asserting the file carries ITS
+## OWN hint. Everything left must match the sibling byte for byte.
+func _twin_code_lines(path: String, own_filter: String) -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	var lines := _read(path).replace("\r\n", "\n").split("\n")
+	var sampler_seen := false
+	for i in lines.size():
+		var line: String = lines[i]
+		var stripped := line.strip_edges()
+		if stripped.is_empty() or stripped.begins_with("//"):
+			continue
+		if line.contains("sampler2D hud_tex"):
+			assert_true(line.contains(own_filter),
+				"%s must hint hud_tex with %s — that hint IS the point of having two files: compile-time nearest keeps the RETRO logical-res target crunchy, linear keeps the HIGH FIDELITY native-res warp from stairstepping. Line: '%s'"
+					% [path, own_filter, line.strip_edges()])
+			line = line.replace(own_filter, "<own_filter>")
+			sampler_seen = true
+		rows.append({"n": i + 1, "s": line})
+	assert_true(sampler_seen,
+		"%s must declare the hud_tex sampler — without it the twin diff is vacuous" % path)
+	return rows
+
+
+func test_the_hf_twin_has_not_forked() -> void:
+	var retro := _twin_code_lines(SHADER_PATH, "filter_nearest")
+	var hf := _twin_code_lines(HF_SHADER_PATH, "filter_linear")
+	# Fail on the FIRST drifted line, naming both sides — a whole-file dump would bury the one line that moved.
+	for i in mini(retro.size(), hf.size()):
+		if retro[i]["s"] != hf[i]["s"]:
+			assert_eq(retro[i]["s"], hf[i]["s"],
+				"TWIN DRIFT between hud_curve.gdshader:%d and hud_curve_hf.gdshader:%d. These files are TWINS — byte-identical except each one's own header paragraph and the hud_tex filter hint (filter_nearest RETRO / filter_linear HIGH FIDELITY; ui.gd._apply_hud_curve swaps them by presentation) — so an edit that landed in only one of them has FORKED the two presentations. Port the edit to the sibling; never let them diverge."
+					% [retro[i]["n"], hf[i]["n"]])
+			return
+	assert_eq(retro.size(), hf.size(),
+		"hud_curve.gdshader has %d code lines but hud_curve_hf.gdshader has %d — their common prefix matches, so code was ADDED or REMOVED at the tail of one file only. The twins must stay byte-identical outside comments and the hud_tex filter hint; port the edit to the sibling."
+			% [retro.size(), hf.size()])
 
 
 # === the drive, by source text ===============================================================================

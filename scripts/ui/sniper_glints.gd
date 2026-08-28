@@ -77,6 +77,13 @@ func _draw() -> void:
 	var hud = MenuStyle.hud  # untyped on purpose: HudSkin's class_name may not be cached yet
 	var eye := camera.global_position
 	var now := Time.get_ticks_msec()
+	# The world LENS bends the PICTURE below this overlay, so an unprojected position must be mapped to
+	# where the warp DISPLAYS it or the flare sits beside the shooter (~4-8 px at mid-radius with the
+	# shipped bend — invisible under RETRO's chunky upscale, plainly off on a native HIGH FIDELITY frame).
+	# k is the same live product player.gd pushes to the shader; 0 makes the map an exact pass-through.
+	var canvas := get_viewport_rect().size
+	var rs := Vector2(Settings.render_size())
+	var lens_k: float = GameSettings.camera.lens_barrel_amount * clampf(Settings.lens_curve, 0.0, 1.0)
 	for id in _glints:
 		# Belt-and-suspenders: never DRAW a glint whose source was freed or whose last report is stale,
 		# even if _process hasn't pruned it yet this frame.
@@ -88,7 +95,7 @@ func _draw() -> void:
 			continue  # too close — no spotting help needed
 		if camera.is_position_behind(world):
 			continue  # behind us — nothing to mark on screen
-		var p := camera.unproject_position(world)
+		var p := CameraSettings.lens_display_point(camera.unproject_position(world), canvas, rs.x / rs.y, lens_k)
 		var charge := clampf(g["charge"], 0.0, 1.0)
 		var col: Color = hud.glint_color
 		col.a = hud.glint_min_alpha + (1.0 - hud.glint_min_alpha) * charge  # brighter as the shot locks in

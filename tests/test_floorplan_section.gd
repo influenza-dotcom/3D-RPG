@@ -113,6 +113,21 @@ func test_stroke_width_zero_is_the_hairline_sentinel() -> void:
 			"0 px -> Godot's -1.0 transform-INDEPENDENT hairline (the shipped default disarms the fatten trap)")
 	assert_almost_eq(FS.stroke_width(-4.0, 2.7), -1.0, 0.0001, "negative is the same sentinel")
 
+## The presentation split: -1.0 is ONE RENDER-TARGET px, which in HIGH FIDELITY is a native px (~0.41
+## logical at 1080p) — the shipped 0-width walls would silently thin ~2.4x. So above scale 1.0 the hairline
+## request substitutes ONE LOGICAL px (1/ppm local units), reproducing the RETRO weight; at scale 1.0 (RETRO
+## and off-tree, Settings.native_scale()'s floor) the sentinel is bit-identical to the pre-presentation game.
+func test_stroke_width_hairline_becomes_one_logical_px_at_native_scale() -> void:
+	assert_almost_eq(FS.stroke_width(0.0, 2.7, 1.0), -1.0, 0.0001,
+			"explicit scale 1.0 (RETRO / off-tree) keeps the -1.0 hairline — the identity the default preserves")
+	for scale in [1.5, 2.42, 4.0]:
+		assert_almost_eq(FS.stroke_width(0.0, 2.7, scale) * 2.7, 1.0, 0.0001,
+				"native_scale %s: hairline -> ONE LOGICAL px, zoom-stable like any positive width" % scale)
+	assert_almost_eq(FS.stroke_width(0.0, 1.0, 2.42), 1.0, 0.0001,
+			"ppm 1.0 (the glyph forwarders' screen-space calls): one logical px is literally 1.0")
+	assert_almost_eq(FS.stroke_width(2.0, 2.7, 2.42) * 2.7, 2.0, 0.0001,
+			"a positive width is already in logical px and must IGNORE native_scale entirely")
+
 
 # --- band_floor / deck_key / cut_plane ------------------------------------------------------------------
 

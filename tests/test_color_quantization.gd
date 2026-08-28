@@ -21,8 +21,13 @@ extends GutTest
 const SHADER_PATH := "res://resources/shaders/post_process.gdshader"
 const SETTINGS_PATH := "res://managers/Settings.gd"
 const PLAYER_PATH := "res://scripts/player/player.gd"
+## The shared presentation dials both retro hosts push (scripts/ui/retro_post.gd) — the in-game overlay on
+## the Player's ColorRect and the BOOT SCREEN's own copy in computerroom.tscn, which has no Player at all.
+const RETRO_POST_PATH := "res://scripts/ui/retro_post.gd"
+const BOOT_SCENE_PATH := "res://scenes/computerroom.tscn"
 const OPTIONS_PATH := "res://scripts/ui/options_menu.gd"
 const CATALOG_PATH := "res://resources/settings/SettingsCatalog.tres"
+const UI_SCENE_PATH := "res://scenes/player/ui.tscn"
 
 const SettingsScript := preload("res://managers/Settings.gd")
 
@@ -186,9 +191,64 @@ func test_uniform_defaults_are_literal_constants() -> void:
 ## The push site. player.gd must hand the shader the LEVELS, never the menu index — the shader has no idea what
 ## an index is, and pushing one would quantise the frame to 3 steps at "15-bit (PS1)".
 func test_player_pushes_the_levels_not_the_index() -> void:
-	var src := _read(PLAYER_PATH)
+	var src := _read(RETRO_POST_PATH)
 	assert_true(src.contains('mat.set_shader_parameter("quantize_levels", Settings.color_quantize_levels(Settings.color_quantization))'),
-		"player.gd must push the TABLE LOOKUP, not the raw index — the uniform is a per-channel step count, so pushing the menu index would quantise a '15-bit (PS1)' frame to 3 steps a channel and look like the wrong row entirely")
+		"retro_post.gd must push the TABLE LOOKUP, not the raw index — the uniform is a per-channel step count, so pushing the menu index would quantise a '15-bit (PS1)' frame to 3 steps a channel and look like the wrong row entirely")
+
+## The presentation-split compensation uniform (render px per logical canvas px, see Settings.native_scale()).
+## Same failure mode as quantize_levels above: player.gd pushes "pixel_scale" every frame, and a
+## set_shader_parameter to a missing/renamed uniform is silently dropped — the HIGH FIDELITY dither cell and
+## film grain would quietly collapse to native-pixel fine noise with no error anywhere.
+func test_the_shader_declares_the_pixel_scale_uniform() -> void:
+	var src := _read(SHADER_PATH)
+	assert_true(src.contains("uniform float pixel_scale"),
+		"post_process.gdshader must declare `uniform float pixel_scale` — the dither-cell/grain compensation player.gd pushes every frame; a rename here is a silently dropped write, so HIGH FIDELITY would ship a dither ~2.4x finer than authored and nothing would catch it")
+
+## ...and the push site must exist too: the uniform alone is a dead knob stuck at its RETRO default 1.0.
+func test_player_pushes_pixel_scale() -> void:
+	var src := _read(RETRO_POST_PATH)
+	assert_true(src.contains('mat.set_shader_parameter("pixel_scale"'),
+		"retro_post.apply_dials must push `pixel_scale` — un-pushed, the uniform sits at its RETRO-identity default 1.0 and HIGH FIDELITY's dither cell and grain speckle shrink to one native pixel")
+
+
+## ⭐BOTH HOSTS MUST GO THROUGH THE HELPER. The boot screen (computerroom.tscn) wears the same shader with no
+## Player to drive it, so before the helper existed it obeyed NONE of the player's look rows: the Dithering
+## slider did nothing on the first thing a player sees, and the room quantised at its own authored colour
+## depth forever. A host that re-inlines its own pushes is that bug coming back silently, so the delegation
+## is pinned rather than trusted.
+func test_both_retro_hosts_push_through_the_shared_dials() -> void:
+	for path in [PLAYER_PATH, "res://scripts/ui/computerroom.gd"]:
+		var src := _read(path)
+		assert_true(src.contains("RETRO_POST.apply_dials("),
+			"%s must push the presentation dials through retro_post.apply_dials() — a private copy is how the boot screen and the game drifted apart in the first place" % path)
+		assert_false(src.contains('set_shader_parameter("dither_strength"'),
+			"%s must NOT push dither_strength itself — apply_dials owns it, and two writers is two behaviours" % path)
+
+
+## The boot screen is the FIRST thing a player sees, so its authored baseline has to be the game's baseline:
+## the dither cell is derived from the downscale grid, so a coarser render_scale here does not just pixelate
+## the room, it makes the DITHER visibly chunkier than every other screen (the reported "the dithering on the
+## first screen looks weird" — the room shipped at render_scale 320 against the overlay's 1584).
+func test_the_boot_screen_matches_the_games_authored_retro_baseline() -> void:
+	var boot := _read(BOOT_SCENE_PATH)
+	var ui := _read(UI_SCENE_PATH)
+	for line in ["shader_parameter/render_scale = 1584.0", "shader_parameter/color_steps = 16",
+			"shader_parameter/bayer_order = 3"]:
+		assert_true(ui.contains(line), "ui.tscn should author %s (the reference baseline)" % line)
+		assert_true(boot.contains(line),
+			"computerroom.tscn must author %s — the boot screen wears the SAME shader, and the dither cell is derived from the downscale grid, so a different value here reads as a different dither on the first screen" % line)
+
+## The pixelation no-op is authored in TWO places that must agree: ui.tscn's shader_parameter/render_scale
+## (what RETRO renders with, read as-authored) and player.gd's POST_PIXELATION_CELLS (what the poll pushes in
+## RETRO and derives the HIGH FIDELITY floor from). Moving either side alone un-no-ops one of the two modes —
+## the exact just-above-the-buffer comb resample post_process.gdshader's render_scale comment documents.
+func test_the_authored_pixelation_no_op_and_its_player_mirror_agree() -> void:
+	var dials := _read(RETRO_POST_PATH)
+	assert_true(dials.contains("const PIXELATION_CELLS := 1584.0"),
+		"retro_post.gd must mirror ui.tscn's authored render_scale as `const PIXELATION_CELLS := 1584.0` — the poll pushes it verbatim in RETRO, so any other value here silently changes the shipped RETRO frame")
+	var scene := _read(UI_SCENE_PATH)
+	assert_true(scene.contains("render_scale = 1584.0"),
+		"scenes/player/ui.tscn must author shader_parameter/render_scale = 1584.0 (2x the 792 px RETRO buffer = the documented no-op) — if this was deliberately re-authored, move player.gd's POST_PIXELATION_CELLS in the same change or the two presentation modes disagree about the no-op")
 
 
 # =============================================================================================================

@@ -12,8 +12,6 @@
 [ext_resource type="Script" path="res://scripts/effects/ink_outline.gd" id="12_inkol"]
 
 [sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_u3hyo"]
-dof_blur_far_enabled = true
-dof_blur_far_distance = 30.0
 dof_blur_near_distance = 0.5
 auto_exposure_max_sensitivity = 400.0
 
@@ -85,7 +83,7 @@ light_position = NodePath("../LightPosition")
 [node name="FlashlightClick" type="AudioStreamPlayer3D" parent="ScreenShake/Camera3D/FlashLight" unique_id=1941688286]
 stream = ExtResource("10_3lxcb")
 volume_db = 80.0
-bus = &"sfx"
+bus = &"world"
 
 [node name="white flash" type="Sprite3D" parent="ScreenShake/Camera3D" unique_id=1837776006]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.5425763)

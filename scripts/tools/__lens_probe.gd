@@ -118,7 +118,7 @@ func _run() -> void:
 	# --- amount alone, near off: the one-line change, measured ---------------------------------------------
 	for amt in ["0.14", "0.18", "0.28"]:
 		var soft := await _ab_amount("03_amount_%s" % amt, amt)
-		print("QA_SWEEP amount %s (near off, far at the authored 30 m) -> %.1f%% softer than amount 0.10" % [amt, soft])
+		print("QA_SWEEP amount %s (near off, far authored OFF since 2026-08-24 -> expect ~0%%) -> %.1f%% softer than amount 0.10" % [amt, soft])
 
 	# --- `dof reset` is verified by PROPERTY, not by pixels ------------------------------------------------
 	WorldActions.run("dof", _ctx, PackedStringArray(["near", "4", "3"]))
@@ -128,14 +128,32 @@ func _run() -> void:
 	if _check_authored_const(attrs, "after reset"):
 		print("QA_PASS `dof reset` put all seven fields back to the authored state")
 
-	# --- the far-half trap: does the ADS snapshot get updated? --------------------------------------------
+	# --- the far-half trap: does the ADS snapshot PAIR get updated? ----------------------------------------
 	_say("dof far 24 8", WorldActions.run("dof", _ctx, PackedStringArray(["far", "24", "8"])))
 	var cam: Variant = player.get(&"camera_effects")
 	var snap: Variant = cam.get(&"_dof_default_far_distance") if cam != null else null
-	if snap is float and is_equal_approx(float(snap), 24.0):
-		print("QA_PASS CameraEffects._dof_default_far_distance updated to 24.0 -- an unscope will NOT undo `dof far`")
+	var snap_on: Variant = cam.get(&"_dof_default_far_enabled") if cam != null else null
+	if snap is float and is_equal_approx(float(snap), 24.0) and snap_on == true:
+		print("QA_PASS CameraEffects' snapshot pair updated (enabled + 24.0 m) -- an unscope will NOT undo `dof far`")
 	else:
-		print("QA_FAIL _dof_default_far_distance is %s, not 24.0 -- the next unscope would restore the authored 30" % str(snap))
+		print("QA_FAIL snapshot pair is enabled=%s distance=%s, not true/24.0 -- the next unscope would restore the authored far state (off)" % [str(snap_on), str(snap)])
+		_fail += 1
+
+	# --- the resting state survives an aim cycle: unscope restores the AUTHORED far state (OFF) ------------
+	# This is the exact regression path of the 2026-08-24 fix: set_scope_dof() used to force
+	# dof_blur_far_enabled = true on every unscope, so the first aim resurrected the retired 30 m far blur
+	# and the distance went back to mush. Drive a scope/unscope through the real method and read the flag.
+	WorldActions.run("dof", _ctx, PackedStringArray(["reset"]))
+	if cam != null and (cam as Object).has_method(&"set_scope_dof"):
+		cam.call(&"set_scope_dof", true, false)
+		cam.call(&"set_scope_dof", false, false)
+		if attrs.dof_blur_far_enabled == bool(WorldActions.DOF_AUTHORED["far_enabled"]):
+			print("QA_PASS an aim cycle leaves the far blur in the authored state (off) -- unscope no longer forces it on")
+		else:
+			print("QA_FAIL an aim cycle left dof_blur_far_enabled=%s -- unscope is still forcing the old far blur back on" % str(attrs.dof_blur_far_enabled))
+			_fail += 1
+	else:
+		print("QA_FAIL no CameraEffects.set_scope_dof reachable to drive the aim cycle")
 		_fail += 1
 
 	# --- the near-ramp guard fires on the exact pair camera_rig.tscn ships --------------------------------

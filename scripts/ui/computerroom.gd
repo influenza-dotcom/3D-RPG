@@ -34,8 +34,25 @@ var _menu: Control = null
 var _startup_gate_done := false
 var _startup_input_locked := false
 
+## The retro overlay's shared presentation dials. Preloaded BY PATH and untyped — it carries no class_name,
+## so this scene's parse never waits on the editor's global class cache.
+##
+## ⭐WHY THIS SCENE NEEDS IT AT ALL. The boot screen wears its OWN copy of post_process.gdshader (a
+## CanvasLayer + ColorRect authored right here), and every player-facing dial on that shader — Dithering,
+## Colour Depth, Colourblind, Contrast, and the RETRO/HIGH-FIDELITY resample — is pushed by the PLAYER
+## (scripts/player/player.gd). This scene has no Player. So the first thing a player ever sees ignored all
+## five: the Dithering slider did nothing here, and the room quantised at its own authored colour depth
+## forever. Polling the shared helper is what makes the boot screen obey the same rows as the game.
+const RETRO_POST := preload("res://scripts/ui/retro_post.gd")
+
+## The room's own post-process ColorRect, resolved once. Untyped + null-guarded: the overlay is AUTHORED in
+## computerroom.tscn, so a designer who removes or renames it must degrade to "no dials pushed", never to a
+## crash on the game's first frame.
+var _post_mat: ShaderMaterial = null
+
 func _ready() -> void:
 	startup_timer.stop()
+	_resolve_post_material()
 	_build_menu()
 	canvas_layer.visible = true
 	if _menu != null:
@@ -128,7 +145,25 @@ func _arm_startup_input_lock() -> void:
 func _release_startup_input_lock() -> void:
 	_startup_input_locked = false
 
+## Find the ColorRect wearing post_process.gdshader under this scene's CanvasLayer. Searched rather than
+## hard-pathed so an artist may re-parent the overlay inside the layer without silently turning the dials off
+## again — the failure this whole seam exists to prevent is a SILENT one.
+func _resolve_post_material() -> void:
+	if canvas_layer == null:
+		return
+	for cr in canvas_layer.find_children("*", "ColorRect", true, false):
+		var mat := (cr as ColorRect).material as ShaderMaterial
+		if mat != null and mat.shader != null 				and String(mat.shader.resource_path).contains("post_process"):
+			_post_mat = mat
+			return
+
+
 func _process(delta: float) -> void:
+	# The player's look dials, every frame — the same call and the same reasoning as the in-game overlay
+	# (see RETRO_POST). Polled rather than pushed on change because this scene is the FIRST thing that runs:
+	# a player who changes Dithering in Options, quits and relaunches must see the new value here too, and a
+	# poll cannot go stale the way a one-shot _ready push would.
+	RETRO_POST.apply_dials(_post_mat)
 	if monitor_glow.visible:
 		var env = world_environment.environment
 		

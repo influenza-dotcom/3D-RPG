@@ -58,6 +58,9 @@ const OVERLAY_LAYER := 100  ## CanvasLayer for the on-top duplicate -- above the
 ## Fixed reference font size the overlay Label is rasterised at ONCE; Control.scale then matches it to the sky
 ## copy's on-screen box each frame (so glyphs stay crisp and the text isn't re-shaped per frame). Big enough that
 ## the typical on-screen size is a DOWNSCALE (sharp), not an upscale (blurry).
+## PRESENTATION NOTE: under HIGH FIDELITY the overlay covers ~Settings.native_scale() times (~2.4x at 1080p) more
+## device px than the canvas math suggests; per-viewport font oversampling is expected to keep the glyphs crisp
+## at that scale. Flagged for the windowed QA pass — no code change.
 const OVERLAY_REF_FONT_SIZE := 256
 var _overlay_layer: CanvasLayer = null
 var _overlay_bbc: BackBufferCopy = null
@@ -198,8 +201,15 @@ func _sync_overlay(cam: Camera3D, world_center: Vector3, up: Vector3, alpha: flo
 	# as a font_size -- oversizing by the line-height factor -- and ignored the stretch, which made it ~vertical_stretch
 	# too WIDE: the huge, overflowing, misaligned duplicate.)
 	var sky_world_half_h := font.get_height(font_size) * pixel_size * vertical_stretch * 0.5
-	var p_c := cam.unproject_position(world_center)
-	var p_top := cam.unproject_position(world_center + up * sky_world_half_h)
+	# Both anchors go through the world LENS's display map: the sky copy this overlay welds onto is bent
+	# by the post barrel warp, while this label draws ABOVE it — unmapped, the pair detaches by the warp
+	# displacement at the title's radius (the sniper-glint fix; see CameraSettings.lens_display_point).
+	# Warping BOTH points also keeps the projected height measure consistent with the displayed glyphs.
+	var canvas := get_viewport().get_visible_rect().size
+	var rs := Vector2(Settings.render_size())
+	var lens_k: float = GameSettings.camera.lens_barrel_amount * clampf(Settings.lens_curve, 0.0, 1.0)
+	var p_c := CameraSettings.lens_display_point(cam.unproject_position(world_center), canvas, rs.x / rs.y, lens_k)
+	var p_top := CameraSettings.lens_display_point(cam.unproject_position(world_center + up * sky_world_half_h), canvas, rs.x / rs.y, lens_k)
 	var sky_h_px := p_c.distance_to(p_top) * 2.0  # the sky copy's full on-screen (stretched) height, px
 	var sy := (sky_h_px / nat.y) * maxf(overlay_size_scale, 0.01)
 	var sx := sy / maxf(vertical_stretch, 0.001)   # width tracks the sky copy's UNstretched width

@@ -145,6 +145,30 @@ func test_camera_effects_scope_fov_owner_latch() -> void:
 	cam.free()
 
 
+func test_camera_effects_exit_tree_scrubs_scoped_far_dof_off_the_shared_attributes() -> void:
+	# CameraAttributesPractical is a SHARED sub-resource of the cached camera_rig.tscn (not
+	# resource_local_to_scene), so whatever a dying camera leaves on it is exactly what the NEXT camera's
+	# _ready() snapshots as "authored". An F9 quickload mid-ADS frees the scene with the scoped far blur
+	# (enabled @ dof_scoped_far_distance) still applied — _exit_tree must put the resting pair back, or
+	# resting far blur comes back for the whole process (the one regression path of the 2026-08-24 far-DoF
+	# retirement, when camera_rig.tscn stopped authoring far blur at rest).
+	# No frame is processed between add_child and remove_child, so _process never runs against the null player.
+	var cam := CameraEffects.new()
+	var attrs := CameraAttributesPractical.new()
+	attrs.dof_blur_far_enabled = false
+	attrs.dof_blur_far_distance = 10.0
+	cam.attributes = attrs
+	add_child(cam)   # _ready() snapshots the resting pair off the live attributes
+	attrs.dof_blur_far_enabled = true    # the scoped state a mid-ADS quickload leaves behind
+	attrs.dof_blur_far_distance = 120.0
+	remove_child(cam)
+	assert_false(attrs.dof_blur_far_enabled,
+		"CameraEffects._exit_tree must restore the resting far-blur enabled flag on the shared attributes — otherwise a quickload while aiming permanently re-enables resting far blur")
+	assert_eq(attrs.dof_blur_far_distance, 10.0,
+		"CameraEffects._exit_tree must restore the resting far-blur distance on the shared attributes")
+	cam.free()
+
+
 func test_camera_effects_reset_transients_restores_neutral_pose() -> void:
 	var cam := CameraEffects.new()
 	cam._origin = Vector3(0.1, 0.2, 0.3)
@@ -298,6 +322,187 @@ func test_scope_magnification_zero_restores_the_absolute_scoped_fov() -> void:
 ## tan(fov/2), which is exactly why `default_fov / magnification` would be the wrong formula in ScopeIn.
 func _apparent_magnification(rest_fov: float, scoped_fov: float) -> float:
 	return tan(deg_to_rad(rest_fov) * 0.5) / tan(deg_to_rad(scoped_fov) * 0.5)
+
+
+# ---------------------------------------------------------------------------
+# Mouse-wheel scope zoom (variable-zoom optics — the sniper)
+# ---------------------------------------------------------------------------
+
+func test_variable_scope_zoom_requires_a_usable_range() -> void:
+	var w := WeaponData.new()
+	assert_false(w.has_variable_scope_zoom(),
+		"an unconfigured weapon (0/0) must not claim the wheel — every existing weapon keeps weapon switching through its scope")
+	w.scoped_zoom_fov_min = 1.0
+	w.scoped_zoom_fov_max = 20.0
+	assert_true(w.has_variable_scope_zoom(),
+		"authoring 0 < min < max is the documented on-switch for the wheel zoom")
+	w.scoped_zoom_fov_max = 1.0
+	assert_false(w.has_variable_scope_zoom(),
+		"a degenerate range (min >= max) must read as a fixed optic, not a zero-width zoom the wheel fights over")
+	w = null
+
+
+func test_wheel_zoom_seeds_from_the_authored_scope_and_steps_as_a_tangent_ratio() -> void:
+	var old_step := GameSettings.camera.scope_zoom_wheel_step
+	GameSettings.camera.scope_zoom_wheel_step = 1.25
+	var si := ScopeIn.new()
+	var w := WeaponData.new()
+	w.scoped_fov_override = 0.01  # the sniper's authoring — clamps to Camera3D's 1-degree floor
+	w.scoped_zoom_fov_min = 1.0
+	w.scoped_zoom_fov_max = 20.0
+	assert_almost_eq(si.current_wheel_zoom_fov(w), 1.0, 0.001,
+		"the wheel zoom must SEED from the weapon's authored resting zoom (override clamped into range) — scope-in lands exactly on the pre-feature look, the wheel is opt-in from there")
+	si.step_wheel_zoom(w, -1)  # one notch OUT
+	var widened: float = si.current_wheel_zoom_fov(w)
+	assert_gt(widened, 1.0, "wheel down must WIDEN the scope FOV (zoom out)")
+	assert_almost_eq(_apparent_magnification(widened, 1.0), 1.25, 0.001,
+		"a notch must step the MAGNIFICATION by scope_zoom_wheel_step — a tangent ratio, not degrees (halving an angle does not double apparent size)")
+	si.step_wheel_zoom(w, 1)  # and back in
+	assert_almost_eq(si.current_wheel_zoom_fov(w), 1.0, 0.001,
+		"a notch in must exactly undo a notch out — the step is symmetric on the tangent")
+	# The tangent-vs-degrees distinction is INVISIBLE at the 1-degree end (tan is linear there to ~1e-5, so
+	# `fov *= step` lands inside any sane tolerance) — so the discriminating assert runs from a WIDE seed,
+	# where a degrees-multiplicative step (20 -> 25, magnification 1.2573) misses the tangent's 24.86.
+	var wide := WeaponData.new()
+	wide.scoped_fov_override = 20.0
+	wide.scoped_zoom_fov_min = 1.0
+	wide.scoped_zoom_fov_max = 90.0
+	si.step_wheel_zoom(wide, -1)
+	assert_almost_eq(_apparent_magnification(si.current_wheel_zoom_fov(wide), 20.0), 1.25, 0.001,
+		"one notch from a WIDE 20-degree seed must change apparent magnification by exactly the step — this is the point where a degrees-stepping rewrite (fov *= step) actually diverges from the tangent contract and must fail")
+	GameSettings.camera.scope_zoom_wheel_step = old_step
+	si.free()
+	w = null
+	wide = null
+
+
+func test_wheel_zoom_clamps_to_the_authored_range_and_remembers_per_weapon() -> void:
+	var old_step := GameSettings.camera.scope_zoom_wheel_step
+	GameSettings.camera.scope_zoom_wheel_step = 100.0  # one notch slams into the range ends
+	var si := ScopeIn.new()
+	var w := WeaponData.new()
+	w.scoped_fov_override = 5.0
+	w.scoped_zoom_fov_min = 1.0
+	w.scoped_zoom_fov_max = 20.0
+	si.step_wheel_zoom(w, -1)
+	assert_almost_eq(si.current_wheel_zoom_fov(w), 20.0, 0.001,
+		"zooming out must stop at scoped_zoom_fov_max — the authored range is the wheel's whole travel")
+	si.step_wheel_zoom(w, 1)
+	si.step_wheel_zoom(w, 1)
+	assert_almost_eq(si.current_wheel_zoom_fov(w), 1.0, 0.001,
+		"zooming in must stop at scoped_zoom_fov_min no matter how many notches pile up")
+	var other := WeaponData.new()
+	other.scoped_fov_override = 8.0
+	other.scoped_zoom_fov_min = 2.0
+	other.scoped_zoom_fov_max = 30.0
+	assert_almost_eq(si.current_wheel_zoom_fov(other), 8.0, 0.001,
+		"each weapon's wheel zoom is remembered SEPARATELY (keyed by its WeaponData) — dialing the sniper must not move another scope")
+	# The RANGE half of the seed clamp, at a point where it differs from Camera3D's 1..179 clamp: an
+	# override authored OUTSIDE the zoom range must seed at the range end, not ease to an out-of-range FOV
+	# that the first notch would then snap back from.
+	var outside := WeaponData.new()
+	outside.scoped_fov_override = 30.0
+	outside.scoped_zoom_fov_min = 1.0
+	outside.scoped_zoom_fov_max = 20.0
+	assert_almost_eq(si.current_wheel_zoom_fov(outside), 20.0, 0.001,
+		"a scoped_fov_override outside the authored zoom range must seed CLAMPED INTO the range — the camera clamp alone (1..179) would pass 30 straight through")
+	# The documented global off-switch must also make a notch a NO-OP, not just refuse ownership.
+	GameSettings.camera.scope_zoom_wheel_step = 1.0
+	si.step_wheel_zoom(w, -1)
+	assert_almost_eq(si.current_wheel_zoom_fov(w), 1.0, 0.001,
+		"with scope_zoom_wheel_step at 1.0 (wheel zoom off) a notch must not move the dial — and a sub-1 step must never invert the zoom direction")
+	GameSettings.camera.scope_zoom_wheel_step = old_step
+	si.free()
+	w = null
+	other = null
+	outside = null
+
+
+func test_scoped_target_fov_prefers_the_wheel_zoom_over_the_fixed_override() -> void:
+	var old_step := GameSettings.camera.scope_zoom_wheel_step
+	GameSettings.camera.scope_zoom_wheel_step = 2.0
+	var si := ScopeIn.new()
+	var w := WeaponData.new()
+	w.scoped_fov_override = 5.0
+	assert_almost_eq(si.scoped_target_fov(w), 5.0, 0.001,
+		"a fixed optic (no zoom range) must keep easing to its absolute scoped_fov_override — pre-feature ADS is untouched")
+	w.scoped_zoom_fov_min = 1.0
+	w.scoped_zoom_fov_max = 20.0
+	si.step_wheel_zoom(w, -1)
+	assert_gt(si.scoped_target_fov(w), 5.0,
+		"with a range authored, the scoped target must be the wheel-dialed zoom, not the frozen override")
+	assert_almost_eq(si.scoped_target_fov(null), si.global_scoped_fov(), 0.001,
+		"no weapon must still fall through to the global magnification solve — bare ADS keeps working")
+	GameSettings.camera.scope_zoom_wheel_step = old_step
+	si.free()
+	w = null
+
+
+func test_wheel_owns_scope_zoom_grants_an_aimed_variable_scope_then_refuses_each_gate() -> void:
+	# The POSITIVE pin comes first and is load-bearing: without it every refusal below is vacuous — the
+	# predicate's final Zoom-held conjunct is false in a bare GUT run, so an always-false predicate (typo'd
+	# action, inverted gate) would pass pure-refusal asserts while shipping the feature dead. Zoom is held
+	# via Input.action_press, the same off-tree idiom the scoped-FOV clamp test above already uses, and
+	# each refusal then flips EXACTLY ONE gate off the granted baseline so it discriminates that gate.
+	# Attack.new() bare is the established off-tree idiom (no add_child, so _ready never runs).
+	var old_step := GameSettings.camera.scope_zoom_wheel_step
+	GameSettings.camera.scope_zoom_wheel_step = 1.25
+	var atk := Attack.new()
+	var w := WeaponData.new()
+	w.scoped_zoom_fov_min = 1.0
+	w.scoped_zoom_fov_max = 20.0
+	atk.current_weapon = w
+	atk.holstered = false
+	Input.action_press("Zoom")
+	assert_true(ScopeIn.wheel_owns_scope_zoom(atk),
+		"an AIMED (Zoom held, un-holstered) variable scope must OWN the wheel — this is the whole feature; the refusals below only mean something against this granted baseline")
+	atk.holstered = true
+	assert_false(ScopeIn.wheel_owns_scope_zoom(atk),
+		"a holstered variable scope must not eat the wheel — you scroll OFF a put-away sniper like any gun")
+	atk.holstered = false
+	var fixed := WeaponData.new()
+	fixed.scoped_fov_override = 5.0
+	atk.current_weapon = fixed
+	assert_false(ScopeIn.wheel_owns_scope_zoom(atk),
+		"a FIXED optic must never claim the wheel — only an authored scoped_zoom_fov_min/max range does")
+	atk.current_weapon = null
+	assert_false(ScopeIn.wheel_owns_scope_zoom(atk),
+		"no weapon drawn must leave the wheel with the hotbar")
+	atk.current_weapon = w
+	GameSettings.camera.scope_zoom_wheel_step = 1.0
+	assert_false(ScopeIn.wheel_owns_scope_zoom(atk),
+		"scope_zoom_wheel_step <= 1.0 is the documented global off-switch — it must hand the wheel back to weapon switching even through an aimed variable scope")
+	GameSettings.camera.scope_zoom_wheel_step = 1.25
+	Input.action_release("Zoom")
+	assert_false(ScopeIn.wheel_owns_scope_zoom(atk),
+		"Zoom released must return the wheel to weapon switching — the hip wheel always cycles")
+	assert_false(ScopeIn.wheel_owns_scope_zoom(null),
+		"no Attack at all (a bare rig) must leave the wheel with the hotbar")
+	GameSettings.camera.scope_zoom_wheel_step = old_step
+	atk.free()
+	w = null
+	fixed = null
+
+
+func test_sniper_authors_a_wheel_zoom_range_that_preserves_its_resting_look() -> void:
+	var sniper: WeaponData = load("res://resources/weapons/sniper_wep.tres")
+	assert_true(sniper.has_variable_scope_zoom(),
+		"the sniper is THE variable-zoom scope — its .tres must author the wheel range (scoped_zoom_fov_min/max)")
+	var si := ScopeIn.new()
+	var seeded: float = si.current_wheel_zoom_fov(sniper)
+	si.free()
+	assert_almost_eq(seeded, clampf(sniper.scoped_fov_override, 1.0, 179.0), 0.001,
+		"the wheel seed must equal the sniper's pre-feature scoped look (its override under Camera3D's clamp) — adding the wheel must not move the authored scope-in")
+
+
+func test_hotbar_wheel_branch_yields_through_the_shared_scope_predicate() -> void:
+	# SOURCE PIN (the file-established idiom for wiring a bare test can't drive): the Hotbar's wheel branch
+	# must consult _scope_owns_wheel beside _spray_owns_wheel, and that yield must route through the SAME
+	# ScopeIn.wheel_owns_scope_zoom the scope consumes notches with — delete either and every behavioural
+	# test here stays green while the bar fights the scope for each notch (weapon switches mid-ADS).
+	var src := FileAccess.get_file_as_string("res://scripts/ui/hotbar.gd")
+	assert_string_contains(src, "not _spray_owns_wheel() and not _scope_owns_wheel(")
+	assert_string_contains(src, "ScopeIn.wheel_owns_scope_zoom")
 
 
 # ---------------------------------------------------------------------------
@@ -758,6 +963,25 @@ func test_camera_settings_climbing_pitch_wider_than_normal_limit() -> void:
 		"pitch_max_climbing_deg must exceed pitch_max_deg: wall-climbing widens the pitch clamp so the view can crane up and over the top of the wall — a non-wider value would silently disable the climb-look feature")
 
 
+func test_head_pitch_limit_ignores_a_held_prop() -> void:
+	# Carrying an object used to clamp the look to camera.pitch_max_holding_deg (30 deg), so picking anything
+	# up read as the camera seizing: you could not look at your own feet or up a stairwell while holding a
+	# crate. That branch (and the knob behind it) was removed 2026-08-27 -- a held prop must now leave the
+	# FULL look range intact, and the wall-climb widening is the ONLY thing allowed to move the limit.
+	# Head.new() without add_child: setup() was never called, so _player is null and _is_climbing() is false
+	# (see the test below), which isolates the carry case.
+	var head := Head.new()
+	var ray := PickupRay.new()
+	var prop := Throwable.new()
+	ray.held_object = prop
+	head.pickup_ray = ray
+	assert_almost_eq(head._target_max_pitch(), deg_to_rad(GameSettings.camera.pitch_max_deg), 0.0001,
+		"holding an object must not tighten the look-pitch clamp: with a prop in hand _target_max_pitch stays at the normal pitch_max_deg, so the view keeps its full up/down range while carrying")
+	prop.free()
+	ray.free()
+	head.free()
+
+
 func test_head_is_climbing_false_without_injected_player() -> void:
 	# Head.new() WITHOUT add_child: _ready/_process never run; camera/screen_shake are
 	# get_node_or_null getters so the bare instance is safe. setup() was never called, so
@@ -780,3 +1004,55 @@ func test_head_reset_pitch_clears_vertical_look_only() -> void:
 	assert_almost_eq(head.rotation.z, -0.1, 0.0001,
 		"Head.reset_pitch must leave roll alone; ScreenShake/CameraEffects own their own roll resets")
 	head.free()
+
+
+# --- Lens display map (CameraSettings.lens_display_point) --------------------------------------------------
+# The world barrel lens bends the PICTURE only; HUD annotations from unproject_position (sniper glints,
+# compass markers, the sky-title overlay) draw ABOVE it and must be mapped to where the warp DISPLAYS their
+# point. These pin the pure static against the shader's own forward mapping (post_process.gdshader
+# lens_warp: source_radius = output_radius * (1 + k*r2n)/(1 + k), corners pinned), verified live 2026-08-25
+# by the presentation QA probe: warp_delta sub-pixel at centre and mid-radius, RETRO and HIGH FIDELITY alike.
+
+## The shader's forward map (output -> the source uv it fetches), transliterated for the round-trip below.
+func _shader_lens_source(out_p: Vector2, canvas: Vector2, aspect: float, k: float) -> Vector2:
+	var c := (out_p / canvas) * 2.0 - Vector2.ONE
+	c.x *= aspect
+	var r2n := c.dot(c) / (aspect * aspect + 1.0)
+	c *= (1.0 + k * r2n) / (1.0 + k)
+	c.x /= aspect
+	return (c + Vector2.ONE) * 0.5 * canvas
+
+func test_lens_display_point_is_identity_at_zero_bend() -> void:
+	var canvas := Vector2(792.0, 444.0)
+	var p := Vector2(500.0, 120.0)
+	assert_eq(CameraSettings.lens_display_point(p, canvas, 1920.0 / 1080.0, 0.0), p,
+		"k == 0 must be an exact pass-through, so callers can apply the map unconditionally")
+
+func test_lens_display_point_inverts_the_shader_forward_map() -> void:
+	# Round-trip: pick DISPLAY (output) points, run them through the shader's forward map to get the
+	# source (= what unproject_position reports), and require the inverse to recover the display point.
+	var canvas := Vector2(792.0, 444.0)
+	var aspect := 1920.0 / 1080.0
+	for k in [0.05, 0.12, 0.5, 1.0]:
+		for out_p in [Vector2(396.0, 222.0), Vector2(500.0, 150.0), Vector2(700.0, 400.0), Vector2(60.0, 40.0)]:
+			var src: Vector2 = _shader_lens_source(out_p, canvas, aspect, k)
+			var back: Vector2 = CameraSettings.lens_display_point(src, canvas, aspect, k)
+			assert_almost_eq(back.x, out_p.x, 0.05,
+				"inverse must recover the display x within 1/20 px (k=%s, p=%s)" % [k, out_p])
+			assert_almost_eq(back.y, out_p.y, 0.05,
+				"inverse must recover the display y within 1/20 px (k=%s, p=%s)" % [k, out_p])
+
+func test_lens_display_point_pushes_content_outward_and_pins_corners() -> void:
+	var canvas := Vector2(792.0, 444.0)
+	var aspect := 792.0 / 444.0
+	# Centre magnification: a mid-radius source point DISPLAYS farther from the centre than it was rendered.
+	var src := Vector2(550.0, 300.0)
+	var disp: Vector2 = CameraSettings.lens_display_point(src, canvas, aspect, 0.12)
+	var centre := canvas * 0.5
+	assert_gt((disp - centre).length(), (src - centre).length(),
+		"a positive bend magnifies the centre, so displayed points sit OUTWARD of their rendered position")
+	# The corner is pinned by the shader's (1 + k) normalisation — the inverse must honour it.
+	var corner := Vector2(792.0, 444.0)
+	var back: Vector2 = CameraSettings.lens_display_point(corner, canvas, aspect, 0.5)
+	assert_almost_eq(back.x, corner.x, 0.05, "corners are pinned at any bend (x)")
+	assert_almost_eq(back.y, corner.y, 0.05, "corners are pinned at any bend (y)")

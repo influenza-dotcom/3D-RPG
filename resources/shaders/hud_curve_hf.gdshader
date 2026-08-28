@@ -23,14 +23,15 @@ render_mode blend_premul_alpha;
 // magnifies whatever it does -- a linear tap there is the one change that would soften the whole HUD, and
 // the uniform hint beats the node's texture_filter either way.
 //
-// (*) THIS FILE IS TWINNED: filter hints are COMPILE-TIME, so the HIGH FIDELITY presentation (a NATIVE-res
-// curve viewport, where a nearest tap at the warp's non-integer offsets stairsteps every bowed line) ships
-// as the sibling hud_curve_hf.gdshader -- byte-identical to this file except `filter_linear` on hud_tex
-// and the header. ui.gd (_apply_hud_curve) swaps them live off Settings.native_scale(). ANY edit to this
-// shader must land in BOTH files -- enforced: tests/test_hud_curve.gd diffs the twins' non-comment lines
-// and fails the suite on any fork.
+// (*) THIS FILE IS THE TWIN: the HIGH-FIDELITY build of resources/shaders/hud_curve.gdshader -- kept
+// byte-identical to it except `filter_linear` on hud_tex (here, for the NATIVE-res curve viewport, where
+// a nearest tap at the warp's non-integer offsets would stairstep every bowed line) vs the original's
+// `filter_nearest` (the authored RETRO crunch, pinned by tests/test_hud_curve.gd) and this paragraph.
+// ui.gd (_apply_hud_curve) swaps them live off Settings.native_scale(). ANY edit to this shader must
+// land in BOTH files -- enforced: tests/test_hud_curve.gd diffs the twins' non-comment lines and fails
+// the suite on any fork.
 
-uniform sampler2D hud_tex : repeat_disable, filter_nearest;
+uniform sampler2D hud_tex : repeat_disable, filter_linear;
 // Per-axis bend. `.x` bends the X coordinate (so VERTICAL lines bow), `.y` bends Y (so HORIZONTAL lines
 // bow) -- see warp() for the cross-coupling that makes that true.
 //

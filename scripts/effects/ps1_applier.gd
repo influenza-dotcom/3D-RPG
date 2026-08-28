@@ -24,7 +24,9 @@ extends Node
 ## the pure, unit-tested `warp_params()` below.
 ##
 ## Skips: Characters (player, enemies) + Throwables (gibs/crates), so their outline/hit-flash
-## overlays survive; transparent/cutout materials (foliage, glass), because the warp shader is
+## overlays survive; InkOutline's invisible tint duplicates (meta `npc_tint_dup`) wherever they hang,
+## because their shared depth-encoding material is infrastructure and must never be swapped;
+## transparent/cutout materials (foliage, glass), because the warp shader is
 ## opaque — pushing alpha through it would punch holes in the mesh and its shadow; and any
 ## non-BaseMaterial3D surface — a ShaderMaterial (authored effect, OR our own ps1 override on a
 ## re-walk, so the walk is idempotent) or a material-less surface has no albedo to carry into the
@@ -39,18 +41,24 @@ extends Node
 ## Snap-grid density: cells across the screen = 2 * value, and — because the func_godot brush mesh is
 ## UNWELDED (private per-face vertices, T-junctions, float-approximate corners) — every edge can tear
 ## open by up to ONE CELL, showing the sky through hollow buildings. So cell width = wobble amplitude
-## = max tear width: ONE dial. 396 = one cell per texel of the ACTUAL 792-wide screen buffer (396x216
-## window x viewport-stretch 0.5 -> 792x444; ui.tscn's post render_scale 1584 is finer than the buffer,
-## so the buffer texel is the real pixel), the authentic PS1 ratio — every snap step is exactly one
-## screen texel and tears read as pixel crawl, not holes. LOWER = chunkier wobble but proportionally
-## wider sky-holes (the old 80 tore ~12px gaps). This is the FULL-intensity (100%) base — the
-## accessibility slider scales the visible jitter down from here.
+## = max tear width: ONE dial. The grid is authored in NDC (screen-proportional), NOT in buffer pixels:
+## 396 = a virtual 792-cells-across-the-screen grid, which equals one texel of the low-res buffer only
+## under RETRO presentation (its ~792x444 viewport stretch — there every snap step is exactly one screen
+## texel and tears read as pixel crawl, the authentic PS1 ratio). Under HIGH FIDELITY the same NDC grid
+## means one cell = ~Settings.native_scale() render px (~2.4 at 1080p): the on-screen wobble/tear SIZE
+## is unchanged, but tears render crisp against the native-res image instead of quantizing into pixel
+## crawl (a windowed-QA judgement call — see ps1.gdshader's SEAM WARNING). FOOT-GUN: do NOT "compensate"
+## by multiplying this by native_scale() — that DIVIDES the wobble amplitude ~2.4x and deletes the PS1
+## look; no code change is correct here. LOWER = chunkier wobble but proportionally wider sky-holes
+## (the old 80 tore ~12px gaps). This is the FULL-intensity (100%) base — the accessibility slider
+## scales the visible jitter down from here.
 @export var vertex_snap: float = 396.0
 ## Far fade (metres of view depth): the snap eases out across [start, end] and distant geometry
 ## renders UNWARPED. This is what stops DISTANT BUILDINGS from strobing: the map's coplanar flush
 ## brush faces z-fight, and per-frame snap jitter re-randomizes the winner (flashing) while seam
-## tears pierce to the sky and the camera's 30m far-DOF re-blurs the jitter (shimmer). The fade is
-## continuous in depth, so it can never tear a seam open itself; wobble stays full up close.
+## tears pierce to the sky — and any live far DoF (ADS-only since 2026-08-24; the resting camera's
+## old 30 m far blur is retired) re-blurs the jitter into shimmer. The fade is continuous in depth,
+## so it can never tear a seam open itself; wobble stays full up close.
 @export_range(1.0, 200.0, 0.5, "or_greater") var snap_far_fade_start: float = 20.0
 @export_range(1.0, 400.0, 0.5, "or_greater") var snap_far_fade_end: float = 40.0
 ## Near fade (metres of view depth): the snap also eases IN across [start, end] from the camera, so
@@ -182,6 +190,15 @@ func _warp(node: Node) -> void:
 	# view-model / full-screen post-process quads (e.g. the pixel.gdshader screen quad) — warping either is
 	# never intended, so skip their whole subtree.
 	if node is Character or node is Throwable or node is Camera3D:
+		return
+	if node.has_meta(&"npc_tint_dup"):
+		# DEFENSIVE: InkOutline's invisible disposition-tint duplicate. Unreachable today by two independent
+		# accidents — the Character/Throwable prune above covers the actors that carry one, and `_ps1ify` only
+		# swaps `src is BaseMaterial3D` surfaces while a duplicate wears the shared tint ShaderMaterial. Neither
+		# holds for long: tint duplicates are about to land on world PROPS, which this walk DOES reach. Overwriting
+		# the shared tint material rasterises garbage depth + a garbage id into the tint buffer, and that buffer's
+		# R/G log-depth bytes read as moving yellow/green stripe bands once anything draws them (reported
+		# 2026-08-25; see scripts/effects/body_part_gib.gd). A duplicate has no children — nothing to recurse into.
 		return
 	if node is MeshInstance3D:
 		_ps1ify(node as MeshInstance3D)

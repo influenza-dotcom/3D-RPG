@@ -61,7 +61,7 @@ var _feed: TextureRect = null
 var _layer: CanvasLayer = null
 var _display: ColorRect = null
 var _mat: ShaderMaterial = null
-var _size: Vector2i = Vector2i.ZERO
+var _size: Vector2i = Vector2i.ZERO  ## accumulator size — the ROOT render target's own texture size, not the logical canvas
 var _running: bool = false
 var _warmup: int = 0
 var _gun_mask: Texture2D = null
@@ -107,7 +107,14 @@ func build(host: CanvasLayer) -> bool:
 	var vp := host.get_viewport()
 	if vp == null:
 		return false
-	_size = Vector2i(vp.get_visible_rect().size.round())
+	# Size from Settings.render_size() — the root render target this buffer averages 1:1: the NATIVE window
+	# size under HIGH FIDELITY (while get_visible_rect() keeps reporting the logical ~792x444 canvas), the
+	# canvas in RETRO, where this is bit-identical to the old behaviour. ⭐NOT vp.get_texture().get_size():
+	# on 4.7 the root Window's ViewportTexture REPORTS an inflated size under canvas_items (window x the
+	# per-axis stretch, measured 2069x1168 for a 1280x720 window on 2026-08-25) while the texture's actual
+	# CONTENT — proven by get_image(), which returned exactly 1280x720 — is the window size. Sizing from
+	# that report oversized the accumulator ~1.6x: a wasteful upscale-accumulate-downscale round trip.
+	_size = Settings.render_size()
 	if _size.x <= 0 or _size.y <= 0:
 		return false
 	_host = host
@@ -130,6 +137,12 @@ func build(host: CanvasLayer) -> bool:
 	_feed = TextureRect.new()
 	_feed.name = "Feed"
 	_feed.texture = vp.get_texture()
+	# EXPAND_IGNORE_SIZE is the belt on that 1:1 draw: the default EXPAND_KEEP_SIZE makes the texture the
+	# rect's MINIMUM size, so a native root texture inside a smaller buffer (one frame of a presentation
+	# flip, a resize race) would hold a top-left CROP of the frame — and the composite would paint that
+	# mis-registered difference across the whole screen. With the sizes matched (the invariant above) the
+	# flag changes nothing.
+	_feed.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_feed.size = Vector2(_size)
 	_feed.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_feed.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST  # 1:1, never resample the picture
@@ -185,10 +198,13 @@ func poll(delta: float, yaw_rate: float, pitch_rate: float) -> void:
 	_feed.modulate.a = blend_for(delta, fx.world_ghost_tau)
 	_mat.set_shader_parameter(&"strength", strength)
 	_mat.set_shader_parameter(&"dead_zone", maxf(fx.world_ghost_dead_zone, 0.0))
-	# The split is authored in PIXELS and handed over in UV, so the same knob means the same visual width at
-	# any resolution. Scaled by the player dial with everything else.
+	# The split is authored in CANVAS PIXELS and handed over in UV — divided by the LOGICAL canvas size, not
+	# the buffer's (possibly native) _size, so the knob keeps meaning the same visual width in both
+	# presentations: canvas px / canvas size IS render px / render size, and in RETRO the two divisors are
+	# the same numbers. Scaled by the player dial with everything else.
 	var px := chroma_offset(yaw_rate, pitch_rate, fx.world_ghost_chroma_gain, fx.world_ghost_chroma_px * scale)
-	_mat.set_shader_parameter(&"chroma", px / Vector2(maxi(_size.x, 1), maxi(_size.y, 1)))
+	var canvas := _host.get_viewport().get_visible_rect().size if (_host != null and _host.is_inside_tree()) else Vector2(_size)
+	_mat.set_shader_parameter(&"chroma", px / Vector2(maxf(canvas.x, 1.0), maxf(canvas.y, 1.0)))
 	_refresh_gun_mask()
 
 
@@ -212,15 +228,19 @@ func _refresh_gun_mask() -> void:
 		_mat.set_shader_parameter(&"gun_mask", _gun_mask)
 
 
-## Track the canvas size (stretch aspect is "expand", so it is not a constant) and re-clear through the
-## change — a resized render target's contents are undefined, and here that would composite as noise.
+## Track the ROOT render target's size — Settings.render_size(), to match build() (see there for why NOT
+## vp.get_texture().get_size(), whose report is inflated under canvas_items on 4.7). It is not a constant
+## twice over: the stretch aspect is "expand" (a window resize changes it), and a mid-session presentation
+## flip swaps it between native and the logical canvas without the canvas moving — the re-clear + warmup
+## below covers both for free. A resized render target's contents are undefined, and here stale contents
+## would composite as noise.
 func _match_canvas_size() -> void:
 	if _host == null or not _host.is_inside_tree():
 		return
 	var vp := _host.get_viewport()
 	if vp == null:
 		return
-	var now := Vector2i(vp.get_visible_rect().size.round())
+	var now := Settings.render_size()
 	if now.x <= 0 or now.y <= 0 or now == _size:
 		return
 	_size = now

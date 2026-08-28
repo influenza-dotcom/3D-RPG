@@ -23,16 +23,32 @@ uniform float dither_strength : hint_range(0.0, 1.0) = 1.0;
 // and LOWER = chunkier. (An older comment here claimed 0.5/1.0/2.0 = double/native/half res; that
 // divisor semantic was never what the code did, and believing it is how ui.tscn ended up at 960.)
 //
-// PITFALL — keep it either well BELOW or well ABOVE the real back-buffer width, never just above it.
-// The back buffer is 792 px wide (project.godot: 396 viewport x stretch scale 0.5). A cell count
-// slightly FINER than the buffer is not a downscale at all: it is a resample through a grid the
-// source cannot feed, so floor() maps several output columns onto the same source column and skips
-// others entirely. At 960-over-792 that silently dropped 168 of 792 source columns (21%) in a fixed
-// 4-5 px comb, which chews on exactly the highest-frequency thing on screen — fence weave, railings,
-// aerials, window mullions — and makes them crawl when you pan.
-//   < 792  = a real chunky downscale (computerroom.tscn uses 320 for the CRT look — intended)
-//   >= ~2x = effectively no downscale, quantization lands sub-pixel (ui.tscn uses 1584)
+// PITFALL — keep it either well BELOW or well ABOVE the CURRENT presentation's back-buffer width,
+// never just above it. That width depends on Settings.presentation: RETRO renders into the classic
+// ~792 px buffer (project.godot: 396 viewport x stretch scale 0.5); HIGH FIDELITY renders at the
+// NATIVE window width (1920 at 1080p, more on ultrawide/4K). A cell count slightly FINER than the
+// buffer is not a downscale at all: it is a resample through a grid the source cannot feed, so
+// floor() maps several output columns onto the same source column and skips others entirely. At
+// 960 cells over RETRO's 792 columns that silently dropped 168 of 792 source columns (21%) in a
+// fixed 4-5 px comb, which chews on exactly the highest-frequency thing on screen — fence weave,
+// railings, aerials, window mullions — and makes them crawl when you pan.
+//   well below the buffer = a real chunky downscale, safe in BOTH modes (computerroom.tscn uses
+//                           320 for the CRT look — intended)
+//   >= ~2x the buffer     = effectively no downscale, quantization lands sub-pixel. ui.tscn authors
+//                           1584 (2x RETRO's 792); under HIGH FIDELITY the player's per-frame poll
+//                           (player.gd _update_low_hp) re-pushes >= 2x the LIVE buffer width so the
+//                           no-op stays a no-op at any window size.
 uniform float render_scale = 320.0;
+
+// Render px per LOGICAL canvas px on the back buffer — the presentation-split compensation for the
+// pixel-grid effects below (the Bayer dither cell and the film-grain speckle). Driven every frame by
+// player.gd's _update_low_hp poll as maxf(1.0, roundf(Settings.native_scale())): 1.0 in RETRO, 2.0 at
+// 1080p HIGH FIDELITY — ROUNDED, because the raw ~2.42 would make alternating 2/3 px cells that crawl
+// on pans. The default is the RETRO identity 1.0 so an UN-DRIVEN material (computerroom.tscn's CRT
+// wall, this shader on a bare quad in the editor) keeps its authored per-buffer-pixel look
+// byte-identical — the quantize_levels-sentinel philosophy. The default must stay a LITERAL:
+// arithmetic in a uniform default fails the WHOLE shader compile (test_color_quantization.gd pins it).
+uniform float pixel_scale = 1.0;
 
 // --- Colour quantization (Options -> Video -> Colour Depth; pushed live by player.gd, the contrast /
 //     dither_strength idiom) ---
@@ -67,6 +83,19 @@ uniform vec3 hurt_tint : source_color = vec3(0.7, 0.05, 0.06);
 //     vignette + colour drain so the world tunnels + greys as you bleed out. Distinct from the
 //     transient red `hurt` flash above. ---
 uniform float low_hp : hint_range(0.0, 1.0) = 0.0;
+
+// --- Fall warning (sustained, driven from code while you FALL): a PURE drain of colour toward grayscale,
+//     scaled by how much of your remaining HP the landing would cost. 0 = safe (or not falling at all); 1 = the
+//     drop below you KILLS you and the frame is completely grey. Cyberpunk 2077's fall read, and the reason it
+//     works there is that it is ONLY a desaturation — deliberately no vignette and no darkening, unlike `hurt`
+//     / `low_hp` above and the death cinematic below, all three of which already own "the edges close in" and
+//     would muddle a warning that has to be legible in the half-second before you land.
+//
+//     Driven every physics frame by player.gd `_update_fall_grey`, which SNAPS the value to exactly 0 once you
+//     are grounded — so the `> 0.0` gate in the fragment really is free on every non-falling frame, and the
+//     default of 0 leaves an UN-driven material (computerroom.tscn's CRT wall, this shader on a bare quad in
+//     the editor) bit-identical to a build without the feature. ---
+uniform float fall_grey : hint_range(0.0, 1.0) = 0.0;
 
 // --- Death cinematic (driven from code on player death): a FULL grayscale drain (death_bw), a black
 //     vignette that CLOSES from the edges to the centre (death_vignette), and a flat fade of the whole
@@ -247,12 +276,14 @@ void fragment() {
         // Dither on the DOWNSCALED grid, not on raw fragments. `low_res_uv` already names the block this
         // fragment took its colour from, so mapping it back to pixels hands every fragment inside one
         // chunky block the SAME threshold — one dithered colour per VISIBLE pixel, instead of a sub-block
-        // pattern that shimmers as the camera moves. Where render_scale is at or above the back-buffer
-        // width (ui.tscn ships 1584 over a 792 px buffer = no real downscale) this collapses exactly back
-        // to the fragment's own integer coordinate, so the shipped chain gets a true 1:1 screen-pixel
-        // Bayer. Derived from low_res_uv rather than render_scale so it can never disagree with whatever
-        // grid step 1 actually sampled.
-        ivec2 dither_px = ivec2(floor(low_res_uv / SCREEN_PIXEL_SIZE));
+        // pattern that shimmers as the camera moves. Dividing by SCREEN_PIXEL_SIZE * pixel_scale makes one
+        // dither cell = pixel_scale BUFFER pixels: in RETRO (pixel_scale 1.0, render_scale at or above the
+        // 792 px buffer as ui.tscn ships it) this collapses exactly back to the fragment's own integer
+        // coordinate — the same true 1:1 buffer-pixel Bayer as before the presentation split — while under
+        // HIGH FIDELITY's native buffer it keeps the cell at its authored ~1-canvas-px size instead of
+        // shrinking to one native pixel of fine noise. Derived from low_res_uv rather than render_scale so
+        // it can never disagree with whatever grid step 1 actually sampled.
+        ivec2 dither_px = ivec2(floor(low_res_uv / (SCREEN_PIXEL_SIZE * pixel_scale)));
         threshold = mix(0.5, bayer(dither_px, bayer_order), dither_strength);
     }
     // ONE threshold across all three channels on purpose: an ordered dither is a spatial decision about
@@ -284,6 +315,22 @@ void fragment() {
         final_color *= lhp_vig;
     }
 
+    // --- 4c-2. Fall warning: drain the colour out of the world as the drop below you turns lethal. Sits right
+    //     AFTER the low-HP drain on purpose — a wounded player's fall then greys out from an already-drained
+    //     frame instead of the two passes fighting over the same pixels — and BEFORE daltonization / contrast /
+    //     grain, exactly like `low_hp`, because this is a world colour GRADE and not a cinematic override: the
+    //     grain still lays over it and the accessibility passes still get the last word. (The death cinematic's
+    //     `death_bw` at step 6 is the one that overrides everything, which is what makes a fall DEATH continuous
+    //     — the frame is already fully grey when the cinematic takes it over.)
+    //
+    //     `mix(colour, vec3(luma), 1.0)` is EXACT grayscale at the top of the range, which is the whole promise:
+    //     "completely grey" has to mean completely, or the player cannot read the difference between a fall that
+    //     hurts a lot and a fall that kills.
+    if (fall_grey > 0.0) {
+        float fg_lum = dot(final_color, vec3(0.299, 0.587, 0.114));
+        final_color = mix(final_color, vec3(fg_lum), clamp(fall_grey, 0.0, 1.0));
+    }
+
     // --- 4d. Colorblind correction (daltonization), applied to the finished image. ---
     if (colorblind_mode > 0) {
         final_color = daltonize(final_color, colorblind_mode);
@@ -304,7 +351,19 @@ void fragment() {
     // small and the grain stays per-pixel fine at any uptime. 13.7 is an arbitrary non-integer rate so
     // the wrap phase never locks to a frame-rate multiple.
     float grain_t = fract(TIME * 13.7);
-    float noise = (fract(sin(dot(SCREEN_UV * (1.0 / grain_size) + grain_t, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 2.0;
+    // Above pixel_scale 1.0 the hash input is SNAPPED to the same compensated grid as the dither cell, so
+    // one grain speckle = pixel_scale BUFFER pixels. That is a CHOICE: the chunky per-buffer-pixel grain is
+    // part of the authored look (it matches the pixelation), so it must SURVIVE HIGH FIDELITY's native
+    // buffer — hashed from raw per-fragment SCREEN_UV there, the speckle shrinks to one native pixel and
+    // reads ~2.4x finer/weaker than authored. The 1.0 branch keeps the RETRO chain (and every un-driven
+    // material) BIT-identical to the pre-presentation-split shader: snapping would preserve the speckle
+    // size and amplitude but move each fragment's hash seed from its pixel centre to its cell corner,
+    // re-seeding the whole random field — imperceptible for animated noise, but not identical.
+    vec2 grain_uv = SCREEN_UV;
+    if (pixel_scale > 1.0) {
+        grain_uv = floor(SCREEN_UV / (SCREEN_PIXEL_SIZE * pixel_scale)) * (SCREEN_PIXEL_SIZE * pixel_scale);
+    }
+    float noise = (fract(sin(dot(grain_uv * (1.0 / grain_size) + grain_t, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 2.0;
     final_color += noise * grain_amount;
 
     // --- 6. Death cinematic: drain the finished frame to grayscale, then fade it to black. Applied last

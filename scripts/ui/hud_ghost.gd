@@ -7,12 +7,12 @@ extends Node
 ##       accumulator that keeps a decaying image of every previous frame.
 ## @risk Any HUD element that SAMPLES THE SCREEN (hint_screen_texture / BackBufferCopy) must be excluded
 ##       from the capture — inside the accumulator the "screen" is the HUD-only buffer, so an inverting or
-##       full-frame post shader reads garbage there. See ui.gd's exclusion block and ui.set_scoped.
+##       full-frame post shader reads garbage there. See ui.gd's exclusion block.
 ## @risk The DISPLAY rect lives on the very layer it is showing, so it MUST be excluded from the capture
 ##       or the accumulator feeds on its own output and runs away to white within a few frames.
 ## @test res://tests/test_hud_ghost.gd
 ##
-## SUBTLE HUD GHOSTING — phosphor persistence for the instrument panel and the reticle.
+## SUBTLE HUD GHOSTING — phosphor persistence for the instrument panel.
 ##
 ## The fiction: this HUD is a CRT/analog readout, not a decal on the glass. Two things follow from that,
 ## and this component is both of them:
@@ -21,17 +21,22 @@ extends Node
 ##      accumulated into an offscreen buffer that is multiplied down a little each frame (frame-rate
 ##      independently: the buffer loses 1/e of itself every `hud_ghost_tau` seconds), and that buffer is
 ##      drawn BEHIND the live HUD. Anything that MOVES or CHANGES therefore drags a soft tail — the corner
-##      panel under the HUD-weight spring, minimap dots, a draining stamina ring, toasts, the +N money
+##      panel under the HUD-weight spring, minimap dots, a filling HP segment, toasts, the +N money
 ##      float, the hitmarker, a prompt appearing. Anything that sits still is pixel-identical to today:
 ##      the ghost of a static element is hidden exactly behind the element.
 ##
-##   2. LATENCY. The reticle is welded to screen centre (Player._update_crosshair), so persistence ALONE
-##      would never show on it — a static image has no tail. So the captured HUD is drawn into the
-##      accumulator at a LAGGED position: a first-order lag of the camera's look rate, a couple of pixels
-##      at most (`hud_ghost_drag_gain` / `hud_ghost_drag_max`). Camera still -> zero offset -> the ghost is
-##      invisible behind the live HUD. Camera turning -> the ghost slides out from under the whole HUD,
-##      crosshair included, and the persistence smears it into a tail. That is the "including the
-##      crosshair" half of the effect, and it costs one RenderingServer call per frame.
+##   2. LATENCY. A screen-locked readout never moves, so persistence ALONE would never show on it — a
+##      static image has no tail. So the captured HUD is drawn into the accumulator at a LAGGED position: a
+##      first-order lag of the camera's look rate, a couple of pixels at most (`hud_ghost_drag_gain` /
+##      `hud_ghost_drag_max`). Camera still -> zero offset -> the ghost is invisible behind the live HUD.
+##      Camera turning -> the ghost slides out from under the whole captured image and the persistence
+##      smears it into a tail, so the minimap frame, the ammo line and the hotbar trail a turn the same way
+##      the swaying panel does. It costs one RenderingServer call per frame.
+##      ⭐THE AIM CLUSTER IS OUT OF THE CAPTURE (ui.gd _build_ghost rule 4), so this lag no longer reaches
+##      the crosshair or the stamina ring. That WAS this half's headline case ("including the crosshair");
+##      the user's call is that an echo at the aim point reads as a second, blurred reticle rather than as
+##      character. The lag stays because it is still the only thing that makes any other screen-locked
+##      readout participate — a drag_max of 0 would leave the whole static half of the HUD tailless.
 ##
 ## WHY A SECOND VIEWPORT AND NOT A NODE REFACTOR: the HUD keeps rendering to the window EXACTLY as before.
 ## Nothing is reparented, no z-order changes, no element loses its screen sampler, and turning the effect
@@ -40,12 +45,13 @@ extends Node
 ## viewer — plus per-CanvasItem opt-outs through `visibility_layer`.
 ##
 ## THE GHOST RULE (what is captured): an INSTRUMENT READOUT ghosts; a FULL-SCREEN WASH, a WORLD-DIRECTION
-## annotation and THE VIEW MODEL do not. So the corner panel, the reticle, the stamina ring, the look-at
-## name, the hitmarker, the centre prompt ladder and the enemy health bar all trail; the hurt/kill/dash
-## flashes, the speed vignette, the blood splatter, the directional damage/aim arcs, the sniper glints, the
-## scope optics and the gun/arms composite do not (a smeared full-screen wash is mud, a lagging bearing
-## would LIE about a direction, and the weapon in your hands is the WORLD, not a readout — it only touches
-## this layer because that is where its SubViewport is composited back in).
+## annotation, THE AIM CLUSTER and THE VIEW MODEL do not. So the corner panel, the look-at name, the
+## hitmarker, the centre prompt ladder and the enemy health bar all trail; the hurt/kill/dash flashes, the
+## speed vignette, the blood splatter, the directional damage/aim arcs, the sniper glints, the scope optics,
+## the crosshair + stamina ring and the gun/arms composite do not (a smeared full-screen wash is mud, a
+## lagging bearing would LIE about a direction, an echo at the aim point reads as a second reticle, and the
+## weapon in your hands is the WORLD, not a readout — it only touches this layer because that is where its
+## SubViewport is composited back in).
 ## Opting out is one line — `HudGhost.set_ghosted(node, false)` — and it carries to the node's whole
 ## subtree, because the renderer culls a canvas item's children along with it.
 
@@ -73,9 +79,9 @@ var _display: TextureRect = null
 var _decay_mat: ShaderMaterial = null
 var _display_mat: ShaderMaterial = null
 var _canvas: RID = RID()           ## the HUD canvas we attached; kept so _exit_tree can detach it cleanly
-var _size: Vector2i = Vector2i.ZERO
+var _size: Vector2i = Vector2i.ZERO  ## accumulator size — the ROOT RENDER TARGET (Settings.render_size()), not the logical canvas
 var _running: bool = false         ## the accumulator is currently rendering (mirrors the strength gate)
-var _drag: Vector2 = Vector2.ZERO  ## current lagged offset (px, canvas space) the capture is drawn at
+var _drag: Vector2 = Vector2.ZERO  ## current lagged offset (CANVAS px — the knobs' unit); scaled to render px + rounded at the stamp
 var _ramp_source: Gradient = null  ## the Gradient the live ramp texture was baked from, for change detection
 var _ramp_tex: GradientTexture1D = null
 
@@ -167,7 +173,11 @@ func build(ui: CanvasLayer, screen_pass: CanvasItem = null) -> bool:
 	var vp := ui.get_viewport()
 	if vp == null:
 		return false
-	_size = Vector2i(vp.get_visible_rect().size.round())
+	# Size from the ROOT RENDER TARGET (Settings.render_size()), not the logical canvas: under HIGH FIDELITY
+	# the window renders at native res while get_visible_rect() keeps reporting the ~792x444 canvas the HUD
+	# lays out against — a canvas-sized buffer there would capture a low-res echo behind a native-crisp HUD.
+	# In RETRO the render target IS the canvas and this is bit-identical to the old behaviour.
+	_size = Settings.render_size()
 	if _size.x <= 0 or _size.y <= 0:
 		return false
 	_ui = ui
@@ -207,7 +217,12 @@ func build(ui: CanvasLayer, screen_pass: CanvasItem = null) -> bool:
 	_display.name = "HudGhost"
 	_display.texture = _accum.get_texture()
 	_display.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_display.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST  # 1:1 with the canvas; never resample the HUD
+	_display.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST  # 1:1 with the RENDER TARGET (buffer == Settings.render_size()); never resample the HUD
+	# Draw the texture across the full-rect Control whatever the sizes: the default EXPAND_KEEP_SIZE would
+	# make the native accumulator texture this rect's MINIMUM size in LOGICAL px under HIGH FIDELITY —
+	# anchors lose to minimum size, so the ghost would blow up ~2.4x past the screen. Identity in RETRO,
+	# where the texture already equals the full-rect exactly.
+	_display.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_display_mat = ShaderMaterial.new()
 	_display_mat.shader = _make_display_shader()
 	_refresh_ramp()
@@ -221,12 +236,15 @@ func build(ui: CanvasLayer, screen_pass: CanvasItem = null) -> bool:
 	_display.visible = false  # poll() opens it once a strength is known; OFF must cost nothing on frame one
 	# THE CAPTURE ITSELF: attach the HUD's existing canvas to the accumulator as a SECOND viewer. The canvas
 	# stays attached to the window exactly as before — this adds a viewer, it does not move one. Stacking
-	# layer 1 puts it above the decay quad's canvas (0); the transform is re-stamped every frame by poll().
+	# layer 1 puts it above the decay quad's canvas (0). The transform reproduces the root window's CONTENT
+	# SCALE, which a second viewer does NOT inherit (under HIGH FIDELITY the window scales the HUD canvas to
+	# native itself; in here nobody does unless this stamp says so — without it the capture lands in the
+	# top-left ~41% of a native buffer). Re-stamped, with the drag offset folded in, every frame by poll().
 	_canvas = _ui.get_canvas()
 	var rid := _accum.get_viewport_rid()
 	RenderingServer.viewport_attach_canvas(rid, _canvas)
 	RenderingServer.viewport_set_canvas_stacking(rid, _canvas, 1, 0)
-	RenderingServer.viewport_set_canvas_transform(rid, _canvas, Transform2D())
+	RenderingServer.viewport_set_canvas_transform(rid, _canvas, Transform2D(0.0, _capture_scale(), 0.0, Vector2.ZERO))
 	return true
 
 
@@ -263,13 +281,18 @@ func poll(delta: float, yaw_rate: float, pitch_rate: float, may_show: bool) -> v
 	_display_mat.set_shader_parameter(&"tail_lift", maxf(hud.hud_ghost_tail_lift, 0.01))
 	# The latency offset: where the capture is drawn RELATIVE to the live HUD. Its cap rides the same player
 	# dial as the strength, so one slider takes the whole effect from full to silent — and a player who
-	# wants persistence with no double vision zeroes hud_ghost_drag_max instead. Rounded to whole canvas
-	# pixels: the display samples the accumulator 1:1 with a NEAREST filter, and a fractional offset would
-	# shimmer the ghost's edges against that grid instead of sliding cleanly.
+	# wants persistence with no double vision zeroes hud_ghost_drag_max instead. _drag stays in CANVAS px
+	# (the drag knobs keep their authored meaning in both presentations) but it is rounded in RENDER px,
+	# inside the content-scaled capture transform: the display samples the accumulator 1:1 with a NEAREST
+	# filter, so the offset must land on whole TEXELS — rounding the canvas-px value first would both
+	# quantize the lag to ~2.4-render-px jumps under HIGH FIDELITY and still land between texels, shimmering
+	# the ghost's edges against that grid instead of sliding cleanly. RETRO: sc == (1, 1), so this line is
+	# bit-identical to the old Transform2D(0.0, _drag.round()).
 	var target := drag_target(yaw_rate, pitch_rate, hud.hud_ghost_drag_gain, hud.hud_ghost_drag_max * scale)
 	_drag = lag_step(_drag, target, hud.hud_ghost_drag_response, delta)
+	var sc := _capture_scale()
 	RenderingServer.viewport_set_canvas_transform(_accum.get_viewport_rid(), _canvas,
-			Transform2D(0.0, _drag.round()))
+			Transform2D(0.0, sc, 0.0, (_drag * sc).round()))
 
 
 ## Seat the display rect in the HUD layer's draw order: immediately AFTER the screen-space post-process pass,
@@ -321,23 +344,40 @@ func _refresh_ramp() -> void:
 	_display_mat.set_shader_parameter(&"ramp", _ramp_tex)
 
 
-## Keep the accumulator the same size as the canvas. The window stretch aspect is "expand", so the canvas
-## is NOT a constant — a resize or a resolution change hands the HUD a different rect, and a stale buffer
-## would stretch the ghost across it. Re-clear on the way through: a resized render target's contents are
-## undefined.
+## Keep the accumulator the same size as the ROOT RENDER TARGET (Settings.render_size(), read LIVE — the
+## reason this is a per-frame poll). That size is not a constant twice over: the stretch aspect is
+## "expand", so a window resize hands the HUD a different rect — and a mid-session presentation flip
+## changes the render size without touching the logical canvas at all, so tracking the render size makes
+## this same guard re-clear through a RETRO<->HIGH FIDELITY switch for free. Re-clear on the way through
+## regardless: a resized render target's contents are undefined.
 func _match_canvas_size() -> void:
 	if _ui == null or not _ui.is_inside_tree():
 		return
-	var vp := _ui.get_viewport()
-	if vp == null:
-		return
-	var now := Vector2i(vp.get_visible_rect().size.round())
+	var now := Settings.render_size()
 	if now.x <= 0 or now.y <= 0 or now == _size:
 		return
 	_size = now
 	_accum.size = now
 	_decay.size = Vector2(now)
 	_accum.render_target_clear_mode = SubViewport.CLEAR_MODE_ONCE
+
+
+## Render px per LOGICAL canvas px of the capture, PER AXIS — the root window's content scale, which the
+## accumulator's second viewer does not inherit, reproduced for the capture transform. Per-axis
+## (Vector2(_size) / canvas) rather than the scalar Settings.native_scale(), because the "expand" stretch
+## is slightly anisotropic (1920/792 != 1080/~444) and a scalar would land the capture a pixel off the
+## buffer's far edge on one axis. (1, 1) in RETRO — the buffer IS the canvas — so every use of it reduces
+## to the mathematical identity there.
+func _capture_scale() -> Vector2:
+	if _ui == null or not _ui.is_inside_tree():
+		return Vector2.ONE
+	var vp := _ui.get_viewport()
+	if vp == null:
+		return Vector2.ONE
+	var canvas := vp.get_visible_rect().size
+	if canvas.x <= 0.0 or canvas.y <= 0.0:
+		return Vector2.ONE
+	return Vector2(_size) / canvas
 
 
 ## Detach the borrowed canvas before this node (and the accumulator's RID with it) goes away. The canvas

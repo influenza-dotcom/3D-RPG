@@ -7,7 +7,10 @@ extends Node
 ## It also proves the three STRUCTURAL claims the curve rests on, printed as QA_STRUCT lines:
 ##   1. the carrier really moves inside the SubViewport when the bend is on, and really comes back out at 0
 ##      (OFF is the old tree, not an identity pass);
-##   2. the SubViewport tracks the live canvas rather than a hardcoded 792x444;
+##   2. the SubViewport tracks the live Settings.render_size() target rather than a hardcoded 792x444 —
+##      the logical canvas in RETRO, the native window in HIGH FIDELITY; equal to the canvas under this
+##      run's RETRO pin, and the QA_STRUCT line prints the live Settings.native_scale() beside canvas=
+##      so the equality stays self-checking in either mode;
 ##   3. hide_hud_for_death() still takes the panel down as ONE unit through the composite — the sweep walks
 ##      direct CanvasItem children, and a SubViewport is not one.
 ##
@@ -22,6 +25,10 @@ extends Node
 ## (*) NEVER call a Settings.set_* here: those setters call save_settings() and would rewrite the developer's
 ## real user://settings.cfg. The plain var is assigned directly instead (ui.gd polls it live), and the
 ## authored amount is pushed onto the in-memory HudSettings, which is never written back to disk.
+##
+## RETRO-PINNED via that same plain-var route: _run assigns Settings.presentation = PRESENTATION_RETRO and
+## calls apply_video(), so the shots stay the deterministic 792x444 pixel look regardless of the dev's saved
+## presentation. A HIGH FIDELITY sweep is a separate follow-up harness.
 
 var _dir := "user://hud_curve_qa_shots"
 
@@ -45,6 +52,16 @@ func _run() -> void:
 	# 1280x720 is 16:9, so the canvas is the true 792x444.
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	DisplayServer.window_set_size(Vector2i(1280, 720))
+	# RETRO pin (see header rule (*)): PLAIN vars + apply_video(), never a Settings.set_*(). window_mode /
+	# windowed_size are pinned too because apply_video() re-applies the stored mode (the dev's saved
+	# fullscreen would take the desktop back), and render_scale 2.0 is RETRO's authored 3D supersample
+	# (project.godot rendering/scaling_3d/scale — an HF cfg carries 1.0, which would soften the 3D world
+	# behind the panel). Nothing here persists: only the setters write the cfg.
+	Settings.presentation = Settings.PRESENTATION_RETRO
+	Settings.window_mode = Settings.WINDOW_MODES.find(Window.MODE_WINDOWED)
+	Settings.windowed_size = Vector2i(1280, 720)
+	Settings.render_scale = 2.0
+	Settings.apply_video()
 	await _frames(5)
 
 	get_tree().change_scene_to_file("res://scenes/game.tscn")
@@ -116,7 +133,9 @@ func _set_curve(ui: Node, amount: float, ratio: float, fade: float, chroma: floa
 	await _frames(6)
 
 
-## The three structural claims, as one greppable line.
+## The three structural claims, as one greppable line. The viewport figure should track Settings.render_size()
+## (== canvas under this run's RETRO pin; the native window in HIGH FIDELITY) — native_scale is read LIVE and
+## printed beside canvas= so the line stays self-checking in either mode (1.0 means viewport == canvas).
 func _struct(ui: Node) -> String:
 	var carrier: Node = ui.get(&"_weighted")
 	var sv: Node = ui.get(&"_curve_viewport")
@@ -130,8 +149,8 @@ func _struct(ui: Node) -> String:
 	var vis := "-"
 	if rect != null and is_instance_valid(rect):
 		vis = str((rect as CanvasItem).visible)
-	return "carrier_parent=%s viewport=%s composite_visible=%s canvas=%s" % [
-		parent, sv_size, vis, str(get_viewport().get_visible_rect().size)]
+	return "carrier_parent=%s viewport=%s composite_visible=%s canvas=%s native_scale=%s" % [
+		parent, sv_size, vis, str(get_viewport().get_visible_rect().size), str(Settings.native_scale())]
 
 
 ## The player's HUD layer, wherever it hangs.

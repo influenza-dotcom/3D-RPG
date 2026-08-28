@@ -15,14 +15,12 @@ extends Resource
 @export var mouse_sensitivity: float = 0.000825
 ## Normal up/down look limit (degrees) — how far the view can tilt before it clamps. 89 = just shy of straight up/down.
 @export var pitch_max_deg: float = 89.0
-## Tighter pitch limit (degrees) while HOLDING a pickup, so a carried object stays in frame instead of swinging past the camera.
-@export var pitch_max_holding_deg: float = 30.0
 ## Degrees before the pitch limit where the look starts easing (soft ramp) instead of hitting a hard wall — bigger = a longer, mushier approach to the clamp.
 @export var pitch_soft_ramp_deg: float = 25.0
 ## Pitch limit while wall-climbing — wider than normal so the view can crane up and over the top of the
 ## wall, simulating walking onto a different plane. Past 90° the look tips backward over the lip.
 @export var pitch_max_climbing_deg: float = 150.0
-## How fast the view reels back into range when the pitch limit CONTRACTS (climb ended / picked up an object) — higher = a snappier recentre, lower = a longer glide back.
+## How fast the view reels back into range when the pitch limit CONTRACTS (a wall-climb ending — the only widening left) — higher = a snappier recentre, lower = a longer glide back.
 @export var pitch_recenter_speed: float = 8.0
 
 @export_group("FOV")
@@ -42,6 +40,13 @@ extends Resource
 @export var scope_magnification: float = 2.108
 ## How fast the FOV eases in/out of the scoped zoom (higher = snappier ADS).
 @export var scope_zoom_speed: float = 8.0
+## Zoom change per mouse-wheel notch while a VARIABLE-zoom scope is aimed (a weapon authoring
+## WeaponData.scoped_zoom_fov_min/max — the sniper): each notch MULTIPLIES / divides the scope's
+## magnification by this. A TANGENT ratio like scope_magnification above — so a notch feels like the same
+## step at 2x as at 40x, which stepping the FOV by flat degrees does not (1->2 degrees halves the zoom;
+## 40->41 is imperceptible). <= 1.0 turns the wheel zoom off globally — the wheel then stays on the
+## Hotbar's weapon switching even through a variable scope (ScopeIn.wheel_owns_scope_zoom reads this).
+@export var scope_zoom_wheel_step: float = 1.25
 ## Extra FOV (degrees) added at full fall speed — the speed-rush widen as you plummet. 0 disables the fall kick.
 @export var fall_fov_mult: float = 60.0
 ## Extra FOV (degrees) added at full upward speed (rocket/blast launch) — the rise kick. 0 disables it.
@@ -111,6 +116,12 @@ extends Resource
 @export var dialogue_frame_height: float = 3.0
 ## FOV floor (degrees) for the dialogue zoom, so a distant target doesn't zoom to a pinhole. Higher = a wider minimum framing.
 @export var dialogue_min_fov: float = 25.0
+## Yaw bias (degrees) the focus swing under-rotates by. 0 (the default) = the speaker frames DEAD CENTRE,
+## the classic conversation framing — the person you talk to is the shot. Positive pushes them right of
+## centre, clearing the dialogue UI's response rows off the face at the cost of the centred composition;
+## it was shipped at 9 on 08-24 and reverted the same day (the off-centre speaker read as "out of focus").
+## Composition is a windowed-QA-shot judgement, not a unit-testable number.
+@export var dialogue_frame_offset_deg: float = 0.0
 
 @export_group("Lens")
 ## Barrel (fisheye) bend of the WHOLE rendered frame at full strength — the centre magnified, the periphery
@@ -128,3 +139,41 @@ extends Resource
 ## instead of sitting on a flat frame as a colour error. This is what makes the warp read as GLASS rather than as
 ## a wobble. 0 = off; ~0.35 is a subtle edge fringe; 1.0 is a strong one. Costs two extra screen taps when on.
 @export var lens_chroma_amount: float = 0.35
+
+## Where the barrel lens DISPLAYS a screen point the 3D pass rendered at `p` (canvas units; `canvas` = the
+## logical viewport size the caller draws in). The lens is a POST warp: it bends the PICTURE only, while
+## HUD annotations placed from Camera3D.unproject_position (sniper glints, compass world markers, the sky
+## title's overlay) draw ABOVE it — so at any bend > 0 an annotation detaches from the object it marks by
+## the warp displacement. That gap always existed, but RETRO's chunky nearest-upscale mushed it into the
+## blob; a native-res HIGH FIDELITY frame shows it plainly at range (reported 2026-08-25 as "the sniper
+## glint is completely misaligned" — measured at ~4-8 px mid-radius with the shipped 0.12 bend, identical
+## in BOTH presentation modes, zero with the lens off). Callers pass their point through this before
+## drawing.
+##
+## The math is the exact INVERSE of post_process.gdshader's lens_warp(), which maps an OUTPUT uv to the
+## SOURCE uv it fetches (radius factor (1 + k*r2n)/(1 + k), corners pinned): given the SOURCE radius,
+## solve for the OUTPUT radius — monotonic over the whole dial (f' > 0), so four Newton steps from o = s
+## land sub-pixel. STATIC + pure so it is assertable off-tree and free of autoload reads:
+##  - `render_aspect` must be the RENDER target's aspect (Settings.render_size().x / .y), matching the
+##    shader's SCREEN_PIXEL_SIZE ratio — the logical canvas aspect is ~0.3% off it under canvas_items'
+##    floored size-2d override.
+##  - `k` is the LIVE bend the shader was pushed: lens_barrel_amount * Settings.lens_curve — the same
+##    product player.gd's poll writes as `lens_barrel`. k == 0 returns `p` untouched, so callers pass it
+##    unconditionally instead of branching.
+static func lens_display_point(p: Vector2, canvas: Vector2, render_aspect: float, k: float) -> Vector2:
+	if k == 0.0 or canvas.x <= 0.0 or canvas.y <= 0.0:
+		return p
+	var c := (p / canvas) * 2.0 - Vector2.ONE
+	c.x *= render_aspect
+	var r2_corner := render_aspect * render_aspect + 1.0
+	var s := c.length()
+	if s < 0.0001:
+		return p  # dead centre never moves (and the Newton scale below would divide by ~0)
+	var o := s
+	for i in 4:
+		var f := o * (1.0 + k * o * o / r2_corner) / (1.0 + k) - s
+		var fp := (1.0 + 3.0 * k * o * o / r2_corner) / (1.0 + k)
+		o -= f / fp
+	c *= o / s
+	c.x /= render_aspect
+	return (c + Vector2.ONE) * 0.5 * canvas
