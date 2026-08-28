@@ -23,12 +23,15 @@ extends Node3D
 ##    model therefore rendered effectively BLACK wherever a direct light didn't strike it. The flat fill makes it
 ##    readable everywhere while direct lights still add on top. See the view_model_* exports.
 ##
-## RUNNABILITY: `enabled` defaults to false. While off, NOTHING changes — the main camera keeps
-## its full cull_mask and still draws the gun exactly as before, so the game is unaffected. The
+## RUNNABILITY: `enabled` defaults to false, and that default is DEAD for the player —
+## Head._setup_view_model_camera builds this node in code and sets `enabled = true` unconditionally, so
+## the dedicated pass is what actually ships and there is no .tscn override to check. The default only
+## describes what a bare instance of this class does. (Read that before reasoning about which camera
+## draws the gun: the answer is this one, and the main camera has VIEW_MODEL_LAYER stripped.)
+## While off, NOTHING changes — the main camera keeps its full cull_mask and still draws the gun. The
 ## main-camera layer drop happens ONLY after the SubViewport pass is fully built, and the gun is
 ## restored to the main camera if this node leaves the tree, so a half-built pass can never leave
-## the player weaponless. Turn `enabled` on (here or in the inspector) to switch to the dedicated
-## view-model camera; the one thing that needs the editor to judge is the composite ORDER vs the
+## the player weaponless. The one thing that needs the editor to judge is the composite ORDER vs the
 ## post-process dither (see _attach_container) — tune it live.
 
 ## Render layer the view model lives on (editor layer 3 = bit value 4). Matches the GunMesh's
@@ -42,7 +45,17 @@ const VIEW_MODEL_LAYER: int = 4
 
 ## Extra FOV for the view model, ADDED to the main camera's FOV each frame. 0 = identical to the
 ## world (the gun tracks the main FOV, including ADS zoom). A small negative value makes the gun
-## read slightly "longer"/closer, the classic FPS weapon look — tune to taste.
+## read slightly "longer"/closer, the classic FPS weapon look.
+##
+## ⭐⭐ SHIPS 0.0 AND THE WEAPON'S OUTLINE DEPENDS ON IT (2026-08-27). Since the inverted hull was deleted,
+## the view model's outline is InkOutline's screen-space ring, rasterised from a tint SubViewport whose
+## camera clones the MAIN camera. This pass renders the gun at `main fov + fov_offset`. At 0 the two
+## projections are identical and the ring sits exactly on the weapon; at anything else the gun is drawn
+## at one FOV and its outline at another, so the line slides off the silhouette — growing with the offset,
+## with no error anywhere and nothing in a headless test that can see it.
+## Want the longer-gun look? The ring pass needs its own view-model tint viewport at this FOV first; one
+## camera cannot hold two projections. `tests/test_ink_outline.gd` pins this default at 0 so the coupling
+## cannot be broken silently.
 @export var fov_offset: float = 0.0
 
 ## --- View-model LIGHTING ---------------------------------------------------------------------------------------
@@ -56,8 +69,9 @@ const VIEW_MODEL_LAYER: int = 4
 ## fallback: same near-zero fill result, now with a real ambient + a CLEAR bg so the composite can't paint the sky.)
 
 ## Explicit Environment for the gun pass. Null (default) -> one is built from the view_model_ambient_* knobs below,
-## inheriting the world's tonemap so the gun grades like the world. Set this to hand-author the view model's look
-## (its own glow / adjustments / a stronger fill) in the inspector — it's then used verbatim.
+## and its tonemap tracks the level's WorldEnvironment (_follow_world_tonemap) so the gun grades like the world.
+## Set this to hand-author the view model's look (its own glow / adjustments / a stronger fill) in the inspector —
+## it's then used verbatim, tonemap included, and neither the grade follow nor the night-fill dim touches it.
 @export var view_model_environment: Environment = null
 
 ## Flat ambient FILL colour for the built-in view-model environment (ignored when view_model_environment is set).
@@ -86,6 +100,7 @@ var _container: SubViewportContainer  ## composites _sub_viewport's texture over
 var _main_cull_mask_backup: int = 0   ## the main camera's original cull_mask, restored on exit
 var _layer_dropped: bool = false      ## true once VIEW_MODEL_LAYER has been removed from the main cam
 var _composited: bool = false         ## true when the SubViewport is shown via a SubViewportContainer
+var _tonemap_source: Environment = null  ## world Environment the gun's grade was last copied from (see _follow_world_tonemap)
 
 ## Build the view-model pass against the live first-person camera. Called once by head.setup().
 ## No-op (and the game renders normally) while `enabled` is false. `ui` is the HUD CanvasLayer the
@@ -144,8 +159,12 @@ func _build_pass(ui: CanvasLayer) -> void:
 	_layer_dropped = true
 
 ## Composite the gun pass over the main view via a full-rect SubViewportContainer on the HUD layer.
-## stretch=true makes the container OWN the SubViewport's size (it tracks the screen), and
-## mouse-ignore means it never eats clicks. Inserted as the FIRST child of the HUD CanvasLayer so
+## Born stretch=true and stretch STAYS true in every presentation: the container OWNS the SubViewport's
+## size in its own logical units — the full canvas in RETRO (canvas px ARE render px there), and under
+## HIGH FIDELITY _sync_pass_resolution re-rects the container itself to the native target and scales it
+## back onto the canvas (see there for the stretch-off feedback loop this dodges). Mouse-ignore means it
+## never eats clicks.
+## Inserted as the FIRST child of the HUD CanvasLayer so
 ## the post-process ColorRect (also on this layer, formerly child 0) still draws on TOP of it —
 ## i.e. the gun is dithered/posterised WITH the world rather than floating crisp above it. If a
 ## crisp (un-dithered) gun is preferred, move this above the ColorRect instead. Sets _composited.
@@ -154,7 +173,7 @@ func _attach_container(ui: CanvasLayer) -> void:
 		return
 	_container = SubViewportContainer.new()
 	_container.name = "ViewModelComposite"
-	_container.stretch = true
+	_container.stretch = true  # PERMANENT in both presentations — _sync_pass_resolution moves the container's rect, never this flag
 	_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_container.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_container.add_child(_sub_viewport)  # the container is the SubViewport's sole parent
@@ -182,13 +201,87 @@ func _process(_delta: float) -> void:
 	if _gun_camera == null or _main_camera == null:
 		return
 	_sync_gun_camera()
+	_follow_world_tonemap()
 	_follow_day_night()
-	# Only the bare (non-composited) fallback needs manual sizing — a stretched SubViewportContainer
-	# owns the size when composited, so touching it here would fight the container.
-	if not _composited and _sub_viewport:
+	_sync_pass_resolution()
+
+## Keep the gun pass's render target matched to the CURRENT presentation mode, polled every frame so a live
+## Options flip bites the next one (the Settings contract: native_scale()/render_size() are read LIVE, never
+## cached — the cached-base_fov lesson). Both arms route through here so they cannot drift:
+##  - COMPOSITED (the shipping path): in RETRO the full-rect stretched container owns the size — in CANVAS
+##    units, which ARE render px there, so this poll writes nothing (today's pipeline, bit-identical). Under
+##    HIGH FIDELITY a full-rect stretched container can only size in canvas units and would pin the gun at
+##    retro res over a native-crisp world — so the CONTAINER is sized to Settings.render_size() in logical
+##    units and Control.scale'd back down so its on-screen footprint stays the full canvas: the stretched
+##    container then sizes the viewport native itself, and the drawn texture lands 1:1 on native pixels
+##    through the window's canvas transform. WorldGhost's gun coverage mask sharpens for free, since it
+##    samples this same target. ⭐stretch STAYS TRUE in both modes: the obvious "stretch off + drive the
+##    SubViewport size by hand" FEEDS BACK — with stretch off a SubViewportContainer's MINIMUM SIZE becomes
+##    its child viewport's size (in this Control's LOGICAL units), the full-rect anchors lose to the
+##    minimum, the container grows, and the next per-frame write re-inflates it ~native_scale()x. Measured
+##    2026-08-25: the pass hit 7,244,550 px wide in ~20 frames — "Texture dimensions exceed device maximum",
+##    then D3D12 CreateResource E_OUTOFMEMORY took every later render-target read down with it (null
+##    get_image() in the QA harness). With stretch on, the container's minimum size stays zero and the
+##    anchors stay in charge of nothing (top-left preset + manual rect while native).
+##  - NON-COMPOSITED fallback: offscreen-only, sized straight to _viewport_pixel_size() as before (now
+##    defined as RENDER px, so the two arms agree in both modes).
+## The pass also mirrors the ROOT's supersample under HIGH FIDELITY (scaling_3d_scale = Settings.render_scale,
+## read live) so gun and world resolve identically; RETRO keeps 1.0 — the pass never inherited the RETRO 2.0
+## supersample, and matching today's pixels wins over matching the world's (the low-res blit hides the
+## difference there anyway).
+func _sync_pass_resolution() -> void:
+	if _sub_viewport == null:
+		return
+	var ns := Settings.native_scale()
+	var want_3d := Settings.render_scale if ns > 1.0 else 1.0
+	if _sub_viewport.scaling_3d_scale != want_3d:
+		_sub_viewport.scaling_3d_scale = want_3d
+	if _composited:
+		if _container == null:
+			return
+		if ns > 1.0:
+			# NATIVE: container sized to the render target in logical units, scaled back onto the canvas.
+			# stretch stays TRUE — see the doc block's feedback-loop warning before "simplifying" this.
+			var rs := Vector2(Settings.render_size()).max(Vector2.ONE)
+			var canvas := _container.get_viewport_rect().size.max(Vector2.ONE)
+			if _container.anchor_right != 0.0:  # leave the full-rect preset once, on entry to the native path
+				_container.set_anchors_preset(Control.PRESET_TOP_LEFT)
+			if _container.position != Vector2.ZERO:
+				_container.position = Vector2.ZERO
+			if _container.size != rs:
+				_container.size = rs  # the stretched container sizes the SubViewport to match this
+			_container.scale = canvas / rs
+		elif _container.anchor_right == 0.0 or _container.offset_right != 0.0:
+			# RETRO restored: geometry handed back to the full-rect anchors — the pre-presentation tree.
+			# MUST be the anchors_AND_OFFSETS form: plain set_anchors_preset PRESERVES the current rect by
+			# rewriting the offsets (measured 2026-08-25 — the container stayed 1280x720 over a 792x444
+			# canvas, drawing the gun ~1.6x oversize in RETRO after a flip), and the offset_right guard
+			# re-runs this once if that state ever gets in some other way.
+			_container.scale = Vector2.ONE
+			_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	else:
 		var want := _viewport_pixel_size()
 		if _sub_viewport.size != want:
 			_sub_viewport.size = want
+
+## Keep the gun graded on the WORLD's tonemap, re-copying whenever the level's Environment changes IDENTITY.
+## REQUIRED, not belt-and-braces — the build-time copy in build_default_environment cannot fire at boot: game.tscn's
+## GameRoot loads the level with `load_level.call_deferred` from its _ready, while head.setup() queues _build_pass
+## from the Player's _enter_tree, which runs FIRST. So at build time there is no WorldEnvironment in the tree yet,
+## `world_env` comes back null, and the whole copy is skipped — measured 2026-08-24 with
+## scripts/tools/view_model_tonemap_qa_shots.gd, which caught the gun shipping on tonemap_mode 0 (LINEAR) against
+## an AgX world. The same re-copy also re-grades the gun after a LevelDoor swap brings in a differently-graded level.
+## Compared by identity, not by value, so this is one group lookup per frame and a designer's live inspector edit to
+## the world env is deliberately NOT chased (nothing in the project writes tonemap_* at runtime). Skipped entirely on
+## an authored view_model_environment, which is the designer's verbatim look.
+func _follow_world_tonemap() -> void:
+	if view_model_environment != null or _gun_camera.environment == null:
+		return
+	var world_env := _world_environment()
+	if world_env == null or world_env == _tonemap_source:
+		return
+	copy_tonemap(world_env, _gun_camera.environment)
+	_tonemap_source = world_env
 
 ## Dim the built-in fill with the level's day/night cycle so the gun goes dark WITH the world at night. Only
 ## while a DayNightSky is live (group "day_night") — its absence means a static level, where the constant fill
@@ -208,20 +301,23 @@ func _sync_gun_camera() -> void:
 	_gun_camera.global_transform = _main_camera.global_transform
 	_gun_camera.fov = _main_camera.fov + fov_offset
 
-## The main viewport's current pixel size, so the gun pass renders at the same (low) internal
-## resolution as the world and the composite lines up 1:1.
+## The root viewport's RENDER pixel size, so the gun pass matches the world's target 1:1 in either
+## presentation: the native window under HIGH FIDELITY, the ~792x444 logical canvas under RETRO.
+## Settings.render_size() is the one authority — get_visible_rect() alone reports the LOGICAL canvas in
+## both modes (that is the design of the canvas_items size-2d override), which would under-size this pass
+## ~2.4x at native. Settings also owns the off-tree/headless fallback: the 792x444 logical canvas (the
+## hardcoded 396x216 that used to sit here was the pre-stretch-scale BASE size — half the real canvas
+## even in RETRO).
 func _viewport_pixel_size() -> Vector2i:
-	var vp := get_viewport()
-	if vp:
-		return Vector2i(vp.get_visible_rect().size)
-	return Vector2i(396, 216)  # project's authored internal resolution as a safe fallback
+	return Settings.render_size()
 
 ## The Environment the gun pass renders with: the authored override when set, else a default flat-ambient FILL
 ## (built to match the world's tonemap) — see the class doc for WHY the view model needs its own fill.
 func _resolve_view_model_environment() -> Environment:
 	if view_model_environment != null:
 		return view_model_environment
-	return build_default_environment(_world_environment(), view_model_ambient_color, view_model_ambient_energy)
+	_tonemap_source = _world_environment()  # null at boot (the level loads later) -> _follow_world_tonemap copies it in
+	return build_default_environment(_tonemap_source, view_model_ambient_color, view_model_ambient_energy)
 
 ## The level's WorldEnvironment's Environment (group "world_environment", as camera_effects / day_night_sky use), or
 ## null if there isn't one yet. Read only to COPY the tonemap onto the view-model env; a missing one just means the
@@ -249,11 +345,26 @@ static func build_default_environment(world_env: Environment, ambient_color: Col
 	env.volumetric_fog_enabled = false
 	# Grade the gun like the world: copy the tonemap so it doesn't read brighter / more saturated than the tonemapped
 	# world beside it (the levels use AgX). Glow / adjustments stay default to keep the flat fill predictable.
+	# A null world_env (no level in the tree yet at boot, or ink_outline's deliberate null) just skips the copy —
+	# the live pass then picks it up from _follow_world_tonemap once the level's WorldEnvironment exists.
 	if world_env != null:
-		env.tonemap_mode = world_env.tonemap_mode
-		env.tonemap_exposure = world_env.tonemap_exposure
-		env.tonemap_white = world_env.tonemap_white
+		copy_tonemap(world_env, env)
 	return env
+
+## Copy a world Environment's TONEMAP onto a view-model Environment — the one definition of "grades like the world",
+## shared by the build-time path above and the per-frame _follow_world_tonemap re-sync. Tonemap ONLY: ambient, fog,
+## background, glow and adjustments belong to the view-model pass and must not be dragged over from the world.
+static func copy_tonemap(from: Environment, to: Environment) -> void:
+	to.tonemap_mode = from.tonemap_mode
+	to.tonemap_exposure = from.tonemap_exposure
+	to.tonemap_white = from.tonemap_white
+	# AgX — the mode the levels ship (tonemap_mode 4) — IGNORES tonemap_white and takes its curve from these two
+	# instead, so copying only the three above left the gun on the AgX DEFAULTS (contrast 1.25 / white 16.29) while
+	# trenchboom_test_level authors contrast 2.0: the gun's shadows sat lifted against the world composited right
+	# behind it. Copied unconditionally rather than only under AgX — they are inert under every other tonemapper,
+	# and a level that switches to AgX later must not silently re-open the mismatch.
+	to.tonemap_agx_contrast = from.tonemap_agx_contrast
+	to.tonemap_agx_white = from.tonemap_agx_white
 
 ## Restore the main camera's full cull_mask if this pass is torn down (e.g. the rig is freed), so
 ## the gun never disappears just because the view-model pass went away. The composite container

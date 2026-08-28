@@ -96,7 +96,7 @@ const SEATED_REPROBE_DISTANCE := 0.02
 	set(value):
 		body_transparency = value
 		_apply_body_transparency()
-		_apply_outline_uniforms()  # the actor rim dissolves WITH the chest it wraps — see _outline_color_for
+		_apply_outline_visibility()  # the actor outline goes WITH the chest it wraps — see _apply_outline_visibility
 
 # --- Head (sits on the torso; the head-look tracks it) -----------------------------------------------------------
 ## PICK a seated HEAD by name from res://resources/parts/heads/ -- the fastest way to change an NPC's face. See
@@ -183,7 +183,7 @@ const SEATED_REPROBE_DISTANCE := 0.02
 	set(value):
 		arm_transparency = value
 		_apply_arm_transparency()
-		_apply_outline_uniforms()  # ...and so does the arms' — same reason, their own curve
+		_apply_outline_visibility()  # ...and so does the arms' — same reason, their own curve
 ## Build only the LEFT arm (skip the mirrored right) -- for a first-person view-model arm, where you see one hand on the weapon.
 @export var single_arm: bool = false:
 	set(value):
@@ -243,7 +243,7 @@ const SEATED_REPROBE_DISTANCE := 0.02
 	set(value):
 		leg_transparency = value
 		_apply_leg_transparency()
-		_apply_outline_uniforms()  # ...and the legs' rim dissolves with them, like the chest's and the arms'
+		_apply_outline_visibility()  # ...and the legs' outline goes with them, like the chest's and the arms'
 ## Whether the swapped meshes CAST SHADOWS. Default true (NPCs cast normal shadows). Set false for the Player's
 ## FIRST-PERSON legs — a shadow cast from under the camera looks wrong. Applied to every spawned mesh on each rebuild.
 @export var casts_shadow: bool = true:
@@ -252,37 +252,29 @@ const SEATED_REPROBE_DISTANCE := 0.02
 		_apply_cast_shadow()
 
 # --- Actor rim (the inverted-hull outline + its ink-mask registration, which are ONE thing) ------------------------
-## Wear the ACTOR RIM: the inverted-hull outline every NPC, prop and view model in this game wears, stamped as
-## material_overlay on every spawned part — AND, inseparably, register those meshes with InkOutline's actor mask so
-## the world's screen-space ink pass SKIPS them. The two halves are one contract, not two features: a hull with no
-## mask draws BOTH lines (the doubled outline the whole ink system exists to prevent), and a mask with no hull
-## draws none at all. See scripts/effects/ink_outline.gd — "hull owns actors, ink owns the world".
+## Wear the ACTOR OUTLINE: InkOutline's screen-space ring, stamped as a tint id on every spawned part — AND,
+## inseparably, register those meshes with InkOutline's actor mask so the world's screen-space ink pass SKIPS
+## them. The two halves are one contract, not two features: a ring with no mask draws BOTH lines (the doubled
+## outline the whole ink system exists to prevent), and a mask with no ring draws none at all.
+## See scripts/effects/ink_outline.gd — "the ring owns actors, ink owns the world".
+##
+## The id is picked from what this rig IS: a rig forced onto `view_model_layer` is first-person gear and takes
+## InkOutline.TINT_ID_VIEW_MODEL (the same id the gun wears, so your hands and your weapon share one knob);
+## anything else is an actor at world depth and takes TINT_ID_NEUTRAL, the black ring an NPC bystander wears.
 ##
 ## Applied on every rebuild beside casts_shadow / view_model_layer, and that placement IS the point: this rig RESETS
-## the `layers` of the meshes it spawns, so a swap dressed from OUTSIDE strands its next set of parts inked with no
-## error anywhere (the trap NpcOutline.apply_part_overlays exists to work around).
+## the `layers` of the meshes it spawns and FREES the part nodes (taking their tint duplicates with them), so a
+## swap dressed from OUTSIDE strands its next set of parts inked and ringless with no error anywhere (the trap
+## NpcOutline.apply_part_overlays exists to work around).
 ##
-## OFF by default because on an NPC the rim is not ours to own — NpcOutline builds a DISPOSITION-coloured one
-## (hostile red / friendly green) into this same material_overlay slot and the two would fight over it. This switch
+## OFF by default because on an NPC the outline is not ours to own — NpcOutline stamps a DISPOSITION id
+## (hostile red / friendly green) onto the same duplicates and the two would fight over it. This switch
 ## is for a rig nobody else dresses: the player's own first-person body, which hangs off a bare BodyModelSwap with
 ## no Character `mesh` walk to ride.
 @export var actor_outline: bool = false:
 	set(value):
 		actor_outline = value
 		_apply_actor_outline()
-## Colour of that rim. BLACK is the house look, shared with NPC.outline_color, Throwable.OUTLINE_HIDDEN_COLOR and
-## GunVisuals. Its ALPHA is DRIVEN rather than authored: the rim fades with body_transparency / arm_transparency
-## (see _outline_color_for) so a dissolving chest can never leave a solid black silhouette of itself hanging.
-@export var actor_outline_color: Color = Color(0.0, 0.0, 0.0, 1.0):
-	set(value):
-		actor_outline_color = value
-		_apply_outline_uniforms()
-## Rim thickness, fed to the outline shader's `outline_width` uniform (which scales it x4 in clip space). 2.0 is
-## NPC parity (NPC.outline_width) — match it for anything drawn at real world depth.
-@export var actor_outline_width: float = 2.0:
-	set(value):
-		actor_outline_width = value
-		_apply_outline_uniforms()
 
 # --- Arm + leg animation (RUNTIME only -- the editor shows the static rest pose for placement) --------------------
 ## Animate the arms in-game: swing while walking unarmed, raise to hold a drawn weapon, rest by the side otherwise. Off -> arms stay at their static rest pose.
@@ -499,7 +491,6 @@ var _arm_transp_touched: bool = false  ## same latch as _body_transp_touched, fo
 var _leg_left: Node3D = null   ## live left-leg instance
 var _leg_right: Node3D = null  ## live right-leg instance (a mirror of the left)
 var _leg_transp_touched: bool = false  ## same latch as _body_transp_touched, for leg_transparency
-var _outline_mats: Dictionary = {}  ## part key -> its own actor-rim ShaderMaterial; survives rebuilds (see _outline_material)
 var _outline_touched: bool = false  ## the actor rim has been applied at least once — off must then STRIP, not early-out
 var _swing_phase: float = 0.0    ## walk-cycle phase, advanced only while moving (shared by arms + legs -> one gait)
 var _mode_pitch: float = 0.0     ## smoothed SYMMETRIC pitch (both arms): raised to hold a weapon, else 0
@@ -1076,6 +1067,12 @@ func _arm_reach_measured() -> float:
 ## the root's OWN transform is excluded on purpose — _arm_pose overwrites it every frame).
 func _part_reach(node: Node, xf: Transform3D) -> float:
 	var best := 0.0
+	if node.has_meta(&"npc_tint_dup"):
+		# InkOutline's disposition-tint duplicate: it carries a COPY of its host mesh at identity, so measuring it
+		# can only ever repeat the host's own corners. Read-only walk, so no corruption risk either way — skipped
+		# to keep one rule for duplicates across this file (the material/layer walkers below are the load-bearing
+		# ones) and so a duplicate that ever stops mirroring its host can't silently inflate the arm reach.
+		return 0.0  # and don't recurse: a duplicate has no children
 	if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
 		var aabb: AABB = (node as MeshInstance3D).get_aabb()
 		for i in 8:
@@ -1477,12 +1474,19 @@ func _apply_leg_transparency() -> void:
 		if is_instance_valid(leg):
 			_see_through_walk(leg, leg_transparency)
 
-## Stamp `amount` of dithered see-through onto every MeshInstance3D under `root`, over WHATEVER material path
-## that mesh took — the _skin override or the model's own baked surface materials.
+## Stamp `amount` of dithered see-through onto every MeshInstance3D under `root` (bar InkOutline's tint
+## duplicates — see the skip below), over WHATEVER material path that mesh took — the _skin override or the
+## model's own baked surface materials.
 func _see_through_walk(root: Node, amount: float) -> void:
 	var stack: Array[Node] = [root]
 	while not stack.is_empty():
 		var node: Node = stack.pop_back()
+		if node.has_meta(&"npc_tint_dup"):
+			# InkOutline's invisible disposition-tint duplicate (NpcOutline, Throwable): it wears the ONE shared
+			# tint material, whose RGB are raw NUMBERS (two-byte log depth + an id), never a colour to fade.
+			# Today this walk survives by ACCIDENT — _see_through_variant returns foreign ShaderMaterials
+			# unchanged — so make it a rule instead of an accident, before someone widens that helper.
+			continue  # and don't descend: a duplicate has no children
 		for child in node.get_children():
 			stack.push_back(child)
 		var mi := node as MeshInstance3D
@@ -1560,6 +1564,7 @@ func _set_cast_shadow(node: Node, mode: GeometryInstance3D.ShadowCastingSetting)
 ## Force every spawned mesh onto `view_model_layer` (a render-layer bitmask) when it's set (> 0), so a first-person
 ## body part (e.g. the player's left arm) draws in the dedicated view-model camera pass ON TOP of the world, with no
 ## wall clipping -- exactly like the gun. 0 (the default) leaves the models on their own layers, unchanged.
+## InkOutline's tint duplicates are exempt (see _set_render_layer) — they own their layer bit and must keep it.
 func _apply_view_model_layer() -> void:
 	if view_model_layer <= 0:
 		return
@@ -1569,56 +1574,60 @@ func _apply_view_model_layer() -> void:
 func _set_render_layer(node: Node, layers: int) -> void:
 	if not is_instance_valid(node):
 		return
+	if node.has_meta(&"npc_tint_dup"):
+		# InkOutline's invisible disposition-tint duplicate (NpcOutline, Throwable) must stay ALONE on
+		# ACTOR_TINT_LAYER, which only the tint SubViewport's camera culls to. This walk ASSIGNS layers, so
+		# without the skip the duplicate would be moved onto a camera that DRAWS it — and ink_tint.gdshader's
+		# R/G log-depth bytes then read as moving yellow/green stripe bands over the first-person body (the
+		# 2026-08-25 report; same failure documented at scripts/effects/body_part_gib.gd _walk_strip).
+		return  # and don't recurse: a duplicate has no children
 	if node is VisualInstance3D:
 		(node as VisualInstance3D).layers = layers
 	for c in node.get_children():
 		_set_render_layer(c, layers)
 
-## Stamp (or strip) the actor rim + its ink-mask layer bit on every spawned part. Called from _rebuild beside
-## _apply_cast_shadow / _apply_view_model_layer, so freshly instanced parts are dressed before they are ever drawn,
-## and from the toggle so the editor preview follows the tick box. See `actor_outline` for why the rim and the
-## mask bit are ONE operation and can never be separated.
+## Stamp (or strip) the actor outline id + its ink-mask layer bit on every spawned part. Called from _rebuild
+## beside _apply_cast_shadow / _apply_view_model_layer, so freshly instanced parts are dressed before they are ever
+## drawn, and from the toggle so the editor preview follows the tick box. See `actor_outline` for why the ring and
+## the mask bit are ONE operation and can never be separated.
 ##
-## The strip path is deliberate rather than "leave it to the next rebuild": this is a @tool component, so a
-## designer un-ticking the box has to SEE the rim go. It only clears an overlay it recognises as its own (the
-## `bms_actor_rim` meta — the bms_body_transp idiom), so it can never wipe an outline another system owns.
+## The strip path is deliberate rather than "leave it to the next rebuild": a designer un-ticking the box has to
+## see the outline go. It only clears a duplicate whose BASE ID is the one we stamp — the successor to the old
+## `bms_actor_rim` meta — so it can never wipe an outline another system owns (an NPC rig that some other pass
+## rings, most obviously).
+## ⭐ This is a @tool component, but InkOutline.apply_tint refuses to run in the editor (it would litter authored
+## scenes with unowned child nodes), so the EDITOR half of that promise is now the mask bit alone. The ring is a
+## runtime look; judge it in game.
 func _apply_actor_outline() -> void:
-	# The _body_transp_touched idiom: a rig that has never worn the rim has nothing to strip either, so every NPC
-	# (actor_outline off, forever) takes a zero-cost early-out on each of its rebuilds instead of walking its whole
-	# mesh set to un-set a bit it never had — and can never have its overlay slot touched by this code at all.
+	# The _body_transp_touched idiom: a rig that has never worn the outline has nothing to strip either, so every
+	# NPC (actor_outline off, forever) takes a zero-cost early-out on each of its rebuilds instead of walking its
+	# whole mesh set to un-set a bit it never had — and can never have its duplicates touched by this code at all.
 	if not actor_outline and not _outline_touched:
 		return
 	_outline_touched = _outline_touched or actor_outline
+	var id := _actor_outline_id()
 	for entry in character_parts():
-		var key: String = entry["key"]
 		var root: Node3D = entry["node"]
-		var mat: ShaderMaterial = _outline_material(key) if actor_outline else null
 		for m in TalkHelpers.collect_meshes(root, null, true):
 			if actor_outline:
 				m.layers |= InkOutline.ACTOR_INK_MASK_LAYER
-				m.material_overlay = mat
+				InkOutline.apply_tint_mesh(m, id)
 			else:
 				m.layers &= ~InkOutline.ACTOR_INK_MASK_LAYER
-				if m.material_overlay != null and m.material_overlay.has_meta(&"bms_actor_rim"):
-					m.material_overlay = null
+				if InkOutline.tint_base_id(m) == id:
+					InkOutline.apply_tint_mesh(m, InkOutline.TINT_ID_NONE)
+	_apply_outline_visibility()
 
-## Get-or-create the rim material for one part key. ONE PER PART rather than one shared, because their alphas
-## diverge: the torso dissolves on the player's look-down / crouch fade, the arms take a third curve of their own
-## (they also hide when the view model owns your hands), and the legs never fade at all. Persistent across
-## rebuilds, like NpcOutline's per-part flash materials, so a model swap doesn't churn materials.
-func _outline_material(key: String) -> ShaderMaterial:
-	var mat: ShaderMaterial = _outline_mats.get(key, null)
-	if mat == null:
-		mat = TalkHelpers.make_outline_material(_outline_color_for(key), actor_outline_width)
-		mat.set_meta(&"bms_actor_rim", true)  # so the strip path above can tell OUR overlay from anyone else's
-		_outline_mats[key] = mat
-	return mat
+## Which of InkOutline's LUT slots this rig's parts wear. A rig forced onto a view-model render layer is
+## first-person gear held at arm's length — the same id the weapon in the other hand wears, so the two can never
+## drift apart. Everything else is a body at world depth and takes the neutral black an NPC bystander wears.
+func _actor_outline_id() -> int:
+	return InkOutline.TINT_ID_VIEW_MODEL if view_model_layer > 0 else InkOutline.TINT_ID_NEUTRAL
 
-## The rim's live colour for one part: the authored tint with its alpha scaled by that part's OWN see-through, so
-## the outline dissolves exactly in step with the geometry it wraps. Without this a crouched player would keep a
-## solid black outline of the chest and arms that just dithered away — strictly worse than either extreme, the
-## same failure the arm_transparency field was added to prevent for the geometry itself.
-func _outline_color_for(key: String) -> Color:
+## How SOLID one part currently is (1 = fully drawn, 0 = fully dissolved), from that part's own see-through
+## channel. The torso dissolves on the player's look-down / crouch fade, the arms take a curve of their own (they
+## also hide when the view model owns your hands), and the legs never fade at all.
+func _outline_solid_for(key: String) -> float:
 	var solid := 1.0
 	if key == "torso" or key == "head":
 		solid = 1.0 - body_transparency
@@ -1626,24 +1635,29 @@ func _outline_color_for(key: String) -> Color:
 		solid = 1.0 - arm_transparency
 	elif key == "leg_l" or key == "leg_r":
 		solid = 1.0 - leg_transparency
-	var c := actor_outline_color
-	c.a *= clampf(solid, 0.0, 1.0)
-	return c
+	return clampf(solid, 0.0, 1.0)
 
-## Push the authored tint/width and the live see-through alpha onto every rim material. Idempotent and cheap (a
-## couple of uniform writes over at most six materials); called from the two transparency setters, which is what
-## keeps a fading part's outline fading with it. Zero cost on every rig that leaves actor_outline off.
-func _apply_outline_uniforms() -> void:
+## ⭐⭐ Keep each part's OUTLINE in step with how dissolved that part is. Called from the three transparency
+## setters, which is what stops a crouched player keeping a solid black outline around a chest that has dithered
+## away — strictly worse than either extreme, and the same failure `arm_transparency` was added to prevent for the
+## geometry itself.
+##
+## It SWITCHES where the old inverted-hull rim FADED, and that is a real (accepted) downgrade rather than an
+## oversight: the hull carried a per-material `outline_color.a` this function could drive continuously, while the
+## ring's colour comes from a global LUT and its buffer's alpha channel is coverage, not opacity
+## (InkOutline.set_tint_visible spells out why there is no per-instance alpha to turn down). Half-dissolved is the
+## switch point — the outline goes at the same moment the geometry stops reading as present.
+## Cheap and idempotent; zero cost on every rig that leaves actor_outline off.
+func _apply_outline_visibility() -> void:
 	if not actor_outline:
 		return
-	for key in _outline_mats:
-		var mat: ShaderMaterial = _outline_mats[key]
-		if mat == null:
-			continue
-		mat.set_shader_parameter("outline_color", _outline_color_for(String(key)))
-		mat.set_shader_parameter("outline_width", actor_outline_width)
+	for entry in character_parts():
+		var key: String = entry["key"]
+		var root: Node3D = entry["node"]
+		InkOutline.set_tint_visible(root, _outline_solid_for(key) > 0.5)
 
-## Override every MeshInstance3D under `root` with an albedo material from `tex` and/or `color` -- a texture OR any
+## Override every MeshInstance3D under `root` (bar InkOutline's tint duplicates — see _set_mesh_material) with an
+## albedo material from `tex` and/or `color` -- a texture OR any
 ## NON-WHITE colour builds the override (the colour tints the texture, or is a flat skin on its own). No texture +
 ## plain WHITE -> clear the override, restoring the model's own baked material (so WHITE is the "leave it" default).
 func _skin(root: Node3D, tex: Texture2D, color: Color) -> void:
@@ -1661,6 +1675,13 @@ func _skin(root: Node3D, tex: Texture2D, color: Color) -> void:
 	_set_mesh_material(root, mat)
 
 func _set_mesh_material(node: Node, mat: Material) -> void:
+	if node.has_meta(&"npc_tint_dup"):
+		# InkOutline's invisible disposition-tint duplicate (NpcOutline, Throwable). Its material_override is the
+		# ONE shared tint material for the whole game, and its RGB are raw NUMBERS — two-byte log depth plus an
+		# id — read back by the outline pass, never seen. Any runtime re-skin that reaches it (spray-paint
+		# recolour, an NpcLook re-application) would swap that for a skin/shirt material and rasterise garbage
+		# depth + a garbage id into the tint buffer, corrupting the ring for that actor.
+		return  # and don't recurse: a duplicate has no children
 	if node is MeshInstance3D:
 		(node as MeshInstance3D).material_override = mat
 	for c in node.get_children():
@@ -1669,12 +1690,18 @@ func _set_mesh_material(node: Node, mat: Material) -> void:
 ## Skin `root` with the planar-projection shirt shader (a player-DRAWN texture pressed flat onto the chest — see
 ## body_texture_planar). Per-mesh materials: each MeshInstance3D gets its OWN ShaderMaterial parameterised by that
 ## mesh's local AABB, so VERTEX normalises into the drawing's 0..1 square whatever the mesh's size/origin.
+## InkOutline's tint duplicates are exempt — see the skip in _walk_planar.
 func _skin_planar(root: Node3D, tex: Texture2D, color: Color) -> void:
 	if not is_instance_valid(root):
 		return
 	_walk_planar(root, tex, Color(color.r, color.g, color.b, 1.0))
 
 func _walk_planar(node: Node, tex: Texture2D, color: Color) -> void:
+	if node.has_meta(&"npc_tint_dup"):
+		# InkOutline's invisible disposition-tint duplicate — the _set_mesh_material rule, second door: replacing
+		# its shared tint material with a planar shirt ShaderMaterial writes garbage depth + a garbage id into
+		# the tint buffer. A drawn shirt belongs on the VISIBLE mesh only.
+		return  # and don't recurse: a duplicate has no children
 	var mi := node as MeshInstance3D
 	if mi != null:
 		mi.material_override = _planar_shirt_material(mi.mesh, tex, color) if mi.mesh != null else null
@@ -1716,6 +1743,12 @@ func _set_meshes_visible(root: Node, vis: bool) -> void:
 func _walk_meshes(node: Node, keep: Node, vis: bool) -> void:
 	if node == keep:
 		return
+	if node.has_meta(&"npc_tint_dup"):
+		# InkOutline's disposition-tint duplicate. It is a CHILD of the mesh it mirrors, so it already follows
+		# that mesh's visibility by design and this walk never needed to reach it — the skip is here so the rule
+		# reads the same at every walker in this file (see _set_render_layer for the stripe-band failure that
+		# taught it), and so a future re-parent of the duplicate can't quietly flip it on under a hidden host.
+		return  # and don't recurse: a duplicate has no children
 	if node is MeshInstance3D:
 		(node as MeshInstance3D).visible = vis
 	for c in node.get_children():

@@ -30,11 +30,17 @@ extends Node3D
 @export var fade_speed: float = 3.0
 
 @export_group("Outline")
-## Rim outline drawn on the corpse's meshes — the same effect the living NPCs and weapons carry, so a
-## dropped skeleton keeps that look. Black + a thin width matches the combat rim; tweak per scene.
-@export var outline_color: Color = Color.BLACK
-## Thickness of the corpse's rim outline. Higher = a chunkier shell; matches the living-NPC combat rim (2.0).
-@export var outline_width: float = 2.0
+## Outline the corpse — the same screen-space ring the living NPCs and every prop carry, so a dropped
+## skeleton keeps that look instead of falling back to the world ink's scribbly per-crease treatment.
+## It paints InkOutline.highlight_neutral (black) at InkOutline.highlight_width_px, exactly like a
+## neutral bystander; there is no per-corpse colour or width, because a ring resolves one id to one
+## global LUT slot (the `outline_color` / `outline_width` exports here went with the inverted hull on
+## 2026-08-27). Off leaves the corpse to the world ink.
+##
+## ⭐ A corpse is the project's one SKINNED ringed thing — InkOutline.apply_tint mirrors `skin` and
+## re-points `skeleton` onto the duplicate so the ring follows the ragdoll pose. That plumbing exists
+## because of this component; before it, apply_tint skipped skinned meshes outright.
+@export var outline: bool = true
 
 ## World-space impulse the corpse launches with — set by the spawner right before it's added to the
 ## tree (so it's already set when _ready starts the simulation).
@@ -124,6 +130,12 @@ func _fade_and_free() -> void:
 	if meshes.is_empty():
 		queue_free()
 		return
+	# ⭐ The RING goes at the top of the dissolve rather than fading with it. GeometryInstance3D.transparency
+	# is a per-instance fade of the corpse's own materials; the tint duplicate wears the shared ID material,
+	# whose alpha channel is COVERAGE, not opacity (see InkOutline.set_tint_visible). Dropping it here is the
+	# same trade BodyModelSwap makes for the dissolving first-person torso: an outline that outlives the body
+	# it wraps reads far worse than one that leaves a beat early.
+	InkOutline.clear_tint(self)
 	var tw := create_tween().set_parallel(true)
 	for m in meshes:
 		tw.tween_property(m, "transparency", 1.0, fade_time)
@@ -133,13 +145,21 @@ func _fade_and_free() -> void:
 func _find_skeleton(node: Node) -> Skeleton3D:
 	return NodeFinder.find_first_of_class(node, Skeleton3D) as Skeleton3D
 
-## Draw the rim outline on every mesh in the corpse, reusing the shared builder so the dropped
-## skeleton carries the same rim the living NPCs (and weapons) do. Applied as a material_overlay,
-## which follows the skinned ragdoll pose.
+## Outline every mesh in the corpse with InkOutline's screen-space ring, and — inseparably — register those
+## meshes with the actor mask so the world's ink pass skips them. The two are one contract everywhere in this
+## project: ring without the mask draws two lines, mask without the ring draws none.
+##
+## ⭐ The mask half is NEW here (2026-08-27). Under the inverted hull this component never stamped
+## ACTOR_INK_MASK_LAYER at all, so a corpse quietly wore BOTH its own rim and the world's ink and nobody
+## noticed — which is also why deleting the hull would have degraded a corpse to world-ink-only rather than to
+## nothing, the easiest kind of regression to miss.
 func _apply_outline() -> void:
-	var mat := TalkHelpers.make_outline_material(outline_color, outline_width)
 	for m in TalkHelpers.collect_meshes(self):
-		m.material_overlay = mat
 		# Corpses don't need to cast shadows, and skipping the shadow pass dodges the "material is null"
 		# render spam from any skeleton surface that imported without a base material.
 		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if outline:
+			m.layers |= InkOutline.ACTOR_INK_MASK_LAYER
+			InkOutline.apply_tint_mesh(m, InkOutline.TINT_ID_NEUTRAL)
+		else:
+			m.layers &= ~InkOutline.ACTOR_INK_MASK_LAYER

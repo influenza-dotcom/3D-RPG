@@ -12,7 +12,6 @@ extends SceneTree
 ## Run: godot --path <abs project> -s scripts/tools/__ink_gap_probe.gd -- --shots-dir=<dir>
 
 const INK_PATH := "res://scripts/effects/ink_outline.gd"
-const HULL_PATH := "res://resources/shaders/outline.gdshader"
 const GAPS := [0.02, 0.05, 0.10, 0.20, 0.40]  ## CLEAR AIR between the wall's back face and the actor's front face
 const SLOTS := [-6.0, -3.0, 0.0, 3.0, 6.0] ## world x for each gap's actor + rib
 const WALL_Z := -6.0
@@ -25,7 +24,6 @@ var _wait := 0
 var _dir := "user://ink_gap_probe"
 var _ink: MeshInstance3D = null
 var _ink_script: Variant = null
-var _hull: Shader = null
 var _hidden: Array[MeshInstance3D] = []
 var _cam: Camera3D = null
 
@@ -72,19 +70,19 @@ func _box(pos: Vector3, size: Vector3, col: Color) -> MeshInstance3D:
 	mi.position = pos
 	return mi
 
+## An actor dressed exactly as the game dresses one since the inverted hull was deleted (2026-08-27):
+## an opaque body on render layer 1 PLUS the ink-mask layer, wearing InkOutline's screen-space ring at
+## the neutral (black) id. The ring is what this probe's scene needs to be REPRESENTATIVE — the mask's
+## depth is what it actually measures, and that comes from the opaque body either way, but an actor with
+## no outline at all is not the thing being shipped.
 func _actor(pos: Vector3, size: Vector3) -> MeshInstance3D:
 	var mi := _box(pos, size, Color(0.75, 0.2, 0.2))
-	var hull := ShaderMaterial.new()
-	hull.shader = _hull
-	hull.set_shader_parameter("outline_color", Color.BLACK)
-	hull.set_shader_parameter("outline_width", 2.0)
-	mi.material_overlay = hull
 	mi.layers = 1 | int(_ink_script.ACTOR_INK_MASK_LAYER)
+	_ink_script.apply_tint_mesh(mi, int(_ink_script.TINT_ID_NEUTRAL))
 	return mi
 
 func _build() -> void:
 	_ink_script = load(INK_PATH)
-	_hull = load(HULL_PATH)
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-45.0, -30.0, 0.0)
 	root.add_child(light)

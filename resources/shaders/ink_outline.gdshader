@@ -61,13 +61,16 @@ uniform vec4 ink_color : source_color = vec4(0.0, 0.0, 0.0, 1.0);
 // Master line alpha. InkOutline multiplies the authored value by the player's Options dial before
 // pushing it here, so this uniform is already the LIVE strength — never the authored one.
 uniform float ink_opacity : hint_range(0.0, 1.0) = 1.0;
-// Line thickness in pixels OF THE 3D BUFFER, which is not the window: 396x216 window x viewport
-// stretch 0.5 = 792x444, x rendering/scaling_3d/scale 2.0 = 1584x888 actually rendered. So 2.0 here is
-// ~1 pixel of the 792-wide image the player sees, and the shipped 3.0 is ~1.5 — chosen by eye against a
-// render probe, because 2.0 reads as a tasteful technical edge and Borderlands' ink is bolder than that.
-// Uniform in screen space by construction: a line does not get thinner with distance, which is the
-// whole point of the comic-ink look. (Note this is the SHADER's fallback — the value actually used is
-// pushed by InkOutline, whose own export is the one to edit.)
+// Line thickness in pixels of WHATEVER BUFFER THIS PASS RENDERS IN (VIEWPORT_SIZE — never the window).
+// Under RETRO that buffer is 396x216 window x viewport stretch 0.5 = 792x444, x
+// rendering/scaling_3d/scale 2.0 = 1584x888 actually rendered, so 2.0 here is ~1 pixel of the 792-wide
+// image the player sees, and the shipped 3.0 is ~1.5 — chosen by eye against a render probe, because
+// 2.0 reads as a tasteful technical edge and Borderlands' ink is bolder than that. Under HIGH FIDELITY
+// the buffer is native-sized and the value arrives pushed native_scale()-compensated by InkOutline, so
+// the on-screen thickness matches RETRO's. Uniform in screen space by construction: a line does not get
+// thinner with distance, which is the whole point of the comic-ink look. (Note this is the SHADER's
+// fallback — a RETRO-unit literal, kept a literal per the white-panel guard; the value actually used is
+// pushed by InkOutline every visible frame, whose own export is the one to edit.)
 uniform float width_px : hint_range(0.0, 8.0) = 3.0;
 
 // --- Silhouette (depth) term -----------------------------------------------------------------------
@@ -119,10 +122,11 @@ uniform float contact_merge_m : hint_range(0.0, 8.0) = 1.0;
 uniform float crease_strength : hint_range(0.0, 2.0) = 1.0;
 // How sharp a normal change has to be before it becomes a line. Higher = only hard corners.
 uniform float crease_threshold : hint_range(0.05, 2.0) = 0.4;
-// ⭐⭐ SEAM MERGE — the narrowest feature, in pixels OF THIS BUFFER, that still earns a crease line: the
-// confirming taps sit exactly this far either side of the pixel, so a face narrower than this cannot hold
-// one and its creases merge into the surface around it. 0 = off, i.e. the pre-2026-08-18 behaviour where
-// ANY normal change draws a line.
+// ⭐⭐ SEAM MERGE — the narrowest feature, in pixels OF THIS BUFFER (pushed native_scale()-compensated
+// by InkOutline, like width_px, so the authored knob keeps its RETRO-buffer unit), that still earns a
+// crease line: the confirming taps sit exactly this far either side of the pixel, so a face narrower
+// than this cannot hold one and its creases merge into the surface around it. 0 = off, i.e. the
+// pre-2026-08-18 behaviour where ANY normal change draws a line.
 //
 // THE PROBLEM IT SOLVES, in the user's own picture: a solid built from several boxes should be inked as
 // ONE solid, not as its parts. Flush and interpenetrating boxes already are — an interior face is behind
@@ -240,10 +244,72 @@ uniform float mask_occlusion_bias = 0.003;
 // How far (in pixels OF THIS BUFFER) to look for the body's depth when a covered pixel has none of its
 // own — the hull rim, which writes no depth at all. See searched_depth(). Generous is CHEAP here: unlike
 // spreading depth in the resolve pass, widening this search cannot widen the mask's coverage, so it
-// costs taps and nothing else. Must out-reach the widest rim on screen: the rim is `outline_width * 2`
-// pixels of the MASK viewport, which at the shipped half-resolution mask is `outline_width * 4` of this
-// one, so the project's widest authored rim (2.0) spans 8 px here.
+// costs taps and nothing else. Must out-reach the widest rim on screen: the rim is a constant FRACTION
+// of the image (outline.gdshader's fixed rim_reference_width), so in this buffer it spans
+// `outline_width * 2 * (buffer width / mask width)` = `outline_width * 2 * render_scale` px — x4 at the
+// RETRO render_scale 2.0, so the project's widest authored rim (2.0) spans 8 px here. The extra factor
+// the buffer gains under HIGH FIDELITY is supplied by InkOutline, which pushes this value
+// native_scale()-compensated (and sizes the mask viewport by the same factor, keeping the ratio above).
 uniform float mask_rim_search_px = 12.0;
+
+// HULL -> INK HANDOFF window, PRE-ENCODED into the mask's log depth space by InkOutline (from its
+// hull_handoff_near_m / hull_handoff_far_m exports through the same encode_actor_depth below, so the
+// comparison against searched_depth() is apples to apples). Encoded depth DECREASES with distance, so
+// e_near > e_far. Nearer than near_m the hull rim owns the actor and this pass suppresses its ink over
+// them (the pre-handoff behaviour, verbatim); farther than far_m the actor is inked exactly like world
+// geometry — at a dozen pixels tall the mask's per-pixel verdicts degrade (it renders COARSER LODs whose
+// silhouette no longer matches the main pass, spraying suppression holes as black fragments) while the
+// screen-space edge detect stays clean at any range, and outline.gdshader's rim_distance_cap thins the
+// hull away over the same span. The literal defaults (full window) keep an un-driven material sensible;
+// the script always overwrites them.
+uniform float hull_handoff_e_near = 1.0;
+uniform float hull_handoff_e_far = 0.0;
+
+// ⭐⭐ THE OUTLINE RING — the screen-space pass that replaced the inverted-hull rim EVERYWHERE (the shell
+// out-thickened the Lego limbs past a few metres and shattered into confetti; the ring is constant
+// PIXEL width at any distance by construction, the property no shell geometry can deliver). Retired for
+// NPCs 2026-08-25 and for every remaining consumer — props, gibs, corpses, the look-at hover, the
+// first-person view model — on 2026-08-27, when resources/shaders/outline.gdshader was DELETED.
+// The tint buffer is InkOutline's second SubViewport: invisible flat duplicates encode per-fragment
+// R+G = log depth (the actor_mask_resolve two-byte pack), B = id / 16, A = coverage — see
+// resources/shaders/ink_tint.gdshader. filter_nearest is load-bearing: interpolated depth bytes or ids
+// blended between two adjacent actors are both meaningless.
+uniform sampler2D actor_tint : repeat_disable, filter_nearest;
+uniform bool use_actor_tint = false;
+// Ring width in pixels OF THIS BUFFER (the width_px unit; InkOutline pushes it px-unit-compensated).
+uniform float highlight_width_px = 2.0;
+// The id -> color LUT. Alpha scales the ring's strength. Neutral is BLACK: everything wearing a ring is
+// excluded from the world ink, so the ring is its ONLY outline and a bystander (or a crate, or your own
+// gun) should read exactly like the classic black rim did.
+//   1 hostile   2 friendly   3 companion   4 neutral (actor black)
+//   5 prop (reuses neutral)  6 claimed prop (reuses companion blue — the blue Claimable authors)
+//   7..8 the CONTINUOUS ENGAGED-HOSTILE band (see the ring branch): hostile color, with the fraction
+//        past 7 flooring the close-range bloom so a locked-on enemy reads full red at any distance
+//   9 look-at / pickup HOVER  10 view model
+uniform vec4 highlight_hostile : source_color = vec4(0.9, 0.1, 0.1, 1.0);
+uniform vec4 highlight_friendly : source_color = vec4(0.1, 0.8, 0.2, 1.0);
+uniform vec4 highlight_companion : source_color = vec4(0.15, 0.45, 1.0, 1.0);
+uniform vec4 highlight_neutral : source_color = vec4(0.0, 0.0, 0.0, 1.0);
+// ⭐ The HOVER white (id 9) — "you are looking at this and Interact will do something". It replaced the
+// per-component `highlight_color` the hull carried on Talkable / DialogueNPC / LookAtInteractable /
+// Throwable: the ring resolves ONE id to ONE LUT slot, so the hover colour is now global and tuned here.
+// Those components keep their `highlight_color`/`highlight_width` exports as the VISIBILITY switch they
+// already doubled as (alpha 0 or width 0 = this one gets no hover outline — the shipping ATM).
+uniform vec4 highlight_hover : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+// ⭐ The VIEW MODEL (id 10) — your own weapon and first-person body, drawn on ViewModelCamera's layer.
+// A slot of its own rather than reusing neutral so the gun's line stays tunable against the world's
+// without touching combat colours (GunVisuals.outline_color used to own this and no longer exists).
+uniform vec4 highlight_view_model : source_color = vec4(0.0, 0.0, 0.0, 1.0);
+// CLOSE-RANGE COLOR BLOOM window (InkOutline.highlight_color_near_m/far_m, pushed PRE-ENCODED): the
+// ring is the neutral black at range and blends to the disposition color as the ACTOR closes — full
+// color nearer than the near threshold, pure black past the far one. Encoded depth decreases with
+// distance, so e_near > e_far and closeness = smoothstep(e_far, e_near, e). Neutral (id 4) is a fixed
+// point of the mix, so bystanders stay black at every distance with no special case.
+// ⭐ ONLY the DISPOSITION ids bloom (1..4 and the 7..8 band). A prop, a hover and the view model are not
+// dispositions — they paint their LUT colour flat at every range, which is also what makes the hover
+// white read the same whether you are looking at a pistol on the floor or a car across the street.
+uniform float highlight_e_color_near = 1.0;
+uniform float highlight_e_color_far = 0.0;
 
 // Stand-in depth for "nothing was drawn here" (sky / cleared far plane). Big enough that any real
 // geometry beside it registers as a discontinuity, finite so it can never poison the arithmetic.
@@ -352,8 +418,10 @@ float ring_max(vec2 uv, vec2 s) {
 // built-in and is NOT reachable from a helper function in Godot's shading language (the whole shader
 // fails to compile with "Unknown identifier in expression", which headless never notices).
 float searched_depth(vec2 uv, vec2 px) {
-	// ⭐ THE TIGHT GATHER, and it is what lets the tolerance below be small. The mask renders at HALF this
-	// buffer's resolution and its depth is point-sampled, so the texel covering a pixel can describe a
+	// ⭐ THE TIGHT GATHER, and it is what lets the tolerance below be small. The mask renders at
+	// 1/render_scale of this buffer's resolution (half, at the RETRO default 2.0 — InkOutline sizes the
+	// mask native_scale()-compensated, so the ratio holds in both presentations) and its depth is
+	// point-sampled, so the texel covering a pixel can describe a
 	// spot a little further round a shoulder or an arm than the pixel itself — and reading an actor as
 	// slightly FARTHER than it is looks exactly like being occluded, which would put a second outline
 	// back on a plainly visible actor. Taking the NEAREST claimed depth within a couple of pixels removes
@@ -372,29 +440,9 @@ float searched_depth(vec2 uv, vec2 px) {
 	return best;
 }
 
-// 1.0 = the mask's actors still suppress ink here; 0.0 = the world in front of them is what the player is
-// actually looking at, so the mask has no business speaking for this pixel.
-//
-// EVERY early return hands back 1.0, i.e. the pre-fix behaviour. That direction is deliberate and
-// load-bearing: suppressing ink around a visible actor costs at most a pixel of line, while failing to
-// suppress it puts a second black outline around an actor the hull already outlines — the complaint this
-// whole system exists to answer. The test only ever REMOVES suppression where it has positive evidence,
-// and anything it cannot vouch for is left exactly as it was (a prop faded out through
-// GeometryInstance3D.transparency, an actor past the encoding window, a frame before the mask is built).
-float actor_visibility(vec2 uv, float world_depth, vec2 px) {
-	if (!use_mask_occlusion) {
-		return 1.0;
-	}
-	float e_actor = searched_depth(uv, px);
-	if (e_actor < 0.0) {
-		return 1.0;
-	}
-	// Both sides in encoded space, so the tolerance is a fraction of the distance rather than a fixed
-	// number of metres — the mask sits at half this buffer's resolution, and a metre of slack at 40 m is
-	// the same sampling wobble as a centimetre at arm's length.
-	float e_world = encode_actor_depth(world_depth, mask_depth_near, mask_depth_far);
-	return (e_world - e_actor > mask_occlusion_bias) ? 0.0 : 1.0;
-}
+// (The old actor_visibility() helper lives INLINE in fragment() now — the handoff below needs the same
+// searched_depth() result the occlusion verdict uses, and running that search twice per pixel would
+// double the most expensive taps in the pass.)
 
 void fragment() {
 	// Roberts cross: the two diagonals of a square centred on this pixel. Four taps (vs Sobel's eight)
@@ -442,7 +490,104 @@ void fragment() {
 	// window off the MASK RESOLUTION instead of off width_px: at a half-resolution mask it erased world
 	// ink 3 px out from every actor, so actors sat in a bare halo you could spot people by — including
 	// distant ones, where a fixed screen-space window is enormous next to the actor itself. Suppression
-	// must always be the width of the line being suppressed.
+	// must always be the width of the line being suppressed. (width_px arrives native_scale()-compensated
+	// from InkOutline — a factor derived from THIS buffer, never from the mask — so the window stays
+	// pinned to the line in both presentations.)
+	// THE OUTLINE RING (see the uniform block), computed FIRST because it must SURVIVE the actor
+	// exclusion below: the ring lives exactly in the suppression band hugging every masked actor, and a
+	// plain discard there would erase the ONLY outline that thing has — since 2026-08-27 everything
+	// masked out of the world ink (NPCs, props, gibs, corpses, the view model) is outlined by this pass
+	// and nothing else. Drawn only OUTSIDE every tinted silhouette; the NEAREST covered tap wins (max
+	// encoded depth — overlapping actors already resolved nearest-wins by their duplicates' own z-test);
+	// depth-compared against the scene at THIS pixel with the same encoded-space bias the occlusion
+	// verdict uses, so an enemy behind a wall paints nothing (the no-radar rule) — with one deliberate
+	// exemption for the view model, documented at the test itself.
+	vec3 ring_rgb = vec3(0.0);
+	float ring_a = 0.0;
+	if (use_actor_tint && highlight_width_px > 0.25) {
+		if (texture(actor_tint, SCREEN_UV).a < 0.5) {
+			vec2 hw = max(highlight_width_px, 0.5) / VIEWPORT_SIZE;
+			vec2 hd = hw * 0.70710678;
+			vec2 taps[12] = vec2[12](
+				vec2(hw.x, 0.0), vec2(-hw.x, 0.0), vec2(0.0, hw.y), vec2(0.0, -hw.y),
+				vec2(hd.x, hd.y), vec2(-hd.x, hd.y), vec2(hd.x, -hd.y), vec2(-hd.x, -hd.y),
+				vec2(hw.x * 0.5, 0.0), vec2(-hw.x * 0.5, 0.0), vec2(0.0, hw.y * 0.5), vec2(0.0, -hw.y * 0.5)
+			);
+			float best_e = -1.0;
+			float best_id = 0.0;
+			for (int i = 0; i < 12; i++) {
+				vec4 t = texture(actor_tint, SCREEN_UV + taps[i]);
+				if (t.a > 0.5) {
+					float e = t.g + t.r / 255.0;  // the resolve pack's decode — keep in step
+					if (e > best_e) {
+						best_e = e;
+						best_id = t.b;
+					}
+				}
+			}
+			if (best_e >= 0.0) {
+				// ⭐ KEEP THE 16.0 IN STEP with ink_tint.gdshader's divide and InkOutline.TINT_ID_SPAN.
+				float idf = best_id * 16.0;
+				int id = int(round(idf));
+				float e_scene = encode_actor_depth(d_c, mask_depth_near, mask_depth_far);
+				// ⭐⭐ THE VIEW MODEL IS EXEMPT FROM THE OCCLUSION TEST, and it has to be. Everything else
+				// here obeys the no-radar rule: a ring whose owner is behind the world paints nothing. But
+				// the view model is composited OVER the world by ViewModelCamera's own SubViewport (its own
+				// cleared depth — that is the whole point of the pass), and the main camera does not draw
+				// the gun at all, so the depth this test reads at a ring pixel is whatever is BEHIND the
+				// weapon. Walk up to a wall and that wall is nearer than the gun's duplicate: the test
+				// would call the gun occluded and blink its outline off while the gun itself is still
+				// plainly drawn on top. Exempting id 10 restores the hull's old behaviour exactly — the
+				// gun's rim was drawn in the gun's own pass and never depth-tested against the world
+				// either. Safe because nothing on VIEW_MODEL_LAYER is ever a thing in the world to be
+				// hidden behind.
+				bool depth_exempt = (id == 10);
+				if (depth_exempt || !(e_scene - best_e > mask_occlusion_bias)) {
+					if ((id >= 1 && id <= 4) || id >= 7) {
+						// DISPOSITION IDS: the ring is the actor's ONLY outline, so it draws at every
+						// range, and its colour blooms as the actor closes.
+						vec4 hcol = (id == 1 || (id >= 7 && id <= 8)) ? highlight_hostile
+							: ((id == 2) ? highlight_friendly
+							: ((id == 3) ? highlight_companion
+							: ((id == 9) ? highlight_hover
+							: ((id == 10) ? highlight_view_model : highlight_neutral))));
+						// The close-range color bloom (see the uniform block): black at range, the
+						// disposition color fading in as THIS actor's encoded depth crosses the band.
+						// A hover / view-model id is not a disposition and does not bloom — it paints its
+						// LUT slot flat, so `closeness` is pinned to 1 for those.
+						float closeness = (id >= 9)
+							? 1.0
+							: smoothstep(highlight_e_color_far, highlight_e_color_near, best_e);
+						// THE ENGAGED-HOSTILE BAND (7..8, continuous): a hostile LOCKED ONTO THE PLAYER
+						// stamps 7 + mix (NpcOutline drives mix 0..1 over NPC.outline_target_fade_s), and
+						// the mix FLOORS the bloom — full red at any distance once locked on, easing back
+						// to the distance rule when the lock breaks. max(), not replace: a locked enemy
+						// point-blank must stay full red even mid-fade. smoothstep instead of a bare
+						// (idf - 7.0) eases the temporal fade and absorbs the buffer's 8-bit quantisation
+						// at both rails (a stamped 7.0 must read exactly not-engaged, an 8.0 fully so).
+						// ⭐ id <= 8 guards the band against the ids ABOVE it: 9 and 10 are ordinary
+						// discrete slots, not "more engaged than full red".
+						if (id >= 7 && id <= 8) {
+							closeness = max(closeness, smoothstep(7.0, 7.9, idf));
+						}
+						ring_rgb = mix(highlight_neutral.rgb, hcol.rgb, closeness);
+						ring_a = mix(highlight_neutral.a, hcol.a, closeness);
+					} else if (id >= 5 && id <= 6) {
+						// WORLD PROPS: unconditional at every range since the hull was deleted
+						// (2026-08-27). It used to be the FAR half of a crossfade — invisible inside the
+						// hull's rim_fade band — which left a claimed dog readable at 30 m but outlined by
+						// a shell up close; now one line owns the whole distance. Rest black reuses the
+						// neutral slot and claimed reuses the companion blue, which is the same blue
+						// Claimable authors, so props need no LUT colours of their own.
+						vec4 pcol = (id == 5) ? highlight_neutral : highlight_companion;
+						ring_rgb = pcol.rgb;
+						ring_a = pcol.a;
+					}
+				}
+			}
+		}
+	}
+
 	float actor_here = 0.0;
 	float actor_near = 0.0;
 	if (use_actor_mask) {
@@ -454,10 +599,37 @@ void fragment() {
 		c_near = max(c_near, max(texture(actor_mask, bl).a, texture(actor_mask, br).a));
 		c_near = max(c_near, c_here);
 		if (c_near > 0.0) {
-			float vis = actor_visibility(SCREEN_UV, d_c, 1.0 / VIEWPORT_SIZE);
-			actor_here = c_here * vis;
-			actor_near = c_near * vis;
-			if (actor_here > 0.25 || actor_near >= 0.5) {
+			// OCCLUSION: 1.0 = the mask's actor still suppresses ink here; 0.0 = the world in front of it
+			// is what the player is actually looking at. Every fall-through keeps 1.0, i.e. suppression:
+			// that direction is deliberate and load-bearing — suppressing ink around a visible actor costs
+			// at most a pixel of line, while failing to suppress puts a second black outline around an
+			// actor the hull already outlines. The verdict only ever REMOVES suppression on positive
+			// evidence; anything it cannot vouch for (a prop faded through GeometryInstance3D.transparency,
+			// an actor past the encoding window, a frame before the mask is built) is left as it was.
+			// Both sides compare in encoded space, so the tolerance is a fraction of the distance rather
+			// than metres — a metre of slack at 40 m is the same sampling wobble as a centimetre close up.
+			float e_actor = searched_depth(SCREEN_UV, 1.0 / VIEWPORT_SIZE);
+			float vis = 1.0;
+			if (use_mask_occlusion && e_actor >= 0.0) {
+				float e_world = encode_actor_depth(d_c, mask_depth_near, mask_depth_far);
+				vis = (e_world - e_actor > mask_occlusion_bias) ? 0.0 : 1.0;
+			}
+			// HULL -> INK HANDOFF (see the uniform block): `owned` is the hull's claim on this actor —
+			// 1 nearer than the near threshold (suppress, the rim owns the outline: pre-handoff behaviour
+			// verbatim), 0 past the far one (no suppression at all — the actor is edge-detected like world
+			// geometry, which stays clean at ranges where the mask's coarse-LOD silhouette falls apart).
+			// Encoded depth DECREASES with distance, hence smoothstep(far, near, e). An unclaimable pixel
+			// (e_actor < 0: the searched ring found no body) keeps owned = 1.0 — the same safe
+			// suppress-by-default direction as the occlusion verdict above.
+			float owned = (e_actor >= 0.0) ? smoothstep(hull_handoff_e_far, hull_handoff_e_near, e_actor) : 1.0;
+			actor_here = c_here * vis * owned;
+			actor_near = c_near * vis * owned;
+			// The ring outranks the suppression: a suppressed pixel carrying ring coverage falls THROUGH
+			// instead of discarding ('return' is illegal in a fragment processor, so no early-out exists)
+			// — the edge math below runs wastefully for those few pixels, the actor_near fade at the tail
+			// zeroes any ink they would draw, and the ring composes at the end. Only a ring-less
+			// suppressed pixel truly discards.
+			if ((actor_here > 0.25 || actor_near >= 0.5) && ring_a <= 0.0) {
 				discard;
 			}
 		}
@@ -587,6 +759,25 @@ void fragment() {
 	// suppression's WIDTH pinned to the line (`o`, above) and let this only soften its edge.
 	edge *= 1.0 - smoothstep(0.4, 0.5, actor_near);
 
-	ALBEDO = ink_color.rgb;
-	ALPHA = clamp(edge, 0.0, 1.0) * ink_color.a * ink_opacity;
+	vec3 out_rgb = ink_color.rgb;
+	float out_alpha = clamp(edge, 0.0, 1.0) * ink_color.a * ink_opacity;
+	// The precomputed outline ring (see the block ABOVE the actor exclusion — it lives there so the
+	// suppression discard cannot erase it) composes OVER the ink: team color is never buried under the
+	// aesthetic line work.
+	// ⭐⭐ AND IT DOES NOT RIDE ink_opacity (changed 2026-08-27). It used to, back when the ring was one
+	// more flourish on an aesthetic pass and every actor, prop and weapon ALSO wore an inverted-hull rim
+	// that the Options -> Video "Ink Outline" slider could not touch. With the hull deleted the ring is
+	// the only outline in the game, and scaling it by that slider would have made a video option the
+	// master switch for hostile red, the colourblind-safe palette, the claimed-prop blue, every look-at
+	// hover cue and the view model's line at once — a gameplay and accessibility regression hiding in a
+	// brightness dial. The slider still owns the WORLD's ink (out_alpha above, and InkOutline hides this
+	// whole quad at 0% unless the ring needs it); the ring is now independent of it, exactly as the hull
+	// rims it replaced always were.
+	if (ring_a > 0.0) {
+		out_rgb = ring_rgb;
+		out_alpha = max(out_alpha, ring_a);
+	}
+
+	ALBEDO = out_rgb;
+	ALPHA = out_alpha;
 }

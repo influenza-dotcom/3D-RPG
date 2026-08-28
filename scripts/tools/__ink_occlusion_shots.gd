@@ -1,6 +1,6 @@
 extends SceneTree
 ## QA probe for the ink pass's ACTOR OCCLUSION (InkOutline.occlusion_aware_mask). Builds a bare scene
-## with one hull-rimmed actor IN THE OPEN and one HIDDEN BEHIND a pillar, and shoots the same frame
+## with one ringed actor IN THE OPEN and one HIDDEN BEHIND a pillar, and shoots the same frame
 ## twice — occlusion off, then on — so the two can be diffed by eye and by pixel count.
 ##
 ## The bug it exists to catch: the mask viewport renders only actors, so nothing in it occludes them.
@@ -22,10 +22,8 @@ extends SceneTree
 ## -> groups.gd -> player.gd, which names the GameSettings autoload — and under `-s` that identifier does
 ## not exist yet, so the whole harness fails to compile with an error that names none of this.
 const INK_PATH := "res://scripts/effects/ink_outline.gd"
-const HULL_PATH := "res://resources/shaders/outline.gdshader"
 
 var _ink_script: Variant = null
-var _hull_shader: Shader = null
 const SETTLE := 40   ## frames before the first shot: shader compiles + the deferred mask build
 const BETWEEN := 12  ## frames between the two shots, so the toggled uniform is definitely on screen
 
@@ -76,9 +74,11 @@ func _process(_delta: float) -> bool:
 	_wait = BETWEEN
 	return false
 
-## A hull-rimmed actor exactly as Character/NPC dress one: an opaque body carrying outline.gdshader as a
-## material_overlay, on render layer 1 PLUS the ink mask layer.
-func _actor(pos: Vector3, size: Vector3, rim: Color) -> MeshInstance3D:
+## A ringed actor exactly as the game dresses one since the inverted hull was deleted (2026-08-27): an
+## opaque body on render layer 1 PLUS the ink-mask layer, wearing InkOutline's screen-space ring. `id` is
+## a TINT_ID_* value — the caller picks which LUT colour this actor reads as (the old signature took a
+## rim COLOUR; the ring has no per-actor colour, it has an identity).
+func _actor(pos: Vector3, size: Vector3, id: int) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = size
@@ -86,13 +86,9 @@ func _actor(pos: Vector3, size: Vector3, rim: Color) -> MeshInstance3D:
 	var base := StandardMaterial3D.new()
 	base.albedo_color = Color(0.75, 0.2, 0.2)
 	mi.material_override = base
-	var hull := ShaderMaterial.new()
-	hull.shader = _hull_shader
-	hull.set_shader_parameter("outline_color", rim)
-	hull.set_shader_parameter("outline_width", 2.0)  # NpcData's authored rim
-	mi.material_overlay = hull
 	mi.layers = 1 | int(_ink_script.ACTOR_INK_MASK_LAYER)
 	mi.position = pos
+	_ink_script.apply_tint_mesh(mi, id)
 	return mi
 
 func _box(pos: Vector3, size: Vector3, col: Color) -> MeshInstance3D:
@@ -108,7 +104,6 @@ func _box(pos: Vector3, size: Vector3, col: Color) -> MeshInstance3D:
 
 func _build() -> void:
 	_ink_script = load(INK_PATH)
-	_hull_shader = load(HULL_PATH)
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-45.0, -30.0, 0.0)
 	root.add_child(light)
@@ -126,11 +121,11 @@ func _build() -> void:
 
 	# HIDDEN: dead behind the wall, 3 m further out, right where those step lines cross the frame.
 	# Nothing of it can be seen — but its silhouette used to bite a person-shaped hole in every one.
-	_hidden = _actor(Vector3(0.0, 0.0, -9.0), Vector3(3.0, 3.4, 0.6), Color.BLACK)
+	_hidden = _actor(Vector3(0.0, 0.0, -9.0), Vector3(3.0, 3.4, 0.6), int(_ink_script.TINT_ID_NEUTRAL))
 	root.add_child(_hidden)
 	# VISIBLE control, out in the open in FRONT of the wall — its rim must stay clean and un-doubled in
 	# BOTH shots. This is the half of the contract the fix must not break.
-	root.add_child(_actor(Vector3(-3.4, -0.6, -4.0), Vector3(1.2, 2.6, 0.6), Color.BLACK))
+	root.add_child(_actor(Vector3(-3.4, -0.6, -4.0), Vector3(1.2, 2.6, 0.6), int(_ink_script.TINT_ID_NEUTRAL)))
 
 	var cam := Camera3D.new()
 	cam.fov = 70.0

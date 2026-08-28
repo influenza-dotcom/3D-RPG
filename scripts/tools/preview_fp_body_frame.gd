@@ -46,10 +46,15 @@ const CAM_TUNING_SCRIPT := "res://resources/tuning/CameraSettings.gd"
 ## judged against the body they hang off — floating arms and well-seated arms look identical in isolation.
 const POSE_PROPS := ["fp_leg_offset", "fp_leg_scale", "fp_torso_offset", "fp_body_arm_offset",
 		"fp_body_arm_scale_mult", "fp_body_scale",
-		# The ACTOR RIM. Read here (rather than left off as "not a pose") for one reason: --headless NEVER COMPILES
-		# A SHADER, so a broken outline.gdshader passes every test in this project and ships dead — twice now. This
-		# probe is windowed, so the rim either appears in the PNG or the shader is broken. Judge it here.
-		"first_person_body_outline", "fp_body_outline_color", "fp_body_outline_width"]
+		# The ACTOR OUTLINE switch. Kept in the pose set (rather than left off as "not a pose") because the body
+		# reads differently with and without a line around it. ⭐ It no longer doubles as the project's
+		# does-the-outline-shader-compile canary: since 2026-08-27 the outline is InkOutline's screen-space RING,
+		# which needs the whole ink pass (two SubViewports on a camera) and cannot be judged in this harness at
+		# all — this rig only gets the ACTOR_INK_MASK_LAYER half here. That canary job now belongs to
+		# scripts/tools/__ink_cb_ring_shots.gd, which is windowed and self-judging. Keep one of them alive:
+		# --headless NEVER COMPILES A SHADER, so a broken .gdshader passes every test in this project and ships
+		# dead — which has happened twice.
+		"first_person_body_outline"]
 ## ...and the arm mount rows read off the catalog (see CATALOG).
 const CATALOG_PROPS := ["arm_scale", "arm_position", "arm_rotation", "leg_scale", "leg_position", "leg_rotation"]
 
@@ -138,12 +143,11 @@ func _run() -> void:
 	var Swap = load("res://scripts/components/body_model_swap.gd")
 	var rig = Swap.new()
 	rig.casts_shadow = false
-	# The actor rim, set BEFORE any model exactly as _build_first_person_legs does. In-game this ALSO registers the
-	# body with InkOutline's actor mask (the same switch); there is no ink pass in this harness, so what the PNG
-	# proves is the other half — that the inverted-hull shader still compiles and draws.
+	# The actor outline switch, set BEFORE any model exactly as _build_first_person_legs does. In-game this stamps
+	# BOTH halves — InkOutline's actor-mask bit and the ring's tint id. There is no ink pass in this harness (and
+	# apply_tint no-ops with no InkOutline node to rasterise the duplicates), so the PNG shows the body WITHOUT its
+	# outline. That is expected here: this probe is for POSE and PLACEMENT. Judge the outline in game.
 	rig.actor_outline = pose["first_person_body_outline"]
-	rig.actor_outline_color = pose["fp_body_outline_color"]
-	rig.actor_outline_width = pose["fp_body_outline_width"]
 	rig.animate_arms = false
 	rig.animate_legs = false
 	rig.breathe = false

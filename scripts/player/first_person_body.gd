@@ -164,25 +164,23 @@ extends Node
 ## How fast that hide/reveal dissolves (per-second exponential rate; higher = snappier). The default is paced to
 ## read alongside the weapon's own ~0.35 s holster swing rather than racing it.
 @export var fp_body_arms_hide_fade: float = 8.0
-## Wear the black ACTOR RIM — the inverted-hull outline every NPC, prop and view model in this game wears — on
-## your own first-person body, and (the same switch, inseparably) keep the world's screen-space INK outline off
-## it. Both halves live on the rig itself (BodyModelSwap.actor_outline), because that component RESETS the render
-## layers of the meshes it spawns and so is the only place a stamp survives a model swap.
+## Wear the black ACTOR OUTLINE — InkOutline's screen-space ring, the one outline every NPC, prop and view model
+## in this game wears — on your own first-person body, and (the same switch, inseparably) keep the world's
+## screen-space INK outline off it. Both halves live on the rig itself (BodyModelSwap.actor_outline), because that
+## component RESETS the render layers of the meshes it spawns and so is the only place a stamp survives a model
+## swap.
 ##
-## ⭐OFF is not "no outline", it is TWO outlines. Your body is an actor at real world depth, so InkOutline's edge
-## detect finds its silhouette exactly like a wall's and draws the world's line on it; the rim is what tells the
-## ink pass "an actor already owns this pixel". Turning this off gives you the world line ALONE, which is the
-## doubled/redundant outline the whole ink system exists to prevent — see scripts/effects/ink_outline.gd,
-## "hull owns actors, ink owns the world". The view-model hands have worn theirs since they were built
-## (FistVisuals, in _build_first_person_arms); this is the body half finally catching up.
+## ⭐OFF is not "no outline", it is THE WRONG outline. Your body is an actor at real world depth, so InkOutline's
+## edge detect finds its silhouette exactly like a wall's and draws the world's line on it; the ring is what tells
+## the ink pass "an actor already owns this pixel". Turning this off gives you the world line ALONE — a scribbly
+## per-crease treatment where every NPC beside you wears a clean constant-width one. See
+## scripts/effects/ink_outline.gd, "the ring owns actors, ink owns the world".
+##
+## ⭐ There is no colour or width knob beside this any more (the `fp_body_outline_color` / `fp_body_outline_width`
+## exports went with the inverted hull on 2026-08-27). A ring resolves one id to one global LUT slot, so your
+## body's line is InkOutline.highlight_neutral at InkOutline.highlight_width_px — the same black, at the same
+## weight, as the NPC standing next to you, which is what it was always pinned to by hand anyway.
 @export var first_person_body_outline: bool = true
-## Colour of that rim. BLACK is the house look, shared with NPC.outline_color and Throwable.OUTLINE_HIDDEN_COLOR.
-## Its alpha is DRIVEN by the rig, not authored here: the rim dissolves with the chest and arms it wraps.
-@export var fp_body_outline_color: Color = Color(0.0, 0.0, 0.0, 1.0)
-## Rim thickness (the outline shader's `outline_width`, which it scales x4 in clip space). 2.0 is NPC parity —
-## your own body is drawn by the same camera at the same depth as theirs, so it should carry the same weight of
-## line. (The view-model fists use 2.0 too, but for a different reason: they are much closer to the lens.)
-@export var fp_body_outline_width: float = 2.0
 ## Tint for both legs (WHITE = the model's own colour). Character creation will override this per-save later.
 @export var fp_leg_color: Color = Color(0.486, 0.184, 0.224)
 ## How far (degrees) the first-person legs LEAN toward the wall they're clinging to, at a full wall-climb cling.
@@ -368,8 +366,6 @@ func _build_first_person_legs() -> void:
 	# The ACTOR RIM + the ink mask, set BEFORE any model so the rig's very first build already dresses its parts
 	# (every later rebuild re-applies them itself — that is why they live on the rig and not on a walk out here).
 	legs.actor_outline = first_person_body_outline
-	legs.actor_outline_color = fp_body_outline_color
-	legs.actor_outline_width = fp_body_outline_width
 	legs.leg_model = fp_leg_model if first_person_legs else null  # torso can show without legs, and vice versa
 	legs.leg_scale = fp_leg_scale
 	legs.leg_position = Vector3(0.095, -0.265, -0.02)  # per-leg hip offset, from scenes/enemies/enemy.tscn
@@ -444,20 +440,18 @@ func _build_first_person_arms() -> void:
 	_fp_arms = arms
 	_fp_arm_bob_mount = bob_mount
 	# The WEAPON look on your bare hands: the same GunVisuals dress pass every view model gets — shadows off,
-	# rim light chained per-surface (or onto the tint override), black inverted-hull outline — so the fists
-	# read as first-class view-model gear beside an outlined gun, for the carry hold and the guard alike.
-	# Code-built child; tune its rim/outline live on the Remote tree (FirstPersonArms/FistVisuals).
+	# rim light chained per-surface (or onto the tint override), and InkOutline's view-model outline id — so
+	# the fists read as first-class view-model gear beside an outlined gun, for the carry hold and the guard
+	# alike. Code-built child; tune its rim live on the Remote tree (FirstPersonArms/FistVisuals), and the
+	# outline itself on the InkOutline node (highlight_view_model / highlight_width_px), which is what keeps
+	# the hands from ever drifting from the gun beside them — they now literally share one knob.
+	# (Until 2026-08-27 this pinned visuals.outline_width = 2.0 before add_child, because GunVisuals baked
+	# the width into a shared hull material in _ready. Both the width and that ordering trap are gone.)
 	var visuals := GunVisuals.new()
 	visuals.name = "FistVisuals"
 	visuals.host = arms  # duck-typed: the rig exposes no `layers`, so meshes keep the view-model layer it forced
-	# Probe-calibrated for the fists: ~2 draws a clean one-edge comic outline, ~8 shatters the hull into
-	# shards. GunVisuals now ships that same 2.0 as its default (its old 0.02 was SUB-PIXEL — see the export's
-	# note; the fists were the first place anyone measured it), so this pin is parity, kept explicit so the
-	# hands can't drift from the gun beside them. Set BEFORE add_child — _ready bakes it into the shared
-	# outline material.
-	visuals.outline_width = 2.0
-	arms.add_child(visuals)  # _ready builds the shared rim/outline materials...
-	visuals.dress(arms)  # ...then the dress stamps them onto the already-instanced arm pair
+	arms.add_child(visuals)  # _ready builds the shared rim material...
+	visuals.dress(arms)  # ...then the dress stamps it (and the outline id) onto the already-instanced arm pair
 
 
 ## Hang your own ARMS off the FP body rig — the same mirrored pair an NPC wears, at real world depth, so looking

@@ -3,7 +3,6 @@
 [ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scripts/components/Throwable.gd" id="1_wd2d1"]
 [ext_resource type="Texture2D" uid="uid://cujoryu8ab2mh" path="res://assets/textures/wooden_crate_texture_by_dementiarunner_d79rssy-fullview.jpg" id="2_ftslj"]
 [ext_resource type="Resource" uid="uid://cjjrjwj1vyvnk" path="res://resources/interactables/wooden_crate.tres" id="2_y8ul7"]
-[ext_resource type="Shader" uid="uid://57nnako5ixe7" path="res://resources/shaders/outline.gdshader" id="4_y8ul7"]
 [ext_resource type="AudioStream" uid="uid://chaqjw6p85dei" path="res://assets/audio/sfx/WoodenHit.mp3" id="5_y8ul7"]
 [ext_resource type="Script" uid="uid://bawsm3uwr2sh3" path="res://scripts/components/nav_blocker.gd" id="nav_blk"]
 
@@ -17,12 +16,6 @@ bounce = 0.2
 albedo_texture = ExtResource("2_ftslj")
 uv1_offset = Vector3(0.485, 0.47, -0.465)
 uv1_triplanar = true
-
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_dmbnc"]
-render_priority = 0
-shader = ExtResource("4_y8ul7")
-shader_parameter/outline_color = Color(0, 0, 0, 1)
-shader_parameter/outline_width = 1.0
 
 [sub_resource type="BoxMesh" id="BoxMesh_rccsh"]
 
@@ -44,7 +37,6 @@ shape = SubResource("BoxShape3D_r6c8q")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="CollisionShape3D" unique_id=1373406883]
 material_override = SubResource("StandardMaterial3D_dke22")
-material_overlay = SubResource("ShaderMaterial_dmbnc")
 cast_shadow = 0
 mesh = SubResource("BoxMesh_rccsh")
 
@@ -52,7 +44,7 @@ mesh = SubResource("BoxMesh_rccsh")
 stream = ExtResource("5_y8ul7")
 unit_size = 4.0
 max_db = 0.0
-bus = &"sfx"
+bus = &"world"
 
 [node name="NavBlocker" type="NavigationObstacle3D" parent="."]
 script = ExtResource("nav_blk")

@@ -161,8 +161,6 @@ func spawn_basis() -> Basis:
 ##     by the recycled NPC's next life, so an un-cleared gib can freeze mid-flash or re-flash later. Throwable's
 ##     own overlay pass would overwrite the slot at _ready anyway; clearing here makes the intent explicit and
 ##     covers a chassis whose _ready hasn't run yet.
-##   * the `talk_prev_overlay` meta -- TalkHelpers' look-at-highlight stash. duplicate() copies metadata, so a
-##     character killed while the player was looking at it hands its stashed overlay to the gib. Inert but stale.
 ##   * material_override -- the character's skin. SHARED BY REFERENCE with the living/pooled original, so it is
 ##     duplicated here per the writable-material rule (mesh_coat.gd) and never mutated in place.
 ##   * layers / cast_shadow / transparency -- forced back to world defaults. A first-person rig sets
@@ -183,12 +181,18 @@ func _strip_host_state(root: Node) -> void:
 func _walk_strip(node: Node, doomed: Array[Node]) -> void:
 	var mi := node as MeshInstance3D
 	if mi != null:
+		if mi.has_meta(&"npc_tint_dup"):
+			# InkOutline's invisible disposition-tint duplicate (NpcOutline), cloned along with the part by
+			# duplicate() — metadata copies too, which is what makes it recognisable here. It MUST die with
+			# the host: the layer reset below would otherwise promote its depth-encoding shader onto the
+			# MAIN camera, wrapping the gib in moving yellow/green stripe bands (reported 2026-08-25 —
+			# ink_tint.gdshader's R/G log-depth bytes rendered as colour, animating with camera distance).
+			doomed.append(mi)
+			return  # its children (it has none) go with it
 		if not mi.visible:
 			doomed.append(mi)
 			return  # its children go with it
 		mi.material_overlay = null
-		if mi.has_meta(&"talk_prev_overlay"):
-			mi.remove_meta(&"talk_prev_overlay")
 		if mi.material_override != null:
 			mi.material_override = mi.material_override.duplicate()
 			# The FP torso's dithered see-through rides the MATERIAL channel (BodyModelSwap.body_transparency:

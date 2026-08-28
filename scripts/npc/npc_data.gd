@@ -57,6 +57,10 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export var outline_color: Color = Color.BLACK
 ## Outline thickness fed to the shader's outline_width uniform. 2.0 is the standard enemy rim; higher = thicker.
 @export var outline_width: float = 2.0
+## Seconds for the ring's hostile red to fade in when this archetype locks onto the player (and back out
+## when the lock breaks) — the "targeting you = full red at any distance" override. 0 = snap. Keep the
+## default in lockstep with NPC.outline_target_fade_s.
+@export_range(0.0, 5.0, 0.05, "or_greater") var outline_target_fade_s: float = 0.4
 
 @export_group("Hostility")
 ## Pick this archetype's faction from a DROPDOWN by id. Resolves to the matching Faction .tres on the NPC in

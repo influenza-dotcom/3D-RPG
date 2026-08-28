@@ -47,6 +47,11 @@ static func resolve_meshes(component: Node, mesh_path: NodePath) -> Array[MeshIn
 ## active surface material, else a fresh StandardMaterial3D. Duplicating preserves every other property (roughness,
 ## cull, transparency…) — the caller only overwrites albedo. Never returns the shared source itself, so recolouring
 ## the result can't leak into other instances or the on-disk resource.
+##
+## `m` must never be an InkOutline tint duplicate (meta `npc_tint_dup`) — the resolvers above are what guarantee it.
+## Handed one, this wouldn't copy the shared tint ShaderMaterial (it isn't a StandardMaterial3D, so the fresh-material
+## fallback takes over) but the CALLER then writes that fresh material into `material_override` and the duplicate's
+## tint material is gone: garbage depth + id in the tint buffer. Screen the mesh out before you get here, not after.
 static func writable_material(m: MeshInstance3D) -> StandardMaterial3D:
 	var src: Material = m.material_override
 	if src == null and m.mesh != null and m.mesh.get_surface_count() > 0:
@@ -57,9 +62,17 @@ static func writable_material(m: MeshInstance3D) -> StandardMaterial3D:
 
 
 ## First MeshInstance3D in `node`'s descendants (depth-first), or null. Used only when the host doesn't expose a
-## `mesh_instance` and no `mesh_path` was wired.
+## `mesh_instance` and no `mesh_path` was wired. Never returns an InkOutline tint duplicate (meta `npc_tint_dup`):
+## depth-first ordering already made the parent mesh win, but the skip is explicit so a future breadth-first
+## rewrite can't start recolouring infrastructure.
 static func first_mesh(node: Node) -> MeshInstance3D:
 	for c in node.get_children():
+		if c.has_meta(&"npc_tint_dup"):
+			continue  # InkOutline's invisible disposition-tint duplicate: it wears the ONE shared tint material
+			# (identity rides a per-instance uniform), so coating it would overwrite the whole game's tint pass
+			# with a skin/coat material and rasterise garbage depth + id — and that buffer's R/G log-depth bytes
+			# read as moving stripe bands once drawn (2026-08-25; see scripts/effects/body_part_gib.gd).
+			# It has no children, so `continue` (not recursing into it) loses nothing.
 		if c is MeshInstance3D:
 			return c as MeshInstance3D
 		var deeper := first_mesh(c)

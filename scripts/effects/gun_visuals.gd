@@ -2,10 +2,9 @@ class_name GunVisuals
 extends Node3D
 
 ## The view-model's LOOK pass — built in code (no .tscn) and owned by GunMesh. Split off so the gun-mesh
-## root stays a thin coordinator: this child owns the rim-light + black inverted-hull outline materials
-## (and the rim/outline tuning exports + shader), and the recursive walks that stamp shadows-off, the rim
-## light, and the outline onto a gun subtree. The root just calls dress(target) — once on itself from
-## _ready, then on each swapped-in weapon model.
+## root stays a thin coordinator: this child owns the rim-light material (and its tuning exports), and the
+## recursive walks that stamp shadows-off, the rim light, and the OUTLINE ID onto a gun subtree. The root
+## just calls dress(target) — once on itself from _ready, then on each swapped-in weapon model.
 ##
 ## Host-coupled but host-AGNOSTIC: GunMesh builds one in _ready for the gun, and the Player builds one for
 ## the first-person ARMS rig (the bare fists wear the same look as every weapon). The host is needed only
@@ -31,28 +30,25 @@ const RIM_LIGHT_SHADER = preload("res://resources/shaders/rim_light.gdshader")
 @export var rim_top_bias: float = 0.35
 
 @export_group("Outline")
-## Black inverted-hull outline on the view model (same shader the NPCs / props / ragdoll / your own
-## first-person body use, via TalkHelpers.make_outline_material). BLACK is the house look.
-@export var outline_color: Color = Color.BLACK
-## Inverted-hull rim thickness fed to the shared outline shader — the SAME units as NPC.outline_width /
-## Ragdoll.outline_width / BodyModelSwap.actor_outline_width, and 2.0 is parity with all of them.
-## ⭐⭐ THIS IS THE VIEW MODEL'S ONLY OUTLINE. The gun renders on the view-model layer, and InkOutline's mask
-## camera culls that layer, so the world's screen-space ink is DISCARDED over the gun on purpose (an actor
-## wearing a hull rim AND the ink is the doubled outline that system exists to prevent). Make this rim
-## sub-pixel and the weapon has no outline at all — which is what shipped until 2026-08-18. This default
-## was 0.02 from the day the gun got a rim (2026-06-03), sized against the NPC's then-0.085 — a value left
-## over from the OLD outline shader, a world-space extrusion in METRES, where a gun 20 cm from the lens did
-## need a far smaller extrusion than an NPC. But outline.gdshader had already become (2026-05-27) a
-## screen-space extrusion — `outline_width` is ~2 px of the 1584-wide 3D buffer per unit (≈1 visible pixel),
-## invariant to how close the mesh is to the camera — so both values were sub-pixel; the NPC was retuned
-## to 2.0 (2026-06-16) and the gun never was. Measured: 5 rim pixels on the whole silenced pistol at 0.02
-## vs 988 at 2.0. Nobody noticed for months because the gun had no other outline to compare against —
-## until the ink pass (2026-08-12) briefly inked it, and the actor mask then (correctly) took the ink off
-## it, which is the day the weapon visibly "lost its outline": it had fallen back to this rim.
-## Distance no longer matters, so there is no reason for the gun to differ from an NPC. Higher = chunkier
-## edge; ~8 shatters the hull into shards (the fists were probe-calibrated to the same 2.0).
-@export var outline_width: float = 2.0
-## MeshInstance3D name substrings (case-insensitive) to SKIP when applying the outline — for a modeled
+## ⭐⭐ THE VIEW MODEL'S OUTLINE IS INKOUTLINE'S SCREEN-SPACE RING (InkOutline.TINT_ID_VIEW_MODEL), and
+## dress() stamps it on every body mesh of the rig and of each swapped-in weapon model. There is no
+## colour or width knob here any more: a ring resolves ONE id to ONE global LUT slot, so the gun's colour
+## lives on InkOutline.highlight_view_model and its thickness on InkOutline.highlight_width_px, tunable
+## live in the remote inspector like the rest of the pass.
+##
+## WHY THE RING AND NOT THE INVERTED HULL IT REPLACED (2026-08-27, the project-wide retirement): a shell
+## is a second draw call per submesh, it fights the flash/rim chain for the ONE material_overlay slot, and
+## it has to be authored at a width nobody can verify — which is exactly how the gun spent 2026-06-03 to
+## 2026-08-18 wearing a rim of 0.02, a metres-era leftover that measured FIVE pixels on a whole pistol
+## (988 at the NPC-parity 2.0 it was eventually corrected to). Nobody caught it for two months because the
+## gun had no other outline to compare against. A constant-pixel ring cannot have that failure mode.
+##
+## ⭐ STILL TRUE, and load-bearing: the gun renders on ViewModelCamera.VIEW_MODEL_LAYER, InkOutline's mask
+## camera culls that layer, and the world's screen-space ink is DISCARDED over the weapon on purpose. So
+## the ring is the view model's ONLY outline — if a mesh here gets no tint duplicate it has no line at all.
+## The ring's occlusion test exempts id 10 for the same reason (see ink_outline.gdshader): the gun is
+## composited over the world by its own camera, so it must never be depth-tested against it.
+## MeshInstance3D name substrings (case-insensitive) to SKIP when outlining — for a modeled
 ## laser sight / dot baked into a gun model that should read as a see-through emitter, not an outlined
 ## prop. If your gun's laser sight still gets outlined, add its exact node name to this list.
 @export var outline_skip_name_hints: PackedStringArray = ["laser", "sight", "beam"]
@@ -63,12 +59,13 @@ const RIM_LIGHT_SHADER = preload("res://resources/shaders/rim_light.gdshader")
 var host: Node3D
 
 var _rim_material: ShaderMaterial
-var _outline_material: ShaderMaterial  ## black inverted-hull outline, shared across every gun submesh
 
-## Build the shared rim-light + outline materials once, the moment this child enters the tree (before
-## GunMesh._ready calls dress). The monolith built them in its own _ready (_setup_rim_light / _setup_outline)
-## before applying; keeping the build here means dress() only ever APPLIES, so the rim/outline look never
-## drifts between the rig and a swapped weapon model.
+## Build the shared rim-light material once, the moment this child enters the tree (before GunMesh._ready
+## calls dress). The monolith built it in its own _ready (_setup_rim_light) before applying; keeping the
+## build here means dress() only ever APPLIES, so the look never drifts between the rig and a swapped
+## weapon model. ⭐ The outline no longer has a material to build — it is an id stamped per mesh in
+## dress() — which retires the old ordering trap that `outline_width` had to be set BEFORE add_child or
+## _ready would bake the stale value into a shared material.
 func _ready() -> void:
 	_rim_material = ShaderMaterial.new()
 	_rim_material.shader = RIM_LIGHT_SHADER
@@ -76,15 +73,14 @@ func _ready() -> void:
 	_rim_material.set_shader_parameter("rim_power", rim_power)
 	_rim_material.set_shader_parameter("rim_strength", rim_strength)
 	_rim_material.set_shader_parameter("top_bias", rim_top_bias)
-	# The SAME shared builder the NPCs and the ragdoll use (TalkHelpers.make_outline_material), so the look
-	# never drifts. It rides material_overlay (a free slot here; the rim light lives on the surface overrides'
-	# next_pass, so the two don't clash) and therefore draws on the gun's own render layer / camera with the
-	# mesh.
-	_outline_material = TalkHelpers.make_outline_material(outline_color, outline_width)
 
-## Stamp the full look onto `target` — shadows off, rim light chained onto every surface, black outline on
+## Stamp the full look onto `target` — shadows off, rim light chained onto every surface, the outline id on
 ## every body mesh — in the SAME order the monolith ran it (shadows -> rim -> outline), both for the rig
 ## (dressed on itself from _ready) and for each swapped-in weapon model.
+## ⭐ ORDER MATTERS between the first and last steps: _disable_shadows_recursive ASSIGNS `layers` from the
+## host, and a tint duplicate is shielded from that walk by its meta — but only because the duplicate is
+## recognisable. Stamp first and the assignment would still skip it; stamp last (as here) and the question
+## never arises for a freshly built duplicate.
 func dress(target: Node3D) -> void:
 	if target == null:
 		return
@@ -95,6 +91,12 @@ func dress(target: Node3D) -> void:
 func _disable_shadows_recursive(node: Node) -> void:
 	if node is MeshInstance3D:
 		var mi := node as MeshInstance3D
+		# InkOutline's invisible tint duplicate (meta &"npc_tint_dup") already ships shadows off, and the layer
+		# ASSIGNMENT below would move it off ACTOR_TINT_LAYER onto whatever camera the host draws on — which
+		# renders ink_tint.gdshader's raw R/G log-depth bytes as moving yellow/green stripe bands (the failure
+		# reported 2026-08-25, see scripts/effects/body_part_gib.gd:186). A duplicate has no children to walk.
+		if mi.has_meta(&"npc_tint_dup"):
+			return
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		# Force every gun mesh onto the gun's render layer (which world decals
 		# exclude via cull_mask) so projected decals — e.g. the player's blob
@@ -111,7 +113,15 @@ func _disable_shadows_recursive(node: Node) -> void:
 func _apply_rim_recursive(node: Node) -> int:
 	var n := 0
 	if node is MeshInstance3D:
-		n += _chain_rim_on_mesh(node as MeshInstance3D)
+		var mi := node as MeshInstance3D
+		# InkOutline's invisible tint duplicate (meta &"npc_tint_dup") carries the ONE shared tint material for the
+		# whole game (identity rides its per-instance "disposition_id" uniform). _chain_rim_on_mesh DUPLICATES
+		# material_override to chain the rim onto it — which would both break that one-material contract (a fresh
+		# copy per gun, per swap, losing the instance uniform) and rasterise a lit rim into the tint buffer, whose
+		# RGB are raw depth/id NUMBERS, not colour. Skip it; a duplicate has no children to walk.
+		if mi.has_meta(&"npc_tint_dup"):
+			return 0
+		n += _chain_rim_on_mesh(mi)
 	for child in node.get_children():
 		n += _apply_rim_recursive(child)
 	return n
@@ -144,18 +154,25 @@ func _chain_rim_on_mesh(mi: MeshInstance3D) -> int:
 		applied += 1
 	return applied
 
-## Walk a gun subtree setting the black outline on every body MeshInstance3D, but SKIP the Muzzle
-## subtree: the muzzle flash (ExplosionMesh) already draws its own thicker outline on next_pass, so
-## an overlay here would just double it. Mirrors how the placeholder-mesh toggle leaves the Muzzle + FX
-## alone. The muzzle of a swapped weapon is found by name.
+## Walk a gun subtree stamping InkOutline.TINT_ID_VIEW_MODEL on every body MeshInstance3D, but SKIP the
+## Muzzle subtree: the muzzle flash (ExplosionMesh) stamps its own outline id, so a second one here would
+## put two duplicates in the same silhouette — and the tint buffer is one id per pixel, so they would
+## z-fight rather than blend. Mirrors how the placeholder-mesh toggle leaves the Muzzle + FX alone. The
+## muzzle of a swapped weapon is found by name.
+##
+## ⭐ Re-run on every model swap, which is what keeps a swapped-in weapon ringed: the duplicates live under
+## the OLD model's meshes and die with it, and dress() is called again on the new one (gun_mesh.gd).
 func _apply_outline_recursive(node: Node) -> void:
-	if not _outline_material:
-		return
 	var muzzle_node := _find_muzzle_marker(node)
 	_apply_outline_skipping(node, muzzle_node)
 
 func _apply_outline_skipping(node: Node, skip: Node) -> void:
 	if node == skip:
+		return
+	# InkOutline's invisible tint duplicate (meta &"npc_tint_dup") IS the outline; walking into it would
+	# ask apply_tint_mesh to give the duplicate a duplicate. Same node the layer/rim walks above must leave
+	# alone (2026-08-25 stripe bands); it has no children.
+	if node is MeshInstance3D and (node as MeshInstance3D).has_meta(&"npc_tint_dup"):
 		return
 	# A modeled laser-sight attachment on a gun should read as a see-through emitter, not a hard
 	# black-outlined prop — skip any node whose name matches an outline_skip_name_hints substring (and
@@ -165,7 +182,9 @@ func _apply_outline_skipping(node: Node, skip: Node) -> void:
 		if not hint.is_empty() and lower_name.contains(hint.to_lower()):
 			return
 	if node is MeshInstance3D:
-		(node as MeshInstance3D).material_overlay = _outline_material
+		# apply_tint_mesh, not apply_tint: the walking form would re-adopt the very children this
+		# function just refused (a "laser" mesh parented under an outlined receiver).
+		InkOutline.apply_tint_mesh(node as MeshInstance3D, InkOutline.TINT_ID_VIEW_MODEL)
 	for child in node.get_children():
 		_apply_outline_skipping(child, skip)
 

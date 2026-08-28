@@ -331,19 +331,17 @@ func _apply_overlay_to_meshes(overlay: Material) -> void:
 		return
 	var targets := TalkHelpers.collect_meshes(mesh, null, true)
 	for m in targets:
-		# Register this body with the ink-outline actor mask: hull-outlined actors are EXCLUDED from the
-		# screen-space ink pass (the hull rim is their outline; ink on top doubles it — see InkOutline).
+		# Register this body with the ink-outline actor mask: outlined actors are EXCLUDED from the
+		# screen-space ink pass (the tint RING is their outline; ink on top doubles it — see InkOutline).
 		# Riding THIS walk means every path that dresses the body (setup, provoke recolour, model rebuild)
 		# re-stamps the bit for free, so a body swap can never strand its new parts inked.
 		m.layers |= InkOutline.ACTOR_INK_MASK_LAYER
-		# If the look-at talk highlight is active on this mesh, its real overlay is STASHED in meta (the
-		# white highlight sits in the live slot). Update the stash so look-away restores the NEW overlay —
-		# else a provoke / disposition recolour is lost when the highlight clears (a friendly turned
-		# hostile would snap back to its old green rim on look-away instead of staying red).
-		if m.has_meta(&"talk_prev_overlay"):
-			m.set_meta(&"talk_prev_overlay", overlay)
-		else:
-			m.material_overlay = overlay
+		# ⭐ This used to have to dodge the look-at highlight, which borrowed the ONE material_overlay slot
+		# and stashed whatever was in it under a `talk_prev_overlay` meta — so a provoke recolour mid-hover
+		# had to be written into the STASH or it was lost on look-away. Since 2026-08-27 the highlight
+		# borrows an outline ID on the tint duplicate instead (InkOutline.set_tint_highlight), nothing
+		# competes for this slot, and the write is unconditional again.
+		m.material_overlay = overlay
 
 
 ## Flash to acknowledge a hit. Base flashes the WHOLE body (the one shared overlay). NPC overrides it to

@@ -69,6 +69,12 @@ func _ready() -> void:
 		else:
 			sphere.radius = explosion_radius
 			sphere.height = explosion_radius * 2.0
+		# ⭐ The child's _ready() runs BEFORE ours, so if this flash opted into `has_outline` its outline
+		# ring was already stamped against the sphere we just replaced — and a tint duplicate SNAPSHOTS its
+		# host's mesh. Without this the ring would be drawn at the AUTHORED radius around a flash resized to
+		# explosion_radius. Same contract the placeholder pistol's ghost outline taught (2026-08-27); see
+		# InkOutline.sync_tint_mesh.
+		InkOutline.sync_tint_mesh(mesh_instance)
 	# Size the push collider only when present (presence = real-blast switch) AND a sphere.
 	if collision_shape != null and collision_shape.shape is SphereShape3D:
 		collision_shape.shape = collision_shape.shape.duplicate()

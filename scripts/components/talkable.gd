@@ -39,15 +39,20 @@ extends Area3D
 ## Node whose MeshInstance3D descendants get the white outline + the turn. Null -> our parent.
 @export var highlight_target: Node3D
 ## Colour of the look-at outline drawn over the host while you aim at it. Default white.
+## ⭐ The COLOUR is no longer painted from here. Since 2026-08-27 the look-at highlight is InkOutline's
+## screen-space ring (id InkOutline.TINT_ID_HOVER), and a ring resolves one id to one GLOBAL LUT slot — so the
+## hue lives on InkOutline.highlight_hover and the thickness on InkOutline.highlight_width_px. These two exports
+## survive as the VISIBILITY SWITCH they already doubled as: alpha 0 or width 0 still means "this one gets no
+## hover outline" (the shipping ATM relies on it), and set_look_highlight then never touches the host at all.
 @export var highlight_color: Color = Color(1.0, 1.0, 1.0, 1.0)
-## Thickness of that look-at outline (shader units). Higher = bolder outline.
+## Thickness of that look-at outline. See the note above: only "> 0 or not" is read now.
 @export var highlight_width: float = 1.0
 
 @export_group("Interaction")
 ## Characters should rotate to face the player on talk; leave off for inanimate objects.
 @export var turn_to_face: bool = true
 
-var _outline_mat: ShaderMaterial
+var _highlight_on: bool = false  ## does this instance highlight at all? (see highlight_color)
 var _meshes: Array[MeshInstance3D] = []
 var _meshes_collected: bool = false  ## gathered lazily on first highlight (the NPC head attaches after our _ready)
 
@@ -58,12 +63,10 @@ func _ready() -> void:
 	# detect nothing ourselves (mask 0 -- we're aimed at, we don't sense bodies).
 	collision_layer = TalkHelpers.TALK_LAYER
 	collision_mask = 0
-	# An INVISIBLE highlight (alpha 0 / zero width) builds NO material, and set_look_highlight then no-ops —
-	# the overlay slot is shared with the host's own combat rim, so writing a transparent material into it
-	# would strip that rim for as long as you look. Same invariant as LookAtInteractable._build_outline.
-	_outline_mat = null
-	if highlight_color.a > 0.0 and highlight_width > 0.0:
-		_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
+	# An INVISIBLE highlight (alpha 0 / zero width) never borrows, and set_look_highlight then no-ops — a mesh
+	# carries ONE outline id, shared with the host's own disposition ring, so a transparent highlight would
+	# still evict it for as long as you look. Same invariant as LookAtInteractable._build_outline.
+	_highlight_on = highlight_color.a > 0.0 and highlight_width > 0.0
 	# Meshes are gathered LAZILY on first highlight (see _ensure_meshes), NOT here: an NPC's modular head is
 	# attached in NPC._ready, which runs AFTER this child component's _ready, so collecting now would miss it.
 
@@ -111,10 +114,10 @@ func can_pickpocket(player: Node) -> bool:
 
 ## Toggled by the interaction ray as the player's aim enters/leaves this target.
 func set_look_highlight(on: bool) -> void:
-	if _outline_mat == null:
-		return  # invisible highlight — never touch the shared overlay slot (see _ready)
+	if not _highlight_on:
+		return  # invisible highlight — never borrow the host's outline id (see _ready)
 	_ensure_meshes()
-	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)
+	InkOutline.set_tint_highlight(_meshes, on)
 
 ## Gather the host's MeshInstance3D descendants ONCE, on first highlight. Deferred from _ready so an NPC's
 ## runtime-attached modular head (added in NPC._ready, AFTER this child readies) is included — fixing the

@@ -67,6 +67,13 @@ func equip() -> void:
 ## Hide/restore the rig's built-in placeholder gun (Sketchfab_Scene) by stashing/restoring each of
 ## its meshes — NOT toggling visibility, because the Muzzle + FX are parented under it and would
 ## vanish too. The Muzzle subtree is skipped entirely.
+##
+## ⭐⭐ AND THAT IS WHY EACH `mesh` WRITE IS FOLLOWED BY `InkOutline.sync_tint_mesh`. Since the view model
+## wears the screen-space RING (2026-08-27), every placeholder mesh carries an invisible tint duplicate,
+## and a duplicate SNAPSHOTS its host's mesh — it cannot see a later `mesh = null`. Hiding the pistol the
+## visibility way would have taken its duplicate with it for free; hiding it the MESH way left the
+## silhouette in the tint buffer and the ring pass drew a permanent ghost of the silenced pistol floating
+## in front of the player's right hand. Restoring has the same duty in reverse.
 func _set_placeholder_hidden(hidden: bool) -> void:
 	var sk := host.get_node_or_null("Sketchfab_Scene")
 	var muzzle_node := host.get_node_or_null("Sketchfab_Scene/PlayerMuzzle")
@@ -78,11 +85,19 @@ func _toggle_placeholder_meshes(node: Node, muzzle_node: Node, hidden: bool) -> 
 		return  # never touch the Muzzle + its FX
 	if node is MeshInstance3D:
 		var mi := node as MeshInstance3D
+		# InkOutline's invisible tint duplicate (meta &"npc_tint_dup") is owned by whoever built it (NpcOutline /
+		# Throwable) and is freed with its host mesh — it must never enter _placeholder_meshes, which would keep a
+		# reference to a dead node and could restore a stashed mesh onto a duplicate that is meant to stay a flat
+		# depth/id write. Same duplicate every other walk here leaves alone (2026-08-25 stripe bands); no children.
+		if mi.has_meta(&"npc_tint_dup"):
+			return
 		if hidden:
 			if mi.mesh:
 				_placeholder_meshes[mi] = mi.mesh
 				mi.mesh = null
+				InkOutline.sync_tint_mesh(mi)  # or its ring outlives the mesh — see the header
 		elif _placeholder_meshes.has(mi):
 			mi.mesh = _placeholder_meshes[mi]
+			InkOutline.sync_tint_mesh(mi)  # and comes back with it
 	for c in node.get_children():
 		_toggle_placeholder_meshes(c, muzzle_node, hidden)

@@ -19,10 +19,10 @@ extends Node3D
 ## WHERE THE RIBBON LIVES, AND WHY IT IS NOT PARENTED UNDER THE PROP: the MeshInstance3D goes to the TREE
 ## ROOT (the `GunFX.spawn_tracer` convention). TWO sweeps over a Throwable's descendants would otherwise
 ## dress the streak as if it were part of the prop, and both go through `TalkHelpers.collect_meshes`:
-##   * `Throwable._setup_overlay_chain` stamps `material_overlay` (the black inverted hull) AND the
-##     `InkOutline.ACTOR_INK_MASK_LAYER` bit onto EVERY MeshInstance3D under the prop — a black-rimmed
-##     ribbon, re-rendered in the ink mask's second scene pass. Child `_ready` runs BEFORE the parent's, so
-##     an eagerly-built ribbon would always be there in time to be caught.
+##   * `Throwable._setup_overlay_chain` stamps the flash overlay, the outline RING (a tint duplicate under
+##     every mesh) AND the `InkOutline.ACTOR_INK_MASK_LAYER` bit onto EVERY MeshInstance3D under the prop
+##     — a black-outlined ribbon, re-rendered in BOTH of the ink pass's extra scene renders. Child `_ready`
+##     runs BEFORE the parent's, so an eagerly-built ribbon would always be there in time to be caught.
 ##   * `Throwable._set_carried_transparency` fades that same set while the prop is carried.
 ## (`Ps1Applier` is NOT one of them and is no reason to root-parent: its walk returns on `node is Throwable`
 ## before recursing, so it never visits a prop's descendants — and it skips transparent materials anyway.)
@@ -35,8 +35,8 @@ extends Node3D
 ## (`DEPTH_DRAW_OPAQUE_ONLY`), so it writes neither depth nor normal-roughness — and that is the ONLY
 ## reason `ink_outline.gdshader`'s edge detect cannot see it: writing no depth is what hides THIS mesh — the
 ## `bulletmat.tres` trick, not a layer trick. (The ink pass does have a layer mechanism, but it is the ACTOR
-## mask, for meshes wearing the inverted-hull rim; stamping a streak into it would only buy a second scene
-## render.) Give this an OPAQUE material and every streak gets a black ink line drawn around it.
+## mask, for meshes that carry an outline RING of their own; stamping a streak into it would only buy a
+## second scene render.) Give this an OPAQUE material and every streak gets a black ink line drawn around it.
 ##
 ## The shape knobs default to 0 = "inherit the global tuning" (`GameSettings.effects`, the
 ## "Thrown weapon trail" group), the `Throwable.face_travel_min_speed` sentinel idiom, so every streak in

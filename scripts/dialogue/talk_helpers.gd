@@ -7,8 +7,6 @@ extends RefCounted
 ## Area3D component) and DialogueNPC (a script on a node) route through these statics so they
 ## highlight, turn, and trigger identically -- the ray doesn't care which one it found.
 
-const OUTLINE_SHADER := preload("res://resources/shaders/outline.gdshader")
-
 ## Dedicated physics layer for look-at talk hitboxes (editor layer 5 = bit value 16). The ray
 ## masks ONLY this for its talk query, so it never clashes with world / character / pickup
 ## collision, and a stray hit on this layer that ISN'T a talk target just resolves to null.
@@ -82,9 +80,16 @@ static func speaker_name(own: String, node: Node) -> String:
 ## recursed from-and-including the root — e.g. an overlay applied to a body that's itself the mesh node).
 ## `stop_at` (optional) is a Callable(Node) -> bool that PRUNES a child subtree before it is walked —
 ## LookAtInteractable passes `owns_its_overlay` so a highlight can never adopt meshes another system drives.
+## An InkOutline tint duplicate (meta `npc_tint_dup`) is NEVER collected — as a child (see `_collect`) and, since
+## a caller may hand one straight in as the root, as `host` itself under `include_root`.
 static func collect_meshes(host: Node, skip: Node = null, include_root: bool = false, stop_at: Callable = Callable()) -> Array[MeshInstance3D]:
 	var out: Array[MeshInstance3D] = []
-	if include_root and host is MeshInstance3D and host != skip:
+	if include_root and host is MeshInstance3D and host != skip and not host.has_meta(&"npc_tint_dup"):
+		# Same shield as `_collect`'s, applied to the ROOT: a generic clear_tint(root) / overlay pass handed a
+		# duplicate would otherwise treat InkOutline's infrastructure as a highlight target — overwrite its shared
+		# tint material or its layer and the raw log-depth bytes render as moving stripe bands on the MAIN camera
+		# (reported 2026-08-25; see scripts/effects/body_part_gib.gd). A duplicate has no children, so the walk
+		# below finds nothing further under it.
 		out.append(host)
 	_collect(host, skip, out, stop_at)
 	return out
@@ -93,17 +98,20 @@ static func _collect(node: Node, skip: Node, out: Array[MeshInstance3D], stop_at
 	for child in node.get_children():
 		if child == skip:
 			continue
+		if child.has_meta(&"npc_tint_dup"):
+			continue  # InkOutline's invisible disposition-tint duplicate (NpcOutline) — infrastructure,
+			# never a highlight/overlay/gib-inheritance target; skipping HERE shields every walker at once
 		if stop_at.is_valid() and bool(stop_at.call(child)):
 			continue  # pruned: that subtree drives its own material_overlay (see owns_its_overlay)
 		if child is MeshInstance3D:
 			out.append(child)
 		_collect(child, skip, out, stop_at)
 
-## ⭐ True for a subtree that OWNS its own `material_overlay` chain, so a look-at collect must not adopt it:
-## an actor (Character/NPC — the disposition rim chained in front of the damage flash) or a prop (Throwable —
-## the black hull plus its InkOutline actor-mask bit). There is exactly ONE overlay slot per mesh and
-## `set_overlay` below swaps into it, so adopting someone else's meshes strips THEIR outline for as long as you
-## look at YOU. Matters because the host defaults to `get_parent()`: an interactable dropped straight under the
+## ⭐ True for a subtree that OWNS its own OUTLINE, so a look-at collect must not adopt it: an actor
+## (Character/NPC — a disposition ring plus the damage flash) or a prop (Throwable — its rest/claimed ring
+## plus its InkOutline actor-mask bit). A mesh carries exactly ONE outline id and the hover BORROWS it
+## (InkOutline.set_tint_highlight), so adopting someone else's meshes paints white over THEIR line for as long
+## as you look at YOU. Matters because the host defaults to `get_parent()`: an interactable dropped straight under the
 ## level root takes the whole map as its host and would otherwise collect every NPC and prop in the level.
 ## DUCK-TYPED on purpose — `Character` and `Throwable` both sit on the actor parse path and this file is on it
 ## too (character.gd calls collect_meshes), so a `class_name` edge from here would close a parse cycle; same
@@ -112,35 +120,16 @@ static func _collect(node: Node, skip: Node, out: Array[MeshInstance3D], stop_at
 static func owns_its_overlay(n: Node) -> bool:
 	return n.has_method(&"flash_red") or n.has_method(&"set_outline_visible")
 
-## THE shared outline-material builder. Single source of truth for "make an outline ShaderMaterial":
-## used by the talk look-at highlight (Talkable / DialogueNPC) AND the NPC combat outline (npc.gd),
-## so the two never drift. Sets the two uniforms the outline shader actually exposes -- outline_color
-## and outline_width (NOT 'outline_thickness'; that name was a latent no-op bug, see npc.gd). Callers
-## that need a chained pass (e.g. NPC's outline -> flash) set `next_pass` on the returned material.
-static func make_outline_material(color: Color, width: float) -> ShaderMaterial:
-	var mat := ShaderMaterial.new()
-	mat.shader = OUTLINE_SHADER
-	mat.set_shader_parameter("outline_color", color)
-	mat.set_shader_parameter("outline_width", width)
-	return mat
-
-## Add (mat) or remove (null) the look-at highlight overlay on every gathered mesh. The overlay
-## slot is SHARED with an NPC's combat outline, so on highlight-ON we stash whatever overlay was
-## already there and on highlight-OFF we RESTORE it (not null) — otherwise looking at an outlined
-## enemy once would permanently wipe its black combat outline.
-static func set_overlay(meshes: Array[MeshInstance3D], mat: ShaderMaterial) -> void:
-	for m in meshes:
-		if not is_instance_valid(m):
-			continue
-		if mat != null:
-			if not m.has_meta(&"talk_prev_overlay"):
-				m.set_meta(&"talk_prev_overlay", m.material_overlay)  # stash combat outline (or null)
-			m.material_overlay = mat
-		elif m.has_meta(&"talk_prev_overlay"):
-			m.material_overlay = m.get_meta(&"talk_prev_overlay")  # restore it on look-away
-			m.remove_meta(&"talk_prev_overlay")
-		else:
-			m.material_overlay = null
+## ⭐ REMOVED 2026-08-27, recorded so nobody rebuilds them: `make_outline_material()` (the shared
+## inverted-hull ShaderMaterial factory) and `set_overlay()` (the `talk_prev_overlay` stash that let the
+## look-at highlight borrow a mesh's ONE material_overlay slot and hand it back). Both existed only to
+## serve resources/shaders/outline.gdshader, which is DELETED: every outline in this game is now
+## InkOutline's screen-space ring, the highlight borrows an ID instead of a material slot
+## (InkOutline.set_tint_highlight — the same stash-and-restore shape, one layer down), and
+## material_overlay is left to the damage flash alone. `collect_meshes` above is the half of that pairing
+## that survives: the highlight components still gather the meshes they are allowed to touch (the
+## owns_its_overlay prune still matters, because one mesh still carries exactly ONE outline) and hand
+## that list to set_tint_highlight.
 
 ## Smoothly yaw `host` (Y-axis only) so its forward (-Z) points at the player -- the "NPC turns
 ## to face you" beat. Uses GLOBAL rotation (so a parented host turns correctly) on the shortest

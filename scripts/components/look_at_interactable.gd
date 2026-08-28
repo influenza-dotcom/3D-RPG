@@ -18,8 +18,13 @@ extends Area3D
 ## Node whose MeshInstance3D descendants get the look-at outline on hover. Null -> our parent.
 @export var highlight_target: Node3D
 ## Colour of the look-at outline drawn over the host on hover. Default white.
+## ⭐ The COLOUR is no longer painted from here. Since 2026-08-27 the look-at highlight is InkOutline's
+## screen-space ring (id InkOutline.TINT_ID_HOVER), and a ring resolves one id to one GLOBAL LUT slot — so the
+## hue lives on InkOutline.highlight_hover and the thickness on InkOutline.highlight_width_px. These two exports
+## survive as the VISIBILITY SWITCH they already doubled as: alpha 0 or width 0 still means "this one gets no
+## hover outline" (the shipping ATM relies on it), and set_look_highlight then never touches the host at all.
 @export var highlight_color: Color = Color(1.0, 1.0, 1.0, 1.0)
-## Thickness of that look-at outline (shader units). Higher = bolder outline.
+## Thickness of that look-at outline. See the note above: only "> 0 or not" is read now.
 @export var highlight_width: float = 1.0
 ## OPT-IN: fit our look-at hitbox (a BoxShape3D CollisionShape3D) to the host meshes' combined bounds, so you
 ## don't hand-size a collider per placement. OFF by default, so a hand-sized collider is never touched. At
@@ -28,7 +33,7 @@ extends Area3D
 ## resizes a collider you already authored (it won't add one), so a bare node shows nothing until you add a shape.
 @export var auto_fit_collider: bool = false
 
-var _outline_mat: ShaderMaterial
+var _highlight_on: bool = false  ## does this instance highlight at all? (see highlight_color)
 var _meshes: Array[MeshInstance3D] = []
 
 ## Become a look-at hitbox on the talk layer (so the interaction ray can hit us; we sense nothing), then
@@ -51,17 +56,15 @@ func _ready() -> void:
 ## (Re)build the outline material + collect the host's meshes. Split out so a subclass can call it after it
 ## sets its own collision layer (Merchant) rather than going through _ready's default.
 ##
-## ⭐AN INVISIBLE HIGHLIGHT BUILDS NO MATERIAL, and set_look_highlight() then never writes. `material_overlay`
-## is ONE slot per mesh, SHARED with the NPC combat rim and the Throwable hull: TalkHelpers.set_overlay stashes
-## whatever is there into `talk_prev_overlay` and swaps ours in, so even a fully transparent, zero-width outline
-## EVICTS the outline that was showing for as long as the player looks at us. Zeroing `highlight_color.a` or
-## `highlight_width` is exactly how a designer says "this one gets no hover outline" (the shipping ATM does),
-## and honouring that literally — by never touching the slot — is the only reading that can't strip someone
-## else's rim. `_meshes` is still collected either way: `auto_fit_collider` sizes the hitbox from it.
+## ⭐AN INVISIBLE HIGHLIGHT NEVER TOUCHES THE HOST. A mesh carries ONE outline id at a time, and the hover
+## BORROWS it — InkOutline.set_tint_highlight stashes whatever the mesh was wearing and puts it back on
+## look-away — so even a fully transparent, zero-width highlight would evict the outline that was showing for
+## as long as the player looks at us. Zeroing `highlight_color.a` or `highlight_width` is exactly how a designer
+## says "this one gets no hover outline" (the shipping ATM does), and honouring that literally — by never
+## borrowing at all — is the only reading that can't take someone else's line.
+## `_meshes` is still collected either way: `auto_fit_collider` sizes the hitbox from it.
 func _build_outline() -> void:
-	_outline_mat = null
-	if highlight_color.a > 0.0 and highlight_width > 0.0:
-		_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
+	_highlight_on = highlight_color.a > 0.0 and highlight_width > 0.0
 	var host := _host()
 	if host != null:
 		# ⭐PRUNE the actors and props under the host — see TalkHelpers.owns_its_overlay. `highlight_target` is
@@ -156,13 +159,13 @@ func _on_dialogue_host() -> bool:
 			return true
 	return false
 
-## Look-at highlight toggle — outlines the host's meshes. A null `_outline_mat` means the highlight is
-## INVISIBLE (alpha 0 / zero width, or we were never built): return before touching the shared overlay slot
-## rather than writing a transparent material into it — see _build_outline.
+## Look-at highlight toggle — outlines the host's meshes white. A false `_highlight_on` means the highlight is
+## INVISIBLE (alpha 0 / zero width, or we were never built): return before borrowing anyone's outline id
+## rather than painting white over it — see _build_outline.
 func set_look_highlight(on: bool) -> void:
-	if _outline_mat == null:
+	if not _highlight_on:
 		return
-	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)
+	InkOutline.set_tint_highlight(_meshes, on)
 
 ## No NPC behind a world interactable (so the FNV hover won't greet/tint it; player.gd null-guards this).
 ## Typed Node (not NPC) on purpose: LootableCorpse extends this and NPC creates LootableCorpse, so an NPC

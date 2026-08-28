@@ -378,7 +378,7 @@ func _spawn_npcs(n: int, min_radius: float = -1.0, max_radius: float = -1.0) -> 
 		parent.add_child(npc)
 		if npc is Node3D:
 			# Ring them around the player so they are ON SCREEN for part of the yaw sweep (rendering +
-			# outline hull + AI all priced), not hiding behind the spawn wall. The radius grows with the
+			# the outline tint pass + AI all priced), not hiding behind the spawn wall. The radius grows with the
 			# count to hold ~2 m spacing: a fixed radius stacks 40 NPCs inside each other, and the resulting
 			# contact storm would price a bug, not the AI.
 			var a := TAU * float(i) / maxf(float(n), 1.0)

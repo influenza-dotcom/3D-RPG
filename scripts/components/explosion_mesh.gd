@@ -19,24 +19,25 @@ extends MeshInstance3D
 ## could ever have reached it — an Explosion is added under the scene root, outside every actor walk.
 ##
 ## ⭐ With the bit stamped, `has_outline` below means exactly what it says and the two lines can never
-## stack: OFF = a bare flash with no line at all (the explosion/hit spark), ON = the inverted-hull rim
-## and only the rim (the muzzle flash). See InkOutline — "the rim and the stamp are one contract".
+## stack: OFF = a bare flash with no line at all (the explosion/hit spark), ON = InkOutline's screen-space
+## ring and only the ring (the muzzle flash). See InkOutline — "the ring and the stamp are one contract".
 
 const EMISSION_ENERGY_MULTIPLIER: float = 3.0
-const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
-const OUTLINE_COLOR: Color = Color.BLACK
-const OUTLINE_WIDTH: float = 1.0
 
 ## How the flash grows in. 0 = pops in at full scale instantly (a muzzle flash); > 0 = starts at zero and swells toward full size, larger values swelling faster (an explosion bloom).
 @export var speed_to_scale: float
-## Add a black silhouette outline pass around the flash mesh (toon look). This is the flash's ONLY line —
+## Add a black silhouette outline around the flash mesh (toon look). This is the flash's ONLY line —
 ## it is excluded from the world's ink either way (class doc). Off = a bare emissive flash with no outline
-## at all (explosions, hit sparks); on = the inverted-hull rim, and only the rim (the muzzle flash).
+## at all (explosions, hit sparks); on = InkOutline's ring, and only the ring (the muzzle flash).
+## ⭐ The ring wears InkOutline.TINT_ID_NEUTRAL, so it paints the same black at the same weight as every other
+## outline in the game — the per-flash OUTLINE_COLOR / OUTLINE_WIDTH consts went with the inverted hull on
+## 2026-08-27. It also lands on a mesh whose SCALE is animated from zero, which the ring handles for free
+## (the duplicate is a child, so it inherits the swell) where a constant-screen-width shell around a
+## sub-centimetre sphere was always going to be thicker than the flash it wrapped.
 @export var has_outline: bool = false
 
 var _time: float = 0.0
 var _material: StandardMaterial3D
-var _outline_material: ShaderMaterial
 var _base_emission_energy: float = EMISSION_ENERGY_MULTIPLIER
 var _base_emission: Color = Color.WHITE
 var _base_albedo: Color = Color.WHITE
@@ -64,13 +65,11 @@ func _ready() -> void:
 		_material = StandardMaterial3D.new()
 		_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_material.emission_enabled = true
-	if has_outline:
-		_outline_material = ShaderMaterial.new()
-		_outline_material.shader = OUTLINE_SHADER
-		_outline_material.set_shader_parameter("outline_color", OUTLINE_COLOR)
-		_outline_material.set_shader_parameter("outline_width", OUTLINE_WIDTH)
-		_material.next_pass = _outline_material
 	set_surface_override_material(0, _material)
+	# The outline goes on LAST and as an id, not a material: the flash's own surface override is what the
+	# duplicate mirrors, and stamping before it is assigned would mirror the mesh's authored material instead.
+	if has_outline:
+		InkOutline.apply_tint_mesh(self, InkOutline.TINT_ID_NEUTRAL)
 
 func _process(delta: float) -> void:
 	if _material == null:

@@ -37,15 +37,20 @@ extends Node3D
 		range_area = value
 		update_configuration_warnings()
 @export_group("Highlight")
-## Colour of the look-at outline drawn while the player aims at this node. RGB tints the rim; alpha sets its opacity.
+## Colour of the look-at outline drawn while the player aims at this node.
+## ⭐ The COLOUR is no longer painted from here. Since 2026-08-27 the look-at highlight is InkOutline's
+## screen-space ring (id InkOutline.TINT_ID_HOVER), and a ring resolves one id to one GLOBAL LUT slot — so the
+## hue lives on InkOutline.highlight_hover and the thickness on InkOutline.highlight_width_px. These two exports
+## survive as the VISIBILITY SWITCH they already doubled as: alpha 0 or width 0 still means "this one gets no
+## hover outline" (the shipping ATM relies on it), and set_look_highlight then never touches the host at all.
 @export var highlight_color: Color = Color(1.0, 1.0, 1.0, 1.0)
-## Thickness of the look-at outline rim. Higher = a chunkier highlight shell around the node.
+## Thickness of the look-at outline. See the note above: only "> 0 or not" is read now.
 @export var highlight_width: float = 1.0
 @export_group("Behavior")
 ## Inanimate objects (a car) stay put; set true for a character that should turn to face you.
 @export var turn_to_face: bool = false
 
-var _outline_mat: ShaderMaterial
+var _highlight_on: bool = false  ## does this instance highlight at all? (see highlight_color)
 var _meshes: Array[MeshInstance3D] = []
 
 func _ready() -> void:
@@ -56,12 +61,10 @@ func _ready() -> void:
 		# ray detects it, and clear its mask (we're aimed at, we don't sense bodies).
 		range_area.collision_layer = TalkHelpers.TALK_LAYER
 		range_area.collision_mask = 0
-	# An INVISIBLE highlight (alpha 0 / zero width) builds NO material, and set_look_highlight then no-ops —
-	# the overlay slot is shared with whatever else dresses these meshes, so writing a transparent material
-	# into it would strip that for as long as you look. Same invariant as LookAtInteractable._build_outline.
-	_outline_mat = null
-	if highlight_color.a > 0.0 and highlight_width > 0.0:
-		_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
+	# An INVISIBLE highlight (alpha 0 / zero width) never borrows, and set_look_highlight then no-ops — a mesh
+	# carries ONE outline id, shared with whatever else dresses these meshes, so a transparent highlight would
+	# still evict it for as long as you look. Same invariant as LookAtInteractable._build_outline.
+	_highlight_on = highlight_color.a > 0.0 and highlight_width > 0.0
 	_meshes = TalkHelpers.collect_meshes(self, range_area)
 
 ## Editor warnings: a DialogueNPC's whole job is to be interfaced with, so it needs both a conversation
@@ -96,9 +99,9 @@ func _dialogue() -> DialogueResource:
 
 ## Toggled by the interaction ray as the player's aim enters/leaves this node.
 func set_look_highlight(on: bool) -> void:
-	if _outline_mat == null:
-		return  # invisible highlight — never touch the shared overlay slot (see _ready)
-	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)
+	if not _highlight_on:
+		return  # invisible highlight — never borrow this node's outline id (see _ready)
+	InkOutline.set_tint_highlight(_meshes, on)
 
 ## The name to show on the look-at hover readout (this node IS the speaker — a car / terminal / sign).
 func look_name() -> String:
