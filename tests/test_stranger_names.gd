@@ -1,7 +1,9 @@
 extends GutTest
 
 ## "Stranger until introduced": GameState.reveal_name / name_is_revealed / public_name + the [world].known_names
-## save/load round-trip + the New-Game wipe, and DialogueLine.reveals_name. Uses a FRESH GameState instance
+## save/load round-trip + the New-Game wipe, DialogueLine.reveals_name, and the reveal-on-talk seam (opening ANY
+## conversation with a real character ends their Stranger status — see the two source pins at the foot of this
+## file; the per-line reveals_name flag is now redundant for a character speaker). Uses a FRESH GameState instance
 ## (load().new()), never the autoload, so it can't touch the user's real user://gamestate.cfg — same isolation
 ## pattern as test_story_flags.gd. The DISPLAY consumers (dialogue speaker label via DialogueManager, Talkable
 ## look-at readout, corpse loot header, death card, takedown prompt, cripple toast) are thin `public_name(...)`
@@ -16,6 +18,7 @@ extends GutTest
 ## the display-compat bridge, and the v3 -> v4 lazy migration are pinned in tests/test_character_identity.gd.
 
 const GAMESTATE_PATH := "res://managers/GameState.gd"
+const DIALOGUE_MANAGER_PATH := "res://scripts/dialogue/dialogue_manager.gd"
 const TMP_SAVE := "user://test_stranger_names.cfg"
 
 func after_each() -> void:
@@ -108,3 +111,22 @@ func test_dialogue_line_reveals_name_defaults_inert() -> void:
 	var line := DialogueLine.new()
 	assert_false(line.reveals_name, "a line does NOT reveal the speaker's name unless the designer ticks it")
 	line = null
+
+## THE feature: talking to someone AT ALL ends their Stranger status. start() reveals a real character speaker as
+## the conversation opens — before the box paints its first speaker label — so no authored line has to be ticked
+## reveals_name for the player to learn who they just met. Source-pinned like the rest of the DialogueManager
+## contract (it is an autoload with NO class_name, so the start() flow can't be driven from a unit test — see the
+## header of test_dialogue.gd). The `speaker`/`speaker_name` PARAMETER names also pin that this lives in start(),
+## not in the legacy per-line reveal in _show_line (which reads the `_speaker` members).
+func test_start_reveals_the_speaker_on_any_conversation() -> void:
+	var src := FileAccess.get_file_as_string(DIALOGUE_MANAGER_PATH)
+	var expected := "if _speaker_is_character():\n\t\t\tGameState.reveal_name(_speaker_name, _speaker_identity(speaker, speaker_name))"
+	assert_string_contains(src, expected)
+
+## ...and it is gated to real CHARACTERS: an inanimate DialogueNPC (terminal / sign) or a null-speaker note was
+## never Stranger-masked, so it must never land in the known-names ledger either. The gate is the same
+## resolved_disposition() marker every other masked surface keys on.
+func test_speaker_is_character_gate_still_marks_only_npcs() -> void:
+	var src := FileAccess.get_file_as_string(DIALOGUE_MANAGER_PATH)
+	var expected := "func _speaker_is_character() -> bool:\n\treturn _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&\"resolved_disposition\")"
+	assert_string_contains(src, expected)

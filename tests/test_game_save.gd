@@ -11,6 +11,10 @@ const PLAYER_PATH := "res://scripts/player/player.gd"
 const TMP_SAVE := "user://test_gamestate_tmp.cfg"
 const TMP_QUEST := "user://test_quest_tmp.tres"
 const TMP_PERK := "user://test_perk_tmp.tres"
+## Ids of the throwaway weapon PARTS test_weapon_mods_round_trip_and_re_derive mints into ItemDb's id map.
+## Deliberately not any shipped part: the save round-trip must not go red because a designer retuned a real one.
+const MOD_BARREL_ID := &"test_mod_gs_barrel"
+const MOD_MUZZLE_ID := &"test_mod_gs_muzzle"
 
 
 func after_each() -> void:
@@ -19,6 +23,10 @@ func after_each() -> void:
 	for f in [TMP_SAVE, TMP_SAVE + ".bak", TMP_SAVE + ".tmp", TMP_QUEST, TMP_PERK]:
 		if FileAccess.file_exists(f):
 			DirAccess.remove_absolute(f)
+	# ItemDb is the real AUTOLOAD (the save path's id resolver, so it can't be faked off-tree) — leave its registry
+	# exactly as found, or a later test in this run would resolve ids that don't exist in the shipped game.
+	for id in [MOD_BARREL_ID, MOD_MUZZLE_ID]:
+		ItemDb._by_id.erase(id)
 
 
 func test_make_stats_builds_sheet_from_values() -> void:
@@ -554,6 +562,106 @@ func test_weapon_delta_round_trips_via_disk() -> void:
 	assert_true(st.has("weapon_delta"), "the weapon_delta key survives the disk round-trip")
 	var delta: Dictionary = st["weapon_delta"]
 	assert_almost_eq(float(delta["damage"]), 42.0, 0.001, "the per-instance weapon damage delta survives ConfigFile serialization")
+	gs.free()
+	gs2.free()
+
+
+## Mint one throwaway weapon PART carrying a single stat line and register it in ItemDb's id map. Step 6 ships
+## the real ten .tres; this file must not wait on them, so it builds its own — and the fold reaches it exactly as
+## it reaches a shipped one, because ItemDb._resolve_weapon_mod is a plain item_by_id() lookup. The registration
+## is undone in after_each. The GUN stays the real authored pistol: rebuild_weapon_mods looks the weapon TEMPLATE
+## up by Item.id too, so a fake weapon would test nothing about the live save path.
+func _register_test_part(id: StringName, slot: int, prop: StringName, op: int, amount: float) -> Item:
+	var line := WeaponStatDelta.new()
+	line.property = prop
+	line.op = op
+	line.amount = amount
+	var lines: Array[WeaponStatDelta] = []
+	lines.append(line)
+	var mod := WeaponMod.new()
+	mod.slot = slot
+	mod.deltas = lines
+	var part := Item.new()
+	part.id = id
+	part.category = Item.Category.MISC
+	part.value = 100.0
+	part.weapon_mod = mod
+	ItemDb._by_id[id] = part
+	return part
+
+
+## WEAPON MODS ride the EXISTING weapon_delta seam — no new save key. The six @export_storage StringName slot
+## ids on WeaponData carry SCRIPT_VARIABLE|STORAGE usage and TYPE_STRING_NAME, both already in
+## ItemDb._is_saved_weapon_property / _is_weapon_delta_type, so weapon_delta_for diffs them out automatically
+## and _store_weapon_delta_value writes them as Strings (ConfigFile reads String values back; a StringName and
+## a String don't compare equal as Dictionary keys, which is why the String form is asserted here).
+##
+## The load half is the DELIBERATE asymmetry: restore_item_from_save ends in rebuild_weapon_mods, which throws
+## the saved scalars away and re-folds the block from the live template + the live part .tres. That is what
+## makes a designer's part retune reach guns already sitting in save files, and what stops the two halves of
+## the delta (the ids and the numbers they produced) from ever drifting apart. Both directions are pinned below.
+func test_weapon_mods_round_trip_and_re_derive() -> void:
+	var template := ItemDb.item_by_id(&"pistol")
+	assert_not_null(template, "the authored pistol item is registered")
+	var base_range: float = template.weapon.effective_range
+	var base_damage: float = template.weapon.damage
+	var base_noise: float = template.weapon.noise_radius_mult
+	var barrel := _register_test_part(MOD_BARREL_ID, WeaponData.ModSlot.BARREL, &"effective_range", WeaponStatDelta.Op.ADD, 8.0)
+	_register_test_part(MOD_MUZZLE_ID, WeaponData.ModSlot.MUZZLE, &"noise_radius_mult", WeaponStatDelta.Op.MULT, 0.25)
+
+	# FIT the two parts by hand — the slot ids plus the scalars the fold would have derived, exactly the shape
+	# WeaponBench._refit leaves behind. `damage` is then POISONED with a value no part produces: it stands in for
+	# a stale/drifted save, and the re-derive must overrule it.
+	var gun := ItemDb.restore_item(&"pistol").clone_unique()
+	gun.weapon.set_mod_id(WeaponData.ModSlot.BARREL, MOD_BARREL_ID)
+	gun.weapon.set_mod_id(WeaponData.ModSlot.MUZZLE, MOD_MUZZLE_ID)
+	gun.weapon.effective_range = base_range + 8.0
+	gun.weapon.noise_radius_mult = base_noise * 0.25
+	gun.weapon.damage = base_damage + 99.0
+
+	var p = load(PLAYER_PATH).new()
+	p.inventory = CharacterInventory.new()
+	p.inventory.add(gun, 1)
+	var gs = load(GAMESTATE_PATH).new()
+	gs.capture(p)
+
+	# --- WRITE: the ids ride the existing delta, as Strings, and an EMPTY slot writes nothing at all.
+	var delta: Dictionary = gs.inventory_stacks[0]["weapon_delta"]
+	assert_true(delta.has("mod_barrel"), "the fitted BARREL slot id serializes into the existing weapon_delta — no new save key")
+	assert_true(delta["mod_barrel"] is String, "a StringName slot id is stored as a String (ConfigFile round-trips Strings, not StringNames)")
+	assert_eq(str(delta["mod_barrel"]), String(MOD_BARREL_ID), "the BARREL slot carries the fitted part's Item.id")
+	assert_eq(str(delta["mod_muzzle"]), String(MOD_MUZZLE_ID), "the MUZZLE slot carries its own part id, independently")
+	assert_false(delta.has("mod_receiver"), "an EMPTY slot equals the template, so it writes no key (an unmodded gun's delta stays empty)")
+
+	# --- RESTORE: the slots come back AND the block is re-derived from the catalog, not from the saved numbers.
+	var restored := ItemDb.restore_item_from_save(gs.inventory_stacks[0])
+	assert_not_null(restored, "the mod-bearing stack restores to an item (rebuild_weapon_mods must never return null)")
+	assert_eq(restored.weapon.mod_id(WeaponData.ModSlot.BARREL), MOD_BARREL_ID, "the BARREL slot id survives the round-trip")
+	assert_eq(restored.weapon.mod_id(WeaponData.ModSlot.MUZZLE), MOD_MUZZLE_ID, "the MUZZLE slot id survives the round-trip")
+	assert_eq(restored.weapon.fitted_mod_count(), 2, "two slots filled, four still empty")
+	assert_almost_eq(restored.weapon.effective_range, base_range + 8.0, 0.001, "the BARREL's ADD is re-derived onto the restored block")
+	assert_almost_eq(restored.weapon.noise_radius_mult, base_noise * 0.25, 0.001, "the MUZZLE's MULT is re-derived onto the restored block")
+	assert_almost_eq(restored.weapon.damage, base_damage, 0.001, "the poisoned saved damage is OVERRULED — no fitted part touches damage, so the catalog's value wins")
+	assert_almost_eq(template.weapon.effective_range, base_range, 0.001, "the registered template is untouched by the fold")
+
+	# --- RETUNE: change the part's .tres (here, its in-memory WeaponMod) and the SAME saved entry restores
+	# differently. This is the whole point of storing ids instead of folded values.
+	barrel.weapon_mod.deltas[0].amount = 20.0
+	var retuned := ItemDb.restore_item_from_save(gs.inventory_stacks[0])
+	assert_almost_eq(retuned.weapon.effective_range, base_range + 20.0, 0.001, "a designer's part retune reaches a gun already sitting in the save — the CATALOG is authoritative, not the saved scalars")
+
+	# --- DISK: the same entry through ConfigFile, because a String-keyed nested dict is where serialization bites.
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the mod-bearing save loads back off disk")
+	var disk_delta: Dictionary = gs2.inventory_stacks[0]["weapon_delta"]
+	assert_eq(str(disk_delta["mod_barrel"]), String(MOD_BARREL_ID), "the slot id survives ConfigFile serialization")
+	var from_disk := ItemDb.restore_item_from_save(gs2.inventory_stacks[0])
+	assert_eq(from_disk.weapon.mod_id(WeaponData.ModSlot.BARREL), MOD_BARREL_ID, "and restores into the slot it was saved from")
+	assert_almost_eq(from_disk.weapon.effective_range, base_range + 20.0, 0.001, "the disk path re-derives off the catalog too")
+
+	p.inventory.free()
+	p.free()
 	gs.free()
 	gs2.free()
 

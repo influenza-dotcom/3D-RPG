@@ -26,8 +26,9 @@ extends CanvasLayer
 ## see project.godot [autoload]); this script binds it by %unique name in _bind_ui and applies the skin-driven
 ## look (MenuStyle style_* adopters) on top, so a designer rearranges the panel in the editor and the skin
 ## keeps owning colours/fonts/width pins. The per-slot ROWS stay code-built (_rebuild/_add_row — they repaint
-## from live disk state) into the authored %List container. NO text is authored in the scene — every string is
-## set here from PlayerText. tests/test_save_load_screen_scene.gd pins the wiring.
+## from live disk state) into the authored %List container, and so is the PINNED Back row under %Status (the
+## screen's only non-slot control — its way OUT; see _bind_ui). NO text is authored in the scene — every string
+## is set here from PlayerText. tests/test_save_load_screen_scene.gd pins the wiring.
 
 signal opened
 signal closed
@@ -48,6 +49,7 @@ var _pending_slot := 0        ## which slot the armed overwrite-confirm would wr
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _focus_target: Button = null   ## first row button of the CURRENT paint — the pad/keyboard landing spot (rows rebuild per repaint)
 var _confirm_cancel: Button        ## the overwrite-confirm's Cancel — focused when the confirm arms (the SAFE default for a pad)
+var _back_btn: Button              ## the PINNED way out (code-built in _bind_ui) — also the focus seed when NO row has a button
 
 func _ready() -> void:
 	layer = 121                                  # above the Pip-Boy tabs (120), below OptionsMenu (128) — CharacterInspect's slot
@@ -83,9 +85,13 @@ func open(in_game: bool, boot: Callable = Callable()) -> void:
 	# by a stacked modal / a conversation / mid-death must stay silent.
 	MenuStyle.play_open()
 	# Seed pad/keyboard focus on the first row button (the OptionsMenu _first_focus idiom) — without a focus
-	# owner, ui navigation is dead and a pad player could open the screen but press nothing on it.
+	# owner, ui navigation is dead and a pad player could open the screen but press nothing on it. When NO row
+	# carries a button at all — menu mode with every slot empty, the shape of a first-ever launch — the pinned
+	# Back button is the one focusable left and takes the seed instead (the chip_install_screen fallback).
 	if _focus_target != null:
 		_focus_target.grab_focus()
+	elif is_instance_valid(_back_btn):
+		_back_btn.grab_focus()
 	opened.emit()
 
 func close() -> void:
@@ -152,8 +158,9 @@ static func slot_metadata(path: String) -> Dictionary:
 ## STRUCTURE only (anchors — including the 0.12 panel margin every inventory-style screen shares — size
 ## flags, autowrap, the 14px row separation, the disabled horizontal scroll); the skin keeps owning colours,
 ## fonts, the content_separation rhythm and the dialog width pin, all applied HERE so a menu_skin.tres edit
-## restyles this screen with zero scene churn. The per-slot rows are NOT in the scene — they repaint from
-## live disk state (_rebuild) into the authored %List. Every string is set here from PlayerText.
+## restyles this screen with zero scene churn. Two things are NOT in the scene: the per-slot rows (they repaint
+## from live disk state — _rebuild, into the authored %List) and the pinned Back row appended to %VBox below.
+## Every string is set here from PlayerText.
 func _bind_ui() -> void:
 	_root = %Root
 	MenuStyle.apply(_root)  # shared menu Theme + sound-wires the authored Confirm/Cancel buttons
@@ -172,6 +179,28 @@ func _bind_ui() -> void:
 	# (make_dialog's constant-line-count rule, applied to a full panel).
 	_status = %Status
 	MenuStyle.style_hint(_status)
+
+	# The PINNED way out. This screen used to hold ONLY the title, the slot rows and the (usually blank) status
+	# line: reached from the start menu the cursor is already free and visible, every button on the panel acts on
+	# a SLOT, and nothing anywhere said Escape closed it — so a mouse-driven player who opened Load Game with no
+	# save to load was simply stranded on a modal with no exit. Its two siblings in the first-run flow (character
+	# creation, the TOS gate) both pin an exit row; this is that row.
+	# CODE-BUILT into the authored %VBox (the AmountPrompt / map_screen pin-card idiom): the scene authors
+	# STRUCTURE and carries NO text, and a row that exists only to hang one PlayerText caption on is chrome this
+	# script owns. Appended LAST, so it lands under %Status — the panel's final child, below the row list.
+	var back_row := HBoxContainer.new()
+	MenuStyle.style_button_row(back_row)              # the shared dialog-row separation (skin knob)
+	back_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_back_btn = MenuStyle.cap_button(Button.new())    # a re-worded caption clips; the row can never widen the panel
+	_back_btn.text = PlayerText.BACK
+	_back_btn.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)  # the shared button width every dialog row uses
+	_back_btn.pressed.connect(close)
+	# MUTED: close() fires MenuStyle.play_back() itself on every path past its not-open guard (it has to — the
+	# Escape path in _unhandled_input lands there too, and a keyboard back must sound like a mouse one), so the
+	# generic click here would double the cue up. Same contract as character_creation's / implant_choice's Back.
+	MenuStyle.set_button_sound(_back_btn, &"")
+	back_row.add_child(_back_btn)
+	(%VBox as VBoxContainer).add_child(back_row)
 
 	# Overwrite-confirm overlay — a dim + fixed-width dialog stacked over the whole panel (authored LAST
 	# under %Root so it draws on top), cloned from options_menu.gd's quit-confirm. Save on an occupied slot
@@ -213,8 +242,9 @@ func _rebuild() -> void:
 
 ## One slot row: name | metadata caption | [Save] [Load]. The caption is cap_label'd so RUNTIME metadata (an
 ## unbounded authored level name) can never widen the panel past its anchors (horizontal scroll is disabled).
-## The button rail is two FIXED-width cells — an absent button leaves a same-width spacer — so the Save and
-## Load columns stay aligned across rows whose affordances differ (quicksave = load-only, empty = save-only).
+## IN-GAME the button rail is two FIXED-width cells — an absent button leaves a same-width spacer — so the Save
+## and Load columns stay aligned across rows whose affordances differ (quicksave = load-only, empty = save-only).
+## MENU MODE has only ONE column (see the Save cell below), and the caption keeps the width that buys.
 func _add_row(slot: int, label_text: String, path: String) -> void:
 	# Read the metadata off the path the file ACTUALLY lives at: while the debug save sandbox is on
 	# (GameState.resolve_save_path maps the five canonical files into user://sandbox/), the raw canonical path is
@@ -242,7 +272,15 @@ func _add_row(slot: int, label_text: String, path: String) -> void:
 		cap.add_theme_color_override(&"font_color", MenuStyle.dim_color())
 	row.add_child(cap)
 	# Save: slots only (F5 owns writing the quicksave) and only in-game (menu mode has no player to capture).
-	var save_btn := _add_rail_cell(row, PlayerText.SAVE_LOAD_SAVE, _on_save_pressed.bind(slot), _in_game and slot != QUICKSAVE_SLOT)
+	# ⭐MENU MODE SKIPS THE CELL ENTIRELY rather than reserving a spacer. _add_rail_cell's same-width spacer buys
+	# COLUMN ALIGNMENT between rows whose affordances differ — but in menu mode NO row can ever carry a Save
+	# button, so there is nothing to align and the reservation was pure loss: 170 of a ~560px panel row went to
+	# an empty cell for a button that mode never shows, squeezing the metadata caption — the level name and
+	# timestamp, the ONLY things telling one save from another — down to ~90px, where it ellipsised to "Abb…".
+	# In-game the two-cell rail is unchanged (the quicksave row still spaces its missing Save).
+	var save_btn: Button = null
+	if _in_game:
+		save_btn = _add_rail_cell(row, PlayerText.SAVE_LOAD_SAVE, _on_save_pressed.bind(slot), slot != QUICKSAVE_SLOT)
 	# Sound, per ROW STATE — the one place the two Save outcomes are still distinguishable. An EMPTY slot's Save
 	# writes straight through to _do_save, which owns the commit cue, so mute its generic click (a good write
 	# would otherwise be click+commit). An OCCUPIED slot's Save only ARMS the confirm and never writes, so it
@@ -357,7 +395,7 @@ func _on_load_pressed(slot: int) -> void:
 	if boot.is_valid():
 		boot.call()
 	# ⭐The commit fires AFTER the boot, never before — the boot Callable is StartMenu._start_game, whose first
-	# act is AudioManager.stop_sfx(), and that walks the tree stopping every PLAYING "sfx"-bus voice, MenuStyle's
-	# pool included. Cued ahead of the call, loading from the main menu was silent while Continue rang out for
+	# act is AudioManager.stop_sfx(), and that walks the tree stopping every PLAYING voice on the sfx family
+	# (STOP_BUSES: sfx / world / gunshots / speaker), MenuStyle's pool included. Cued ahead of the call, loading from the main menu was silent while Continue rang out for
 	# the same act. MenuStyle is an autoload, so the voice survives the scene swap.
 	MenuStyle.play_commit()

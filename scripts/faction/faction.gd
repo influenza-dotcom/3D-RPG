@@ -15,6 +15,15 @@ extends Resource
 @export var id: StringName = &""
 ## Human-readable name for dialogue / UI.
 @export var display_name: String = ""
+## What ONE member of this faction is called INSIDE A SENTENCE, indefinite and lowercase, article included:
+## "a raider", "a townsperson", "an enforcer". `display_name` can't do this job -- it's a plural proper noun
+## for label contexts ("Raiders"), and "You were killed by Raiders." is not a sentence about the one NPC that
+## shot you. Read by the death card / purse-robbed toast when the killer is a faction member the player was
+## never introduced to (Player._killer_faction_noun): "You were killed by a raider." instead of the generic
+## "a stranger". BLANK (the default) keeps the old anonymous wording -- an unnamed faction is not a wrong
+## faction, it just doesn't get named at you. UNALIGNED NPCs have no faction at all and always read "a
+## stranger". Note this NEVER overrides a name you know: once introduced, the card says who it was.
+@export var member_noun: String = ""
 
 @export_group("Disposition & Relations")
 ## The faction's attitude toward the player at ZERO reputation, before Reputation applies its

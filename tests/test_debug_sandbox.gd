@@ -243,6 +243,36 @@ func test_write_atomic_lands_in_the_sandbox_and_leaves_the_real_save_untouched()
 	gs.free()
 
 
+# --- load_autosave: the death-respawn reload seam -------------------------------------------------------------
+
+func test_load_autosave_reads_the_autosave_through_the_reload_seam() -> void:
+	# The Player's RELOAD_LAST_SAVE death branch routes through load_autosave() (-> _load_and_reload) so the
+	# scene reload arms the _reload_pending autosave freeze — the same latch a quickload gets (the latch's
+	# behaviour itself is pinned in test_world_snapshot.gd; the in-tree arm can't run under GUT because
+	# _load_and_reload would reload the GUT scene). What IS testable off-tree, and what this pins: the seam
+	# exists, it reads the AUTOSAVE (SAVE_PATH — the file the coalesced world-state autosave writes, NOT the
+	# quicksave), and it returns false on a missing/unreadable file WITHOUT loading, so the Player's degrade
+	# branch (a plain reload of the in-memory run) owns that case. Sandboxed so SAVE_PATH resolves into the
+	# scratch box and this test never reads the developer's real profile.
+	var gs = load(GAMESTATE_PATH).new()
+	assert_eq(gs.enable_sandbox(BOX), OK, "enable on the scratch box")
+	if not _boxed_or_bail(gs, gs.SAVE_PATH):
+		gs.free()
+		return
+	var boxed := _boxed(gs.SAVE_PATH)
+	# enable_sandbox forked the machine's real rung set into the box — clear it so "no autosave" is deterministic.
+	for p in [boxed, boxed + ".tmp", boxed + ".bak"]:
+		if FileAccess.file_exists(p):
+			DirAccess.remove_absolute(p)
+	assert_false(gs.load_autosave(), "no autosave on disk -> false (no load, no reload) — the caller owns the degrade")
+	assert_false(gs.loaded, "…and the failed path never promoted `loaded`")
+	assert_eq(gs._write_atomic(_cfg(66.0), gs.SAVE_PATH), OK, "fixture: a sandboxed autosave profile")
+	assert_true(gs.load_autosave(), "with an autosave present, load_autosave() loads it (off-tree: skips the scene reload)")
+	assert_almost_eq(gs.money, 66.0, 0.001, "…and it read the AUTOSAVE file (SAVE_PATH), not the quicksave")
+	assert_true(gs.loaded, "…and promoted `loaded` so the fresh Player would apply the build after the reload")
+	gs.free()
+
+
 # --- telemetry: save_count / save_fail_count / last_save_* / `saved` -----------------------------------------
 
 func test_save_count_and_saved_signal_on_a_scratch_path() -> void:
