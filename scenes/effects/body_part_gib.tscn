@@ -32,7 +32,7 @@ mesh_instance = NodePath("Model")
 stream = ExtResource("3_sfx")
 unit_size = 2.0
 max_db = 0.0
-bus = &"sfx"
+bus = &"world"
 
 [node name="BloodyMess" type="Node3D" parent="."]
 script = ExtResource("4_mess")

@@ -57,7 +57,7 @@ func _build_slide_sfx() -> void:
 	_slide_sfx = AudioStreamPlayer.new()
 	_slide_sfx.stream = stream
 	_slide_sfx.volume_db = -80.0
-	_slide_sfx.bus = &"sfx"  # respect the SFX slider (a bare player lands on Master and ignores it)
+	_slide_sfx.bus = &"ambient"  # WIND, not foley: match the authored FallingAirSFX twin (Player.tscn, same stream, `ambient`) so one wind sound answers to one slider — and air rush must not take the `world` bus's indoor room echo
 	add_child(_slide_sfx)
 	# Keep it looping silently and fade the volume in/out with the slide state instead of hard play()/stop()
 	# on every brief slide — that restart was the repeated clicking.

@@ -140,6 +140,9 @@ func test_roof_above_marks_indoors_and_ducks() -> void:
 	d.outdoor_db = 0.0
 	d.indoor_db = -20.0
 	d.enable_muffle = false     # this test covers the volume duck only — don't touch the global ambient_bed bus
+	d.enable_room_echo = false  # same rule for the `world` bus room chain: another file (test_audio_bus_hygiene)
+	                            # pins those effects DISABLED, and a roof sample here would flip the LIVE flags —
+	                            # green only by teardown-ordering luck, which is not a contract
 	add_child_autofree(d)
 
 	# let the StaticBody register in the physics space, then process a couple of ticks

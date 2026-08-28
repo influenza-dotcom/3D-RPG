@@ -14,7 +14,8 @@ extends Node3D
 ## wakes: panned, attenuated, coming out of the panel you are standing at, instead of a 2D blip in your ear.
 ##
 ## ⭐THE BUS *IS* THE TINNY SOUND. `speaker` (default_bus_layout.tres) is a high-pass + lo-fi crunch + low-pass
-## chain that sends into `sfx` — no bass, no air. Point `bus` at `sfx` instead for a clean, expensive-sounding
+## chain that sends into `world` (the diegetic trunk — the panel takes the indoor room echo like any physical
+## object, and reaches `sfx` transitively) — no bass, no air. Point `bus` at `sfx` instead for a clean, expensive-sounding
 ## machine. A bus that does not exist falls back to `sfx` with a warning rather than landing on Master, where
 ## no Options slider (and no death-cinematic duck) would reach it.
 ##

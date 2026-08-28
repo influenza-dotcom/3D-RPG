@@ -243,6 +243,8 @@ func _do_spray_paint() -> void:
 	# BURST, not per tick — the `playing` guard means each squeeze of the trigger gets one fresh pitch roll.
 	if current_weapon.audio and not attack_audio.playing:
 		attack_audio.stream = current_weapon.audio
+		# Shared node, so re-pick the bus: the hiss must not inherit the previous gun's `gunshots` echo.
+		attack_audio.bus = WeaponAudio.fire_bus_for(current_weapon)
 		AudioManager.play_varied(attack_audio)
 
 func _can_start_melee_attack() -> bool:

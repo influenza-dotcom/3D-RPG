@@ -48,8 +48,35 @@ func setup(p_attack_audio: AudioStreamPlayer3D, p_reload_sfx: AudioStreamPlayer3
 ## The ammo pitch is the BASE handed to AudioManager.play_varied, which multiplies the global per-play
 ## variation onto it — the mag-empties sag still reads exactly as authored, it just stops firing the
 ## byte-identical sample on every trigger pull (most audible on a full-auto burst).
+## Which bus this weapon's trigger sound belongs on. Real GUNFIRE under open sky routes to `gunshots` (the
+## distant city-billow chain in default_bus_layout.tres). Everything else is `world`, the diegetic bus every
+## footstep/foley sound rides: a melee swing whoosh and the spray can's hiss are world ACTIONS (never the
+## billow), and gunfire while `indoors` — the LISTENER's roof state, see listener_indoors() — skips the
+## billow too, because `world` itself carries the tight indoor room chain the IndoorAmbienceDucker switches
+## on under a roof. The choice must be re-made per play: ONE shared `Attack Audio` node carries every
+## weapon's trigger sound (authored on `gunshots`, the outdoor-gun default), and a sticky bus is exactly how
+## the fists' punch once shipped echoing across the map. A bus missing from the layout degrades to plain
+## `sfx` (clean, still under the Effects slider) rather than falling to Master — the StationSpeaker idiom.
+## Static because the spray-burst path in attack.gd plays attack_audio directly and needs the same one rule.
+static func fire_bus_for(weapon: WeaponData, indoors: bool = false) -> StringName:
+	var is_gun := weapon == null or not (weapon.is_melee or weapon.is_spray_paint)
+	if is_gun and not indoors and AudioServer.get_bus_index(&"gunshots") >= 0:
+		return &"gunshots"
+	return &"world" if AudioServer.get_bus_index(&"world") >= 0 else &"sfx"
+
+## The LISTENER's roof state — the echo chain is a bus-wide treatment of what YOU hear, so the player's
+## environment shapes every shot on the bus (an NPC firing at you indoors reads through your room; the same
+## NPC outdoors billows). Reads Player.is_indoors, which the IndoorAmbienceDucker drop-in (a Player child in
+## game.tscn) writes from its up-ray roof fan each sample. No ducker / no player in the tree leaves it
+## false = the outdoor billow, so a bare test level changes nothing. Instance method (needs the tree);
+## play_fire only runs in-tree, so off-tree unit tests never reach it.
+func listener_indoors() -> bool:
+	var p := Groups.human_player(get_tree())
+	return p != null and p.get(&"is_indoors") == true
+
 func play_fire(weapon: WeaponData, ammo_before: int) -> void:
 	attack_audio.stream = weapon.audio
+	attack_audio.bus = fire_bus_for(weapon, listener_indoors())
 	var base_pitch := 1.0
 	if not weapon.is_infinite_ammo:
 		var ammo_frac := clampf(float(ammo_before) / float(weapon.max_ammo), 0.0, 1.0)

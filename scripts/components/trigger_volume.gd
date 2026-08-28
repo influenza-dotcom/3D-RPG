@@ -37,8 +37,9 @@ signal fired(activator: Node)
 @export var activate_node_path: NodePath
 ## Play this sound (positional, at the volume) when fired. Empty = none.
 @export var play_audio: AudioStream
-## The audio bus `play_audio` routes to, so the matching volume slider affects it. "sfx" by default.
-@export var audio_bus: StringName = &"sfx"
+## The audio bus `play_audio` routes to, so the matching volume slider affects it. "world" (diegetic, gets
+## the indoor room echo under a roof) by default; use "sfx" for a non-world cue that must stay dry.
+@export var audio_bus: StringName = &"world"
 ## Show an on-screen toast (via the player's HUD) when fired. Empty = none.
 @export var toast_text: String = ""
 ## Colour of the toast text.

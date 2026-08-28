@@ -1,7 +1,65 @@
 [gd_resource type="AudioBusLayout" format=3 uid="uid://erlnyl87knje"]
 
+[sub_resource type="AudioEffectHighPassFilter" id="AudioEffectHighPassFilter_stationmusic"]
+resource_name = "Station Music HighPass"
+cutoff_hz = 900.0
+resonance = 0.7
+
+[sub_resource type="AudioEffectDistortion" id="AudioEffectDistortion_stationmusic"]
+resource_name = "Station Music Crunch"
+mode = 2
+drive = 0.25
+
+[sub_resource type="AudioEffectLowPassFilter" id="AudioEffectLowPassFilter_stationmusic"]
+resource_name = "Station Music LowPass"
+cutoff_hz = 4200.0
+
+[sub_resource type="AudioEffectDelay" id="AudioEffectDelay_gunshots"]
+resource_name = "Gunshot Echo"
+tap1_delay_ms = 389.0
+tap1_level_db = -15.0
+tap1_pan = 0.6
+tap2_delay_ms = 653.0
+tap2_level_db = -21.0
+tap2_pan = -0.7
+feedback_active = true
+feedback_delay_ms = 467.0
+feedback_level_db = -14.0
+feedback_lowpass = 3000.0
+
+[sub_resource type="AudioEffectReverb" id="AudioEffectReverb_gunshots"]
+resource_name = "Gunshot Reverb"
+predelay_msec = 500.0
+predelay_feedback = 0.2
+room_size = 0.6
+damping = 0.45
+hipass = 0.04
+wet = 0.12
+
 [sub_resource type="AudioEffectDistortion" id="AudioEffectDistortion_j3pel"]
 resource_name = "Distortion"
+
+[sub_resource type="AudioEffectDelay" id="AudioEffectDelay_indoor"]
+resource_name = "Indoor Slap"
+tap1_delay_ms = 47.0
+tap1_level_db = -12.0
+tap1_pan = -0.4
+tap2_delay_ms = 89.0
+tap2_level_db = -17.0
+tap2_pan = 0.45
+feedback_active = true
+feedback_delay_ms = 61.0
+feedback_level_db = -16.0
+feedback_lowpass = 6500.0
+
+[sub_resource type="AudioEffectReverb" id="AudioEffectReverb_indoor"]
+resource_name = "Indoor Room"
+predelay_msec = 20.0
+predelay_feedback = 0.0
+room_size = 0.15
+damping = 0.7
+hipass = 0.12
+wet = 0.18
 
 [sub_resource type="AudioEffectHighPassFilter" id="AudioEffectHighPassFilter_radio"]
 resource_name = "Radio HighPass"
@@ -34,20 +92,6 @@ drive = 0.25
 resource_name = "Speaker LowPass"
 cutoff_hz = 4200.0
 
-[sub_resource type="AudioEffectHighPassFilter" id="AudioEffectHighPassFilter_stationmusic"]
-resource_name = "Station Music HighPass"
-cutoff_hz = 900.0
-resonance = 0.7
-
-[sub_resource type="AudioEffectDistortion" id="AudioEffectDistortion_stationmusic"]
-resource_name = "Station Music Crunch"
-mode = 2
-drive = 0.25
-
-[sub_resource type="AudioEffectLowPassFilter" id="AudioEffectLowPassFilter_stationmusic"]
-resource_name = "Station Music LowPass"
-cutoff_hz = 4200.0
-
 [resource]
 bus/1/name = &"ambient"
 bus/1/solo = false
@@ -63,65 +107,85 @@ bus/2/volume_db = -6.5788474
 bus/2/send = &"Master"
 bus/2/effect/0/effect = SubResource("AudioEffectDistortion_j3pel")
 bus/2/effect/0/enabled = true
-bus/3/name = &"music"
+bus/3/name = &"world"
 bus/3/solo = false
 bus/3/mute = false
 bus/3/bypass_fx = false
 bus/3/volume_db = 0.0
-bus/3/send = &"Master"
-bus/4/name = &"voice"
+bus/3/send = &"sfx"
+bus/3/effect/0/effect = SubResource("AudioEffectDelay_indoor")
+bus/3/effect/0/enabled = false
+bus/3/effect/1/effect = SubResource("AudioEffectReverb_indoor")
+bus/3/effect/1/enabled = false
+bus/4/name = &"music"
 bus/4/solo = false
 bus/4/mute = false
 bus/4/bypass_fx = false
 bus/4/volume_db = 0.0
 bus/4/send = &"Master"
-bus/5/name = &"radio"
+bus/5/name = &"voice"
 bus/5/solo = false
 bus/5/mute = false
 bus/5/bypass_fx = false
-bus/5/volume_db = 3.0
-bus/5/send = &"music"
-bus/5/effect/0/effect = SubResource("AudioEffectHighPassFilter_radio")
-bus/5/effect/0/enabled = true
-bus/5/effect/1/effect = SubResource("AudioEffectDistortion_radio")
-bus/5/effect/1/enabled = true
-bus/5/effect/2/effect = SubResource("AudioEffectLowPassFilter_radio")
-bus/5/effect/2/enabled = true
-bus/6/name = &"ambient_bed"
+bus/5/volume_db = 0.0
+bus/5/send = &"Master"
+bus/6/name = &"radio"
 bus/6/solo = false
 bus/6/mute = false
 bus/6/bypass_fx = false
-bus/6/volume_db = 0.0
-bus/6/send = &"ambient"
-bus/6/effect/0/effect = SubResource("AudioEffectLowPassFilter_ambient")
+bus/6/volume_db = 3.0
+bus/6/send = &"music"
+bus/6/effect/0/effect = SubResource("AudioEffectHighPassFilter_radio")
 bus/6/effect/0/enabled = true
-bus/7/name = &"sting"
+bus/6/effect/1/effect = SubResource("AudioEffectDistortion_radio")
+bus/6/effect/1/enabled = true
+bus/6/effect/2/effect = SubResource("AudioEffectLowPassFilter_radio")
+bus/6/effect/2/enabled = true
+bus/7/name = &"ambient_bed"
 bus/7/solo = false
 bus/7/mute = false
 bus/7/bypass_fx = false
 bus/7/volume_db = 0.0
-bus/7/send = &"Master"
-bus/8/name = &"speaker"
+bus/7/send = &"ambient"
+bus/7/effect/0/effect = SubResource("AudioEffectLowPassFilter_ambient")
+bus/7/effect/0/enabled = true
+bus/8/name = &"sting"
 bus/8/solo = false
 bus/8/mute = false
 bus/8/bypass_fx = false
-bus/8/volume_db = 4.0
-bus/8/send = &"sfx"
-bus/8/effect/0/effect = SubResource("AudioEffectHighPassFilter_speaker")
-bus/8/effect/0/enabled = true
-bus/8/effect/1/effect = SubResource("AudioEffectDistortion_speaker")
-bus/8/effect/1/enabled = true
-bus/8/effect/2/effect = SubResource("AudioEffectLowPassFilter_speaker")
-bus/8/effect/2/enabled = true
-bus/9/name = &"station_music"
+bus/8/volume_db = 0.0
+bus/8/send = &"Master"
+bus/9/name = &"speaker"
 bus/9/solo = false
 bus/9/mute = false
 bus/9/bypass_fx = false
-bus/9/volume_db = 0.0
-bus/9/send = &"music"
-bus/9/effect/0/effect = SubResource("AudioEffectHighPassFilter_stationmusic")
+bus/9/volume_db = 4.0
+bus/9/send = &"world"
+bus/9/effect/0/effect = SubResource("AudioEffectHighPassFilter_speaker")
 bus/9/effect/0/enabled = true
-bus/9/effect/1/effect = SubResource("AudioEffectDistortion_stationmusic")
+bus/9/effect/1/effect = SubResource("AudioEffectDistortion_speaker")
 bus/9/effect/1/enabled = true
-bus/9/effect/2/effect = SubResource("AudioEffectLowPassFilter_stationmusic")
+bus/9/effect/2/effect = SubResource("AudioEffectLowPassFilter_speaker")
 bus/9/effect/2/enabled = true
+bus/10/name = &"station_music"
+bus/10/solo = false
+bus/10/mute = false
+bus/10/bypass_fx = false
+bus/10/volume_db = 0.0
+bus/10/send = &"music"
+bus/10/effect/0/effect = SubResource("AudioEffectHighPassFilter_stationmusic")
+bus/10/effect/0/enabled = true
+bus/10/effect/1/effect = SubResource("AudioEffectDistortion_stationmusic")
+bus/10/effect/1/enabled = true
+bus/10/effect/2/effect = SubResource("AudioEffectLowPassFilter_stationmusic")
+bus/10/effect/2/enabled = true
+bus/11/name = &"gunshots"
+bus/11/solo = false
+bus/11/mute = false
+bus/11/bypass_fx = false
+bus/11/volume_db = 0.0
+bus/11/send = &"world"
+bus/11/effect/0/effect = SubResource("AudioEffectDelay_gunshots")
+bus/11/effect/0/enabled = true
+bus/11/effect/1/effect = SubResource("AudioEffectReverb_gunshots")
+bus/11/effect/1/enabled = true

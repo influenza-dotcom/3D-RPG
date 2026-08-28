@@ -190,7 +190,7 @@ func _play_sound() -> void:
 		return
 	var p := AudioStreamPlayer3D.new()
 	p.stream = pet_sound
-	p.bus = &"sfx"
+	p.bus = AudioManager.WORLD_BUS
 	add_child(p)
 	# NOTE the base pitch here is a flat 1.0: unlike a Throwable's own yap this does NOT read the host's
 	# `sound_pitch_mult`, so a big dog purrs at the same pitch as a small one. Pre-existing; wire the host's

@@ -48,4 +48,6 @@ func play() -> void:
 	_last_damage_thud_ms = now
 	# Base (designer-tunable) volume + the felt-loudness boost, and re-pitched well below 1.0 so
 	# the placeholder wooden knock lands as a deep, bassy body-blow under the audio-desaturation duck.
-	AudioManager.play_2d_sfx(_host.damage_thud, GameSettings.player_feedback.damage_thud_volume_db + DAMAGE_THUD_VOLUME_BOOST_DB, DAMAGE_THUD_PITCH)
+	# Explicit &"sfx", NOT the world default: this is felt in the PLAYER'S CHEST, not made by the room —
+	# like the heartbeat, it must never pick up the indoor room echo the `world` bus carries.
+	AudioManager.play_2d_sfx(_host.damage_thud, GameSettings.player_feedback.damage_thud_volume_db + DAMAGE_THUD_VOLUME_BOOST_DB, DAMAGE_THUD_PITCH, &"sfx")

@@ -19,4 +19,4 @@ shape = SubResource("BoxShape3D_p8imj")
 mesh = SubResource("BoxMesh_throw")
 
 [node name="AudioStreamPlayer3D" type="AudioStreamPlayer3D" parent="." unique_id=1133259692]
-bus = &"sfx"
+bus = &"world"

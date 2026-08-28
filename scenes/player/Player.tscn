@@ -156,7 +156,7 @@ host = NodePath("..")
 [node name="WalkingSFX" type="AudioStreamPlayer3D" parent="." unique_id=203515311]
 stream = ExtResource("2_2n1s8")
 volume_db = 80.0
-bus = &"sfx"
+bus = &"world"
 
 [node name="FallingAirSFX" type="AudioStreamPlayer" parent="." unique_id=1700000005]
 stream = ExtResource("11_eac1a")

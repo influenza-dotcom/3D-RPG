@@ -141,8 +141,8 @@ func _bind_ui() -> void:
 	# (OptionsMenu, SaveLoadScreen), and Quit has nothing left to sound over.
 	MenuStyle.set_button_sound(%NewGameButton, &"open")  # character creation is a cold entrance, not a page swap
 	# Continue CANNOT be re-pointed the same way. Its handler boots the game, and _start_game's first act is
-	# AudioManager.stop_sfx(), which walks the whole tree and stops every PLAYING "sfx"-bus voice — MenuStyle's
-	# own UI pool sits on that bus. A cue fired from a `pressed` connection would land on whichever side of that
+	# AudioManager.stop_sfx(), which walks the whole tree and stops every PLAYING voice on the sfx family
+	# (STOP_BUSES: sfx / world / gunshots / speaker) — MenuStyle's own UI pool sits on `sfx`. A cue fired from a `pressed` connection would land on whichever side of that
 	# call the connection order happens to put it, so the commit is muted here and fired BY HAND, after the boot
 	# begins, in _on_continue.
 	MenuStyle.set_button_sound(%ContinueButton, &"")

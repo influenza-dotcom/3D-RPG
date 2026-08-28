@@ -345,7 +345,7 @@ func _play_sound() -> void:
 		return
 	var p := AudioStreamPlayer3D.new()
 	p.stream = claim_sound
-	p.bus = &"sfx"
+	p.bus = AudioManager.WORLD_BUS
 	add_child(p)
 	AudioManager.play_varied(p)  # base 1.0 — this does not read the host's sound_pitch_mult; see Pettable._play_sound
 	p.finished.connect(p.queue_free)

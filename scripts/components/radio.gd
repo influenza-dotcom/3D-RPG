@@ -187,11 +187,12 @@ func _ready() -> void:
 		# dialogue/combat duck, but ONLY the radio is band-limited (the MusicDirector score stays clean).
 		audio_player.bus = &"radio"
 		add_child(audio_player)
-	# A SEPARATE, non-looping player for the on/off click on the SFX bus (the music player loops the track and is
-	# volume-driven every frame, so a click must never share it).
+	# A SEPARATE, non-looping player for the on/off click on the diegetic `world` bus (the music player loops the
+	# track and is volume-driven every frame, so a click must never share it; a physical clunk takes the indoor
+	# room echo and reaches the SFX slider through `world` -> `sfx`).
 	if click_player == null:
 		click_player = AudioStreamPlayer3D.new()
-		click_player.bus = &"sfx"
+		click_player.bus = AudioManager.WORLD_BUS
 		add_child(click_player)
 	# Auto-advance the playlist when a track ends (looping the folder); a lone fallback track just repeats.
 	if not audio_player.finished.is_connected(_on_track_finished):

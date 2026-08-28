@@ -34,7 +34,7 @@ signal used(activator: Node)
 @export var toast_color: Color = Color(1.0, 1.0, 1.0)
 ## Clunk / click sound on use (positional, at the switch). Empty = none.
 @export var play_audio: AudioStream
-@export var audio_bus: StringName = &"sfx"
+@export var audio_bus: StringName = &"world"
 
 var _spent: bool = false  ## a one_shot switch that has already thrown
 

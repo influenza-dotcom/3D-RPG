@@ -1,9 +1,9 @@
 extends Node
 
 ## @system Effect And Audio Seams
-## @seam One-shot SFX seam: play_sfx/play_2d_sfx spawn self-freeing players on the sfx bus (default) so volume sliders apply; play_applause is the shared kill+pet cheer; stop_sfx cuts all sfx-bus players, freeing only ONE_SHOT_META ones.
+## @seam One-shot SFX seam: play_sfx/play_2d_sfx spawn self-freeing players on the diegetic `world` bus (default WORLD_BUS; it sends into `sfx` and carries the toggleable indoor room chain) so volume sliders apply — a non-diegetic caller passes &"sfx" explicitly; play_applause is the shared kill+pet cheer; stop_sfx cuts every player on a STOP_BUSES bus (sfx, world, gunshots, speaker), freeing only ONE_SHOT_META ones.
 ## @seam Pitch-variation seam: vary_pitch() is THE global per-play detune for DIEGETIC world SFX; play_sfx/play_2d_sfx apply it unless the caller passes vary=false, and play_varied() is the node-driven equivalent for an authored AudioStreamPlayer a world site retriggers.
-## @risk A sound spawned bare (not via play_sfx) lands on Master and silently ignores the SFX volume slider AND the death cinematic's world duck (so it blares under the death card) — no error; the bus=&"sfx" default guards the code side, tests/test_audio_bus_hygiene.gd guards the authored-scene side.
+## @risk A sound spawned bare (not via play_sfx) lands on Master and silently ignores the SFX volume slider AND the death cinematic's world duck (so it blares under the death card) — no error; the bus=WORLD_BUS default guards the code side, tests/test_audio_bus_hygiene.gd guards the authored-scene side.
 ## @risk Pitch variation is for DIEGETIC WORLD sound only (footsteps, gunfire, impacts, voices, doors). Menu chrome, HUD/alert stings, reward jingles and music must stay EXACT — a randomised UI blip or a detuned jingle reads as a defect, not as life; the vary=false opt-out on play_sfx/play_2d_sfx is how such a caller says so.
 ## @risk A new WORLD SFX site that calls player.play() directly instead of AudioManager.play_varied(player) is the ONE way to reintroduce a machine-exact retrigger — it sounds fine in isolation and only reads as fatiguing once it fires three times a second.
 ## @risk Re-adding a local applause copy in death.gd/pettable.gd instead of calling play_applause drifts the kill vs pet cheer apart, and no test asserts they delegate.
@@ -22,6 +22,16 @@ const DEFAULT_3D_MAX_DISTANCE: float = 30.0
 ## did before `max_db` became a parameter. NOT a tuning knob — a caller that wants a different ceiling passes one.
 const DEFAULT_MAX_DB: float = 3.0
 const SFX_BUS: StringName = &"sfx"
+## The DIEGETIC bus — every sound the game world physically makes (footsteps, foley, impacts, doors, gore).
+## It sends into `sfx` (so the Effects slider, the death duck and the Distortion crunch all still apply) and
+## carries the authored-DISABLED indoor room chain that IndoorAmbienceDucker switches on under a roof. Plain
+## `sfx` is for what is NOT world-made: UI chrome, stings, reward jingles, the heartbeat — those must never
+## pick up room reverb, which is the whole reason the two buses are separate. The play helpers below default
+## here; a non-diegetic caller passes &"sfx" explicitly (they already pass `vary = false` for the same cut).
+const WORLD_BUS: StringName = &"world"
+## Everything stop_sfx() cuts: the whole family that ultimately mixes into `sfx` — world foley, both gunshot
+## echo feeds, the diegetic panel speakers, and `sfx` itself (UI cues + the missing-bus degrade path).
+const STOP_BUSES: Array[StringName] = [&"sfx", &"world", &"gunshots", &"speaker"]
 const ONE_SHOT_META: StringName = &"_audio_manager_one_shot"
 ## Floor the varied pitch can never fall below. pitch_scale 0 hangs a voice forever — it never advances, so
 ## `finished` never fires and a play_sfx one-shot (which frees itself on that signal) would LEAK. Guards both a
@@ -113,8 +123,10 @@ func play_varied(player: Node, base_pitch: float = 1.0) -> void:
 	player.call(&"play")
 
 
-## One-shot positional SFX. Routed to the `bus` (default "sfx") so the audio-options sliders actually
-## affect it — a bare AudioStreamPlayer3D.new() lands on Master and ignores the SFX volume setting.
+## One-shot positional SFX. Routed to the `bus` (default WORLD_BUS — positional one-shots are world sounds,
+## and `world` sends into `sfx` so the audio-options sliders still affect it; a bare AudioStreamPlayer3D.new()
+## lands on Master and ignores the SFX volume setting). A non-diegetic caller passes &"sfx" (or `sting`)
+## explicitly, exactly as it already passes `vary = false`.
 ##
 ## ⭐`max_db` IS the audible loudness for this project's authored idiom, and callers that modulate volume have to
 ## pass it. AudioStreamPlayer3D outputs `min(volume_db + distance_attenuation, max_db)`, and the attenuation is
@@ -126,7 +138,7 @@ func play_varied(player: Node, base_pitch: float = 1.0) -> void:
 ## `vary` (default true) is the DIEGETIC flag: a world sound gets the global per-play pitch variation, a
 ## non-diegetic one (an alert sting, a HUD cue, a reward jingle) passes `false` and plays at exactly
 ## `pitch_scale`. See vary_pitch for why the boundary is drawn there.
-func play_sfx(pos: Vector3, stream: AudioStream, volume_db: float = 0.0, pitch_scale: float = 1.0, bus: StringName = &"sfx", max_db: float = DEFAULT_MAX_DB, vary: bool = true) -> void:
+func play_sfx(pos: Vector3, stream: AudioStream, volume_db: float = 0.0, pitch_scale: float = 1.0, bus: StringName = WORLD_BUS, max_db: float = DEFAULT_MAX_DB, vary: bool = true) -> void:
 	if stream == null:
 		return
 	var player := AudioStreamPlayer3D.new()
@@ -143,10 +155,10 @@ func play_sfx(pos: Vector3, stream: AudioStream, volume_db: float = 0.0, pitch_s
 	player.play()
 
 
-## One-shot 2D (in-your-ear) SFX. Routed to the `bus` (default "sfx") — see play_sfx, including `vary`.
+## One-shot 2D (in-your-ear) SFX. Routed to the `bus` (default WORLD_BUS) — see play_sfx, including `vary`.
 ## ⭐Being 2D is NOT the same as being non-diegetic, so the flag is never inferred from it: the bullet whiz, the
 ## ram thud and the grapple all play 2D and ARE world sounds, while the "!" sting and the cha-ching are not.
-func play_2d_sfx(stream: AudioStream, volume_db: float = 0.0, pitch_scale: float = 1.0, bus: StringName = &"sfx", vary: bool = true) -> void:
+func play_2d_sfx(stream: AudioStream, volume_db: float = 0.0, pitch_scale: float = 1.0, bus: StringName = WORLD_BUS, vary: bool = true) -> void:
 	if stream == null:
 		return
 	var player := AudioStreamPlayer.new()
@@ -179,7 +191,8 @@ func play_applause() -> void:
 	tw.tween_callback(applause.queue_free)
 
 
-## Immediately cut any currently-playing SFX-bus players in the live tree.
+## Immediately cut any currently-playing effect players in the live tree — every bus in STOP_BUSES (the
+## `sfx` family: world foley, gunshot echoes, panel speakers, UI cues), leaving music/ambience/voice alone.
 ## Persistent authored players are stopped in place; AudioManager one-shots are freed so stopping them does not leak.
 func stop_sfx() -> void:
 	var tree := get_tree()
@@ -190,7 +203,7 @@ func stop_sfx() -> void:
 
 func _stop_sfx_under(node: Node) -> void:
 	if node is AudioStreamPlayer or node is AudioStreamPlayer2D or node is AudioStreamPlayer3D:
-		if node.get(&"bus") == SFX_BUS and bool(node.get(&"playing")):
+		if (node.get(&"bus") in STOP_BUSES) and bool(node.get(&"playing")):
 			node.call(&"stop")
 			if node.has_meta(ONE_SHOT_META):
 				node.queue_free()

@@ -3,8 +3,9 @@ class_name IndoorAmbienceDucker
 extends Node3D
 
 ## Drop-in on the PLAYER: casts a small fan of rays STRAIGHT UP each tick and, when enough of them hit geometry
-## (a roof / ceiling / overhang) within `ceiling_scan_height`, applies two subtle "you're indoors" treatments to a
-## target ambient bed — a VOLUME duck and a low-pass MUFFLE — and reverses both under open sky:
+## (a roof / ceiling / overhang) within `ceiling_scan_height`, applies three "you're indoors" treatments — a
+## VOLUME duck and a low-pass MUFFLE on a target ambient bed, plus the ROOM ECHO on the `world` bus — and
+## reverses all of them under open sky:
 ##  - VOLUME: it fades the target player's own `volume_db` from `outdoor_db` to `indoor_db`. It touches the node,
 ##    NOT the `ambient` bus, so the player's Ambient volume slider still governs the overall level and the two
 ##    compose in dB — the same "fade a node, leave the bus for the slider" split `AudioZone` uses.
@@ -13,12 +14,19 @@ extends Node3D
 ##    roof. A low-pass in Godot is a per-BUS effect, so the bed lives on its own `ambient_bed` bus (which sends into
 ##    `ambient`, keeping the slider) — mirroring how the `radio` bus carries its own low-pass. Disable via
 ##    `enable_muffle` (then it's a pure volume duck and needs no dedicated bus).
+##  - ROOM ECHO: it switches the authored-DISABLED tight-room chain (AudioEffectDelay slap + AudioEffectReverb)
+##    on the diegetic `room_bus` (`world`) ON while covered and OFF under sky, so every world sound — footsteps,
+##    weapon foley, doors, impacts, gunfire — picks up a close indoor echo behind a roof. Tuning lives in
+##    default_bus_layout.tres (Audio panel); this only flips `enabled`. UI cues/stings/jingles play on plain
+##    `sfx`, which never passes through `world`, so they stay dry by construction.
 ## The ray + throttle + LOS-mask idiom is lifted from `PlayerLightLevel`.
 ##
 ## SHARED SEAM: it also WRITES `host.is_indoors` (a bool on the player) each sample, so other systems can read one
-## authoritative "is there a roof over me" flag instead of each re-casting — a future reverb send, a rain/particle
-## cutoff, an interior music swap. Default (no ducker in the scene) leaves `is_indoors` at its `false` default, so
-## this is purely additive: nothing changes until you drop one in.
+## authoritative "is there a roof over me" flag instead of each re-casting — a rain/particle cutoff, an interior
+## music swap. Live consumer: WeaponAudio.listener_indoors() reads it so gunfire skips its outdoor `gunshots`
+## billow bus indoors (the indoor room itself is this component's ROOM ECHO toggle on `world`, above). Default
+## (no ducker in the scene) leaves `is_indoors` at its `false` default and the room chain at its authored OFF,
+## so this is purely additive: nothing changes until you drop one in (gunfire then always billows, dry rooms).
 ##
 ## PLACEMENT: drop it as a CHILD of the Player, next to the `Ambience` AudioStreamPlayer3D. `host` auto-wires to the
 ## parent; `target` points at the bed to duck (or leave it blank to auto-find the first sibling on `bus`). Zero-config
@@ -63,6 +71,17 @@ extends Node3D
 ## How fast the cutoff eases between the two (per-second exponential rate; higher = snappier). Frame-rate independent.
 @export var muffle_smoothing: float = 4.0
 
+@export_group("Room Echo")
+## Switch the room-echo chain on `room_bus` with the roof state: ON under cover, OFF under open sky. The chain
+## is authored DISABLED in default_bus_layout.tres (the resting state IS outdoors), so a scene with no ducker
+## never echoes. Consumed by everything on the `world` bus; see WeaponAudio.fire_bus_for for how gunfire
+## additionally swaps off its outdoor billow bus indoors.
+@export var enable_room_echo: bool = true
+## The bus carrying the disabled-at-rest AudioEffectDelay + AudioEffectReverb to switch — the diegetic `world`
+## bus (sends into `sfx`, keeping the Effects slider and the death duck). A bus without those effects, or a
+## missing bus, is a silent no-op (the duck + muffle still run).
+@export var room_bus: StringName = &"world"
+
 ## The up-ray fan, in host-local metres before scaling by `probe_radius`: centre + the four cardinals. Straight up
 ## is world-up for every one; only the ORIGIN is spread, so a partial ceiling with one gap still reads as covered.
 const PROBE_OFFSETS: Array[Vector3] = [
@@ -102,6 +121,10 @@ func _physics_process(delta: float) -> void:
 		_t = sample_interval
 		_covered = _sample_covered()
 		host.set(&"is_indoors", _covered)  # silent no-op if the host has no such property (matches PlayerLightLevel)
+		# UNGATED on enable_room_echo: with the flag off this drives the chain to OFF each sample, so flipping
+		# the export at runtime (remote inspector, a debug hook) can never strand the GLOBAL bus state enabled —
+		# the off-switch is a state to enforce, not a reason to stop enforcing. Idempotent; also self-heals.
+		_apply_room_echo(_covered and enable_room_echo)
 	if enable_muffle:
 		_apply_muffle(delta)
 	if _target_player == null or not is_instance_valid(_target_player):
@@ -176,6 +199,27 @@ func _apply_muffle(delta: float) -> void:
 	if not is_equal_approx(_lowpass.cutoff_hz, goal):
 		_lowpass.cutoff_hz = approach_exp(_lowpass.cutoff_hz, goal, muffle_smoothing, delta)
 
+## Flip every AudioEffectDelay / AudioEffectReverb on `room_bus` to match the roof state. Enabled flips are a
+## trivial pair of server calls at sample_interval cadence and are NOT persisted — the .tres reloads its
+## authored (disabled) state next run, exactly like the muffle's cutoff.
+func _apply_room_echo(on: bool) -> void:
+	var idx := AudioServer.get_bus_index(room_bus)
+	if idx < 0:
+		return
+	for i in AudioServer.get_bus_effect_count(idx):
+		var fx := AudioServer.get_bus_effect(idx, i)
+		if fx is AudioEffectDelay or fx is AudioEffectReverb:
+			AudioServer.set_bus_effect_enabled(idx, i, on)
+
+## Leaving the tree (level swap, host freed) restores the chain's resting state — OFF — so a next scene
+## without a ducker doesn't inherit a stranded indoor echo from exiting a level while under a roof.
+## Deliberately NOT gated on enable_room_echo: the restore must run even for a ducker whose toggle was
+## switched off mid-life, or the disable path itself becomes the one path that can never clean up.
+func _exit_tree() -> void:
+	if Engine.is_editor_hint():
+		return
+	_apply_room_echo(false)
+
 ## The first AudioEffectLowPassFilter on `muffle_bus`, or null if the bus / effect isn't there. Modulating the
 ## returned effect resource updates the LIVE filter (it's the same instance the bus processes) — the standard
 ## Godot dynamic-filter-sweep pattern. Not persisted: the .tres reloads its authored cutoff next run.
@@ -223,4 +267,15 @@ func _get_configuration_warnings() -> PackedStringArray:
 			w.append("enable_muffle is on but muffle_bus '%s' isn't in the audio bus layout — the muffle can't engage. Route the bed to a bus that has a low-pass (e.g. `ambient_bed`), or turn off enable_muffle." % str(muffle_bus))
 		elif _resolve_lowpass() == null:
 			w.append("muffle_bus '%s' has no AudioEffectLowPassFilter — add one (the effect the muffle sweeps), or turn off enable_muffle." % str(muffle_bus))
+	if enable_room_echo:
+		var ri := AudioServer.get_bus_index(room_bus)
+		if ri < 0:
+			w.append("enable_room_echo is on but room_bus '%s' isn't in the audio bus layout — the indoor room echo can't engage." % str(room_bus))
+		else:
+			var has_chain := false
+			for i in AudioServer.get_bus_effect_count(ri):
+				var fx := AudioServer.get_bus_effect(ri, i)
+				has_chain = has_chain or fx is AudioEffectDelay or fx is AudioEffectReverb
+			if not has_chain:
+				w.append("room_bus '%s' has no AudioEffectDelay/AudioEffectReverb to switch — author the (disabled) indoor chain on it in the editor's Audio panel, or turn off enable_room_echo." % str(room_bus))
 	return w

@@ -58,30 +58,30 @@ empty_clip = NodePath("EmptyClip")
 stream = ExtResource("17_qsmrd")
 volume_db = 80.0
 max_db = 6.0
-bus = &"sfx"
+bus = &"world"
 
 [node name="ImpactEnemyHit" type="AudioStreamPlayer3D" parent="Attack" unique_id=617242072]
 stream = ExtResource("21_h1ws3")
 attenuation_model = 3
 volume_db = 80.0
-bus = &"sfx"
+bus = &"world"
 
 [node name="Impact" type="AudioStreamPlayer3D" parent="Attack" unique_id=1972815363]
 stream = ExtResource("10_efikj")
 volume_db = 80.0
-bus = &"sfx"
+bus = &"world"
 
 [node name="ReloadSFX" type="AudioStreamPlayer3D" parent="Attack" unique_id=1740879969]
 stream = ExtResource("10_rv870")
-bus = &"sfx"
+bus = &"world"
 
 [node name="Attack Audio" type="AudioStreamPlayer3D" parent="Attack" unique_id=1145521213]
 stream = ExtResource("8_oudfo")
-bus = &"sfx"
+bus = &"gunshots"
 
 [node name="EmptyClip" type="AudioStreamPlayer3D" parent="Attack" unique_id=856581990]
 stream = ExtResource("18_5ttev")
-bus = &"sfx"
+bus = &"world"
 
 [node name="Attack" type="Timer" parent="Attack" unique_id=1644142713]
 one_shot = true

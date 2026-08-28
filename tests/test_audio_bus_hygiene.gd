@@ -67,8 +67,9 @@ func test_every_authored_audio_player_declares_a_bus() -> void:
 	assert_eq(offenders.size(), 0,
 		("These authored AudioStreamPlayers have no `bus = ` line, so they play on Master: they ignore every "
 		+ "Options volume slider AND stay at full volume through the death cinematic, which ducks the world "
-		+ "buses rather than Master. Set a bus in the Inspector (ambient / sfx / music / voice / radio). "
-		+ "Offenders: %s") % ", ".join(offenders))
+		+ "buses rather than Master. Set a bus in the Inspector — `world` for anything the game world "
+		+ "physically makes (it carries the indoor room echo), `sfx` for non-world cues, or ambient / music / "
+		+ "voice / radio. Offenders: %s") % ", ".join(offenders))
 
 ## The DIEGETIC-SPEAKER bus: the tinny high-pass + lo-fi crunch + low-pass chain every self-serve station's panel
 ## speaker plays through (StationSpeaker.bus). Two things are pinned, and both are the same failure the scan above
@@ -76,9 +77,10 @@ func test_every_authored_audio_player_declares_a_bus() -> void:
 ##  * it EXISTS. StationSpeaker falls back to `sfx` with a warning if it doesn't, so a deleted bus degrades to a clean
 ##    full-range chirp rather than silence — you would hear a wrong sound, not a missing one, which is exactly
 ##    the kind of drift a test should catch instead of a playtest.
-##  * it SENDS INTO `sfx`, not Master. That is what keeps it under the SFX volume slider and inside the death
-##    cinematic's world duck (death_mix.gd ducks the four world buses; a child bus inherits its parent's
-##    volume). Re-pointing it at Master in the editor's Audio panel would silently undo both.
+##  * it SENDS INTO `world` (the diegetic trunk, which sends into `sfx`), not Master. That routing is what
+##    keeps it under the SFX volume slider and inside the death cinematic's world duck (death_mix.gd ducks the
+##    world buses; a child bus inherits its parent's volume) — and what gives the panel chirp the indoor room
+##    echo, since a speaker is a physical object. Re-pointing it at Master in the Audio panel undoes all three.
 func test_the_speaker_bus_exists_and_routes_through_sfx() -> void:
 	var idx := AudioServer.get_bus_index(&"speaker")
 	assert_gte(idx, 0,
@@ -86,9 +88,10 @@ func test_the_speaker_bus_exists_and_routes_through_sfx() -> void:
 		+ "treatment and falls back to a clean `sfx` chirp")
 	if idx < 0:
 		return
-	assert_eq(AudioServer.get_bus_send(idx), &"sfx",
-		"the `speaker` bus must send into `sfx` so the SFX volume slider and the death-cinematic duck both "
-		+ "still reach it — sending it to Master escapes every slider")
+	assert_eq(AudioServer.get_bus_send(idx), &"world",
+		"the `speaker` bus must send into `world` — a panel speaker is a physical object, so its chirp takes "
+		+ "the indoor room echo like every world sound, and `world` sends into `sfx`, which keeps the SFX "
+		+ "volume slider and the death-cinematic duck reaching it transitively. Master escapes every slider")
 	assert_gt(AudioServer.get_bus_effect_count(idx), 0,
 		"the `speaker` bus with no effects IS a clean bus — the filters are the whole point of it existing")
 
@@ -175,6 +178,116 @@ func test_the_light_fixture_buzz_stays_off_the_muffled_bus() -> void:
 		"Light.tscn's LightBuzz is on `ambient_bed`, the bus IndoorAmbienceDucker muffles under a roof — a "
 		+ "fixture you are standing next to indoors would lose its high end exactly when it should be clearest. "
 		+ "Keep fixture-local sound on `ambient`; `ambient_bed` is for the outdoor bed only")
+
+## The GUNSHOT-ECHO bus: the delay + reverb chain every weapon's fire sound plays through. Same two silent
+## failure modes the `speaker` test pins:
+##  * it EXISTS. weapon.tscn's `Attack Audio` names it, and an AudioStreamPlayer3D whose bus name doesn't
+##    resolve falls back to Master — every fire sound (player AND NPC, they share the prefab) would escape
+##    the Effects slider and play at full volume through the death cinematic's world duck.
+##  * it SENDS INTO `world` (the diegetic bus, which sends into `sfx`) — the Effects slider, the death duck
+##    and the `sfx` Distortion crunch all still reach gunfire transitively, and a billow tail that is still
+##    ringing when you duck through a door picks up the indoor room like every other world sound.
+##  * it CARRIES the delay (the discrete echo repeats) AND the reverb (the tail). A bare bus is a clean
+##    bus — the echo would stop being a feature without anything erroring.
+func test_the_gunshots_bus_exists_routes_through_world_and_echoes() -> void:
+	var idx := AudioServer.get_bus_index(&"gunshots")
+	assert_gte(idx, 0,
+		"the `gunshots` bus is missing from default_bus_layout.tres — weapon.tscn's `Attack Audio` names it, "
+		+ "so every fire sound lands on Master and escapes the Effects slider + the death-cinematic duck")
+	if idx < 0:
+		return
+	assert_eq(AudioServer.get_bus_send(idx), &"world",
+		"the `gunshots` billow bus must send into `world` (which sends into `sfx`) so the Effects slider and "
+		+ "the death-cinematic duck still reach gunfire — Master escapes both, and `sfx` directly would skip "
+		+ "the indoor room a lingering billow tail should pick up when you step inside")
+	var has_delay := false
+	var has_reverb := false
+	for i in AudioServer.get_bus_effect_count(idx):
+		var fx := AudioServer.get_bus_effect(idx, i)
+		has_delay = has_delay or fx is AudioEffectDelay
+		has_reverb = has_reverb or fx is AudioEffectReverb
+	assert_true(has_delay and has_reverb,
+		"the `gunshots` bus must carry an AudioEffectDelay (the discrete echo repeats) and an "
+		+ "AudioEffectReverb (the tail) — retuning them in the Audio panel is fine, deleting them is not")
+
+## The emitter side of that contract: the weapon prefab's fire-sound player is the ONE node routed through
+## the billow bus. The other five players (impacts, shell tink, reload, dry-fire) ride `world` with the rest
+## of the diegetic foley — the BILLOW is a gunSHOT treatment, while the indoor room (the `world` chain) is a
+## whole-world treatment. The authored `gunshots` here is only the outdoor-GUN default: the node is shared by
+## every weapon's trigger sound, so WeaponAudio.fire_bus_for re-picks the bus per play (next test).
+func test_the_weapon_fire_sound_plays_on_the_gunshots_bus() -> void:
+	var src := FileAccess.get_file_as_string("res://scenes/weapons/weapon.tscn")
+	assert_ne(src, "", "scenes/weapons/weapon.tscn is unreadable — the weapon prefab moved or was renamed")
+	var chunk := src.get_slice('name="Attack Audio"', 1).get_slice("\n[", 0)
+	assert_true(chunk.contains('bus = &"gunshots"'),
+		"weapon.tscn's `Attack Audio` (the fire sound — player and NPC gunfire alike) must play on the "
+		+ "`gunshots` echo bus: on plain `sfx` the shot loses its echo, and with no bus line it lands on Master")
+
+## The per-weapon half of the routing: ONE shared `Attack Audio` node carries every weapon's trigger sound,
+## so the bus is re-picked per play by WeaponAudio.fire_bus_for. Only an outdoor GUN gets the city billow;
+## everything else is a world ACTION on the `world` bus — clean under open sky, the tight indoor room under
+## a roof, exactly like a footstep. "why the FUCK does the fists echo" (the fists billowing across the map)
+## was a real shipped bug: the node kept whatever bus it was authored with, for every weapon.
+func test_fire_bus_gives_only_outdoor_guns_the_billow() -> void:
+	var gun := WeaponData.new()
+	assert_eq(WeaponAudio.fire_bus_for(gun), &"gunshots",
+		"a ranged weapon fired under open sky must route to the `gunshots` city-billow bus")
+	assert_eq(WeaponAudio.fire_bus_for(gun, true), &"world",
+		"a gun fired while the listener is under a roof (Player.is_indoors, the IndoorAmbienceDucker seam) "
+		+ "must skip the billow and ride `world`, whose indoor room chain the ducker has switched on")
+	var fists := WeaponData.new()
+	fists.is_melee = true
+	assert_eq(WeaponAudio.fire_bus_for(fists), &"world",
+		"a melee swing whoosh is a world ACTION, never a gunshot — it rides `world` (clean outdoors, the "
+		+ "same indoor room as a footstep under a roof), and must never get the city billow")
+	assert_eq(WeaponAudio.fire_bus_for(fists, true), &"world",
+		"a melee swing whoosh indoors stays on `world` — the room it gets there is the ducker's world-chain "
+		+ "toggle, identical to every other action sound, not a gun treatment")
+	var spray := WeaponData.new()
+	spray.is_spray_paint = true
+	assert_eq(WeaponAudio.fire_bus_for(spray), &"world",
+		"the spray can's hiss is a world action — `world`, never the `gunshots` billow")
+	assert_eq(WeaponAudio.fire_bus_for(spray, true), &"world",
+		"the spray can's hiss indoors stays on `world`, taking the same room as a footstep")
+	gun = null
+	fists = null
+	spray = null
+
+## The WORLD bus — the diegetic trunk every world sound rides (footsteps, weapon foley, doors, impacts, gore,
+## the echo-bus sends), and the home of the indoor ROOM ECHO:
+##  * it EXISTS and SENDS INTO `sfx` — that routing is what keeps the whole world mix under the Effects
+##    slider, inside the death-cinematic duck, and running through the `sfx` Distortion crunch, while UI
+##    cues / stings / jingles on plain `sfx` never pass through it (they must never take room reverb).
+##  * it CARRIES the indoor chain — an AudioEffectDelay (the tight wall slap) and an AudioEffectReverb (the
+##    small bright room) — authored DISABLED: the resting state IS outdoors. IndoorAmbienceDucker switches
+##    them on under a roof and back off under sky, and restores OFF in _exit_tree, so a bare scene with no
+##    ducker plays the authored dry mix. Values are free to retune in the Audio panel; the class pair is not.
+func test_the_world_bus_carries_the_disabled_indoor_room_chain() -> void:
+	var idx := AudioServer.get_bus_index(&"world")
+	assert_gte(idx, 0,
+		"the `world` bus is missing from default_bus_layout.tres — every diegetic emitter names it, so the "
+		+ "whole world mix lands on Master, escaping the Effects slider and the death-cinematic duck")
+	if idx < 0:
+		return
+	assert_eq(AudioServer.get_bus_send(idx), &"sfx",
+		"the `world` bus must send into `sfx` so the Effects slider / death duck / Distortion crunch still "
+		+ "govern the whole diegetic mix — Master escapes all three")
+	var delay_i := -1
+	var reverb_i := -1
+	for i in AudioServer.get_bus_effect_count(idx):
+		var fx := AudioServer.get_bus_effect(idx, i)
+		if fx is AudioEffectDelay:
+			delay_i = i
+		elif fx is AudioEffectReverb:
+			reverb_i = i
+	assert_true(delay_i >= 0 and reverb_i >= 0,
+		"the `world` bus must carry an AudioEffectDelay + AudioEffectReverb (the indoor room chain the "
+		+ "IndoorAmbienceDucker switches on under a roof) — without them 'indoors sounds indoor' silently dies")
+	if delay_i >= 0 and reverb_i >= 0:
+		assert_false(AudioServer.is_bus_effect_enabled(idx, delay_i) or AudioServer.is_bus_effect_enabled(idx, reverb_i),
+			"the `world` indoor chain must be authored DISABLED — outdoors is the resting state, and a scene "
+			+ "with no IndoorAmbienceDucker must play the dry mix. If this fails, the .tres was saved with the "
+			+ "chain stuck on (e.g. from the editor's Audio panel while testing indoors)")
 
 func test_the_scan_actually_finds_audio_players() -> void:
 	# Guard against the scan silently matching nothing (a .tscn format change would make the test above pass
