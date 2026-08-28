@@ -21,6 +21,14 @@ extends Resource
 ## and the talk/pickup prompts all still work; only the dot goes away. OFF restores the old permanent
 ## reticle. Composed with the dialogue hide in ui.gd's _apply_crosshair_visibility (the single writer).
 @export var hide_crosshair_when_holstered: bool = true
+## ...but a prop in your HANDS is an aimed thing: a carried Throwable launches straight down the look ray
+## (left-click / Z release), so the reticle IS its aim point even though the weapon underneath is holstered
+## and draw-locked ("no gun while your hands are full", Player._on_carry_changed). ON re-shows the dot for
+## the whole carry — a world-grabbed crate, a hotbar-pulled prop, or your own weapon taken into hand with
+## DropHeld (H) — and it OVERRIDES the holster hide above, because the holster here is a side effect of
+## carrying rather than a "nothing is aimed" state. OFF leaves carrying to follow the holster rule.
+## Dialogue still wins over both (talking isn't an aiming moment).
+@export var show_crosshair_while_carrying: bool = true
 ## Bottom-left clip/reserve ammo readout font (ui.gd) — NOT hud_font_size (that stays the big centred
 ## message font).
 @export var ammo_font_size: int = 18
@@ -96,10 +104,21 @@ extends Resource
 @export var stamina_ring_idle_alpha: float = 0.0
 ## Ease rate (1 - exp idiom) for the idle fade in/out; higher = snappier.
 @export var stamina_ring_fade_speed: float = 6.0
+## HOLD (seconds) the ring stays fully lit AFTER the pool tops back up before the idle fade begins — a
+## split-second linger so recovering to full registers instead of the gauge vanishing the instant the last
+## point returns (user call, "delay fading out for a split second after you get back to full stamina").
+## The hold only counts a refill the player WATCHED: it is cleared on an adopted frame (revive / level
+## load / bar-mode swap), so a full pool that appears off-screen still lands straight on the idle alpha with
+## no linger (the same contract stamina_ring's _fade_primed latch enforces). 0 = fade the instant you hit full.
+@export var stamina_ring_full_hold: float = 0.4
 ## Base opacity of the ring's fill arc (the idle fade multiplies ON TOP of this) — the ring reads as a
 ## translucent annotation over the world rather than solid paint at the aim point (user call). The
-## outline rides the same multiplier so the rim never overpowers a faded fill.
-@export var stamina_ring_alpha: float = 0.6
+## outline rides the same multiplier so the rim never overpowers a faded fill, so this ONE knob carries
+## the whole gauge's transparency. Taken 0.6 -> 0.4 on a second user call ("make the stamina bar more
+## transparent"), in the same pass that dropped the aim cluster out of the HUD ghost (ui.gd _build_ghost
+## rule 4) — both asks are the same ask: keep the aim point clean. Much below ~0.3 the arc stops reading
+## over a bright scene even with its outline under it.
+@export var stamina_ring_alpha: float = 0.4
 ## Outline width (px, EACH side of the stroke) drawn under the fill arc — the contrast rim that keeps a
 ## thin 2px arc legible over bright/dithery scenes. 0 = no outline.
 @export var stamina_ring_outline_width: float = 1.0
@@ -109,8 +128,9 @@ extends Resource
 @export_group("HUD weight")
 # Diegetic HUD sway (scripts/ui/hud_sway.gd, driven per frame in ui.gd): the corner HUD cluster —
 # HP/stamina bars, ammo, money, toasts, quest tracker, hotbar — trails camera turns on a damped spring
-# and settles, reading as an instrument panel with mass. The crosshair + stamina ring ride the SAME
-# spring at hud_sway_aim_scale (a whisper — see that knob); the look-name label stays pinned. TWO channels feed the one spring: every ROTATIONAL
+# and settles, reading as an instrument panel with mass. The crosshair + stamina ring CAN ride the SAME
+# spring at hud_sway_aim_scale, but that knob ships at 0 (pinned reticle — see that knob); the look-name
+# label stays pinned too. TWO channels feed the one spring: every ROTATIONAL
 # camera behaviour (mouse look, trauma shake from guns/blasts/ram bounces) is MEASURED off the camera
 # basis and needs no wiring here, while POSITIONAL impacts the basis can't see (the landing dip) arrive
 # as discrete velocity kicks (ui.hud_land -> hud_land_kick below). The player scales the whole effect
@@ -123,11 +143,14 @@ extends Resource
 ## Keep it SMALL (the 792x444 canvas magnifies ~2.4x): >12 px starts reading seasick, not weighty.
 @export var hud_sway_max: float = 8.0
 ## Fraction of the panel's spring offset the AIM CLUSTER (crosshair + stamina ring) rides — the same
-## spring, so reticle and panel share ONE mass and one settle, just at a whisper of the amplitude
-## (0.12 of an 8px max ≈ 1px). MUCH subtler than the panel by design: the reticle is the aim reference
-## and large motion there reads as aim error, not weight. 0 = classic fully-pinned reticle. Inherits
-## the Accessibility "HUD Sway" scale for free (the offset it samples is already scaled).
-@export var hud_sway_aim_scale: float = 0.12
+## spring, so reticle and panel would share ONE mass and one settle, at a whisper of the amplitude.
+## SHIPPED AT 0 (user call, 2026-08-26 "remove the sway on the crosshair"): the reticle is the aim
+## reference and any motion there reads as aim error, not weight, so it stays classic fully-pinned to
+## screen centre while the corner panel still trails. Raise toward ~0.12 (≈1px of an 8px max) to let a
+## whisper of the panel's weight reach the reticle again; keep it well under 0.5 (see the test) — large
+## reticle motion reads as aim error. Inherits the Accessibility "HUD Sway" scale for free (the offset
+## it samples is already scaled), so at 0 the aim cluster is pinned regardless of that slider.
+@export var hud_sway_aim_scale: float = 0.0
 ## Spring stiffness (accel per px of error). Higher = the panel snaps to its lag position faster.
 @export var hud_sway_stiffness: float = 70.0
 ## Spring damping (accel per px/s of velocity). With stiffness 70, damping 12 lands ~0.72 damping
@@ -365,11 +388,56 @@ extends Resource
 # vocabulary itself is pure maths in scripts/ui/map_glyph.gd — these are only its sizes.
 # ⭐WHOLE-ISH PIXELS. The 792x444 canvas is nearest-upscaled ~2.4x, so a glyph sized in fractions rasterizes
 # into a lopsided blob. Half-pixel steps survive; finer ones do not.
+## THE SCANNER RIM, in metres: how deep a band at the edge of a scanner implant's reach fades body dots out
+## over. The REACH itself is not here — it is authored per chip on the scanner ability scenes (BioScanner 22 m,
+## DeepScanner 55 m), because the number you bought is what the tier means; this is only how the edge of it is
+## drawn, which is presentation and shared by every tier.
+##
+## WHY A BAND AT ALL. A hard clip makes a walking body's dot blink in and out at a fixed radius, which reads as
+## the map glitching rather than as the scanner reaching its limit — and on the 120 m Map tab the rim can sit
+## well inside the drawn view, so there is nothing else on screen to explain the pop. A ramp says "signal, and
+## it is running out". 0 = the hard clip back, for a designer who wants the harsher read.
+@export var minimap_scan_fade_m: float = 3.0
 ## Zoom steps the "Cycle Minimap Zoom" key walks through, in order, wrapping at the end. Each is the same
 ## multiplier Options -> Accessibility -> "Minimap Zoom" sets, so the key and the slider write ONE value
 ## (Settings.minimap_zoom) and can never disagree. Values outside Settings.MINIMAP_ZOOM_MIN/MAX are clamped by
 ## the setter; an EMPTY list disables the key entirely.
 @export var minimap_zoom_steps: PackedFloat32Array = PackedFloat32Array([1.0, 1.5, 2.25])
+
+# THE MAP TAB (scripts/ui/map_screen.gd — the sixth Pip-Boy tab, default M) draws the SAME widget at panel
+# size, so everything above still applies to it: the cut height, band height, solid-span rejects, merge and
+# the zoom steps are shared, and every colour still comes off MenuStyle.hud. Only the four numbers below are
+# its own, because they are the ones the corner box can't answer for a full-screen read: how much WORLD a
+# page-sized map should show, how far one wheel notch moves it, and how far off the player the view may be
+# DRAGGED. Its heading is forced NORTH_UP and its zoom lives on Settings.map_zoom (the Options → Accessibility
+# "Map Zoom" row) — both authored on the widget's own "Instance view" exports in scenes/ui/map_screen.tscn,
+# not here.
+## World metres across the MAP TAB's short axis at zoom 1.0. Three times the corner box's span: the panel is
+## ~3x taller than the 108 px box, so this lands at a similar px/m while showing a district instead of a room.
+## The player's Map Zoom row divides it (0.5x–3.0x = 240 m out to 40 m in, the corner box's own span at 3x).
+@export var map_world_span: float = 120.0
+## How much one mouse-wheel notch moves the map tab's zoom. The wheel is the map's primary zoom affordance
+## (the footer's two buttons are the pad/keyboard path and step by the same amount), so this is the feel knob:
+## bigger crosses the 0.5–3.0 range in fewer notches. Clamped at the ends by Settings.set_map_zoom.
+@export var map_zoom_wheel_step: float = 0.25
+## HOW FAR THE MAP TAB MAY BE PANNED off the player, in world metres — the clamp the map screen puts on
+## Minimap.view_offset.length() as the player drags the plan (or walks it with the movement keys / stick).
+##
+## WHY PANNING EXISTS AT ALL: the widget is player-CENTRED by construction, so before this the reachable world
+## was whatever the zoom floor showed — Settings.MINIMAP_ZOOM_MIN (0.5) over map_world_span (120) is 240 m
+## around the player, which is a plaza on a district map and made the far half of a level literally unviewable.
+## 400 m is about a district's diagonal here. Panning past where the level is BAKED is honest rather than
+## broken: the plan simply runs out, because there is nothing out there to draw.
+##
+## ⭐It is a LEASH, not a boundary: the pan is an offset from the player, so walking drags the whole window
+## along. Zero pins the map back to the player and disables panning outright.
+@export var map_pan_range: float = 400.0
+## Keyboard / stick pan speed on the map tab, in VIEW-HEIGHTS per second — deliberately not metres per second.
+## A metre rate would crawl at the zoomed-out district view and rocket at the zoomed-in room view; a rate in
+## screenfuls covers the same fraction of what the player can SEE at every zoom, which is the thing their hand
+## is actually steering. 0.9 walks the view just under one screenful a second, close to the feel of dragging
+## it with the mouse. 0 disables the key/stick path and leaves the drag (and the pad's Place Pin button).
+@export var map_pan_speed: float = 0.9
 
 @export_group("Clock")
 # The HUD time-of-day readout (scripts/ui/hud_clock.gd, code-built by ui.gd). ROW 2 OF THE TOP-RIGHT STACK:
@@ -398,6 +466,68 @@ extends Resource
 ## Digit size. Bigger than the quest tracker's line on purpose: this is a glanceable instrument, not prose.
 @export var clock_font_size: int = 16
 
+@export_group("Compass")
+# The TOP-CENTRE heading tape (scripts/ui/hud_compass.gd, code-built by ui.gd): the eight rose letters and
+# their degree ticks sliding under a fixed index caret, plus a pip for every `compass`-group marker at its
+# bearing. It is PINNED to the HUD layer and un-ghosted (a bearing that lags is a bearing that lies — the
+# same standing rule the damage arcs are held to; see ui.gd's header).
+# THE TIGHT ONE: this band is ROW 0 OF THE CENTRE-TOP COLUMN, and everything under it (the enemy health bar,
+# then the stealth badge -> detection meter -> claim -> takedown/pet ladder) is pushed down by exactly
+# compass_top + compass_size.y + compass_column_gap through UI.centre_column_top_for. So growing the tape
+# SLIDES the column instead of colliding with it, and switching the compass off in Options returns the
+# column to its historical offsets byte-for-byte.
+# AUTHOR-TIME numbers only — the player-facing on/off is an Options -> Accessibility row
+# (Settings.compass_enabled, polled live), and every colour/tick/fade is MenuStyle.hud ("Compass").
+## The tape's box, w x h px, centred horizontally on the canvas. WIDTH is the instrument's precision: at the
+## shipped 300 px / 120 deg span one canvas pixel is 0.4 deg, and a narrower band packs the rose letters
+## tighter rather than showing less. HEIGHT must clear the three stacked rows the widget draws — ticks
+## hanging from the top edge, the letter baseline (compass_label_baseline_px up from the bottom), and the
+## marker chevrons seated on the bottom edge. At the shipped skin that budget is ticks/caret y 0..4, the
+## letters y ~7..15, and the chevrons y 18..24 — three rows with ~3 px between them, measured from a real
+## windowed capture (scripts/tools/hud_compass_qa_shots.gd), not eyeballed. WHOLE pixels: a fractional box
+## rasterizes into a ragged comb under the 792x444 canvas's ~2.4x nearest upscale (the minimap_size /
+## clock_size rule).
+@export var compass_size: Vector2 = Vector2(300, 24)
+## Px from the canvas top to the tape's RESTING top edge. Ships at 4 — hard against the top of the screen,
+## the same inset the enemy health bar used to own before the compass took row 0 (user call: "closer to the
+## top").
+## Note what this knob is and is NOT. The tape rides the HUD-weight carrier, so it drifts UP as well as down,
+## and this is the budget for the UP half — but overrunning it only CROPS the band against the screen edge,
+## where overrunning compass_column_gap below COLLIDES with the enemy health bar. A crop degrades (you lose a
+## few px of tick row on a hard flick, which reads as the weight effect working); a collision is a bug. That
+## asymmetry is why this one is spent down to the edge and that one is not. The floor is that the instrument
+## must never vanish ENTIRELY — compass_top + compass_size.y has to outlast the carrier's worst-case upward
+## travel, which tests/test_hud_compass.gd pins against the live sway knobs.
+@export var compass_top: float = 4.0
+## Px between the tape's RESTING bottom edge and the top of the centre-top column below it (the enemy health
+## bar's own track).
+## ⭐THIS GAP IS A SWAY BUDGET, not breathing room, and that is why it is so much larger than it looks like
+## it needs to be. The tape MOVES (it rides `_weighted`) and the column under it is PINNED, so the gap has to
+## absorb the carrier's whole downward travel or the rose lands on the enemy health bar: up to hud_sway_max
+## (8 px) of spring offset, PLUS the lens-breath scale pulling the band toward screen centre — at a resting
+## bottom edge of 28 on the 444-tall canvas that is (222 - 28) * hud_fov_scale_max ≈ 7.8 px. 16 clears the
+## bar's ink by ~3 px at the simultaneous worst case, the same margin enemy_hp_size budgets against the
+## quest tracker. `tests/test_hud_compass.gd` pins it against the LIVE sway knobs, so raising hud_sway_max
+## or hud_fov_scale_max fails there instead of shipping an overlap.
+@export var compass_column_gap: float = 16.0
+## How many DEGREES the full width of the tape shows. THE FEEL KNOB: smaller = a longer, more precise scale
+## that swings fast under a flick; larger = more of the rose visible at once (at 180 you can see the bearing
+## behind each shoulder). 120 shows three rose letters at rest, which is the Skyrim/Far Cry reading.
+@export var compass_span_deg: float = 120.0
+## Degrees between graduations. ⭐MUST DIVIDE 45 — the rose LETTERS are drawn from this same walk, so a step
+## that misses the 45s (say 20) silently drops N/E/S/W off the tape entirely.
+@export var compass_tick_step_deg: float = 15.0
+## N/E/S/W letter size. Bigger than the intercardinals below on purpose: this is a glanceable instrument and
+## the four cardinals are what a player actually navigates by.
+@export var compass_font_size: int = 11
+## NE/SE/SW/NW letter size — two glyphs in the same band, so it has to be smaller or the rose collides.
+@export var compass_minor_font_size: int = 8
+## Hide compass-group marker pips farther than this from the camera (0 = no limit, the shipped value). The
+## screen-edge Compass component carries the same knob as a per-instance @export; this is the tape's copy
+## because the two widgets can reasonably want different reach — the tape is a NAVIGATION instrument and a
+## distant quest bearing is exactly what it is for.
+@export var compass_marker_max_distance: float = 0.0
+
 @export_group("Centre prompts")
 ## Shared centre-screen prompt size (ui.gd's look-at name + player_hud.gd's takedown/pet/claim cues).
 @export var prompt_font_size: int = 14
@@ -421,7 +551,9 @@ extends Resource
 # rep/quest toast gain-loss colours above). The bar's TRACK reuses meter_bg_color from "Prompt meters" so the
 # whole HUD speaks one meter dialect. The player can hide the bar entirely via Options -> Accessibility ->
 # "Enemy Health Bar" (Settings.enemy_health_bar_enabled, polled live).
-## Distance (px) from the canvas top to the TOP of the bar's TRACK. THE TIGHT ONE: the centre-top column below
+## Distance (px) from the CENTRE-TOP COLUMN's top to the TOP of the bar's TRACK — the column's own origin is
+## the canvas top plus whatever the compass band above it reserves (UI.centre_column_top_for), so this stays
+## the same number whether the compass is on or off. THE TIGHT ONE: the centre-top column below
 ## is a contiguous, outline-tight stack (stealth badge -> detection bar -> claim -> takedown/pet, ending at
 ## y 123) whose first ink — the [ HIDDEN ] badge's outline — reaches up to y 15. MEASURE THE RIM: the contrast
 ## rim below grows the painted band one px on every side, so at the default top 4 / height 8 / rim 1 the ink is

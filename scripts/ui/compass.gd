@@ -7,6 +7,12 @@ extends Control
 ## (project_to_edge) is pure + unit-tested. Drawing is playtest-tuned. PAINT comes from the artist skin
 ## (MenuStyle.hud): the no-`color` fallback tint + optional marker art; GEOMETRY stays on the @exports
 ## below (scene-authored, per-instance wins).
+##
+## ⭐RETIRED, AND DELIBERATELY LEFT UNWIRED: nothing instantiates this. The compass the game ships is the
+## top-centre heading TAPE (scripts/ui/hud_compass.gd), built by ui.gd, and it reads the same Groups.COMPASS
+## channel this does. Both the PLAYER'S OWN WAYPOINTS and the tracked-pin pip live over there, on the surface
+## a player can actually see — a second copy of that channel here would have been code nobody's screen ever
+## rendered. The file stays as the optional hand-added overlay it always was; do not grow features on it.
 
 ## Inset (px) of the edge chevron ring from the screen border.
 @export var edge_margin: float = 28.0
@@ -37,7 +43,14 @@ func _draw_marker(cam: Camera3D, marker: Node3D) -> void:
 	var behind := cam.is_position_behind(wp)
 	var sp := cam.unproject_position(wp)
 	if not behind and Rect2(Vector2.ZERO, size).has_point(sp):
-		_paint_marker(sp, col)  # visible on-screen -> mark it where it is
+		# Visible on-screen -> mark it where the world LENS actually DISPLAYS it: the barrel warp bends
+		# the picture under this overlay, so the raw unprojection sits beside its object (~4-8 px at
+		# mid-radius with the shipped bend — the sniper-glint fix, see CameraSettings.lens_display_point).
+		# The edge chevrons below skip it on purpose: the warp is radial about the screen centre, so it
+		# cannot change the DIRECTION a chevron points, only where the (clipped) point would sit.
+		var rs := Vector2(Settings.render_size())
+		_paint_marker(CameraSettings.lens_display_point(sp, size, rs.x / rs.y,
+			GameSettings.camera.lens_barrel_amount * clampf(Settings.lens_curve, 0.0, 1.0)), col)
 	else:
 		# Off-screen (outside the view rect, or behind us): pin a chevron to the edge ring pointing toward it.
 		var dir := sp - size * 0.5

@@ -11,11 +11,11 @@ extends Control
 ## - `centre` is re-stamped EVERY frame from the live crosshair rect (crosshair.position + size * 0.5),
 ##   never from the viewport centre — the crosshair is repositioned per frame by Player._update_crosshair,
 ##   and a ring anchored anywhere else visibly detaches from the reticle the moment that policy sways it.
-## - The ring must never ride the diegetic HUD-weight carrier (ui.gd `_weighted`) — but it is no longer
-##   fully pinned either: the CROSSHAIR carries a whisper of the sway (hud_sway_aim_scale, ~1px max), and
-##   the ring follows it through the centre stamp, re-stamped AFTER the sway write each frame (ui.gd
-##   _update_hud_sway) so ring + reticle move as ONE. A ring lagging its own reticle reads as a broken
-##   crosshair, which is why the stamp order matters more than the amplitude.
+## - The ring must never ride the diegetic HUD-weight carrier (ui.gd `_weighted`). It CAN inherit a whisper
+##   of the sway the crosshair carries (hud_sway_aim_scale), but that knob SHIPS AT 0, so today the ring is
+##   fully pinned along with the reticle. It is still re-stamped AFTER the sway write each frame (ui.gd
+##   _update_hud_sway) so that if the knob is ever raised, ring + reticle move as ONE — a ring lagging its
+##   own reticle reads as a broken crosshair, which is why the stamp order matters more than the amplitude.
 ## - Annulus budget around the crosshair (same-centre neighbours): the Hitmarker's body ticks pop to
 ##   ~11 px, its headshot ticks to ~21; AimIndicators start at base_radius 28 (stroke 6 -> inner edge
 ##   ~25); DamageIndicators sit at 120 and the aim ping at 84. The default radius 14 / stroke 2 hugs the
@@ -42,8 +42,10 @@ var centre: Vector2 = Vector2.ZERO
 var fill: float = 1.0
 ## Idle-fade multiplier on the whole ring's alpha: eases toward stamina_ring_idle_alpha while the pool
 ## is full (a full ring is zero-information — fade it so the crosshair area stays clean), snaps back
-## toward 1.0 the moment any stamina is spent. Eased in _process, applied in _draw — but only while the
-## ring is on screen and PRIMED (below); an unwatched change is adopted, not animated.
+## toward 1.0 the moment any stamina is spent, and LINGERS lit for stamina_ring_full_hold seconds after a
+## refill tops the pool back up before that idle fade starts (_full_hold_remaining). Eased in _process,
+## applied in _draw — but only while the ring is on screen and PRIMED (below); an unwatched change is
+## adopted, not animated.
 var _alpha_mult: float = 1.0
 ## Has the ring had a live frame on screen since it last became visible? The ease above is only meaningful
 ## as an animation of something the PLAYER WATCHED, so it must never replay a transition that happened
@@ -62,6 +64,11 @@ var _alpha_mult: float = 1.0
 ## `fill` and `_alpha_mult` start "full and lit" — one full alpha-unit from a full pool's resting state.
 ## One latch covers both.
 var _fade_primed: bool = false
+## Seconds left in the post-full HOLD: a just-refilled pool lingers fully lit for stamina_ring_full_hold
+## before the idle fade starts (user call). ARMED (reset to the full duration) every frame the pool is below
+## full, so it always covers the NEXT top-off; bled down while full; and forced to 0 on an unprimed frame so
+## an adopted full pool (revive / level load) never lingers lit — the _fade_primed "watched only" contract.
+var _full_hold_remaining: float = 0.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE  # never eat input (HUD gotcha, same as every overlay)
@@ -73,17 +80,28 @@ func _process(delta: float) -> void:
 		# The next visible frame then lands on the truth instead of replaying an off-screen change.
 		_fade_primed = false
 		return
-	var target := alpha_target(fill, GameSettings.hud.stamina_ring_idle_alpha)
+	var hud: HudSettings = GameSettings.hud
+	# Post-full HOLD timer. On an unprimed frame it is CLEARED (an adopted full pool must not linger — same
+	# "never animate an unwatched change" rule as the fade below). While draining it stays armed at the full
+	# duration; the moment the pool tops up, that armed value counts down and keeps `holding` true until it
+	# expires, so the ring lingers lit for a split second before fading (user call).
+	if not _fade_primed:
+		_full_hold_remaining = 0.0
+	elif fill < 0.999:
+		_full_hold_remaining = hud.stamina_ring_full_hold
+	elif _full_hold_remaining > 0.0:
+		_full_hold_remaining = maxf(0.0, _full_hold_remaining - delta)
+	var target := alpha_target(fill, hud.stamina_ring_idle_alpha, _full_hold_remaining > 0.0)
 	if not _fade_primed:
 		# First frame back on screen (or the first frame of this ring's life): ADOPT the target outright.
 		# ui.gd is our parent and processes first, so `fill` was already stamped from the live pool THIS
 		# frame — a revive that refilled stamina under the death fade arrives here as "already full,
-		# already invisible", with no dissolve to play.
+		# already invisible" (hold cleared just above), with no dissolve and no linger to play.
 		_alpha_mult = target
 		_fade_primed = true
 	else:
 		# Frame-rate-independent ease toward the idle/active alpha (the 1 - exp idiom used HUD-wide).
-		var t := 1.0 - exp(-GameSettings.hud.stamina_ring_fade_speed * delta)
+		var t := 1.0 - exp(-hud.stamina_ring_fade_speed * delta)
 		_alpha_mult = lerpf(_alpha_mult, target, t)
 		# SNAP the asymptote shut: the exp-lerp approaches its target forever without arriving, and with the
 		# shipped idle alpha of 0 that residue is a permanent ghost ring at ~1% opacity — visibly NOT the
@@ -108,9 +126,12 @@ static func arc_angles(fill_frac: float, start_deg: float, sweep_deg: float) -> 
 static func ring_color(fill_frac: float, fill_col: Color, low_col: Color) -> Color:
 	return low_col.lerp(fill_col, clampf(fill_frac, 0.0, 1.0))
 
-## Pure idle-fade target: a full pool rests at the faint idle alpha, anything less pops to fully lit.
-static func alpha_target(fill_frac: float, idle_alpha: float) -> float:
-	return idle_alpha if fill_frac >= 0.999 else 1.0
+## Pure idle-fade target: a full pool rests at the faint idle alpha, anything less pops to fully lit —
+## EXCEPT while `holding` (the post-full linger, stamina_ring_full_hold), which keeps a just-refilled full
+## pool fully lit until the hold expires. `holding` defaults false so the plain "idles only at full" callers
+## (and the off-tree tests) are unchanged.
+static func alpha_target(fill_frac: float, idle_alpha: float, holding := false) -> float:
+	return idle_alpha if (fill_frac >= 0.999 and not holding) else 1.0
 
 ## Pure outline-span pad: widen the fill arc's angular span by `pad_rad` on BOTH ends, respecting the
 ## sweep's direction — so the outline caps the arc's TIPS as well as its long edges (a same-span outline

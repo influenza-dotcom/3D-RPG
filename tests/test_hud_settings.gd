@@ -27,10 +27,10 @@ func test_defaults_match_the_former_consts() -> void:
 
 func test_aim_cluster_sway_is_a_whisper_of_the_panel() -> void:
 	var h := HudSettings.new()
-	assert_almost_eq(h.hud_sway_aim_scale, 0.12, 0.001,
-		"the crosshair + stamina ring ride the panel spring at ~12%% — subtle by design (aim reference, not HUD mass)")
+	assert_almost_eq(h.hud_sway_aim_scale, 0.0, 0.001,
+		"reticle ships fully pinned (user call 2026-08-26 'remove the sway on the crosshair') — the aim cluster does NOT ride the panel spring")
 	assert_lt(h.hud_sway_aim_scale, 0.5,
-		"the aim share must stay well under the panel's — large reticle motion reads as aim error")
+		"if ever raised again, the aim share must stay well under the panel's — large reticle motion reads as aim error")
 	h = null
 
 
@@ -67,6 +67,29 @@ func test_minimap_geometry_defaults() -> void:
 		"...but under ONE PIXEL at the shipped scale, or the hidden-line test starts eating real gaps between real solids")
 	assert_almost_eq(h.minimap_redraw_pos_eps, 0.02, 0.001, "idle gate: metres")
 	assert_almost_eq(h.minimap_redraw_yaw_eps, 0.004, 0.0001, "idle gate: radians")
+	# THE SCANNER RIM. Only the FADE BAND lives here — the reach itself is the scanner ability script's own
+	# export default (bio_scanner 22 m / deep_scanner 55 m), because a runtime chip install builds from the
+	# script and never reads a tuning resource. A band of 0 is the documented hard clip, so the floor is >= 0,
+	# and it must stay well under the shortest tier or the entry-level scanner would be mostly rim.
+	assert_almost_eq(h.minimap_scan_fade_m, 3.0, 0.001, "metres of alpha ramp at the scanner's rim")
+	assert_gte(h.minimap_scan_fade_m, 0.0,
+		"a negative fade band would invert the ramp: 0 is the documented hard-clip off-switch, not a minimum")
+	assert_lt(h.minimap_scan_fade_m, 22.0 * 0.5,
+		"the band must stay a RIM: more than half the shortest scanner tier (22 m) and the implant reads as a permanent fade rather than a reach")
+	h = null
+
+## The MAP TAB's two knobs — the only numbers the page-sized instance of the same widget owns. Everything else
+## it draws with (cut height, band, solid-span rejects, merge, colours) is shared with the corner box.
+func test_map_tab_span_and_wheel_step() -> void:
+	var h := HudSettings.new()
+	var s = load("res://managers/Settings.gd")
+	assert_gt(h.map_world_span, h.minimap_world_span,
+		"the map tab must show MORE world than the 108 px corner box, or the tab is just a magnifier")
+	assert_almost_eq(h.map_world_span, 120.0, 0.001, "metres across the map panel's short axis at zoom 1")
+	assert_gt(h.map_zoom_wheel_step, 0.0,
+		"a zero wheel step makes the map's primary zoom affordance inert (the buttons step by the same amount)")
+	assert_lt(h.map_zoom_wheel_step, s.MINIMAP_ZOOM_MAX - s.MINIMAP_ZOOM_MIN,
+		"...and one notch must not cross the whole range, or the zoom has exactly two positions")
 	h = null
 
 

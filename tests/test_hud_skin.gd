@@ -38,6 +38,11 @@ func test_fields_exist_per_component_group() -> void:
 		"glint_core_radius", "glint_streak_length", "glint_color", "glint_min_alpha", "glint_min_scale",
 		# Compass / minimap
 		"compass_fallback_color", "compass_marker_texture", "minimap_player_color", "minimap_npc_color",
+		# Top-centre heading tape (2026-08-26, scripts/ui/hud_compass.gd) — shares the group above because it
+		# reads the SAME marker channel and the same compass_fallback_color; these are its own ink.
+		"compass_track_color", "compass_major_color", "compass_minor_color", "compass_tick_px",
+		"compass_tick_width_px", "compass_label_baseline_px", "compass_outline_size", "compass_rim_px",
+		"compass_edge_fade_px", "compass_marker_px", "compass_index_px", "compass_index_color",
 		"minimap_wall_color", "minimap_walkable_color", "minimap_backing_color", "minimap_outline_color",
 		"clock_color",
 		"minimap_frame_texture",
@@ -45,6 +50,9 @@ func test_fields_exist_per_component_group() -> void:
 		# POI-beacon fallback), the hostile alert ring, the station family + its exit exception, the north tick.
 		"minimap_neutral_color", "minimap_alert_color", "minimap_station_color", "minimap_exit_color",
 		"minimap_north_color",
+		# The player's own noise footprint (2026-08-26): the ring around the caret at the radius enemy hearing
+		# tests against — the one thing this widget inks in world METRES rather than at a fixed pixel size.
+		"minimap_noise_color", "minimap_noise_fill_color",
 		# Minimap ART (2026-08-19): the drop-in marker slots that landed with the authored-scene conversion —
 		# the caret, the POI beacon and the station alphabet, the three families a %MapOver scene node cannot
 		# draw because their positions are recomputed every frame. See scripts/ui/minimap_art.gd.

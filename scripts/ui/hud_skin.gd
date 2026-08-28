@@ -127,14 +127,68 @@ extends Resource
 @export var glint_min_scale: float = 0.45
 
 @export_group("Compass")
-# Screen-edge compass markers (scripts/ui/compass.gd). Its geometry (edge_margin, marker_size,
-# max_distance) stays scene-authored @exports on the component; the skin owns paint.
+# BOTH compass surfaces, because they share a marker channel: the screen-edge markers
+# (scripts/ui/compass.gd, a drop-in component) and the top-centre HEADING TAPE (scripts/ui/hud_compass.gd,
+# code-built by ui.gd). The edge component's geometry (edge_margin, marker_size, max_distance) stays
+# scene-authored @exports on it; the tape's geometry (box, span, tick step, font sizes) is GameSettings.hud
+# ("Compass"). The skin owns paint for both.
 ## Tint for a compass marker whose WorldMarker carries no `color` of its own (gold, like the money
 ## readout).
 @export var compass_fallback_color: Color = Color(1.0, 0.85, 0.3)
 ## OPTIONAL artist marker art: drawn centred at the marker/chevron point (modulated by the marker's
 ## colour) INSTEAD of the code-drawn dot. Null = keep the drawn circle (the shipped look).
 @export var compass_marker_texture: Texture2D
+# --- The TOP-CENTRE HEADING TAPE (scripts/ui/hud_compass.gd) shares this group, because it reads the same
+# marker channel and the same fallback tint above: one WorldMarker colour drives BOTH compass surfaces.
+# Everything below is the tape's own ink. THE RULE is the minimap group's: if it changes how the tape LOOKS
+# it is here — a drawn element's colour AND the width/length of the thing that colour inks. Where the band
+# SITS, how many degrees it spans and how often it graduates are GameSettings.hud ("Compass").
+## The band behind the tape. SHIPS AT ALPHA 0 — no backing at all, the rose floating on the world, which is
+## what every other readout on this HUD does (the ammo line, the money rail and the quest tracker are all
+## bare outlined text on the picture; the minimap's backing is the exception, and it is a WINDOW rather than
+## a label). Legibility is carried by compass_outline_size below instead, the same black-outline treatment
+## the rest of the HUD's labels use. Raise the alpha to put the plate back if a level's backdrop defeats the
+## outline — the draw skips the rect entirely at 0, so OFF costs nothing.
+@export var compass_track_color: Color = Color(0.05, 0.05, 0.07, 0.0)
+## N/E/S/W ink — the four bearings the player navigates by, so this is the bright one.
+@export var compass_major_color: Color = Color(0.9, 0.94, 1.0, 0.95)
+## NE/SE/SW/NW ink AND the intermediate degree ticks: the scale between the cardinals, deliberately quieter
+## so the rose reads as a hierarchy rather than as a picket fence.
+@export var compass_minor_color: Color = Color(0.75, 0.8, 0.88, 0.6)
+## Length (px) of an intermediate degree tick, hanging from the band's TOP edge. A NAMED bearing draws its
+## letter instead of a tick (see HudCompass._draw_graduations), so this never has to clear a glyph.
+@export var compass_tick_px: float = 4.0
+## Tick stroke width (px). Goes through FloorplanSection.stroke_width like every other hairline in the HUD,
+## so it stays one PRESENTED pixel at native-res rather than a sub-pixel shimmer.
+@export var compass_tick_width_px: float = 1.0
+## Px up from the band's BOTTOM edge to the rose letters' BASELINE. Authored together with
+## GameSettings.hud.compass_size.y: too small and the glyphs sink under the marker chevrons, too large and
+## they collide with the tick row above.
+@export var compass_label_baseline_px: float = 9.0
+## Black-outline width behind the rose letters (0 = none). Same legibility treatment every other HUD label
+## gets; the colour is label_outline_color above, shared so one edit re-inks the whole HUD's outlines.
+@export var compass_outline_size: int = 4
+## The LINE-ART twin of compass_outline_size: px of dark rim drawn behind the degree ticks, the marker
+## chevrons and the index caret. ⭐It is not optional decoration — with compass_track_color at alpha 0 there
+## is no plate under this widget, and a bare light-grey tick is INVISIBLE against a bright backdrop (a white
+## wall, a daylit street, a muzzle flash). The letters were already covered by their own outline; this is what
+## covers everything else. Caught in the QA harness's split dark/bright band crop. 0 = no rim.
+@export var compass_rim_px: float = 1.0
+## Px over which ink RAMPS OUT at each end of the band. WHY: without it a rose letter pops into existence at
+## the band edge as you turn, which reads as a glitch rather than as a scale sliding past. 0 = hard edges.
+@export var compass_edge_fade_px: float = 26.0
+## Half-width (px) of a marker chevron, seated pointing DOWN onto the band's bottom edge. 0 hides the pips
+## and leaves the tape a pure heading readout.
+@export var compass_marker_px: float = 3.0
+## Half-width (px) of the fixed INDEX caret at dead centre — the pointer the tape slides under, and ALSO its
+## height, since it is drawn as a triangle 2x this tall hanging from the band's top edge. ⭐Keep it inside the
+## tick row: at 3 the caret's tip reached into the cap of whichever rose letter was centred under it and the
+## two read as one broken glyph (caught in the QA band crop, invisible in a full-frame shot). 0 removes it,
+## which leaves a scale with nothing marking "now"; only do that if the crosshair is standing in for it.
+@export var compass_index_px: float = 2.0
+## The index caret's ink. Brighter than the rose on purpose: it is the one mark on the band that is about
+## the player rather than about the world.
+@export var compass_index_color: Color = Color(1.0, 0.85, 0.3, 0.95)
 
 @export_group("Minimap")
 # HUD minimap (scripts/ui/minimap.gd) — the top-right procedural floorplan, and the ARTIST'S WHOLE SURFACE
@@ -158,6 +212,27 @@ extends Resource
 ## it lives here now so all four marker sizes (caret / POI / body / station) are one group instead of four
 ## numbers in three files.
 @export var minimap_caret_px: float = 5.0
+## THE PLAYER'S OWN NOISE FOOTPRINT — the ring around the caret at the radius enemy hearing actually tests
+## against (Minimap._paint_noise_ring). The ONE thing this widget draws in true WORLD METRES rather than a
+## fixed pixel size, so it grows and shrinks with the plan under it as you zoom.
+##
+## Pale yellow, deliberately clear of every other slot here: the caret's blue (0.4, 0.8, 1.0), the teal walls
+## / north tick / rim, the POI and neutral-body reds, the hostile alert AMBER (1.0, 0.75, 0.2) — near enough
+## in hue that the low alpha and the large radius are what separate them, and a thin 16-76 px circle centred
+## on the caret cannot be confused with a 4 px glyph by SHAPE, which minimap.gd's header calls the primary
+## channel anyway. Low alpha because a gunshot's ring covers the WHOLE box for half a second and must wash
+## over the floorplan rather than bury it.
+@export var minimap_noise_color: Color = Color(0.95, 0.9, 0.55, 0.5)
+## THE AUDIBLE AREA INSIDE THAT RING — a FLAT disc, never a gradient (hearing is a hard distance threshold, and
+## a falloff would draw a softness the game does not simulate). Alpha 0 = off, the minimap_wall_glow_color
+## sentinel, so an artist can keep the outline alone for one Color.a compare.
+##
+## ⭐It ships ON, unlike the wall glow, and the reason is measured rather than aesthetic: a 28 m gunshot ring is
+## ~110 px against a 54 px half-box, so its RIM is entirely off-screen for the first half of the spike's decay
+## and the stroke ALONE renders the loudest event in the game as a blank map. The disc is what carries the fact
+## at those radii — the whole visible floor is inside earshot, so the whole box washes. Very low alpha because
+## that wash sits under the entire floorplan and every marker on it.
+@export var minimap_noise_fill_color: Color = Color(0.95, 0.9, 0.55, 0.16)
 ## Fallback tint for a POI MARKER that carries no `color` of its own (the NPC red). Still the WorldMarker /
 ## quest-beacon fallback it always was — but no longer the neutral-NPC tint, which now has its own slot below.
 @export var minimap_npc_color: Color = Color(1.0, 0.4, 0.4)
@@ -195,6 +270,73 @@ extends Resource
 ## LEVEL EXITS only (a LevelDoor's chevron). Picked out from the station family because a way out of the level
 ## is a different class of answer from a way to spend money — and it is the one glyph a lost player hunts for.
 @export var minimap_exit_color: Color = Color(0.6, 1.0, 0.6, 0.95)
+## THE PLAYER'S OWN PINS — the tints a waypoint's `tint` index selects (scripts/world/waypoint_book.gd stores
+## the INDEX, never a Color, so restyling this array restyles every pin already saved in every profile).
+##
+## ⭐SIX ENTRIES IS NOT A MAGIC NUMBER — it is the chip count the Map tab's colour row builds itself from
+## (`palette.size()`), so adding a seventh entry here grows that row with no code change, and shortening the
+## array is safe too: the paint site takes `tint % size` rather than trusting a saved index. An EMPTY array
+## would leave every pin untinted, so the paint site falls back to minimap_waypoint_color below.
+##
+## Chosen to sit clear of the channels a pin is drawn beside — the teal walls, the blue caret, the station
+## cyan, the exit green, the hostile/neutral reds and the alert amber. These are the player's own vocabulary
+## ("red means trouble, green means safe") and are the ONE place on this map where hue is the primary channel
+## rather than the secondary one: the SHAPE is already spoken for by the icon the player picked.
+## ⭐The "safe/done" slot is LIME, not green, and that is load-bearing: Icon.TARGET shares the CHEVRON
+## silhouette with a LevelDoor's exit glyph (both point "go here"), so a pin in the exit's own pastel green
+## (0.6, 1.0, 0.6) would counterfeit the one glyph a lost player hunts for. Pushing this entry to yellow-green
+## keeps "green means good" readable while the exit keeps its hue to itself.
+@export var minimap_waypoint_palette: PackedColorArray = PackedColorArray([
+	Color(1.0, 0.88, 0.35, 0.95),   # amber   — the default "here"
+	Color(1.0, 0.45, 0.35, 0.95),   # coral   — trouble
+	Color(0.75, 1.0, 0.3, 0.95),    # lime    — safe / done (NOT the exit's green — see above)
+	Color(0.55, 0.75, 1.0, 0.95),   # blue    — cold info
+	Color(0.85, 0.6, 1.0, 0.95),    # violet  — a person / a story beat
+	Color(1.0, 1.0, 1.0, 0.95),     # white   — plain
+])
+## Fallback tint for a pin whose palette index cannot be resolved (an EMPTY palette above). Never normally
+## reached; it exists so a cleared array degrades to a visible map instead of an invisible one.
+@export var minimap_waypoint_color: Color = Color(1.0, 0.88, 0.35, 0.95)
+## A WAYPOINT glyph's radius in px. Sits ABOVE the station radius on purpose: the pin the PLAYER placed is the
+## one they are looking for, and this family is the only one that is both FILLED and STROKED (see
+## minimap_waypoint_fill_alpha) — bodies are filled, stations are stroked, a pin is both.
+@export var minimap_waypoint_glyph_px: float = 5.5
+## How much of the pin's tint the FILL under its outline keeps, 0..1. This is the family separator doing its
+## work: at 0 a waypoint is a hollow glyph and collapses into the station alphabet, at 1 it is a solid blob
+## and collapses into the body alphabet. The shipped value leaves the outline clearly readable over a filled
+## centre, which is a silhouette neither other family owns.
+@export_range(0.0, 1.0, 0.05) var minimap_waypoint_fill_alpha: float = 0.45
+## The ring drawn around the SELECTED pin on the Map tab (nothing is ever selected on the HUD box). White so
+## it reads against every palette entry above — a selection is chrome, not another category.
+@export var minimap_waypoint_selected_color: Color = Color(1.0, 1.0, 1.0, 0.9)
+## Px of clear air between the selected pin's glyph and its selection ring — the minimap_alert_ring_gap_px
+## argument verbatim: zero makes the ring a thicker outline on the glyph rather than a halo around it.
+## ⭐IT SIZES THE TRACKED RING TOO (one gap further out — see minimap_waypoint_tracked_color), and through
+## both rings it sizes the RIM INSET a pinned pin is drawn at, which the Map tab's hit test derives from the
+## same numbers. So this knob moves where an off-box glyph SITS, not just how much air its ring has.
+@export var minimap_waypoint_selected_gap_px: float = 3.0
+## THE TRACKED PIN'S RING — the single pin per profile the player set as their active nav point (the record's
+## `tracked` flag). Amber, and deliberately NOT the selection's white: SELECTED means "the pin I am editing on
+## the Map tab right now" and dies with that screen, while TRACKED means "the place I am walking to" and
+## outlives it. Drawn one minimap_waypoint_selected_gap_px FURTHER OUT than the selection ring, so a pin that
+## is both wears two concentric rings instead of one overdrawing the other.
+##
+## ⭐It is also the one waypoint the HUD CORNER BOX still pins to the rim. Minimap.waypoint_pin_offscreen ships
+## FALSE there (six overlapping rim glyphs on a 108 px box was the bug that retired the old always-pin rule),
+## and the tracked pin is the deliberate exception: pointing at the place you are heading for IS the feature.
+@export var minimap_waypoint_tracked_color: Color = Color(1.0, 0.85, 0.3, 0.95)
+## The pin's LABEL, painted beside it — the player's own typed name, and the only text this widget ever draws.
+## Its own colour rather than the pin's tint: a six-colour palette includes tints that are unreadable as small
+## text over the floorplan, and a label is a caption, not a category.
+@export var minimap_waypoint_label_color: Color = Color(0.92, 0.98, 1.0, 0.9)
+## LABEL SIZE in px, and the switch that turns labels off: 0 or less draws no text at all. Labels are ALSO
+## gated per widget by Minimap.waypoint_labels, which ships FALSE — the HUD corner box has no room for them,
+## and only the Map tab turns them on. See minimap_waypoint_label_outline_size for why they stay readable.
+@export var minimap_waypoint_label_px: int = 11
+## Black outline width around the label, in px. A caption drawn over a vector floorplan crosses both the dark
+## backing and the bright wall strokes, so the outline is what keeps it readable over BOTH — the same trick
+## every other HUD readout here uses (toast_outline_size / look_name_outline_size). 0 = no outline.
+@export var minimap_waypoint_label_outline_size: int = 3
 ## The north tick on the box rim. Dim on purpose: it is a reference mark, not an instrument, and it must not
 ## compete with the markers inside the box.
 @export var minimap_north_color: Color = Color(0.35, 0.95, 0.85, 0.7)
@@ -203,8 +345,11 @@ extends Resource
 @export var minimap_north_tick_px: float = 4.0
 ## The section-cut wall strokes — the map's primary read.
 @export var minimap_wall_color: Color = Color(0.35, 0.95, 0.85, 0.9)
-## WALL STROKE WIDTH in px. 0 = Godot's transform-independent HAIRLINE, which is the shipped look and the
-## crispest one on a 792x444 canvas nearest-upscaled ~2.4x. Anything above 0 is converted through the view
+## WALL STROKE WIDTH in px. 0 = the thinnest crisp stroke, the shipped look. In RETRO presentation that is
+## Godot's transform-independent HAIRLINE — one px of the ~792x444 buffer, nearest-upscaled ~2.4x; in HIGH
+## FIDELITY the render target is native, a raw hairline would be one NATIVE px (~0.4 logical, silently
+## thinner), so the map substitutes ONE LOGICAL px instead — the same on-screen weight in both modes
+## (FloorplanSection.stroke_width's native_scale parameter). Anything above 0 is converted through the view
 ## matrix's px-per-metre so a stroke stays the same thickness on screen at every zoom instead of fattening
 ## as the player zooms in.
 @export var minimap_wall_width: float = 0.0
@@ -238,7 +383,8 @@ extends Resource
 
 # --- Shared marker geometry: the four knobs every marker channel reads, rather than one copy each. ---
 ## Stroke width in px for every HOLLOW glyph — the stroked station badges, the neutral body ring, the alert
-## rings, the off-storey ticks and the north spoke. 0 = Godot's hairline (the minimap_wall_width idiom).
+## rings, the off-storey ticks and the north spoke. 0 = the thinnest crisp stroke (the minimap_wall_width
+## idiom: RETRO gets Godot's hairline, HIGH FIDELITY substitutes one logical px).
 @export var minimap_glyph_stroke_px: float = 1.0
 ## Length in px of the little up/down tick beside a marker on ANOTHER storey. 0 disables the ticks and leaves
 ## the alpha fade below to say "not here" on its own — which it does mutely, without saying which way.

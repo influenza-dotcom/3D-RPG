@@ -11,8 +11,16 @@ extends Node
 ## overlay (parented to the player's UI so they draw over the post-process) and wires their cameras.
 ##
 ## The centre-top column is a hand-tuned, outline-TIGHT offset ladder (18 -> 40 -> 56 -> 78 -> 96 -> 118, with
-## the enemy bar above it all at 4): every label carries outline_size 6, which reaches ~3 px past its line
-## box, so there is no slack between rows. Moving one row means re-checking its neighbours.
+## the enemy bar above it all at GameSettings.hud.enemy_hp_top 4): every label carries outline_size 6, which
+## reaches ~3 px past its line box, so there is no slack between rows. Moving one row means re-checking its
+## neighbours.
+##
+## ⭐THOSE OFFSETS ARE MEASURED FROM THE COLUMN, NOT FROM THE SCREEN. Every row here parents into
+## UI.centre_column() — a full-rect carrier the HUD layer slides down to clear the compass tape above it
+## (ui.gd `_apply_compass_visibility`) and slides back to zero when the player switches the compass off. So
+## the ladder reflows as ONE unit and its internal spacing is preserved exactly; do NOT bake the compass band
+## into these numbers, and do NOT re-parent a row to `ui` to "fix" a position — that row would then be the
+## only one that ignores the reflow.
 ##
 ## The Player keeps the public facade method NAMES (indicate_damage_from / indicate_aimed_from /
 ## on_dealt_hit / on_damaged_target) and forwards them here; the speed-line + dash-flash drive is forwarded
@@ -108,6 +116,19 @@ func build(ui: Node, camera: Node3D) -> void:
 	_hitmarker = Hitmarker.new()
 	ui.add_child(_hitmarker)
 	_hitmarker.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# ---- THE CENTRE-TOP COLUMN starts here. Every row below parents into `column`, NOT into `ui`.
+	# The column is a full-rect carrier the UI layer owns (UI.centre_column) whose offset slides the WHOLE
+	# ladder down to clear the compass tape in the band above, and back up byte-for-byte when the player
+	# switches the compass off (Options -> Accessibility -> "HUD Compass"). That is why the hand-tuned offsets
+	# below are unchanged and must stay unchanged: they are measured from the COLUMN's top, not the screen's,
+	# so the reflow is one write in ui.gd's _apply_compass_visibility instead of six numbers here.
+	# Duck-typed with a fallback to `ui` itself: `ui` is typed Node, and several suites hand this a bare
+	# Node/CanvasLayer with no such method — those land on the historical parent and the historical offsets.
+	var column: Node = ui
+	if ui.has_method(&"centre_column"):
+		var c = ui.call(&"centre_column")
+		if c is Control:
+			column = c
 	# Stealth status readout (Fallout-style): a top-centre [HIDDEN]/[DETECTED]/[DANGER] label, outlined for
 	# legibility over any backdrop. Hidden until the player crouches (sneaking) or something becomes aware of
 	# them — see set_stealth_level — so it never clutters normal run-and-gun play.
@@ -118,7 +139,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_stealth_label.add_theme_constant_override(&"outline_size", 6)
 	_stealth_label.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
 	_stealth_label.visible = false
-	ui.add_child(_stealth_label)
+	column.add_child(_stealth_label)
 	_stealth_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	_stealth_label.offset_top = 18.0
 	_stealth_label.offset_bottom = 64.0
@@ -134,7 +155,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_detection_bar.show_percentage = false
 	_detection_bar.custom_minimum_size = Vector2(120.0, 6.0)
 	_detection_bar.visible = false
-	ui.add_child(_detection_bar)
+	column.add_child(_detection_bar)
 	_detection_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	_detection_bar.offset_top = 40.0
 	_detection_bar.offset_left = -60.0
@@ -148,7 +169,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_takedown_label.add_theme_constant_override(&"outline_size", 6)
 	_takedown_label.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
 	_takedown_label.visible = false
-	ui.add_child(_takedown_label)
+	column.add_child(_takedown_label)
 	_takedown_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	_takedown_label.offset_top = 96.0
 	_takedown_label.offset_left = -180.0
@@ -161,7 +182,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_takedown_bar.show_percentage = false
 	_takedown_bar.custom_minimum_size = Vector2(120.0, 5.0)
 	_takedown_bar.visible = false
-	ui.add_child(_takedown_bar)
+	column.add_child(_takedown_bar)
 	_takedown_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	# 118 (not 116): the prompt label's outline extends ~3px past its prompt_font_size line box, and the
 	# stack only just clears — the bar sits 2px lower than the old 13px-font layout to keep that air.
@@ -179,7 +200,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_pet_label.add_theme_constant_override(&"outline_size", 6)
 	_pet_label.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
 	_pet_label.visible = false
-	ui.add_child(_pet_label)
+	column.add_child(_pet_label)
 	_pet_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	_pet_label.offset_top = 96.0
 	_pet_label.offset_left = -180.0
@@ -192,7 +213,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_pet_bar.show_percentage = false
 	_pet_bar.custom_minimum_size = Vector2(120.0, 5.0)
 	_pet_bar.visible = false
-	ui.add_child(_pet_bar)
+	column.add_child(_pet_bar)
 	_pet_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	_pet_bar.offset_top = 118.0
 	_pet_bar.offset_left = -60.0
@@ -209,7 +230,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_claim_label.add_theme_constant_override(&"outline_size", 6)
 	_claim_label.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
 	_claim_label.visible = false
-	ui.add_child(_claim_label)
+	column.add_child(_claim_label)
 	_claim_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	_claim_label.offset_top = 56.0
 	_claim_label.offset_left = -180.0
@@ -222,7 +243,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_claim_bar.show_percentage = false
 	_claim_bar.custom_minimum_size = Vector2(120.0, 5.0)
 	_claim_bar.visible = false
-	ui.add_child(_claim_bar)
+	column.add_child(_claim_bar)
 	_claim_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	_claim_bar.offset_top = 78.0
 	_claim_bar.offset_left = -60.0
@@ -230,14 +251,16 @@ func build(ui: Node, camera: Node3D) -> void:
 
 	# Top-centre enemy health bar: the slim "who am I shooting" meter, raised by any hit the player lands
 	# (Player.on_damaged_target -> show_enemy_health) and self-expiring. It sits ABOVE the whole prompt ladder
-	# — the only free band on the canvas — at HudSettings enemy_hp_top 4; with its contrast rim its ink runs
-	# y 3..13, clearing the stealth badge's outline (which reaches up to y 15) by 2 px. Added LAST so it
-	# composites over the full-screen hurt / kill flashes
-	# built at the top of this function. It is a FULL-RECT Control that draws its own bar from the knobs, so
+	# — the only free band in the column — at HudSettings enemy_hp_top 4; with its contrast rim its ink runs
+	# y 3..13 of the COLUMN, clearing the stealth badge's outline (which reaches up to y 15) by 2 px. It rides
+	# the column with everything else, so the compass band above pushes it down along with the ladder and the
+	# 2 px clearance is preserved either way. It composites over the full-screen hurt / kill flashes built at
+	# the top of this function through the COLUMN's z_index 1, not through being added last — see the carrier
+	# comment in ui.gd. It is a FULL-RECT Control that draws its own bar from the knobs, so
 	# there are no child widgets and no preset-ordering trap; and it owns its PROCESS_MODE_ALWAYS + wall-clock
 	# TTL, so it expires through hitstop and through a paused conversation without any hide wiring here.
 	_enemy_hp = ENEMY_HEALTH_BAR_SCRIPT.new()
-	ui.add_child(_enemy_hp)
+	column.add_child(_enemy_hp)
 	_enemy_hp.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_apply_ghost_rule()
 

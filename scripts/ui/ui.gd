@@ -17,6 +17,16 @@ extends CanvasLayer
 ## bar) also stay pinned: the arcs point at world directions and a lagging bearing would lie, and the
 ## centre-top column is an outline-tight stack whose rows would collide under 8 px of spring drift plus
 ## the carrier's FOV lens-breath scale. Corner readouts carry mass; combat truth does not.
+##
+## ⭐THE HEADING TAPE (HudCompass) IS THE DELIBERATE EXCEPTION, on a user call: it is a bearing, so the rule
+## above would have pinned it, but it reads as part of the instrument panel and now rides `_weighted` —
+## swaying, ghosting and bending through the curve with the map and the clock. What that costs is honest and
+## bounded: the tape lags the turn by the spring's settle, so a bearing read mid-flick is a beat stale
+## (unlike the damage arcs, a compass point that arrives a frame late still points at the same place in the
+## world — which is why the exception is affordable here and is NOT a precedent for the arcs). What it costs
+## in LAYOUT is the real bill: the tape moves and the centre-top column under it does not, so
+## GameSettings.hud.compass_column_gap has to absorb the carrier's whole downward travel or the rose lands
+## on the enemy health bar. That budget is the knob's whole reason for its size — read it before shrinking it.
 
 @export_group("Data Sources")
 ## The Character whose HP this HUD reads each frame (the player). Usually re-injected by setup(); the scene
@@ -76,7 +86,14 @@ var _scope_flare: ColorRect
 ## ⭐THE GHOST STILL SEES THE PANEL. HudGhost captures this layer's canvas, and the carrier's children are on
 ## the VIEWPORT's canvas once the curve is up — but `_curve_rect` is on this one, so the accumulator picks
 ## the panel up through its composite and the phosphor tail is of the CURVED panel. Nothing to wire.
+##
+## ⭐TWO compiled builds of ONE warp: a sampler's filter hint is COMPILE-TIME, so nearest-vs-linear cannot be a
+## uniform. RETRO keeps the authored filter_nearest crunch (bit-identical to the pre-presentation game); the _HF
+## twin is byte-identical except filter_linear, because at a native-res render target (Settings.presentation ==
+## HIGH FIDELITY) a nearest tap stairsteps every bowed line. _apply_hud_curve swaps them live off native_scale().
+## ⭐Any edit to either shader must land in BOTH files — their headers say so too.
 const HUD_CURVE_SHADER := preload("res://resources/shaders/hud_curve.gdshader")
+const HUD_CURVE_SHADER_HF := preload("res://resources/shaders/hud_curve_hf.gdshader")
 var _curve_viewport: SubViewport = null
 var _curve_rect: ColorRect = null
 var _curve_mat: ShaderMaterial = null
@@ -119,6 +136,7 @@ var _quest_tracker: Label  ## top-right active-objective line, refreshed off the
 const STAMINA_RING_SCRIPT := preload("res://scripts/ui/stamina_ring.gd")
 const HUD_SWAY_SCRIPT := preload("res://scripts/ui/hud_sway.gd")
 const HUD_CLOCK_SCRIPT := preload("res://scripts/ui/hud_clock.gd")
+const HUD_COMPASS_SCRIPT := preload("res://scripts/ui/hud_compass.gd")
 const HUD_GHOST_SCRIPT := preload("res://scripts/ui/hud_ghost.gd")
 const WORLD_GHOST_SCRIPT := preload("res://scripts/effects/world_ghost.gd")
 ## THE MINIMAP IS AN AUTHORED SCENE, not a script (the "menus are scenes" rule, applied to a HUD widget): the
@@ -146,6 +164,23 @@ var _minimap = null
 ## BY PATH for the same class_name-cache reason as _minimap, and null-guarded everywhere for the same
 ## reason too — several suites build a bare UI.new() with no _ready and call the visibility methods.
 var _clock = null
+## ROW 0 OF THE CENTRE-TOP COLUMN: the heading tape (scripts/ui/hud_compass.gd). Untyped and preloaded BY
+## PATH for the same class_name-cache reason as _minimap/_clock, and null-guarded everywhere for the same
+## reason too. Rides `_weighted` and ghosts like the rest of the instrument panel — user call, see the
+## header's moved-vs-pinned rule for the trade that was made and what it costs.
+var _compass = null
+## THE CENTRE-TOP COLUMN's carrier — the `_weighted` idiom applied to the OTHER top-of-screen stack. Every
+## row PlayerHud builds down the middle of the screen (the enemy health bar, then the stealth badge ->
+## detection meter -> claim -> takedown/pet ladder) parents into this full-rect Control instead of the layer,
+## so ONE offset write slides the whole hand-tuned ladder down to clear the compass band above it — and back
+## up, byte-for-byte, the moment the player switches the compass off. player_hud.gd asks for it through
+## centre_column() and never touches its offset; _apply_compass_visibility is the single writer.
+##
+## ⭐z_index 1 (the minimap's tier: over PlayerHud's full-screen flashes, under the crosshair) is LOAD-BEARING,
+## not decoration. This carrier is born in THIS layer's _ready, while the flashes it must composite over are
+## added later from PlayerHud.build — so tree order alone would bury the whole column under the hurt/kill
+## wash. The enemy bar's "added LAST so it draws over the flashes" contract now rides this one write.
+var _centre_column: Control = null
 var _sway = HUD_SWAY_SCRIPT.new()  ## the damped-spring state behind the panel sway (pure math, unit-tested)
 var _sway_fov = HUD_SWAY_SCRIPT.new()  ## SECOND spring, scalar (.x only): the FOV "lens breath" scale delta — kept
 								   ## separate so a dash punch breathing the lens never eats the offset spring's travel
@@ -388,6 +423,9 @@ func _ready() -> void:
 	_quest_tracker.add_theme_constant_override(&"outline_size", MenuStyle.hud.toast_outline_size)
 	_quest_tracker.visible = false
 	_notices.add_child(_quest_tracker)
+	# THE OTHER top-of-screen stack. Everything above this line is the TOP-RIGHT corner cluster; the next two
+	# builds own the CENTRE-TOP column, whose row 0 is the compass and whose rows 1..n are PlayerHud's.
+	_build_compass()
 	# Quest feedback: tracker line + toasts, driven by the QuestTracker autoload's quest signals (self-wired
 	# here). The signals live on QuestTracker; the tracker line's READS still go through GameState's one-line
 	# forwarding accessors (active_quest_ids / active_quest / objective_progress — see _refresh_quest_tracker).
@@ -483,22 +521,28 @@ func _ready() -> void:
 
 ## THE HUD GHOST (scripts/ui/hud_ghost.gd): re-render this layer's canvas into a never-cleared offscreen
 ## buffer that fades a little each frame, and draw that buffer BEHIND the live HUD — so moving readouts drag
-## a soft tail, and while the camera turns the whole ghost image lags a couple of pixels so the screen-locked
-## reticle participates too. Built LAST, after every overlay above exists, because the opt-outs below name
-## the nodes they flag.
+## a soft tail, and while the camera turns the whole ghost image lags a couple of pixels so screen-locked
+## readouts participate too. Built LAST, after every overlay above exists, because the opt-outs below name
+## the nodes they flag. (The AIM CLUSTER is the one screen-locked thing deliberately left out — rule 4.)
 ##
-## THE GHOST RULE: an INSTRUMENT READOUT ghosts; a FULL-SCREEN WASH and a WORLD-DIRECTION annotation do not.
-## Opting out is one `visibility_layer` write that carries to the node's whole subtree, and there are exactly
-## three reasons to spend one:
+## THE GHOST RULE: an INSTRUMENT READOUT ghosts; a FULL-SCREEN WASH, a WORLD-DIRECTION annotation and the
+## AIM POINT do not. Opting out is one `visibility_layer` write that carries to the node's whole subtree,
+## and there are exactly five reasons to spend one:
 ##   1. IT WOULD BREAK — anything that SAMPLES THE SCREEN. Inside the capture the "screen" is the HUD-only
 ##      buffer, so this layer's own state post-process rect (which re-emits the whole sampled frame opaquely)
 ##      would paint the accumulator solid, and the reticle's back-buffer copy would read a near-empty screen.
-##      The SCOPED inverting reticle is the same problem and is handled per-transition in set_scoped.
+##      The SCOPED inverting reticle is the same problem; rule 4 below now covers it permanently.
 ##   2. IT WOULD BE MUD — a full-screen wash (the hurt / kill / dash flashes, the speed vignette, the blood
 ##      splatter, the scope optics) smeared over its own tail is a haze, not an echo. They own their fades.
 ##   3. IT WOULD LIE — the directional damage arcs, the "being aimed at" radials and the sniper glints point
 ##      at WORLD directions. A lagging bearing reports a threat that is no longer there.
-##   4. IT ISN'T THE HUD — the VIEW MODEL. The gun pass is rendered by its own camera into its own
+##   4. IT WOULD READ AS A SECOND RETICLE — the AIM CLUSTER: the crosshair and the stamina ring wrapped
+##      around it. Everywhere else on this layer a soft echo is character; at the aim point it is a blurred
+##      duplicate of the one pixel the player aims with, and the ring's trail smears a gauge that is already
+##      transient by design. User call ("remove the ghosting on the cursor/stamina bar"). Note this is the
+##      ONLY rule that removes something the LATENCY half was built for — the lag still makes every other
+##      screen-locked readout (minimap frame, ammo line, hotbar) trail a turn, so the mechanism stays.
+##   5. IT ISN'T THE HUD — the VIEW MODEL. The gun pass is rendered by its own camera into its own
 ##      SubViewport and composited back through a full-rect SubViewportContainer that happens to live on
 ##      this layer (ViewModelCamera._attach_container, which flags itself there). That is a compositing
 ##      detail, not a readout: ghosted, the whole weapon smears behind itself on every turn.
@@ -528,6 +572,16 @@ func _build_ghost() -> void:
 	HUD_GHOST_SCRIPT.set_ghosted(get_node_or_null(^"BloodSplatter") as CanvasItem, false)
 	HUD_GHOST_SCRIPT.set_ghosted(_scope_vignette, false)
 	HUD_GHOST_SCRIPT.set_ghosted(_scope_flare, false)
+	# (4) would read as a second reticle: the AIM CLUSTER. Both nodes already exist — _build_hud() runs
+	# earlier in _ready — and the crosshair's opt-out carries to its artist-texture child for free, because
+	# the renderer culls a canvas item's children along with it. This is PERMANENT: set_scoped must not
+	# toggle it back (see the note there).
+	HUD_GHOST_SCRIPT.set_ghosted(crosshair, false)
+	HUD_GHOST_SCRIPT.set_ghosted(_stamina_ring as CanvasItem, false)
+	# NOTE the heading tape (HudCompass) is deliberately ABSENT from this list. It is a world-direction
+	# readout and clause 3 would have excluded it; the user's call was that it should read as part of the
+	# instrument panel instead, so it ghosts (and sways, and curves) with everything else. The rule stands
+	# for the arcs, the radials and the glints — see the header for why the tape is the one exception.
 	# PlayerHud's overlays are built later (from Player._ready, which runs after this layer's _ready), so they
 	# flag themselves at the bottom of PlayerHud.build under rules 2 and 3.
 	_build_world_ghost()
@@ -564,14 +618,39 @@ func _apply_hud_curve() -> void:
 		return
 	if _curve_viewport == null:
 		_build_hud_curve()
-	# ⭐THE CANVAS IS NOT A CONSTANT: stretch aspect "expand" grows it with the window's aspect ratio, so a
-	# render target frozen at the boot size would crop the panel the moment the window changed. `_weighted` is
-	# PRESET_FULL_RECT, so its own size follows this — and _update_hud_sway reads that size for the lens-breath
-	# pivot, which is the second reason this must track the real canvas instead of a hardcoded 792x444.
+	# ⭐THE CANVAS IS NOT A CONSTANT: stretch aspect "expand" grows it with the window's aspect ratio, and the
+	# Video "Presentation" mode moves the RENDER target between native (HIGH FIDELITY) and the logical canvas
+	# (RETRO) — so a target frozen at the boot size would crop or blur the panel the moment either changed.
+	# `_weighted` is PRESET_FULL_RECT, so its own size follows the LOGICAL canvas — and _update_hud_sway reads
+	# that size for the lens-breath pivot, which is why the viewport's 2D space must stay logical (the override
+	# below) while only its TEXELS track the render size. Target sized from Settings.render_size() EXACTLY —
+	# never logical x native_scale(): the stretch is slightly anisotropic, so the product can drift a pixel.
 	var canvas: Vector2 = get_viewport().get_visible_rect().size
-	var want := Vector2i(maxi(int(roundf(canvas.x)), 1), maxi(int(roundf(canvas.y)), 1))
+	var want := Settings.render_size().max(Vector2i.ONE)
 	if _curve_viewport.size != want:
 		_curve_viewport.size = want
+	# ⭐THE LINCHPIN of the native-res curve: texels go native, LAYOUT does not. Whenever the render target is
+	# bigger than the canvas, size_2d_override pins the viewport's 2D coordinate space to the logical canvas —
+	# the reparented `_weighted` carrier, every absolute child coord, the sway spring's canvas-px offsets and
+	# the lens-breath pivot all keep laying out against ~792x444 while the override-stretch rasterizes them at
+	# native (the root window's own canvas_items idiom, reproduced on this hand-built viewport). At scale 1.0
+	# (RETRO, and headless) the override stays/returns to ZERO — disabled — and size == canvas: bit-identical
+	# to the pre-presentation pipeline. Polled here, in the same per-frame path that sizes the target, so a
+	# live presentation flip bites next frame.
+	var ns := Settings.native_scale()
+	var want_override := Vector2i(canvas.round()) if ns > 1.0 else Vector2i.ZERO
+	if _curve_viewport.size_2d_override != want_override:
+		_curve_viewport.size_2d_override = want_override
+		_curve_viewport.size_2d_override_stretch = ns > 1.0
+	# Same gate for the warp shader: the sampler filter hint is compile-time, so nearest (the RETRO crunch) vs
+	# linear (HIGH FIDELITY — nearest resampling a native buffer stairsteps every bowed line) is a swap between
+	# two compiled twins on the one material. hud_tex is re-pushed after a swap: a ShaderMaterial's params do
+	# survive a shader change in 4.7, but a param that reads back Nil has burned this project before (the
+	# sky-flash lesson) — one cheap re-push beats trusting the cache.
+	var want_shader: Shader = HUD_CURVE_SHADER_HF if ns > 1.0 else HUD_CURVE_SHADER
+	if _curve_mat.shader != want_shader:
+		_curve_mat.shader = want_shader
+		_curve_mat.set_shader_parameter("hud_tex", _curve_viewport.get_texture())
 	# Park the render target whenever the composite is down (the death cinematic, `hud off`): an invisible
 	# pass should cost nothing, the ink_outline.gd idiom. `_curve_rect` is precisely what the sweep hides.
 	var mode := SubViewport.UPDATE_ALWAYS if _curve_rect.visible else SubViewport.UPDATE_DISABLED
@@ -603,15 +682,26 @@ func _build_hud_curve() -> void:
 	# and deliberately left alone: CLEAR_MODE_NEVER would accumulate last frame's panel.
 	_curve_viewport.transparent_bg = true
 	_curve_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	# Birth-frame sizing only — _apply_hud_curve (which called us and continues straight into its sizing block)
+	# re-stamps all of this every frame: render target at Settings.render_size() (native under HIGH FIDELITY,
+	# the logical canvas under RETRO), 2D layout pinned to the LOGICAL canvas via size_2d_override whenever the
+	# two differ. See the poll's linchpin comment for why the override is load-bearing.
 	var canvas: Vector2 = get_viewport().get_visible_rect().size
-	_curve_viewport.size = Vector2i(maxi(int(roundf(canvas.x)), 1), maxi(int(roundf(canvas.y)), 1))
-	# Keep the panel's own art crunchy INSIDE the viewport. This governs how the carrier's children sample
-	# THEIR textures and has no say over how the composite samples the render target — that is the shader's
-	# own filter_nearest hint, which outranks every node-level setting.
+	_curve_viewport.size = Settings.render_size().max(Vector2i.ONE)
+	if Settings.native_scale() > 1.0:
+		_curve_viewport.size_2d_override = Vector2i(canvas.round())
+		_curve_viewport.size_2d_override_stretch = true
+	# Keep the panel's own art crunchy INSIDE the viewport, in BOTH presentations (nearest-sampled low-res art
+	# reads the same whether the target is logical or native — this is the authored look, not a resolution
+	# artifact). This governs how the carrier's children sample THEIR textures and has no say over how the
+	# composite samples the render target — that is the warp shader's own filter hint (nearest in RETRO,
+	# linear in the _HF twin), which outranks every node-level setting.
 	_curve_viewport.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST
 	add_child(_curve_viewport)
 	_curve_mat = ShaderMaterial.new()
-	_curve_mat.shader = HUD_CURVE_SHADER
+	# The nearest/linear twin rides the same native_scale() gate as the override above; the poll in
+	# _apply_hud_curve swaps it live on a presentation flip.
+	_curve_mat.shader = HUD_CURVE_SHADER_HF if Settings.native_scale() > 1.0 else HUD_CURVE_SHADER
 	_curve_mat.set_shader_parameter("hud_tex", _curve_viewport.get_texture())
 	_curve_rect = ColorRect.new()
 	_curve_rect.name = "HudCurve"
@@ -666,9 +756,11 @@ func _teardown_hud_curve() -> void:
 	_curve_viewport = null
 
 ## Move the carrier between this layer and the curve viewport without disturbing anything it holds. Nothing
-## here touches its transform: it is PRESET_FULL_RECT in both homes and both homes are the same canvas size,
-## so every child keeps its absolute coords — the same promise the carrier already makes to anything that
-## parents into it.
+## here touches its transform: it is PRESET_FULL_RECT in both homes and both homes present the same LOGICAL
+## canvas size, so every child keeps its absolute coords — the same promise the carrier already makes to
+## anything that parents into it. Under HIGH FIDELITY the viewport's render target is NATIVE, and it is the
+## size_2d_override (stamped to the logical canvas by _apply_hud_curve's poll) that keeps this "same canvas
+## size" promise; delete that override and every absolute coord in here silently shrinks by native_scale().
 func _reparent_weighted(to: Node) -> void:
 	if _weighted == null or to == null or _weighted.get_parent() == to:
 		return
@@ -789,6 +881,7 @@ func _set_gameplay_hud_visible(vis: bool) -> void:
 		_hotbar.visible = vis
 	_apply_stamina_mode()
 	_apply_minimap_visibility()
+	_apply_compass_visibility()
 
 ## THE STAMINA MODE SWITCH: exactly one of ring/bar shows, polled live off Settings.stamina_ring_enabled
 ## (so the Options toggle applies the same frame, like loot_beacons/detection_meter). The RING ships as
@@ -912,6 +1005,92 @@ func _apply_minimap_visibility() -> void:
 		var top := quest_tracker_top(want, want_clock)
 		if not is_equal_approx(_quest_tracker.offset_top, top):
 			_quest_tracker.offset_top = top
+
+## THE CENTRE-TOP COLUMN, built as two nodes: the compass tape that OWNS the top band, and the carrier every
+## row under it rides. Both are PINNED to this layer rather than parented into `_weighted` — read the
+## header's moved-vs-pinned rule, which puts the whole centre column on the "combat truth does not carry
+## mass" side: the tape is a bearing (clause 3 of the ghost rule, same as the damage arcs), and the ladder
+## below it is an outline-tight stack whose rows would collide under 8 px of spring drift.
+##
+## The tape's WIDTH is centred with a symmetric anchor pair rather than a preset, so it stays centred at any
+## canvas size; its top is the authored inset and its height is the authored box.
+func _build_compass() -> void:
+	_compass = HUD_COMPASS_SCRIPT.new()
+	_compass.name = "HudCompass"
+	var h := GameSettings.hud
+	_compass.anchor_left = 0.5
+	_compass.anchor_right = 0.5
+	_compass.offset_left = -h.compass_size.x * 0.5
+	_compass.offset_right = h.compass_size.x * 0.5
+	_compass.offset_top = h.compass_top
+	_compass.offset_bottom = h.compass_top + h.compass_size.y
+	_compass.z_index = 1  # the minimap's tier: over PlayerHud's full-screen flashes, under the crosshair
+	# ON THE WEIGHT CARRIER, with the minimap and the clock: the tape carries mass, ghosts, and bends through
+	# the HUD curve like every other readout. It is the ONE bearing on this HUD that does — see the header.
+	_weighted.add_child(_compass)
+	# Built here rather than lazily in centre_column() so its SEAT is decided once, in this layer's _ready,
+	# before PlayerHud.build() (which runs from Player._ready — our parent, so strictly after us) asks for it.
+	centre_column()
+
+## The carrier PlayerHud parents its centre-top rows into. Lazily built so the bare `UI.new()` suites — and
+## any caller that reaches this before _ready — get a real carrier instead of a null they would have to
+## special-case, and so there is exactly one construction site for it. Returns a Control that is ALWAYS
+## full-rect at the current column offset, so a row added at any time lands correctly positioned.
+func centre_column() -> Control:
+	if _centre_column == null:
+		_centre_column = Control.new()
+		_centre_column.name = "CentreColumn"
+		_centre_column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_centre_column.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_centre_column.z_index = 1  # see the field comment — this write is what keeps the column over the flashes
+		add_child(_centre_column)
+		# Seeded compass-up; _apply_compass_visibility re-derives it per frame (the clock's seeding idiom).
+		var top := centre_column_top(true)
+		_centre_column.offset_top = top
+		_centre_column.offset_bottom = top
+	return _centre_column
+
+## Pure: the y the CENTRE-TOP COLUMN's origin sits at — i.e. how far every row PlayerHud builds down the
+## middle of the screen is pushed to clear the compass band above it. The top-right stack's
+## hud_clock_top_for / quest_tracker_top_for rule, one column over.
+##
+## ZERO when the compass is off, and that exact value is the point: PlayerHud's ladder carries hand-tuned,
+## outline-tight offsets (18 -> 40 -> 56 -> 78 -> 96 -> 118, with the enemy bar above it at
+## GameSettings.hud.enemy_hp_top), and an offset of 0 reproduces the pre-compass canvas byte-for-byte rather
+## than approximating it. Static + unit-tested for the reason its top-right siblings are: "the centre-top
+## column does not collide with the compass" is a layout INVARIANT, not something to eyeball once.
+static func centre_column_top_for(compass_visible: bool, compass_top: float, compass_h: float,
+		gap: float) -> float:
+	return (compass_top + compass_h + gap) if compass_visible else 0.0
+
+## The same rule bound to the live knobs.
+func centre_column_top(compass_visible: bool) -> float:
+	var h := GameSettings.hud
+	return centre_column_top_for(compass_visible, h.compass_top, h.compass_size.y, h.compass_column_gap)
+
+## THE COMPASS ROW's visibility and the column reflow under it, polled live off Settings.compass_enabled so
+## the Options toggle bites the same frame with no rebuild (the minimap_enabled / clock_enabled family),
+## composed with the dialogue-hide flag. BAILS during the death cinematic for exactly the reason
+## _apply_stamina_mode and _apply_minimap_visibility do: hide_hud_for_death has already hidden these and
+## remembered which, and a per-frame re-show here would resurrect the panel over the fade.
+##
+## The offset is written through offset_top/offset_bottom rather than `position` (which `_weighted` uses):
+## that carrier is rewritten every single frame so a layout sort cannot outlive it, while this one changes
+## only when the player toggles a row — and an anchored Control's `position` is recomputed from its offsets
+## on the next sort, which would silently snap the column back.
+func _apply_compass_visibility() -> void:
+	if not _death_hidden_hud.is_empty():
+		return
+	# `_compass != null` is part of the QUESTION, not a guard: a failed build must return the centre column to
+	# its historical offsets, exactly as switching the compass off in Options does.
+	var want: bool = _compass != null and _gameplay_hud_visible and Settings.compass_enabled
+	if _compass != null:
+		_compass.visible = want
+	if _centre_column != null:
+		var top := centre_column_top(want)
+		if not is_equal_approx(_centre_column.offset_top, top):
+			_centre_column.offset_top = top
+			_centre_column.offset_bottom = top
 
 ## HUD nodes hidden for the death cinematic; restored on the in-place revive (a full reload rebuilds a fresh UI).
 var _death_hidden_hud: Array[CanvasItem] = []
@@ -1038,11 +1217,13 @@ static func hp_display_seg_count(max_hp: float, budget: float, gap: float, min_w
 ## The per-segment width that lets `count` segments + their gaps span exactly `budget`, clamped to the authored
 ## full width (an under-budget bar keeps the default look) and a 1px floor. Static so it's unit-testable.
 static func hp_display_seg_width(count: int, budget: float, gap: float, full_w: float) -> float:
-	# FLOORED to a whole pixel: a fractional width ((budget - gaps)/count is integral only when the divisor
-	# cooperates) makes each segment's float position rasterize independently on the low-res 792x444 canvas —
-	# adjacent segments land a pixel apart in width/gap and the ~2.4x nearest upscale magnifies the bar into a
-	# ragged comb (screenshot-QA class). Whole-pixel widths + the whole-pixel gap keep every edge aligned; the
-	# bar renders up to count-1 px narrower than the budget, which no eye can see.
+	# FLOORED to a whole LOGICAL pixel: a fractional width ((budget - gaps)/count is integral only when the
+	# divisor cooperates) makes each segment's float position rasterize independently, and in RETRO — where
+	# the ~792x444 canvas IS the render target — adjacent segments land a pixel apart in width/gap and the
+	# window's nearest upscale magnifies the bar into a ragged comb (screenshot-QA class). That failure mode
+	# is RETRO-only: HIGH FIDELITY rasterizes sub-logical-pixel edges at native with no upscale. But RETRO
+	# still needs it and whole-logical-pixel widths are harmless at native, so the floor stays unconditional;
+	# the bar renders up to count-1 px narrower than the budget, which no eye can see.
 	return clampf(floorf((budget - gap * float(count - 1)) / float(maxi(count, 1))), 1.0, full_w)
 
 ## Drive the segmented HP bar from hp / max_hp each frame: each segment fills left-to-right (the last live one
@@ -1186,11 +1367,13 @@ func _update_hud_sway(delta: float) -> void:
 		_sway_primed = false  # re-prime on the next valid sample (a respawn/teleport won't fake a flick)
 		_look_rate = Vector2.ZERO
 	_weighted.position = _sway.step(target, GameSettings.hud.hud_sway_stiffness, GameSettings.hud.hud_sway_damping, delta)
-	# AIM CLUSTER sway (user call): the crosshair rides the SAME spring at a whisper of the amplitude
-	# (hud_sway_aim_scale), so reticle and panel move as one mass — and the stamina ring re-stamps its
-	# centre HERE, after the crosshair write, because _update_stamina_readout ran earlier this frame and
-	# a frame-stale centre would detach the ring from the reticle it annotates (the ring's own contract).
-	# _crosshair_base is the unswayed centre from set_crosshair_screen_pos; look-name stays pinned.
+	# AIM CLUSTER: the crosshair CAN ride the SAME spring at a whisper of the amplitude (hud_sway_aim_scale)
+	# so reticle and panel move as one mass — but that knob SHIPS AT 0 (user call, "remove the sway on the
+	# crosshair"), so the reticle sits pinned at _crosshair_base and the term below vanishes. Kept as a
+	# scaled add, not a branch, so raising the knob restores the coupled feel with no code change. The
+	# stamina ring still re-stamps its centre HERE, after the crosshair write, because _update_stamina_readout
+	# ran earlier this frame and a frame-stale centre would detach the ring from the reticle it annotates
+	# (the ring's own contract). _crosshair_base is the centre from set_crosshair_screen_pos; look-name stays pinned.
 	if crosshair != null:
 		crosshair.position = _crosshair_base - crosshair.size * 0.5 + _sway.offset * GameSettings.hud.hud_sway_aim_scale
 		if _stamina_ring != null:
@@ -1229,12 +1412,13 @@ func set_scoped(scoped: bool) -> void:
 	# Only pay for the full-screen back-buffer copy while the inverting disc is actually up.
 	if _crosshair_bbc:
 		_crosshair_bbc.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT if scoped else BackBufferCopy.COPY_MODE_DISABLED
-	# ...and the reticle leaves the HUD-ghost capture for exactly as long as it wears that shader. Inside the
-	# ghost’s offscreen buffer the "screen" is the HUD alone, so `1.0 - screen` resolves to near-white there
-	# and the ghost would trail a bright disc behind a reticle whose entire job is contrast. Scoping is also
-	# where a second reticle image is least wanted, so the aim point simply stops ghosting while you are down
-	# the scope and resumes on the way out — the panel and the rest of the HUD keep ghosting throughout.
-	HUD_GHOST_SCRIPT.set_ghosted(crosshair, not scoped)
+	# NOTHING TO DO FOR THE HUD GHOST HERE ANY MORE. This used to swap the reticle in and out of the ghost
+	# capture per scope transition, because the inverting shader reads `1.0 - screen` and inside the ghost's
+	# offscreen buffer the "screen" is the HUD alone — it resolves to near-white and trailed a bright disc
+	# behind a reticle whose entire job is contrast. The aim cluster is now excluded PERMANENTLY in
+	# _build_ghost (rule 4), which subsumes the scoped case.
+	# ⭐DO NOT REINTRODUCE `set_ghosted(crosshair, not scoped)` HERE: the `not scoped` arm opts the reticle
+	# back IN, so the cursor would silently start ghosting again the first time the player left ADS.
 
 ## Resolve what the reticle rect shows: scoped -> the inverting disc shader (always — it's functional);
 ## unscoped -> the artist texture from the HUD skin when authored, else the shader-drawn flat dot.
@@ -1253,31 +1437,36 @@ func _apply_crosshair_look(scoped: bool) -> void:
 	crosshair.material = null if use_art else (_scoped_reticle_mat if scoped else _flat_reticle_mat)
 	crosshair.color = Color(1, 1, 1, 0) if use_art else Color.WHITE
 
-## Pin the reticle to an absolute screen position (its centre on `p`) — the TRUE aim point, projected by
-## Player._update_crosshair from the swayed shot direction, so the crosshair never lies about where a shot
-## will land. Null-guarded for calls before _ready.
-## The UNSWAYED crosshair centre (what the player's aim actually points at). The rendered reticle sits at
-## this plus the subtle aim-cluster share of the sway offset — see _update_hud_sway.
+## Pin the reticle to an absolute screen position (its centre on `p`) — Player._update_crosshair feeds it
+## SCREEN CENTRE each frame (a fixed Deus Ex reticle; the shot itself wanders around it, the dot does not).
+## Null-guarded for calls before _ready.
+## The base crosshair centre. The rendered reticle sits at this plus the aim-cluster share of the sway
+## offset (hud_sway_aim_scale) — which SHIPS AT 0, so today the reticle sits exactly here. See _update_hud_sway.
 var _crosshair_base: Vector2 = Vector2.ZERO
 
 func set_crosshair_screen_pos(p: Vector2) -> void:
 	_crosshair_base = p
 	if crosshair:
-		# Write with the CURRENT aim-sway offset so a physics-frame reposition can't strip the sway for a
-		# frame (the sway update refreshes it each process frame with the freshly-stepped spring).
+		# Include the CURRENT aim-cluster offset so a physics-frame reposition can't strip it for a frame
+		# (the sway update refreshes it each process frame). At the shipped hud_sway_aim_scale of 0 this term
+		# is zero and the reticle is simply pinned to `p`.
 		crosshair.position = p - crosshair.size * 0.5 + _sway.offset * GameSettings.hud.hud_sway_aim_scale
 
-## THE RETICLE'S TWO SUPPRESSION LATCHES. Two owners hide the crosshair — a conversation, and the weapon
-## being HOLSTERED — and they OVERLAP: dialogue force-holsters the weapon (DialogueController) and restores
-## that state on finish, so an imperative show/hide would let the conversation's closing `show` un-hide the
-## reticle over a weapon that is still put away (and a hold-R holster taken mid-conversation would do the
-## mirror on the un-holster). Latch per REASON and derive; _apply_crosshair_visibility is the SINGLE writer
-## of crosshair.visible. Order-independent — whichever owner settles last, the answer is the same.
+## THE RETICLE'S THREE STATE LATCHES. Several owners have an opinion about the crosshair — a conversation
+## and the weapon being HOLSTERED both hide it, CARRYING a throwable prop re-shows it — and they OVERLAP:
+## dialogue force-holsters the weapon (DialogueController) and restores that state on finish, so an
+## imperative show/hide would let the conversation's closing `show` un-hide the reticle over a weapon that
+## is still put away (and a hold-R holster taken mid-conversation would do the mirror on the un-holster).
+## Carrying overlaps the same way from the other side: grabbing a prop IS a holster (Player._on_carry_changed
+## stows + draw-locks the gun), so the hide and the re-show fire against each other inside one event.
+## Latch per REASON and derive; _apply_crosshair_visibility is the SINGLE writer of crosshair.visible.
+## Order-independent — whichever owner settles last, the answer is the same.
 var _crosshair_hidden_dialogue: bool = false
 var _crosshair_hidden_holstered: bool = false
+var _crosshair_carrying: bool = false
 
 ## Show / hide the reticle for a CONVERSATION — the historical name + contract (vis=false hides), now one
-## latch of two. The parent HUD's own `visible` (cleared on death) still wins, so this never un-hides a dead HUD.
+## latch of three (and the only one that outranks the others). The parent HUD's own `visible` (cleared on death) still wins, so this never un-hides a dead HUD.
 func set_crosshair_visible(vis: bool) -> void:
 	_crosshair_hidden_dialogue = not vis
 	_apply_crosshair_visibility()
@@ -1290,6 +1479,14 @@ func set_crosshair_holstered(holstered: bool) -> void:
 	_crosshair_hidden_holstered = holstered
 	_apply_crosshair_visibility()
 
+## A physics prop was taken into / let go from the hands — driven by PickupRay.carry_changed, relayed from
+## Player._on_carry_changed (which is also what holsters the weapon, so both latches move in that one call).
+## A carried Throwable launches down the look ray on the throw press, so the reticle is a real aim point
+## again and comes BACK for the carry; gated on the designer knob, read AT THE APPLY like the holster one.
+func set_crosshair_carrying(carrying: bool) -> void:
+	_crosshair_carrying = carrying
+	_apply_crosshair_visibility()
+
 ## The one place crosshair.visible is written. BAILS during the death cinematic for the same reason
 ## _apply_stamina_mode does: hide_hud_for_death has hidden these nodes and remembered exactly which, so a
 ## write here would resurrect the reticle over the fade — restore_hud_after_death re-applies this instead.
@@ -1298,12 +1495,22 @@ func _apply_crosshair_visibility() -> void:
 	if not is_instance_valid(crosshair) or not _death_hidden_hud.is_empty():
 		return
 	crosshair.visible = crosshair_shown(_crosshair_hidden_dialogue, _crosshair_hidden_holstered,
-			GameSettings.hud.hide_crosshair_when_holstered)
+			GameSettings.hud.hide_crosshair_when_holstered, _crosshair_carrying,
+			GameSettings.hud.show_crosshair_while_carrying)
 
 ## PURE composition rule (the StaminaRing/HudSway static idiom): tests/test_crosshair_visibility.gd pins the
 ## truth table off-tree, without building this CanvasLayer or the autoloads its _ready needs.
-static func crosshair_shown(hidden_by_dialogue: bool, holstered: bool, hide_when_holstered: bool) -> bool:
-	return not hidden_by_dialogue and not (holstered and hide_when_holstered)
+## PRECEDENCE, in order: dialogue hides unconditionally (a conversation is never an aiming moment); then a
+## CARRIED prop shows, beating the holster hide (that holster is only carrying's own side effect, and the
+## prop throws down the look ray); then the plain holster rule. The two carry params are DEFAULTED so the
+## older 3-arg callers/tests keep their exact meaning (the StaminaRing.alpha_target idiom).
+static func crosshair_shown(hidden_by_dialogue: bool, holstered: bool, hide_when_holstered: bool,
+		carrying: bool = false, show_when_carrying: bool = true) -> bool:
+	if hidden_by_dialogue:
+		return false
+	if carrying and show_when_carrying:
+		return true
+	return not (holstered and hide_when_holstered)
 
 ## Show/hide the look-at name readout (FNV-style) under the crosshair. Empty text hides it; a colour tints
 ## the name (e.g. green for a friendly NPC). Driven by Player.on_look_target_changed via the interaction ray.
@@ -1366,12 +1573,18 @@ func _on_dialogue_started() -> void:
 	if _notices != null:
 		_notices.visible = false
 	set_crosshair_visible(false)  # talking isn't an aiming moment (folded here off the fragile .bind connection)
+	# Blood splatter blobs spawn at random viewport positions and their fade rides the now-PAUSED tree —
+	# without this hide, one freezes mid-fade over the dialogue's response column for the whole conversation.
+	if blood_splatter != null:
+		blood_splatter.visible = false
 	_set_gameplay_hud_visible(false)
 
 func _on_dialogue_finished() -> void:
 	if _notices != null:
 		_notices.visible = true
 	set_crosshair_visible(true)
+	if blood_splatter != null:
+		blood_splatter.visible = true
 	_set_gameplay_hud_visible(true)
 	_flush_dialogue_toasts()
 
@@ -1601,6 +1814,7 @@ func _process(delta: float) -> void:
 	# Deliberately NOT gated on a live player: the Options toggle has to work on any frame, including the
 	# ones around a death/respawn where `player` is briefly invalid.
 	_apply_minimap_visibility()
+	_apply_compass_visibility()
 	_apply_hud_curve()
 	_update_hud_sway(delta)
 	# AFTER the sway, so the ghost lags the panel position this frame actually settled on — and it is fed the

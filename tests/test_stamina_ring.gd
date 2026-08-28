@@ -77,6 +77,12 @@ func test_alpha_target_idles_only_at_full() -> void:
 	assert_almost_eq(RING.alpha_target(0.9, 0.25), 1.0, 0.0001,
 		"any spend pops the ring to fully lit")
 
+func test_alpha_target_holds_lit_at_full_while_holding() -> void:
+	assert_almost_eq(RING.alpha_target(1.0, 0.25, true), 1.0, 0.0001,
+		"a full pool inside the post-refill hold stays fully lit — the fade waits for the hold to expire")
+	assert_almost_eq(RING.alpha_target(1.0, 0.25, false), 0.25, 0.0001,
+		"once the hold expires a full pool falls back to the idle alpha")
+
 # --- shipped defaults ---------------------------------------------------------------------------------
 
 func test_outline_span_pads_both_tips_along_the_sweep() -> void:
@@ -101,6 +107,8 @@ func test_hud_settings_ring_defaults_fit_the_crosshair_annulus() -> void:
 	assert_almost_eq(h.stamina_ring_idle_alpha, 0.0, 0.001,
 		"a full ring is FULLY INVISIBLE at rest (user call) — the knob can raise a faint ghost ring back")
 	assert_gt(h.stamina_ring_fade_speed, 0.0, "the idle fade must actually ease")
+	assert_almost_eq(h.stamina_ring_full_hold, 0.4, 0.001,
+		"a full pool lingers ~0.4 s (a split second) after topping up before the idle fade starts (user call)")
 	assert_almost_eq(h.stamina_ring_outline_width, 1.0, 0.001, "a 1px contrast outline keeps the thin arc legible over bright scenes")
 	assert_eq(h.stamina_ring_outline_color, Color(0.0, 0.0, 0.0, 0.9), "the outline is near-black (user call)")
 	h = null
@@ -232,4 +240,47 @@ func test_a_primed_ring_still_eases_rather_than_cutting() -> void:
 	for _i in 60:
 		ring._process(1.0 / 60.0)
 	assert_almost_eq(ring._alpha_mult, 1.0, 0.001, "and it does arrive, exactly (the 0.01 snap closes the asymptote)")
+	ring.free()
+
+func test_a_refill_lingers_lit_for_the_hold_then_fades() -> void:
+	# The requested feel: after the pool tops back up the ring stays fully lit for stamina_ring_full_hold
+	# seconds, THEN fades to the idle alpha — recovery to full registers instead of the gauge blinking out
+	# the instant the last point returns. Drive _process by hand at 60 fps.
+	var ring = _offtree_ring()
+	ring.visible = true
+	ring.fill = 0.5
+	ring._process(1.0 / 60.0)   # frame 1: prime (adopt lit; the hold timer is cleared on an unprimed frame)
+	ring._process(1.0 / 60.0)   # frame 2: PRIMED + draining -> arms the hold for the coming refill
+	assert_almost_eq(ring._alpha_mult, 1.0, 0.001, "a draining pool is fully lit")
+	# Top the pool up. Through (almost) the whole hold window the ring must stay lit, NOT start fading now —
+	# without the hold it would already be easing toward the idle alpha (exp(-6*t) is ~0.11 by here).
+	ring.fill = 1.0
+	var hold_frames: int = int(GameSettings.hud.stamina_ring_full_hold * 60.0)
+	for _i in maxi(1, hold_frames - 2):
+		ring._process(1.0 / 60.0)
+	assert_almost_eq(ring._alpha_mult, 1.0, 0.001,
+		"inside the post-refill hold the ring stays fully lit — the fade is delayed a split second, not immediate")
+	# Let the hold expire and the fade run out.
+	for _i in 90:
+		ring._process(1.0 / 60.0)
+	assert_almost_eq(ring._alpha_mult, _idle_alpha(), 0.001,
+		"once the hold expires the ring fades to the idle alpha as before")
+	ring.free()
+
+func test_an_adopted_full_pool_does_not_linger() -> void:
+	# The hold must obey the SAME "watched only" contract as the fade priming: a full pool that appears while
+	# the ring was hidden (revive / level load / bar-mode swap) must land straight on the idle alpha with no
+	# linger, even if the ring had armed a hold before it was hidden.
+	var ring = _offtree_ring()
+	ring.visible = true
+	ring.fill = 0.5
+	ring._process(1.0 / 60.0)
+	ring._process(1.0 / 60.0)   # primed + draining -> hold armed
+	ring.visible = false
+	ring._process(1.0 / 60.0)   # hidden: un-primes
+	ring.fill = 1.0             # off-screen refill
+	ring.visible = true
+	ring._process(1.0 / 60.0)   # first visible frame: adopt, hold cleared -> no linger
+	assert_almost_eq(ring._alpha_mult, _idle_alpha(), 0.001,
+		"an adopted full pool skips the hold entirely — it never lingers lit over a revive/level load")
 	ring.free()

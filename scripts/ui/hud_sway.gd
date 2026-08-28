@@ -6,9 +6,9 @@ extends RefCounted
 ## than a decal on the glass. PURE STATE + MATH ONLY — no nodes, no autoload reads — so tests pin the
 ## damping behaviour off-tree. ui.gd owns the wiring: it measures the camera's yaw/pitch rates each
 ## frame, builds a target via look_target(), steps this spring, and writes the returned offset onto the
-## `_weighted` carrier Control — plus a WHISPER of the same offset onto the aim cluster (crosshair +
-## stamina ring, scaled by hud_sway_aim_scale, ~1px max): one spring, one mass, two amplitudes. The
-## look-name label and the combat arcs stay pinned; see ui.gd's HUD-weight comment for the rule.
+## `_weighted` carrier Control — and OPTIONALLY a whisper of the same offset onto the aim cluster (crosshair
+## + stamina ring, scaled by hud_sway_aim_scale, which SHIPS AT 0 so the reticle is pinned): one spring, one
+## mass. The look-name label and the combat arcs stay pinned; see ui.gd's HUD-weight comment for the rule.
 ##
 ## Model: a damped spring (semi-implicit Euler) with TWO input channels feeding one mass:
 ##   1. CONTINUOUS — a target displacement proportional to the look angular velocity. While the camera
