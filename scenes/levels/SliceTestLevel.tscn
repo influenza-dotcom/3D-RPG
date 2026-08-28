@@ -153,9 +153,6 @@ size = Vector3(1.15, 1, 1.15)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_tttcu"]
 
-[sub_resource type="BoxShape3D" id="hit"]
-size = Vector3(1, 2, 0.3)
-
 [sub_resource type="Resource" id="Resource_3g65w"]
 script = ExtResource("24_0a101")
 head_model = ExtResource("23_8c03u")
@@ -450,12 +447,6 @@ open_angle = -90.0
 locked = true
 pickable = true
 
-[node name="CollisionShape3D2" type="CollisionShape3D" parent="Door" unique_id=562548655]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1, 0)
-shape = SubResource("hit")
-
-[node name="DoorPivot2" type="Node3D" parent="Door" unique_id=901141622]
-
 [node name="DogCrate" parent="." unique_id=659841876 instance=ExtResource("19_tttcu")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.245, 4.08, -3.749)
 
@@ -463,41 +454,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.245, 4.08, -3.749)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12.508795, 2.8289545, 9.856476)
 profile = ExtResource("21_hq0l6")
 look = SubResource("Resource_3g65w")
-
-[node name="BloodyMess2" type="Node3D" parent="NPC" unique_id=852782266]
-script = ExtResource("28_wmxwh")
-
-[node name="CollisionShape3D2" type="CollisionShape3D" parent="NPC" unique_id=1547146335]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.010460556, -0.028381348, 0.022141248)
-visible = false
-shape = SubResource("CapsuleShape3D_4gyqm")
-
-[node name="Mesh2" type="MeshInstance3D" parent="NPC" unique_id=195095158]
-transform = Transform3D(1, 0, 0, 0, 0.99999106, 0.0042236843, 0, -0.0042236843, 0.99999106, 0, 0, 0)
-
-[node name="Death2" type="AudioStreamPlayer3D" parent="NPC" unique_id=2042168141]
-stream = ExtResource("29_i7wn2")
-volume_db = 80.0
-unit_size = 100.0
-max_db = 6.0
-bus = &"sfx"
-script = ExtResource("30_nnvf5")
-death_cry = ExtResource("33_dcry0")
-
-[node name="Damage2" type="AudioStreamPlayer3D" parent="NPC" unique_id=903524182]
-stream = ExtResource("31_dhuc3")
-bus = &"sfx"
-script = ExtResource("32_8sx0p")
-
-[node name="OmniLight3D2" type="OmniLight3D" parent="NPC" unique_id=354425515]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5339377, 0.11439216)
-omni_range = 1.0
-
-[node name="Shadow2" type="Decal" parent="NPC" unique_id=1457092277]
-transform = Transform3D(0.25, 0, 0, 0, 0.5, 0, 0, 0, 0.25, 0, -1, 0)
-size = Vector3(2, 2.5, 2)
-texture_albedo = ExtResource("40_2svcq")
-cull_mask = 1048571
 
 [node name="Talkable" parent="NPC" unique_id=336090958 instance=ExtResource("42_j6553")]
 dialogue = SubResource("Resource_i7wn2")
