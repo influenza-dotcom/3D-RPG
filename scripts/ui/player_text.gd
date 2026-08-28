@@ -62,8 +62,9 @@ const BODY_PART_HEAD := "Head"
 const BODY_PART_TORSO := "Torso"
 const BODY_PART_ARM := "Arm"
 const BODY_PART_LEG := "Leg"
-## Placeholder shown in place of an NPC's real name until they introduce themselves in dialogue (a line
-## with reveals_name = true fires GameState.reveal_name). Read via GameState.public_name — the single seam
+## Placeholder shown in place of an NPC's real name until the player has SPOKEN to them — opening any
+## conversation reveals the speaker (DialogueManager.start -> GameState.reveal_name); a line with
+## reveals_name = true fires the same call. Read via GameState.public_name — the single seam
 ## every player-facing NPC-name surface (dialogue label, look-at readout, loot/death/takedown/cripple) routes
 ## through. Quest/kill matching keys on the stable identity (NPC.identity_key), never this. Edit here to re-label ("???").
 const STRANGER := "Stranger"
@@ -99,7 +100,8 @@ const SAVE_WARN_COMPLETED_QUEST_MISSING := "[PH] Couldn't restore a completed qu
 const SAVE_WARN_FAILED_QUEST_MISSING := "[PH] Couldn't restore a failed quest record (its data is missing)."
 ## The SYNTHESIZED dialogue response-menu options — the buttons DialogueManager splices on top of a line's
 ## authored choices when the speaker carries the matching component (Merchant / Healer / Bonfire / LevelUp /
-## ChipInstaller / ChessMatch / Atm / a following companion with a backpack), plus the always-present leave option.
+## ChipInstaller / WeaponBench / ChessMatch / Atm / a following companion with a backpack), plus the
+## always-present leave option.
 ## DISPLAY text only: each button binds its own handler Callable, so re-wording one here can never change which
 ## menu opens — the same label-is-never-a-key rule as MENU_TAB_* and CompanionRecruiter.label_for.
 const DIALOGUE_OPTION_TRADE := "Trade"
@@ -107,6 +109,10 @@ const DIALOGUE_OPTION_HEAL := "Heal"
 const DIALOGUE_OPTION_REST := "Rest"
 const DIALOGUE_OPTION_LEVEL_UP := "Level Up"
 const DIALOGUE_OPTION_INSTALL := "Install"
+## The gunsmith bench's option (WeaponBench.DIALOGUE_ORDER 55, between the chip installer's 50 and chess's 60,
+## which is why it sits HERE in the block). BARE, no "[PH] " marker — a verb label in the same fixed functional
+## vocabulary as Install / Trade above, and DialogueManager splices it into a menu row that carries its own.
+const DIALOGUE_OPTION_MODIFY := "Modify"
 const DIALOGUE_OPTION_PLAY_CHESS := "Play Chess"
 ## One verb for BOTH directions and both signs of the account (deposit / withdraw / pay a debt down) — the
 ## terminal's own screen swaps its Deposit/Pay-down caption, so this button never has to know which you mean.
@@ -141,6 +147,13 @@ const CHARACTER_CREATE_EMPTY_PART := "—"
 ## keep the codepoint when re-skinning or re-fonting.
 const CHARACTER_CREATE_STAT_MINUS := "−"
 const CHARACTER_CREATE_STAT_PLUS := "+"
+## The Stats tab's standing RULE line, under the points banner. The builder is ZERO-SUM and nothing else on
+## the tab admits it: the screen opens with no spare points and every "+" painted disabled, which reads as a
+## broken menu until you work out that a "−" somewhere else is what funds one. This line is the only thing
+## teaching that, so it names the mechanic rather than describing the screen.
+## ⭐ONE LINE, and keep any re-wording inside one: it paints into a fixed-height row above the stat list, and a
+## second line would push the list down — the menus-must-not-resize-with-text rule that letterboxed the map.
+const CHARACTER_CREATE_STAT_RULE := "Lower a stat to free points for another."
 ## The "Shirt" tab — the player paints their own torso texture (a blank tee they decorate).
 const CHARACTER_CREATE_SHIRT_TAB := "Shirt"
 const CHARACTER_CREATE_SHIRT_PAINT := "Paint"
@@ -160,9 +173,12 @@ const CHARACTER_CREATE_SHIRT_FRONT := "Front"
 const CHARACTER_CREATE_SHIRT_BACK := "Back"
 ## Closes the free-colour wheel overlay.
 const CHARACTER_CREATE_SHIRT_PICK_DONE := "Done"
-const CHARACTER_NAME_PLACEHOLDER := "[PH] Enter a name…"
+## The name field's placeholder. SHARED with NameEntryDialog (the same box claims a stray dog), which is why
+## it says "a name" and not "your character's name" — one line has to sit honestly in both boxes. The trailing
+## ellipsis is the authored affordance for "type here", the same convention WALLET_DROP uses for "opens a card".
+const CHARACTER_NAME_PLACEHOLDER := "Enter a name…"
 ## Shown under the name field (and gating Begin) while the name is blank — a run must be NAMED before it can start.
-const CHARACTER_CREATE_NAME_REQUIRED := "[PH] Name your character to begin"
+const CHARACTER_CREATE_NAME_REQUIRED := "Name your character to begin."
 
 ## The implant-purchase step (implant_choice.gd) — New Game's SECOND screen, after character creation's
 ## Begin: fit starting chips ON CREDIT — each is billed at its authored Item.value against the starting
@@ -173,35 +189,35 @@ const CHARACTER_CREATE_NAME_REQUIRED := "[PH] Name your character to begin"
 ## nothing is the default. Chip rows paint Item.label() / AbilityRegistry.display_name_for /
 ## Zorkmids.money_text — only the chrome lives here; the tally line is composed by implant_choice_tally.
 const IMPLANT_CHOICE_TITLE := "Starting Implants"
-const IMPLANT_CHOICE_HINT := "[PH] Implants go on your tab — whatever you fit is billed against your starting zorkmids.\nThe Ledger rates the build, then sets the line."
+const IMPLANT_CHOICE_HINT := "Implants go on your tab — whatever you fit is billed against your starting zorkmids.\nThe Ledger rates the build, then sets the line."
 ## The PINNED footer tally under the roster: the running implant bill + the resulting starting balance +
 ## the credit still extendable (limit + starting money − bill; the roster greys rows that no longer fit it).
-const IMPLANT_CHOICE_TALLY := "[PH] Implant bill: {cost}  ·  Starting zorkmids: {balance}  ·  Credit left: {credit}"
+const IMPLANT_CHOICE_TALLY := "Implant bill: {cost}  ·  Starting zorkmids: {balance}  ·  Credit left: {credit}"
 
 ## THE LEDGER'S VERDICT on the creation build — one WHOLE template per score band, SELECTED by the key
 ## EconomySettings.credit_rating_for returns (never a prose fragment glued to a number; re-wording a band here
 ## can never change what the bank actually does). The creditor is "the Ledger", the same always-online thing
 ## the first-launch terms gate says keeps the Record — the entity financing your body-mods is the entity that
 ## remembers what you do with them. Keep every line under ~100 chars: it paints on an 11px autowrapped band.
-const IMPLANT_CREDIT_BAND_NO_FILE := "[PH] No file — {score}. Nothing on record to price. The Ledger will advance you {money}."
-const IMPLANT_CREDIT_BAND_DECLINED := "[PH] Declined — {score}. Nothing here we could repossess. You're good for {money}."
-const IMPLANT_CREDIT_BAND_SUBPRIME := "[PH] Subprime — {score}. No trade, no assets, no notable features. You're good for {money}."
-const IMPLANT_CREDIT_BAND_SERVICEABLE := "[PH] Serviceable — {score}. No enthusiasm, no objection. You're good for {money}."
-const IMPLANT_CREDIT_BAND_BANKABLE := "[PH] Bankable — {score}. We can price this. You're good for {money}."
-const IMPLANT_CREDIT_BAND_PREFERRED := "[PH] Preferred debtor — {score}. We like your odds of living long enough. You're good for {money}."
+const IMPLANT_CREDIT_BAND_NO_FILE := "No file — {score}. Nothing on record to price. The Ledger will advance you {money}."
+const IMPLANT_CREDIT_BAND_DECLINED := "Declined — {score}. Nothing here we could repossess. You're good for {money}."
+const IMPLANT_CREDIT_BAND_SUBPRIME := "Subprime — {score}. No trade, no assets, no notable features. You're good for {money}."
+const IMPLANT_CREDIT_BAND_SERVICEABLE := "Serviceable — {score}. No enthusiasm, no objection. You're good for {money}."
+const IMPLANT_CREDIT_BAND_BANKABLE := "Bankable — {score}. We can price this. You're good for {money}."
+const IMPLANT_CREDIT_BAND_PREFERRED := "Preferred debtor — {score}. We like your odds of living long enough. You're good for {money}."
 
 ## The FILED REASON — the adverse-action notice parody: the one underwriting line the build falls furthest
 ## under, or a commendation when nothing is short. Whole templates keyed like the bands above. "Notable
 ## Cowardice" is a callback to the standing heading the terms gate files declined choices under.
-const IMPLANT_CREDIT_REASON_NONE := "[PH] Noted in your favour: a specialty the Ledger can insure."
-const IMPLANT_CREDIT_REASON_NO_FILE := "[PH] Filed reason: no established identity. The Ledger has no notes on you."
-const IMPLANT_CREDIT_REASON_UNSPENT := "[PH] Filed reason: allocation left undrawn — see 'Notable Cowardice'."
-const IMPLANT_CREDIT_REASON_THIN_TRADE := "[PH] Filed reason: no trade of record — allocation spread too thin to price."
-const IMPLANT_CREDIT_REASON_NO_INCOME := "[PH] Filed reason: no visible means of support."
-const IMPLANT_CREDIT_REASON_MORTALITY := "[PH] Filed reason: life expectancy under the repayment term."
-const IMPLANT_CREDIT_REASON_EXPOSURE := "[PH] Filed reason: pledged attributes exceed recoverable value."
+const IMPLANT_CREDIT_REASON_NONE := "Noted in your favour: a specialty the Ledger can insure."
+const IMPLANT_CREDIT_REASON_NO_FILE := "Filed reason: no established identity. The Ledger has no notes on you."
+const IMPLANT_CREDIT_REASON_UNSPENT := "Filed reason: allocation left undrawn — see 'Notable Cowardice'."
+const IMPLANT_CREDIT_REASON_THIN_TRADE := "Filed reason: no trade of record — allocation spread too thin to price."
+const IMPLANT_CREDIT_REASON_NO_INCOME := "Filed reason: no visible means of support."
+const IMPLANT_CREDIT_REASON_MORTALITY := "Filed reason: life expectancy under the repayment term."
+const IMPLANT_CREDIT_REASON_EXPOSURE := "Filed reason: pledged attributes exceed recoverable value."
 ## The one reason you can fix TODAY — walk to a terminal and pay — so it outranks every build complaint.
-const IMPLANT_CREDIT_REASON_DELINQUENT := "[PH] Filed reason: unsatisfactory payment history."
+const IMPLANT_CREDIT_REASON_DELINQUENT := "Filed reason: unsatisfactory payment history."
 ## The name-entry modal's BUILD-TIME card title. NameEntryDialog re-titles the card on every open() with the
 ## caller's composed prompt (claim_name_dialog, routed through MenuStyle.title_text for the skin's casing), so
 ## this is only what the card is CONSTRUCTED with. Deliberately not shared with CHARACTER_CREATE_NAME_LABEL —
@@ -209,14 +225,54 @@ const IMPLANT_CREDIT_REASON_DELINQUENT := "[PH] Filed reason: unsatisfactory pay
 const NAME_DIALOG_TITLE := "Name"
 
 const SHOP_TITLE := "TRADE"
-const SHOP_FOR_SALE_HEADING := "[PH] For sale  (click to buy)"
-const SHOP_YOUR_ITEMS_HEADING := "[PH] Your items  (click to sell)"
-const SHOP_MERCHANT_WALLET := "[PH] Merchant: {money}"
-const PLAYER_WALLET := "[PH] You: {money}"
+## The trade screen's two column headings. The parenthetical says what a CLICK does, because the two grids
+## take OPPOSITE actions on tiles that look identical — the same shape as the INSTALL_* and BENCH_* heading
+## pairs. Two spaces before it: this file's column breath, not padding.
+const SHOP_FOR_SALE_HEADING := "For sale  (click to buy)"
+const SHOP_YOUR_ITEMS_HEADING := "Your items  (click to sell)"
+## The wallet readouts over those columns.
+## ⭐PLAYER_WALLET IS SHARED — the shop, the chip installer and the gunsmith bench all paint it through
+## wallet_you() — so it must stay SIDE-NEUTRAL. Folding the shop's verb in ("You · sell") would read as a
+## lie on the two tills that only ever take money; giving the shop its verb back is a shop-side template.
+const SHOP_MERCHANT_WALLET := "Merchant: {money}"
+const PLAYER_WALLET := "You: {money}"
+
+## THE WALLET ROW + its AmountPrompt — money is not an inventory item, so these are the whole vocabulary of
+## the widget that replaced the backpack coin tile. WALLET_ROW is the readout (the backpack + loot screens
+## both paint it); DROP / STASH caption the button that opens the prompt AND the prompt's own commit, so the
+## verb the player pressed is the verb they confirm.
+## TWO SPACES between the noun and the number — the readout's column look, not padding (inventory_weight and
+## bench_gun space their columns the same way). The DROP / STASH verbs keep a trailing ELLIPSIS because they
+## OPEN the amount card rather than committing anything; the card's own commit button is handed the same
+## caption today, which is why the ellipsis reads oddly there (see the note on ask()'s confirm_caption).
+const WALLET_ROW := "Zorkmids  {money}"
+const WALLET_DROP := "Drop…"
+const WALLET_STASH := "Stash…"
+## The amount card's TITLE, in natural casing: AmountPrompt.ask routes it through MenuStyle.title_text, which
+## is the one place casing is decided (skin.uppercase_titles paints these "DROP ZORKMIDS" today) — the
+## INSTALL_SCREEN_TITLE rule. An uppercase_titles = false skin must still get the authored wording.
+const WALLET_DROP_TITLE := "Drop Zorkmids"
+const WALLET_STASH_TITLE := "Stash Zorkmids"
+## The card's field placeholder and its two fill chips. One word each: the chips sit side by side in a row
+## that shrink-wraps the card, so a longer caption widens the whole prompt rather than the button.
+const AMOUNT_PLACEHOLDER := "amount"
+const AMOUNT_ALL := "All"
+const AMOUNT_HALF := "Half"
+## The cap line under the title — what the prompt will actually let you commit, never the raw wallet.
+const AMOUNT_AVAILABLE := "You have {money}"
 
 const INSTALL_TITLE := "INSTALL"
-const INSTALL_CARRIED_HEADING := "[PH] Install your chips  (click to install)"
-const INSTALL_STOCK_HEADING := "[PH] For sale — buy & install  (click to fit)"
+## The two section headings, in the SHOP_FOR_SALE_HEADING mold: the heading names whose chips they are, the
+## parenthetical says what a click does. ⭐ONE VERB across both — "install" — and the parentheticals differ
+## only by the PAYMENT. They used to read "(click to install)" and "(click to fit)", which made a player work
+## out whether fitting and installing were two different operations on one screen. They are not.
+const INSTALL_CARRIED_HEADING := "Your chips  (click to install)"
+const INSTALL_STOCK_HEADING := "For sale  (click to buy & install)"
+## The ARMED caption a row swaps to on its first click, before the second click actually charges. Installing
+## spends money AND consumes the chip, so the row states the price at the moment of commitment rather than
+## letting one click do both — the em dash and money phrase match respec_button / heal_button, the other two
+## captions in the game that are the last thing pressed before a debit. Read it through chip_install_confirm().
+const CHIP_INSTALL_CONFIRM := "Confirm — {cost}"
 ## The empty-section line in BOTH install lists (you carry no installable chip / the mechanic stocks none).
 ## Deliberately NOT the shop's EMPTY_LIST "(empty)" — the install sections read "(none)" today and this is a pure
 ## move of that literal; unifying the two wordings is a copy call, not a refactor.
@@ -231,14 +287,19 @@ const INSTALL_SCREEN_TITLE := "Install"
 ## as SHOP_TITLE / INSTALL_TITLE.
 const LEVEL_UP_TITLE := "Level Up"
 
-const LOOT_TITLE := "[PH] LOOTING"
-const LOOT_CORPSE_HEADING := "[PH] Corpse"
-const LOOT_PICKPOCKET_TITLE := "[PH] PICKPOCKETING"
-const LOOT_POCKETS_HEADING := "[PH] Pockets"
-const LOOT_EXCHANGE_TITLE := "[PH] EXCHANGING GEAR"
-const LOOT_THEIR_GEAR_HEADING := "[PH] Their Gear"
-const LOOT_CONTAINER_TITLE := "[PH] CONTAINER"
-const LOOT_CONTAINER_HEADING := "[PH] Container"
+## The loot screen's four MODES: a panel title (the blank-name fallback loot_title selects) and the SOURCE
+## column's heading for each. The titles are the VERB the screen is doing to somebody, the headings are the
+## NOUN the left grid holds — that pairing is the only thing distinguishing a corpse from a live pocket from
+## a crate, since all four modes draw the identical two-grid layout. The all-caps titles are the SHOP_TITLE /
+## INSTALL_TITLE idiom (a station's fallback title); the headings are title-case like LOOT_YOU_HEADING.
+const LOOT_TITLE := "LOOTING"
+const LOOT_CORPSE_HEADING := "Corpse"
+const LOOT_PICKPOCKET_TITLE := "PICKPOCKETING"
+const LOOT_POCKETS_HEADING := "Pockets"
+const LOOT_EXCHANGE_TITLE := "EXCHANGING GEAR"
+const LOOT_THEIR_GEAR_HEADING := "Their Gear"
+const LOOT_CONTAINER_TITLE := "CONTAINER"
+const LOOT_CONTAINER_HEADING := "Container"
 const LOOT_SOURCE_HEADING := "Source"
 const LOOT_YOU_HEADING := "You"
 
@@ -289,12 +350,29 @@ const RESPEC_CARD_TITLE := "Respec"
 ## Keep this SHORT: it swaps onto a rebind button pinned to MenuSkin.rebind_button_width (120px English
 ## budget incl. margins, clip_text on) — a longer prompt clips rather than growing the button, so it must
 ## read whole at ~100px (the shipped art button boxes carry 10+10 margins).
-const OPTIONS_BIND_PROMPT := "[PH] Press key..."
-const OPTIONS_MUSIC_FOLDER_DEFAULT := "[PH] Default (each radio's own folder)"
-const OPTIONS_CHOOSE_MUSIC_FOLDER := "[PH] Choose a music folder"
-const OPTIONS_WINDOWED := "[PH] Windowed"
-const OPTIONS_BORDERLESS := "[PH] Borderless Fullscreen"
-const OPTIONS_EXCLUSIVE_FULLSCREEN := "[PH] Exclusive Fullscreen"
+const OPTIONS_BIND_PROMPT := "Press a key…"
+## The Music Folder row's button caption while no custom folder is chosen. Says what the DEFAULT actually
+## does rather than printing an empty path: each in-world radio plays out of its own authored folder until
+## you point them all at one of yours.
+const OPTIONS_MUSIC_FOLDER_DEFAULT := "Default (each radio's own folder)"
+## The OS folder-picker's window title (a real FileDialog, so this is chrome the desktop paints, not the skin).
+const OPTIONS_CHOOSE_MUSIC_FOLDER := "Choose a music folder"
+## Window-mode choice captions. DISPLAY text only, but the caller's ARRAY ORDER IS BEHAVIOUR — item INDEX
+## maps straight to the window mode, so re-wording one can never select a different mode.
+## ⭐ONE WORD EACH, and keep it that way: these paint into the cycler's value button, which is cap_button()'d
+## between two arrows on the two-up Video page — it CLIPS rather than widening, and the shipped art seats about
+## eleven English characters. "Borderless Fullscreen" shipped clipped to "[PH] Window"-length nonsense; the
+## distinction that survives at this width is borderless-window versus exclusive, which these two words carry.
+const OPTIONS_WINDOWED := "Windowed"
+const OPTIONS_BORDERLESS := "Borderless"
+const OPTIONS_EXCLUSIVE_FULLSCREEN := "Fullscreen"
+## Presentation choice captions (options_menu _emit_presentation). DISPLAY text only, but the caller's ARRAY
+## ORDER IS BEHAVIOUR — item INDEX maps straight to Settings.PRESENTATION_* (0 = native-res, 1 = the low-res
+## PS1 buffer). Same one-word clip budget as the window modes above: "Retro (Pixelated)" shipped sliced to
+## "Retro (Pix". Named for what the PICTURE looks like, not for the render path — "Crisp" is a thing a player
+## can see, "High Fidelity" is a thing an engine does.
+const OPTIONS_PRESENTATION_HIGH_FIDELITY := "Crisp"
+const OPTIONS_PRESENTATION_RETRO := "Retro"
 ## The colourblind-mode choice captions (options_menu). DISPLAY text only, but the caller's ARRAY
 ## ORDER IS BEHAVIOUR — the cycler row maps item INDEX straight to the Settings mode, so the four stay
 ## listed None-first at the call site regardless of wording here.
@@ -364,18 +442,20 @@ const SAVE_LOAD_TITLE := "Save / Load"
 ## The quicksave row's name — a LOAD-only row (F5 owns writing it); the Slot rows use the SAVE_LOAD_SLOT template.
 const SAVE_LOAD_QUICKSAVE_ROW := "Quicksave"
 ## One manual slot's row name; {n} = the 1-based slot number (TextFormat.subst via save_slot_label, never %).
-const SAVE_LOAD_SLOT := "[PH] Slot {n}"
-## The caption on a row whose file doesn't exist yet.
-const SAVE_LOAD_EMPTY := "[PH] Empty"
+const SAVE_LOAD_SLOT := "Slot {n}"
+## The caption on a row whose file doesn't exist yet. It sits in the same column an occupied row fills with
+## its level name and timestamp (SAVE_SLOT_CAPTION), so one bare word is the whole difference between
+## "nothing here" and a save — never a parenthesised "(empty)", which would read as a state of the SAVE.
+const SAVE_LOAD_EMPTY := "Empty"
 const SAVE_LOAD_SAVE := "Save"
 const SAVE_LOAD_LOAD := "Load"
 ## The overwrite-confirm card's title (Save pressed on an OCCUPIED slot) — the card reuses CONFIRM / CANCEL.
-const SAVE_LOAD_OVERWRITE_TITLE := "[PH] Overwrite this save?"
+const SAVE_LOAD_OVERWRITE_TITLE := "Overwrite this save?"
 ## Screen-local failure lines (the TOAST_QUICKSAVE_FAILED wording idiom, painted on the panel's status hint
 ## instead of toasted): a save that didn't persist (disk full / permission / no player), a load whose file
 ## vanished or won't parse.
-const SAVE_LOAD_SAVE_FAILED := "[PH] Save failed"
-const SAVE_LOAD_LOAD_FAILED := "[PH] Load failed"
+const SAVE_LOAD_SAVE_FAILED := "Save failed"
+const SAVE_LOAD_LOAD_FAILED := "Load failed"
 ## An existing slot's metadata caption — TWO whole templates SELECTED on whether the save carries a resolvable
 ## authored level name (save_slot_caption): level display name + modified time, or the time alone. The
 ## separator is a MIDDLE DOT (U+00B7) with three spaces each side — the character_inspect_summary idiom.
@@ -383,7 +463,7 @@ const SAVE_LOAD_LOAD_FAILED := "[PH] Load failed"
 const SAVE_SLOT_CAPTION := "{level}   ·   {time}"
 const SAVE_SLOT_CAPTION_NO_LEVEL := "{time}"
 ## Player-menu tab-strip labels (the Deus Ex / Pip-Boy tab group). DISPLAY text only: PlayerMenus routes
-## between the five screens on StringName keys (PlayerMenus.TABS); these are just what the strip's buttons
+## between the six screens on StringName keys (PlayerMenus.TABS); these are just what the strip's buttons
 ## paint (PlayerMenus.TAB_LABELS maps key -> label). Re-wording one here can never change routing.
 const MENU_TAB_INVENTORY := "Inventory"
 const MENU_TAB_STATS := "Stats"
@@ -392,7 +472,16 @@ const MENU_TAB_STATS := "Stats"
 const MENU_TAB_IMPLANTS := "Implants"
 const MENU_TAB_REPUTATION := "Reputation"
 const MENU_TAB_JOURNAL := "Journal"
-const QUEST_JOURNAL_EMPTY := "[PH] No quests yet."
+## The MAP tab (map_screen.gd — the sixth sibling, default M). Deliberately NOT shared with the Options ->
+## Accessibility "Minimap" / "Map Zoom" row labels: those name SETTINGS rows and a locale may word a settings
+## row differently from a tab chip (the MENU_TAB_JOURNAL / QUEST_JOURNAL_TITLE rule).
+const MENU_TAB_MAP := "Map"
+## The Journal's EMPTY STATE — the whole screen when nothing is tracked, so it is the one line that has to
+## teach where quests come from. TWO LINES, the MAP_HINT shape: the state, then the action that ends it. A
+## bare "No quests yet." is a status readout on a blank panel and answers nothing a player would ask next.
+## The line break is authored (make_hint also autowraps, so a narrower panel simply reflows the second line —
+## it never widens the tab).
+const QUEST_JOURNAL_EMPTY := "No quests yet.\nAccept a job from someone in the city and its objectives are tracked here."
 ## The Journal panel's own title, painted by QuestJournal via MenuStyle.make_title (which routes it through
 ## title_text, so the SKIN owns the casing — keep this title-case). Deliberately NOT a reuse of
 ## MENU_TAB_JOURNAL: that const is the tab STRIP button's label, an independent surface, and re-wording one
@@ -415,15 +504,115 @@ const STATS_INSPECT_BUTTON := "Inspect"
 ## switch an implant off" hint under the INSTALLED toggle rows, and the "how to get a carried chip fitted"
 ## hint under the carried rows. Deliberately NOT reuses of the INSTALL_* consts: those paint the
 ## ChipInstallScreen (the paid mechanic modal), an independent surface.
-const IMPLANTS_INSTALLED_HEADING := "[PH] Installed"
+const IMPLANTS_INSTALLED_HEADING := "Installed"
 ## The toggle verb, under the installed rows. Switching one OFF keeps it installed (it just stops working)
-## — the copy must not read as uninstalling, or a player will fear losing a chip they paid for.
-const IMPLANTS_TOGGLE_HINT := "[PH] Click an implant to switch it off — it stays installed."
-const IMPLANTS_CARRIED_HEADING := "[PH] In your bag — not installed"
-const IMPLANTS_CARRIED_HINT := "[PH] A chip mechanic can fit these."
+## — the copy must not read as uninstalling, or a player will fear losing a chip they paid for. Names BOTH
+## directions: the rows carry no on/off word of their own (an off row is only dimmer), so a player looking at
+## a dim row needs this line to tell them the click that dimmed it is the click that brings it back.
+const IMPLANTS_TOGGLE_HINT := "Click an implant to switch it on or off — it stays installed."
+## Says NOT INSTALLED in the heading itself: a carried chip and a fitted one are the same row shape one
+## section apart, and "In your bag" alone would leave the difference to be inferred from position.
+const IMPLANTS_CARRIED_HEADING := "In your bag — not installed"
+const IMPLANTS_CARRIED_HINT := "A chip mechanic can fit these."
 ## The per-section empty line. Reads like INSTALL_NONE's "(none)" but is deliberately its OWN const —
 ## one const per painted surface, so re-wording the install screen never re-words this tab.
 const IMPLANTS_NONE := "(none)"
+
+## The Map tab (map_screen.gd). MAP_HINT is the tab's WHOLE tutorial — it names the pointer gestures nothing
+## on screen announces (a click pins, a drag pans, the wheel zooms) — and it is painted as an EMPTY STATE over
+## the plan itself rather than in the footer. It lived in the footer once and never fitted: in the strip the
+## row's buttons left over it shipped ellipsized to "Click to pi…", which teaches nothing. On the plan
+## it has the whole panel width, and it earns its space by only appearing when there is nothing else to look at
+## (no pins on this level, nothing selected) — the first pin the player drops takes it away, and an empty floor
+## teaches again. The double space between its two sentences is the file's usual breath, not padding.
+const MAP_HINT := "Click to drop a pin.   Drag to pan, scroll to zoom."
+## What the FOOTER hint says instead, and the one fact the footer genuinely owes the player: this tab is
+## NORTH-UP while the HUD minimap they already know is heading-up by default, and without saying so the two
+## pictures disagreeing reads as a bug. Three words on purpose — the footer row is fixed-height, a wrapping
+## hint would shove the zoom controls (menus-dont-shift-with-text), and this one fits the strip the buttons
+## leave over at any panel width instead of being trimmed to nothing.
+const MAP_NORTH_UP := "North is up."
+## The three footer buttons. They exist so the zoom and the pan have a focusable pad/keyboard path at all (the
+## atm_screen "a control a pad can never land on is not a path" rule) — a wheel-and-drag-only affordance is
+## unreachable without a mouse. RECENTRE puts the view back on the player: panning is the one gesture that does
+## not undo itself, since the caret can be dragged clean off the view with nothing left pointing home.
+const MAP_ZOOM_IN := "Zoom In"
+const MAP_ZOOM_OUT := "Zoom Out"
+const MAP_RECENTRE := "Recentre"
+## The current multiplier, a whole template with the number substituted as a VALUE (TextFormat.subst + num).
+const MAP_ZOOM_READOUT := "{zoom}x"
+## Shown in the map panel instead of the plan when there is no floor to draw: a level whose navmesh has not
+## been baked (the whole map is one empty band) or a boot frame before the first slice. Deliberately its own
+## const rather than a reuse of EMPTY_LIST's "(empty)" — this names a MISSING BAKE, which is a level-authoring
+## fault a designer should recognise, not an empty collection.
+const MAP_NO_DATA := "No map data for this floor."
+
+## --- The player's own map pins (waypoints + notes) ---------------------------------------------------------
+## Copy for the fourth marker channel: the Map tab's pin controls (the footer's two pad-path buttons and the
+## floating card that carries the selection's details), the editor card a pin is RE-authored in, and the
+## cues the in-world Mark Waypoint key answers with — one confirmation and two refusals.
+##
+## ⭐NOTHING HERE HOLDS A PIN'S OWN TEXT. A waypoint's name and note are typed by the PLAYER, so they are data,
+## not copy: they are never looked up as a msgid (every Control that paints one sets
+## auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED — the menu_style.gd translation-seam rule) and they
+## never pass through this file. What lives here is the chrome AROUND that text.
+## The two FOOTER buttons: the pad's selection path (cycles pin -> pin -> none, because Track/Edit/Delete all
+## need a selected pin and a click is mouse-only) and its placement path (places at the VIEW CENTRE, which
+## together with panning is what gives a pad the whole map to pin on). Captions must be real words, not
+## icons: MenuStyle.cap_button clips a Button's text, so a caption is also the only thing giving these
+## buttons a width in their row.
+const MAP_PIN_NEXT := "Next Pin"
+const MAP_PIN_ADD := "Place Pin"
+## The floating pin card's button row, over the map's bottom-left corner while a pin is selected. TRACK and
+## UNTRACK are ONE button whose caption swaps with the pin's state — two whole words rather than a "Track"
+## with an appended negation, because a locale may not build the pair that way. All four are bare VERBS: the
+## card is narrow (three buttons across ~220 px) and its subject is already named on the line above them, so
+## "Edit Pin" would spend width restating what the card is about.
+const MAP_PIN_EDIT := "Edit"
+const MAP_PIN_DELETE := "Delete"
+const MAP_PIN_TRACK := "Track"
+const MAP_PIN_UNTRACK := "Untrack"
+## The selected pin's name line on that card. The pin's own name is substituted as a VALUE — never
+## concatenated — so a locale may put it anywhere in the line, and so player-typed text is never a msgid.
+const MAP_PIN_SELECTED := "{name}"
+## Shown under the selected pin's name when it carries no note, so the note row keeps its height and the
+## card cannot resize as the selection moves between an annotated pin and a bare one.
+const MAP_PIN_NO_NOTE := "No note."
+## The editor card. It has ONE mode now — placement is instant (a click pins immediately with a seeded name),
+## so the card is only ever opened on a pin that already exists. Title, then field captions, then commit.
+## NAME is deliberately its own const rather than a reuse of NAME_DIALOG_TITLE / CHARACTER_CREATE_NAME_LABEL:
+## those title a modal and label the creation field, and one surface must be re-wordable without the others.
+const WAYPOINT_EDIT_TITLE := "Edit Pin"
+const WAYPOINT_NAME_LABEL := "Name"
+const WAYPOINT_NOTE_LABEL := "Note"
+const WAYPOINT_NOTE_PLACEHOLDER := "What's here, or what you meant to do."
+const WAYPOINT_ICON_LABEL := "Mark"
+const WAYPOINT_TINT_LABEL := "Colour"
+const WAYPOINT_SAVE := "Save"
+## The seeded name for a pin the player has not named. A whole template with the ordinal as a VALUE, so the
+## word order is the locale's; the number is the pin's position in this level's list, which is what makes two
+## unnamed pins distinguishable at a glance instead of both reading the same.
+##
+## ⭐ITS TWO SEED SITES STILL RUN IT THROUGH PlayerText.strip_prefix (map_screen.gd::_pin_seed_name and
+## waypoint_marker.gd), and that call is now a NO-OP. It is kept on purpose: this is the one const in the file
+## whose rendering is SAVED as player data, so the guard against a `[PH] ` marker reaching a save file must not
+## depend on this line staying authored — re-marking it during a copy pass would otherwise ship the marker into
+## every profile silently.
+const WAYPOINT_DEFAULT_NAME := "Pin {n}"
+## The in-world Mark Waypoint key's confirmation toast. That key no longer opens a name box at all — it pins
+## the aimed point (or your feet), names it from WAYPOINT_DEFAULT_NAME and TRACKS it in one press, so the
+## toast is the only thing telling the player which pin the compass pip that just appeared belongs to. The
+## name is substituted as a VALUE — it is player-typed data, never part of a msgid — and arrives with its
+## `[PH] ` marker already stripped (PlayerText.strip_prefix), a no-op now that the seed is authored but kept
+## for the reason spelled out on WAYPOINT_DEFAULT_NAME.
+const WAYPOINT_MARKED := "Marked: {name}"
+## The refusal when the level is already at WaypointBook.MAX_PER_LEVEL. It names the cap as a VALUE so the
+## number and the sentence stay one template, and it is a REFUSAL rather than a silent drop because a pin that
+## does not appear reads exactly like a broken map.
+const WAYPOINT_FULL := "Map is full — {max} pins on this level."
+## The OTHER refusal: a level that records no path (a code-built LevelData) has no ledger to file a pin
+## into. Its own copy because telling that player "the map is full" over an empty map is a lie.
+const WAYPOINT_NO_LEVEL := "Nowhere to file a pin here."
 
 ## The fullscreen "inspect your character" showcase (opened from the Stats screen, NOT a Pip-Boy tab): its
 ## panel title. Deliberately its own const rather than sharing CHARACTER_CREATE_TITLE — same surface family,
@@ -709,6 +898,17 @@ static func wallet_you(amount: float) -> String:
 	return TextFormat.subst(PLAYER_WALLET, {"money": Zorkmids.money_text(amount)})
 
 
+## The backpack / loot-screen wallet ROW — the readout that took over from the coin tile, and the row whose
+## button opens the AmountPrompt. Whole money phrase (never "<amount>" + a " zm" glued on at the call site).
+static func wallet_row(amount: float) -> String:
+	return TextFormat.subst(WALLET_ROW, {"money": Zorkmids.money_text(amount)})
+
+
+## The AmountPrompt's cap line — how much the prompt will actually let you commit.
+static func amount_available(amount: float) -> String:
+	return TextFormat.subst(AMOUNT_AVAILABLE, {"money": Zorkmids.money_text(amount)})
+
+
 ## The Ledger's VERDICT line on the pending build: one whole band template SELECTED by key, carrying the
 ## score as a bare number and the limit as a whole money phrase. An unknown key degrades to the no-file
 ## wording rather than painting blank — a band added to EconomySettings without a template here still reads.
@@ -865,33 +1065,52 @@ static func level_up(level: int, points: int) -> String:
 			{"level": level, "points": points})
 
 
+## The character creator's points banner. Says TO SPEND rather than "remaining": the builder is zero-sum and
+## opens at zero, so "remaining" would imply an allowance was handed out and then eaten. CHARACTER_CREATE_STAT_RULE
+## is the line under it that explains how the number ever becomes non-zero.
 static func points_to_spend(spare: int) -> String:
-	return TextFormat.subst("[PH] Points to spend: {points}", {"points": spare})
+	return TextFormat.subst("Points to spend: {points}", {"points": spare})
 
 
-
+## --- THE SIX LIVE-EFFECT LINES (the Stats screen's "Now:" row, and the same text inside a hover tooltip) ----
+## One whole template per stat, filled with SIGNED readouts StatInfo already formatted ("+8%", "-2", "+0").
+## They are the only place the sheet's derived numbers are put into words, so they name the EFFECT a player
+## can feel ("aim steadiness"), never the multiplier behind it (`sway_mult`).
+##
+## ⭐DELIBERATELY BARE — no "[PH] " marker, and none may be re-marked. Both consumers PREFIX these: the Stats
+## screen through stat_now() and StatInfo.tooltip through its own "Now: %s". A marker here therefore lands
+## MID-SENTENCE ("Now: [PH] +0% gun damage"), which is exactly what shipped and what authoring these fixed.
+## Same rule as the ATM_BAND_* short names and the BODY_PART_* nouns.
+##
+## Keep them SHORT. They paint into a stat block in a two-column grid (six blocks on one Pip-Boy tab), the
+## block wraps to as many lines as it needs, and the grid has no scrollbar worth the name — the longest of
+## these, larceny's four clauses, is the one that shipped clipped at the panel's bottom edge.
 static func stat_effect_strength(melee: String, carry: String, max_hp: String) -> String:
-	return TextFormat.subst("[PH] melee {melee}, {carry} carry, {max_hp} max HP", {"melee": melee, "carry": carry, "max_hp": max_hp})
+	return TextFormat.subst("melee {melee}, {carry} carry, {max_hp} max HP", {"melee": melee, "carry": carry, "max_hp": max_hp})
 
 
 static func stat_effect_endurance(stamina: String, regen: String) -> String:
-	return TextFormat.subst("[PH] {stamina} max stamina, {regen} out-of-combat healing", {"stamina": stamina, "regen": regen})
+	return TextFormat.subst("{stamina} max stamina, {regen} out-of-combat healing", {"stamina": stamina, "regen": regen})
 
 
 static func stat_effect_gunplay(damage: String, steadiness: String) -> String:
-	return TextFormat.subst("[PH] {damage} gun damage, {steadiness} aim steadiness", {"damage": damage, "steadiness": steadiness})
+	return TextFormat.subst("{damage} gun damage, {steadiness} aim steadiness", {"damage": damage, "steadiness": steadiness})
 
 
 static func stat_effect_agility(speed: String) -> String:
-	return TextFormat.subst("[PH] {speed} move speed", {"speed": speed})
+	return TextFormat.subst("{speed} move speed", {"speed": speed})
 
 
 static func stat_effect_streetwise(buys: String, sales: String, rep: String) -> String:
-	return TextFormat.subst("[PH] buys {buys}, sales {sales}, rep gains {rep}", {"buys": buys, "sales": sales, "rep": rep})
+	return TextFormat.subst("buys {buys}, sales {sales}, rep gains {rep}", {"buys": buys, "sales": sales, "rep": rep})
 
 
+## `allowance` is the priciest thing a pickpocket lift may be worth, as a bare number beside the three
+## percentages. Worded "lift limit" rather than the shipped "lift value <= 50": a maths operator in player
+## prose is a fragment nothing can translate, and the shorter clause is what keeps the four-clause larceny
+## block inside its cell.
 static func stat_effect_larceny(detection: String, takedown: String, risk: int, allowance: String) -> String:
-	return TextFormat.subst("[PH] {detection} enemy detection speed, {takedown} takedown time, {risk}% caught risk, lift value <= {allowance}", {"detection": detection, "takedown": takedown, "risk": risk, "allowance": allowance})
+	return TextFormat.subst("{detection} enemy detection speed, {takedown} takedown time, {risk}% caught risk, lift limit {allowance}", {"detection": detection, "takedown": takedown, "risk": risk, "allowance": allowance})
 
 
 static func shop_title(name: String) -> String:
@@ -906,6 +1125,13 @@ static func equipped_row(row_text: String) -> String:
 
 static func install_title(name: String) -> String:
 	return TextFormat.subst("INSTALL — {name}", {"name": name}) if not name.is_empty() else INSTALL_TITLE
+
+
+## An ARMED chip row's caption — the second half of the two-click install. The money phrase resolves HERE
+## through Zorkmids.money_text (the currency word lives there, never appended at the row), so a caller passes
+## the raw charge exactly as heal_button and level_up_cost_cell take theirs.
+static func chip_install_confirm(cost: float) -> String:
+	return TextFormat.subst(CHIP_INSTALL_CONFIRM, {"cost": Zorkmids.money_text(cost)})
 
 
 static func heal_title(name: String) -> String:
@@ -1047,10 +1273,19 @@ static func atm_withdrew(amount: float) -> String:
 ## The armed payment RAIL, as a button caption — TWO whole templates selected by the KEY (never by the painted
 ## label, the label-is-never-a-key rule). DEBIT spends what you have; CREDIT keeps going past zero onto the
 ## line, which is what the interest then compounds against.
+##
+## ⭐AT THE SIX TILLS THE PAINTED CAPTION IS WIDER THAN THIS STRING: the shared PaymentRailButton drop-in flanks
+## it with the skin's cycler step glyphs ("< … >") so the control reads as something that CYCLES rather than as
+## a status readout — which is how QA read the bare sentence on a full-width button, never discovering that
+## Credit could be armed at a till at all. Those glyphs live on MenuSkin.cycler_prev_glyph / cycler_next_glyph
+## (non-prose paint belongs to the skin, never here) and are joined at the button. So keep this a SENTENCE and
+## keep it short: it has to fit inside that button's pinned width WITH the chevrons, and any shape added here
+## would sit between two that already say "cycle". (The ATM's own rail button paints this string bare — it is
+## not the drop-in, and a terminal whose whole subject is the account needs no discovery affordance.)
 static func payment_rail_button(method: String) -> String:
 	if method == "credit":
-		return "[PH] Paying with: Credit"
-	return "[PH] Paying with: Debit"
+		return "Paying with: Credit"
+	return "Paying with: Debit"
 
 
 ## The top-left CREDIT SCORE announcement (CreditWatch). FOUR whole templates selected by two booleans —
@@ -1076,6 +1311,143 @@ static func ledger_interest(delta: float) -> String:
 		return TextFormat.subst("[PH] The Ledger added {money} to what you owe.",
 			{"money": Zorkmids.money_text(absf(delta))})
 	return TextFormat.subst("[PH] Your deposits earned {money}.", {"money": Zorkmids.money_text(delta)})
+
+
+# --- THE GUNSMITH BENCH (scripts/components/weapon_bench.gd + scripts/ui/weapon_bench_screen.gd) -----------
+# A dual-mode station in the ChipInstaller mold, so this block deliberately reads like the INSTALL_* one above:
+# a fixed card title, two section headings, an empty-section line, and a per-row price column. What is NEW is
+# the always-present NOTICE band — bench_notice() below — which is why the refusal wording lives here as one
+# whole sentence per CAUSE KEY rather than as a tooltip the screen assembles.
+#
+# ⭐The bench hands the screen KEYS (WeaponBench.refusal_reason -> &"slot_taken", &"afford", …), never labels.
+# Re-wording any sentence below can therefore never change which row dims or what a guard does — the
+# display-strings-are-never-behaviour-keys rule, in the one place in this file where the two most look alike.
+
+## The card title when the bench is unnamed — the all-caps blank-name fallback bench_title() selects, exactly
+## as INSTALL_TITLE / SHOP_TITLE do for their stations.
+const BENCH_TITLE := "WEAPON BENCH"
+## The panel's CONSTRUCTION-time title, in NATURAL casing because MenuStyle.title_text owns the casing (an
+## uppercase_titles = false skin must still get the authored wording). open_bench re-titles with
+## bench_title(bench_name) before the card is ever shown. The INSTALL_SCREEN_TITLE / INSTALL_TITLE pairing,
+## one for one — see that const's note for why both halves exist.
+const BENCH_SCREEN_TITLE := "Weapon Bench"
+## The two section headings. The parenthetical says what a CLICK does, because the two lists take opposite
+## actions on rows that look identical (the shop's buy/sell heading pair is the same shape).
+const BENCH_FITTED_HEADING := "[PH] Fitted  (click to remove)"
+const BENCH_PARTS_HEADING := "[PH] Parts  (click to fit)"
+## The GUN CYCLER row's heading, left of the cycling Button. A third heading in the same voice as the two above,
+## but with no parenthetical: the button beside it carries its own caption (bench_gun — the weapon's name and
+## filled-slot count), so the heading only has to name what the row is ABOUT. It exists because the card's rows
+## all describe ONE weapon and a player arriving at a bench with four guns in the pack needs the row that
+## chooses between them labelled, not merely captioned.
+const BENCH_GUN_HEADING := "[PH] Weapon"
+## The empty-section line in the PARTS list (you carry no fitting part and the bench stocks none). Deliberately
+## the install screen's "(none)" rather than the shop's EMPTY_LIST "(empty)" — the two service screens read
+## alike today, and unifying the three wordings is a copy call, not a refactor.
+const BENCH_NO_PARTS := "(none)"
+## The Notice band's &"no_weapons" sentence — nothing in the pack a bench could work on. Says PACK, not
+## "inventory": a gun in your HANDS is in the pack too (the bench cycles the drawn weapon first).
+const BENCH_NO_GUN := "[PH] No modifiable weapon in your pack."
+## An offered-but-empty slot's NAME column in the Fitted list. The section paints one row per offered slot
+## ALWAYS, so this is what most rows say on a stock gun — the fixed arity that stops the card hopping as parts
+## come and go. An EM DASH (U+2014) each side.
+const BENCH_EMPTY_SLOT := "[PH] — empty —"
+## The PRICE column when a labour fee rounds away to nothing. Only reachable on a REMOVAL: fitting refuses a
+## zero fee outright (a permanently-disabled "0 zm" row is the ChipInstaller lesson), while handing a part
+## back that the player already owns must never be blocked by a rounding edge.
+const BENCH_FREE := "[PH] free"
+
+## The SIX slot names — the FO4 vocabulary, in WeaponData.ModSlot ordinal order.
+## ⭐DELIBERATELY BARE (no "[PH] "): these are VALUE tokens substituted into templates that already carry the
+## marker (a row's SLOT column sits beside a marked NAME, and mod_slot_name feeds tooltips built from marked
+## sentences), and a second marker landing mid-line is the failure that convention exists to prevent. Same
+## rule as the ATM_BAND_* short names and the BODY_PART_* nouns. They are also a fixed FUNCTIONAL vocabulary,
+## like the stat titles: the six slots are the save vocabulary (WeaponData.MOD_SLOT_PROPS), so a locale
+## re-words them but nothing may key on the wording.
+const MOD_SLOT_RECEIVER := "Receiver"
+const MOD_SLOT_BARREL := "Barrel"
+const MOD_SLOT_MAGAZINE := "Magazine"
+const MOD_SLOT_SIGHT := "Sight"
+const MOD_SLOT_MUZZLE := "Muzzle"
+const MOD_SLOT_STOCK := "Stock"
+
+
+## The card title, re-stamped per bench on open (the install_title mold). MenuStyle.title_text owns the casing.
+static func bench_title(name: String) -> String:
+	return TextFormat.subst("WEAPON BENCH — {name}", {"name": name}) if not name.is_empty() else BENCH_TITLE
+
+
+## The hover readout over a standalone bench: its authored `bench_name`, else the bare trade word. The
+## chip_installer_prompt / atm_prompt mold — a station that names itself gets named, one that does not still
+## says what it IS rather than falling back to a generic "Interact".
+static func bench_prompt(name: String) -> String:
+	if name.is_empty():
+		return "[PH] Gunsmith"
+	return TextFormat.subst("[PH] Gunsmith: {name}", {"name": name})
+
+
+## The gun cycler's caption: the selected weapon's authored label beside its filled-slot count ("Pistol   2/6").
+## Both halves are VALUES — the name is the Item's own display_name and the counts are numbers — so the whole
+## line is prose-free and carries no marker (the character_inspect_summary precedent). THREE spaces separate
+## the columns; keep them when re-wording.
+static func bench_gun(name: String, fitted: int, total: int) -> String:
+	return TextFormat.subst("{name}   {fitted}/{total}", {"name": name, "fitted": fitted, "total": total})
+
+
+## One slot's display name, SELECTED by the WeaponData.ModSlot ordinal — never indexed out of an array, so a
+## seventh slot added to the enum lands here as a compile-visible gap rather than an out-of-range read. An
+## unknown ordinal degrades to the Receiver name (slot 0, the enum's own default) rather than a blank column.
+static func mod_slot_name(slot: int) -> String:
+	match slot:
+		WeaponData.ModSlot.BARREL: return MOD_SLOT_BARREL
+		WeaponData.ModSlot.MAGAZINE: return MOD_SLOT_MAGAZINE
+		WeaponData.ModSlot.SIGHT: return MOD_SLOT_SIGHT
+		WeaponData.ModSlot.MUZZLE: return MOD_SLOT_MUZZLE
+		WeaponData.ModSlot.STOCK: return MOD_SLOT_STOCK
+	return MOD_SLOT_RECEIVER
+
+
+## The success toasts, one per direction (WeaponBench._fitted / _removed). `part` and `gun` arrive as authored
+## Item.label() display names — content VALUES, never msgids of ours — which is why the marker sits once at
+## the front and the names ride mid-sentence.
+static func mod_fitted(part: String, gun: String) -> String:
+	return TextFormat.subst("[PH] Fitted {part} to {gun}.", {"part": part, "gun": gun})
+
+
+static func mod_removed(part: String, gun: String) -> String:
+	return TextFormat.subst("[PH] Removed {part} from {gun}.", {"part": part, "gun": gun})
+
+
+## The always-present Notice band under the bench's lists: WHY the thing you are looking at would refuse.
+## SELECTS one whole sentence per CAUSE KEY — the exact StringNames WeaponBench.refusal_reason returns, which
+## is the whole point of that function answering in keys: this table can be re-worded or translated without a
+## single branch there changing. Cover every key it can return; a key with no row here would silently blank
+## the band, which reads as "nothing is wrong" at precisely the moment something is.
+##
+## `n` is the gate's required rating, read ONLY by the &"stat_gate" row (0 elsewhere, and the parameter
+## defaults so the gun-level caller — which asks with no part in hand and can only get &"no_weapons",
+## &"draw_locked" or &"" back — need not pass a number it does not have). The stat title resolves HERE through
+## StatInfo.title, the requires_stat idiom, so renaming the stat in resources/stats/gunplay.tres reaches this
+## sentence; the stat ID is fixed because WeaponMod's gate field is (min_gunplay).
+##
+## &"" is the NO-NOTICE case and returns "" on purpose: the band keeps its height and simply says nothing, so
+## the card never re-flows under the player's cursor mid-transaction.
+static func bench_notice(reason_key: StringName, n: int = 0) -> String:
+	match reason_key:
+		&"draw_locked": return "[PH] Put down what you're carrying first."
+		&"no_weapons": return BENCH_NO_GUN
+		&"slot_taken": return "[PH] That slot is filled — remove the fitted part first."
+		&"stat_gate": return TextFormat.subst("[PH] Requires {stat} {n}.", {"stat": StatInfo.title(&"gunplay"), "n": n})
+		&"bag_full": return "[PH] No room in your pack for the part."
+		&"afford": return "[PH] You can't afford that."
+		&"unfit": return "[PH] That part doesn't fit this weapon."
+	return ""
+
+
+## The weapon row's right-hand column ("2/6 fitted") — the same two numbers bench_gun paints in the cycler,
+## worded for a surface that has no header explaining what the fraction counts.
+static func mod_slots_fitted(n: int, total: int) -> String:
+	return TextFormat.subst("[PH] {n}/{total} fitted", {"n": n, "total": total})
 
 
 static func respec_title(name: String) -> String:
@@ -1141,18 +1513,18 @@ static func perks_header(points: int) -> String:
 ## appended. Weight/capacity keep the fixed one-decimal readout ("12.0"), so the token values are
 ## pre-formatted here (TextFormat.num would trim the ".0" the gauge look relies on).
 static func inventory_weight(weight: float, capacity: float, encumbered: bool) -> String:
-	var template := "[PH] Weight  {weight} / {capacity}   ENCUMBERED" if encumbered else "[PH] Weight  {weight} / {capacity}"
+	var template := "Weight  {weight} / {capacity}   ENCUMBERED" if encumbered else "Weight  {weight} / {capacity}"
 	return TextFormat.subst(template, {"weight": "%.1f" % weight, "capacity": "%.1f" % capacity})
 
 
 ## PHASE-2 DEBT: `kind` arrives as a heading fragment ("LOOTING" / "PICKPOCKETING" from LootScreen) — the
 ## loot-screen phase should replace this with one whole-template func per mode.
 static func loot_title(kind: String, name: String) -> String:
-	return TextFormat.subst("[PH] {kind} {name}", {"kind": kind, "name": name}) if not name.is_empty() else TextFormat.subst("[PH] {kind}", {"kind": kind})
+	return TextFormat.subst("{kind} {name}", {"kind": kind, "name": name}) if not name.is_empty() else TextFormat.subst("{kind}", {"kind": kind})
 
 
 static func loot_exchange_title(name: String) -> String:
-	return TextFormat.subst("[PH] EXCHANGING GEAR — {name}", {"name": name}) if not name.is_empty() else LOOT_EXCHANGE_TITLE
+	return TextFormat.subst("EXCHANGING GEAR — {name}", {"name": name}) if not name.is_empty() else LOOT_EXCHANGE_TITLE
 
 
 static func chess_cant_cover(wager: float) -> String:
@@ -1255,7 +1627,10 @@ static func stat_header(stat: StringName, value: String) -> String:
 ## effect arrives as a prose FRAGMENT (StatInfo._effect, itself assembled from the stat_effect_* whole
 ## templates), so a locale cannot move the label relative to it — the loot_title situation. Folding "Now:"
 ## into those six templates is the real fix, but StatInfo.tooltip prefixes the SAME "Now:" from its own
-## format string (stat_info.gd), so the two must migrate together in the stats phase.
+## format string, so the two must migrate together in the stats phase.
+## The VISIBLE half of that debt is paid: the six templates are authored, so the prefix no longer lands in
+## front of a "[PH] " marker ("Now: [PH] +0% gun damage" is what shipped). ⭐Re-marking any of them puts it
+## straight back — see the block header on stat_effect_strength.
 static func stat_now(effect_text: String) -> String:
 	return TextFormat.subst("Now: {effect}", {"effect": effect_text})
 
@@ -1346,9 +1721,9 @@ static func reputation_standing(standing: int) -> String:
 static func shop_price_line(body: String, price: float, buying: bool, affordable: bool) -> String:
 	var money := Zorkmids.money_text(price)
 	if buying:
-		return TextFormat.subst("{body}\n[PH] Buy — {amount}" if affordable else "{body}\n[PH] Buy — {amount}  (you can't afford it)",
+		return TextFormat.subst("{body}\nBuy — {amount}" if affordable else "{body}\nBuy — {amount}  (you can't afford it)",
 				{"body": body, "amount": money})
-	return TextFormat.subst("{body}\n[PH] Sell — {amount}" if affordable else "{body}\n[PH] Sell — {amount}  (they won't pay for it)",
+	return TextFormat.subst("{body}\nSell — {amount}" if affordable else "{body}\nSell — {amount}  (they won't pay for it)",
 			{"body": body, "amount": money})
 
 
@@ -1358,6 +1733,23 @@ static func shop_price_line(body: String, price: float, buying: bool, affordable
 ## re-queries InputManager.get_action_binding on every show).
 static func dialogue_continue_hint(key: String) -> String:
 	return TextFormat.subst("[{key}]", {"key": key})
+
+
+## The response-menu header hint: which keys select a reply and which backs out. Pure bindings-as-glyphs,
+## no prose (the dialogue_continue_hint rule) — the keys come from the LIVE hotbar-slot bindings the
+## digit selection rides (DialogueManager passes get_action_binding results, never literals).
+static func dialogue_menu_hint(first_key: String, last_key: String, exit_key: String) -> String:
+	return TextFormat.subst("[{first}–{last}] · [{exit}]", {"first": first_key, "last": last_key, "exit": exit_key})
+
+
+## The menu hint when only synthesized rows are up (no digit-selectable authored replies): just the exit key.
+static func dialogue_menu_hint_exit_only(exit_key: String) -> String:
+	return TextFormat.subst("[{exit}]", {"exit": exit_key})
+
+
+## The digit gutter painted inside a response row ("1." / "0." — the row's live selection-key binding).
+static func dialogue_choice_number(key: String) -> String:
+	return TextFormat.subst("{key}.", {"key": key})
 
 
 ## One manual save slot's row name on the SaveLoadScreen ("Slot 1"). The number is a VALUE token in the one
@@ -1396,6 +1788,41 @@ static func clock_24_hour(hours: String, minutes: String) -> String:
 static func clock_12_hour(hours: String, minutes: String, pm: bool) -> String:
 	return TextFormat.subst(CLOCK_12_HOUR_PM if pm else CLOCK_12_HOUR_AM,
 			{"hours": hours, "minutes": minutes})
+
+
+## The HUD compass's rose (scripts/ui/hud_compass.gd) — the eight bearing letters on the top-centre heading
+## tape, in bearing order from north: N, NE, E, SE, S, SW, W, NW.
+##
+## THESE ARE COPY, NOT GEOMETRY, which is the whole reason they live here rather than as a const array in the
+## widget. A compass rose is initialled from the LOCAL words for the directions, and the initials are not
+## shared: French writes O for ouest where English writes W, and every intercardinal built on it moves with
+## it (NO/SO, not NW/SW). Hardcoding "W" in a _draw would make the tape the one HUD surface a translator
+## cannot reach. Contrast the minimap's north tick, which is a drawn SPOKE precisely so it owes nothing here.
+##
+## Each is its own whole const rather than one packed "N,NE,E,..." string: a locale must be able to reword
+## any single point without re-parsing a list, and a compass has exactly eight — an enumerable set, not data.
+const COMPASS_N := "N"
+const COMPASS_NE := "NE"
+const COMPASS_E := "E"
+const COMPASS_SE := "SE"
+const COMPASS_S := "S"
+const COMPASS_SW := "SW"
+const COMPASS_W := "W"
+const COMPASS_NW := "NW"
+
+## The rose letter for a cardinal INDEX (0 = N, 1 = NE, ... 7 = NW — HudCompass.cardinal_index's output).
+## SELECTS between the eight whole templates above; an out-of-range index wraps rather than degrading to a
+## blank, because a compass point that silently vanishes reads as a broken instrument, not as missing copy.
+static func compass_cardinal(index: int) -> String:
+	match posmod(index, 8):
+		1: return COMPASS_NE
+		2: return COMPASS_E
+		3: return COMPASS_SE
+		4: return COMPASS_S
+		5: return COMPASS_SW
+		6: return COMPASS_W
+		7: return COMPASS_NW
+	return COMPASS_N
 
 
 ## The WAIT screen (scripts/ui/wait_screen.gd) — the Fallout-style "let some hours pass" panel on T.

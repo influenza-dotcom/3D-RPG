@@ -150,9 +150,9 @@ func test_whole_template_selection_and_plurals() -> void:
 	assert_eq(PlayerText.chess_checkmate(false), "[PH] Checkmate — you lose.", "loss selects its whole template")
 	assert_eq(PlayerText.radio_on("Jukebox"), "[PH] Jukebox on", "radio-on whole template (was radio_state + a state-word fragment)")
 	assert_eq(PlayerText.radio_off("Jukebox"), "[PH] Jukebox off", "radio-off whole template")
-	assert_eq(PlayerText.inventory_weight(12.0, 30.0, false), "[PH] Weight  12.0 / 30.0",
+	assert_eq(PlayerText.inventory_weight(12.0, 30.0, false), "Weight  12.0 / 30.0",
 		"weight line keeps its fixed one-decimal readout")
-	assert_eq(PlayerText.inventory_weight(31.5, 30.0, true), "[PH] Weight  31.5 / 30.0   ENCUMBERED",
+	assert_eq(PlayerText.inventory_weight(31.5, 30.0, true), "Weight  31.5 / 30.0   ENCUMBERED",
 		"the encumbered warning is its own whole template, not an append")
 	# The heal card's four-way status block (HealScreen passes FACTS; the lines live here).
 	assert_eq(PlayerText.heal_status(50, 100, false, 12.5, false),
@@ -166,7 +166,7 @@ func test_whole_template_selection_and_plurals() -> void:
 	# Money phrases route through the single Zorkmids.money_text template (the currency word lives there).
 	assert_eq(PlayerText.heal_button(40), "[PH] Heal  —  40 zm", "heal button substitutes the whole money phrase")
 	assert_eq(PlayerText.respec_button(100.0), "Respec  —  100 zm", "respec button substitutes the whole money phrase")
-	assert_eq(PlayerText.wallet_you(12.5), "[PH] You: 12.5 zm", "wallet readout substitutes the whole money phrase")
+	assert_eq(PlayerText.wallet_you(12.5), "You: 12.5 zm", "wallet readout substitutes the whole money phrase")
 
 
 ## (7): the requires_* deny toasts take RAW IDS and resolve authored display names internally (StatInfo.title /

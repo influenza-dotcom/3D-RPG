@@ -219,10 +219,33 @@ func _bind_stats_tab() -> void:
 	_points_label = %PointsLabel
 	_points_label.add_theme_color_override(&"font_color", MenuStyle.gold())
 
+	# THE ZERO-SUM RULE, one line, directly under the points banner. Without it this tab reads as BROKEN on the
+	# very first screen of a new game: every stat sits at 0, the banner says "Points to spend: 0", and every "+"
+	# is painted disabled — and nothing anywhere admits that pressing "−" on ANOTHER stat is what funds one. This
+	# line is the only thing on the screen that teaches the mechanic; the per-stat hover tip below answers the
+	# different question of what a stat DOES (and a pad never sees it at all).
+	# CODE-BUILT and inserted between the two authored children (banner, then the stat scroll): the scene owns
+	# STRUCTURE and carries no text, and a label whose entire job is to hang one PlayerText const is chrome this
+	# script owns — the same split every other dynamic row on this screen already follows.
+	# ⭐NOT make_hint, which autowraps: a wrapping label OWNS ITS ROW'S HEIGHT, so a second line would push the
+	# stat list down AND grow the Stats page's minimum — the menus-must-not-resize-with-text failure that
+	# SHIRT_PAGE_HEIGHT_BUDGET above exists to police. Clipped to ONE line instead (cap_label also drops its
+	# horizontal minimum to ~0, so an l10n'd line can never widen the card), which is why the const itself is
+	# marked one-line-only in PlayerText.
+	var rule := MenuStyle.cap_label(Label.new())
+	MenuStyle.style_hint(rule)  # dim footnote ink at hint size — the gold belongs to the banner above it
+	rule.autowrap_mode = TextServer.AUTOWRAP_OFF  # style_hint switches wrapping ON; see the one-line rule above
+	rule.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER  # centred under the centred banner
+	rule.text = PlayerText.CHARACTER_CREATE_STAT_RULE
+	var stats_tab: VBoxContainer = %StatsTab
+	stats_tab.add_child(rule)
+	stats_tab.move_child(rule, _points_label.get_index() + 1)  # between the banner and the authored %StatScroll
+
 	# Columns (authored: columns = 4): name | − | value | +. The name column is the EXPAND_FILL rail, so
 	# the stepper cluster right-aligns against the panel edge (the options-row label-left/control-right
-	# idiom). No effect column and no hint line: what a stat does lives in the hover tip on its name/value
-	# (see _stat_tip — the CK3-style breakdown), not in inline prose.
+	# idiom). No effect column and no PER-STAT prose: what a stat does lives in the hover tip on its
+	# name/value (see _stat_tip — the CK3-style breakdown), never inline in a row. (The rule line above is
+	# not an exception — it names the ALLOCATOR's mechanic, which belongs to the tab, not to any one stat.)
 	var grid: GridContainer = %StatGrid
 	for stat in STATS:
 		_add_stat_row(grid, stat)

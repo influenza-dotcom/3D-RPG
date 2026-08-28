@@ -77,16 +77,15 @@ static func _effect(stat: StringName, s: CharacterStats, bonus: float = 0.0) -> 
 static func _num(x: float) -> String:
 	return TextFormat.num(x, 1)
 
-## A SIGNED bare/half number: "+4", "-4", "+4.5", and "0" at baseline (never "+0" / "-0").
+## A SIGNED bare/half number: "+4", "-4", "+4.5", and "+0" at baseline. TextFormat.signed at one decimal in the
+## COMPARISON voice (zero_plus = true) — this file's private copy of the idiom is gone, and the weapon bench's
+## before/after footer reads in this same voice for the same reason (see _signed_pct).
 static func _signed_num(x: float) -> String:
-	if is_zero_approx(x):
-		return "+0"  # baseline reads as an explicit no-bonus, same voice as every other value (see _signed_pct)
-	return ("+" + _num(x)) if x > 0.0 else _num(x)  # a negative already carries its minus
+	return TextFormat.signed(x, 1, true)
 
 ## A SIGNED percentage: "+8%", "-8%", and "+0%" at baseline — zero keeps the plus so a baseline stat reads
 ## as "this is your bonus: none" in the same voice as a real bonus, instead of a bare number that looks like
-## a different kind of line (the creation tooltip used to say "neutral" here; user call 2026-08-12).
+## a different kind of line (the creation tooltip used to say "neutral" here; user call 2026-08-12). That
+## decision now lives in TextFormat.signed_pct's `zero_plus` flag, which this passes true.
 static func _signed_pct(p: int) -> String:
-	if p == 0:
-		return "+0%"
-	return ("+%d%%" % p) if p > 0 else ("%d%%" % p)  # a negative already carries its minus
+	return TextFormat.signed_pct(p, true)

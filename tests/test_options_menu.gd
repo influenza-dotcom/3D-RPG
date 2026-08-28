@@ -62,6 +62,44 @@ func test_menu_skin_cycler_glyph_defaults() -> void:
 	assert_eq(s.cycler_next_glyph, ">", "cycler next glyph defaults to plain ASCII >")
 	s = null  # Resource (RefCounted) — release per the project test idiom
 
+func test_every_tab_page_shows_a_real_scrollbar_paid_for_out_of_its_gutter() -> void:
+	# THE PAGE MUST ADMIT IT SCROLLS. Controls runs 44 rebind rows and Accessibility 33 settings through a
+	# ~245px page. Both scrolled; neither said so, because the themed bar was drawn ZERO px wide (see
+	# MenuStyle's scrollbar block) — the audit screenshot shows four bindings, a fifth sliced through, and a
+	# bare right edge. Two halves are pinned here, and the SECOND is the one that bites:
+	#   (a) the bar exists, is always up (not AUTO — every tab must reserve the same rail), and has a width
+	#       a mouse can actually hit;
+	#   (b) that width is BOUGHT from the page's own right margin, not added to the page. The Accessibility
+	#       two-up columns clear the panel by ~17px, and a page minimum wider than the card's anchor band
+	#       GROWS THE WHOLE CARD (tests/test_menu_layout_stability.gd) — so the two horizontal insets plus the
+	#       bar must still come to exactly PAGE_MARGIN * 2.
+	OptionsMenu.open()
+	var page_margin: int = int(OptionsMenu.get_script().get_script_constant_map().get("PAGE_MARGIN", 0))
+	assert_gt(page_margin, 0, "the page inset budget is declared as a const")
+	var width: int = MenuStyle.skin.scrollbar_width
+	assert_gt(width, 0, "the skin draws scrollbars with real width")
+	for i in OptionsMenu._tabs.get_tab_count():
+		var page := OptionsMenu._tabs.get_tab_control(i) as ScrollContainer
+		assert_not_null(page, "tab %d's page is the ScrollContainer _add_tab built" % i)
+		if page == null:
+			continue
+		assert_eq(page.vertical_scroll_mode, ScrollContainer.SCROLL_MODE_SHOW_ALWAYS,
+			"%s shows its scrollbar before the player wheels" % page.name)
+		assert_eq(page.get_v_scroll_bar().get_combined_minimum_size().x, float(width),
+			"%s's bar is skin.scrollbar_width wide — visible AND grabbable" % page.name)
+		# By TYPE, not by index: a ScrollContainer's own two bars are (internal) children as well.
+		var found: Array[Node] = page.find_children("*", "MarginContainer", false, false)
+		assert_false(found.is_empty(), "%s's rows sit in the inset MarginContainer" % page.name)
+		if found.is_empty():
+			continue
+		var margin := found[0] as MarginContainer
+		var insets: int = (margin.get_theme_constant(&"margin_left")
+			+ margin.get_theme_constant(&"margin_right"))
+		assert_eq(insets + width, page_margin * 2,
+			"%s pays for the bar out of its right inset — the page minimum is unchanged" % page.name)
+	OptionsMenu.close()
+
+
 func test_close_cancels_an_armed_rebind() -> void:
 	# Options is a NON-pausing ALWAYS-processing autoload, so a forced close (InputManager.close_all_modals on player
 	# death mid-rebind) must CANCEL the armed capture — else _rebinding_action stays set and the next key/pad press

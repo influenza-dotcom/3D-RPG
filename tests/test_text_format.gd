@@ -6,7 +6,9 @@ extends GutTest
 ## work) builds on: token replacement is order-free and %-safe, num() is byte-identical to the old
 ## per-file "%.*f" + rstrip idiom (every historic copy delegates now — Zorkmids.fmt, StatInfo._num,
 ## ItemInfo._num, StatsScreen._stat_num), and plural() is the English singular/other split that
-## tr_n() will widen later.
+## tr_n() will widen later. signed()/signed_pct() are the same story one level up: the fourth private
+## copy of the sign idiom is gone, and the two shipped VOICES (a bare "0" vs a comparison surface's
+## "+0") are now one `zero_plus` parameter rather than two near-identical functions.
 
 
 # --- subst: {name}-token replacement -----------------------------------------------------------------
@@ -97,6 +99,64 @@ func test_stat_and_item_readout_copies_delegate_to_num() -> void:
 	assert_eq(screen._stat_num(4.5), "4.5", "StatsScreen._stat_num delegates to TextFormat.num too")
 	assert_eq(screen._stat_num(12.0), "12", "…and still prints a whole value bare")
 	screen.free()
+
+
+# --- signed / signed_pct: the promoted sign formatters (two voices, one copy) ---------------------------
+
+func test_signed_terse_voice_is_item_infos() -> void:
+	# zero_plus defaults FALSE — the ItemInfo voice, whose callers gate on is_zero_approx and skip zeros.
+	assert_eq(TextFormat.signed(3.0), "+3", "a positive gains an explicit plus")
+	assert_eq(TextFormat.signed(-2.0), "-2", "a negative already carries its own minus — never '+-2'")
+	assert_eq(TextFormat.signed(4.5), "+4.5", "one live decimal survives (decimals defaults to 1)")
+	assert_eq(TextFormat.signed(0.0), "0", "the terse voice prints a BARE zero at baseline")
+
+
+func test_signed_comparison_voice_is_stat_infos() -> void:
+	# zero_plus TRUE — StatInfo and the weapon bench's before/after footer: a comparison surface must be able
+	# to say "no change" out loud, in the same voice as a real bonus (user call 2026-08-12).
+	assert_eq(TextFormat.signed(0.0, 1, true), "+0", "the comparison voice keeps the plus at baseline")
+	assert_eq(TextFormat.signed(3.0, 1, true), "+3", "…and is otherwise identical to the terse voice")
+	assert_eq(TextFormat.signed(-2.0, 1, true), "-2", "…including for a negative")
+
+
+func test_signed_negative_zero_guard() -> void:
+	# num()'s "-0" guard reaches through signed(): a value that ROUNDS to zero prints a bare "0", never "-0".
+	assert_eq(TextFormat.signed(-0.001), "0", "a tiny negative that rounds away prints '0', not '-0'")
+	# ⭐And it does so in BOTH voices: -0.001 is not is_zero_approx (the tolerance is 1e-06), so the zero_plus
+	# branch is never taken and the value falls through to num()'s guard. Byte-identical to the old
+	# StatInfo._signed_num, which is the behaviour this promotion had to preserve exactly.
+	assert_eq(TextFormat.signed(-0.001, 1, true), "0",
+		"a rounds-to-zero negative is NOT the zero_plus baseline — it prints a bare '0' in the comparison voice too")
+
+
+func test_signed_respects_the_decimals_argument() -> void:
+	assert_eq(TextFormat.signed(4.26, 2), "+4.26", "decimals=2 keeps two places")
+	assert_eq(TextFormat.signed(4.26), "+4.3", "the default decimals=1 rounds to one place")
+	assert_eq(TextFormat.signed(12.0, 2), "+12", "a whole value still trims to bare digits")
+
+
+func test_signed_pct_both_voices() -> void:
+	assert_eq(TextFormat.signed_pct(10), "+10%", "a positive percentage gains an explicit plus")
+	assert_eq(TextFormat.signed_pct(-25), "-25%", "a negative already carries its own minus")
+	assert_eq(TextFormat.signed_pct(0), "0%", "the terse voice prints a bare '0%' at baseline")
+	assert_eq(TextFormat.signed_pct(0, true), "+0%", "the comparison voice keeps the plus at baseline")
+	assert_eq(TextFormat.signed_pct(10, true), "+10%", "…and is otherwise identical")
+	assert_eq(TextFormat.signed_pct(-25, true), "-25%", "…including for a negative")
+
+
+func test_sign_formatter_copies_delegate() -> void:
+	# The FOURTH copy of the idiom is gone: ItemInfo carries the terse voice, StatInfo the comparison one.
+	# These pin that each private wrapper still renders exactly what its own copy used to.
+	for pair: Array in [[3.0, "+3"], [-2.0, "-2"], [4.5, "+4.5"], [-0.001, "0"]]:
+		assert_eq(ItemInfo._signed(float(pair[0])), String(pair[1]),
+			"ItemInfo._signed(%s) must print '%s' after delegating to TextFormat.signed" % [pair[0], pair[1]])
+	for pair: Array in [[3.0, "+3"], [-2.0, "-2"], [4.5, "+4.5"], [0.0, "+0"]]:
+		assert_eq(StatInfo._signed_num(float(pair[0])), String(pair[1]),
+			"StatInfo._signed_num(%s) must print '%s' — the '+0' baseline is the whole difference" % [pair[0], pair[1]])
+	assert_eq(ItemInfo._signed_pct(10), "+10%", "ItemInfo._signed_pct delegates in the terse voice")
+	assert_eq(ItemInfo._signed_pct(0), "0%", "…so its (unreachable) baseline is a bare '0%'")
+	assert_eq(StatInfo._signed_pct(0), "+0%", "StatInfo._signed_pct delegates in the comparison voice")
+	assert_eq(StatInfo._signed_pct(-8), "-8%", "…and a negative is unchanged by the voice")
 
 
 # --- plural: the future tr_n() seam -------------------------------------------------------------------

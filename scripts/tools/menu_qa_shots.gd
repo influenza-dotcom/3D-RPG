@@ -4,6 +4,10 @@ extends Node
 ## Doubles as the UI-ARTIST reference pack: every screen in the "Menus are scenes" roster gets a shot,
 ## so a reskin brief can ship the whole set (upscale the PNGs with NEAREST for a legible hand-off —
 ## the canvas is deliberately low-res, so a smooth upscale misrepresents the pixel look).
+## RETRO-PINNED: _run forces Settings.presentation = PRESENTATION_RETRO (plain var + apply_video — NEVER a
+## Settings.set_*, which persists to the dev's real settings.cfg; hud_curve_qa_shots.gd's header documents
+## that rule), so the pack stays this deterministic 792x444 pixel look regardless of the dev's saved
+## presentation. A HIGH FIDELITY sweep is a separate follow-up harness.
 ## Run from the project root (a real windowed run — NOT --headless, the GPU must render):
 ##   godot --path . res://scripts/tools/menu_qa_shots.tscn -- --shots-dir="C:/some/dir"
 ## Without --shots-dir it writes to user://qa_shots. Prints one QA_SHOT/QA_SKIP line per screen and
@@ -28,6 +32,7 @@ func _ready() -> void:
 	_run()
 
 func _run() -> void:
+	GameState.enable_sandbox()  # every save this run triggers lands in user://sandbox/, never the real profile (the waypoint_qa_shots seam)
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shots-dir="):
 			_dir = a.get_slice("=", 1)
@@ -36,12 +41,44 @@ func _run() -> void:
 	# 1280x720 is 16:9, the same aspect as the user's monitor -> identical 792x444 canvas.
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	DisplayServer.window_set_size(Vector2i(1280, 720))
+	# RETRO pin (see header): PLAIN vars + apply_video(), never a Settings.set_*() — a setter save_settings()s
+	# over the dev's real user://settings.cfg. window_mode/windowed_size are pinned too because apply_video()
+	# re-applies the stored mode (the dev's saved fullscreen would take the desktop back), and render_scale 2.0
+	# is RETRO's authored 3D supersample (project.godot rendering/scaling_3d/scale — an HF cfg carries 1.0,
+	# which would soften the 3D in the shots). Nothing here persists: only the setters write the cfg.
+	Settings.presentation = Settings.PRESENTATION_RETRO
+	Settings.window_mode = Settings.WINDOW_MODES.find(Window.MODE_WINDOWED)
+	Settings.windowed_size = Vector2i(1280, 720)
+	Settings.render_scale = 2.0
+	Settings.apply_video()
 	await _frames(5)
 	print("QA_CANVAS=", get_viewport().get_visible_rect().size)
 
 	# --- Boot-flow screens (no player needed) --------------------------------------------------
 	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
-	await _frames(10)
+	# ⭐WAIT FOR THE MENU, DO NOT COUNT FRAMES. The boot plays two fade cards (the internet warning) over ~6 s
+	# before the menu is revealed, so the old 10-frame wait shot a nearly-black frame at alpha ~0.09 and the
+	# game's actual first interactive screen went unphotographed for the whole UX audit. Poll for a VISIBLE
+	# menu button instead — that is the thing the shot is of.
+	# Poll the SCREEN'S OWN STATE, not a guess about buttons: start_menu.gd clears `_internet_warning_active`
+	# in _reveal_menu_after_internet_warning(), which is precisely "the cards are done, the menu is the
+	# screen now". A button-visibility probe answered true too early (the buttons exist under the black
+	# cover), which is how the audit ended up with a photograph of a fade card.
+	# DRIVE THE GAME'S OWN REVEAL rather than waiting the boot cards out. start_menu.gd calls
+	# _reveal_menu_after_internet_warning() itself when the cards finish (and when a skip press lands), so
+	# calling it is the same door, opened on the harness's schedule — it kills the quote tween, drops the
+	# black cover and shows the buttons. Waiting instead means ~13 s of fades per run, and a frame-count
+	# guess is what put a photograph of a fade card into the UX audit in the first place.
+	var menu_up := false
+	for i in 240:
+		await get_tree().process_frame
+		var sm: Node = get_tree().current_scene
+		if sm != null and sm.has_method(&"_reveal_menu_after_internet_warning"):
+			sm.call(&"_reveal_menu_after_internet_warning")
+			menu_up = true
+			break
+	await _frames(20)  # let the reveal settle before the shutter
+	print("QA_MENU_READY=", menu_up)
 	await _shot("01_start_menu")
 
 	var cc: Control = (load("res://scenes/ui/character_creation.tscn") as PackedScene).instantiate()
@@ -121,6 +158,16 @@ func _run() -> void:
 	if _try_open(InventoryScreen):
 		await _frames(20)  # icon tiles bake over a few frames
 		await _shot("08_inventory")
+		# The WALLET ROW's amount card (AmountPrompt) — a real menu surface with no screen of its own, so it
+		# only ever appears on top of this one. Seed some cash first: the prompt refuses a 0 wallet outright
+		# (nothing to divide up), which is correct behaviour but shoots an empty frame.
+		if player.has_method(&"add_money") and player.money <= 0.0:
+			player.add_money(125.0)
+		InventoryScreen._on_drop_money_pressed()
+		await _frames(8)
+		await _shot("08b_inventory_drop_amount")
+		InventoryScreen._amount_prompt.close()
+		await _frames(2)
 		InventoryScreen.close()
 		await _frames(2)
 
@@ -283,6 +330,31 @@ func _run() -> void:
 		await _frames(8)
 		await _shot("21_implants")
 		ImplantsScreen.close()
+		await _frames(2)
+
+	# The Map tab (the sixth Pip-Boy sibling). Needs MORE settle frames than its siblings: its body is a second
+	# instance of the minimap widget, which gathers the level's wall geometry and slices the player's floor band
+	# on its FIRST processed frame (it only processes while visible), then paints on the queued redraw after
+	# that. Eight frames catches a blank panel; the shot is worth taking only once the plan is on it.
+	# THE BODY CHANNEL IS IMPLANT-GATED NOW (Minimap._sample_scan_range): without a scanner chip the map draws
+	# no NPC dots at all, and this reference shot would document a page-sized plan with nothing living on it.
+	# Grant the LONG tier, since 55 m is the only one that puts anything on a 120 m view. Runtime-only — the
+	# grant path emits mechanic_unlocked, which only ChipInstallScreen listens for, so nothing reaches user://.
+	player.call(&"unlock_mechanic", &"deep_scanner")
+	if _try_open(MapScreen):
+		await _frames(20)
+		await _shot("22_map")
+		# ...and a second shot one zoom step out, because the zoom readout + the two footer buttons are the only
+		# chrome this screen owns and the reference should show them having done something. RESTORED after the
+		# shot: the zoom is a PERSISTED player row (Settings.set_map_zoom writes user://settings.cfg), so a QA
+		# run that left it moved would follow the user into their next play session — the same class of profile
+		# clobber the inventory-autosave unplug above exists to prevent.
+		var was_map_zoom: float = Settings.map_zoom
+		MapScreen._nudge_zoom(-1)
+		await _frames(6)
+		await _shot("23_map_zoomed_out")
+		Settings.set_map_zoom(was_map_zoom)
+		MapScreen.close()
 		await _frames(2)
 
 	_finish()

@@ -44,6 +44,34 @@ static func num(value: float, decimals: int = 2) -> String:
 	return "0" if out == "-0" else out
 
 
+## A SIGNED bare/half number: "+3", "-2", "+4.5". The fourth copy of this idiom is gone — ItemInfo._signed and
+## StatInfo._signed_num both delegate here, so a locale that moves the sign (or drops it) changes ONE line.
+##
+## ⭐`zero_plus` is HOW A BASELINE READS — the one deliberate difference between the two shipped voices (user
+## call 2026-08-12), and the reason this is a parameter rather than a second function:
+##   • TRUE  (StatInfo, and the weapon bench's before/after footer) prints "+0". A COMPARISON surface must say
+##     "no change" out loud, in the same voice as a real bonus; a bare "0" there reads as a different kind of
+##     line and the creation tooltip used to say "neutral" instead.
+##   • FALSE (ItemInfo) prints a bare "0" — and its callers skip zeros anyway (they gate on is_zero_approx /
+##     a rounded percent), so the branch is only ever reached by a future caller that wants the terse voice.
+## The negative-zero case is handled by num()'s own "-0" guard: a value that ROUNDS to zero prints "0", never
+## "-0", so with zero_plus off a tiny negative degrades to the same bare "0" a real zero gives.
+static func signed(x: float, decimals: int = 1, zero_plus: bool = false) -> String:
+	if zero_plus and is_zero_approx(x):
+		return "+" + num(0.0, decimals)
+	return ("+" + num(x, decimals)) if x > 0.0 else num(x, decimals)
+
+
+## A SIGNED integer percentage: "+10%", "-25%"; at baseline "+0%" or "0%" per `zero_plus` (see signed() for
+## why the two voices differ). Takes an ALREADY-ROUNDED int on purpose — the round is the caller's display
+## policy (`roundi((mult - 1.0) * 100.0)`), and rounding here would hide the "did this change at all?"
+## question every caller has to answer before it decides whether to emit the line at all.
+static func signed_pct(p: int, zero_plus: bool = false) -> String:
+	if p == 0:
+		return "+0%" if zero_plus else "0%"
+	return ("+%d%%" % p) if p > 0 else ("%d%%" % p)  # a negative already carries its own minus
+
+
 ## Zero-padded TWO-DIGIT integer ("07", "35") — the clock-face idiom, and the reason it lives here rather
 ## than as a "%02d" at each call site: digit rendering is a LOCALE concern (several locales draw their own
 ## digit glyphs), so the day that lands it changes in one place, exactly as num() centralises the decimal

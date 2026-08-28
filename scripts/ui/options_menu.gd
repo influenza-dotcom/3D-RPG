@@ -39,6 +39,12 @@ const PANEL_MARGIN := 0.07  ## fraction of the screen left as a border around th
 ## other tab is <=7 rows and stays single-column.
 const TWO_UP_ROW_THRESHOLD := 8
 
+## The inset (px) between a tab page's edge and its rows, on all four sides — the "another 20" in the
+## column fit math quoted by MenuSkin.slider_width_dense / setting_label_col_width_dense. The RIGHT side
+## spends part of it on the always-visible scrollbar instead of on air (see _add_tab), so the sum the
+## columns are measured against is unchanged: margin + gutter still comes to PAGE_MARGIN.
+const PAGE_MARGIN := 10
+
 ## The declarative source of truth for every row + tab (and which actions are rebindable). Authored in the
 ## inspector; consumed only here. See resources/settings/SettingSpec.gd for the model.
 const CATALOG := preload("res://resources/settings/SettingsCatalog.tres")
@@ -94,7 +100,7 @@ func open() -> void:
 	# NameEntryDialog is kept explicit since it's a control-only suppressor, not a _modal_reg entry). T1.
 	if _is_open or DialogueManager.is_active() or NameEntryDialog.is_open() or InputManager.any_modal_open(self):
 		return  # don't fight another modal for the mouse / Escape (no stacked overlays — symmetric with every screen's own gate + InputManager.gameplay_suppressed)
-	# Refuse MID-DEATH, like every sibling screen (Inventory / Stats / Implants / Reputation / Journal / CharacterInspect /
+	# Refuse MID-DEATH, like every sibling screen (Inventory / Stats / Implants / Map / Reputation / Journal / CharacterInspect /
 	# SaveLoad). We are a NON-pausing PROCESS_MODE_ALWAYS autoload, so Escape keeps reaching _unhandled_input all
 	# through the death cinematic AND the in-place checkpoint revive — where the player stays in-tree with the
 	# _dead latch set and hp 0 (Character.is_alive() == false). die() slams us shut (Player._close_open_modals ->
@@ -436,6 +442,14 @@ func _emit_resolution(parent: VBoxContainer, _spec: Variant) -> Control:
 func _emit_window_mode(parent: VBoxContainer, spec: Variant) -> Control:
 	return _option_row(parent, spec.label, [PlayerText.OPTIONS_WINDOWED, PlayerText.OPTIONS_BORDERLESS, PlayerText.OPTIONS_EXCLUSIVE_FULLSCREEN], int(_spec_current(spec)), _spec_setter(spec))
 
+## Presentation chooser (Video) — native-resolution HIGH FIDELITY vs the classic low-res RETRO pixel pipeline.
+## Code-defined items for the same reason as window mode: a generic DROPDOWN's options do not survive an editor
+## re-save of SettingsCatalog.tres. ARRAY ORDER IS BEHAVIOUR — index-mapped straight into Settings.PRESENTATION_*
+## (0 High Fidelity, 1 Retro); the PlayerText consts only re-word. Sits directly above Render Scale on purpose:
+## that slider is a fraction of whatever render target THIS row picks (the native window vs the ~792x444 canvas).
+func _emit_presentation(parent: VBoxContainer, spec: Variant) -> Control:
+	return _option_row(parent, spec.label, [PlayerText.OPTIONS_PRESENTATION_HIGH_FIDELITY, PlayerText.OPTIONS_PRESENTATION_RETRO], int(_spec_current(spec)), _spec_setter(spec))
+
 ## Colorblind-filter chooser — code-defined items (0..3 -> none/protan/deutan/tritan), same reason as window
 ## mode. ARRAY ORDER IS BEHAVIOUR (index-mapped setter) — the PlayerText consts only re-word, never re-order.
 func _emit_colorblind_mode(parent: VBoxContainer, spec: Variant) -> Control:
@@ -633,14 +647,32 @@ func _tab_title(tab: StringName, tab_specs: Array) -> String:
 ## are added to. `key` (String(spec.tab)) becomes the page node's NAME — the stable id — while `title` is
 ## painted via set_tab_title, so re-wording a tab's display title can never change what code looks up.
 ## (The old single-arg version fused them: the node name WAS the visible title.)
+##
+## THE PAGE ADMITS THAT IT SCROLLS (2026-08-27). Controls runs 44 rebind rows and Accessibility 33 settings
+## through a ~245px page; both scrolled fine and neither said so, because the theme's scrollbar was drawn 0px
+## wide (see MenuStyle's scrollbar block) — the audit screenshot of Controls shows four bindings, a fifth
+## sliced through, and a bare right edge. So the bar is now SHOW_ALWAYS rather than AUTO, on EVERY page: the
+## affordance is up before the player wheels, and — since a ScrollContainer reserves the bar's width beside
+## its content — every tab reserves the same width whether or not it happens to overflow, so the control rail
+## can't sit 8px further right on Video than on Controls.
+## ⚠ THE GUTTER IS BOUGHT, NOT ADDED. The bar's width comes out of this page's own right margin, so the page
+## MINIMUM is the same PAGE_MARGIN*2 it always was and the rows' left/right edges land exactly where they did.
+## That matters: the Accessibility two-up columns fit the panel with ~17px to spare (see MenuSkin's
+## slider_width_dense fit math), and a page minimum wider than the panel's anchor band GROWS THE WHOLE CARD
+## (tests/test_menu_layout_stability.gd). Never pay for a wider bar out of the rows.
 func _add_tab(key: String, title: String) -> VBoxContainer:
 	var scroll := ScrollContainer.new()
 	scroll.name = key  # the KEY, never display prose — TabContainer would otherwise title the tab from it
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
+	# clampi, not a bare subtraction: a skin that widens the bar past the page margin would otherwise hand
+	# MarginContainer a NEGATIVE margin (rows drawn under the bar) instead of just closing the gutter.
+	var gutter: int = clampi(MenuStyle.skin.scrollbar_width, 0, PAGE_MARGIN)
 	var margin := MarginContainer.new()
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 10)
+	for side in ["left", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, PAGE_MARGIN)
+	margin.add_theme_constant_override("margin_right", PAGE_MARGIN - gutter)
 	var v := VBoxContainer.new()
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.add_theme_constant_override("separation", 10)

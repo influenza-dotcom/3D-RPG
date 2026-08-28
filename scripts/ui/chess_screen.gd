@@ -42,11 +42,23 @@ const BOARD_CELL := 21
 const BOARD_PIECE_FONT := int(BOARD_CELL * 0.62)
 const VISUALIZER_ABILITY := &"chess_visualizer"
 
-# Board cell tints (muted, mid-tone so both white and black piece letters stay legible on either shade).
+# Board cell tints (muted, mid-tone so a piece letter of EITHER colour can sit on either shade).
 const LIGHT_SQ := Color(0.62, 0.62, 0.68)
 const DARK_SQ := Color(0.40, 0.40, 0.46)
 const WHITE_PIECE := Color(0.97, 0.97, 0.95)
 const BLACK_PIECE := Color(0.06, 0.06, 0.10)
+## ⭐WHAT MAKES THE MID-TONE SQUARES WORK: each letter carries its OWN counter-shaded rim, so legibility never
+## depends on which shade the piece happens to be standing on. Measured off the QA board shot, the tints alone
+## did NOT hold: white letters on a light square are ~2.5:1 and black letters on a dark square are barely more,
+## so half the board read as washed out — and it is exactly the half a player must read to find their back rank.
+## Re-tuning the two square tints cannot fix that; it only moves the failure to the other half of the board
+## (darken the light square and the black letters standing on it go). The rim is per-PIECE, which is the only
+## treatment that covers all four letter/square combinations at once.
+const WHITE_PIECE_RIM := Color(0.04, 0.04, 0.07, 0.95)  ## dark rim under a light letter
+const BLACK_PIECE_RIM := Color(0.96, 0.96, 0.93, 0.85)  ## light rim under a dark letter
+## Rim width in px. THIN on purpose: BOARD_PIECE_FONT is ~13px on a 21px square, so anything heavier fattens the
+## glyph until R/B/K stop being distinguishable at a glance — the same budget the hotbar's small labels use.
+const PIECE_RIM_PX := 2
 const LAST_MOVE_TINT := Color(0.85, 0.75, 0.35, 0.55)   # highlights the from/to of the most recent move
 
 var _root: Control
@@ -423,7 +435,12 @@ func _rebuild_board() -> void:
 			var piece: int = _game.board[s]
 			var label: Label = _cell_labels[idx]
 			label.text = ChessGame.piece_letter_cased(piece)
-			label.add_theme_color_override(&"font_color", WHITE_PIECE if ChessGame.color_of(piece) == ChessGame.WHITE else BLACK_PIECE)
+			# Fill AND rim flip together with the piece's colour (see WHITE_PIECE_RIM): the rim is the half that
+			# survives the square underneath, so the two must never be set apart from one another. An EMPTY square
+			# lands here too and takes whichever pair color_of() reports — harmless, its text is "".
+			var white_piece := ChessGame.color_of(piece) == ChessGame.WHITE
+			label.add_theme_color_override(&"font_color", WHITE_PIECE if white_piece else BLACK_PIECE)
+			label.add_theme_color_override(&"font_outline_color", WHITE_PIECE_RIM if white_piece else BLACK_PIECE_RIM)
 			var base: Color = LIGHT_SQ if ((file + rank) % 2 == 1) else DARK_SQ
 			if s == _last_from or s == _last_to:
 				base = base.lerp(LAST_MOVE_TINT, LAST_MOVE_TINT.a)  # tint the last move's squares
@@ -522,6 +539,9 @@ func _populate_board_grid(grid: GridContainer) -> void:
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		lbl.add_theme_font_size_override("font_size", BOARD_PIECE_FONT)  # piece letters sized to the BOARD_CELL square
+		# The counter-shaded rim (PIECE_RIM_PX): width is fixed for every cell and set once here, while the rim
+		# COLOUR flips per piece in _rebuild_board. An outline costs nothing on an empty cell — no text, no rim.
+		lbl.add_theme_constant_override(&"outline_size", PIECE_RIM_PX)
 		lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		cell.add_child(lbl)
 		grid.add_child(cell)

@@ -100,6 +100,25 @@ func test_shirt_reset_drops_two_sided_custom_shirt() -> void:
 	assert_eq(cc._shirt_canvas._imgs[ShirtCanvasScript.SIDE_FRONT].get_pixel(4, 4), Color.WHITE, "front art is blanked")
 	assert_eq(cc._shirt_canvas._imgs[ShirtCanvasScript.SIDE_BACK].get_pixel(4, 4), Color.WHITE, "back art is blanked")
 
+func test_the_stats_tab_states_the_zero_sum_rule_under_the_banner() -> void:
+	# The tab opens with every stat at 0, "Points to spend: 0" and every "+" painted disabled — which reads as a
+	# BROKEN menu unless something says that a "−" on another stat is what funds a "+". The rule line is that
+	# something. It is CODE-BUILT into the authored StatsTab (the scene carries no text), so the scene-wiring
+	# suite cannot see it at all; pinned here, on the real screen, in the position it has to hold.
+	var cc = _make_screen()
+	var tab := cc.get_node("%StatsTab") as VBoxContainer
+	var banner := cc.get_node("%PointsLabel") as Label
+	var rule := tab.get_child(banner.get_index() + 1) as Label
+	assert_not_null(rule, "a Label sits directly under the points banner (before the stat scroll)")
+	assert_eq(rule.text, PlayerText.CHARACTER_CREATE_STAT_RULE,
+		"…painted from the authored const, never a literal at the paint site")
+	# ONE LINE, by construction: a wrapping label owns its row's height, so a second line would push the stat
+	# list down AND grow the Stats page's minimum past the card's anchor band — the menus-don't-resize rule
+	# tests/test_menu_layout_stability.gd exists to police.
+	assert_eq(rule.autowrap_mode, TextServer.AUTOWRAP_OFF,
+		"the rule line never wraps — a second line would resize the card")
+	assert_true(rule.clip_text, "…and clips instead, so a re-worded or l10n'd line can never widen it either")
+
 func test_plus_steppers_gate_on_spare_points() -> void:
 	var cc = _make_screen()
 	assert_true((cc._plus_buttons[&"strength"] as Button).disabled, "the + stepper is disabled with no spare points")
