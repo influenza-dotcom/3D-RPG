@@ -14,7 +14,8 @@ func test_minute_of_day_maps_the_cardinal_times() -> void:
 	assert_eq(CLOCK.minute_of_day(0.0), 0, "0.0 is midnight")
 	assert_eq(CLOCK.minute_of_day(0.25), 360, "0.25 is 06:00 — WorldClock.day_start, dawn")
 	assert_eq(CLOCK.minute_of_day(0.5), 720, "0.5 is noon, the WorldClock's own documented anchor")
-	assert_eq(CLOCK.minute_of_day(0.75), 1080, "0.75 is 18:00 — WorldClock.night_start, dusk")
+	assert_eq(CLOCK.minute_of_day(0.75), 1080, "0.75 is 18:00")
+	assert_eq(CLOCK.minute_of_day(0.8333), 1199, "0.8333 is 19:59 — WorldClock.night_start / the main level's dusk_time (8pm to the nearest minute)")
 
 
 func test_minute_of_day_wraps_like_the_world_clock() -> void:

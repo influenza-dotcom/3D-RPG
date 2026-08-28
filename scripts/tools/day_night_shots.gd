@@ -16,7 +16,9 @@ extends SceneTree
 const LEVEL := "res://scenes/levels/trenchboom_test_level.tscn"
 ## time_of_day stops: midnight (deep night), a risen morning sun, noon peak, golden-hour dusk. Dawn 0.25 itself
 ## is deliberately NOT a stop — the sun sits exactly ON the horizon there (day factor 0), which shoots like night.
-const STOPS := [["0_midnight", 0.0], ["1_morning", 0.3], ["2_noon", 0.5], ["3_dusk", 0.7]]
+## Dusk is 0.8 (7:12pm), mid-fade of the main level's AUTHORED daylight window (dusk_time 0.8333 = 8pm sunset,
+## full_brightness_elevation 0.35) — the old 0.7 stop now shoots as full afternoon daylight there.
+const STOPS := [["0_midnight", 0.0], ["1_morning", 0.3], ["2_noon", 0.5], ["3_dusk", 0.8]]
 ## ⭐PER-STOP SETTLE, AND IT MUST BE GENEROUS. This world's scene fill is VOLUMETRIC FOG, which is temporally
 ## reprojected — it converges over time rather than per frame. Jumping the clock straight from midnight to noon
 ## is the largest lighting change the level can make, and at 45 frames the noon shot still rendered essentially

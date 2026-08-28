@@ -19,6 +19,8 @@ extends Node
 ##  * `drive_sky` — day-brighten the StarSky horizon sky via the shader's EXISTING uniforms (`zenith_color`,
 ##    `horizon_color`, `sun_glow`, `sun_azimuth`) — parameter writes only, never a shader edit or sky swap, so
 ##    StarSky keeps sole ownership of the material + the kill `flash`. Off = the authored sky holds 24/7.
+##  * `dawn_time` / `dusk_time` / `full_brightness_elevation` — WHEN the day is: the horizon crossings and how
+##    hard daylight plateaus between them. Defaults (0.25 / 0.75 / 1.0) are the original 6am..6pm raw sinusoid.
 ##
 ## ⭐NIGHT IS A STEALTH BUFF, automatically: PlayerLightLevel adds a DirectionalLight's raw energy globally, so
 ## dropping the key light from the sun's authored energy to the moon's fraction of it drops the player's light
@@ -35,15 +37,36 @@ extends Node
 @export_group("Sun")
 ## The sun to drive. Null -> auto-find the first DirectionalLight3D under this node's own scene at _ready.
 @export var sun: DirectionalLight3D
+## time_of_day fraction the sun RISES (crosses the horizon upward). 0.25 = 6am on the HUD clock.
+@export var dawn_time: float = 0.25
+## time_of_day fraction the sun SETS. ⭐The default 0.75 (6pm) reproduces the original hard-coded sinusoid; the
+## main level authors 0.8333 (8pm) because a 6pm blackout read as "way too dark by 4-5pm" — with the raw sine,
+## brightness was already halved by 4pm. Everything rides this window together (energy, ambient, sky, the arc,
+## the moon handover), so the horizon crossing and the light always agree. NOT the WorldClock phase boundary:
+## `WorldClock.night_start` (schedules, night_only fixtures) is its own GAMEPLAY knob — it now ships at the same
+## 0.8333 so lamps and schedules flip at full dark, but set it earlier than dusk_time if you want streetlights
+## burning through the dusk fade.
+@export var dusk_time: float = 0.75
+## Sun elevation (fraction of the noon peak, 0..1) at which daylight SATURATES to full brightness. 1.0 (the
+## default) = the original raw sinusoid: brightness tracks elevation all day, so the light starts dying right
+## after noon. Lower it and the day PLATEAUS — full authored brightness while the sun is above this elevation,
+## with the whole fade to dark compressed into the twilight band just after dawn / before dusk (the main level
+## authors 0.35). ⭐Clamped to at most 1.0 live: a higher value would dim NOON below the authored peak and
+## quietly break the "bare drop-in keeps the authored noon" contract.
+@export var full_brightness_elevation: float = 1.0
 ## OPT-IN: arc the sun's ORIENTATION (pitch + a gentle yaw sweep) across the day. ⭐OFF (default) = the sun
 ## holds its AUTHORED direction — the level's manicured key-light angle — and only energy/colour/visibility
-## animate. Turning this on also engages high_sun_fog_scale (the climbing sun's washout guard).
+## animate. Turning this on also engages high_sun_fog_scale (the climbing sun's washout guard). At night the
+## arc hands the orientation back to the AUTHORED rake (the moon's angle) over the dusk crossfade — the raw
+## arc would otherwise shine UP from below the horizon all night.
 @export var drive_sun_rotation: bool = false
 ## Sun light energy at high noon. ⭐0 (the default) = use the sun's AUTHORED light_energy as the peak, so the
 ## bare drop-in keeps the level's authored noon brightness. Set explicitly to retune the whole day's scale.
 @export var peak_sun_energy: float = 0.0
-## OPTIONAL energy shape over time_of_day (0..1) — sampled for the 0..1 day factor. Null -> a clean sinusoid
-## (max(sun_elevation, 0)): 0 below the horizon, peaking at noon.
+## OPTIONAL energy shape over time_of_day (0..1) — sampled for the 0..1 day factor, REPLACING the built-in
+## dawn/dusk-window shape entirely (dawn_time / dusk_time / full_brightness_elevation are ignored while a curve
+## is authored). ⭐A curve that stays > 0 past the sun's horizon crossing breaks the day>0 ⇔ elev>0 invariant
+## the arc's never-points-up handover rests on — keep an authored curve at 0 wherever the sun is down.
 @export var sun_energy_curve: Curve
 ## OPTIONAL sun colour over time_of_day (0..1). ⭐Null (default) -> the sun keeps its AUTHORED colour at every
 ## hour (the manicured look). Author a Gradient to colour-ramp the day instead — e.g. offsets 0/.25/.5/.75/1
@@ -110,17 +133,32 @@ extends Node
 ## Night zenith/horizon — defaults mirror horizon_sky.gdshader's authored uniforms, so an untouched night looks
 ## exactly like the pre-cycle sky. (Captured as exports, not read from the material: a ShaderMaterial only
 ## reports uniforms something has SET, so the shader's own defaults are not readable at runtime.)
+## ⭐PROBE-CONFIRMED: a Color written to a `source_color` uniform via set_shader_parameter is NOT sRGB-converted
+## — it lands exactly as typed, matching the shader's own vec3 literal. (Pre-compensating these to linear was
+## tried and moved 30% of night sky pixels; copying the literals verbatim is correct.) Only a literal declared
+## in SHADER SOURCE versus a picked Inspector Color can diverge — see horizon_sky.gdshader's tone defaults.
 @export var sky_night_zenith: Color = Color(0.015, 0.025, 0.055)
 @export var sky_night_horizon: Color = Color(0.06, 0.11, 0.16)
-## The horizon shader's hazy sun-glow strength at high noon (its `sun_glow` uniform; authored default 0.5).
-## Scaled by the day factor, so the glow sets with the sun and the night keeps only the light-pollution haze.
-@export var sky_sun_glow: float = 0.5
+## The horizon shader's hazy sun-glow strength at HIGH NOON (its `sun_glow` uniform). ⭐Lowered from the
+## shader's authored 0.5 because that amber lobe is a DUSK read: `haze_color` is sunset amber and the lobe is
+## pinned to the horizon whatever the sun's real elevation, so at noon it painted a sunset across the horizon
+## band no matter how blue the zenith got (probe-measured: the lobe alone moved the sky by mean 0.151 /
+## max 0.475). The NIGHT keeps the authored 0.5 — see below.
+@export var sky_sun_glow: float = 0.12
+## ⭐⭐THE AUTHORED NIGHT VALUES THE GLOW AND ITS BEARING RETURN TO, mirroring horizon_sky.gdshader's own
+## defaults so that day 0 is the authored night EXACTLY. Scaling the glow by `day` alone (what this used to do)
+## drove it to 0 at midnight and snapped the azimuth onto the arc's yaw — which changed 100% of night sky
+## pixels by up to 82/255. That is the "authored look is the resting state" contract broken by the very knob
+## that promises it. Holding both here measured 0 of 131072 sky pixels different from the untouched night.
+@export var sky_night_sun_glow: float = 0.5
+@export var sky_night_sun_azimuth: float = 0.7
 
 var _env: WorldEnvironment = null
 var _warned: bool = false
 var _authored_sun_energy: float = 1.0        ## captured at _ready — the noon peak while peak_sun_energy is 0
 var _authored_sun_color: Color = Color.WHITE ## captured at _ready — the sun's colour while no gradient is authored
 var _authored_sun_fog: float = 1.0           ## captured at _ready — light_volumetric_fog_energy, scaled by elevation
+var _authored_sun_quat := Quaternion.IDENTITY ## captured at _ready — the manicured key angle the arc returns to at night
 var _authored_ambient: float = 1.0           ## captured at _ready — the base the day/night scales multiply
 var _sky_mat: ShaderMaterial = null     ## last horizon-sky material checked (identity cache for _sky_ok)
 var _sky_ok: bool = false               ## does _sky_mat expose the horizon uniforms we drive?
@@ -134,6 +172,7 @@ func _ready() -> void:
 		_authored_sun_energy = sun.light_energy
 		_authored_sun_color = sun.light_color
 		_authored_sun_fog = sun.light_volumetric_fog_energy
+		_authored_sun_quat = sun.global_basis.get_rotation_quaternion()
 	if _env != null and _env.environment != null:
 		# Captured AFTER StarSky's node_added pass, so on a sky-sourced env this reads StarSky's pinned 1.0 and
 		# on a colour-sourced env (the main level) the designer's authored value — either way, "what noon looks
@@ -147,16 +186,25 @@ func _process(_delta: float) -> void:
 	if sun == null:
 		return
 	var t: float = WorldClock.time_of_day
-	var elev := sun_elevation(t)
-	var day := day_factor(t, sun_energy_curve)
-	var yaw := sun_yaw_deg + (t - 0.5) * sun_sweep_deg
-	if drive_sun_rotation:
-		var pitch := -elev * max_sun_pitch_deg  # noon (elev 1) -> steepest; dawn/dusk (elev 0) -> 0 (horizon)
-		sun.global_rotation = Vector3(deg_to_rad(pitch), deg_to_rad(yaw), 0.0)
+	var elev := sun_elevation(t, dawn_time, dusk_time)
+	var day := day_factor(t, sun_energy_curve, dawn_time, dusk_time, full_brightness_elevation)
+	# Yaw sweeps around the day window's MIDPOINT (solar noon), not 0.5 — with an asymmetric authored window
+	# (the main level's 6am..8pm) the sun's highest point lands mid-window, and the sweep should mirror it.
+	var yaw := sun_yaw_deg + (t - (dawn_time + dusk_time) * 0.5) * sun_sweep_deg
 	# ⭐DAY AND NIGHT ARE ONE LIGHT. Above the horizon it is the sun (authored colour + energy scaled by the day
 	# factor); below it the SAME light becomes the moon — dim, cool, still on the authored direction. Crossfaded
 	# over `day` rather than switched at the horizon, so dusk hands over to moonlight without a visible pop.
 	var moon_lead := moon_lead_for(day)
+	if drive_sun_rotation:
+		var pitch := -elev * max_sun_pitch_deg  # noon (elev 1) -> steepest; dawn/dusk (elev 0) -> 0 (horizon)
+		# ⭐THE ARC MUST NOT FOLLOW THE SUN UNDER THE WORLD. Below the horizon -elev flips sign, so the raw arc
+		# pitch turns POSITIVE — a key light shining UP from underground (probe-measured +58° at midnight): the
+		# street loses every edge the moon exists to keep, and shadows land on undersides. So the ORIENTATION
+		# rides the same dusk crossfade as the energy/colour: as the moon takes the lead, the arc hands the
+		# angle back to the AUTHORED rake the moon was designed to hold. Euler write, not a basis write — a
+		# basis assignment would wipe an authored scale 60x/s.
+		var arc := Quaternion.from_euler(Vector3(deg_to_rad(pitch), deg_to_rad(yaw), 0.0))
+		sun.global_rotation = Basis(key_light_quat_for(arc, _authored_sun_quat, moon_lead)).get_euler()
 	var moon_energy := maxf(0.0, moon_energy_scale) * maxf(0.0, _authored_sun_energy)
 	sun.light_energy = key_light_energy_for(
 			sun_energy_for(day, peak_sun_energy, _authored_sun_energy), moon_energy, moon_lead)
@@ -176,19 +224,32 @@ func _process(_delta: float) -> void:
 ## The live day factor (0 deep night .. 1 high noon) — the ONE value other systems may sample off this driver
 ## (found via group "day_night", duck-typed). ViewModelCamera dims its gun fill by it at night.
 func current_day_factor() -> float:
-	return day_factor(WorldClock.time_of_day, sun_energy_curve)
+	return day_factor(WorldClock.time_of_day, sun_energy_curve, dawn_time, dusk_time, full_brightness_elevation)
 
-## Sun elevation -1..1 over time_of_day: -1 at midnight (below the horizon), 0 at dawn (0.25) / dusk (0.75) on the
-## horizon, +1 at noon (0.5) overhead. A clean sinusoid (-cos), so the arc is smooth and wraps. Pure — unit-tested.
-static func sun_elevation(t: float) -> float:
-	return -cos(TAU * fposmod(t, 1.0))
+## Sun elevation -1..1 over time_of_day: -1 mid-night (below the horizon), 0 on the horizon at `dawn`/`dusk`,
+## +1 at the day window's midpoint (solar noon). Two sine half-arcs stitched at the horizon crossings — at the
+## default 0.25/0.75 window this is EXACTLY the original -cos(TAU*t) sinusoid, so a bare drop-in is unchanged;
+## an authored window (the main level's 6am..8pm) just moves where the crossings land. Smooth, wraps, and stays
+## the single source of "is the sun up" — day_factor derives from it, so day > 0 ⇔ elev > 0 holds for ANY
+## window (the invariant key_light_quat_for's never-points-up construction rests on). Pure — unit-tested.
+static func sun_elevation(t: float, dawn: float = 0.25, dusk: float = 0.75) -> float:
+	t = fposmod(t, 1.0)
+	dawn = clampf(dawn, 0.01, 0.97)
+	dusk = clampf(dusk, dawn + 0.02, 0.99)
+	if t >= dawn and t < dusk:
+		return sin(PI * (t - dawn) / (dusk - dawn))
+	var since_dusk := t - dusk if t >= dusk else t + 1.0 - dusk
+	return -sin(PI * since_dusk / (1.0 - (dusk - dawn)))
 
-## The 0..1 day light factor: a custom energy `curve` sampled at t when given, else max(sun_elevation, 0) — 0 below
-## the horizon (night), peaking at noon. Pure (the curve is passed in) so it's unit-testable.
-static func day_factor(t: float, curve: Curve = null) -> float:
+## The 0..1 day light factor: a custom energy `curve` sampled at t when given, else the sun's elevation over the
+## dawn..dusk window divided by `full_elev` and clamped — so elevations above `full_elev` SATURATE to full
+## brightness (the afternoon plateau) and the fade lives in the twilight band. full_elev 1.0 collapses to the
+## original max(sun_elevation, 0); it is clamped to at most 1.0 so no value can dim the authored noon. Pure
+## (the curve is passed in) so it's unit-testable.
+static func day_factor(t: float, curve: Curve = null, dawn: float = 0.25, dusk: float = 0.75, full_elev: float = 1.0) -> float:
 	if curve != null:
 		return clampf(curve.sample(fposmod(t, 1.0)), 0.0, 1.0)
-	return maxf(sun_elevation(t), 0.0)
+	return clampf(sun_elevation(t, dawn, dusk) / clampf(full_elev, 0.001, 1.0), 0.0, 1.0)
 
 ## The sun's energy for a day factor: the explicit peak when set, else the AUTHORED energy captured at _ready —
 ## the "bare drop-in keeps the authored noon" contract. Pure — unit-tested.
@@ -211,6 +272,14 @@ static func fog_energy_scale_for(elevation: float, high_scale: float) -> float:
 ## cannot fight it — so the crossfade reads as one light changing character, not two lights swapping. Pure.
 static func moon_lead_for(day: float) -> float:
 	return 1.0 - clampf(day * 4.0, 0.0, 1.0)
+
+## The ONE key light's ORIENTATION for a moon handover `lead` (0 full day .. 1 deep night): the day ARC
+## rotation slerped back onto the AUTHORED rake as the moon takes the lead. Slerp, never a per-axis euler lerp —
+## the authored rake can decompose into a far euler branch (yaw 180°) and component-lerping across branches
+## tumbles the light mid-handover. Live, lead only leaves 0 while the arc is still above the horizon (day > 0
+## ⇔ elev > 0), so every blend runs between two DOWNWARD angles — the light can never point up. Pure — unit-tested.
+static func key_light_quat_for(arc: Quaternion, authored: Quaternion, lead: float) -> Quaternion:
+	return arc.slerp(authored, clampf(lead, 0.0, 1.0))
 
 ## The ONE key light's energy: the sun's own value, or the moon's once it leads — whichever is greater, so the
 ## crossfade can never dip through a dark seam at dusk (a plain lerp between them does exactly that). Pure —
@@ -237,8 +306,20 @@ func _drive_sky_material(day: float, yaw_deg: float) -> void:
 		return
 	mat.set_shader_parameter(&"zenith_color", sky_night_zenith.lerp(sky_day_zenith, day))
 	mat.set_shader_parameter(&"horizon_color", sky_night_horizon.lerp(sky_day_horizon, day))
-	mat.set_shader_parameter(&"sun_glow", maxf(0.0, sky_sun_glow) * day)
-	mat.set_shader_parameter(&"sun_azimuth", wrapf(deg_to_rad(yaw_deg), -PI, PI))
+	mat.set_shader_parameter(&"sun_glow", lerpf(maxf(0.0, sky_night_sun_glow), maxf(0.0, sky_sun_glow), day))
+	# ⭐The bearing EASES from the authored night azimuth to the live sun's yaw as the day comes up, rather than
+	# snapping to the arc at every hour — at day 0 that is the authored 0.7 rad, the other half of what made
+	# `drive_sky` repaint the night. Accepted cost, stated rather than hidden: through the dusk fade the lobe
+	# migrates ~25° off the setting sun as it hands the bearing back. lerp_angle, not lerpf: the arc's yaw is
+	# a designer knob and a wider sun_sweep_deg would straddle ±PI, where component lerp takes the long way.
+	mat.set_shader_parameter(&"sun_azimuth",
+			lerp_angle(sky_night_sun_azimuth, wrapf(deg_to_rad(yaw_deg), -PI, PI), day))
+	# ⭐AND THE HORIZON BAND ITSELF. The gradient above the band is only half the sky — the authored skybox image
+	# laid along the horizon carries its OWN night sky, and lerping the gradient to day while the band stayed
+	# night drew a hard dark arc across the top of the image (probe-verified). `day` re-grades the band's palette
+	# in step, so the two halves meet. Written from HERE, not from a general "drive any sky" hook, precisely so
+	# the band can never be day while the gradient is night.
+	mat.set_shader_parameter(&"day", clampf(day, 0.0, 1.0))
 
 ## The env's live sky ShaderMaterial IF it exposes the horizon uniforms we drive, else null. The uniform probe
 ## is the StarSky._has_param idiom (a ShaderMaterial publishes one shader_parameter/<uniform> property per

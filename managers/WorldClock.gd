@@ -18,8 +18,12 @@ enum Phase { NIGHT, DAY }
 ## Real seconds for one full in-game day (0 = clock frozen).
 var day_length_seconds: float = 600.0
 ## time_of_day fractions where DAY begins (dawn) and NIGHT begins (dusk). DAY is the half-open [day_start, night_start).
+## ⭐night_start rides in step with the main level's DayNightSky `dusk_time` (0.8333 = 8pm sunset, the 2026-08-26
+## "too dark by 4-5pm" fix): night_only streetlights, NPC schedules and the wait screen flip to NIGHT at full dark.
+## They are still SEPARATE knobs — this one is gameplay (schedules/fixtures), dusk_time is lighting — so a level
+## that wants lamps on during the dusk fade sets this a little earlier than its dusk_time.
 var day_start: float = 0.25
-var night_start: float = 0.75
+var night_start: float = 0.8333
 ## Current time of day, 0..1. Starts at noon so a fresh game opens in daylight.
 var time_of_day: float = 0.5
 
