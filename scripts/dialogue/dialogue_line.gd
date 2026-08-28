@@ -13,11 +13,12 @@ const CONTINUE: int = -2  # choice target sentinel (the DEFAULT): picking the ch
 
 ## The spoken text shown for this line (multiline). The speaker's name is supplied by the talking character, not here.
 @export_multiline var text: String = ""
-## Tick this on the line where the speaker tells you their name (e.g. "The name's Marcus."). When the line plays,
-## DialogueManager calls GameState.reveal_name on the speaker, so from that moment on the NPC shows their REAL name
-## instead of "Stranger" — in this box, on the look-at readout, on their corpse, everywhere (and it sticks across a
-## save). Until some line flips this, the NPC stays a Stranger. Only real character speakers are masked; an
-## inanimate DialogueNPC (terminal / sign) is never a Stranger, so this is a no-op there.
+## LEGACY / redundant for a character speaker: simply OPENING a conversation now ends "Stranger" status — the act
+## of talking to someone IS the introduction (DialogueManager.start calls GameState.reveal_name on any real
+## character speaker), so a character is already named by the time their first line paints. Ticking this on a line
+## where the speaker states their name (e.g. "The name's Marcus.") still calls reveal_name, it just has nothing
+## left to unlock. Kept so authored .tres files keep loading and a future non-auto-reveal flow has a per-line hook.
+## Only real character speakers are masked; an inanimate DialogueNPC (terminal / sign) is never a Stranger.
 @export var reveals_name: bool = false
 ## Branch options offered at this line. Empty = the line plays linearly and advances to the next on input.
 @export var choices: Array[DialogueChoice] = []

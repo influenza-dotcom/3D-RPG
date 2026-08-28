@@ -50,8 +50,11 @@ extends Resource
 ## (HighPass 900 Hz / resonance 0.7 -> Distortion LOFI drive 0.25 -> LowPass 4200 Hz) but SENDS INTO `music`
 ## rather than `sfx`, so the Options **Music** slider governs it — a 90-second loop is music by every
 ## definition that menu uses, and a player who pulls Music to 0 to run their own playlist must not still hear
-## shop themes. Sending into `music` also inherits the dialogue duck, the ADS duck and the death-cinematic
-## world duck for free. Point it at `sfx` for a clean, expensive-sounding machine, or at `speaker` to share
+## shop themes. Sending into `music` also inherits the ADS duck and the death-cinematic world duck for free.
+## ⭐The DIALOGUE duck is the one exception, and deliberately so: it STANDS DOWN while a station screen is up
+## (MusicDucker.note_station_radio, fed by StationMusic.is_screen_open()). A dialogue-hosted Trade suspends the
+## conversation — nobody is speaking — so leaving that duck armed just made a person-vendor's shop play 12 dB
+## quieter than the identical kiosk beside it. Point it at `sfx` for a clean, expensive-sounding machine, or at `speaker` to share
 ## the chirp's exact bus (and its Effects-slider fate). A bus that does not exist degrades to `music` with a
 ## warning — never `sfx` (that would silently re-categorise a music bed) and never Master (which escapes
 ## every slider AND the death duck).

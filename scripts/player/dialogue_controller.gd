@@ -66,6 +66,9 @@ func focus_camera_on(target_pos: Vector3) -> void:
 	var target_yaw := atan2(-flat.x, -flat.z)  # body forward (-Z) faces the target horizontally
 	var max_pitch := deg_to_rad(GameSettings.camera.pitch_max_deg)
 	var target_pitch := clampf(atan2(to.y, flat.length()), -max_pitch, max_pitch)  # + = look up
+	# Frame the speaker RIGHT-of-centre (positive yaw turns the camera left, pushing the target right in
+	# frame) so the box-less dialogue UI's left-hand response column doesn't sit on the face-lit speaker.
+	target_yaw += deg_to_rad(GameSettings.camera.dialogue_frame_offset_deg)
 	var yaw_target := host.rotation.y + wrapf(target_yaw - host.rotation.y, -PI, PI)  # shortest path
 	var tw := create_tween().set_parallel()
 	tw.set_trans(Tween.TRANS_SINE)

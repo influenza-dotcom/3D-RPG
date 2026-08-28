@@ -132,9 +132,11 @@ extends Resource
 ## Minimum width of a dialog action button (Confirm/Cancel/Close/Heal). One value so the
 ## transaction modals' buttons match across screens.
 @export var dialog_button_min_width: int = 160
-## Width FLOOR for one player-menu tab button (Inventory/Stats/Implants/Reputation/Journal). The strip
-## stretches to the panel's width; this only guards pathological narrow canvases. Keep the five
-## tabs' total (5x + separations) under the 0.12-margin panel width at the smallest canvas.
+## Width FLOOR for one player-menu tab button (Inventory/Stats/Implants/Map/Reputation/Journal). The strip
+## stretches to the panel's width; this only guards pathological narrow canvases. Keep the SIX
+## tabs' total (6x + separations) under the 0.12-margin panel width at the smallest canvas — at the shipped
+## 72 that is 432 + 30 vs the ~602 px the 792-wide canvas leaves inside the band, so a seventh tab is the
+## next thing that would need this floor lowered.
 @export var tab_min_width: int = 72
 ## FIXED width (px) of a centered transaction / prompt dialog card (heal / respec / name-entry). The card
 ## is pinned to EXACTLY this width regardless of its text (MenuStyle.make_dialog), so a long station /
@@ -166,7 +168,9 @@ extends Resource
 @export var slider_width: int = 120
 ## Options: the same floor inside a two-up dense column (the Accessibility tab), where two full-width rows
 ## have to share one panel. The half-column fit at the 792x444 canvas: the Options panel's 0.07..0.93 band
-## is 681px, the artist frame stylebox eats 72 of it, and the page's own margins another 20 — so the two
+## is 681px, the artist frame stylebox eats 72 of it, and the page's own insets another 20
+## (options_menu.PAGE_MARGIN each side — the right one now split between air and the always-visible
+## scrollbar's gutter, which is why widening scrollbar_width costs the columns nothing) — so the two
 ## columns plus their 10px gutter must fit ~589px. 110 (dense label) + 10 + 90 + 10 + 56 (readout) = 276 per
 ## column -> 562. At the drawn width the slider still gets ~103px, so this floor never binds in practice; it
 ## exists so the page's MINIMUM stays inside the panel instead of growing the card when Accessibility opens.
@@ -183,7 +187,8 @@ extends Resource
 @export var setting_label_col_width: int = 130
 ## Options: setting-name column floor inside a two-up dense column (the Accessibility tab). The half-column
 ## fit is English-measured: 110 + 10 + slider_width_dense (90) + 10 + slider_readout_width (56) = 276, and two
-## of those plus the 10px gutter and the page's 20px margins fit the panel's ~609px inner width — the full
+## of those plus the 10px gutter and the page's 20px of insets (see slider_width_dense — the scrollbar rides
+## inside them, it does not add to them) fit the panel's ~609px inner width — the full
 ## setting_label_col_width (130) would overflow it and grow the whole Options card. A locale growing either
 ## label width must re-verify that sum (tests/test_menu_layout_stability.gd fails if it stops fitting).
 @export var setting_label_col_width_dense: int = 110
@@ -320,10 +325,35 @@ extends Resource
 @export var tab_hovered: StyleBox
 
 @export_group("Widget art — scrollbars")
-## Scrollbar track (default: 5%-white).
+## THE KNOB THAT DECIDES WHETHER A SCROLLBAR EXISTS AT ALL — the bar's thickness in canvas px. A ScrollBar
+## takes its cross-axis size from the CONTENT MARGINS of its track box and from nothing else, so MenuStyle
+## stamps this number onto whichever box the bar ends up wearing — the generated one AND an artist's, which
+## would otherwise re-collapse the bar the day a margin-less PNG lands. Until 2026-08-27 no box carried
+## margins and every scrollbar in the game drew ZERO px wide: not faint, not clipped — absent, and
+## un-grabbable. Four "this page silently hides half its rows" bugs were that one defect (Options→Controls
+## showed 4 of 44 bindings, Accessibility 14 of 33, character creation 4 of 6 stats, the Stats tab cut a
+## sentence mid-word).
+## ⚠ ALSO A LAYOUT BUDGET, not just paint: a ScrollContainer RESERVES this many px beside its content, so a
+## page with no width to spare must pay for the bar out of its own gutter rather than out of its rows —
+## options_menu._add_tab pulls its right page margin in by exactly this number for that reason. Retuning it
+## therefore retunes those hosts; re-verify tests/test_menu_layout_stability.gd after a change.
+## 0 = stamp nothing and let the boxes' own margins decide (an artist delivering a full-metric 9-patch).
+@export var scrollbar_width: int = 8
+## Scrollbar track (default: a flat bar in scrollbar_track_color).
 @export var scrollbar_track: StyleBox
-## Scrollbar thumb, all states (default: 22%-white).
+## Scrollbar thumb. ONE slot for all three states, like the slider's thumb: deliver it and the bar stops
+## lighting up under the mouse (default: a flat bar in scrollbar_grabber_color that goes ACCENT on
+## hover/drag — the same "this control is live" language the focus ring and the active tab speak).
 @export var scrollbar_grabber: StyleBox
+## OPTIONAL track ink — ⚠ ALPHA 0 = derive (the same null sentinel the button_font_*_color knobs use): a
+## faint wash of text_color. Consulted only while scrollbar_track is empty; a delivered StyleBox carries its
+## own colour. Author it against the PANEL, not the screen: the shipped skin runs a DARK ink on LIGHT
+## parchment, which is exactly where the old 5%-alpha track would have been invisible even at a real width.
+@export var scrollbar_track_color: Color = Color(0, 0, 0, 0)
+## OPTIONAL resting-thumb ink — same alpha-0-derives sentinel, same panel-contrast rule. The thumb is the
+## affordance ("this page has more"), so keep it well clear of the track: 75%-alpha text_color by default,
+## roughly four times the track's wash.
+@export var scrollbar_grabber_color: Color = Color(0, 0, 0, 0)
 
 @export_group("Widget art — misc")
 ## The hairline HSeparator/VSeparator (default: a 1px 8%-white top border).
@@ -342,6 +372,30 @@ extends Resource
 ## native size; anything spilling into a stretched edge/centre cell smears. The matching content margin
 ## must clear it too, or text/choice buttons land over the hole. See resources/ui/menu_skin.tres sb_dialogue.
 @export var dialogue_panel: StyleBox
+## Whether the dialogue box actually WEARS the dialogue_panel art. A GATE rather than emptying the slot,
+## on purpose: the slot keeps the artist's authored art (and its tests / shadow-bake target) while the
+## shipped look is the box-LESS one — outlined text + per-row beds straight over the 3D world, 2026-08-24.
+## Flip this back on to restore the olive slab without re-wiring anything.
+@export var dialogue_panel_enabled: bool = true
+## The dialogue RESPONSE ROW's rest-state bed — a translucent near-black plate behind each choice row.
+## Rest-state, not hover-state, deliberately: the dialogue camera centres+zooms the LIT speaker into the
+## column's region, so bare outlined text would sit on the brightest surface in the frame. null = the
+## generated default (MenuStyle.make_dialogue_choice_normal).
+@export var dialogue_choice_normal: StyleBox
+## The response row's hover/selected bed — the rest bed raised, plus a 3px left rule in the accent gold.
+## null = the generated default (MenuStyle.make_dialogue_choice_hover).
+@export var dialogue_choice_hover: StyleBox
+## Row ink for the dialogue response rows. NOT button_font_color (menu-PANEL ink, dark since the plum
+## palette): these rows float over the 3D world on translucent beds, so the ink must stay light — the
+## same rule dialogue_text_color / tile_count_color follow.
+@export var dialogue_choice_font_color: Color = Color(0.94, 0.93, 0.87)
+## Tint of a response row whose SKILL CHECK the player passes (the "[Streetwise 6]"-labelled rows).
+## Gold-adjacent, but its own slot: gate state must be re-inkable without moving the accent.
+@export var dialogue_choice_gate_pass_color: Color = Color(0.95, 0.85, 0.4)
+## Tint of a FAILED non-stat gate row (reputation/perk/item/quest — still selectable, routes to the fail
+## branch). Only painted while DialogueSettings.show_failed_gate_tags is on; muted terracotta so it reads
+## as "risky", never as the hostile red.
+@export var dialogue_choice_gate_fail_color: Color = Color(0.85, 0.55, 0.4)
 
 @export_group("Grid tiles")
 ## The tetris-grid stack tiles (grid_tile.gd / grid_inventory_view.gd) — the inventory/loot/shop cells.

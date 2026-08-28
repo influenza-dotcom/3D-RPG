@@ -38,7 +38,8 @@ func test_skin_exposes_every_artist_art_slot() -> void:
 			"slider_track", "slider_fill", "slider_grabber",
 			"line_edit_normal", "line_edit_focus", "meter_background", "meter_fill",
 			"tab_selected", "tab_unselected", "tab_hovered",
-			"scrollbar_track", "scrollbar_grabber", "separator_style", "tooltip_panel", "dialogue_panel"]:
+			"scrollbar_track", "scrollbar_grabber", "scrollbar_width", "scrollbar_track_color",
+			"scrollbar_grabber_color", "separator_style", "tooltip_panel", "dialogue_panel"]:
 		assert_true(field in s, "MenuSkin exposes artist slot %s" % field)
 	s = null
 
@@ -106,6 +107,81 @@ func test_artist_slider_thumb_and_toggle_icons_win() -> void:
 		"missing disabled ON variant falls back to the artist's enabled ON art")
 	assert_eq(_ms.theme.get_icon(&"unchecked_disabled", &"CheckBox"), off_tex,
 		"missing disabled OFF variant falls back to the artist's enabled OFF art")
+
+
+func test_scrollbars_are_drawn_wide_enough_to_see_and_grab() -> void:
+	# THE 0-PX BAR. A ScrollBar takes its cross-axis size from its track box's CONTENT MARGINS and from
+	# nothing else. The theme used to hand out margin-less boxes, so every scrollbar in the game was drawn
+	# zero pixels wide: four "this page silently hides half its rows" bugs (Options→Controls showed 4 of 44
+	# bindings, Accessibility 14 of 33, character creation 4 of 6 stats, the Stats tab cut a sentence
+	# mid-word) were that ONE defect. The width is a skin budget now; pin that it actually reaches the boxes.
+	var w := float(MenuSkin.new().scrollbar_width)
+	assert_gt(w, 0.0, "a bare skin draws a scrollbar with real width (0 here means no bar exists at all)")
+	for state in [&"scroll", &"grabber", &"grabber_highlight", &"grabber_pressed"]:
+		var v: StyleBox = _ms.theme.get_stylebox(state, &"VScrollBar")
+		assert_eq(v.content_margin_left + v.content_margin_right, w,
+			"VScrollBar %s spans skin.scrollbar_width across the bar" % state)
+		var h: StyleBox = _ms.theme.get_stylebox(state, &"HScrollBar")
+		assert_eq(h.content_margin_top + h.content_margin_bottom, w,
+			"HScrollBar %s is the same thickness on ITS cross axis" % state)
+	# Only the cross axis is stamped — the bar's minimum LENGTH stays the engine's business.
+	var track: StyleBox = _ms.theme.get_stylebox(&"scroll", &"VScrollBar")
+	assert_eq(track.content_margin_top + track.content_margin_bottom, 0.0,
+		"the vertical track reserves no length of its own")
+	# Every entry is its OWN box: two bar kinds x four states share the generated fallbacks, and a shared
+	# instance would collect both orientations' margins.
+	assert_ne(track, _ms.theme.get_stylebox(&"scroll", &"HScrollBar"),
+		"the two bar kinds wear separate duplicates, never one shared stylebox")
+
+
+func test_artist_scrollbar_art_still_gets_the_skin_thickness() -> void:
+	# The regression that would put the 0-px bar straight back: an artist delivers scrollbar PNGs whose boxes
+	# carry no content margins of their own. The thickness is stamped onto THEIR box too (a duplicate — the
+	# saved .tres sub-resource must stay pristine, the _pick rule).
+	var art := StyleBoxTexture.new()
+	var authored := art.content_margin_left  # -1 on a fresh box: "no content margin, use the style's own"
+	_ms.skin.scrollbar_track = art
+	_ms.rebuild()
+	var got: StyleBox = _ms.theme.get_stylebox(&"scroll", &"VScrollBar")
+	assert_true(got is StyleBoxTexture, "the artist track art lands in the theme")
+	assert_eq(got.content_margin_left + got.content_margin_right, float(_ms.skin.scrollbar_width),
+		"...wearing the skin's thickness, so delivered art can never collapse the bar to nothing")
+	assert_eq(art.content_margin_left, authored, "the artist's own box is untouched (the stamp lands on a copy)")
+	# 0 opts out entirely — for a skin delivering a full-metric 9-patch that owns its own margins.
+	_ms.skin.scrollbar_width = 0
+	_ms.rebuild()
+	assert_eq(_ms.theme.get_stylebox(&"scroll", &"VScrollBar").content_margin_left, authored,
+		"scrollbar_width 0 stamps nothing and leaves the box's own margins alone")
+
+
+func test_scrollbar_inks_read_against_the_panel_and_are_overridable() -> void:
+	# The other half of the invisible bar: the old track/grabber ran at 5% / 22% of text_color, which is
+	# hopeless with the shipped skin's DARK ink on LIGHT parchment. Both derive from text_color now, with the
+	# thumb well clear of the track so "there is more below" is the thing that reads.
+	# Explicit types throughout: _ms is Variant-held, so `.theme` is a Variant chain (see the disabled-body test).
+	var s: MenuSkin = _ms.skin
+	var track_box: StyleBoxFlat = _ms.theme.get_stylebox(&"scroll", &"VScrollBar")
+	var grab_box: StyleBoxFlat = _ms.theme.get_stylebox(&"grabber", &"VScrollBar")
+	var track: Color = track_box.bg_color
+	var grab: Color = grab_box.bg_color
+	assert_eq(Vector3(grab.r, grab.g, grab.b), Vector3(s.text_color.r, s.text_color.g, s.text_color.b),
+		"the resting thumb derives from the panel ink")
+	assert_gt(grab.a, 0.5, "...at an alpha that reads on either polarity of panel")
+	assert_gt(grab.a - track.a, 0.3, "the thumb stands clear of its track — that gap IS the affordance")
+	assert_gt(track.a, 0.1, "...and the empty track is still visible, so the bar has a length")
+	# Hover/drag lights the thumb in the accent (the focus-ring / active-tab language).
+	var hot := (_ms.theme.get_stylebox(&"grabber_highlight", &"VScrollBar") as StyleBoxFlat).bg_color
+	assert_eq(Vector3(hot.r, hot.g, hot.b), Vector3(s.accent_color.r, s.accent_color.g, s.accent_color.b),
+		"a grabbed thumb wears the accent")
+	# The alpha-0 sentinel, same as the button caption inks: an authored colour wins without needing a StyleBox.
+	assert_eq(MenuSkin.new().scrollbar_grabber_color.a, 0.0, "the ink knobs default to 'derive'")
+	_ms.skin.scrollbar_grabber_color = Color(0.1, 0.2, 0.3, 1.0)
+	_ms.skin.scrollbar_track_color = Color(0.3, 0.2, 0.1, 1.0)
+	_ms.rebuild()
+	assert_eq((_ms.theme.get_stylebox(&"grabber", &"VScrollBar") as StyleBoxFlat).bg_color, Color(0.1, 0.2, 0.3, 1.0),
+		"an authored thumb ink replaces the derived one")
+	assert_eq((_ms.theme.get_stylebox(&"scroll", &"VScrollBar") as StyleBoxFlat).bg_color, Color(0.3, 0.2, 0.1, 1.0),
+		"...and an authored track ink too")
 
 
 func test_make_meter_tints_a_copy_of_the_artist_fill() -> void:

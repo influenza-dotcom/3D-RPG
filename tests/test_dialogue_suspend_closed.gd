@@ -1,18 +1,18 @@
 extends GutTest
-## F-C47 — the dialogue-suspend contract for the dialogue-hostable sub-menus (Shop / ChipInstall / Chess / Atm /
-## Heal / LevelUp / the LootScreen's gear EXCHANGE).
+## F-C47 — the dialogue-suspend contract for the dialogue-hostable sub-menus (Shop / ChipInstall / WeaponBench /
+## Chess / Atm / Heal / LevelUp / the LootScreen's gear EXCHANGE).
 ##
 ## DialogueManager._suspend_for_menu hides the box, connects the sub-menu's `closed` as a CONNECT_ONE_SHOT resume,
-## THEN calls the open. So EVERY refuse path in ShopScreen/ChipInstallScreen/ChessScreen/AtmScreen/HealScreen/
-## LevelUpScreen/LootScreen MUST emit `closed`, or a dialogue-hosted open that hits a guard strands the
-## conversation _suspended forever (box hidden, tree paused, no way to advance). Each screen routes its guard
-## early-returns through `closed.emit()`.
+## THEN calls the open. So EVERY refuse path in ShopScreen/ChipInstallScreen/WeaponBenchScreen/ChessScreen/
+## AtmScreen/HealScreen/LevelUpScreen/LootScreen MUST emit `closed`, or a dialogue-hosted open that hits a guard
+## strands the conversation _suspended forever (box hidden, tree paused, no way to advance). Each screen routes
+## its guard early-returns through `closed.emit()`.
 ##
 ## We drive the invalid-node guard: a bare Node lacks each screen's duck-typed surface (Shop wants a `stock`
-## CharacterInventory, Install wants install_carried(), Chess wants ai_search_depth(), the loot exchange wants an
-## `inventory` CharacterInventory), so the open refuses with a
-## null player. Assert the screen did NOT open AND `closed` fired. On the standalone path nothing listens to
-## `closed`, so the emit is a harmless no-op there — this contract only matters for the dialogue-hosted open.
+## CharacterInventory, Install wants install_carried(), the bench wants fit_mod(), Chess wants ai_search_depth(),
+## the loot exchange wants an `inventory` CharacterInventory), so the open refuses with a null player. Assert the
+## screen did NOT open AND `closed` fired. On the standalone path nothing listens to `closed`, so the emit is a
+## harmless no-op there — this contract only matters for the dialogue-hosted open.
 ## Cannot build a real Player in a unit test (Player._ready forbidden), so we pass null and let the invalid-node
 ## guard fire first. (AtmScreen/HealScreen/LevelUpScreen have no duck-typed station guard at all — a bare Node
 ## passes is_instance_valid — so there it is the NULL PLAYER that refuses, which is exactly the path a
@@ -24,6 +24,8 @@ func before_each() -> void:
 		ShopScreen.close()
 	if ChipInstallScreen.is_open():
 		ChipInstallScreen.close()
+	if WeaponBenchScreen.is_open():
+		WeaponBenchScreen.close()
 	if ChessScreen.is_open():
 		ChessScreen.close()
 	if AtmScreen.is_open():
@@ -51,6 +53,18 @@ func test_chip_install_refuse_emits_closed() -> void:
 	ChipInstallScreen.closed.connect(func() -> void: flag["closed"] = true, CONNECT_ONE_SHOT)
 	ChipInstallScreen.open_install(bad, null)
 	assert_false(ChipInstallScreen.is_open(), "ChipInstallScreen refuses an invalid installer + null player")
+	assert_true(flag["closed"], "the refuse path still emits `closed` (dialogue-suspend contract)")
+
+func test_weapon_bench_refuse_emits_closed() -> void:
+	# The gunsmith bench is the newest dialogue-hosted station (the "Modify" option on a WeaponBench-bearing
+	# speaker). A bare Node lacks fit_mod() -> the not-a-bench guard fires, before the null player is ever read.
+	# Its refuse path routes through _refuse_open(), whose ONLY job is this emit.
+	var bad: Node = Node.new()
+	autofree(bad)
+	var flag := {"closed": false}
+	WeaponBenchScreen.closed.connect(func() -> void: flag["closed"] = true, CONNECT_ONE_SHOT)
+	WeaponBenchScreen.open_bench(bad, null)
+	assert_false(WeaponBenchScreen.is_open(), "WeaponBenchScreen refuses an invalid bench + null player")
 	assert_true(flag["closed"], "the refuse path still emits `closed` (dialogue-suspend contract)")
 
 func test_chess_refuse_emits_closed() -> void:

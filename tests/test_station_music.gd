@@ -28,7 +28,8 @@ func test_the_station_music_set_is_exactly_the_screens_with_a_panel_speaker() ->
 	# hand-written list next to the bed: the music plays through a clone of the StationSpeaker's filter chain,
 	# so it must play under exactly the screens that answer with a StationSpeaker chirp. If those two sets ever
 	# drift, a machine chirps and then plays nothing (or plays music without ever having spoken).
-	var expected: Array = [ShopScreen, LevelUpScreen, RespecScreen, HealScreen, AtmScreen, ChipInstallScreen, ChessScreen]
+	var expected: Array = [ShopScreen, LevelUpScreen, RespecScreen, HealScreen, AtmScreen, ChipInstallScreen,
+			WeaponBenchScreen, ChessScreen]
 	InputManager._ensure_modal_reg()
 	var actual: Array = []
 	for e in InputManager._modal_reg:

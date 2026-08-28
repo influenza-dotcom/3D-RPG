@@ -283,11 +283,12 @@ func _build_body() -> void:
 	_line_text.text_changed.connect(_on_line_text_changed)
 	right.add_child(_line_text)
 
-	# "Stranger until introduced": tick on the line where the speaker says their name — from then on the NPC shows
-	# their real name instead of "Stranger" everywhere (dialogue label, look-at, corpse, ...). See GameState.reveal_name.
+	# LEGACY knob: "Stranger" now ends the moment the player talks to someone at all (DialogueManager.start ->
+	# GameState.reveal_name), so a character speaker is already named before line 1 paints. Left in place for
+	# authored .tres compatibility — see DialogueLine.reveals_name.
 	_line_reveals_name = CheckBox.new()
-	_line_reveals_name.text = "Reveals speaker's name (introduces them)"
-	_line_reveals_name.tooltip_text = "When this line plays, the NPC is no longer a \"Stranger\" — their real display_name shows from here on (persists across saves). No-op on an inanimate speaker."
+	_line_reveals_name.text = "Reveals speaker's name (legacy — talking already reveals it)"
+	_line_reveals_name.tooltip_text = "Legacy: talking to someone at all already reveals their name, so a character speaker is never a \"Stranger\" by the time any line plays. Ticking this still calls reveal_name; it just has nothing left to unlock. No-op on an inanimate speaker."
 	_line_reveals_name.toggled.connect(_on_line_reveals_name_toggled)
 	right.add_child(_line_reveals_name)
 

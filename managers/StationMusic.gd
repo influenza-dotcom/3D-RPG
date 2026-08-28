@@ -3,6 +3,7 @@ extends AudioStreamPlayer
 ## @system Audio
 ## @seam POLLS InputManager.any_station_music_open() every frame — deliberately NOT the screens' opened/closed signals, which fire on REFUSE paths too and therefore cannot be refcounted. A poll asks the CURRENT truth, so it self-heals across a refused open, the death sweep, a quickload and a level swap with no repair code, and it touches ZERO screen files.
 ## @seam is_bed_wanted() is the public tier flag: MusicDirector stands the combat score down for it (yield_to_station_music) and DialogueMusicBed steps aside for it (note_menu_music), exactly as both already do for a diegetic Radio.
+## @seam is_screen_open() is the TIGHTER twin (no hold window): the conversation music duck stands down for it (DialogueManager.note_station_screen -> MusicDucker.note_station_radio), so a dialogue-hosted shop sounds identical to the same kiosk opened standing up.
 ## @risk PROCESS_MODE_ALWAYS is load-bearing: a station screen opened from a CONVERSATION opens under DialogueManager's tree pause, and a pausable AudioStreamPlayer silences itself ~15 ms in with nothing logged (the trap documented on StationSpeaker).
 ## @test res://tests/test_station_music.gd
 ##
@@ -26,7 +27,8 @@ extends AudioStreamPlayer
 ## IT NEVER WRITES A BUS. The `music` bus has a single-owner protocol (DeathMix owns it during the death
 ## cinematic; MusicDucker and the ADS duck honour that), and a fourth claimant would break it. This node only
 ## ever moves its OWN volume_db — exactly like MusicDirector and DialogueMusicBed — so it stacks cleanly with
-## every bus writer in the game.
+## every bus writer in the game. It does ASK the conversation duck to stand down while a screen is up
+## (is_screen_open, below) — a request through MusicDucker's own facade, not a second hand on the fader.
 ##
 ## TUNING: GameSettings.station_music (resources/tuning/StationMusicSettings.tres) — playlist, level, fades,
 ## the station-to-station hold window, and the bus. An empty playlist makes the whole layer inert.
@@ -34,7 +36,8 @@ extends AudioStreamPlayer
 var _rng := RandomNumberGenerator.new()  ## its OWN generator, never the global one, so a shop visit can't perturb a gameplay roll
 var _last_index: int = -1                ## index into cfg.tracks of what played last; deliberately NOT reset by anything, so "never twice in a row" spans separate visits, level changes and deaths
 var _hold_t: float = 0.0                 ## the grace window after the last terminal closes — see StationMusicSettings.hold_seconds
-var _wanted: bool = false                ## the tier flag other music layers read (is_bed_wanted)
+var _wanted: bool = false                ## the tier flag other music layers read (is_bed_wanted); TRUE THROUGH THE HOLD WINDOW
+var _screen_open: bool = false           ## a station screen is up RIGHT NOW *and* this layer can sound — the tighter flag the conversation DUCK stands down for (is_screen_open); false the instant the screen closes, hold window or not
 
 
 func _ready() -> void:
@@ -61,10 +64,21 @@ func _process(delta: float) -> void:
 	_hold_t = cfg.hold_seconds if open_now else maxf(0.0, _hold_t - real)
 	# An UNAUTHORED playlist raises no tier flag at all, so MusicDirector and the dialogue bed behave EXACTLY
 	# as they did before this node existed rather than standing down for a bed that will never be audible.
-	_wanted = (open_now or _hold_t > 0.0) and not _playable_indices(cfg).is_empty()
+	var in_play: bool = open_now or _hold_t > 0.0
+	# `and` SHORT-CIRCUITS, and that is load-bearing, not incidental: _playable_indices() allocates an Array
+	# per call and this _process ticks forever — through the main menu, every level, every firefight. Keeping
+	# the scan behind `in_play` means it only runs on the frames a terminal is actually in play.
+	var audible: bool = in_play and not _playable_indices(cfg).is_empty()
+	_wanted = audible
+	_screen_open = audible and open_now
 	# Asserted every frame rather than on the edge: the far side latches, so the call is idempotent and cheap,
 	# and there is no ordering hazard between this poll and a conversation starting or ending.
+	# TWO flags, because the two dialogue-side layers want different truths and collapsing them is a bug:
+	#  • the BED reads _wanted — true through the hold window, so it doesn't stutter back in over the tail.
+	#  • the conversation DUCK reads _screen_open — false the instant the screen closes, so the resumed line
+	#    doesn't land over three seconds of full-level shop music. See MusicDucker.note_station_radio.
 	DialogueManager.note_menu_music(_wanted)
+	DialogueManager.note_station_screen(_screen_open)
 	_route(cfg)
 	# RISING EDGE, two cases — and the split IS the "close it and instantly re-open it" answer:
 	#  • still playing (the hold window or the fade-out hasn't landed yet) -> do NOT restart and do NOT
@@ -98,6 +112,16 @@ func _process(delta: float) -> void:
 ## real crossfade in both directions instead of a gap.
 func is_bed_wanted() -> bool:
 	return _wanted
+
+
+## True while a station terminal's screen is open RIGHT NOW *and* this layer can actually sound. The TIGHTER
+## twin of is_bed_wanted(): it drops the moment the screen closes, where is_bed_wanted() rides the
+## hold_seconds grace window out. The conversation MUSIC DUCK reads THIS one
+## (DialogueManager.note_station_screen -> MusicDucker.note_station_radio) so a dialogue-hosted shop plays at
+## the same level as the identical kiosk two metres away, while the duck re-arms the instant the box comes
+## back rather than three seconds later. Also what the `stationmusic` console readout prints beside the tier flag.
+func is_screen_open() -> bool:
+	return _screen_open
 
 
 ## Debug readout only (the `stationmusic` console command). Blank when nothing has ever played.

@@ -16,9 +16,13 @@ extends AudioStreamPlayer
 ## TWO THINGS THIS IS NOT:
 ## • Not the MusicDucker. That fades the whole `music` BUS down so whatever is already playing (a diegetic
 ##   Radio) sits under the voices. This ADDS a layer. Both run for the same conversation, and because the bed
-##   defaults to the `music` bus the duck applies to it too — a CONSTANT offset, since the bed only ever plays
-##   while a conversation is up. Tune by ear with dialogue_music_volume_db, but know that editing
-##   music_duck_amount_db shifts this bed's level as well.
+##   defaults to the `music` bus the duck applies to it too — effectively a CONSTANT offset, since the bed only
+##   ever plays while a conversation is up. Tune by ear with dialogue_music_volume_db, but know that editing
+##   music_duck_amount_db shifts this bed's level as well. The two also now stand down for the SAME event from
+##   opposite directions: while a station terminal's screen is up this bed ducks OUT (note_menu_music below)
+##   and the bus duck RELEASES (MusicDucker.note_station_radio), so the machine's radio is alone and at the
+##   level a bare kiosk plays it at. With the default -60 handover the bed is inaudible through that window,
+##   so its share of the release is never heard.
 ## • Not the MusicDirector score. That fades the scene's Music node in for COMBAT (and holds it there, ducked,
 ##   through the CAUTION hunt), while holding it SILENT during dialogue by default (swell_for_dialogue = false) —
 ##   which is why this loop is normally the only music you hear while talking. That suppression is load-bearing

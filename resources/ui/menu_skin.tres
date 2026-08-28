@@ -145,6 +145,7 @@ button_font_focus_color = Color(0.12, 0.11, 0.08, 1)
 button_font_disabled_color = Color(0.38, 0.36, 0.3, 1)
 tooltip_panel = SubResource("sb_tooltip")
 dialogue_panel = SubResource("sb_dialogue")
+dialogue_panel_enabled = false
 hover_sound = ExtResource("3_hover")
 click_sound = ExtResource("4_click")
 open_sound = ExtResource("5_open")

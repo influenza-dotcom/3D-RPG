@@ -29,10 +29,13 @@ var hud: Resource = preload("res://resources/ui/hud_skin.tres")
 var theme: Theme
 var _title_font: Font
 
-# Custom in-viewport tooltip — a Control in our OWN CanvasLayer so it renders INSIDE the scaled
-# viewport (pixelated like the game), unlike Godot's native tooltip Popups which draw at desktop res.
+# Custom in-viewport tooltip — a Control in our OWN CanvasLayer so it renders INSIDE the game viewport
+# (in RETRO pixelated like the game; in HIGH FIDELITY native-crisp — either way themed and in-frame),
+# unlike Godot's native tooltip Popups which draw as separate desktop-res popups.
 # NOTE the real UI canvas is 792x444 at 16:9 (base 396x216 doubled by window/stretch/scale 0.5, then
-# aspect="expand" stretches it per monitor shape) — NOT the 396x216 the project settings suggest.
+# aspect="expand" stretches it per monitor shape) — NOT the 396x216 the project settings suggest. That
+# 792x444 LOGICAL canvas holds in BOTH presentation modes (HIGH FIDELITY keeps Control layout on it via
+# canvas_items' size-2d override); only RETRO nearest-upscales it to the window.
 # Menus must lay out against ~792x444 and survive 792x432..792x495+ (16:10, ultrawide).
 var _tip_layer: CanvasLayer
 var _tip_panel: PanelContainer
@@ -283,12 +286,46 @@ func make_plain_panel_style() -> StyleBoxFlat:
 	return _flat(skin.panel_color, skin.panel_border_width, skin.panel_border_color, skin.panel_corner_radius, m, m)
 
 ## The DIALOGUE box's own background art (skin.dialogue_panel), or NULL when the skin leaves that slot
-## empty. Null is meaningful here — unlike every other art slot there is no generated fallback to derive,
-## because "no art" is a real authored look for this surface (outlined text straight over the 3D world),
-## so DialogueView reads the null and wears a StyleBoxEmpty instead. Duplicated per the _pick rule: the
-## caller overrides a Control with what it's handed, and a shared .tres sub-resource must never be mutated.
+## empty OR gates it off (skin.dialogue_panel_enabled — the shipped skin keeps the artist's art in the
+## slot but ships the box-LESS look, 2026-08-24). Null is meaningful here — unlike every other art slot
+## there is no generated fallback to derive, because "no art" is a real authored look for this surface
+## (outlined text straight over the 3D world), so DialogueView reads the null and wears a StyleBoxEmpty
+## instead. Duplicated per the _pick rule: the caller overrides a Control with what it's handed, and a
+## shared .tres sub-resource must never be mutated.
 func make_dialogue_panel_style() -> StyleBox:
-	return skin.dialogue_panel.duplicate() if skin.dialogue_panel != null else null
+	if skin.dialogue_panel == null or not skin.dialogue_panel_enabled:
+		return null
+	return skin.dialogue_panel.duplicate()
+
+## The dialogue RESPONSE ROW's rest-state bed (skin.dialogue_choice_normal, else generated): a translucent
+## near-black plate behind each choice row. Rest-state deliberately — the dialogue camera centres + zooms
+## the LIT speaker into the column's region, so bare outlined text would sit on the brightest surface in
+## the frame. The 3px left border is RESERVED (transparent) here so hover's gold rule never shifts the text.
+## `gutter_px` inset on the left makes room for the row's number/caret label (DialogueView paints it there).
+func make_dialogue_choice_normal(gutter_px: int = 0) -> StyleBox:
+	if skin.dialogue_choice_normal != null:
+		return skin.dialogue_choice_normal.duplicate()
+	var sb := _dialogue_choice_bed(Color(0.02, 0.03, 0.05, 0.45), Color(0, 0, 0, 0), gutter_px)
+	return sb
+
+## The response row's hover/selected/pressed bed: the rest bed raised, plus the 3px accent-gold left rule.
+func make_dialogue_choice_hover(gutter_px: int = 0) -> StyleBox:
+	if skin.dialogue_choice_hover != null:
+		return skin.dialogue_choice_hover.duplicate()
+	return _dialogue_choice_bed(Color(0.02, 0.03, 0.05, 0.66), gold(), gutter_px)
+
+## Shared builder for the two generated row beds above — one shape so rest and hover can never drift
+## geometrically (a bed that changes size on hover reads as a broken control, not a highlight).
+func _dialogue_choice_bed(bg: Color, rule: Color, gutter_px: int) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_width_left = 3
+	sb.border_color = rule
+	sb.content_margin_left = 10.0 + float(gutter_px)
+	sb.content_margin_right = 10.0
+	sb.content_margin_top = 4.0
+	sb.content_margin_bottom = 4.0
+	return sb
 
 ## Adopt a COMPACT confirm card (title + one button row — the quit-confirm / TOS-nag / overwrite-confirm
 ## popups): style_dialog_card's width pin PLUS the plain generated panel on the card's PanelContainer
@@ -918,6 +955,27 @@ func _ink(authored: Color, derived: Color) -> Color:
 	return authored if authored.a > 0.0 else derived
 
 
+## ONE scrollbar stylebox: the artist's box when they authored one (the _pick rule), wearing the skin's
+## THICKNESS as content margins on the bar's CROSS axis. This is the single place that decides how wide every
+## scrollbar in the game is drawn — a ScrollBar measures its cross axis off exactly these margins, which is
+## why the pre-2026-08-27 margin-less boxes rendered as nothing at all. Stamped on the ARTIST'S box too, on
+## purpose: a delivered StyleBoxTexture carrying no margins of its own would silently reintroduce the 0px bar.
+## Only the cross axis is touched, so the bar's minimum LENGTH stays the engine's business.
+## Always a DUPLICATE — four theme entries per bar kind and two kinds share these generated boxes, and a
+## shared instance would collect both orientations' margins and every later state's edits.
+func _scrollbar_box(artist: StyleBox, generated: StyleBox, vertical: bool) -> StyleBox:
+	var sb: StyleBox = artist.duplicate() if artist != null else generated.duplicate()
+	if skin.scrollbar_width > 0:
+		var half := float(skin.scrollbar_width) * 0.5
+		if vertical:
+			sb.content_margin_left = half
+			sb.content_margin_right = half
+		else:
+			sb.content_margin_top = half
+			sb.content_margin_bottom = half
+	return sb
+
+
 ## Stamp the skin's text drop shadow onto one theme type. `Label`, `RichTextLabel` and `TooltipLabel` are
 ## the ONLY types Godot 4.7 gives font-shadow items to (probed against ThemeDB) — Button, TabBar and LineEdit
 ## never read one, and stamping it on them SUCCEEDS SILENTLY while drawing nothing. See the MenuSkin knob for
@@ -1051,6 +1109,19 @@ func _build_theme() -> Theme:
 	t.set_color(&"selection_color", &"LineEdit", Color(skin.accent_color.r, skin.accent_color.g, skin.accent_color.b, 0.35))
 	t.set_font_size(&"font_size", &"LineEdit", skin.body_size)
 
+	# TextEdit — the same flat chrome, same slots. The waypoint editor's note field is the game's first
+	# multi-line text input, and without these entries it wore the stock engine box inside a skinned card —
+	# the exact bug the LineEdit block above records. It reuses the LineEdit styleboxes (an artist who
+	# reskins line_edit_normal/focus reskins both field kinds at once; the two are one input language).
+	t.set_stylebox(&"normal", &"TextEdit", _pick(skin.line_edit_normal, le_normal))
+	t.set_stylebox(&"focus", &"TextEdit", _pick(skin.line_edit_focus, le_focus))
+	t.set_stylebox(&"read_only", &"TextEdit", _pick(skin.line_edit_normal, le_normal.duplicate()))
+	t.set_color(&"font_color", &"TextEdit", skin.text_color)
+	t.set_color(&"font_placeholder_color", &"TextEdit", skin.text_dim_color)
+	t.set_color(&"caret_color", &"TextEdit", skin.accent_color)
+	t.set_color(&"selection_color", &"TextEdit", Color(skin.accent_color.r, skin.accent_color.g, skin.accent_color.b, 0.35))
+	t.set_font_size(&"font_size", &"TextEdit", skin.body_size)
+
 	# ProgressBar — same thin track/fill language as the sliders (reputation meters). Tint a meter
 	# via make_meter(col) / a "fill" stylebox override, never via modulate.
 	var pb_bg := _flat(Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.12), 0, Color(0, 0, 0, 0), 1)
@@ -1089,14 +1160,38 @@ func _build_theme() -> Theme:
 	t.set_icon(&"grabber", &"HSlider", thumb)
 	t.set_icon(&"grabber_highlight", &"HSlider", thumb)
 
-	# Scrollbars — minimal ------------------------------------------------------
-	var sb_bg := _flat(Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.05), 0, Color(0, 0, 0, 0), 2)
-	var sb_grab := _flat(Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.22), 0, Color(0, 0, 0, 0), 2)
+	# Scrollbars — a bar you can SEE and GRAB ------------------------------------
+	# NOT "minimal" any more, and the rewrite is worth the paragraph (2026-08-27, screenshot audit). The old
+	# block handed both bars margin-less boxes at 5% / 22% of text_color. A ScrollBar sizes its cross axis off
+	# its track box's content margins and nothing else, so every scrollbar in the game was drawn ZERO PX WIDE:
+	# there was no faint bar to squint at, there was no bar. Four separate HIGH findings turned out to be this
+	# one defect — Options→Controls showed 4 of 44 bindings, Accessibility 14 of 33, character creation 4 of 6
+	# stats, and the Stats tab cut a sentence mid-word — each of them a page that scrolls with nothing on
+	# screen admitting it and no thumb to drag even once the player guessed.
+	# Two things fix it and both live on the skin: skin.scrollbar_width (stamped as margins by _scrollbar_box,
+	# on the artist's box too, so delivered art can't put the bar back at 0) and inks that read on the SHIPPED
+	# palette — a dark panel ink on light parchment, where 22% alpha was hopeless even at a real width.
+	# ⚠ The width is a LAYOUT budget, not just paint: ScrollContainer reserves it beside the content. Hosts
+	# with no width to spare buy it back from their own gutter (options_menu._add_tab) rather than from rows.
+	var sb_track_ink := _ink(skin.scrollbar_track_color,
+		Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.18))
+	# 0.18 / 0.75 measured against the SHIPPED pairing (dark plum ink on light parchment): the thumb lands
+	# around half the panel's own value — a bar you spot without looking for it — while the track stays a
+	# quiet gutter. They are alphas of the panel ink rather than fixed colours so a dark reskin flips with
+	# the palette instead of leaving a black bar on a black panel.
+	var sb_grab_ink := _ink(skin.scrollbar_grabber_color,
+		Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.75))
+	var sb_bg := _flat(sb_track_ink, 0, Color(0, 0, 0, 0), 2)
+	var sb_grab := _flat(sb_grab_ink, 0, Color(0, 0, 0, 0), 2)
+	# Hover/drag lights the thumb in the accent — the same "this control is live" signal the focus ring and the
+	# active tab give. An artist grabber wins all three states (one delivered thumb, the slider's rule).
+	var sb_grab_hot := _flat(Color(skin.accent_color.r, skin.accent_color.g, skin.accent_color.b, 0.9), 0, Color(0, 0, 0, 0), 2)
 	for kind in [&"VScrollBar", &"HScrollBar"]:
-		t.set_stylebox(&"scroll", kind, _pick(skin.scrollbar_track, sb_bg.duplicate()))
-		t.set_stylebox(&"grabber", kind, _pick(skin.scrollbar_grabber, sb_grab.duplicate()))
-		t.set_stylebox(&"grabber_highlight", kind, _pick(skin.scrollbar_grabber, sb_grab.duplicate()))
-		t.set_stylebox(&"grabber_pressed", kind, _pick(skin.scrollbar_grabber, sb_grab.duplicate()))
+		var vertical: bool = kind == &"VScrollBar"
+		t.set_stylebox(&"scroll", kind, _scrollbar_box(skin.scrollbar_track, sb_bg, vertical))
+		t.set_stylebox(&"grabber", kind, _scrollbar_box(skin.scrollbar_grabber, sb_grab, vertical))
+		t.set_stylebox(&"grabber_highlight", kind, _scrollbar_box(skin.scrollbar_grabber, sb_grab_hot, vertical))
+		t.set_stylebox(&"grabber_pressed", kind, _scrollbar_box(skin.scrollbar_grabber, sb_grab_hot, vertical))
 
 	# Tabs (options menu) — text-forward, accent underline on the active tab ----
 	var tab_clear := _flat(Color(0, 0, 0, 0), 0, Color(0, 0, 0, 0), 0, 8, 4)

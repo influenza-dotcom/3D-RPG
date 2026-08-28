@@ -9,10 +9,13 @@ extends Node
 ## @test res://tests/test_dialogue.gd
 ## @test res://tests/test_dialogue_suspend_closed.gd
 ## @test res://tests/test_dialogue_speaker_contracts.gd
-## Autoload ("DialogueManager") that runs conversations. Builds a simple bottom text box + cinematic
-## letterbox bars in code, frees the mouse while a line is up (the world keeps running — no pause,
-## real-time like Deus Ex), and advances on PickUp (F) / ui_accept / left-click. The player script
-## freezes locomotion while is_active() so it reads as a soft cinematic lock. Call start(resource).
+## Autoload ("DialogueManager") that runs conversations. The visuals are the box-less 08-24 look
+## (DialogueView: letterbox bars + left-gutter subtitle block and response column, the speaker held
+## dead-centre by the camera); lines advance on
+## PickUp (F) / ui_accept / left-click, and while the response menu is up the DIGIT keys select
+## (riding the Weapon Slot 1..10 bindings — free while the tree is paused) with ui_cancel as Goodbye.
+## The world pauses once the box opens (see start()); the player script freezes locomotion while
+## is_active() so it reads as a soft cinematic lock. Call start(resource).
 ##
 ## A thin COORDINATOR + FACADE: it owns the conversation state machine (which line, who's speaking, the
 ## pause/mouse/freeze handshake) and delegates the rest to code-built child components — DialogueView (the
@@ -132,6 +135,24 @@ func note_menu_music(under_menu: bool) -> void:
 	if _music_bed != null:
 		_music_bed.note_menu_music(under_menu)
 
+## The SECOND half of the station handover, forwarded from the same per-frame StationMusic poll: a station
+## terminal's screen is open RIGHT NOW (and its radio can actually sound), or it is not. Stands the whole
+## conversation MUSIC DUCK down for that window — see MusicDucker.note_station_radio.
+##
+## Two calls rather than one because the two music layers want DIFFERENT truths, and collapsing them was the
+## bug: the bed reads the tier flag (which stays true through StationMusic's hold_seconds grace window, so the
+## bed doesn't stutter back in over the shop tune's tail), while the duck must re-arm the instant the screen
+## CLOSES and the box returns — otherwise the resumed line plays over three seconds of full-level shop music.
+## Safe with no conversation in progress: the ducker composes this with its own "a conversation exists" flag.
+func note_station_screen(screen_open: bool) -> void:
+	if _ducker != null:
+		_ducker.note_station_radio(screen_open)
+
+## Is the conversation music duck ARMED right now — the composed answer, read off the ducker's real latch.
+## Debug readout only (the `stationmusic` console command); false with no ducker built.
+func is_music_ducked() -> bool:
+	return _ducker != null and _ducker.is_ducked()
+
 ## The NPC currently being talked to (null when no conversation is active) -- so the head-look can let ONLY the
 ## speaker turn its head during a conversation, while every other NPC holds still.
 func current_speaker() -> Node:
@@ -170,6 +191,13 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 		# note / terminal passes speaker=null with a cosmetic title) must NOT complete a talk objective by name
 		# collision. Keyed by the STABLE identity (Slice 3), with the resolved name as the authored-display fallback.
 		GameState.notify_talk(_speaker_identity(speaker, speaker_name), StringName(speaker_name))
+		# "Stranger until introduced" ends the moment you SPEAK to someone: opening a conversation with a real
+		# character IS the introduction, so learn their name here — before the box paints its first speaker label
+		# — and every masked surface (dialogue label, look-at hover, corpse header, death card, takedown prompt)
+		# shows the real name from now on. Gated on _speaker_is_character so a terminal / sign / note never
+		# enters the ledger; DialogueLine.reveals_name still works but is redundant for a character speaker.
+		if _speaker_is_character():
+			GameState.reveal_name(_speaker_name, _speaker_identity(speaker, speaker_name))
 	if speaker != null:
 		# End the conversation immediately if the speaker is killed mid-sentence (#5) — e.g. shot during
 		# the intro beat before the world pauses. Auto-disconnected in _finish.
@@ -226,9 +254,9 @@ func _show_line() -> void:
 	if line == null:
 		return
 	_choices_shown = false
-	# "Stranger until introduced": if THIS line is the one where the speaker names themselves (reveals_name),
-	# learn the name NOW — before we compute the label — so the revealing line already shows the real name in
-	# its own speaker slot (and every surface from here on). Only a real character speaker has a name to reveal.
+	# Legacy per-line reveal (DialogueLine.reveals_name). Redundant for a character speaker — start() already
+	# revealed them when the conversation opened — but kept so authored lines that tick it stay honest, and it
+	# still fires BEFORE the label is computed. Only a real character speaker has a name to reveal.
 	if line.reveals_name and _speaker_is_character():
 		GameState.reveal_name(_speaker_name, _speaker_identity(_speaker, _speaker_name))
 	# New Vegas flow: show + speak the line FIRST with only a continue prompt; the response menu (if any)
@@ -336,7 +364,24 @@ func _reveal_menu() -> void:
 		_view.add_extra_choice(entry.label as String, _on_station_pressed.bind(entry.station as Node))
 	if _speaker_exchange_npc() != null:
 		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_EXCHANGE_GEAR, _on_exchange_pressed)
-	_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_GOODBYE, _on_goodbye_pressed)
+	# Goodbye is the PINNED exit — below the scrollable rows with a hairline above it, so the way out
+	# never scrolls off a long list; digit 0 (the slot-10 binding) and ui_cancel fire it too.
+	_view.add_exit_choice(PlayerText.DIALOGUE_OPTION_GOODBYE, _on_goodbye_pressed)
+	# The line's been heard (that's the listen-first contract that gated this reveal), so it collapses to
+	# its recap clamp to keep the column low on screen — a Label property, never a rewrite, which is what
+	# makes the _resume_from_menu re-entry (which lands here WITHOUT re-running _show_line) safe.
+	_view.reveal_recap()
+	# Header hint flips to the response-menu affordance, composed from the LIVE hotbar-slot bindings the
+	# digit selection rides (never literals — the rebind rule).
+	var count: int = _view.numbered_choice_count()
+	if count > 0:
+		_view.show_menu_hint(PlayerText.dialogue_menu_hint(
+			InputManager.get_action_binding(InputManager.hotbar_actions[0]),
+			InputManager.get_action_binding(InputManager.hotbar_actions[count - 1]),
+			InputManager.get_action_binding(InputManager.hotbar_actions[9])))
+	else:
+		_view.show_menu_hint(PlayerText.dialogue_menu_hint_exit_only(
+			InputManager.get_action_binding(InputManager.hotbar_actions[9])))
 	_sync_dialogue_cursor()  # the response menu is up -> show the cursor so the player can click an option
 
 ## A choice button was pressed -> apply its consequences (on a passed gate), then jump to its target (which
@@ -551,7 +596,8 @@ func _speaker_is_character() -> bool:
 ## Slice 3 (stable identity): the quest/known-names key for a conversation partner — the speaker's identity_key()
 ## (NPC: NpcData.id, falling back to the authored display name) when it exposes one (duck-typed, like the NPC
 ## probes above), else the resolved speaker-name string, so an inanimate DialogueNPC / any non-NPC speaker keeps
-## today's name key. Feeds notify_talk (start) and reveal_name (_show_line); display labels never read this.
+## today's name key. Feeds notify_talk + reveal_name (start) and the legacy per-line reveal (_show_line); display
+## labels never read this.
 func _speaker_identity(speaker: Node, speaker_name: String) -> StringName:
 	if speaker != null and is_instance_valid(speaker) and speaker.has_method(&"identity_key"):
 		var key: StringName = speaker.identity_key()
@@ -675,8 +721,21 @@ func _sync_dialogue_cursor() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_active() or _intro_playing:
 		return
-	# When the response menu is up, its Buttons drive selection — a stray click must NOT advance/skip.
+	# When the response menu is up, its rows drive selection — a stray click must NOT advance/skip, but
+	# the DIGIT keys select and ui_cancel is Goodbye. The digits deliberately RIDE the hotbar-slot
+	# bindings (keys 1..9, 0) rather than nine new actions: the Player is PAUSABLE and the tree is paused,
+	# so those actions are otherwise idle for the whole conversation, and a player's hotbar rebinds carry
+	# straight over — the row gutters paint the live binding (get_action_binding), so they always match.
 	if _choices_shown:
+		for i in range(1, 10):
+			if event.is_action_pressed(InputManager.hotbar_actions[i - 1]):
+				if _view.press_numbered_choice(i):
+					get_viewport().set_input_as_handled()
+				return
+		if event.is_action_pressed(InputManager.hotbar_actions[9]) or event.is_action_pressed(&"ui_cancel"):
+			if _view.press_exit_choice():
+				get_viewport().set_input_as_handled()
+			return
 		return
 	var advance := event.is_action_pressed(&"ui_accept")
 	if not advance and InputMap.has_action(&"PickUp"):
@@ -692,6 +751,8 @@ func _unhandled_input(event: InputEvent) -> void:
 ## reveals the response menu on a decision line OR the final line (authored choices + Follow me +
 ## Goodbye); otherwise advances to the next spoken line — so clicking "skips through" the monologue.
 func _on_advance_click() -> void:
+	if _active == null:
+		return  # the _jump_to rule: a stale direct call (QA harness, a late timer) must not deref _active.lines below
 	SpeechTts.stop_dialogue()
 	_disconnect_speech_finished()
 	if _pending_end:

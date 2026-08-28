@@ -3,8 +3,8 @@ extends GutTest
 ## M14: DialogueManager reaches its collaborators via DUCK-TYPING (has_method / has_signal scans) rather than typed
 ## refs, deliberately — a typed `Merchant`/`Healer`/… would recreate the Merchant <-> ShopScreen <-> DialogueManager
 ## compile cycle (the typed-interface remedy was REFUTED for that reason). Since the station-contract extraction,
-## the dialogue's station OPTIONS (Trade / Heal / Rest / Level Up / Install / Play Chess / Bank) ride ONE method
-## pair on every dual-mode component — dialogue_station_option() (label / order / reason / closed) +
+## the dialogue's station OPTIONS (Trade / Heal / Rest / Level Up / Install / Modify / Play Chess / Bank) ride ONE
+## method pair on every dual-mode component — dialogue_station_option() (label / order / reason / closed) +
 ## open_dialogue_station(player) — discovered by a direct-children has_method scan of BOTH names
 ## (dialogue_manager.gd _station_options); the transaction SCREENS keep their own duck-typed reads of the same
 ## components (COMPONENT_CONTRACTS below). The cost of duck-typing is unchanged: a rename silently DROPS the
@@ -25,18 +25,22 @@ const STATION_CONTRACTS := {
 	"res://scripts/components/bonfire.gd": {"label": PlayerText.DIALOGUE_OPTION_REST, "order": 30, "reason": "", "suspends": false},
 	"res://scripts/components/level_up.gd": {"label": PlayerText.DIALOGUE_OPTION_LEVEL_UP, "order": 40, "reason": "level_up", "suspends": true},
 	"res://scripts/components/chip_installer.gd": {"label": PlayerText.DIALOGUE_OPTION_INSTALL, "order": 50, "reason": "install", "suspends": true},
+	"res://scripts/components/weapon_bench.gd": {"label": PlayerText.DIALOGUE_OPTION_MODIFY, "order": 55, "reason": "modify", "suspends": true},
 	"res://scripts/components/chess_match.gd": {"label": PlayerText.DIALOGUE_OPTION_PLAY_CHESS, "order": 60, "reason": "chess", "suspends": true},
 	"res://scripts/components/atm.gd": {"label": PlayerText.DIALOGUE_OPTION_BANK, "order": 70, "reason": "bank", "suspends": true},
 }
 
 # The explicit spine of the roster order (a GDScript Dictionary does preserve insertion order, but the ordering
-# contract deserves its own explicit, greppable list): Trade, Heal, Rest, Level Up, Install, Play Chess, Bank.
+# contract deserves its own explicit, greppable list): Trade, Heal, Rest, Level Up, Install, Modify, Play Chess,
+# Bank. Modify sits at 55, in the free slot between Install (50) and Play Chess (60) — chrome for your gear
+# right after chrome for yourself.
 const STATION_ROSTER: Array[String] = [
 	"res://scripts/components/merchant.gd",
 	"res://scripts/components/healer.gd",
 	"res://scripts/components/bonfire.gd",
 	"res://scripts/components/level_up.gd",
 	"res://scripts/components/chip_installer.gd",
+	"res://scripts/components/weapon_bench.gd",
 	"res://scripts/components/chess_match.gd",
 	"res://scripts/components/atm.gd",
 ]
@@ -53,6 +57,7 @@ const COMPONENT_CONTRACTS := {
 	"res://scripts/components/level_up.gd": ["level_up_stat", "level_up_cost"], # LevelUpScreen's raise rows
 	"res://scripts/components/chess_match.gd": ["ai_search_depth", "display_opponent_name", "ai_blunder", "player_is_white", "wager_amount"], # ChessScreen.open_match (guard key + 4 config reads)
 	"res://scripts/components/atm.gd": ["deposit", "withdraw"],                 # AtmScreen's transaction buttons
+	"res://scripts/components/weapon_bench.gd": ["fit_mod", "fit_fee", "remove_mod"], # WeaponBenchScreen's two row verbs + the price column that dims them
 }
 
 # Transaction screens the stations open from dialogue: script path -> the open method each component's
@@ -64,6 +69,7 @@ const SCREEN_CONTRACTS := {
 	"res://scripts/ui/chess_screen.gd": "open_match",
 	"res://scripts/ui/chip_install_screen.gd": "open_install",  # DialogueManager suspends into open_install, awaiting `closed`
 	"res://scripts/ui/atm_screen.gd": "open_atm",               # ditto for the ledger terminal's "Bank" option
+	"res://scripts/ui/weapon_bench_screen.gd": "open_bench",    # and for the gunsmith's "Modify" option
 }
 
 # NPC speaker methods DialogueManager duck-scans (set_in_dialogue/note_speaking/note_speaking_stop/provoke/
