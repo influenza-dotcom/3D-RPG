@@ -13,7 +13,8 @@ const SCENE := "res://scenes/ui/loot_screen.tscn"
 ## Every unique name loot_screen.gd binds in _bind_ui — a rename in the editor breaks the bind at boot,
 ## so pin the roster here where it fails loudly instead.
 const BOUND := ["Root", "Dim", "VBox", "Title", "Columns", "SourceColumn", "SourceHeading",
-	"SourceScroll", "PlayerColumn", "PlayerHeading", "PlayerScroll", "Footer", "Detail"]
+	"SourceScroll", "PlayerColumn", "PlayerHeading", "PlayerScroll", "PlayerWalletRow", "PlayerWallet",
+	"StashButton", "Footer", "Detail"]
 
 
 func test_autoload_is_the_authored_scene() -> void:

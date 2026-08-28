@@ -117,7 +117,7 @@ func setup(source: CharacterInventory, who: String, wallet: float = 0.0) -> void
 		for s in source.contents():
 			inventory.add(s["item"], s["count"])
 	# Seed the dead NPC's wallet as a real zorkmids COIN TILE (one unit = one QUANTUM, so a fractional wallet
-	# stays exact — see Zorkmids / MoneyPurse). Added while the bag's grid is still OFF (unbounded), so it always
+	# stays exact — see Zorkmids). Added while the bag's grid is still OFF (unbounded), so it always
 	# lands; the loot screen grids the copy on open. Taking the tile credits the player via LootScreen._take's
 	# zorkmids branch (Character.add_money), same as looting the ground / a shop refund.
 	if wallet > 0.0:

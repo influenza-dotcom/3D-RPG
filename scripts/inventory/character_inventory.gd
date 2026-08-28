@@ -48,19 +48,14 @@ var _grid_enabled: bool = false
 var _next_key: int = 0  ## hands each new stack its grid key
 
 ## COALESCE-`changed` latch for transfer_to. transfer_to mutates THIS bag twice (remove, then a rollback add of
-## whatever the destination couldn't fit); a mirror listener wired to `changed` (MoneyPurse.sync via
-## inventory.changed) must NOT fire on the intermediate post-remove state and grab the freed cells before the
-## rollback re-homes the bounced remainder. While `_defer_changed` is set, add()/remove() route their emit
+## whatever the destination couldn't fit); a listener wired to `changed` that WRITES back into the bag (any
+## self-healing view — the loot screen's coin freeze, a future derived stack) must NOT fire on the intermediate
+## post-remove state and grab the freed cells before the rollback re-homes the bounced remainder. While
+## `_defer_changed` is set, add()/remove() route their emit
 ## through _emit_changed() which just records `_pending_changed`; transfer_to emits ONCE at the very end, after
 ## the rollback has settled, so a listener only ever sees the final counts/placements.
 var _defer_changed: bool = false
 var _pending_changed: bool = false
-
-## The ids this backpack MIRRORS from an external source of truth (today only the MoneyPurse coin tile, keyed by
-## Zorkmids.ITEM_ID). A mirrored item is a DERIVED VIEW — its count reflects a float owned elsewhere
-## (Character.money), not real loot. Only the PLAYER's backpack registers one (MoneyPurse._ready); NPC / corpse /
-## container bags never do, so their identical-looking coin tile is genuine loot. See is_mirrored / register_mirror.
-var _mirrored_ids: Dictionary = {}
 
 ## The item INSTANCE currently drawn (set by equip_item). Because weapons are unique items now, several
 ## identical weapons (same WeaponData) can be carried as distinct items — this lets the UI mark exactly
@@ -106,8 +101,8 @@ func grid_enabled() -> bool:
 ## cols×rows), clear the equipped marker, and release the transfer-coalesce latch. Added for NPC pooling
 ## (NpcPool): a reused NPC's bag has DRIFTED — consumed ammo, this-life loot-table drops rolled in by gore()
 ## (never emptied; the corpse only COPIES the bag), scavenged pickups, pickpocket/loot removals — so pooling
-## reset must wipe it before re-seeding the authored loadout, or loot compounds every life. Leaves _mirrored_ids
-## and the equip_weapon_requested/changed connections (config wired once on the surviving node) untouched, and
+## reset must wipe it before re-seeding the authored loadout, or loot compounds every life. Leaves the
+## equip_weapon_requested/changed connections (config wired once on the surviving node) untouched, and
 ## emits `changed` once so PassiveItemBuffs / any UI recompute from the now-empty bag.
 func clear() -> void:
 	_stacks.clear()
@@ -142,21 +137,6 @@ func _emit_changed() -> void:
 		_pending_changed = true
 		return
 	changed.emit()
-
-
-## Register `id` as a MIRRORED view on this backpack (called once by MoneyPurse._ready with Zorkmids.ITEM_ID).
-## Idempotent; a blank id is ignored. This is the single place the "is this a wallet mirror, not real cash?"
-## question is registered, so a looting path can debit a source's separate `money` float ONLY for a genuine mirror.
-func register_mirror(id: StringName) -> void:
-	if id != &"":
-		_mirrored_ids[id] = true
-
-
-## True when `item` is a DERIVED VIEW (a MoneyPurse coin tile) on THIS backpack, not real loot. LootScreen gates
-## its wallet-float debit on this so taking a REAL coin tile (from a corpse / container / live-pickpocket NPC —
-## none of which register a mirror) never also drains that source's separate `money` float. False for a null item.
-func is_mirrored(item: Item) -> bool:
-	return item != null and _mirrored_ids.has(item.id)
 
 
 ## Add `amount` of `item`, filling existing non-full stacks first then spilling into new ones. Returns how many
@@ -206,13 +186,21 @@ func find_by_id(id: StringName) -> Item:
 
 
 ## The strongest carried weapon-item by WeaponData.power_score (null when unarmed) — the NPC "equip the
-## strongest" rule and the container-scavenge comparison both rank with this.
+## strongest" rule and the container-scavenge comparison both rank with this. Every caller is AI-side
+## (npc.gd equip/rearm, NpcScavenge); the player picks weapons by hand, so this IS the AI ranking.
+## ⭐ SPRAY PAINT never ranks: its fire path is Attack's damage-free _do_spray_paint short-circuit, yet its
+## raw power_score (0.1 dmg x 8 pellets / 0.15 cadence = 5.33) outguns every shipped gun — an NPC that
+## ranked it would draw the can and harmlessly tag walls mid-fight (reachable via a scavenged crate or a
+## LootScreen deposit). Skipping it also keeps a bag holding ONLY spray paint reading as unarmed, so the
+## NPC punches (real damage) and still scores -1 to NpcScavenge — a candidate for looting a real gun.
+## Melee deliberately DOES rank: act_alerted scales the engage range to the weapon (point-blank override
+## included), so a knife-armed NPC closes and lands real swings — short reach is not zero damage.
 func best_weapon_item() -> Item:
 	var best: Item = null
 	var best_score := -1.0
 	for s in _stacks:
 		var it: Item = s["item"]
-		if it != null and it.is_weapon():
+		if it != null and it.is_weapon() and not it.weapon.is_spray_paint:
 			var score := it.weapon.power_score()
 			if score > best_score:
 				best_score = score
@@ -288,9 +276,9 @@ func remove_stack(key: int) -> int:
 ## Force the backpack to hold EXACTLY `count` units of `item` in a SINGLE stack at a given grid FOOTPRINT, keeping
 ## that stack's key when it already exists (so a live tile keeps its identity as the value ticks). `foot_w`/`foot_h`
 ## <= 0 fall back to the item's authored grid_width/height; pass a bigger square to make the pile take up more cells
-## as it grows — the zorkmids stack, whose footprint MoneyPurse scales with the wallet. count <= 0 removes every
-## stack of `item`. This is the seam for a DERIVED / mirrored quantity owned elsewhere — money lives on
-## Character.money and is pushed in here (money is the source of truth; this stack is a self-healing VIEW). Unlike
+## as it grows. count <= 0 removes every stack of `item`. This is the seam for a DERIVED quantity owned elsewhere
+## — a live pickpocket target's `money` float, frozen into (and thawed back out of) one coin tile by LootScreen
+## for the length of a robbery, is the shipped user (money is the source of truth; the stack is a VIEW). Unlike
 ## add(), it never merges by max_stack and never spills into a second stack — a mirrored singleton is always one
 ## tile. Surplus duplicate stacks (there should be none) are dropped defensively. Returns true and emits `changed`
 ## iff it altered anything, so re-asserting the same value + footprint each frame is a cheap no-op (no churn).
@@ -489,8 +477,8 @@ func contents() -> Array:
 ## `other` couldn't take is restored to this bag, so a full destination never makes items vanish.
 ##
 ## SIGNAL INVARIANT: this COALESCES its own `changed` across the remove + rollback add, emitting exactly ONCE at
-## the end (after the rollback has settled). A mirror listener wired to `changed` (MoneyPurse.sync via
-## inventory.changed) therefore never sees the intermediate post-remove state and so can't grab the freed cells
+## the end (after the rollback has settled). A listener that WRITES back into this bag on `changed` therefore
+## never sees the intermediate post-remove state and so can't grab the freed cells
 ## before the bounced remainder is re-homed — otherwise a full-bag bounce would land unplaced / be lost. `other`'s
 ## OWN emissions stay independent (its listeners see its real add). The resulting counts/placements are identical
 ## to the old two-emit path; only the number of `changed` this bag fires per transfer drops from two to one.
@@ -654,9 +642,9 @@ func _has_stack_key(key: int) -> bool:
 ## Serialize every stack to the save-entry shape — [{id, count(, weapon_delta)(, x, y, w, h)}] — the
 ## symmetric half of restore_serialized_stacks. Placement rides along only while a stack actually sits on a
 ## grid cell (x >= 0); a grid-off / unplaced stack writes plain {id, count}, which restores as an auto-place.
-## Skips a MIRRORED stack (the player wallet's derived coin tile — its float is persisted elsewhere; a
-## container/corpse coin tile is real loot and DOES serialize) and an id-less item (can't round-trip — register
-## it in resources/items/ to make it persist), matching GameState.capture's profile rules. NOTE: the player
+## Skips an id-less item (can't round-trip — register it in resources/items/ to make it persist), matching
+## GameState.capture's profile rules. A container/corpse coin tile is REAL loot and does serialize; the player's
+## own cash never reaches a bag at all (it is the `money` float). NOTE: the player
 ## profile path (GameState.capture / Player._restore_saved_inventory) stays inline — it interleaves
 ## equipped_index and held-item bookkeeping with the loop, and its shape is pinned by test_game_save; this pair
 ## exists for the exact-snapshot tier (ItemContainer) and any future non-player bag.
@@ -667,8 +655,6 @@ func serialize_stacks() -> Array:
 		if it == null or it.id == &"":
 			if it != null:
 				push_warning("CharacterInventory: item '%s' has no id — not serialized" % it.label())
-			continue
-		if is_mirrored(it):
 			continue
 		var entry := {"id": String(it.id), "count": int(s["count"])}
 		var weapon_delta := ItemDb.weapon_delta_for(it)

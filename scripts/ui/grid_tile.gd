@@ -211,9 +211,10 @@ func _draw_glyph(r: Rect2, col: Color) -> void:
 			var fs := int(minf(r.size.x, r.size.y) * 0.5)
 			draw_string(font, Vector2(0.0, c.y + float(fs) * 0.35), _item.label().substr(0, 1), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, fs, col)
 
-## True when this tile is the player's zorkmids stack — it renders the BAG mesh (Item.world_model = bag.glb) with
-## the FRACTIONAL wallet amount as its badge (count × Zorkmids.QUANTUM through fmt), since the stack counts in
-## hundredths (one unit = 0.01 zm). See MoneyPurse.
+## True when this tile is a zorkmids stack — a LOOT source's cash (a corpse / container / frozen pickpocket
+## pocket; the player's own money is a float, never a tile). It renders the BAG mesh (Item.world_model = bag.glb)
+## with the FRACTIONAL amount as its badge (count × Zorkmids.QUANTUM through fmt), since the stack counts in
+## hundredths (one unit = 0.01 zm).
 func _is_money() -> bool:
 	return _item != null and _item.id == Zorkmids.ITEM_ID
 

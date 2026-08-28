@@ -1,18 +1,21 @@
 extends GutTest
 
-## GUT suite for ZORKMIDS-AS-AN-ITEM (the coin pile the player carries). Money stays a fractional float on
-## Character (pinned by test_money.gd); this covers the two pieces that make it show up as a real backpack item:
+## GUT suite for the ZORKMIDS COIN TILE — the stack a LOOT SOURCE carries its cash as (a corpse / container
+## seeded at spawn, a live pickpocket target's `money` float frozen into a tile for the length of a robbery).
+## ⭐The PLAYER never holds one: their zorkmids are the `money` float, painted by the HUD + the backpack's
+## wallet row and spilled through it as a physics money bag (see Zorkmids.ITEM_ID). Money stays a fractional
+## float on Character (pinned by test_money.gd); this covers the two pieces the coin tile rests on:
 ##
-##   * CharacterInventory.set_item_count — the SINGLE-stack "force exact quantity in place" primitive MoneyPurse
-##     pushes the wallet into. Create / update-in-place (placement preserved) / remove-at-zero / no-op-when-equal /
-##     duplicate-collapse, with the grid both OFF (NPC/corpse bags) and ON (the player's bounded Tetris bag).
+##   * CharacterInventory.set_item_count — the SINGLE-stack "force exact quantity in place" primitive the
+##     pickpocket freeze/thaw pushes a wallet float through. Create / update-in-place (placement preserved) /
+##     remove-at-zero / no-op-when-equal / duplicate-collapse / footprint refit, with the grid both OFF
+##     (an unbounded corpse-copy bag) and ON (a bounded Tetris bag).
 ##   * The coin<->wallet round-trip math: one coin = one Zorkmids.QUANTUM (0.01 zm), so coins = round(money/QUANTUM)
 ##     and the tile reprints fmt(coins × QUANTUM) VERBATIM as the wallet — the fraction survives the integer stack.
 ##
 ## SCOPE / testability: both angles are pure + off-tree (CharacterInventory is a bare Node built with .new(); its
-## _grid is initialized at declaration, so set_item_count needs no _ready). The live MoneyPurse sync (money_changed
-## / inventory.changed hooks, the reentrancy latch, the coin tile in the grid) is IN-TREE behaviour verified by
-## playtest per the project's testing policy — not re-implemented here.
+## _grid is initialized at declaration, so set_item_count needs no _ready). The live freeze/thaw around a
+## pickpocket session is covered against the real autoload in tests/test_loot_drop.gd.
 
 const ZORKMIDS_UNIT := 0.01  ## == Zorkmids.QUANTUM; a local copy so a QUANTUM change trips test_money.gd, not this
 
@@ -34,7 +37,7 @@ func _misc(id: StringName) -> Item:
 
 
 # ---------------------------------------------------------------------------
-# set_item_count — the mirror primitive (grid OFF: the unlimited v1 bag)
+# set_item_count — the exact-quantity primitive (grid OFF: an unbounded bag)
 # ---------------------------------------------------------------------------
 
 func test_set_item_count_creates_then_removes_a_single_stack() -> void:
@@ -45,7 +48,7 @@ func test_set_item_count_creates_then_removes_a_single_stack() -> void:
 	assert_eq(inv.count_of(coin), 1250,
 		"the pile holds exactly the count asked for (1250 units = 12.5 zorkmids at one coin per QUANTUM)")
 	assert_eq(inv.contents().size(), 1,
-		"a mirrored quantity is ONE stack, never spilled across several — even 1250 units stay a single pile")
+		"a set quantity is ONE stack, never spilled across several — even 1250 units stay a single pile")
 	assert_true(inv.set_item_count(coin, 0),
 		"dropping the amount to 0 removes the pile and reports the change")
 	assert_eq(inv.count_of(coin), 0,
@@ -87,12 +90,12 @@ func test_set_item_count_leaves_other_items_untouched() -> void:
 
 
 # ---------------------------------------------------------------------------
-# set_item_count — the player's BOUNDED grid (placement must survive an update)
+# set_item_count — a BOUNDED grid (placement must survive an update)
 # ---------------------------------------------------------------------------
 
 func test_set_item_count_preserves_grid_key_and_placement_across_updates() -> void:
 	var inv := CharacterInventory.new()
-	inv.enable_grid(6, 5)  # the player's Tetris bag
+	inv.enable_grid(6, 5)  # a Tetris-sized bag
 	var coin := _coin()
 	inv.set_item_count(coin, 100)
 	var placed := _coin_row(inv, coin)
@@ -180,59 +183,19 @@ func test_half_a_zorkmid_is_fifty_coins() -> void:
 
 
 # ---------------------------------------------------------------------------
-# the coin id constant (the single source shared by MoneyPurse / grid_tile / GameState)
+# the coin id constant (the single source shared by loot_screen / grid_tile / GameState)
 # ---------------------------------------------------------------------------
 
 func test_item_id_constant_is_zorkmids() -> void:
 	assert_eq(Zorkmids.ITEM_ID, &"zorkmids",
-		"the coin Item's id is the stable key resources/items/zorkmids.tres carries — MoneyPurse resolves the template by it, grid_tile renders by it, and GameState.capture EXCLUDES it from the save by it")
+		"the coin Item's id is the stable key resources/items/zorkmids.tres carries — LootScreen converts a tile to money by it, grid_tile renders by it, and GameState.capture EXCLUDES a stray one from the save by it")
 
 
 # ---------------------------------------------------------------------------
-# MoneyPurse registers the coin tile as a MIRROR on the player's backpack (F-C12)
-#   -> CharacterInventory.is_mirrored(coin) is the single predicate LootScreen gates its wallet-float debit on,
-#      so taking a REAL coin tile (corpse / container / pickpocket NPC — no purse) never debits a separate float.
+# grid FOOTPRINT — set_item_count(item, count, w, h) grows/shrinks in place, never evicts, never vanishes.
+# (No caller scales a coin pile's footprint today — a loot tile is a fixed 1×1 so it always places on a
+# bounded loot grid — but the refit path is the primitive's contract and stays pinned.)
 # ---------------------------------------------------------------------------
-
-func test_registers_zorkmids_mirror_on_ready() -> void:
-	# Build a concrete off-tree Character host — Player (Character itself is @abstract) — WITHOUT add_child'ing it, so
-	# Player._ready never runs; we just hand it a fresh backpack. Then set _host before add_child'ing the purse (the
-	# drop-in contract) and let only the light MoneyPurse._ready run. MoneyPurse is player-only, so this mirrors how
-	# the real game wires it — an NPC / corpse / container bag has no purse and so never registers a mirror.
-	var host = load("res://scripts/player/player.gd").new()
-	host.inventory = CharacterInventory.new()
-	assert_false(host.inventory.is_mirrored(_coin()),
-		"precondition: a fresh backpack (NPC / corpse / container) reports nothing as mirrored")
-	var purse := MoneyPurse.new()
-	purse._host = host
-	add_child(purse)  # runs MoneyPurse._ready -> _host.inventory.register_mirror(Zorkmids.ITEM_ID)
-	assert_true(host.inventory.is_mirrored(_coin()),
-		"the player's purse registers the coin tile as a mirror on _ready, so LootScreen can tell it from real cash")
-	assert_false(host.inventory.is_mirrored(_misc(&"lockpick")),
-		"an ordinary item is never a mirror — only the zorkmids id is registered")
-	purse.free()
-	host.inventory.free()
-	host.free()
-
-
-# ---------------------------------------------------------------------------
-# grid FOOTPRINT scaling — the pile takes more cells the richer you are
-#   * MoneyPurse.grid_side_for maps the wallet -> a whole-cell square side (pure).
-#   * set_item_count(item, count, w, h) grows/shrinks in place, never evicts, never vanishes.
-# ---------------------------------------------------------------------------
-
-func test_grid_side_steps_up_in_whole_cells_and_clamps() -> void:
-	assert_eq(MoneyPurse.grid_side_for(0.0, 1, 3, 0.2), 1,
-		"a broke wallet is a single cell")
-	assert_eq(MoneyPurse.grid_side_for(24.0, 1, 3, 0.2), 1,
-		"under the first threshold it's still 1×1 — floor() keeps whole-cell size tiers, no half-cells")
-	assert_eq(MoneyPurse.grid_side_for(25.0, 1, 3, 0.2), 2,
-		"25 zorkmids (√25=5, 0.2*5=1) steps the pile up to 2×2")
-	assert_eq(MoneyPurse.grid_side_for(100.0, 1, 3, 0.2), 3,
-		"100 zorkmids (√100=10, 0.2*10=2) is 3×3")
-	assert_eq(MoneyPurse.grid_side_for(1000000.0, 1, 3, 0.2), 3,
-		"a fortune caps at max_side, so the money pile never eats the whole bag")
-
 
 func test_set_item_count_places_at_the_requested_footprint() -> void:
 	var inv := CharacterInventory.new()
@@ -270,7 +233,7 @@ func test_footprint_stays_put_when_the_bigger_size_cannot_fit() -> void:
 	assert_false(inv.set_item_count(coin, 50, 2, 2),
 		"can't grow to 2×2 (no free 2×2 block) and the amount didn't change -> a no-op, returns false")
 	var row := _coin_row(inv, coin)
-	assert_eq(int(row["w"]), 1, "the pile stays 1×1 rather than vanish — a mirrored stack must never lose its tile")
+	assert_eq(int(row["w"]), 1, "the pile stays 1×1 rather than vanish — a resized stack must never lose its tile")
 	assert_gte(int(row["x"]), 0, "…and it's still placed (visible), not stranded unplaced")
 	inv.free()
 

@@ -8,13 +8,18 @@ extends RefCounted
 
 const QUANTUM: float = 0.01  ## the smallest coin — every wallet/price lands on a multiple of this
 
-## Stable id of the coin Item (resources/items/zorkmids.tres). The player's wallet (Character.money, the
-## authoritative fractional float) is MIRRORED into a real backpack stack of this item by MoneyPurse, so
-## zorkmids show up as a genuine draggable/droppable grid tile. ONE unit of the stack = one QUANTUM (0.01 zm),
-## so the integer stack count stays exact while the amount stays fractional (the tile renders count × QUANTUM
-## through fmt()). The single source of this id — grid_tile / inventory_screen / GameState / MoneyPurse all
-## reference it here. The save DELIBERATELY excludes this stack (money persists separately as the [player]
-## wallet float; the purse rebuilds the stack on load), so it must never be treated as ordinary loot.
+## Stable id of the coin Item (resources/items/zorkmids.tres) — the tile a LOOT SOURCE carries its cash as.
+## A corpse / container seeds one at spawn and a live pickpocket target's `money` float is frozen into one for
+## the length of a robbery, so cash loots by clicking a tile like any other item. ONE unit of the stack = one
+## QUANTUM (0.01 zm), so the integer stack count stays exact while the amount stays fractional (the tile renders
+## count × QUANTUM through fmt()).
+##
+## ⭐THE PLAYER NEVER HOLDS ONE. Their zorkmids are `Character.money` — a plain float, read by the HUD and by
+## the backpack's wallet row, dropped through it as a physics money bag. (It was briefly mirrored into a real
+## backpack stack, which meant a fat purse ate 1×1..3×3 grid cells; money is not an inventory item.) Taking a
+## coin tile therefore CONVERTS it (LootScreen._take -> add_money) rather than moving an Item across, and every
+## other path into the player's bag refuses the id outright. The single source of this id — grid_tile /
+## inventory_screen / loot_screen / GameState all reference it here.
 const ITEM_ID: StringName = &"zorkmids"
 
 ## The ONE authored money template — the currency word ("zm") lives HERE, never as a per-call-site

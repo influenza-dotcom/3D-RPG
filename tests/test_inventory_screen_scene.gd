@@ -14,7 +14,8 @@ const SCENE := "res://scenes/ui/inventory_screen.tscn"
 
 ## Every unique name inventory_screen.gd binds in _bind_ui — a rename in the editor breaks the bind at
 ## boot, so pin the roster here where it fails loudly instead.
-const BOUND := ["Root", "Dim", "VBox", "TabSlot", "Scroll", "Footer", "Detail"]
+const BOUND := ["Root", "Dim", "VBox", "TabSlot", "WalletRow", "Wallet", "DropMoneyButton",
+	"Scroll", "Footer", "Detail"]
 
 
 func test_autoload_is_the_authored_scene() -> void:

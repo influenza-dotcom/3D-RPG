@@ -334,7 +334,7 @@ func test_deposit_zorkmids_without_wallet_source_leaves_player_money() -> void:
 	assert_eq(mark.money, 1.0,
 		"...and must not sneak money through an equipment-only exchange")
 	assert_eq(mark.inventory.count_of(ZORKMIDS_ITEM), 0,
-		"the mirror stack still must not become ordinary inventory loot")
+		"a refused cash deposit still must not become ordinary inventory loot")
 	LootScreen.close()
 	mark.inventory.free()
 	mark.free()
@@ -345,7 +345,7 @@ func test_pickpocket_wallet_is_frozen_to_a_tile_and_taken_as_money() -> void:
 	# A live pickpocket target's Character.money float is FROZEN into a real zorkmids coin tile on open, so cash
 	# loots like any other item (a clicked tile — no "Take N zm" button). Taking it credits the player's wallet by
 	# the NPC's whole cash and empties the tile; the float is left at 0 (it was folded into the tile on open). The
-	# NPC has no MoneyPurse, so the coin tile is real loot (is_mirrored false) — _take never double-debits a float.
+	# The freeze already zeroed the NPC's float, so _take credits the player once and never double-debits.
 	var player = load("res://scripts/player/player.gd").new()
 	player.inventory = CharacterInventory.new()
 	player.money = 0.0
@@ -404,7 +404,7 @@ func test_pickpocket_wallet_thaws_untaken_coins_on_close() -> void:
 func test_take_coin_tile_from_static_source_credits_player() -> void:
 	# TILE mode (corpse / container): the source's cash is a real zorkmids coin tile. Clicking it converts the
 	# stack to real player money (add_money) — it must NOT land in the backpack as a loose zorkmids stack (the
-	# player's purse would only trim it back to the wallet value, silently losing it).
+	# player's zorkmids are the `money` float; a stack in the bag would be cash nothing accounts for).
 	var player = load("res://scripts/player/player.gd").new()
 	player.inventory = CharacterInventory.new()
 	player.money = 0.0
@@ -429,8 +429,8 @@ func test_take_coin_tile_from_static_source_credits_player() -> void:
 
 func test_deposit_coin_tile_into_static_source_adds_tile() -> void:
 	# TILE mode deposit: stashing the player's wallet into a corpse / container adds a real zorkmids coin tile to
-	# the source and debits the player. (Off-tree there's no MoneyPurse, so we set player.money directly; the
-	# deposit reads the wallet float, not a backpack stack.)
+	# the source and debits the player. (The deposit reads the wallet float — the player never carries a coin
+	# tile — so the test seeds player.money directly.)
 	var player = load("res://scripts/player/player.gd").new()
 	player.inventory = CharacterInventory.new()
 	player.money = 8.0

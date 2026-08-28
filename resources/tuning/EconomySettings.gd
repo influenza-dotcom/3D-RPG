@@ -137,16 +137,6 @@ static func long_range_bonus_for(distance: float, min_distance: float, flat: flo
 @export var money_bag_damage_per_zm: float = 0.05
 ## Cap on that throw-damage multiplier, so an obscene fortune can't trivially one-shot everything.
 @export var money_bag_max_damage_mult: float = 8.0
-## The zorkmids stack ALSO takes up more BACKPACK space the richer you are — its grid footprint is a square whose
-## side grows with the amount (a fat purse is bulky to haul). These set that curve. Minimum side (cells) — the
-## footprint at ~0 zorkmids. 1 = a single cell.
-@export var money_bag_grid_min_side: int = 1
-## Maximum side (cells) — however rich, the money pile never occupies more than this square (keeps it from eating
-## the whole bag). 3 = at most 3×3 = 9 cells.
-@export var money_bag_grid_max_side: int = 3
-## Side (cells) added per SQRT of the amount, floored to a whole cell. e.g. 0.2 -> 25 zm is 2×2, 100 zm is 3×3.
-## The pile only grows into FREE cells and never evicts other items; if the next size won't fit, it stays smaller.
-@export var money_bag_grid_side_per_sqrt_zm: float = 0.2
 
 @export_group("Starting credit")
 ## New Game's implant purchase (implant_choice.gd) runs ON CREDIT — but the Ledger rates the BUILD first:

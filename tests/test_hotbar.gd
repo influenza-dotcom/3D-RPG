@@ -147,13 +147,13 @@ func test_is_holdable_classifies_props_not_gear() -> void:
 
 
 func test_zorkmids_coin_tile_is_not_holdable() -> void:
-	# The wallet coin tile wears a world_model (the money-bag mesh) but is MONEY — slotting it on the hotbar and
-	# activating it would mint a physics money-bag into the hands while MoneyPurse re-mints the debited wallet.
-	# is_holdable() guards the zorkmids id FIRST, so the coin tile is never hotbar-assignable/holdable (F-C13-C28).
+	# A coin tile wears a world_model (the money-bag mesh) but is MONEY — slotting a looted one on the hotbar and
+	# activating it would mint a physics money-bag into the hands that no wallet was ever debited for.
+	# is_holdable() guards the zorkmids id FIRST, so a coin tile is never hotbar-assignable/holdable (F-C13-C28).
 	var z := Item.new()
 	z.id = Zorkmids.ITEM_ID
 	z.world_model = BoxMesh.new()  # even wearing a world_model...
-	assert_false(z.is_holdable(), "the wallet coin tile is money, never a holdable prop even with a world_model")
+	assert_false(z.is_holdable(), "a coin tile is money, never a holdable prop even with a world_model")
 	# Guard against an over-broad id-only guard: a DIFFERENT world_model item still holds.
 	var other := Item.new()
 	other.id = &"crate"
@@ -287,5 +287,32 @@ func test_stash_refuses_into_a_full_bag_and_keeps_holding() -> void:
 	assert_false(p.stash_held_item(), "stash into a full bag is refused")
 	assert_eq(p.held_inventory_item(), dog, "the reservation is KEPT (the item stays in hand, not orphaned)")
 	assert_false(inv.has(dog), "the dog was not force-added over capacity")
+	p.free()
+	inv.free()
+
+
+func test_every_slot_line_wears_the_shared_text_outline() -> void:
+	# ⭐THE FAINTEST TEXT ON THE HUD, fixed. The bar is anchored bottom-right over the LIVE WORLD with no backing
+	# plate behind it, so a glyph with no outline has nothing to hold its edge where the bar crosses a bright band.
+	# The item NAME shipped outlined; the KEY digit and the STACK COUNT did not — which made the one thing on a
+	# slot that tells you which button to press the softest text on the screen (caught in the QA gameplay-HUD shot,
+	# where the bar sits over a lit ground band and the name stays crisp while the digits go grey).
+	# Pinned per LINE, because the regression is exactly one missing pair of overrides on one Label.
+	var p = load(PLAYER_PATH).new()
+	var inv := CharacterInventory.new()
+	p.inventory = inv
+	var hb := Hotbar.new()
+	hb.setup(p)  # builds the bar's chrome off-tree (see this file's header)
+	var width: int = MenuStyle.hud.hotbar_name_outline_size
+	assert_gt(width, 0, "the skin's slot outline budget must be a real width, or every assert below passes vacuously")
+	for i in Hotbar.SLOTS:
+		var lines: Array = [["key", hb._slot_keys[i]], ["name", hb._slot_names[i]], ["count", hb._slot_counts[i]]]
+		for line: Array in lines:
+			var l: Label = line[1]
+			assert_true(l.has_theme_color_override(&"font_outline_color"),
+				"slot %d's %s line needs the outline COLOUR — a width with no colour draws nothing" % [i, line[0]])
+			assert_eq(l.get_theme_constant(&"outline_size"), width,
+				"slot %d's %s line wears the shared slot outline width" % [i, line[0]])
+	hb.free()
 	p.free()
 	inv.free()

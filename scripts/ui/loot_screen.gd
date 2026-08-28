@@ -1,8 +1,8 @@
 extends CanvasLayer
 ## @system Economy
-## @seam `_take` on a zorkmids tile credits real `add_money` (never `transfer_to`) and debits the source's `money` float only if `is_mirrored(item)`.
-## @risk Drop the `is_mirrored` guard: taking a live-pickpocket NPC's coin tile also debits its separate pocket float — that cash is destroyed silently.
-## @risk `transfer_to`'ing a zorkmids tile (vs `add_money`) lets the player's purse trim it back to the wallet value — the take silently evaporates.
+## @seam `_take` on a zorkmids tile credits real `add_money` (never `transfer_to`); the player's cash is the `money` float, never a backpack stack.
+## @risk `transfer_to`'ing a zorkmids tile (vs `add_money`) hands the player an Item their wallet doesn't account for — cash that spends nowhere.
+## @risk Debiting a pickpocket NPC's `money` float on top of taking its frozen coin tile double-charges it: the freeze already zeroed that float.
 ## @test res://tests/test_loot_drop.gd
 ## LootScreen — the transfer overlay for LOOTING a corpse or PICKPOCKETING a live NPC. Autoload,
 ## non-pausing, clones the InventoryScreen / OptionsMenu pattern (frees the mouse on open; player control
@@ -49,6 +49,9 @@ var _title: Label
 var _source_grid: GridInventoryView   ## the SOURCE bag as a grid (corpse / container / pockets) — click a tile to TAKE
 var _player_grid: GridInventoryView   ## the PLAYER bag as a grid — click a tile to DEPOSIT into the source; drag to rearrange
 var _detail: Label                    ## hovered-item breakdown shown under the grids (shared by both)
+var _wallet: Label                    ## YOUR zorkmid readout under your grid — cash is not a backpack tile
+var _stash_btn: Button                ## opens the AmountPrompt that stashes part of your purse into the source
+var _amount_prompt: AmountPrompt      ## "how much?" card, parented over our own panel (code-built, like the grids)
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
@@ -239,6 +242,8 @@ func _refuse_open() -> void:
 func close() -> void:
 	if not _is_open:
 		return
+	if _amount_prompt != null:
+		_amount_prompt.close()  # never leave a half-answered "how much?" card to reappear over the next open
 	_bind(false)
 	# Thaw a pickpocketed NPC's frozen wallet back into its money float (any un-taken + planted coins), stripping
 	# the temporary tile — AFTER _bind(false) so the remove()'s `changed` doesn't trigger a rebuild mid-close.
@@ -333,13 +338,12 @@ func _take(item: Item) -> void:
 			_on_pickpocket_caught()
 			return
 	# A zorkmids stack is WALLET MONEY wearing an item costume — the coin tile a corpse / container carries
-	# (LootableCorpse.setup / ItemContainer._seed_money_coins), a live pickpocket's wallet float frozen into a tile
-	# for the session (_freeze_live_wallet), or the player's own MoneyPurse mirror. transfer_to would hand the player
-	# a stack their own purse then trims back to their wallet value — the taken amount silently evaporates. Convert it
-	# to real money instead. The extra `money`-float debit below is ONLY correct when the source's coin tile is a
-	# genuine MIRROR of a live wallet float (a MoneyPurse owner — only the player, who is never a loot source). A
-	# corpse / container / pickpocket NPC has NO purse, so is_mirrored(item) (F-C12) reads false and its float is left
-	# alone — for a pickpocket NPC the float is already 0 anyway (frozen into this tile), thawed back only on close.
+	# (LootableCorpse.setup / ItemContainer._seed_money_coins) or a live pickpocket's wallet float frozen into a
+	# tile for the session (_freeze_live_wallet). It must become real money on the player's side, never a stack in
+	# their backpack: the player's zorkmids ARE the `money` float, so a transfer_to would hand them an Item the
+	# wallet doesn't account for — cash that spends nowhere. Nothing debits the SOURCE's float here: a corpse /
+	# container has no float at all, and a pickpocket NPC's is already 0 (frozen into this very tile on open,
+	# thawed back only on close), so the tile itself is the whole wallet. ONE debit, one credit.
 	if item.id == Zorkmids.ITEM_ID:
 		var count := _source_inv.count_of(item)
 		if count <= 0:
@@ -347,10 +351,6 @@ func _take(item: Item) -> void:
 			return
 		var amt := float(count) * Zorkmids.QUANTUM
 		_source_inv.remove(item, count)
-		if _money_source != null and is_instance_valid(_money_source) and _source_inv.is_mirrored(item):
-			var raw: Variant = _money_source.get(&"money")
-			if raw is float or raw is int:
-				_money_source.set(&"money", maxf(0.0, float(raw) - amt))
 		_player.add_money(amt)
 		MenuStyle.play_commit()  # HEAVY: cash changing hands, past the count<=0 guard above so an empty tile stays silent
 		_maybe_free_drained_corpse()
@@ -458,20 +458,15 @@ func _maybe_free_drained_corpse() -> void:
 func _deposit(item: Item) -> void:
 	if not is_instance_valid(_source_inv) or not is_instance_valid(_player) or _player.inventory == null:
 		return
-	# The player's coin tile IS the wallet (MoneyPurse mirrors `money` into a zorkmids stack): transfer_to would
-	# move the mirror while the wallet float stays put, and the purse re-mints the full pile next frame -- an
-	# infinite money dupe into any container / corpse / companion. So cash is never transfer_to'd: a TILE source
-	# (corpse / container / pickpocketed pocket) gets a real coin tile stashed (debited from the player's wallet);
-	# a NONE source (gear exchange with an ally) refuses it — gifting / robbing a friend's wallet isn't
-	# "exchanging". (There's no float-deposit path anymore: a live pickpocket wallet is a coin tile for the whole
-	# session — frozen on open, thawed on close — so planting cash on it just adds to that tile.)
+	# Cash is never transfer_to'd. The player's zorkmids are the `money` FLOAT, not a backpack stack — a
+	# transfer_to of a coin tile would move an Item the wallet doesn't account for, minting cash from nothing.
+	# So a zorkmids press routes to the wallet path instead: a TILE source (corpse / container / pickpocketed
+	# pocket) gets a real coin tile stashed and the player debited; a NONE source (gear exchange with an ally)
+	# refuses it — gifting / robbing a friend's wallet isn't "exchanging". This branch is DEFENSIVE now (a
+	# zorkmids stack can't reach the player's bag any more); the live path is the wallet row's Stash button,
+	# which lands on the very same _stash_coins.
 	if item.id == Zorkmids.ITEM_ID:
-		if _wallet_mode == WALLET_TILE:
-			_deposit_coins_to_source()  # owns its own commit/denied pair
-		else:
-			MenuStyle.play_denied()  # a NONE-source exchange refuses cash outright
-			if _player.has_method(&"notify_toast"):
-				_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, GameSettings.hud.rep_neutral_color)
+		_stash_coins(_player.money)
 		return
 	var count := _player.inventory.count_of(item)
 	if _capacity_owner != null and is_instance_valid(_capacity_owner):
@@ -505,17 +500,19 @@ func _deposit(item: Item) -> void:
 	if moved > 0 and item.is_weapon() and _plant_target_cannot_wield() and _player.has_method(&"notify_toast"):
 		_player.notify_toast(PlayerText.TOAST_THEY_CANT_USE_WEAPON, GameSettings.hud.rep_neutral_color)
 
-## TILE-mode deposit: stash the player's whole wallet into the source (corpse / container / pickpocketed pocket)
-## as a real zorkmids COIN TILE. add() tops the source's existing coin tile (no new cell) or claims a fresh 1×1;
-## a full bounded source may only take part, so we debit ONLY what actually landed and leave the shortfall in the
-## player's wallet (no cash ever vanishes into a full bag). _source_inv.add emits `changed`, which rebuilds both
-## grids. For a live pickpocket pocket the stashed coins thaw into the NPC's money float on close (_refloat_live_wallet).
-func _deposit_coins_to_source() -> void:
+## TILE-mode deposit: stash `amount` of the player's wallet into the source (corpse / container / pickpocketed
+## pocket) as a real zorkmids COIN TILE. add() tops the source's existing coin tile (no new cell) or claims a
+## fresh 1×1; a full bounded source may only take part, so we debit ONLY what actually landed and leave the
+## shortfall in the player's wallet (no cash ever vanishes into a full bag). _source_inv.add emits `changed`,
+## which rebuilds both grids. For a live pickpocket pocket the stashed coins thaw into the NPC's money float on
+## close (_refloat_live_wallet). `amount` is CLAMPED to the wallet here as well as in the prompt — this is the
+## one function that debits, so it owns the invariant rather than trusting its caller.
+func _deposit_coins_to_source(amount: float) -> void:
 	if not is_instance_valid(_player) or not is_instance_valid(_source_inv):
 		return
 	# All three early returns below are refusals — each says so, so an empty wallet / a full container never
-	# reads as a dead tile. Only the last line commits.
-	var amount := snappedf(maxf(0.0, _player.money), Zorkmids.QUANTUM)
+	# reads as a dead press. Only the last line commits.
+	amount = snappedf(clampf(amount, 0.0, maxf(0.0, _player.money)), Zorkmids.QUANTUM)
 	if amount <= 0.0:
 		MenuStyle.play_denied()
 		if _player.has_method(&"notify_toast"):
@@ -662,7 +659,35 @@ func _rebuild() -> void:
 	# the transfer happens on a tile click (wired in _open: source -> _take, player -> _deposit). Cash rides INSIDE
 	# the source grid as a zorkmids coin tile now — every cash source is TILE mode — so there's no wallet button.
 	# _sync_cell_sizes refreshes both columns after equalizing their cell size.
+	_paint_wallet()
 	_sync_cell_sizes.call_deferred()  # first open: the root was hidden, so sizes settle a frame after visible
+
+## Paint YOUR wallet row from the LIVE `money` float (there is no derived coin stack to read). Gold while
+## solvent, danger on a negative read — the HUD's colour rule. The Stash button dims on an empty purse, and on
+## a cash-refusing gear EXCHANGE, so the row says up-front whether a press can move anything.
+func _paint_wallet() -> void:
+	if _wallet == null:
+		return
+	var cash: float = _player.money if is_instance_valid(_player) else 0.0
+	_wallet.text = PlayerText.wallet_row(cash)
+	_wallet.add_theme_color_override(&"font_color", MenuStyle.wallet_color(cash))
+	_stash_btn.disabled = cash <= 0.0 or _wallet_mode != WALLET_TILE
+
+## The wallet row's button — ask how much, then stash exactly that into the source as a coin tile.
+func _on_stash_pressed() -> void:
+	if not is_instance_valid(_player):
+		return
+	_amount_prompt.ask(PlayerText.WALLET_STASH_TITLE, _player.money, PlayerText.WALLET_STASH, _stash_coins)
+
+## Commit the prompt's answer through the SAME deposit path a coin tile used, so the wallet-mode refusal, the
+## room check and the partial-stash debit stay in one place.
+func _stash_coins(amount: float) -> void:
+	if _wallet_mode == WALLET_TILE:
+		_deposit_coins_to_source(amount)  # owns its own commit/denied pair
+	else:
+		MenuStyle.play_denied()  # a NONE-source exchange refuses cash outright
+		if is_instance_valid(_player) and _player.has_method(&"notify_toast"):
+			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, GameSettings.hud.rep_neutral_color)
 
 ## Side-by-side grids must render the same item at ONE scale: each view fits its own slot independently, so the
 ## 10x8 container column landed at 22px cells while the 6x5 player column landed at ~36px — the same item ~64%
@@ -808,6 +833,27 @@ func _bind_ui() -> void:
 	_player_grid.transfer_partner = _source_grid
 	_source_grid.transfer_requested.connect(_on_source_transfer)
 	_player_grid.transfer_requested.connect(_on_player_transfer)
+
+	# YOUR WALLET ROW, under your grid. The player's cash is a plain float (no coin tile eating backpack
+	# cells), so "stash some money in here" needs its own affordance: this button opens the shared
+	# AmountPrompt and deposits exactly what you answer. The SOURCE side needs no such row — a corpse /
+	# container / frozen pocket carries its cash as a real coin tile you take by clicking, which is unchanged.
+	# The button is always present, whatever the source: a NONE-mode exchange refuses cash through the same
+	# _deposit path a coin tile went through, so the refusal reads identically instead of the row vanishing.
+	_wallet = MenuStyle.cap_label(%PlayerWallet)
+	_wallet.add_theme_font_size_override("font_size", MenuStyle.skin.hint_size)
+	# NOT cap_button — see the same note in inventory_screen.gd: clip_text zeroes a Button's minimum width, and
+	# next to an EXPAND_FILL Label that leaves a captionless sliver. The caption is a fixed PlayerText const.
+	_stash_btn = %StashButton
+	_stash_btn.text = PlayerText.WALLET_STASH
+	MenuStyle.set_button_sound(_stash_btn, &"")  # the prompt plays its own open cue; the commit belongs to the deposit
+	_stash_btn.pressed.connect(_on_stash_pressed)
+	(%PlayerWalletRow as HBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
+
+	# The "how much?" card, parented over the whole screen (LAST child of the root, so it draws above the panel
+	# and eats the clicks that miss it). Code-built for the same reason the grid views are.
+	_amount_prompt = AmountPrompt.new()
+	_root.add_child(_amount_prompt)
 
 	# Detail line under both grids (footer + label authored in the scene): the hovered item's breakdown, else
 	# the click/drag hint. A fixed-height clip host so hovering can't re-lay-out the grid columns above (the

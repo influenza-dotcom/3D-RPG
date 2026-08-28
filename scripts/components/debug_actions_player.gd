@@ -1430,7 +1430,7 @@ static func _stats(p: Player) -> PackedStringArray:
 ## `money <amount>` — the live wallet.
 ##
 ## ⭐`add_money` is the ONLY correct mutator (character.gd:39). Writing `player.money` emits no `money_changed`,
-## so the MoneyPurse coin tile goes stale, the HUD readout and floating +N never fire and no autosave is queued.
+## so the HUD readout, the backpack's wallet row and the floating +N never fire and no autosave is queued.
 ## And `GameState.money` is NOT the wallet — it is a saved MIRROR that capture() overwrites from player.money.
 static func _money(p: Player, args: PackedStringArray) -> PackedStringArray:
 	if p == null:
@@ -1897,8 +1897,9 @@ static func _level(p: Player, args: PackedStringArray) -> PackedStringArray:
 ## ⭐A weapon is requested ONE AT A TIME, because ItemDb.restore_item returns a FRESH unique Item for a weapon and
 ## the SHARED template for everything else — asking for three pistols in one add() would file three stacks that
 ## all alias one object. Ammo/consumables must keep the shared template, or they stop stacking.
-## ⭐Zorkmids are refused: the coin tile is a DERIVED VIEW that MoneyPurse rebuilds from `money` on every
-## inventory.changed, so adding it here is silently reverted. Use `money`.
+## ⭐Zorkmids are refused: the player's cash is the `money` FLOAT, not a backpack stack, so a coin tile handed
+## to the bag here would be money nothing accounts for (it spends nowhere and no wallet ever paid for it).
+## Use `money`.
 static func _give(p: Player, args: PackedStringArray) -> PackedStringArray:
 	if p == null:
 		return _no_player()
@@ -1907,7 +1908,7 @@ static func _give(p: Player, args: PackedStringArray) -> PackedStringArray:
 		return PackedStringArray(["give: no backpack — CharacterInventory is built in Character._ready, so the player is off-tree"])
 	var id := StringName(args[0].strip_edges())
 	if id == ZorkmidsReg.ITEM_ID:
-		return PackedStringArray(["give: zorkmids are a derived tile MoneyPurse rebuilds from the wallet — use `money <amount>`"])
+		return PackedStringArray(["give: zorkmids are the wallet float, not a backpack stack — use `money <amount>`"])
 	var count := 1
 	if args.size() > 1:
 		count = maxi(1, int(round(args[1].to_float())))

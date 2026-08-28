@@ -483,8 +483,8 @@ func test_future_snapshot_version_degrades_to_profile_only() -> void:
 	gs.free()
 
 func test_item_container_serialize_restore_round_trips_coins_and_layout() -> void:
-	# The coin-polarity pin: a CONTAINER's zorkmid tile is REAL loot (no mirror registered — only the player's
-	# MoneyPurse mirrors the wallet float), so it must serialize AND restore like any stack. Also pins that a
+	# The coin-polarity pin: a CONTAINER's zorkmid tile is REAL loot (the PLAYER's zorkmids are a `money` float
+	# that never enters a bag), so it must serialize AND restore like any stack. Also pins that a
 	# grid-bounded crate re-bounds on restore with its cells honored, and that restore REPLACES the fresh seed.
 	var coin: Item = ItemDb.item_by_id(Zorkmids.ITEM_ID)
 	assert_not_null(coin, "the zorkmid coin item is registered in ItemDb")

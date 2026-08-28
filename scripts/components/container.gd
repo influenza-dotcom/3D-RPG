@@ -105,8 +105,8 @@ func snapshot_key() -> String:
 
 ## This container's exact-save state, in the [world_snapshot] "containers" entry shape:
 ## { stacks: serialize_stacks() rows, grid: bool, locked: bool (only when a Lock child exists) }.
-## The coin tile serializes like any other stack (it's REAL loot here, never a wallet mirror — see
-## CharacterInventory.is_mirrored); `grid` records whether the loot screen has bounded us yet, so a restore
+## The coin tile serializes like any other stack (a container's cash is REAL loot — the PLAYER's zorkmids are
+## a `money` float that never enters a bag); `grid` records whether the loot screen has bounded us yet, so a restore
 ## can re-bound BEFORE re-placing and the player's crate layout survives the reload.
 func snapshot_contents() -> Dictionary:
 	if inventory == null:

@@ -23,14 +23,18 @@ signal closed
 
 
 const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME margin as the loot/shop screens, so every inventory-style menu shares one chrome; AUTHORED into the scene's Panel anchors (0.12..0.88), this const documents the contract (test-pinned)
-const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Implants/Reputation/Journal)
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Implants/Map/Reputation/Journal)
 
 var _root: Control
 var _grid_view: GridInventoryView  ## the Tetris grid of the backpack (drag to move, R to rotate, click to equip/use)
 var _detail: Label                 ## hovered-item breakdown shown under the grid (replaces the per-row tooltip)
+var _wallet: Label                 ## the zorkmid readout above the grid — money is NOT a grid tile (see _bind_ui)
+var _drop_money_btn: Button        ## opens the AmountPrompt that spills part of the purse as a physics money bag
+var _amount_prompt: AmountPrompt   ## "how much?" card, parented over our own panel (code-built, like the grid)
 var _is_open := false
 var _player: Player = null
 var _bound_inventory: CharacterInventory = null
+var _bound_player: Player = null   ## whose money_changed the wallet row is currently listening to
 
 func _ready() -> void:
 	layer = 120                                  # above the HUD, just under OptionsMenu (128)
@@ -72,6 +76,7 @@ func open() -> void:
 		return  # no player / no backpack -> nothing to show (e.g. the start menu)
 	PlayerMenus.enter(self)  # switch off a sibling + free the cursor (preserves cursor position across switches)
 	_bind_inventory(_player.inventory)
+	_bind_wallet(_player)
 	_is_open = true
 	_rebuild()
 	_root.visible = true
@@ -80,6 +85,8 @@ func open() -> void:
 func close() -> void:
 	if not _is_open:
 		return
+	if _amount_prompt != null:
+		_amount_prompt.close()  # never leave a half-answered "how much?" card to reappear over the next open
 	_is_open = false
 	_root.visible = false
 	PlayerMenus.leave()
@@ -95,6 +102,24 @@ func _bind_inventory(inv: CharacterInventory) -> void:
 	_bound_inventory = inv
 	if inv != null and not inv.changed.is_connected(_on_inventory_changed):
 		inv.changed.connect(_on_inventory_changed)
+
+## The wallet row reads `money`, which the BAG's `changed` never fires for (a bounty, a sale, a pickup, an
+## interest posting). Bind the float's own signal so the row can't sit stale while the screen is open. Bound
+## per-open like the inventory; a respawned player is a new node, so its predecessor's connection dies with it.
+func _bind_wallet(p: Player) -> void:
+	if _bound_player == p:
+		return
+	if is_instance_valid(_bound_player) and _bound_player.money_changed.is_connected(_on_money_changed):
+		_bound_player.money_changed.disconnect(_on_money_changed)
+	_bound_player = p
+	if p != null and not p.money_changed.is_connected(_on_money_changed):
+		p.money_changed.connect(_on_money_changed)
+
+
+func _on_money_changed(_total: float, _delta: float) -> void:
+	if _is_open:
+		_paint_wallet()
+
 
 func _on_inventory_changed() -> void:
 	if _is_open:
@@ -129,11 +154,34 @@ func _bind_ui() -> void:
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared rhythm across every panel screen
 
 	# The tab strip is the only header — it already labels the screen, so no separate title. Stats aren't shown
-	# here (dedicated Stats screen, one tab away); zorkmids ride INSIDE the grid as their own coin tile now
-	# (MoneyPurse mirrors the wallet into a real backpack stack), so there's no separate money widget to place.
-	# The strip stays CODE-BUILT by PlayerMenus into the authored %TabSlot: its one-Button-per-tab EXPAND_FILL
-	# structure is a cross-screen contract (tests/test_player_menus.gd), so the scene authors only the slot.
+	# here (dedicated Stats screen, one tab away). The strip stays CODE-BUILT by PlayerMenus into the authored
+	# %TabSlot: its one-Button-per-tab EXPAND_FILL structure is a cross-screen contract
+	# (tests/test_player_menus.gd), so the scene authors only the slot.
 	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"inventory"))  # [Inventory | Stats | Implants | Reputation | Journal] — click to switch (routing KEY, not the painted label)
+
+	# THE WALLET ROW — money is NOT an inventory item. Zorkmids spent a while mirrored into a real coin tile
+	# inside the grid, which meant a fat purse ate 1x1..3x3 backpack cells you'd rather have filled with
+	# loot. The wallet is a plain readout again — `Character.money`, the authoritative
+	# float, painted here and on the HUD — and the two gestures the tile carried moved onto this row: the
+	# button opens the AmountPrompt, which spills a CHOSEN slice of the purse as a physics money bag (the tile
+	# could only ever dump the whole lot). The Label EXPAND_FILLs and clips, so the amount can grow to any
+	# width without shifting the button (menus never re-lay-out on text).
+	_wallet = MenuStyle.cap_label(%Wallet)
+	_wallet.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
+	# NOT cap_button: clip_text drops a Button's horizontal MINIMUM to ~0, and beside an EXPAND_FILL Label that
+	# collapses it to a sliver with no caption (cap_button is for a card whose width is PINNED — see
+	# MenuStyle.make_dialog). This caption is a fixed PlayerText const, so its natural width is the right width.
+	_drop_money_btn = %DropMoneyButton
+	_drop_money_btn.text = PlayerText.WALLET_DROP
+	MenuStyle.set_button_sound(_drop_money_btn, &"")  # the prompt plays its own open cue — don't stack a click on top
+	_drop_money_btn.pressed.connect(_on_drop_money_pressed)
+	(%WalletRow as HBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
+
+	# The "how much?" card, parented over the whole screen (LAST child of the root, so it draws above the
+	# panel and eats the clicks that miss it). Code-built for the same reason the grid view is: it's live
+	# runtime chrome, not layout an artist arranges.
+	_amount_prompt = AmountPrompt.new()
+	_root.add_child(_amount_prompt)
 
 	# The Tetris grid itself — drag a tile to move it, R to rotate the held tile, click to equip/use, right-click
 	# to drop. Cells size to the SLOT: the resized hook below feeds the grid the scroll slot's height as its
@@ -151,9 +199,8 @@ func _bind_ui() -> void:
 	_grid_view.hover_changed.connect(_on_grid_hover_changed)
 
 	# Footer status line under the grid (footer + label authored in the scene): the carry weight when idle, the
-	# hovered item's breakdown on hover. (Zorkmids now live INSIDE the grid as their own coin tile — MoneyPurse
-	# mirrors the wallet into a real stack — so the old footer coin widget is gone; the wallet total still reads
-	# on the top-left HUD.) The detail Label lives inside a FIXED-HEIGHT clip host (the make_hint_footer
+	# hovered item's breakdown on hover. (Cash is NOT here — it reads on the wallet row above the grid, and on
+	# the top-left HUD.) The detail Label lives inside a FIXED-HEIGHT clip host (the make_hint_footer
 	# construct, shared with LootScreen — the height math below mirrors it): reserving a min height on the Label
 	# alone was not enough — an unusually long tooltip (a weapon's full stat block) exceeds it, and because a
 	# Label reports its full wrapped height as its min size, the VBox grew the footer and SHRANK the EXPAND_FILL
@@ -182,7 +229,42 @@ func _rebuild() -> void:
 	if not is_instance_valid(_player) or _player.inventory == null:
 		return
 	_grid_view.bind(_player.inventory)  # bind() also refreshes the tiles
+	_paint_wallet()
 	_show_weight()
+
+
+## Paint the wallet row from the LIVE `money` float (the single source of truth — there is no derived stack to
+## read any more). Gold while solvent, danger when a wallet somehow reads negative, matching the HUD readout.
+## The Drop button dims on an empty purse so the row states up-front whether a press can do anything.
+func _paint_wallet() -> void:
+	if not is_instance_valid(_player):
+		return
+	var cash: float = _player.money
+	_wallet.text = PlayerText.wallet_row(cash)
+	_wallet.add_theme_color_override(&"font_color", MenuStyle.wallet_color(cash))
+	_drop_money_btn.disabled = cash <= 0.0
+
+
+## The wallet row's button — ask how much, then spill exactly that as a physics money bag. The prompt clamps
+## to the cap we hand it (and drop_money clamps again), so _drop_money can never be given more than we carry.
+func _on_drop_money_pressed() -> void:
+	if not is_instance_valid(_player):
+		return
+	_amount_prompt.ask(PlayerText.WALLET_DROP_TITLE, _player.money, PlayerText.WALLET_DROP, _drop_money)
+
+
+## Commit the prompt's answer. Gated on the wallet ACTUALLY shrinking: drop_money returns void but no-ops when
+## the player is off-tree (nowhere to spawn the bag), and a spill that never happened must not sound like one.
+func _drop_money(amount: float) -> void:
+	if not is_instance_valid(_player):
+		return
+	var before := _player.money
+	_player.drop_money(amount)
+	if _player.money < before:
+		MenuStyle.play_commit()  # HEAVY: cash leaving the wallet for the floor
+	else:
+		MenuStyle.play_denied()
+	_paint_wallet()
 
 ## Put the carry-weight readout on the footer status line (the idle state; hovering an item overrides it).
 func _show_weight() -> void:
@@ -213,18 +295,11 @@ func _on_grid_drop(item: Item, key: int) -> void:
 	if item == null or not is_instance_valid(_player) or _player.inventory == null:
 		return
 	if item.id == Zorkmids.ITEM_ID:
-		# The coin pile IS the wallet, not an ordinary stack — spill the WHOLE purse as a collectable MoneyPickUp
-		# (drop_money debits the wallet, then MoneyPurse clears the tile). A plain drop_stack would remove the
-		# mirror stack without moving `money`, and the purse would just re-assert it a frame later.
-		var purse := _player.money
-		_player.drop_money(purse)
-		# HEAVY commit — the whole wallet leaving the bag at once, not an ordinary stack drop. Gated on the wallet
-		# ACTUALLY shrinking (drop_money returns void but no-ops on an empty purse / off-tree); a spill that never
-		# happened takes the denial cue instead, so right-clicking a coin tile always answers.
-		if _player.money < purse:
-			MenuStyle.play_commit()
-		else:
-			MenuStyle.play_denied()
+		# DEFENSIVE, not a live path: cash converts to `money` at every seam that could hand the player coins
+		# (LootScreen._take, MoneyPickUp, the debug `give` refusal), so a zorkmids stack can no longer reach the
+		# backpack. If one ever does, route it to the wallet's own gesture rather than drop_stack — that would
+		# mint a money-bag world object holding NO money while the wallet float sat untouched.
+		_on_drop_money_pressed()
 		return
 	_player.drop_stack(item, key)  # removes THAT stack from the bag -> inventory.changed -> _rebuild refreshes
 	# A grid tile is a plain Control (GridInventoryView/GridTile extend Control, not BaseButton), so the auto-wired

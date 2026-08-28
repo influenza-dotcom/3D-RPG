@@ -88,6 +88,21 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
+[node name="PlayerWalletRow" type="HBoxContainer" parent="Root/Panel/VBox/Columns/PlayerColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="PlayerWallet" type="Label" parent="Root/Panel/VBox/Columns/PlayerColumn/PlayerWalletRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 1
+clip_text = true
+
+[node name="StashButton" type="Button" parent="Root/Panel/VBox/Columns/PlayerColumn/PlayerWalletRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
 [node name="Footer" type="Control" parent="Root/Panel/VBox"]
 unique_name_in_owner = true
 layout_mode = 2

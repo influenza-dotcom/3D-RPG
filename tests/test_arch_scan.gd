@@ -59,13 +59,13 @@ func test_repeated_seam_joins_and_risks_accumulate() -> void:
 	var text := _src([
 		"## @system Economy",
 		"## @seam Wallet is the authoritative float.",
-		"## @seam MoneyPurse mirrors it into a coin stack.",
-		"## @risk Double-count if the mirror is serialized.",
+		"## @seam A loot source carries its cash as a coin stack.",
+		"## @risk Double-count if the coin tile is serialized.",
 		"## @risk Loot loss if the changed signal fires mid-transfer.",
-		"class_name MoneyPurse",
+		"class_name SyntheticWallet",
 	])
-	var e: Dictionary = ArchScan.parse_file("res://scripts/inventory/money_purse.gd", text, {})[0]
-	assert_eq(String(e.get("seam")), "Wallet is the authoritative float. MoneyPurse mirrors it into a coin stack.", "repeated @seam joins with a space")
+	var e: Dictionary = ArchScan.parse_file("res://scripts/inventory/synthetic_wallet.gd", text, {})[0]
+	assert_eq(String(e.get("seam")), "Wallet is the authoritative float. A loot source carries its cash as a coin stack.", "repeated @seam joins with a space")
 	assert_eq((e.get("risks") as Array).size(), 2, "each @risk accumulates")
 
 

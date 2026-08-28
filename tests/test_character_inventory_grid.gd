@@ -331,9 +331,10 @@ func test_move_stack_is_a_noop_with_grid_off() -> void:
 	it = null
 
 
-# --- transfer_to coalesces its own `changed` so a mirror listener (MoneyPurse) can't grab a freed cell (F-C12) ---
+# --- transfer_to coalesces its own `changed` so a write-back listener can't grab a freed cell (F-C12) ---
 
-## A stand-in for MoneyPurse.sync: wired to the SOURCE bag's `changed`, it re-asserts a mirrored coin tile into a
+## A stand-in for any listener that WRITES BACK on `changed` (the pickpocket wallet freeze is the shipped one):
+## wired to the SOURCE bag's `changed`, it re-asserts a coin tile into a
 ## free cell the instant the bag looks emptied of `a`. If transfer_to did NOT coalesce its own emit, the remove()
 ## step's `changed` would fire this MID-transfer and the coin would eat the freed cell before the bounced remainder
 ## is rolled back — the exact interleave the deferral prevents. A bound method on an inner class, not a lambda, per
@@ -344,11 +345,11 @@ class _CoinRefitter extends RefCounted:
 	var a: Item
 	func on_changed() -> void:
 		if inv != null and inv.count_of(a) == 0 and inv.count_of(coin) == 0:
-			inv.set_item_count(coin, 1, 1, 1)  # grab a freed cell for the (derived) coin pile — models MoneyPurse.sync
+			inv.set_item_count(coin, 1, 1, 1)  # grab a freed cell for the coin pile — models a self-healing view
 
 func test_transfer_to_rollback_survives_listener_refit() -> void:
 	# A partial-bounce deposit: src holds two 1×1 `a` (both cells), dst has room for only one. transfer_to removes
-	# both, dst keeps one, the other bounces back. A mirror listener on src.changed tries to claim a freed cell the
+	# both, dst keeps one, the other bounces back. A write-back listener on src.changed tries to claim a freed cell the
 	# instant `a` is gone. WITHOUT the deferral it fires mid-remove and mints a coin into that cell; WITH it, src
 	# emits `changed` exactly once at the end (a already restored), so the listener's guard sees count_of(a)==1 and
 	# never mints. (The spec's moved==0 shape is unreachable: transfer_to's can_accept guard early-returns a full
