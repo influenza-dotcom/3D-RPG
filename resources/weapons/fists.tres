@@ -38,7 +38,6 @@ whiz_sound = ExtResource("6_e4upy")
 impact_sound = ExtResource("3_ofxai")
 impact_enemy_sound = ExtResource("2_gqr1c")
 screen_shake_amount = 0.0
-launch_screen_shake = 0.0
 hitstop_duration = 0.0
 hitstop_recovery = 0.0
 no_ads = true

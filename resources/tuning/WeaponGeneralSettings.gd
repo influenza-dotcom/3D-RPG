@@ -39,6 +39,25 @@ extends Resource
 ## Reload-key press shorter than this (s) reloads; held at least this long toggles the holster.
 @export var reload_hold_threshold: float = 0.3
 
+@export_group("Agility floors")
+## The shortest a MELEE swing's cadence may become once the wielder's AGILITY has scaled it
+## (CharacterStats.melee_time_mult, applied in Attack.effective_attack_speed). The weapon's own authored
+## attack_speed is untouched — this only bounds how far a build can compress it.
+## ⭐ LOAD-BEARING, not cosmetic. Agility is uncapped at the level-up station (character creation stops at +10,
+## LevelUp.level_up_stat does not stop at all), so at agility 20 the multiplier is exactly 0 — and a
+## Timer.wait_time of 0 is an engine error ("Time should be greater than zero"), which would leave the fire
+## cooldown never elapsing. The DEFAULT sits just above FirstPersonBody.fp_arm_punch_duration (0.32 s), the
+## documented "one punch, start to fully settled" window that must fit inside the cadence or spamming attack
+## restarts the swing before it ever completes. At this value the knife (0.88 s) first floors at agility 13 and
+## the fists (1.2 s) at agility 15 — deep into a specialist build, so an ordinary one never meets the plateau.
+@export var min_melee_attack_speed: float = 0.35
+## The shortest a RELOAD may become once AGILITY has scaled it (CharacterStats.reload_time_mult, applied in
+## Attack.effective_reload_time). Same engine reason as above — the reload Timer needs a positive wait_time.
+## The DEFAULT keeps a magazine change readable as an action and comfortably longer than auto_reload_delay
+## (0.1 s), so an auto-reloading weapon's "shot, beat, reload" rhythm keeps its ordering. The shipped shotgun
+## (1.0 s) and the SMG (1.1 s) first floor at agility 16, the sniper (3.4 s) not until agility 19.
+@export var min_reload_time: float = 0.25
+
 @export_group("Hitstop")
 ## Hitstop grows with damage: every this-many damage adds +1x on top of the 1x base
 ## (so a hit of exactly this deals 2x hitstop)...

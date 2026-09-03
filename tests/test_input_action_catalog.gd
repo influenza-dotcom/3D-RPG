@@ -71,3 +71,19 @@ func test_run_and_nightvision_are_canonicalized() -> void:
 func test_run_defaults_to_shift_and_crouch_to_ctrl() -> void:
 	assert_true(_keycodes_for(&"Run").has(KEY_SHIFT), "Run defaults to Shift")
 	assert_true(_keycodes_for(&"Crouch").has(KEY_CTRL), "Crouch defaults to Ctrl so Shift is free for Run")
+
+
+func test_air_dash_defaults_to_left_alt_and_shares_with_nothing() -> void:
+	# The air dash is the third BARE MODIFIER binding, alongside Run=Shift and Crouch=Ctrl — chosen because Alt is
+	# the only free key the left thumb can reach without leaving WASD+Space, which a mid-air verb needs. The
+	# rationale is argued at length in InputManager.gd; this pins it as data so a rebind of the DEFAULT is a
+	# deliberate edit here, not a silent drift.
+	assert_true(InputMap.has_action(&"AirDash"), "AirDash is a real InputMap action")
+	assert_eq(InputManager.action_air_dash, &"AirDash", "action_air_dash canonicalizes the AirDash action")
+	assert_true(_keycodes_for(&"AirDash").has(KEY_ALT), "AirDash defaults to Left Alt")
+	# It must not collide with the other two bare modifiers — a shared event would fire both verbs on one press,
+	# and unlike the Q lean/takedown pair there is no context to arbitrate a dash against.
+	assert_false(_keycodes_for(&"Run").has(KEY_ALT), "Run must not also sit on Alt")
+	assert_false(_keycodes_for(&"Crouch").has(KEY_ALT), "Crouch must not also sit on Alt")
+	assert_false(_keycodes_for(&"AirDash").has(KEY_SHIFT), "the dash must not shadow Run")
+	assert_false(_keycodes_for(&"AirDash").has(KEY_CTRL), "the dash must not shadow Crouch")

@@ -285,6 +285,10 @@ var _fp_legs: BodyModelSwap = null
 @export var fp_arm_punch_pitch: float = -35.0
 ## Seconds one punch takes, start to fully settled. Must stay under the weapon's attack_speed (fists: 1.2 s) or
 ## spamming attack restarts the swing before it ever completes.
+## ⭐ Since 2026-09-02 the cadence to compare against is the WIELDER'S, not the weapon's: AGILITY compresses a melee
+## swing (Attack.effective_attack_speed), so the real lower bound is GameSettings.weapon_general
+## .min_melee_attack_speed — authored at 0.35 s precisely to sit above this field's 0.32 s default. Retune the two
+## TOGETHER; tests/test_managers_tuning.gd::test_weapon_general_settings_agility_floors pins the relationship.
 @export var fp_arm_punch_duration: float = 0.32
 ## How far the punching fist THRUSTS, in camera space: -Z is forward (AWAY from the lens), -X pulls it inward
 ## toward screen centre. From the steep guard the swing pitches the fist down-forward toward the crosshair.
@@ -516,7 +520,7 @@ func _configure_fp_torso(rig: BodyModelSwap) -> void:
 		body = catalog.default_body()
 	if body == null or body.whole_body:
 		return
-	var shirt := catalog.shirt_texture(host.appearance)
+	var shirt := CharacterAppearanceCatalog.shirt_texture(host.appearance)
 	rig.body_model_scale = body.scale
 	# +180 yaw on the catalog rotation: body options are authored to face the NPC's +Z forward (see
 	# body_model_rotation's own doc), but the player faces -Z — without the flip you wear the torso backwards.

@@ -613,8 +613,8 @@ const COMPONENTS: Array[Dictionary] = [
 		"extends": "Ability",
 		"category": "Player",
 		"add_mode": "instance",
-		"description": "Player ability: a mid-air dash; presence grants the mechanic.",
-		"key_exports": ["enabled"],
+		"description": "The chip-granted AIR DASH: tap the AirDash key (default Left Alt) to fling yourself where you are LOOKING, once per airtime, with any weapon or none. Unlike the pure-gate abilities this node OWNS the verb - the impulse, the stamina charge, the one-per-airtime lock and the recharge cue all live on it, ticked from the Player physics beat. It used to be a bare gate with the launch living on the knife (attack while scoped to dash); that gesture is gone. TUNE IT ON THE SCRIPT DEFAULTS, not the .tscn - a chip install rebuilds the node with load(script).new() and never reads the scene.",
+		"key_exports": ["enabled", "dash_force", "dash_upward", "cooldown", "single_air_dash", "screen_shake", "dash_sound"],
 	},
 	{
 		"class_name": "SkyTitle",
@@ -823,7 +823,7 @@ const COMPONENTS: Array[Dictionary] = [
 		"extends": "Ability",
 		"category": "Player",
 		"add_mode": "instance",
-		"description": "The chip-granted quiet-kill GATE: install the Takedown Chip (chip_takedown.tres) at a ChipInstaller to earn the silent-takedown verb. A pure presence flag (like AirDash) — the behaviour lives in the always-present SilentTakedown player component, inert until this node is present + enabled. A fresh game ships with zero abilities, so the stealth kill is earned, not given.",
+		"description": "The chip-granted quiet-kill GATE: install the Takedown Chip (chip_takedown.tres) at a ChipInstaller to earn the silent-takedown verb. A pure presence flag — the behaviour lives in the always-present SilentTakedown player component, inert until this node is present + enabled. A fresh game ships with zero abilities, so the stealth kill is earned, not given.",
 		"key_exports": ["enabled"],
 	},
 	{
@@ -833,7 +833,7 @@ const COMPONENTS: Array[Dictionary] = [
 		"extends": "Ability",
 		"category": "Player",
 		"add_mode": "instance",
-		"description": "The chip-granted BUNNY-HOP GATE: install the Bunny-Hop Chip (chip_bunnyhop.tres) at a ChipInstaller to earn the chained-jump speed boost. A pure presence flag (like AirDash) — the chain state machine is the Player's always-present Bunnyhop child, inert until this node is present + enabled, so without it ground speed stays at player_movement.max_speed. Instances as 'BunnyhopImplant' so it doesn't collide with that Bunnyhop child.",
+		"description": "The chip-granted BUNNY-HOP GATE: install the Bunny-Hop Chip (chip_bunnyhop.tres) at a ChipInstaller to earn the chained-jump speed boost. A pure presence flag (like SilentTakedownAbility) — the chain state machine is the Player's always-present Bunnyhop child, inert until this node is present + enabled, so without it ground speed stays at player_movement.max_speed. Instances as 'BunnyhopImplant' so it doesn't collide with that Bunnyhop child.",
 		"key_exports": ["enabled"],
 	},
 	{

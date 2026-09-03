@@ -54,6 +54,9 @@ func test_baseline_sheet_is_perfectly_neutral() -> void:
 	assert_almost_eq(s.rep_loss_mult(), 1.0, 0.0001, "baseline streetwise changes no rep loss")
 	assert_almost_eq(s.move_speed_mult(), 1.0, 0.0001, "baseline agility changes no move speed")
 	assert_almost_eq(s.jump_mult(), 1.0, 0.0001, "baseline agility changes no jump")
+	assert_almost_eq(s.stamina_regen_mult(), 1.0, 0.0001, "baseline agility changes no stamina recovery — a baseline character still recovers, at exactly the authored tier rates")
+	assert_almost_eq(s.melee_time_mult(), 1.0, 0.0001, "baseline agility changes no melee cadence — a baseline character swings at exactly the authored attack_speed and wind-up")
+	assert_almost_eq(s.reload_time_mult(), 1.0, 0.0001, "baseline agility changes no reload time — a baseline character reloads in exactly the authored reload_time")
 	assert_almost_eq(s.detection_rate_mult(), 1.0, 0.0001, "baseline larceny changes no detection rate")
 	assert_almost_eq(s.pickpocket_catch_chance(0.35, 0.03), 0.35, 0.0001, "baseline larceny leaves the base catch chance")
 	assert_almost_eq(s.pickpocket_value_allowance(10.0, 5.0), 10.0, 0.0001, "baseline larceny leaves the base value allowance")
@@ -117,6 +120,58 @@ func test_agility_speeds_movement_and_jump() -> void:
 	fast = null
 	slow = null
 	frozen = null
+
+
+func test_agility_speeds_stamina_recovery() -> void:
+	# AGILITY's third effect: how fast the stamina pool comes BACK (endurance still buys its SIZE). Consumed at
+	# StaminaManager.recovery_rate_for, which multiplies whichever tier rate it picked by this — see
+	# tests/test_player_core.gd for the wiring half.
+	var quick := _sheet(0, 0, 4)  # agility 4
+	assert_almost_eq(quick.stamina_regen_mult(), 1.2, 0.0001, "agility 4 -> stamina recovers 20% faster (5%/pt)")
+	var sluggish := _sheet(0, 0, -2)
+	assert_almost_eq(sluggish.stamina_regen_mult(), 0.9, 0.0001, "worse forever going down: a negative agility recovers slower, linearly")
+	var nearly_still := _sheet(0, 0, -19)
+	assert_almost_eq(nearly_still.stamina_regen_mult(), 0.05, 0.0001, "still STRICTLY positive just above the floor — no interior plateau (NO SOFT CAP)")
+	var spent := _sheet(0, 0, -100)
+	assert_almost_eq(spent.stamina_regen_mult(), 0.0, 0.0001, "the physical floor: a deeply negative agility stops recovery at 0 and NEVER goes negative — a negative rate would reach _set_stamina and silently drain a standing player's pool")
+	quick = null
+	sluggish = null
+	nearly_still = null
+	spent = null
+
+
+func test_agility_quickens_melee_swings_and_reloads() -> void:
+	# AGILITY's fourth and fifth effects, and the two that make it a FIGHTING stat rather than a purely
+	# traversal one: how long a melee swing takes (cadence AND wind-up, Attack.effective_attack_speed /
+	# effective_attack_windup) and how long a reload takes (Attack.effective_reload_time).
+	# Both are TIME multipliers in the takedown_time_mult voice — LESS is better — so every assertion below
+	# reads "the clock got shorter", and a NEGATIVE agility runs them past 1.0 without limit.
+	# ⭐ The two ride the SAME per-point rate on purpose: the Stats screen prints ONE percentage for both
+	# (tests/test_stats_screen.gd::test_agility_effect_names_all_three_speeds pins that wording), which is only
+	# honest while these stay equal. If they ever diverge, that readout needs a fourth clause.
+	var quick := _sheet(0, 0, 4)  # agility 4
+	assert_almost_eq(quick.melee_time_mult(), 0.8, 0.0001, "agility 4 -> a melee swing takes 20% less time (5%/pt)")
+	assert_almost_eq(quick.reload_time_mult(), 0.8, 0.0001, "agility 4 -> a reload takes 20% less time (5%/pt)")
+	assert_almost_eq(quick.melee_time_mult(), quick.reload_time_mult(), 0.0001,
+		"the melee and reload clocks share one per-point rate — the single 'attack & reload speed' readout depends on it")
+	var clumsy := _sheet(0, 0, -3)
+	assert_almost_eq(clumsy.melee_time_mult(), 1.15, 0.0001, "worse forever going up: a negative agility drags every swing out, linearly")
+	assert_almost_eq(clumsy.reload_time_mult(), 1.15, 0.0001, "and leaves a clumsy character exposed 15% longer on every magazine change")
+	var nearly_instant := _sheet(0, 0, 19)
+	assert_almost_eq(nearly_instant.melee_time_mult(), 0.05, 0.0001, "still STRICTLY positive just above the floor — no interior plateau (NO SOFT CAP)")
+	var beyond := _sheet(0, 0, 25)
+	assert_almost_eq(beyond.melee_time_mult(), 0.0, 0.0001, "the multiplier's own floor is 0 and it NEVER goes negative")
+	assert_almost_eq(beyond.reload_time_mult(), 0.0, 0.0001, "same for the reload clock")
+	# ⭐ 0 is REACHABLE (agility 20), and a Timer.wait_time of 0 is an engine error — so unlike every other
+	# derived multiplier, the floor that actually protects the game is the CONSUMER's, not this one.
+	# Attack holds the product to GameSettings.weapon_general.min_melee_attack_speed / min_reload_time; see
+	# tests/test_combat_systems.gd for that half and tests/test_managers_tuning.gd for the knobs themselves.
+	assert_almost_eq(_sheet(0, 0, 20).melee_time_mult(), 0.0, 0.0001,
+		"agility 20 drives the multiplier to EXACTLY 0 — the level-up station has no cap, so this is reachable in play")
+	quick = null
+	clumsy = null
+	nearly_instant = null
+	beyond = null
 
 
 func test_streetwise_drives_prices_and_reputation() -> void:
@@ -299,6 +354,9 @@ func test_status_bonus_folds_into_multiplier_stats() -> void:
 	assert_almost_eq(base.sway_mult(2.0), _sheet(0, 2).sway_mult(), 0.0001, "gunplay bonus folds into aim sway")
 	assert_almost_eq(base.move_speed_mult(2.0), _sheet(0, 0, 2).move_speed_mult(), 0.0001, "agility bonus folds into move speed")
 	assert_almost_eq(base.jump_mult(2.0), _sheet(0, 0, 2).jump_mult(), 0.0001, "agility bonus folds into jump")
+	assert_almost_eq(base.stamina_regen_mult(2.0), _sheet(0, 0, 2).stamina_regen_mult(), 0.0001, "agility bonus folds into the stamina recovery rate")
+	assert_almost_eq(base.melee_time_mult(2.0), _sheet(0, 0, 2).melee_time_mult(), 0.0001, "agility bonus folds into the melee swing clock — a kickstart stim really does swing faster, not just print faster")
+	assert_almost_eq(base.reload_time_mult(2.0), _sheet(0, 0, 2).reload_time_mult(), 0.0001, "agility bonus folds into the reload clock — Attack._agility_bonus exists for exactly this")
 	assert_almost_eq(base.buy_price_mult(2.0), _sheet(0, 0, 0, 2).buy_price_mult(), 0.0001, "streetwise bonus folds into buy price")
 	assert_almost_eq(base.sell_price_mult(2.0), _sheet(0, 0, 0, 2).sell_price_mult(), 0.0001, "streetwise bonus folds into sell price")
 	assert_almost_eq(base.rep_gain_mult(2.0), _sheet(0, 0, 0, 2).rep_gain_mult(), 0.0001, "streetwise bonus folds into rep gain")

@@ -53,6 +53,15 @@ var action_grapple: StringName = &"Grapple"
 var action_run: StringName = &"Run"
 ## Night-vision toggle (default N): flips the night-vision post-process look. Polled by the Player.
 var action_nightvision: StringName = &"NightVision"
+## AIR DASH (default Left Alt): TAP to fling yourself where you are LOOKING — the Cruelty-Squad launch, now its
+## own verb instead of the old "ADS with the knife and swing" gesture. Polled by the AirDash ability
+## (scripts/components/abilities/air_dash.gd), which owns the impulse, the stamina cost and the one-per-airtime
+## lock; no AirDash node (or the implant switched off) = the key does nothing. ⭐LEFT ALT is deliberate: it sits
+## under the same thumb as Space, so you can jump and then dash without taking a finger off WASD — the only free
+## keys left near the movement hand. Bare modifiers already bind fine here (Run is Shift, Crouch is Ctrl), and
+## Godot's non-exact action matching means holding it never shadows WASD. Rebindable; no controller default (the
+## obvious pads are taken).
+var action_air_dash: StringName = &"AirDash"
 ## Weapon slots 1-10 (keys 1-0): consumed by the HOTBAR (scripts/ui/hotbar.gd) — pressing one equips the
 ## weapon / uses the consumable auto-assigned to that slot. (Slots 1-7 are the original weapon-switch
 ## actions, revived; 8-10 were added with the hotbar. The Tab inventory remains the full bag UI.)

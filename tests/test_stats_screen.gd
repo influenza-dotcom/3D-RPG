@@ -35,6 +35,36 @@ func test_inspect_is_reachable_without_a_mouse() -> void:
 	assert_eq(btn.focus_mode, Control.FOCUS_ALL,
 		"Inspect is focusable at runtime — it is the tab's only control, so focus-less means pad-unreachable")
 
+func test_agility_effect_names_all_three_speeds() -> void:
+	# The agility block gained a SECOND clause when agility started driving stamina recovery (2026-08-28), and a
+	# THIRD when it started driving melee cadence + reload time (2026-09-02). Pinned because this readout is the
+	# only place a player is ever told the stat does more than move them faster.
+	# ⭐ ONE percentage covers both hands effects on purpose: melee_time_mult and reload_time_mult ride the same
+	# per-point rate, so a fourth clause would spend a line of a cramped cell restating the number beside it.
+	var s := CharacterStats.new()
+	s.agility = 4
+	assert_eq(StatInfo._effect(&"agility", s), "+20% move speed, +20% stamina recovery, +20% attack & reload speed",
+		"agility reads out its move speed, its stamina recovery AND the hands speed (melee cadence + reload)")
+
+
+func test_agility_effect_hands_clause_reads_less_is_better() -> void:
+	# The hands clause is a TIME multiplier, so it must be printed the gunplay-sway / larceny-takedown way:
+	# a POSITIVE percentage means LESS time per swing and per magazine change. A negative agility must read as a
+	# real penalty rather than a stray double sign — character creation lets a stat go to -5.
+	var slow := CharacterStats.new()
+	slow.agility = -3
+	assert_eq(StatInfo._effect(&"agility", slow), "-15% move speed, -15% stamina recovery, -15% attack & reload speed",
+		"a NEGATIVE agility reads as a penalty on all three clauses — slower on foot AND slower with the hands")
+
+
+func test_agility_effect_hands_clause_folds_a_live_buff() -> void:
+	# A carried +agility trinket (Featherframe Weave) must move the printed hands number too, not just the legs —
+	# StatInfo passes the same `bonus` into melee_time_mult that Attack passes into the real swing.
+	var s := CharacterStats.new()
+	assert_eq(StatInfo._effect(&"agility", s, 3.0), "+15% move speed, +15% stamina recovery, +15% attack & reload speed",
+		"a held +3 agility buff shows up on the hands clause exactly as it does on the movement ones")
+
+
 func test_stat_effect_includes_live_bonus() -> void:
 	var s := CharacterStats.new()
 	assert_eq(StatInfo._effect(&"streetwise", s, 3.0), "buys +12%, sales +12%, rep gains +24%",

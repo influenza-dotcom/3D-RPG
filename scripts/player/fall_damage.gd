@@ -15,10 +15,35 @@ const METERS_PER_SECOND_TO_MILES_PER_HOUR: float = 2.2369362920544
 ## safe (0). Above it, the excess speed times `per_speed` is truncated to a whole HP — int() so a
 ## graze that doesn't clear a full point of damage costs nothing, matching the original inline
 ## `int(...)` in Character._apply_fall_damage. Never returns negative (the <= min_speed guard).
+##
+## ⭐ `per_speed` is the SCALED cost — Character.effective_fall_damage_per_speed(), not the raw
+## `fall_damage_per_speed` export. See hp_scale() below for why, and note that the warning curve
+## (lethal_speed / lethal_fraction) must be handed the SAME scaled number or the screen starts
+## lying about a landing it is scoring by a different rule.
 static func hp_loss(fall_speed: float, min_speed: float, per_speed: float) -> int:
 	if fall_speed <= min_speed:
 		return 0
 	return int((fall_speed - min_speed) * per_speed)
+
+
+## The multiplier the whole fall-damage curve rides on: this actor's CURRENT max HP against the max HP the
+## curve was AUTHORED for. 1.0 at the reference, 2.0 at double it. `reference_max_hp` <= 0 means "don't scale"
+## (1.0), which is also the honest answer for an actor whose baseline was never captured.
+##
+## ⭐ WHY FALL DAMAGE SCALES WITH MAX HP AT ALL. Without this, `fall_damage_per_speed` is an ABSOLUTE cost in
+## whole HP, so every point of max HP you earn (strength, level-ups, perks, an implant) quietly buys fall
+## IMMUNITY: the drop that took the shipped 4-HP player from full to dead is a survivable scratch at 20 HP,
+## and the game's one universal terrain threat evaporates exactly as the rest of the game gets harder. Scaling
+## the cost with max_hp fixes the FRACTION of your health a given drop costs, so height stays as dangerous at
+## the end of the game as at the start, and the ledge you cannot jump off is the same ledge all game long.
+##
+## Note what this deliberately does NOT do: it reads max_hp, so being HURT never makes the ground hit harder.
+## The damage is scored against the health bar you own; the health you have left decides whether it kills you
+## (that is lethal_speed's job, one screen below).
+static func hp_scale(max_hp: float, reference_max_hp: float) -> float:
+	if reference_max_hp <= 0.0:
+		return 1.0
+	return maxf(max_hp, 0.0) / reference_max_hp
 
 
 ## User-facing impact speed for the fall-death card.
@@ -49,6 +74,12 @@ static func mph(fall_speed: float) -> int:
 ## ⭐ IT MOVES WITH YOUR HEALTH, and that is the point rather than a side effect: a fall that is a scratch at full
 ## HP is a lethal fall at one point of it, so the screen has to go fully grey EARLIER when you are hurt. Reading
 ## `hp` (not `max_hp`) is what makes the full-grey frame mean "this kills YOU, now".
+##
+## ⭐ `per_speed` MUST be the max-HP-scaled cost (Character.effective_fall_damage_per_speed()), the same number
+## hp_loss() is handed. Pass the raw export here and the warning silently drifts: with max HP bought up, the
+## screen would promise a survivable landing that the scaled damage then kills you on. The pleasant consequence
+## of scaling BOTH is that the speed which kills a healthy actor is a CONSTANT — hp/per_speed is max_hp over
+## (per_speed x max_hp/reference), i.e. reference/per_speed, whatever the health bar has grown to.
 static func lethal_speed(min_speed: float, per_speed: float, hp: float) -> float:
 	if per_speed <= 0.0 or hp <= 0.0:
 		return INF

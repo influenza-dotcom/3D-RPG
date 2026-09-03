@@ -3,8 +3,22 @@ extends Node
 
 ## Bunnyhop (bhop) chain system — the movement skill-expression mechanic. Rewards
 ## jumping again within a tight window right after landing: each well-timed
-## consecutive hop ("chain") raises the target ground speed by a fixed increment,
-## up to a hard cap. A mistimed / standing jump resets the chain.
+## consecutive hop ("chain") ADDS boost_per_hop to the speed you carried INTO the
+## hop, up to a hard cap. A mistimed / standing jump resets the chain.
+##
+## ⭐⭐THE CHIP IS THE ONLY WAY TO *GAIN* MOMENTUM — that is the whole product, and it is
+## why this builds on the carried speed rather than stamping an absolute ladder. Without
+## the implant a jump gets PlayerMovementSettings.jump_momentum_boost: a one-shot +15% of
+## the speed you ran in with, which cannot accumulate (AirMovement.takeoff_speed withholds
+## it above the ground target) and decays straight back to run speed. With the implant every
+## timed hop compounds on the last one: 6.95, 7.89, 8.70 ... up to BunnyhopSettings.max_speed.
+## Simple boost vs. real acceleration.
+##
+## It used to stamp `max_speed + chain * boost_per_hop` outright, which IGNORED your momentum
+## entirely: a chip holder jogging at 1 m/s was stamped straight to 6.2, and a 12 m/s grapple
+## fling was stamped DOWN to 6.2 by its own first hop. Building on the carry fixes both — a
+## slow start now has to be ramped in, and the chain can never claw back speed you arrived with
+## (`maxf` below), so the ceiling only ever stops it ADDING.
 ##
 ## State only — never touches velocity. player.gd calls try_engage() on each jump
 ## and, if it returns true, overrides horizontal velocity with get_target_speed().
@@ -72,17 +86,27 @@ func try_engage(has_movement_input: bool) -> bool:
 
 	return true
 
-## Target horizontal speed for the current chain length, clamped to the global
-## bhop ceiling so a long chain can't grow speed unbounded.
-func get_target_speed() -> float:
+## Target horizontal speed for THIS hop: the speed carried into it PLUS one boost_per_hop,
+## clamped to the global bhop ceiling so a long chain can't grow unbounded. `carried_speed` is
+## the player's horizontal speed at the instant of the jump (player.gd measures it right before
+## the stamp, so it already includes the free take-off boost — the implant builds on top of it).
+##
+## Accumulation lives in the VELOCITY, not in the `chain` counter: the counter is the timing
+## state (are we still chaining?), and the speed compounds because each hop's carry is the last
+## hop's result. That is what makes this a momentum GAIN rather than a lookup table.
+##
+## ⭐The maxf floor means this can only ever ADD. Above the ceiling it returns the carry
+## untouched instead of dragging a grapple fling / air dash / blast down to the chain value.
+func get_target_speed(carried_speed: float) -> float:
 	if chain <= 0:
-		return GameSettings.player_movement.max_speed
+		# Defensive: player.gd only stamps when try_engage() returned true, which always leaves
+		# chain >= 1. Degrade to plain run speed without ever reducing what we were handed.
+		return maxf(carried_speed, GameSettings.player_movement.max_speed)
 
-	return min(
-		GameSettings.player_movement.max_speed
-		+ chain * GameSettings.bunnyhop.boost_per_hop,
+	return maxf(carried_speed, minf(
+		carried_speed + GameSettings.bunnyhop.boost_per_hop,
 		GameSettings.bunnyhop.max_speed
-	)
+	))
 
 
 func break_chain() -> void:

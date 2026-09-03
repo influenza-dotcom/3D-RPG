@@ -15,7 +15,7 @@ extends Node
 ## HOW IT FOLDS INTO GAMEPLAY (the LIVE stats). This node exposes the SAME duck-typed surface a
 ## StatusEffectManager does — stat_modifier(stat) + speed_multiplier() (+ a no-op apply_effect() so Character's
 ## scanner recognises it as a buff source) — and Character.status_stat_modifier / status_move_multiplier SUM /
-## PRODUCT across every such child. So agility (move/jump), gunplay (weapon damage / sway), streetwise (shop prices
+## PRODUCT across every such child. So agility (move/jump/stamina recovery/MELEE CADENCE + RELOAD TIME), gunplay (weapon damage / sway), streetwise (shop prices
 ## + reputation) and larceny (detection + pickpocketing) pick up held-item buffs automatically at their existing live
 ## seams, with no per-frame work here — recompute happens only when the bag changes.
 ##

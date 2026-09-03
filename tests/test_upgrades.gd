@@ -27,7 +27,8 @@ func test_player_unlock_set() -> void:
 
 func test_player_grant_ability_node() -> void:
 	# The drop-in path: a scene-based UpgradePickup hands the player a ready-built Ability NODE, and its presence
-	# grants the mechanic -- no string id. AirDash is a pure gate (no in-tree build), so this is off-tree-safe.
+	# grants the mechanic -- no string id. AirDash needs no in-tree build (it reads its key off the host beat), so
+	# this stays off-tree-safe.
 	var p = load(PLAYER_PATH).new()
 	assert_false(p.has_mechanic(&"air_dash"), "a gated mechanic is locked until granted")
 	p.grant_ability(AirDash.new())
@@ -114,7 +115,7 @@ func test_ability_scene_filename_matches_ability_id() -> void:
 			assert_eq(String((inst as Ability).ability_id()), f.trim_suffix(".tscn").to_snake_case(),
 				"ability scene '%s' filename must snake-case to its ability_id() (the unlock_id dropdown relies on it)" % f)
 		inst.free()
-	assert_eq(checked, 10, "expected the 10 shipped ability scenes (AirDash/Grapple/Slide/WallClimb/FallImmunity/ChessVisualizer/SilentTakedown/Bunnyhop/BioScanner/DeepScanner) — the laser sight was retired when the flashlight took F")
+	assert_eq(checked, 11, "expected the 11 shipped ability scenes (AirDash/Grapple/Slide/WallClimb/FallImmunity/ChessVisualizer/SilentTakedown/Bunnyhop/BioScanner/DeepScanner/LaserSight — the laser sight is back, on its own rig node instead of the flashlight's key)")
 
 func test_ability_scripts_covers_registry_ids() -> void:
 	# C21 drift guard (post-extraction): every ability id the editor dropdown can suggest (AbilityRegistry, scanned
@@ -196,3 +197,138 @@ func test_player_continuous_fall_timeout_wired() -> void:
 		"the player physics loop must tick the continuous-fall timeout so void falls eventually kill")
 	assert_true("_die_from_continuous_fall" in content,
 		"the continuous-fall timeout must enter the player death/respawn flow")
+
+
+# ---------------------------------------------------------------------------
+# AIR DASH — the look-direction launch, rebound onto its own key (default Left Alt).
+#
+# It used to be a WEAPON behaviour fired by attacking while scoped, so its only tests were on WeaponData's
+# launch_* fields and Attack's source. The verb now lives on the ability node, so the behaviour is pinned here:
+# the tuning defaults, the implant gate, the impulse maths, the one-per-airtime lock and its recharge cue.
+#
+# Driven against a stub host, never a real Player: dash() only needs explosion_velocity + get_aim_direction() +
+# is_on_floor(), and a bare Player would drag the whole camera rig in. dash_sound is nulled in every case so the
+# assertions don't fire AudioManager off-tree.
+# ---------------------------------------------------------------------------
+
+class _DashHost extends Node:
+	var explosion_velocity: Vector3 = Vector3.ZERO
+	var aim: Vector3 = Vector3.FORWARD
+	var on_floor: bool = true
+	var granted: bool = true
+	var stamina: float = 100.0
+	var shake_taken: float = -1.0
+	func get_aim_direction() -> Vector3: return aim
+	func is_on_floor() -> bool: return on_floor
+	func has_mechanic(_id: StringName) -> bool: return granted
+	func on_air_dash(trauma: float) -> void: shake_taken = trauma
+	func spend_stamina(cost: float, _delay: float = -1.0) -> bool:
+		if stamina < cost:
+			return false
+		stamina -= cost
+		return true
+
+
+func _dash_pair() -> Array:
+	var d := AirDash.new()
+	d.dash_sound = null
+	var h := _DashHost.new()
+	d.setup(h)
+	return [d, h]
+
+
+func test_air_dash_tuning_defaults_live_on_the_script() -> void:
+	# ⭐The load-bearing one: AbilityManager._build rebuilds a chip-installed / save-loaded ability with
+	# load(script).new() and NEVER reads AirDash.tscn, so a default authored only in the scene would install a
+	# dead 0-force dash. These are melee.tres's old numbers, carried over so the dash feels unchanged.
+	var d := AirDash.new()
+	assert_eq(d.ability_id(), &"air_dash", "the id the has_mechanic gate, the chip and the save all key on")
+	assert_eq(d.dash_force, 8.0, "dash_force defaults to melee.tres's old launch_force (8.0)")
+	assert_eq(d.dash_upward, 4.0, "dash_upward defaults to WeaponData's old launch_upward (4.0)")
+	assert_eq(d.screen_shake, 0.6, "screen_shake defaults to the old launch_screen_shake (0.6)")
+	assert_eq(d.cooldown, 0.88, "cooldown defaults to the melee attack_speed that used to gate the launch")
+	assert_true(d.single_air_dash, "one dash per airtime, as melee.tres authored it")
+	assert_not_null(d.dash_sound, "the whoosh is preloaded as the SCRIPT default so a chip install is never silent")
+	d.free()
+
+
+func test_air_dash_launches_along_the_aim() -> void:
+	var pair := _dash_pair()
+	var d: AirDash = pair[0]
+	var h = pair[1]
+	h.aim = Vector3(0.0, 0.0, -1.0)
+	d.dash()
+	assert_eq(h.explosion_velocity, Vector3(0.0, 4.0, -8.0),
+		"the dash stacks aim * dash_force plus the straight-up dash_upward onto the blast channel")
+	assert_eq(h.shake_taken, 0.6, "the dash hands its OWN trauma to the host — no weapon is involved any more")
+	d.free()
+	h.free()
+
+
+func test_air_dash_aims_where_you_look_not_where_you_move() -> void:
+	# The whole point of the rebind: look UP and the dash goes UP, with no weapon equipped and no ADS.
+	var pair := _dash_pair()
+	var d: AirDash = pair[0]
+	var h = pair[1]
+	h.aim = Vector3(0.0, 1.0, 0.0)
+	d.dash()
+	assert_almost_eq(h.explosion_velocity.y, 12.0, 0.001,
+		"looking straight up dashes straight up (dash_force along the aim, plus the lift)")
+	d.free()
+	h.free()
+
+
+func test_air_dash_one_per_airtime_and_recharge() -> void:
+	var pair := _dash_pair()
+	var d: AirDash = pair[0]
+	var h = pair[1]
+	h.on_floor = false
+	d.dash()
+	d._cooldown_left = 0.0  # isolate the airtime lock from the cadence timer
+	assert_false(d.can_dash(), "the airborne dash is spent until you land")
+	var recharged := [false]
+	d.air_dash_recharged.connect(func() -> void: recharged[0] = true)
+	h.on_floor = true
+	d.tick(0.016)
+	assert_true(recharged[0], "landing clears the lock and chirps the recharge cue the Player flashes on")
+	assert_true(d.can_dash(), "...and the next airtime gets a fresh dash")
+	d.free()
+	h.free()
+
+
+func test_air_dash_cooldown_blocks_and_expires() -> void:
+	var pair := _dash_pair()
+	var d: AirDash = pair[0]
+	var h = pair[1]
+	d.dash()
+	assert_false(d.can_dash(), "the cooldown blocks an immediate second dash, grounded or not")
+	d.tick(d.cooldown)
+	assert_true(d.can_dash(), "...and clears once it has run out")
+	d.free()
+	h.free()
+
+
+func test_air_dash_refuses_when_the_implant_is_switched_off() -> void:
+	# The Implants tab flips `enabled`, which the host's has_mechanic gate reports — the key must go dead, exactly
+	# as a switched-off Grapple refuses to fire.
+	var pair := _dash_pair()
+	var d: AirDash = pair[0]
+	var h = pair[1]
+	h.granted = false
+	assert_false(d.can_dash(), "a switched-off air-dash implant refuses the dash")
+	d.on_deactivated()
+	assert_false(d._did_air_dash, "switching off hands the airborne dash back, so a re-enable isn't stuck locked")
+	d.free()
+	h.free()
+
+
+func test_air_dash_binding_exists_on_all_three_action_surfaces() -> void:
+	# project.godot [input] / InputManager's action_* var / the rebindable ActionCatalog — InputManager's boot
+	# audit only WARNS about drift between them, so pin the new action here.
+	assert_eq(InputManager.action_air_dash, &"AirDash", "action_air_dash canonicalizes the AirDash action")
+	assert_true(InputMap.has_action(&"AirDash"), "AirDash must be a real [input] action or the key does nothing")
+	var listed := false
+	for spec in InputManager.action_catalog().actions:
+		if spec.action == &"AirDash":
+			listed = true
+	assert_true(listed, "AirDash must appear in ActionCatalog.tres or it can't be rebound in Options -> Controls")

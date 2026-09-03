@@ -51,7 +51,15 @@ static func _effect(stat: StringName, s: CharacterStats, bonus: float = 0.0) -> 
 				_signed_pct(roundi((s.weapon_damage_mult(bonus) - 1.0) * 100.0)),
 				_signed_pct(roundi((1.0 - s.sway_mult(bonus)) * 100.0)))
 		&"agility":
-			return PlayerText.stat_effect_agility(_signed_pct(roundi((s.move_speed_mult(bonus) - 1.0) * 100.0)))
+			# How fast you MOVE, how fast the stamina behind that movement comes back — endurance still owns the
+			# pool's SIZE, so the two stamina stats read as different lines in different blocks, not a duplicate —
+			# and how fast your HANDS work (a melee swing + a reload). The hands clause reads "less is better" off
+			# 1.0 - mult, the gunplay-sway / larceny-takedown convention: melee_time_mult and reload_time_mult are
+			# the SAME per-point rate, so one percentage speaks for both rather than printing the number twice.
+			return PlayerText.stat_effect_agility(
+				_signed_pct(roundi((s.move_speed_mult(bonus) - 1.0) * 100.0)),
+				_signed_pct(roundi((s.stamina_regen_mult(bonus) - 1.0) * 100.0)),
+				_signed_pct(roundi((1.0 - s.melee_time_mult(bonus)) * 100.0)))
 		&"streetwise":
 			# The merged social stat: prices (+ = in your favour, cheaper buys / dearer sales) AND reputation gains.
 			return PlayerText.stat_effect_streetwise(

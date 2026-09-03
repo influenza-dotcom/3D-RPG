@@ -44,6 +44,76 @@ func test_player_exposes_death_card_hooks() -> void:
 	p.free()
 
 
+# --- Clicking through the cinematic (the death skip) -------------------------------------------------
+
+func test_death_skip_defaults_ship_on_and_sane() -> void:
+	var s := PlayerFeedbackSettings.new()
+	assert_true(s.death_skip_enabled, "a death you cannot click through is the behaviour the skip exists to fix")
+	assert_gt(s.death_skip_delay, 0.0,
+		("the skip must not arm on the frame you die — dying while mashing the fire button at your killer would "
+		+ "skip the death card with the same clicks that got you killed"))
+	assert_gt(s.death_skip_speed, 1.0, "a skip speed of 1 or less would not fast-forward anything")
+	s = null
+
+func test_player_exposes_the_death_skip_seams() -> void:
+	var p = load("res://scripts/player/player.gd").new()
+	for seam in ["_unhandled_input", "_is_death_skip_press", "_try_skip_death_beat", "_arm_death_skip", "_on_death_card_shown"]:
+		assert_true(p.has_method(seam), "the death skip needs %s() on the Player" % seam)
+	p.free()
+
+func test_the_skip_refuses_when_no_cinematic_is_running() -> void:
+	# _unhandled_input fires on every event in normal play; with no death tween there is nothing to skip and
+	# the click must fall through to the game rather than being swallowed.
+	var p = load("res://scripts/player/player.gd").new()
+	assert_false(p._try_skip_death_beat(), "a click outside the death cinematic must not be consumed")
+	p.free()
+
+func test_arming_the_skip_uses_a_future_wall_clock_deadline() -> void:
+	# Wall-clock (Time.get_ticks_msec), NOT a tween or a physics count: the cinematic drops the world into
+	# slow-mo and stops the player's physics step, either of which would stretch or freeze the wait.
+	var fb: PlayerFeedbackSettings = GameSettings.player_feedback
+	var p = load("res://scripts/player/player.gd").new()
+	var before := Time.get_ticks_msec()
+	p._arm_death_skip()
+	var armed_at: int = p._death_skip_ready_msec
+	p.free()
+	if fb.death_skip_enabled:
+		assert_gte(armed_at, before + int(fb.death_skip_delay * 1000.0),
+			"the beat must be watchable for death_skip_delay before a click is accepted")
+	else:
+		assert_eq(armed_at, -1, "a disabled skip must never arm")
+
+func test_only_a_click_or_accept_skips_the_cinematic() -> void:
+	# Deliberately narrower than the start menu's "press anything": dying with a movement key half-pressed is
+	# normal, and a stray WASD tap must not spend a beat of the cinematic.
+	var p = load("res://scripts/player/player.gd").new()
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	assert_true(p._is_death_skip_press(click), "a left-click skips the beat — the whole point of the feature")
+	var released := InputEventMouseButton.new()
+	released.button_index = MOUSE_BUTTON_LEFT
+	released.pressed = false
+	assert_false(p._is_death_skip_press(released), "the RELEASE of a click must not spend a second beat")
+	var walk := InputEventKey.new()
+	walk.keycode = KEY_W
+	walk.pressed = true
+	assert_false(p._is_death_skip_press(walk), "a movement key must not skip the death cinematic")
+	click = null
+	released = null
+	walk = null
+	p.free()
+
+func test_the_skip_speeds_the_cinematic_up_rather_than_cutting_it_short() -> void:
+	# THE invariant. The cinematic is ONE tween whose callbacks fire the world-reset cue on the black frame,
+	# the card, and the death-mode branch that respawns or reloads. A skip that killed the tween and jumped to
+	# the end would have to re-implement all three — and would silently drop whichever beat is added next.
+	var src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
+	assert_true(src.contains("_death_tween.set_speed_scale("),
+		"the skip must scale the cinematic tween, so every callback in the chain still fires in order")
+	assert_false(src.contains("_death_tween.kill()"),
+		"killing the death tween would skip its callbacks: the world-reset cue, the card and the respawn branch")
+
 ## Duck-typed stand-in for an NPC killer: a display_name plus the resolved_disposition method that
 ## _killer_display_name uses as its "is a real person" gate (so the Stranger mask applies), plus the
 ## `faction` slot the NPC resolves its faction_id dropdown into (null == UNALIGNED, as on a real NPC).

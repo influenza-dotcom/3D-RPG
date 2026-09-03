@@ -1,10 +1,11 @@
 extends GutTest
 
 ## GUT tests for the "Movement helpers" subsystem: the small jump/movement state
-## machines under res://scripts/player/ — CoyoteTime, JumpBuffer, Bunnyhop, and the
-## state-query surface of BulletTime. These are the highest-value pure-logic targets:
-## tiny timers and an enum gate that player.gd reads every physics frame to decide
-## whether a jump fires, whether a bhop chain accumulates, and whether slow-mo is live.
+## machines under res://scripts/player/ — CoyoteTime, JumpBuffer, Bunnyhop, the
+## state-query surface of BulletTime, and the MovementHelpers statics (the edge-brake
+## intent gate). These are the highest-value pure-logic targets: tiny timers and gates
+## that player.gd reads every physics frame to decide whether a jump fires, whether a
+## bhop chain accumulates, whether slow-mo is live, and whether the edge brake grips.
 ##
 ## STRATEGY: drive the state APIs directly (set _timer / _state / chain, then call
 ## tick/consume/_physics_process/try_engage and assert immediately). The timers are
@@ -21,17 +22,32 @@ extends GutTest
 ##   - JumpBuffer._physics_process() bleeds the buffer down, clamped at 0.
 ##   - Bunnyhop._physics_process() airborne window-bleed, and its null-character guard.
 ##   - Bunnyhop.try_engage() return value + chain growth on an existing chain in-window.
-##   - Bunnyhop.get_target_speed() mid-range linear growth (+boost_per_hop/hop) below cap.
+##   - Bunnyhop.get_target_speed() building on the CARRIED speed (+boost_per_hop/hop, compounding) and its
+##     clamp, which may stop the chain adding but must never claw back a carry that already exceeds it.
 ##   - Player.bhop_blocked_by_stance(): the crouched / encumbered gate in front of try_engage().
 ##   - Player.bhop_chain_allowed(): the full jump-block gate — the BUNNY-HOP IMPLANT (has_mechanic) AND the
 ##     stance predicate — plus BunnyhopAbility.on_deactivated()'s switch-off chain-break hygiene.
 ##   - BulletTime.is_active() maps to State.ACTIVE only (READY/EXHAUSTED both false).
 ##   - BulletTime._on_scoped_in(false) disarms _is_scoped and _scope_entered_in_air.
+##   - MovementHelpers.edge_intent_scale(): the full-brake protective endpoints (zero /
+##     vertical-only / sideways / opposed wish), the zero-brake gap-ward endpoint + the
+##     exact EDGE_INTENT_DOT_FULL cone boundary, the linear mid-band blend + its
+##     monotonicity, and the flatten-before-dot rule.
+##   - MovementHelpers.extra_brake_t(): the intent<=0 early-out returning 0.0 before any
+##     world access (off-tree), plus the 3-arg legacy call shape (wish defaults to ZERO =
+##     the old unconditional-brake contract) and the no-floor-found guard, both driven
+##     in-tree over an EMPTY physics space (real world, nothing for the probe to hit).
 ##
 ## DELIBERATELY SKIPPED (would be fragile or duplicate):
 ##   - CoyoteTime grounded re-arm and Bunnyhop landing-edge / chain-break branches: a
 ##     bare CharacterBody3D in a test tree always reports is_on_floor()==false, so the
 ##     grounded branches need real physics and are unreachable here.
+##   - extra_brake_t's null-world guard and its floor/edge raycast branches: OFF-tree,
+##     get_world_3d() itself raises a tracked engine error that GUT 9.6 turns into a
+##     failure (the gut-engine-errors trap), so the null-world guard stays code-reviewed
+##     only; the floor-hit/edge-hit branches need real geometry in a physics space —
+##     same reasoning as the existing grounded-branch skips above. The gate math itself
+##     is fully pinned off-tree via edge_intent_scale.
 ##   - BulletTime._process / Engine.time_scale lerp + ownership: fully covered by smoke
 ##     (test_bullet_time_*); re-driving _process risks leaving Engine.time_scale dirty,
 ##     so these tests touch only _state and flags and never call _process.
@@ -210,23 +226,41 @@ func test_bunnyhop_try_engage_extends_existing_chain_and_returns_true() -> void:
 	bh.free()
 
 
-func test_bunnyhop_target_speed_grows_linearly_below_cap() -> void:
-	# Pure: get_target_speed reads chain + the (read-only) tuning. Mid-range growth is
-	# uncovered by smoke (which only checks the chain==0 floor and the chain==9999 cap).
-	# With max_speed 5.0 + boost_per_hop 1.2 and a 12.0 cap, chains 1 and 2 are both
-	# below the cap, so each hop adds exactly boost_per_hop.
+func test_bunnyhop_target_speed_builds_on_the_speed_you_carried_in() -> void:
+	# THE CHIP'S WHOLE PRODUCT: it GAINS momentum. Each hop adds boost_per_hop to the speed carried INTO it,
+	# so the accumulation lives in the velocity and compounds hop over hop. It used to stamp an absolute
+	# ladder (max_speed + chain * boost_per_hop) that ignored the carry entirely — which meant a chip holder
+	# jogging at 1 m/s was snapped straight to 6.2, and momentum was irrelevant to the implant that sells it.
 	var bh := BUNNYHOP.new()
 	bh.chain = 1
-	var s1: float = bh.get_target_speed()
-	bh.chain = 2
-	var s2: float = bh.get_target_speed()
-	assert_gt(s2, s1,
-		"Each additional hop must raise the target speed (monotonic growth) below the cap")
-	assert_gt(s1, GameSettings.player_movement.max_speed,
-		"Even a single-hop chain must exceed plain max_speed — that boost is the bhop reward")
-	assert_almost_eq(s1,
-		GameSettings.player_movement.max_speed + GameSettings.bunnyhop.boost_per_hop, 0.001,
-		"A chain of 1 must add exactly one boost_per_hop above max_speed (linear, pre-clamp)")
+	var run_hop: float = bh.get_target_speed(GameSettings.player_movement.max_speed)
+	var walk_hop: float = bh.get_target_speed(GameSettings.player_movement.max_speed * 0.5)
+	assert_almost_eq(run_hop, GameSettings.player_movement.max_speed + GameSettings.bunnyhop.boost_per_hop, 0.001,
+		"a hop taken at full run speed must add exactly one boost_per_hop to what was carried in")
+	assert_gt(run_hop, walk_hop,
+		"the same chain length taken SLOWER must yield less — the chip builds on your momentum, so a run-up matters with the implant exactly as it does without it")
+	assert_almost_eq(walk_hop - GameSettings.player_movement.max_speed * 0.5, GameSettings.bunnyhop.boost_per_hop, 0.001,
+		"...and the gain per hop is the same absolute increment whatever you carried in, so the chain is linear in hops rather than a fixed tier list")
+	# Compounding: feeding each result back in is what makes a chain accelerate.
+	var compounded: float = bh.get_target_speed(run_hop)
+	assert_almost_eq(compounded, run_hop + GameSettings.bunnyhop.boost_per_hop, 0.001,
+		"chaining must COMPOUND — each hop's carry is the previous hop's result, which is the difference between a momentum gain and a lookup table")
+	bh.free()
+
+
+func test_bunnyhop_target_speed_clamps_without_ever_clawing_speed_back() -> void:
+	# The ceiling may only stop the chain ADDING; it must never drag down a carry that already exceeds it.
+	# The old absolute stamp did exactly that: a 12 m/s grapple fling plus a chain-1 hop was stamped to 6.2.
+	var bh := BUNNYHOP.new()
+	bh.chain = 1
+	assert_almost_eq(bh.get_target_speed(GameSettings.bunnyhop.max_speed), GameSettings.bunnyhop.max_speed, 0.001,
+		"a carry already at the bhop ceiling must stay there — clamped, not boosted")
+	var over := GameSettings.bunnyhop.max_speed + 3.0
+	assert_almost_eq(bh.get_target_speed(over), over, 0.001,
+		"a carry ABOVE the ceiling (a grapple fling, an air dash, a blast) must pass through untouched — the chain withholds its gain there, it never claws speed back")
+	bh.chain = 0
+	assert_almost_eq(bh.get_target_speed(over), over, 0.001,
+		"...and the defensive chain-0 path must not reduce it either")
 	bh.free()
 
 
@@ -423,3 +457,74 @@ func test_bullet_time_unscope_clears_arm_flags() -> void:
 	assert_false(bt._scope_entered_in_air,
 		"Un-scoping must reset the airborne-arm flag so a fresh re-scope must re-arm to re-activate")
 	bt.free()
+
+
+# ---------------------------------------------------------------------------
+# MovementHelpers.edge_intent_scale — the intent gate in front of the edge brake.
+# Pure statics on a class_name: call MovementHelpers.edge_intent_scale directly —
+# no instance, nothing to free. Convention below: gap_dir = (0,0,-1); a wish with
+# dot d against it is constructed as (sqrt(1 - d*d), 0, -d), already unit length.
+# ---------------------------------------------------------------------------
+
+func test_intent_scale_full_brake_with_no_input() -> void:
+	assert_eq(MovementHelpers.edge_intent_scale(Vector3(0, 0, -1), Vector3.ZERO), 1.0,
+		"input-less sliding must keep the FULL protective brake — the design half the gate must never lose")
+
+
+func test_intent_scale_zero_when_steering_at_the_gap() -> void:
+	# wish == gap_dir (dot 1.0): the complaint case — running deliberately at the ledge.
+	assert_eq(MovementHelpers.edge_intent_scale(Vector3(0, 0, -1), Vector3(0, 0, -1)), 0.0,
+		"deliberate steering at the ledge must fully disarm the brake — intent wins")
+	# A wish at exactly the EDGE_INTENT_DOT_FULL cone edge (dot 0.5) pins the cone boundary.
+	assert_almost_eq(
+		MovementHelpers.edge_intent_scale(Vector3(0, 0, -1), Vector3(sqrt(0.75), 0, -0.5)), 0.0, 0.001,
+		"a wish exactly on the EDGE_INTENT_DOT_FULL cone edge must already read as fully deliberate (no brake)")
+
+
+func test_intent_scale_full_brake_sideways_and_fighting() -> void:
+	# Perpendicular wish (dot 0.0): strafing along a rim is not gap-ward intent.
+	assert_eq(MovementHelpers.edge_intent_scale(Vector3(0, 0, -1), Vector3(1, 0, 0)), 1.0,
+		"sideways input is not gap-ward intent — the EDGE_INTENT_DOT_START boundary keeps the full brake")
+	# Opposed wish (dot -1.0): holding AWAY from the slide clamps to full brake, stacking with counter-accel.
+	assert_eq(MovementHelpers.edge_intent_scale(Vector3(0, 0, -1), Vector3(0, 0, 1)), 1.0,
+		"fighting the slide keeps the full brake AND their counter-accel — both help")
+
+
+func test_intent_scale_blends_linearly_between_thresholds() -> void:
+	# dot 0.25 sits exactly halfway across the 0.0→0.5 band, so the scale must be exactly 0.5.
+	var quarter := MovementHelpers.edge_intent_scale(Vector3(0, 0, -1), Vector3(sqrt(1.0 - 0.25 * 0.25), 0, -0.25))
+	assert_almost_eq(quarter, 0.5, 0.001,
+		"mid-band drift earns a PROPORTIONAL brake — a blend, not a pop")
+	# Monotonicity across the band: more gap-ward intent must always mean less brake.
+	var near_start := MovementHelpers.edge_intent_scale(Vector3(0, 0, -1), Vector3(sqrt(1.0 - 0.1 * 0.1), 0, -0.1))
+	var near_full := MovementHelpers.edge_intent_scale(Vector3(0, 0, -1), Vector3(sqrt(1.0 - 0.4 * 0.4), 0, -0.4))
+	assert_gt(near_start, near_full,
+		"more gap-ward intent must always mean less brake (monotonic across the dot band)")
+
+
+func test_intent_scale_flattens_vertical_wish() -> void:
+	# A large vertical component on a gap-ward wish must NOT dilute the horizontal intent: the gate
+	# flattens before normalizing, so (0,5,-1) reads as (0,0,-1) — dot 1.0, no brake.
+	assert_almost_eq(MovementHelpers.edge_intent_scale(Vector3(0, 0, -1), Vector3(0, 5, -1)), 0.0, 0.001,
+		"a vertical component must not dilute horizontal intent — the gate flattens before the dot")
+	# Pure vertical wish carries no horizontal intent at all — the protective full brake stands.
+	assert_eq(MovementHelpers.edge_intent_scale(Vector3(0, 0, -1), Vector3.UP), 1.0,
+		"vertical-only wish reads as no horizontal intent — full brake")
+
+
+func test_extra_brake_off_tree_guard_and_default_arg() -> void:
+	# 4-arg form, gap-ward wish (intent 0.0): the early-out must return 0.0 BEFORE any world access —
+	# the one branch provable on an OFF-TREE body, because it returns before get_world_3d() (which
+	# off-tree raises a tracked engine error GUT 9.6 would fail the test on — the gut-engine-errors trap).
+	var body := CharacterBody3D.new()
+	assert_eq(MovementHelpers.extra_brake_t(body, Vector3(0, 0, -1), 0.135, Vector3(0, 0, -1)), 0.0,
+		"full gap-ward intent must early-out to no brake before the probe rays are ever cast")
+	# The probe paths need a real world, so run them IN-TREE over the test scene's EMPTY space: the
+	# reference down-probe finds no floor, and that "couldn't find our own floor" guard must answer
+	# no brake (never a false crawl). autofree — GUT frees the in-tree body, no manual free().
+	add_child_autofree(body)
+	assert_eq(MovementHelpers.extra_brake_t(body, Vector3(0, 0, -1), 0.135), 0.0,
+		"no floor under the body must mean no brake — and the 3-arg legacy call shape must still compile (wish defaults to ZERO = the old unconditional-brake contract)")
+	# 4-arg form, sideways wish (intent 1.0): same no-floor guard, exercised through the new signature.
+	assert_eq(MovementHelpers.extra_brake_t(body, Vector3(0, 0, -1), 0.135, Vector3(1, 0, 0)), 0.0,
+		"the 4-arg form with a non-gap-ward wish must reach the probe and still answer no brake over an empty space")

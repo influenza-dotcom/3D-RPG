@@ -1097,8 +1097,14 @@ static func stat_effect_gunplay(damage: String, steadiness: String) -> String:
 	return TextFormat.subst("{damage} gun damage, {steadiness} aim steadiness", {"damage": damage, "steadiness": steadiness})
 
 
-static func stat_effect_agility(speed: String) -> String:
-	return TextFormat.subst("{speed} move speed", {"speed": speed})
+## Three clauses, not five: agility's JUMP scale rides the exact same per-point rate as move speed, and its RELOAD
+## speed rides the same rate as its melee speed, so spelling either out would spend a line of a cramped cell
+## restating the number beside it. Stamina recovery is its own rate on its own resource, and the hands clause
+## ("attack & reload speed") is a whole different domain from the legs, so both earn their own clause.
+## `quickness` is the HANDS number and reads "less is better" — a positive percentage means less time per swing
+## and per magazine change, the same voice as gunplay's aim steadiness and larceny's takedown time.
+static func stat_effect_agility(speed: String, stamina_regen: String, quickness: String) -> String:
+	return TextFormat.subst("{speed} move speed, {regen} stamina recovery, {quickness} attack & reload speed", {"speed": speed, "regen": stamina_regen, "quickness": quickness})
 
 
 static func stat_effect_streetwise(buys: String, sales: String, rep: String) -> String:

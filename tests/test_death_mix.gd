@@ -166,9 +166,9 @@ func test_sting_end_time_is_zero_when_nothing_will_play() -> void:
 
 # --- The component's method surface -----------------------------------------------------------------
 
-func test_death_mix_exposes_the_four_cinematic_seams() -> void:
+func test_death_mix_exposes_the_cinematic_seams() -> void:
 	var mix: DeathMix = MIX_SCRIPT.new()
-	for seam in ["begin", "set_world_duck", "restore_world", "begin_revive", "sting_end_time", "sting_sync_time", "card_hold_seconds"]:
+	for seam in ["begin", "set_world_duck", "restore_world", "begin_revive", "release_sting", "sting_end_time", "sting_sync_time", "card_hold_seconds"]:
 		assert_true(mix.has_method(seam), "DeathMix must expose %s() — Player's cinematic calls it" % seam)
 	mix.free()
 
@@ -205,6 +205,45 @@ func test_every_bus_the_cinematic_ducks_is_one_it_claims() -> void:
 	var src := FileAccess.get_file_as_string("res://scripts/player/death_mix.gd")
 	assert_true(src.contains("_owned_buses = GameSettings.player_feedback.death_cinematic_buses.duplicate()"),
 		"ownership must be claimed from the same designer list _apply_duck iterates")
+
+# --- The SKIP and the song (a click fast-forwards the cinematic) --------------------------------------
+
+func test_release_sting_is_inert_when_nothing_is_playing() -> void:
+	# The opt-in release runs on skipped deaths where no sting was ever going to sound (no clip authored, or
+	# a muted slider). It must be a silent no-op there, not a stop() on a dead player or a tween built
+	# off-tree.
+	var mix: DeathMix = MIX_SCRIPT.new()
+	mix.release_sting(0.35)
+	assert_false(mix.playing, "release_sting must leave a silent mix silent")
+	assert_false(mix._ducked, "release_sting is about the sting alone — it must not touch the world duck")
+	mix.free()
+
+func test_a_skipped_death_plays_the_song_out_in_full() -> void:
+	# THE DEFAULT, and the whole point of the knob shipping at 0: a click fast-forwards the PICTURES. The
+	# sting runs on DeathMix's own wall-clock and cannot ride the tween the skip speeds up, so a release
+	# would shorten no part of the death — it would only delete the back half of the track.
+	var fb: PlayerFeedbackSettings = GameSettings.player_feedback
+	assert_gte(fb.death_skip_sting_release, 0.0, "death_skip_sting_release seconds cannot be negative")
+	if fb.death_skip_sting_release <= 0.0:
+		pass_test("death_skip_sting_release is 0 — a skipped death lets the song play out in full")
+		return
+	# A designer who DOES opt in gets a get-out-of-the-way ramp, not a mix choice: the player is already back
+	# in the world, so it has to be over before the world has finished arriving.
+	assert_lte(fb.death_skip_sting_release, fb.spawn_fade_in_time,
+		"an opted-in skip release must be gone by the time the world has finished fading back in")
+
+func test_the_sting_release_is_gated_on_the_skip_and_the_knob() -> void:
+	# TWO gates, both load-bearing. Drop the _death_skipped latch and EVERY death fades, reversing the
+	# never-fade rule (test_the_sting_is_not_force_faded_by_default); drop the knob test and every SKIPPED
+	# death fades, reversing this one. The knob test cannot move into the seam either: release_sting(0) means
+	# CUT IT DEAD there, not "leave it alone", so the opt-out has to be read at the call site.
+	var src := FileAccess.get_file_as_string(PLAYER_SOURCE)
+	assert_true(src.contains("if _death_skipped and skip_release > 0.0:\n\t\t\t_death_mix.release_sting(skip_release)"),
+		"the sting release must be gated on BOTH the skip latch and an opted-in death_skip_sting_release")
+	var revive_at := src.find("_death_mix.begin_revive()")
+	var release_at := src.find("_death_mix.release_sting(")
+	assert_gt(release_at, revive_at,
+		"release_sting must come AFTER begin_revive(), whose _kill_tweens() would otherwise cancel the fade")
 
 # --- The delegation, pinned by source ---------------------------------------------------------------
 

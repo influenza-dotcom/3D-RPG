@@ -244,10 +244,14 @@ func _apply(t: float, s: PlayerLeanSettings) -> void:
 	head.rotation.z = -t * roll
 
 
-## Snap fully upright THIS FRAME and drop any key claims. Called by the player's in-place revive
-## (Player._respawn_at_checkpoint) after death froze this node, so a death taken mid-peek doesn't respawn you
-## with a tilted, side-shifted camera — and so the verb drivers aren't left standing down for a hold that ended
-## with the last life. Mirrors Crouch.reset().
+## Snap fully upright THIS FRAME and drop any key claims. Called on BOTH ends of a death, and it must be:
+##   * Player.die(), immediately BEFORE it freezes this node's _physics_process — freezing alone latches the
+##     death frame's lean_t, so a death taken mid-peek would play the whole keel-over cinematic from a camera
+##     shifted max_offset sideways and rolled max_roll_deg over.
+##   * Player._respawn_at_checkpoint, immediately BEFORE it re-enables that process — so the fresh life starts
+##     level even if something moved the rig while it was frozen, and so the verb drivers aren't left standing
+##     down for a hold that ended with the last life.
+## Mirrors Crouch.reset().
 func reset() -> void:
 	lean_t = 0.0
 	_airborne_t = 0.0

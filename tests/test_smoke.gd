@@ -195,11 +195,11 @@ func test_freeze_frame_respects_global_disable() -> void:
 
 
 func test_preload_manager_prewarm_api() -> void:
-	# Boot-time warmers that move the first-kill hitch (OS speech engine + GPU-particle death shaders) off
-	# the combat frame. Assert the API exists and _prewarm_tts is safe to call (no-ops without voices, e.g.
+	# Boot-time warmers that move the first-kill hitch (the Flite voice extraction + process-wide voice cache,
+	# and the GPU-particle death shaders) off the combat frame. Assert the API exists and _prewarm_tts is safe to call (no-ops without voices, e.g.
 	# on the headless test renderer) so a typo/regression here is caught.
 	assert_true(PreloadManager.has_method("_prewarm_tts"),
-		"PreloadManager must expose _prewarm_tts — boot-time OS speech-engine warm-up")
+		"PreloadManager must expose _prewarm_tts — boot-time Flite voice extraction + voice-cache warm-up")
 	assert_true(PreloadManager.has_method("_prewarm_gpu_particles"),
 		"PreloadManager must expose _prewarm_gpu_particles — boot-time death-effect shader warm-up")
 	PreloadManager._prewarm_tts()  # must not crash (headless: no voices -> early return)
@@ -210,8 +210,8 @@ func test_bunnyhop_default_chain_zero() -> void:
 	var bh := Bunnyhop.new()
 	add_child_autofree(bh)
 	assert_eq(bh.chain, 0, "Bunnyhop chain must start at 0")
-	assert_almost_eq(bh.get_target_speed(), GameSettings.player_movement.max_speed, 0.001,
-		"With chain=0, target speed must be PLAYER_MAX_SPEED")
+	assert_almost_eq(bh.get_target_speed(0.0), GameSettings.player_movement.max_speed, 0.001,
+		"With chain=0 and nothing carried, target speed must degrade to PLAYER_MAX_SPEED")
 
 
 # NOTE: bunnyhop was simplified to "movement input + land-window timing" — the old
@@ -259,10 +259,12 @@ func test_bunnyhop_break_chain_resets() -> void:
 
 
 func test_bunnyhop_speed_is_capped() -> void:
+	# The chain GAINS on the speed carried in, so the ceiling is reached by compounding rather than by the
+	# chain COUNT — a carry already at the cap must clamp instead of adding another boost_per_hop.
 	var bh := Bunnyhop.new()
 	add_child_autofree(bh)
 	bh.chain = 9999
-	assert_eq(bh.get_target_speed(), GameSettings.bunnyhop.max_speed,
+	assert_eq(bh.get_target_speed(GameSettings.bunnyhop.max_speed), GameSettings.bunnyhop.max_speed,
 		"Speed must clamp at BHOP_MAX_SPEED no matter how long the chain")
 
 
@@ -800,16 +802,16 @@ func test_weapon_data_has_behaviour_toggles() -> void:
 		assert_eq(typeof(w.has_muzzle_flash), TYPE_BOOL, "WeaponData.has_muzzle_flash must be a bool")
 		assert_eq(typeof(w.has_laser_sight), TYPE_BOOL, "WeaponData.has_laser_sight must be a bool")
 		assert_eq(typeof(w.spawns_casing), TYPE_BOOL, "WeaponData.spawns_casing must be a bool")
-		assert_eq(typeof(w.single_air_dash), TYPE_BOOL, "WeaponData.single_air_dash must be a bool")
-		assert_eq(typeof(w.launch_on_scoped_attack), TYPE_BOOL, "WeaponData.launch_on_scoped_attack must be a bool")
 		assert_eq(typeof(w.attack_windup), TYPE_FLOAT, "WeaponData.attack_windup must be a float")
 
 
 func test_melee_weapon_identity() -> void:
 	assert_true(MELEE is WeaponData, "melee.tres must be a WeaponData resource")
 	assert_false(MELEE.auto_fire, "Melee must be semi-auto (one swing per click)")
-	assert_true(MELEE.launch_on_scoped_attack, "Melee's scoped attack is the dash launch")
-	assert_true(MELEE.single_air_dash, "Melee's dash is limited to one per airtime")
+	# Melee no longer launches anything: the dash it used to carry (launch_on_scoped_attack / launch_force /
+	# single_air_dash) moved wholesale onto the AirDash ability and its own key.
+	assert_eq(MELEE.get(&"launch_on_scoped_attack"), null,
+		"the scoped-attack launch is gone from WeaponData — a weapon must never fling the player again")
 	assert_false(MELEE.has_muzzle_flash, "Melee has no muzzle flash")
 	assert_false(MELEE.has_laser_sight, "Melee has no laser sight")
 	assert_false(MELEE.spawns_casing, "Melee ejects no shell casing")
@@ -839,12 +841,12 @@ func test_ram_settings_present() -> void:
 		"Ram requires a positive minimum speed so ordinary movement doesn't body-check enemies")
 
 
-func test_attack_has_scope_and_dash_gating() -> void:
+func test_attack_has_scope_gating() -> void:
 	var content := _read_file("res://scripts/combat/attack.gd")
 	assert_true("func can_enter_scope" in content,
-		"Attack.can_enter_scope() gates re-scoping (ScopeIn uses it for the air-dash lockout)")
-	assert_true("func _do_launch_attack" in content,
-		"Attack._do_launch_attack() is the scoped-attack dash launch")
+		"Attack.can_enter_scope() is the seam ScopeIn asks before (re-)entering ADS")
+	assert_false("_do_launch_attack" in content,
+		"The scoped-attack dash launch is GONE from Attack — the air dash is its own key on the AirDash ability, and a weapon must never launch the player again")
 
 
 func test_scope_in_has_force_unscope() -> void:
@@ -852,7 +854,7 @@ func test_scope_in_has_force_unscope() -> void:
 	# instance — has_method() works without entering the tree.
 	var si := ScopeIn.new()
 	assert_true(si.has_method("force_unscope"),
-		"ScopeIn.force_unscope() lets the melee dash exit ADS immediately")
+		"ScopeIn.force_unscope() is the hard ADS exit (death / holster / weapon swap use it)")
 	si.free()
 
 

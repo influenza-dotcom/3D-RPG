@@ -127,6 +127,13 @@ signal died()
 ## STRENGTH on the stat sheet adds to this at spawn (see _apply_stats). Per-character in the inspector.
 @export var max_hp: float = 4.0
 var hp: float
+## The inspector/profile `max_hp` as authored, snapshotted by _apply_stats BEFORE strength adds to it — the auto
+## reference for fall_damage_reference_max_hp, and the only reader. 0 until _apply_stats runs, which
+## fall_damage_reference_hp() reads as "no baseline captured, don't scale" so an off-tree Character in a test is
+## scored exactly as before. Per-INSTANCE, not per-life, and deliberately NOT reset by reset_for_reuse: it is a
+## snapshot of max_hp's own authored value, and max_hp itself survives pooling for the same reason (re-running
+## _apply_stats would re-stamp strength additively every cycle — see Npc.reset_for_reuse).
+var _authored_max_hp: float = 0.0
 ## This character's RPG stat sheet — set in the inspector by a designer (every Character, player AND NPC,
 ## has one). null = a neutral baseline sheet, so an unsheeted character is unchanged. Spawn effects
 ## (strength->max_hp + carry_capacity) stamp in _apply_stats during _ready; the live effects are
@@ -135,8 +142,19 @@ var hp: float
 @export_group("Fall Damage")
 ## Downward speed (m/s) a landing must exceed before it does fall damage.
 @export var fall_damage_min_speed: float = 16.0
-## HP lost per m/s of downward speed above the safe speed.
+## HP lost per m/s of downward speed above the safe speed, AT the reference max HP below — the cost scales
+## with max_hp from there, so read this with fall_damage_reference_max_hp.
 @export var fall_damage_per_speed: float = 0.5
+## The max HP `fall_damage_per_speed` is authored against. Fall damage is multiplied by max_hp / this, so a
+## given drop always costs the same FRACTION of your health bar however much of it you have earned (see
+## FallDamage.hp_scale for why that matters). 0 — the default — means "this actor's OWN authored max_hp": the
+## number a designer typed in the inspector or the NpcData profile, snapshotted before ANY bonus lands. So the
+## whole HP budget a character EARNS moves the curve, strength included (a strength build has to fear height
+## like everyone else — that is the hole this closes), while an actor whose sheet adds nothing spawns scored by
+## exactly the curve it was tuned with, which is what makes this safe to land on a tuned game. Set a positive value to pin
+## the reference explicitly: share one across an actor family and a tougher archetype really is tougher,
+## because its extra HP then buys real fall protection rather than being scaled away.
+@export var fall_damage_reference_max_hp: float = 0.0
 @export_group("Encumbrance")
 ## Fraction of carry_capacity you haul for FREE — below this load ratio there's no penalty at all (¼ by default).
 @export var encumbrance_free_fraction: float = 0.25
@@ -239,6 +257,7 @@ func stats_or_default() -> CharacterStats:
 ## profile first, then super() lands here) gets it.
 func _apply_stats() -> void:
 	var s := stats_or_default()
+	_authored_max_hp = max_hp  # BEFORE strength lands: the designer's baseline, the auto fall-damage reference
 	max_hp = maxf(1.0, max_hp + s.max_hp_bonus())
 	carry_capacity = maxf(0.0, carry_capacity + s.carry_bonus())
 
@@ -907,7 +926,12 @@ func _on_limb_crippled(part: int, attacker: Node = null) -> void:
 	# means this hit kills — let the death cinematic own the audio.
 	if cripple_sound != null and is_inside_tree() and hp > 0 and not _dead:
 		AudioManager.play_sfx(global_position, cripple_sound, cripple_sound_volume_db)
-	if part == BodyPart.HEAD:
+	# Same lethal-blow skip as the cripple SFX above, and for the same reason: _apply_limb_damage runs one line
+	# ABOVE the hp<=0/die() branch, so a KILLING headshot that also empties the head pool would pulse the hurt
+	# feedback from INSIDE the killing take_damage — arming a FreezeFrame whose recovery tween is then born after
+	# the death tween and out-writes the death slow-mo for its whole recovery. On a lethal blow the death
+	# cinematic owns Engine.time_scale (die() neutralises BulletTime for exactly this reason).
+	if part == BodyPart.HEAD and hp > 0 and not _dead:
 		_on_head_crippled(attacker)
 
 ## Overridable: head crippled by `attacker`. Base no-op; the Player pulses the hurt feedback for a
@@ -926,14 +950,31 @@ func _on_equip_weapon_requested(_weapon: WeaponData) -> void:
 func is_off_guard() -> bool:
 	return false
 
+## The max HP this actor's fall-damage curve is scored against — the explicit knob when a designer pinned one,
+## otherwise the authored baseline _apply_stats snapshotted, otherwise (never readied) the live max_hp, which
+## makes the scale exactly 1.0 and the whole feature a no-op. Never returns 0, so hp_scale can't divide badly.
+func fall_damage_reference_hp() -> float:
+	if fall_damage_reference_max_hp > 0.0:
+		return fall_damage_reference_max_hp
+	return _authored_max_hp if _authored_max_hp > 0.0 else max_hp
+
+## ⭐ THE ONE SEAM every fall-damage reader goes through: `fall_damage_per_speed` scaled by how far this actor's
+## max HP has grown past the value the knob was authored against. Both the COST (hp_loss, below and in the
+## Player override) and the WARNING (FallDamage.lethal_fraction, in Player._fall_grey_target) must read it —
+## a caller that reaches for the raw export instead is the one bug this feature cannot survive, because the
+## screen would then be scoring the landing by a different curve than the one that kills you.
+func effective_fall_damage_per_speed() -> float:
+	return fall_damage_per_speed * FallDamage.hp_scale(max_hp, fall_damage_reference_hp())
+
 ## Fall damage: a landing whose downward speed tops fall_damage_min_speed costs HP, scaling
-## with the excess. Shared by the player (its landing block) and enemies (Enemy.apply_velocity).
+## with the excess AND with this actor's max HP (see effective_fall_damage_per_speed). Shared by the
+## player (its landing block) and enemies (Enemy.apply_velocity).
 func _apply_fall_damage(fall_speed: float) -> void:
 	# Allies (companions following the player) are immune to fall damage — they keep up via teleport and
 	# shouldn't be punished by dying to terrain. has_method-guarded so only NPCs answer is_following().
 	if HostMethodHelper.try_call_bool(self, &"is_following"):
 		return
-	var dmg := FallDamage.hp_loss(fall_speed, fall_damage_min_speed, fall_damage_per_speed)
+	var dmg := FallDamage.hp_loss(fall_speed, fall_damage_min_speed, effective_fall_damage_per_speed())
 	if dmg > 0:
 		take_damage(dmg)
 
@@ -997,9 +1038,10 @@ func on_shot_resolved(_weapon: WeaponData, _hit_npc: bool) -> void:
 func get_hit_flash() -> Node3D:
 	return null
 
-# Launch/dash feedback hook (a scoped-attack launch, e.g. the melee air-dash): the wielder
-# reacts with its own whoosh — FOV punch, shake. Default no-op. Player overrides.
-func on_weapon_launched(_weapon: WeaponData) -> void:
+# AIR-DASH feedback hook: the dasher reacts with its own whoosh — FOV punch, shake at the passed trauma. Default
+# no-op; the Player overrides. Was on_weapon_launched(WeaponData) while the dash was a scoped melee ATTACK and the
+# trauma came off the weapon — the dash owns its trauma now (AirDash.screen_shake), so it hands over the number.
+func on_air_dash(_shake_trauma: float) -> void:
 	pass
 
 func _push_interactables(pre_move_velocity: Vector3) -> void:

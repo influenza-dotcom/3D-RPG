@@ -13,7 +13,7 @@ extends GutTest
 ##   - is_headshot() head-zone threshold; is_off_guard() base false.
 ##   - Weapon-host aim contract (get_aim_origin/direction/basis) at an identity transform.
 ##   - get_hit_flash() base null; the base no-op hooks exist (indicate_damage_from,
-##     on_dealt_hit, on_scored_kill, on_weapon_fired, on_weapon_launched).
+##     on_dealt_hit, on_scored_kill, on_weapon_fired, on_air_dash).
 ##   - The movement guard reports no live physics space on a bare off-tree actor.
 ##
 ## DELIBERATELY SKIPPED (would crash / mutate the world in a unit run, see character.gd):
@@ -233,8 +233,8 @@ func test_weapon_fire_and_launch_hooks_exist() -> void:
 	var c = load(CHARACTER_PATH).new()
 	assert_true(c.has_method("on_weapon_fired"),
 		"Character must expose on_weapon_fired() — a hosted Weapon calls it every shot, so an Enemy wielder needs no override")
-	assert_true(c.has_method("on_weapon_launched"),
-		"Character must expose on_weapon_launched() — the launch/dash feedback hook a hosted Weapon calls, as a base no-op")
+	assert_true(c.has_method("on_air_dash"),
+		"Character must expose on_air_dash() — the dash feedback hook the AirDash ability calls, as a base no-op")
 	c.free()
 
 

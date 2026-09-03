@@ -36,6 +36,11 @@ const WeaponFields = preload("res://scripts/items/weapon_fields.gd")
 ##   • effective_range / noise_radius_mult / reload_time — negatives are nonsense the consumers don't guard.
 ## Applied ONCE, at the very end of rebuild(), so it clamps the FINAL number no matter which pass produced it.
 const CLAMP_FLOORS: Dictionary = {
+	# ⭐ NOT the last word on the value the game actually uses. A MELEE weapon's cadence and EVERY weapon's reload
+	# are scaled again at consumption time by the wielder's AGILITY (Attack.effective_attack_speed /
+	# effective_reload_time), bounded by GameSettings.weapon_general's own floors. Those floors are non-lengthening
+	# (Attack._duration_floor takes minf(floor, authored)), so a part that drops a cadence below them still reads
+	# true in the bench preview and still swings that fast in the hands — it simply stops responding to agility.
 	"attack_speed": 0.01,
 	"max_ammo": 1.0,
 	"pellet_count": 1.0,
@@ -253,4 +258,9 @@ static func _scalar_types(weapon: WeaponData) -> Dictionary:
 ## Write a number back into its declared type. An INT field ROUNDS (roundi, not truncation — a MULT landing on
 ## 19.999 must be 20 rounds, not 19); a FLOAT field takes the value as-is.
 static func _write_number(weapon: WeaponData, prop: String, t: int, value: float) -> void:
-	weapon.set(prop, roundi(value) if t == TYPE_INT else value)
+	# An `if` and not a ternary: an int branch beside a float branch has no common type, so the ternary form
+	# types as Variant and the analyzer flags it. set() takes a Variant either way.
+	var out: Variant = value
+	if t == TYPE_INT:
+		out = roundi(value)
+	weapon.set(prop, out)

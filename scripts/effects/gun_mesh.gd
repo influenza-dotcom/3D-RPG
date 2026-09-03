@@ -107,6 +107,11 @@ func _build_components() -> void:
 ## from _enter_tree, so all the view-model wiring lives inside this component instead
 ## of being spread across the host. Attack/Ammo live in the separate weapon component,
 ## so the host passes them in.
+## How far to compress the "hands are busy" reload gesture (dip + raise), captured when the dip starts and spent
+## by the matching raise. 1.0 = the authored EffectsSettings timings — a swap, a baseline wielder, or an off-tree
+## GunMesh with no Attack. See Attack.reload_view_scale for why the raise MUST move with the reload.
+var _busy_dip_scale: float = 1.0
+
 func setup(p_player: Character, p_inventory: Inventory, p_attack: Attack, p_ammo: Ammo, p_mouse_input: MouseInput, p_scope_in: ScopeIn) -> void:
 	player = p_player
 	inventory = p_inventory
@@ -115,7 +120,7 @@ func setup(p_player: Character, p_inventory: Inventory, p_attack: Attack, p_ammo
 	# Gun-mesh pose animations, driven by the weapon's combat signals.
 	p_attack.play_animation.connect(fire)
 	p_attack.reload_started.connect(reload)
-	p_attack.swap_started.connect(reload)
+	p_attack.swap_started.connect(_on_swap_started)
 	p_attack.swap_finished.connect(_on_swap_finished)
 	p_ammo.finished_reloading.connect(_on_ammo_finished_reloading)
 	p_mouse_input.rotate.connect(_on_mouse_input_rotate)
@@ -181,7 +186,21 @@ func fire() -> void:
 	if vm != null and vm.has_method(&"strike"):
 		vm.call(&"strike")
 
+## The reload_started handler. Dips the gun and remembers how far the wielder's AGILITY compressed THIS reload,
+## so the matching raise in _on_ammo_finished_reloading() compresses by the same factor.
 func reload() -> void:
+	_busy_dip_scale = attack.reload_view_scale() if attack != null else 1.0
+	_busy_dip()
+
+## The swap_started handler — the SAME "hands are busy" dip, at full length. A weapon swap is paced by its own
+## knobs (WeaponGeneralSettings.swap_time / swap_raise_duration) and is NOT agility-scaled, so it must not pick up
+## the reload's factor. Split out from reload() for exactly that reason: the two shared one handler until the
+## reload half started scaling.
+func _on_swap_started() -> void:
+	_busy_dip_scale = 1.0
+	_busy_dip()
+
+func _busy_dip() -> void:
 	# A holstered weapon must stay parked off-screen (same invariant as land() / _on_ammo_finished_reloading()).
 	# reload() is wired to swap_started too, and a swap fired while the draw is LOCKED — carrying a prop — keeps
 	# holstered=true (Attack refuses the set_holstered(false)) yet still emits swap_started. Without this guard the
@@ -201,8 +220,9 @@ func reload() -> void:
 	var fx := GameSettings.effects
 	tween = create_tween().set_parallel()
 	tween.set_trans(Tween.TRANS_CUBIC)
-	tween.tween_property(self, "_recoil_pos", fx.gun_reload_dip_position, fx.gun_reload_dip_time)
-	tween.tween_property(self, "_recoil_rot", fx.gun_reload_dip_rotation, fx.gun_reload_dip_time)
+	var dip_time: float = maxf(0.0, fx.gun_reload_dip_time * _busy_dip_scale)
+	tween.tween_property(self, "_recoil_pos", fx.gun_reload_dip_position, dip_time)
+	tween.tween_property(self, "_recoil_rot", fx.gun_reload_dip_rotation, dip_time)
 
 func land(intensity: float = 1.0) -> void:
 	# Brief downward dip + slight barrel rise so the gun "absorbs" the landing
@@ -236,6 +256,10 @@ func land(intensity: float = 1.0) -> void:
 	tween.chain().tween_property(self, "_recoil_rot", Vector3.ZERO, fx.gun_land_out_time)
 
 func _on_ammo_finished_reloading() -> void:
+	# Consume the reload's compression factor FIRST, before any early return can strand it: a holstered bail here
+	# would otherwise leave a finished reload's scale armed, and the NEXT swap or unholster would inherit it.
+	var dip_scale := _busy_dip_scale
+	_busy_dip_scale = 1.0
 	# A holstered weapon must stay put away (same invariant as land()): this raise tweens _recoil_pos back to zero,
 	# which would swing the gun — parked off-screen via the holster offset — right back into view. It fires on a
 	# reload finish (can't happen while holstered — reload() bails) but ALSO on a SWAP finish, and a swap started
@@ -247,7 +271,12 @@ func _on_ammo_finished_reloading() -> void:
 	# The laser-gate window and the raise tween share the ONE designer knob (gun_raise_time, default
 	# GUN_RAISE_MS / 1000 — the const stays as the baseline/test anchor), derived the same way
 	# unholster() derives its window, so the laser unlocks exactly as the gun settles even after a retune.
-	var t: float = GameSettings.effects.gun_raise_time
+	# ⭐ Scaled by the SAME factor the reload Timer took (1.0 for a swap, and for a baseline wielder). This window
+	# is what is_raised() reports and GunPose mirrors into attack.gun_raised, so it BLOCKS FIRING — leaving it at a
+	# fixed 0.5 s would append a tail to every reload that AGILITY can never shorten, capping a promised 4x reload
+	# at 2x. `dip_scale` was consumed at the top of this function, so a later swap or unholster is never scaled
+	# by a stale reload's factor.
+	var t: float = GameSettings.effects.gun_raise_time * dip_scale
 	_raise_until_msec = Time.get_ticks_msec() + int(t * 1000.0)
 	if tween:
 		tween.kill()

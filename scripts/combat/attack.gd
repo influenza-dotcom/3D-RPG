@@ -3,7 +3,7 @@ extends Node3D
 
 ## The Weapon's firing coordinator + the signal hub external code connects to. It owns the shot
 ## RESOLUTION (input gating, ammo, the penetration raycast loop, recoil, auto-reload), the reload /
-## swap / holster / scope state machine, and the secondary (scoped-attack) launch — but delegates the
+## swap / holster / scope state machine, and the secondary (scoped-attack) weapon THROW — but delegates the
 ## stateless bits to helpers and the side systems to child components, so it stays a thin coordinator:
 ##   - ShotResolver (static): per-pellet math — spread, damage, hitstop scale, crit rule, decal cap.
 ##   - GunFX (static): the throwaway tracer / hit-spark / muzzle-flash visuals.
@@ -29,7 +29,9 @@ signal holster_changed(on: bool)  ## weapon put away / brought back out (hold-R 
 
 @export_group("Wielder & Weapon Source")
 ## The wielder this weapon is mounted on (player or enemy). Source of aim (origin/direction/basis), fire
-## feedback (screen shake), knockback, and the air-dash floor check — the whole fire path routes through it.
+## feedback (screen shake), knockback, and the ADS weapon throw — the whole fire path routes through it.
+## (The air-dash floor check that used to be on this list left with the dash — it is _host_on_floor() in
+## scripts/components/abilities/air_dash.gd now.)
 @export var character: Character
 ## The equipped-weapon source. Attack listens to its weapon_changed to reseed current_weapon + spread,
 ## and reads equipped_weapon on _ready; the live WeaponData drives every per-shot tunable.
@@ -44,16 +46,18 @@ signal holster_changed(on: bool)  ## weapon put away / brought back out (hold-R 
 ## The magazine state (current/reserve ammo). Consumed per shot and topped up on reload; gates firing
 ## when empty and drives the foreground/background reload logic.
 @export var clip: Ammo
-## The aim-down-sights (ADS) controller. Attack reads its scoped state to launch the dash-attack instead
-## of firing, and calls force_unscope on a launch so dashing snaps you out of the scope.
+## The aim-down-sights (ADS) controller. Attack reads its scoped state for the tightened spread, for the extended
+## trace range, and for the ADS weapon THROW (_try_scoped_weapon_throw). The air dash no longer rides it — that
+## verb moved onto its own key; see scripts/components/abilities/air_dash.gd.
 @export var scope_in: ScopeIn
 
 @export_group("Fire Timers")
-## Per-shot cooldown timer — its wait_time is set to the weapon's attack_speed (seconds) on each fire, and
-## firing is blocked until it stops. Shorter = faster fire rate.
+## Per-shot cooldown timer — its wait_time is set to effective_attack_speed() on each fire (the weapon's
+## attack_speed, which the wielder's AGILITY compresses for a MELEE weapon), and firing is blocked until it
+## stops. Shorter = faster fire rate.
 @export var attack: Timer
-## The reload timer — runs for the weapon's reload_time (seconds); firing/swapping is blocked until it
-## stops, at which point the clip refills.
+## The reload timer — runs for effective_reload_time() (the weapon's reload_time, which the wielder's AGILITY
+## compresses); firing/swapping is blocked until it stops, at which point the clip refills.
 @export var reload: Timer
 ## The weapon-swap timer — covers both the lower (holster) and raise phases of a swap (seconds); firing is
 ## blocked until the gun is fully back up.
@@ -96,13 +100,14 @@ var holstered: bool = false  ## weapon put away (hidden; can't fire or reload) u
 ## wielders and normal empty-handed play are unaffected. Cleared on drop / on the in-place revive (die/revive symmetry).
 var draw_locked: bool = false
 var gun_raised: bool = true  ## false while the view-model tweens into view (set by GunMesh); blocks firing mid-raise
-var _drew_on_press: bool = false  ## the click that drew the weapon must not also fire; cleared on release
+var _drew_on_press: bool = false  ## the PRIMARY click that drew the weapon must not also fire; cleared on release
+## The alt button's own copy of _drew_on_press. Kept SEPARATE because the two buttons are routinely held at the
+## same time and mean different things: alt is ADS on a gun but a real attack on the fists, and the ADS weapon
+## throw ends with Zoom still held and the FISTS in your hands. One shared latch would let releasing whichever
+## button you were done with unblock the other — let go of the trigger after throwing the knife and the
+## still-held ADS button starts landing unrequested right hooks.
+var _alt_drew_on_press: bool = false
 var _is_scoped: bool = false
-## Emitted the instant the air-dash lock clears on landing — i.e. the dash just became available
-## again. The player listens to flash the screen + chirp a "dash ready" cue.
-signal air_dash_recharged
-
-var _did_air_dash: bool = false
 var _last_fire_msec: int = 0  ## Time.get_ticks_msec() of the last shot; 0 = never fired (reads as long-idle)
 
 ## Seconds since this weapon last fired (huge if it never has) — drives the view-model idle-lower in GunPose.
@@ -151,14 +156,12 @@ func set_holstered(on: bool) -> void:
 	holster_changed.emit(on)
 
 func _physics_process(_delta: float) -> void:
-	# The press that drew a holstered weapon must not fire; clear that block once it's released.
+	# The press that drew a holstered weapon (or re-drew one over a carry release) must not fire; clear that block
+	# once it is released — PER BUTTON, so letting go of one never speaks for the other.
 	if _drew_on_press and not Input.is_action_pressed("Attack"):
 		_drew_on_press = false
-	# Reset the per-airtime dash lock once we're back on the ground so the next
-	# airtime gets a fresh launch (single_air_dash weapons, e.g. melee).
-	if character and character.is_on_floor() and _did_air_dash:
-		_did_air_dash = false
-		air_dash_recharged.emit()
+	if _alt_drew_on_press and not Input.is_action_pressed(alt_attack_action):
+		_alt_drew_on_press = false
 
 ## A carried prop was just released while the fire button MAY still be held — e.g. LEFT-CLICK throws the prop
 ## (see PickupRay's alternate-throw). Dropping the prop re-draws the holstered weapon, so treat this exactly like
@@ -168,6 +171,8 @@ func _physics_process(_delta: float) -> void:
 func suppress_fire_for_carry_release() -> void:
 	if Input.is_action_pressed("Attack"):
 		_drew_on_press = true
+	if Input.is_action_pressed(alt_attack_action):
+		_alt_drew_on_press = true
 
 ## Which fist / hand threw the most recent attack: true = the ALT button (right click), false = primary.
 ## Read by FirstPersonBody.on_attack_play_animation to lead with the matching hand.
@@ -180,12 +185,143 @@ var alt_attack_action: StringName = &"Zoom"
 func can_fire() -> bool:
 	return current_weapon != null and attack.is_stopped() and reload.is_stopped() and swap.is_stopped()
 
-# Put the weapon on its normal fire cooldown without actually firing. Used by
-# secondary actions (e.g. the melee launch) so they share the firing cadence.
-func start_secondary_cooldown() -> void:
-	if not current_weapon:
+## --- AGILITY-scaled durations (the wielder's quickness applied to the weapon's clock) ---
+## THREE facts hold these together and each of them is a bug somebody would otherwise re-introduce:
+##   (1) the weapon's authored numbers are never mutated — a WeaponData is a SHARED resource, so scaling
+##       `current_weapon.attack_speed` in place would permanently re-tune every other wielder of that .tres;
+##   (2) the floors are load-bearing, not tidy — a Timer.wait_time of 0 is an engine error, and agility is
+##       UNCAPPED at the level-up station (only character creation stops at +10), so agility 20 really does
+##       drive CharacterStats.melee_time_mult / reload_time_mult to exactly 0;
+##   (3) baseline is EXACTLY the authored value — both multipliers are 1.0 at agility 0, so nothing about the
+##       pre-stat behaviour moves. ⭐Do NOT lean on the null-sheet early-outs below for that: Character
+##       .stats_or_default() LAZILY BUILDS a baseline sheet and never returns null, so every real Player and NPC
+##       takes the scaled branch on every swing. Neutrality is carried by the 1.0 multiplier and by
+##       _duration_floor (a floor never lengthens an authored duration) — the early-outs only cover a host that
+##       lacks the method entirely, i.e. a bare unit-test Attack whose `character` is null.
+## Duck-typed on the host (has_method) rather than a Character downcast, matching every other host read in this
+## file: a Player, an NPC and a test stub all work, and an off-tree Attack with `character == null` is a no-op.
+
+## The wielder's live agility status modifier (a timed StatusEffect, a held PassiveItemBuffs trinket), or 0.0.
+## Folded into both multipliers below as their `bonus`, exactly like the move/sway/price seams — otherwise a
+## kickstart stim would speed up the number the Stats screen PRINTS without speeding up the swing itself.
+func _agility_bonus() -> float:
+	if character != null and character.has_method(&"status_stat_modifier"):
+		return character.status_stat_modifier(&"agility")
+	return 0.0
+
+## The wielder's stat sheet, or null for a host that has none (an AI body without one, a bare test instance).
+func _wielder_stats() -> CharacterStats:
+	if character != null and character.has_method(&"stats_or_default"):
+		return character.stats_or_default()
+	return null
+
+## ⭐ A FLOOR MUST NEVER LENGTHEN AN AUTHORED DURATION. The global minimums exist to stop AGILITY compressing a
+## clock past what the engine and the animations can carry — they are not a statement that every weapon takes at
+## least that long. So the floor actually used is `minf(global_minimum, the weapon's own authored value)`: a
+## weapon authored FASTER than the minimum keeps its authored speed (agility simply buys it nothing more), and
+## the fists' authored reload_time of 0.0 stays 0.0 instead of becoming a quarter-second reload nobody asked for.
+## Without this the baseline-neutrality contract breaks outright — a baseline character would find the fists
+## reloading slower than the .tres says, which is the exact class of silent balance drift the whole stat system
+## is built to avoid. Returns the global minimum unchanged for every weapon authored above it (all shipped ones).
+static func _duration_floor(global_minimum: float, authored: float) -> float:
+	return minf(global_minimum, maxf(0.0, authored))
+
+## Pure + static (the NPC.shot_interval_for idiom — the floor arrives as an argument so nothing here reads the
+## GameSettings autoload, and a test can pin the whole curve against a shipped .tres with no live wielder):
+## `mult` (a wielder's CharacterStats.melee_time_mult) raised, if need be, so `w`'s cadence does not fall under
+## `min_cadence`. Returns `mult` untouched for a null / non-melee weapon.
+##
+## ⭐ ONE SCALE for the whole swing rather than a floor applied per-field, and that is the reason this exists.
+## Flooring the cadence alone while the wind-up kept shrinking would change the swing's SHAPE past the floor, not
+## just its speed: at agility 20 the knife's cooldown would sit at the 0.35 s floor while its wind-up had gone to
+## zero, so the hit would land the instant you clicked and the "weight" the wind-up is authored for would be gone
+## — silently, with the cadence readout still looking correct. One post-floor scale pins the authored
+## wind-up:cadence ratio at every agility value. NPC._shot_interval reads it too, so the AI's own melee clock and
+## this component's Timer are scaled by the SAME number and can never drift into disagreeing about the cadence.
+## ⭐ A 0 attack_speed is PASSED THROUGH, not floored — the guard exists to keep the ratio below from dividing by
+## zero, and the honest consequence is that such a weapon still assigns a Timer.wait_time of 0 (an engine error),
+## exactly as it did before agility existed. What keeps that unreachable is tests/test_smoke.gd's
+## `assert_gt(w.attack_speed, 0.0)` over every shipped weapon, plus WeaponModKit.CLAMP_FLOORS holding a modded
+## cadence at 0.01 — NOT this floor. Do not assume the floor covers it.
+static func melee_time_scale_for(w: WeaponData, mult: float, min_cadence: float) -> float:
+	if w == null or not w.is_melee or w.attack_speed <= 0.0:
+		return mult
+	return maxf(mult, _duration_floor(min_cadence, w.attack_speed) / w.attack_speed)
+
+## This wielder's melee scale for `w` — melee_time_scale_for fed from the live stat sheet. 1.0 for a ranged
+## weapon, a null weapon, or a host with no sheet (a bare test Attack), so baseline behaviour is untouched.
+func _melee_time_scale(w: WeaponData) -> float:
+	if w == null or not w.is_melee:
+		return 1.0
+	var stats := _wielder_stats()
+	if stats == null:
+		return 1.0
+	return Attack.melee_time_scale_for(w, stats.melee_time_mult(_agility_bonus()),
+			GameSettings.weapon_general.min_melee_attack_speed)
+
+## `weapon`'s fire cadence for THIS wielder, in seconds — the value the attack Timer waits.
+## MELEE ONLY: agility compresses a swing and a gun's cyclic rate is left alone, because a mechanical rate of fire
+## is not athleticism and because Attack._shot_stamina_cost derives its clamp FROM attack_speed (scaling it here
+## would move the shot price as a side effect). Bounded by min_melee_attack_speed via _melee_time_scale.
+func effective_attack_speed(weapon: WeaponData = null) -> float:
+	var w: WeaponData = weapon if weapon != null else current_weapon
+	if w == null:
+		return 0.0
+	return w.attack_speed * _melee_time_scale(w)
+
+## `weapon`'s wind-up (the beat between the click and the hit landing) for THIS wielder, in seconds.
+## The SAME post-floor scale as the cadence above, so a quick build's swing is the same animation played faster
+## rather than a normal animation with its wind-up shaved off. Deliberately UNSCALED for a ranged weapon — and
+## that is a real exemption, not a vacuous one: rock_weapon authors 0.22 s of wind-up, shotgun 0.11, smg 0.039 and
+## sniper_wep 0.013, so guns really do have a click-to-hit beat and agility really does leave it alone, exactly as
+## it leaves their cadence alone. Floored at 0: a negative would reach `await create_timer(x)`, which treats it as
+## an immediate timeout — the wind-up would silently vanish rather than erroring.
+func effective_attack_windup(weapon: WeaponData = null) -> float:
+	var w: WeaponData = weapon if weapon != null else current_weapon
+	if w == null:
+		return 0.0
+	return maxf(0.0, w.attack_windup * _melee_time_scale(w))
+
+## How far the wielder's AGILITY compressed `weapon`'s reload, as a FACTOR on the authored reload_time
+## (1.0 = unscaled; 0.25 = a quarter as long). 1.0 for a weapon that authors no reload at all.
+## ⭐ GunMesh reads this to scale its reload DIP and RAISE by the same amount. That coupling is load-bearing, not
+## cosmetic: the raise window drives is_raised(), which GunPose mirrors into `gun_raised`, which BLOCKS FIRING —
+## so an unscaled 0.5 s raise is a flat tail on every reload that agility could never shorten. The player-felt
+## reload would be `effective_reload_time + 0.5 s`, which turns a promised 4x improvement into 2x and installs
+## exactly the kind of interior plateau the NO SOFT CAP contract forbids, with no error and nothing visibly wrong.
+func reload_view_scale(weapon: WeaponData = null) -> float:
+	var w: WeaponData = weapon if weapon != null else current_weapon
+	if w == null or w.reload_time <= 0.0:
+		return 1.0
+	return effective_reload_time(w) / w.reload_time
+
+## `weapon`'s reload duration for THIS wielder, in seconds — the value the reload Timer waits.
+## EVERY weapon, melee and ranged alike: a reload is HANDS, not the gun's mechanism, which is exactly why this
+## half is not restricted the way the cadence above is — it is what makes agility worth points to a shooter.
+## Bounded by min_reload_time, through _duration_floor so a 0.0-reload weapon (the fists) stays at 0.0.
+func effective_reload_time(weapon: WeaponData = null) -> float:
+	var w: WeaponData = weapon if weapon != null else current_weapon
+	if w == null:
+		return 0.0
+	var stats := _wielder_stats()
+	if stats == null:
+		return w.reload_time
+	return maxf(_duration_floor(GameSettings.weapon_general.min_reload_time, w.reload_time),
+			w.reload_time * stats.reload_time_mult(_agility_bonus()))
+
+# Put the weapon on its normal fire cooldown without actually firing, so a secondary action can share the firing
+# cadence. CLAIMED by the ADS weapon throw (_try_scoped_weapon_throw); its previous user, the scoped melee launch,
+# took its whole verb (and its own cooldown) to scripts/components/abilities/air_dash.gd.
+# ⭐Pass `weapon` when the action CHANGES what you are wielding. The throw pulls the knife out of the backpack,
+# which re-arms the fists and reassigns current_weapon SYNCHRONOUSLY — so by the time we get here current_weapon is
+# the fists, and reading it would pace a knife throw at the FISTS' attack_speed (fists.tres authors 1.2 s; 0.1 is
+# only WeaponData's unauthored default) instead of the knife's 0.88 s — SLOWER, and long enough to outlast the
+# ~0.9 s fists swap that otherwise hides this timer completely, so the mistake would not show in a playtest.
+func start_secondary_cooldown(weapon: WeaponData = null) -> void:
+	var w: WeaponData = weapon if weapon != null else current_weapon
+	if w == null:
 		return
-	attack.wait_time = current_weapon.attack_speed
+	attack.wait_time = effective_attack_speed(w)  # the wielder's AGILITY compresses a melee cadence (the knife's)
 	attack.start()
 
 # True only for "long" busy states (reload/swap) — NOT the attack cooldown
@@ -209,13 +345,12 @@ func reset_for_reuse() -> void:
 	_swap_raising = false
 	_pending_swap_weapon = null
 
-# Whether ADS may be (re)entered right now. Launch-on-scope weapons (melee) stay
-# locked out of ADS after spending their one airborne dash until they land —
-# otherwise you could re-scope mid-air just to dash again.
+# Whether ADS may be (re)entered right now. Always true today: the one caller that ever said NO was the air-dash
+# lockout (a melee weapon that had spent its airborne dash was barred from re-scoping, because re-scoping was how
+# you re-triggered the dash). The dash moved onto its own key, so scoping no longer launches anything and there is
+# nothing left to lock out. KEPT as the seam — ScopeIn._process asks every frame, and a future weapon-side ADS
+# refusal (a jammed optic, a wind-up scope) belongs here rather than inside ScopeIn.
 func can_enter_scope() -> bool:
-	if current_weapon and current_weapon.launch_on_scoped_attack and current_weapon.single_air_dash:
-		if character and not character.is_on_floor() and _did_air_dash:
-			return false
 	return true
 
 ## True while a fired shot is still resolving — the attack-cadence timer runs through the wind-up +
@@ -227,7 +362,9 @@ func is_shot_in_progress() -> bool:
 ## Lob a paint blob from the muzzle on the weapon's attack cadence; it splashes a coloured decal
 ## wherever it lands (see PaintProjectile). No ammo, no damage — purely cosmetic graffiti.
 func _do_spray_paint() -> void:
-	attack.wait_time = current_weapon.attack_speed
+	# Through the same seam as a real shot so no raw attack_speed read is left to drift — a no-op in practice,
+	# since the spray can is not is_melee and only a melee weapon's cadence is agility-scaled.
+	attack.wait_time = effective_attack_speed()
 	attack.start()
 	var col := _resolved_paint_color()
 	var proj := PaintProjectile.new()
@@ -254,11 +391,47 @@ func _can_start_melee_attack() -> bool:
 		return true
 	return character.can_spend_stamina(GameSettings.player_movement.stamina_melee_attack_cost)
 
-func _spend_melee_attack_stamina() -> void:
-	if current_weapon == null or not current_weapon.is_melee:
+## Pay for a swing. `weapon` overrides current_weapon for a caller whose action CHANGES what you wield mid-beat —
+## the ADS throw has already re-armed the fists by the time it settles up — so the price is always read off the
+## weapon that actually acted. (Both are melee and the cost is one global number, so this changes no arithmetic
+## today; it keeps "you pay for what you swung" true the moment either half stops being either.)
+func _spend_melee_attack_stamina(weapon: WeaponData = null) -> void:
+	var w: WeaponData = weapon if weapon != null else current_weapon
+	if w == null or not w.is_melee:
 		return
 	if character != null and character.has_method(&"spend_stamina"):
 		character.spend_stamina(GameSettings.player_movement.stamina_melee_attack_cost)
+
+## Pure gesture test (static + literal args so it is unit-testable, mirroring PickupRay.is_throw_release): a trigger
+## pull is the ADS WEAPON THROW only when a PLAYER — never an AI wielder, which has no camera and so never scopes —
+## fires while SCOPED with a weapon that authored WeaponData.throw_on_scoped_attack. Hip-fire is always an ordinary
+## attack, which is what keeps the knife a knife until you deliberately raise it.
+static func is_scoped_throw_gesture(scoped: bool, from_ai: bool, weapon_throws_on_scoped_attack: bool) -> bool:
+	return scoped and not from_ai and weapon_throws_on_scoped_attack
+
+## The ADS + attack WEAPON THROW: hurl the wielded weapon down the look ray instead of swinging it. True means the
+## throw happened and the caller must STOP — the stamina is spent and the cadence started here. False leaves the
+## click to the normal attack path, so every refusal (hip-fire, an AI wielder, a weapon that does not opt in, a host
+## with no hands, nothing equipped, hands already full of another prop) degrades to an ordinary attack instead of
+## eating the trigger pull. The throw itself is Player.throw_equipped_weapon — see there for why it reuses the H /
+## left-click carry-and-throw path rather than launching a bespoke projectile.
+## ⭐The weapon is CAPTURED before the throw and both the price and the cadence are read off that capture: the throw
+## takes the item out of the backpack, which clears equipped_item -> re-arms the FISTS -> fires weapon_changed ->
+## reassigns current_weapon, all synchronously inside the call below.
+## Duck-typed (has_method + call) rather than a `character as Player` downcast: attack.gd is mounted on NPCs too and
+## naming Player here would close a class_name cycle (player.gd already depends on Attack).
+func _try_scoped_weapon_throw(from_ai: bool) -> bool:
+	if not Attack.is_scoped_throw_gesture(_is_scoped, from_ai,
+			current_weapon != null and current_weapon.throw_on_scoped_attack):
+		return false
+	if character == null or not character.has_method(&"throw_equipped_weapon"):
+		return false  # an AI body or a bare test host — no hands to throw from
+	var thrown_weapon := current_weapon
+	if not bool(character.call(&"throw_equipped_weapon")):
+		return false  # refused (nothing equipped / hands full / off-tree) — fall through to the normal attack
+	_spend_melee_attack_stamina(thrown_weapon)
+	start_secondary_cooldown(thrown_weapon)
+	return true
 
 ## What a RANGED shot costs this wielder in stamina — the economy half of the price, over WeaponData's
 ## stamina_effort() (the "how big is this bang" half: damage, pellets, blast payload). A grenade launcher costs
@@ -287,8 +460,9 @@ func _shot_stamina_cost() -> float:
 	return maxf(minf(raw, ceiling), 0.0)
 
 ## Charge the wielder for a shot that is ALREADY committed (ammo consumed) — the ranged twin of
-## _spend_melee_attack_stamina(), called from the same beat so a dry click, a blocked click, a spray-paint blob
-## and the scoped air dash (which pays stamina_air_dash_cost of its own) all cost nothing. It is charged in the
+## _spend_melee_attack_stamina(), called from the same beat so a dry click, a blocked click and a spray-paint blob
+## all cost nothing. (The air dash pays stamina_air_dash_cost of its own, on its own key, off in the AirDash
+## ability — no longer anything a weapon charges for.) It is charged in the
 ## SAME beat as the round itself, so a shot the wind-up / hit-flash awaits later ABORT (dialogue opened, the
 ## weapon got holstered, the wielder died) forfeits its stamina exactly the way it already forfeits its ammo —
 ## the two stay in lockstep rather than one refunding and the other not.
@@ -333,9 +507,13 @@ func _shot_regen_hold() -> float:
 	var base: float = GameSettings.player_movement.stamina_regen_delay_after_shot
 	if current_weapon == null:
 		return base
-	var gap := current_weapon.attack_speed
+	# Both halves read the EFFECTIVE (agility-scaled) durations, not the authored ones. A quick wielder's real
+	# gap is genuinely shorter, and holding regen for the authored reload instead would punish agility with a
+	# stamina lockout it no longer earns — the hold must track the gap it is derived from, or the "you never
+	# regenerate between your own shots" theorem stops being tight and starts being arbitrary.
+	var gap := effective_attack_speed()
 	if clip != null and clip.current_ammo <= 0 and not current_weapon.is_infinite_ammo:
-		gap = maxf(gap, GameSettings.weapon_general.auto_reload_delay + current_weapon.reload_time)
+		gap = maxf(gap, GameSettings.weapon_general.auto_reload_delay + effective_reload_time())
 	return maxf(base, gap)
 
 ## --- Spray-paint colour picker facade (forwards to the SprayPainter child) ---
@@ -388,9 +566,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false, alt := f
 		if not from_ai:
 			set_holstered(false)
 			_drew_on_press = true
+			_alt_drew_on_press = true  # a draw click blocks BOTH buttons until released, as it always has
 		return
-	if _drew_on_press:
-		return  # still holding the draw click — release and click again to fire
+	if (_alt_drew_on_press if alt else _drew_on_press):
+		return  # still holding the click that drew this weapon — release THAT button and click again to fire
 	if not from_ai and not gun_raised:
 		return  # view-model still raising in (reload / swap / draw) — don't fire from the low muzzle
 	if !attack.is_stopped() or !reload.is_stopped() or !swap.is_stopped():
@@ -407,22 +586,15 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false, alt := f
 	if current_weapon.is_spray_paint:
 		_do_spray_paint()
 		return
-	# Attacking while scoped launches the player instead of firing (e.g. melee
-	# dash). Hip-fire falls through to the normal attack below. AI never scopes.
-	# Air dash is an UNLOCKABLE upgrade: without it, attacking-while-scoped falls through to a normal attack
-	# (duck-typed; a wielder with no unlock system — including AI — is treated as having it).
-	# `character` is typed Character (no has_mechanic — only Player has it), so the has_mechanic() call resolves
-	# dynamically (Variant): the `or`-chain has no inferable type, so annotate `bool` explicitly (no := here).
-	var dash_ok: bool = character == null or not character.has_method(&"has_mechanic") or character.has_mechanic(&"air_dash")
-	if not from_ai and current_weapon.launch_on_scoped_attack and _is_scoped and dash_ok:
-		# One dash per airtime: block a second airborne launch until you land.
-		if current_weapon.single_air_dash and character and not character.is_on_floor() and _did_air_dash:
-			return
-		if character and character.has_method(&"spend_stamina") and not character.spend_stamina(GameSettings.player_movement.stamina_air_dash_cost):
-			return
-		_do_launch_attack()
-		return
+	# (Attacking while scoped USED to LAUNCH the player — the air dash. That trigger is gone; the dash is its own key
+	# on its own component, scripts/components/abilities/air_dash.gd. The ADS + attack GESTURE came back below with
+	# the arrow reversed: the weapon flies, not you.)
 	if not _can_start_melee_attack():
+		return
+	# ADS + trigger on a throw_on_scoped_attack weapon (the knife) HURLS it instead of swinging. Placed AFTER the
+	# stamina gate — a throw is priced as a swing — and BEFORE the ammo consume / cadence below, which it owns
+	# itself (it must read the cadence off the weapon LEAVING your hand; see _try_scoped_weapon_throw).
+	if _try_scoped_weapon_throw(from_ai):
 		return
 	var ammo_before := clip.current_ammo
 	if !clip.consume_ammo():
@@ -431,14 +603,17 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false, alt := f
 		return
 	_spend_melee_attack_stamina()
 	_spend_shot_stamina()
-	attack.wait_time = current_weapon.attack_speed
+	attack.wait_time = effective_attack_speed()  # AGILITY compresses a MELEE cadence; a gun's cyclic rate is its own
 	attack.start()
 	# Wind-up: heavy weapons (melee) pause briefly after the click before the
 	# swing actually lands, for weight. The cooldown already started above, so
 	# this delay sits inside the normal firing cadence. 0 = instant.
-	if current_weapon.attack_windup > 0.0:
+	# Scaled by the SAME agility factor as the cooldown, so the wind-up keeps its authored share of the swing
+	# instead of becoming a fixed constant that eats a quick build's whole shortened window.
+	var windup := effective_attack_windup()
+	if windup > 0.0:
 		var _weapon := current_weapon
-		await get_tree().create_timer(current_weapon.attack_windup).timeout
+		await get_tree().create_timer(windup).timeout
 		if current_weapon != _weapon:
 			return
 	# The wind-up await can outlive the wielder (freed enemy) OR the world can change under us: a delayed shot must
@@ -616,7 +791,11 @@ func _on_reload_reload() -> void:
 		return
 	# Fold any background top-up for this gun into the normal foreground reload the player just asked for.
 	clip.cancel_background_reload(current_weapon)
-	reload.wait_time = current_weapon.reload_time
+	# The wielder's AGILITY sets how long the magazine change takes (floored so the Timer keeps a positive
+	# wait_time). Read ONCE, here: a buff that lands mid-reload does not retime the reload already running —
+	# the Timer owns the remaining seconds from this point, exactly as it does for a swap-mid-reload handoff,
+	# which hands `reload.time_left` (already scaled) to the background reload.
+	reload.wait_time = effective_reload_time()
 	# Per-weapon reload sound; fall back to the node's authored default when this weapon has none.
 	if _audio:
 		_audio.play_reload(current_weapon)
@@ -676,24 +855,3 @@ func _on_swap_timeout() -> void:
 func _on_scope_in_scoped_in(_tf: bool) -> void:
 	_is_scoped = _tf
 	current_spread = base_spread / GameSettings.weapon_general.scope_spread_divisor if _tf else base_spread
-
-func _do_launch_attack() -> void:
-	# Launch in the look direction with a slight upward arc (blast system, so it
-	# decays and lets the player ram enemies). Goes on the normal fire cooldown.
-	# Dashing snaps the wielder out of ADS immediately (the cooldown then blocks an
-	# instant re-scope until the dash settles).
-	if scope_in:
-		scope_in.force_unscope()
-	# Spend the one airborne dash so you can't launch again until you land.
-	if current_weapon.single_air_dash and character and not character.is_on_floor():
-		_did_air_dash = true
-	if character:
-		var look_dir := character.get_aim_direction()
-		character.explosion_velocity += look_dir * current_weapon.launch_force + Vector3.UP * current_weapon.launch_upward
-		# The dash whoosh (FOV punch + shake) is wielder feedback, same idea as
-		# on_weapon_fired — the player does it, an enemy needs none.
-		character.on_weapon_launched(current_weapon)
-	if current_weapon.whiz_sound:
-		AudioManager.play_2d_sfx(current_weapon.whiz_sound, 0.0, randf_range(0.9, 1.1))
-	attack.wait_time = current_weapon.attack_speed
-	attack.start()

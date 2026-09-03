@@ -21,6 +21,7 @@ projectile_speed = 10.0
 bullet_gravity_scale = 0.013
 launch_angle = 0.1
 view_model = ExtResource("3_w858f")
+npc_hold_trim = Vector3(0, -0.13, -0.34)
 has_muzzle_flash = false
 has_laser_sight = false
 spawns_casing = false

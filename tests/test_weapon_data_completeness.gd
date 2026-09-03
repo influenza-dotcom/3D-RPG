@@ -59,6 +59,12 @@ func _check_weapon(path: String) -> void:
 	# AI dodge-window dial: multiplies projectile_speed ONLY for an AI wielder's rounds (ProjectileSpawner
 	# round_speed) — enemies never hitscan, so this is what makes their fire visibly dodgeable per weapon.
 	_check_field(w, "npc_projectile_speed_mult", TYPE_FLOAT, path)
+	# AI BURST fire: how many rounds an NPC answers one trigger pull with, and the gap between them (0 = the
+	# gun'''s own attack_speed). npc_burst_count is genuinely `int` in source (whole rounds), like pellet_count
+	# above; the interval is `float = 0.0`, so an int-looking `npc_burst_interval = 0` in a .tres still parses
+	# FLOAT — the same trap damage above documents. Player fire never reads either.
+	_check_field(w, "npc_burst_count", TYPE_INT, path)
+	_check_field(w, "npc_burst_interval", TYPE_FLOAT, path)
 	_check_field(w, "launch_angle", TYPE_FLOAT, path)
 	_check_field(w, "max_explosion_force", TYPE_FLOAT, path)
 	_check_field(w, "explosion_radius", TYPE_FLOAT, path)
@@ -68,9 +74,12 @@ func _check_weapon(path: String) -> void:
 	_check_field(w, "npc_hold_position", TYPE_VECTOR3, path)
 	_check_field(w, "npc_hold_rotation", TYPE_VECTOR3, path)
 	_check_field(w, "npc_hold_scale", TYPE_FLOAT, path)
-	# Held-out readability boost (npc.gd _build_weapon_mesh MULTIPLIES it onto a GUN's surviving baked scale;
-	# npc_hold_override weapons keep their authored npc_hold_scale exactly). Display-only: the FP view-model,
-	# ground drops, icons, and preview never read it.
+	# Fist trim: pulls an ENLARGED model back onto the hand (the display boost below scales the model's baked
+	# forward offset along with its size). NPC-hand only — drops and the preview never read it.
+	_check_field(w, "npc_hold_trim", TYPE_VECTOR3, path)
+	# Held-out readability boost (npc.gd _build_weapon_mesh MULTIPLIES it onto whatever scale survives the mount:
+	# a gun's baked FP root scale, or an override weapon's npc_hold_scale — one field, one meaning for every
+	# weapon). Display-only: the FP view-model, ground drops, icons, and preview never read it.
 	_check_field(w, "npc_held_display_scale", TYPE_FLOAT, path)
 	# In-flight streak for a THROWN copy (WorldItem._make_throwable stamps a ThrowTrail child from these; the
 	# effect is scripts/components/throw_trail.gd). Off by default — a gun tumbles away without one.
@@ -179,6 +188,12 @@ func test_knife_opts_into_npc_hold_override() -> void:
 	assert_almost_eq(w.npc_hold_rotation.x, 0.0, 0.001, "knife NPC hold has no pitch")
 	assert_almost_eq(w.npc_hold_rotation.z, 0.0, 0.001, "knife NPC hold has no roll")
 	assert_almost_eq(w.npc_hold_scale, 1.0, 0.001, "knife NPC hold keeps the model's native size")
+	# ...and the NPC-hand readability boost is what makes it READ at NPC viewing distance. It rides on top of
+	# npc_hold_scale (which the ground drop and the character preview also read), so the held knife can be
+	# enlarged for the hand WITHOUT resizing the dropped/thrown copy — whose dropped_collision_size is
+	# hand-tuned to the native 0.44 m blade.
+	assert_gt(w.npc_held_display_scale, 1.0,
+		"the knife must still get an NPC-hand size boost, or it vanishes into a 0.75 m arm")
 
 # The override is opt-in: every weapon EXCEPT the knife has a CLEAN view_model root — identity (the AK) or a
 # centered uniform scale with no offset/tilt (the pistol's 0.001) — and mounts correctly via the rotation-only
@@ -234,3 +249,51 @@ func test_every_weapon_streaks_when_thrown() -> void:
 		assert_true(w.thrown_trail, "%s must draw a streak in flight — the tracer is on every thrown weapon" % wep)
 		assert_eq(w.thrown_trail_color, Color(1.0, 1.0, 1.0, 1.0),
 			"%s's streak is WHITE, like every other weapon's" % wep)
+
+# ADS + attack HURLS a weapon that opts in (WeaponData.throw_on_scoped_attack) instead of swinging it. That is a
+# trigger pull that permanently gives the weapon away, so the roster is pinned in BOTH directions: the knife must keep
+# it (silently losing the gesture is invisible in play until you notice ADS does nothing) and nothing else may pick it
+# up (a gun authored from a stale template would fling itself across the room the first time you aimed and fired).
+# The no_ads pairing is pinned with it: a weapon that cannot aim down sights can never reach a scoped attack, so the
+# two flags together would be a dead knob rather than a feature.
+func test_only_the_knife_throws_on_a_scoped_attack() -> void:
+	var knife := load("res://resources/weapons/melee.tres") as WeaponData
+	assert_not_null(knife, "melee.tres must load as a WeaponData")
+	assert_true(knife.throw_on_scoped_attack,
+		"the knife is THE ADS-throw weapon — aiming and firing must hurl the blade, not swing it")
+	assert_false(knife.no_ads,
+		"and it must be able to aim down sights at all, or the gesture can never fire")
+	for wep in ["pistol", "shotgun", "smg", "sniper_wep", "rock_weapon", "spray_paint", "fists"]:
+		var w := load("res://resources/weapons/%s.tres" % wep) as WeaponData
+		assert_not_null(w, "%s must load as a WeaponData" % wep)
+		assert_false(w.throw_on_scoped_attack,
+			"%s must NOT throw itself when you aim and fire — scoping a gun is how you shoot it" % wep)
+
+
+# --- AGILITY floor ratchet (2026-09-02) --------------------------------------------------------------
+# A wielder's AGILITY compresses a melee cadence and every reload, and Attack holds the scaled result to
+# GameSettings.weapon_general.min_melee_attack_speed / min_reload_time. Attack._duration_floor makes those
+# floors non-lengthening, so a weapon authored UNDER one keeps its authored speed and simply gains nothing
+# from agility. That is safe, but it is also silent: the weapon becomes a dead end for the stat with no
+# error anywhere. This walks every .tres on disk (not a hand-listed const set) so a NEWLY authored weapon
+# is caught the day it lands rather than the day someone notices their agility build does nothing with it.
+
+func test_no_shipped_weapon_is_authored_under_the_agility_floors() -> void:
+	var wg: WeaponGeneralSettings = GameSettings.weapon_general
+	var files := _list_tres()
+	assert_gt(files.size(), 0, "there must be weapons to check")
+	for path in files:
+		var w := load(path) as WeaponData
+		if w == null:
+			continue
+		if w.is_melee:
+			assert_gte(w.attack_speed, wg.min_melee_attack_speed,
+				"%s is melee and authors attack_speed %.3f, at or under min_melee_attack_speed %.3f — agility would buy this weapon NOTHING (Attack._duration_floor refuses to slow it, so it just stops responding to the stat). Raise the cadence or lower the floor deliberately." % [path, w.attack_speed, wg.min_melee_attack_speed])
+		# The reload floor only binds a weapon that can actually run a reload. A free-refill / infinite-ammo
+		# weapon (both melee weapons, the rock, the spray can) authors reload_time 0.0 and never reaches
+		# _on_reload_reload at all — flooring THAT to 0.25 s is exactly the neutrality break _duration_floor
+		# exists to prevent, so those are deliberately exempt rather than quietly rounded up.
+		if not w.is_infinite_ammo and w.reload_time > 0.0:
+			assert_gte(w.reload_time, wg.min_reload_time,
+				"%s authors reload_time %.3f, under min_reload_time %.3f — the reload is already at the floor, so agility cannot shorten it." % [path, w.reload_time, wg.min_reload_time])
+		w = null

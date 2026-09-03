@@ -264,9 +264,13 @@ func reset_transients() -> void:
 	fov = base_fov
 
 ## Punch the FOV way out instantly for an air-dash whoosh; _process then eases it
-## back. Snaps to an ABSOLUTE wide FOV (base + punch) rather than current + punch:
-## the dash fires from ADS (scoped FOV is a narrow ~40), so a relative bump would
-## barely clear default. maxf() means it never narrows an already-wide fall FOV.
+## back. Snaps to an ABSOLUTE wide FOV (base + punch) rather than current + punch,
+## so the punch is the SAME size wherever the dash is fired from. That mattered
+## most back when the dash could only be triggered out of ADS (scoped FOV is a
+## narrow ~40, where a relative bump would barely clear default); the dash is its
+## own key now and usually fires from the hip, where absolute and relative agree.
+## Keep it absolute anyway — you can still dash while scoped. maxf() means it
+## never narrows an already-wide fall FOV.
 ## The `_fov_punch` term keeps _target_fov raised while it decays so the per-frame
 ## ease doesn't immediately cancel it. Magnitude + recovery live in CameraSettings.
 func fov_punch() -> void:

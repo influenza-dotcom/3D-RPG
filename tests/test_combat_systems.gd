@@ -22,7 +22,7 @@ extends GutTest
 ##   - Attack.can_fire()/is_reload_or_swap_active() CALLS: they dereference the null
 ##     @export Timer nodes (attack/reload/swap) and would crash a bare instance — only
 ##     has_method is safe here; the real boolean needs full Timer + Inventory wiring.
-##   - Attack._ready/_physics_process and the whole fire/spray/launch/colour-picker/
+##   - Attack._ready/_physics_process and the whole fire/spray/colour-picker/
 ##     swap-state path: these connect to a null inventory, dereference null
 ##     character/clip/muzzle, spawn nodes into the tree, play audio, raycast the world,
 ##     call FreezeFrame, and set Input.mouse_mode — never safe to drive in a unit test.
@@ -35,7 +35,7 @@ extends GutTest
 ##     test_smoke.gd — not duplicated here.
 ##
 ## test_smoke.gd already asserts ScopeIn.new().has_method("force_unscope") and (via
-## source text) that Attack defines can_enter_scope/_do_launch_attack; the NEW value
+## source text) that Attack defines can_enter_scope; the NEW value
 ## below is the actual runtime BEHAVIOUR (defaults, no-op/flip semantics, emitted
 ## signals, real return values), not the existence checks.
 
@@ -181,26 +181,23 @@ func test_scope_in_force_unscope_clears_and_emits_when_scoped() -> void:
 # ---------------------------------------------------------------------------
 
 func test_attack_default_flag_state() -> void:
-	# attack.gd:50,53,54,59 — current_weapon (untyped null), _is_scoped/_swap_raising/
-	# _did_air_dash all start false.
+	# current_weapon (untyped null), _is_scoped and _swap_raising all start false.
 	var a = load(ATTACK_PATH).new()
 	assert_eq(a.current_weapon, null,
 		"A bare Attack has no equipped weapon — current_weapon must be null until weapon_changed seeds it.")
 	assert_false(a._is_scoped,
 		"An unwired Attack starts un-scoped (_is_scoped false) so it doesn't apply the scoped spread divisor with no ADS.")
-	assert_false(a._did_air_dash,
-		"_did_air_dash must start false so the first airborne single-air-dash launch is available.")
 	assert_false(a._swap_raising,
 		"_swap_raising must start false — no weapon-swap raise is in progress on a fresh Attack.")
 	a.free()
 
 
 func test_attack_can_enter_scope_true_by_default() -> void:
-	# attack.gd:102-106 — with current_weapon null the launch/air-dash branch is
-	# skipped entirely (it never touches the null character/timers) and returns true.
+	# Unconditional today: the air-dash ADS lockout that was its only refusal went away with the scoped launch.
+	# Pinned anyway — it is the seam ScopeIn polls every frame, so a future weapon-side refusal lands here.
 	var a = load(ATTACK_PATH).new()
 	assert_true(a.can_enter_scope(),
-		"Re-scoping must be allowed by default — only a spent airborne single_air_dash launch weapon locks ADS, so a bare Attack must report it can enter scope.")
+		"Re-scoping must be allowed by default — a bare Attack has nothing to refuse ADS for.")
 	a.free()
 
 
@@ -224,11 +221,11 @@ func test_attack_exposes_firing_and_scope_api() -> void:
 	assert_true(a.has_method("is_reload_or_swap_active"),
 		"ScopeIn._process and Weapon.is_busy() read Attack.is_reload_or_swap_active() to break/gate ADS — it must exist.")
 	assert_true(a.has_method("can_enter_scope"),
-		"ScopeIn._process calls can_enter_scope() to enforce the air-dash ADS lockout — it must exist.")
+		"ScopeIn._process calls can_enter_scope() before entering ADS — it must exist.")
 	assert_true(a.has_method("try_fire"),
 		"try_fire() is the AI-wielder fire entry point — it must exist for camera-less wielders to attack.")
 	assert_true(a.has_method("start_secondary_cooldown"),
-		"start_secondary_cooldown() lets secondary actions (e.g. the melee launch) share the firing cadence — it must exist.")
+		"start_secondary_cooldown() lets secondary actions share the firing cadence — it must exist.")
 	a.free()
 
 
@@ -337,9 +334,9 @@ func test_shot_stamina_scales_with_weapon_power() -> void:
 	var weak := _priced_gun(0.5)
 	var strong := _priced_gun(2.0)
 	a.current_weapon = weak
-	var weak_cost := a._shot_stamina_cost()
+	var weak_cost: float = a._shot_stamina_cost()
 	a.current_weapon = strong
-	var strong_cost := a._shot_stamina_cost()
+	var strong_cost: float = a._shot_stamina_cost()
 	assert_gt(strong_cost, weak_cost,
 		"a higher-damage weapon must cost more stamina per shot than a weaker one")
 	assert_almost_eq(strong_cost / weak_cost, 4.0, 0.001,
@@ -358,7 +355,7 @@ func test_shot_stamina_scales_with_weapon_power() -> void:
 	assert_almost_eq(launcher.stamina_effort(), 8.0, 0.001,
 		"an exploding round adds BLAST_PAYLOAD scaled by radius on top of its direct damage (4.0 + 4.0)")
 	a.current_weapon = solid
-	var solid_cost := a._shot_stamina_cost()
+	var solid_cost: float = a._shot_stamina_cost()
 	a.current_weapon = launcher
 	assert_almost_eq(a._shot_stamina_cost(), solid_cost * 2.0, 0.001,
 		"the same round costs exactly DOUBLE once it explodes - the blast payload is charged for")
@@ -376,7 +373,7 @@ func test_shot_stamina_trim_nudges_the_derived_price() -> void:
 	var gun := _priced_gun()
 	a.current_weapon = gun
 	a.character = p
-	var base := a._shot_stamina_cost()
+	var base: float = a._shot_stamina_cost()
 	gun.stamina_cost_mult = 0.75
 	assert_almost_eq(a._shot_stamina_cost(), base * 0.75, 0.001,
 		"stamina_cost_mult TRIMS the derived price rather than replacing it")
@@ -409,7 +406,7 @@ func test_shot_stamina_is_clamped_so_fire_never_outdrains_sprinting() -> void:
 	var mv: PlayerMovementSettings = GameSettings.player_movement
 	var absurd := _priced_gun(100.0, 0.125)  # SMG cadence, a hundred damage a round
 	a.current_weapon = absurd
-	var cost := a._shot_stamina_cost()
+	var cost: float = a._shot_stamina_cost()
 	var ceiling: float = mv.stamina_shot_drain_ceiling * mv.stamina_sprint_drain * 0.125
 	assert_almost_eq(cost, ceiling, 0.001,
 		"an over-powered weapon is clamped to its cadence ceiling instead of charging the derived price")
@@ -469,7 +466,7 @@ func test_shot_from_a_positive_but_insufficient_pool_overdraws_into_debt() -> vo
 	var gun := _priced_gun(2.0)  # a heavy round, and well clear of the cadence clamp
 	a.current_weapon = gun
 	a.character = p
-	var cost := a._shot_stamina_cost()
+	var cost: float = a._shot_stamina_cost()
 	assert_gt(cost, 0.5,
 		"the test weapon must cost more than the sliver of pool below, or this proves nothing")
 	p.stamina = 0.5
@@ -1206,3 +1203,250 @@ func test_interactable_is_confetti_kill_false_for_stale_gib() -> void:
 		"_is_confetti_kill() must return false for a stale gib — only a gib fresh off a kill (within confetti_fresh_window_ms) qualifies; the freshness gate trips before the attacker/world checks.")
 	attacker.free()
 	inter.free()
+
+
+# ---------------------------------------------------------------------------
+# AGILITY-scaled durations (attack.gd effective_attack_speed / _windup / _reload_time).
+# Built the same way as the melee-stamina pair above: a bare Attack (never add_child'd) with a real Player as
+# the wielder, whose Character.stats_or_default() lazily builds a baseline sheet we then write.
+# ---------------------------------------------------------------------------
+
+## A bare Attack wired to a fresh Player whose sheet carries `agi`. Caller frees both via _free_pair.
+func _wielder_attack(agi: int, weapon: WeaponData) -> Array:
+	var a = load(ATTACK_PATH).new()
+	var p = load("res://scripts/player/player.gd").new()
+	p.stats = CharacterStats.new()
+	p.stats.agility = agi
+	a.character = p
+	a.current_weapon = weapon
+	return [a, p]
+
+func _free_pair(pair: Array) -> void:
+	pair[0].free()
+	pair[1].free()
+
+## A melee weapon authored well clear of the min_melee_attack_speed floor, so a test can read the raw curve
+## without the floor quietly rewriting it (the _priced_gun idiom above, for the melee clock).
+func _slow_melee(cadence: float = 1.0, windup: float = 0.2) -> WeaponData:
+	var w := WeaponData.new()
+	w.is_melee = true
+	w.attack_speed = cadence
+	w.attack_windup = windup
+	w.reload_time = 0.0
+	return w
+
+
+func test_attack_baseline_agility_leaves_every_authored_duration_untouched() -> void:
+	# THE load-bearing contract. A baseline sheet must reproduce the .tres numbers EXACTLY — if this drifts, every
+	# weapon in the game was silently re-tuned by a stat nobody spent a point on.
+	var melee := _slow_melee(1.0, 0.2)
+	var gun := _priced_gun()
+	gun.reload_time = 2.0
+	var pair := _wielder_attack(0, melee)
+	var a = pair[0]
+	assert_almost_eq(a.effective_attack_speed(), 1.0, 0.0001,
+		"agility 0 swings at exactly the authored attack_speed")
+	assert_almost_eq(a.effective_attack_windup(), 0.2, 0.0001,
+		"agility 0 winds up for exactly the authored attack_windup")
+	a.current_weapon = gun
+	assert_almost_eq(a.effective_reload_time(), 2.0, 0.0001,
+		"agility 0 reloads in exactly the authored reload_time")
+	_free_pair(pair)
+	melee = null
+	gun = null
+
+
+func test_attack_agility_shortens_a_melee_swing_and_lengthens_a_clumsy_one() -> void:
+	var melee := _slow_melee(1.0, 0.2)
+	var quick := _wielder_attack(4, melee)
+	assert_almost_eq(quick[0].effective_attack_speed(), 0.8, 0.0001,
+		"agility 4 -> a 1.0s swing cycles in 0.8s (5% per point, matching CharacterStats.melee_time_mult)")
+	_free_pair(quick)
+	var clumsy := _wielder_attack(-3, melee)
+	assert_almost_eq(clumsy[0].effective_attack_speed(), 1.15, 0.0001,
+		"a NEGATIVE agility drags the swing out past the authored cadence — worse forever, no upper clamp")
+	_free_pair(clumsy)
+	melee = null
+
+
+func test_attack_agility_scales_the_windup_by_the_same_factor_as_the_cadence() -> void:
+	# ⭐ The wind-up sits INSIDE the cadence (attack.gd starts the cooldown, then awaits the wind-up before the hit
+	# lands). Scaling only the cadence would leave the wind-up an unscaled constant that eats a quick build's whole
+	# shortened window — and past the floor it would shrink to nothing while the cadence held, so the swing's SHAPE
+	# would change rather than its speed. One shared post-floor scale is what pins the ratio.
+	var melee := _slow_melee(1.0, 0.2)
+	for agi in [0, 4, 10, 13, 20, -3]:
+		var pair := _wielder_attack(agi, melee)
+		var a = pair[0]
+		var cadence: float = a.effective_attack_speed()
+		var windup: float = a.effective_attack_windup()
+		assert_almost_eq(windup / cadence, 0.2, 0.0001,
+			"the authored wind-up:cadence ratio (0.2) must hold at agility %d — at every value, floored or not" % agi)
+		_free_pair(pair)
+	melee = null
+
+
+func test_attack_agility_leaves_a_gun_cadence_alone() -> void:
+	# Agility buys HANDS, not the gun's mechanism. A mechanical rate of fire is not athleticism, and
+	# _shot_stamina_cost derives its clamp FROM attack_speed — scaling it here would move the shot price too.
+	var gun := _priced_gun(1.0, 0.44)
+	gun.attack_windup = 0.11
+	var pair := _wielder_attack(10, gun)
+	assert_almost_eq(pair[0].effective_attack_speed(), 0.44, 0.0001,
+		"agility 10 does NOT speed up a gun's cyclic rate — that is gunplay's domain, and the shot price is derived from it")
+	assert_almost_eq(pair[0].effective_attack_windup(), 0.11, 0.0001,
+		"nor a gun's click-to-hit wind-up (the shotgun really does author 0.11s of it)")
+	_free_pair(pair)
+	gun = null
+
+
+func test_attack_agility_shortens_every_reload_melee_or_not() -> void:
+	# The reload half is NOT restricted to melee: a reload is hands, not the gun's mechanism, and it is what makes
+	# agility worth points to a shooter.
+	var gun := _priced_gun()
+	gun.reload_time = 2.0
+	var pair := _wielder_attack(4, gun)
+	assert_almost_eq(pair[0].effective_reload_time(), 1.6, 0.0001,
+		"agility 4 -> a 2.0s reload finishes in 1.6s, on a RANGED weapon")
+	_free_pair(pair)
+	gun = null
+
+
+func test_attack_floors_hold_the_scaled_durations_off_zero() -> void:
+	# CharacterStats.melee_time_mult / reload_time_mult reach EXACTLY 0 at agility 20 and the level-up station has
+	# no cap, so without these floors a specialist build assigns 0 to a Timer's wait_time — an engine error, and a
+	# fire cooldown that never elapses.
+	var wg: WeaponGeneralSettings = GameSettings.weapon_general
+	var melee := _slow_melee(1.0, 0.2)
+	var gun := _priced_gun()
+	gun.reload_time = 2.0
+	var pair := _wielder_attack(20, melee)
+	var a = pair[0]
+	assert_almost_eq(a.effective_attack_speed(), wg.min_melee_attack_speed, 0.0001,
+		"agility 20 drives the multiplier to 0, so the cadence lands exactly on min_melee_attack_speed instead of 0")
+	assert_gt(a.effective_attack_speed(), 0.0,
+		"and is strictly positive — a Timer.wait_time of 0 is an engine error")
+	a.current_weapon = gun
+	assert_almost_eq(a.effective_reload_time(), wg.min_reload_time, 0.0001,
+		"the reload lands on min_reload_time for the same reason")
+	assert_gt(a.effective_reload_time(), 0.0, "and is strictly positive")
+	_free_pair(pair)
+	melee = null
+	gun = null
+
+
+func test_attack_floor_never_lengthens_an_authored_duration() -> void:
+	# ⭐ THE NEUTRALITY TRAP. The floors bound how far AGILITY may compress a clock; they are NOT a statement that
+	# every weapon takes at least that long. Applied unconditionally, a melee weapon authored FASTER than the floor
+	# would swing SLOWER than its .tres says for a baseline character — and the shipped fists (reload_time 0.0)
+	# would gain a quarter-second reload nobody authored. _duration_floor is what stops both.
+	var wg: WeaponGeneralSettings = GameSettings.weapon_general
+	var fast := _slow_melee(wg.min_melee_attack_speed * 0.5, 0.02)
+	var pair := _wielder_attack(0, fast)
+	var a = pair[0]
+	assert_almost_eq(a.effective_attack_speed(), fast.attack_speed, 0.0001,
+		"a melee weapon authored under the floor keeps its authored cadence at baseline — the floor must never SLOW anything")
+	assert_almost_eq(a.effective_reload_time(), 0.0, 0.0001,
+		"and a 0.0 authored reload_time (both shipped melee weapons) stays 0.0 rather than becoming min_reload_time")
+	_free_pair(pair)
+	# It is already at/under the physical minimum, so agility buys it nothing further either.
+	var quick := _wielder_attack(10, fast)
+	assert_almost_eq(quick[0].effective_attack_speed(), fast.attack_speed, 0.0001,
+		"agility cannot compress a weapon already authored below the floor — it is at the physical minimum already")
+	_free_pair(quick)
+	fast = null
+
+
+func test_attack_live_agility_buff_reaches_the_real_swing_and_reload() -> void:
+	# A carried +agility trinket / a stim must move the SWING, not just the number the Stats screen prints —
+	# that is the whole reason Attack._agility_bonus folds Character.status_stat_modifier in at this seam.
+	var melee := _slow_melee(1.0, 0.2)
+	var pair := _wielder_attack(0, melee)
+	var a = pair[0]
+	var p = pair[1]
+	var eff := StatusEffect.new()
+	eff.duration = 999.0
+	eff.stat_modifiers = {"agility": 4}
+	var mgr := StatusEffectManager.new()
+	p.add_child(mgr)
+	mgr.apply_effect(eff)
+	assert_almost_eq(p.status_stat_modifier(&"agility"), 4.0, 0.0001,
+		"the buff is live on the wielder (guard: if this fails the assertion below proves nothing)")
+	assert_almost_eq(a.effective_attack_speed(), 0.8, 0.0001,
+		"a live +4 agility buff on a BASELINE sheet swings exactly as fast as an authored agility 4")
+	assert_almost_eq(a.effective_attack_windup(), 0.16, 0.0001,
+		"and shortens the wind-up with it, keeping the ratio")
+	_free_pair(pair)
+	melee = null
+	eff = null
+
+
+func test_attack_effective_durations_are_safe_with_no_wielder_and_no_weapon() -> void:
+	# The off-tree case the whole suite depends on: a bare Attack has a null `character` AND may have no weapon.
+	# Neither may crash, and a wielder-less Attack must report the AUTHORED numbers (an AI body with no sheet).
+	var a = load(ATTACK_PATH).new()
+	assert_almost_eq(a.effective_attack_speed(), 0.0, 0.0001,
+		"no weapon -> 0.0 rather than a null deref")
+	assert_almost_eq(a.effective_reload_time(), 0.0, 0.0001, "same for the reload clock")
+	assert_almost_eq(a.effective_attack_windup(), 0.0, 0.0001, "same for the wind-up")
+	var melee := _slow_melee(1.0, 0.2)
+	a.current_weapon = melee
+	assert_almost_eq(a.effective_attack_speed(), 1.0, 0.0001,
+		"a wielder-less Attack takes the authored cadence untouched")
+	assert_almost_eq(a.effective_attack_windup(), 0.2, 0.0001, "and the authored wind-up")
+	a.free()
+	melee = null
+
+
+func test_attack_reload_view_scale_tracks_the_reload_it_scaled() -> void:
+	# ⭐ The view model's reload DIP and RAISE ride this factor, and the raise window is what is_raised() reports
+	# and GunPose mirrors into `gun_raised` — which BLOCKS FIRING. So a fixed 0.5 s raise would be a flat tail on
+	# every reload that agility could never shorten: the player-felt reload would be effective + 0.5 s, turning a
+	# promised 4x into 2x. That is an interior plateau arriving by the back door, and the NO SOFT CAP contract
+	# forbids it. This pins the factor against the duration it came from, so the two cannot drift.
+	var gun := _priced_gun()
+	gun.reload_time = 2.0
+	for agi in [0, 4, 10, 20]:
+		var pair := _wielder_attack(agi, gun)
+		var a = pair[0]
+		assert_almost_eq(a.reload_view_scale(), a.effective_reload_time() / gun.reload_time, 0.0001,
+			"at agility %d the view scale must be exactly the ratio the reload Timer took" % agi)
+		_free_pair(pair)
+	gun = null
+
+
+func test_attack_reload_view_scale_is_one_at_baseline_and_for_a_reloadless_weapon() -> void:
+	var gun := _priced_gun()
+	gun.reload_time = 2.0
+	var pair := _wielder_attack(0, gun)
+	assert_almost_eq(pair[0].reload_view_scale(), 1.0, 0.0001,
+		"a baseline wielder leaves the view-model reload gesture at its authored EffectsSettings length")
+	_free_pair(pair)
+	# A weapon that authors no reload has no gesture to compress — and 0.0/0.0 must not reach the caller.
+	var melee := _slow_melee(1.0, 0.2)
+	var quick := _wielder_attack(20, melee)
+	assert_almost_eq(quick[0].reload_view_scale(), 1.0, 0.0001,
+		"a 0.0-reload weapon (both shipped melee weapons) reports 1.0 rather than dividing by zero")
+	_free_pair(quick)
+	var bare = load(ATTACK_PATH).new()
+	assert_almost_eq(bare.reload_view_scale(), 1.0, 0.0001, "and so does an Attack with no weapon at all")
+	bare.free()
+	gun = null
+	melee = null
+
+
+func test_felt_reload_stays_linear_in_agility_once_the_view_scale_is_applied() -> void:
+	# The whole point of the coupling, stated as the property that matters: the time from pressing reload to
+	# being able to fire again must shrink in PROPORTION to the stat, not asymptote onto a fixed animation tail.
+	var raise_time: float = GameSettings.effects.gun_raise_time
+	var gun := _priced_gun()
+	gun.reload_time = 2.0
+	var baseline := _wielder_attack(0, gun)
+	var felt_base: float = baseline[0].effective_reload_time() + raise_time * baseline[0].reload_view_scale()
+	_free_pair(baseline)
+	var quick := _wielder_attack(10, gun)  # multiplier 0.5
+	var felt_quick: float = quick[0].effective_reload_time() + raise_time * quick[0].reload_view_scale()
+	_free_pair(quick)
+	assert_almost_eq(felt_quick, felt_base * 0.5, 0.0001,
+		"agility 10 halves the FELT reload (timer + the firing-blocked raise), not just the Timer half — an unscaled raise would leave it at %.3f instead of %.3f" % [gun.reload_time * 0.5 + raise_time, felt_base * 0.5])
+	gun = null

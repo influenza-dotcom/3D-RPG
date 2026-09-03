@@ -20,6 +20,9 @@ extends Resource
 ##   streetwise -> buy/sell_price_mult()              Merchant.buy_price / sell_price (the trading character)
 ##                 + rep_gain/loss_mult()             Reputation.add_reputation (gains bigger, losses smaller)
 ##   agility    -> move_speed_mult() + jump_mult()    Player locomotion (faster on foot, higher jump)
+##                 + stamina_regen_mult()             StaminaManager.recovery_rate_for (the pool refills faster)
+##                 + melee_time_mult()                Attack.effective_attack_speed / _windup (quicker swings)
+##                 + reload_time_mult()               Attack.effective_reload_time (quicker magazine changes)
 ##   larceny    -> detection_rate_mult()              Perception.sense (slower to fill an enemy's detection meter)
 ##                 + takedown_time_mult()             SilentTakedown (a stealthier operator kills quicker)
 ##                 + pickpocket_catch_chance() + pickpocket_value_allowance()  LootScreen pickpocket (caught roll + lift ceiling)
@@ -64,6 +67,9 @@ const PRICE_PER_STREETWISE := 0.04         ## streetwise -> buys 4% cheaper / se
 const REP_PER_STREETWISE := 0.08           ## streetwise -> rep gains 8% bigger / losses 8% smaller per point
 const MOVE_PER_AGILITY := 0.05             ## agility  -> +5% move speed per point
 const JUMP_PER_AGILITY := 0.05             ## agility  -> +5% jump velocity per point
+const STAMINA_REGEN_PER_AGILITY := 0.05    ## agility  -> +5% stamina RECOVERY rate per point
+const MELEE_TIME_PER_AGILITY := 0.05       ## agility  -> a melee swing's cadence + wind-up run 5% quicker per point
+const RELOAD_TIME_PER_AGILITY := 0.05      ## agility  -> a reload finishes 5% quicker per point
 const DETECTION_PER_LARCENY := 0.05        ## larceny  -> enemy detection meter fills 5% slower per point
 const TAKEDOWN_TIME_PER_LARCENY := 0.05    ## larceny  -> silent-takedown wind-up 5% quicker per point
 
@@ -74,12 +80,19 @@ const TAKEDOWN_TIME_PER_LARCENY := 0.05    ## larceny  -> silent-takedown wind-u
 ## ENDURANCE. Each point over baseline adds +10 max stamina for special movement abilities (grapple, climb, dash)
 ## AND speeds out-of-combat health regen by 10% (read live while you're out of a fight — see hp_regen_mult).
 ## 0 = neutral; negative lowers the pool until Player.stamina_max hits its physical floor, and slows healing until
-## regen stops entirely at endurance -10.
+## regen stops entirely at endurance -10. Endurance owns the stamina pool's SIZE only — how fast that pool REFILLS
+## is agility's (stamina_regen_mult), so the two stats split the economy rather than stacking on one axis.
 @export var endurance: int = BASELINE
 ## GUNPLAY. Each point over baseline steadies the aim wander 8% (floored at perfectly still), hits 5% harder with
 ## RANGED weapons, and adds 5% headshot punch. 0 = neutral; higher = a deadlier, tighter shooter.
 @export var gunplay: int = BASELINE
-## AGILITY. Each point over baseline makes you move + jump 5% faster/higher. 0 = neutral; negative = slower.
+## AGILITY. The QUICKNESS stat — every point over baseline buys 5% on each of five axes: you move + jump 5%
+## faster/higher, recharge stamina 5% faster (stamina_regen_mult, read live at the regen curve — endurance still
+## sets the pool's SIZE), swing a MELEE weapon 5% quicker (melee_time_mult, cadence AND wind-up), and finish a
+## reload 5% quicker (reload_time_mult). 0 = neutral; negative = slower on every axis, down to a standstill / no
+## recovery / a swing and a magazine change that take forever. The two combat halves are HANDS, not legs, and they
+## are what makes agility a fighting stat rather than purely a traversal one: strength decides how hard the knife
+## lands and gunplay how hard the bullet does, while agility decides how OFTEN either gets to happen.
 @export var agility: int = BASELINE
 ## STREETWISE. The social stat (it merged in the old Persuasion). Each point over baseline makes buying 4% cheaper,
 ## selling 4% dearer, rep gains 8% bigger and rep losses 8% smaller. Also gates dialogue checks. 0 = neutral.
@@ -240,6 +253,63 @@ func move_speed_mult(bonus: float = 0.0) -> float:
 ## high-agility build springs noticeably higher; a deeply negative agility eventually can't leave the ground.
 func jump_mult(bonus: float = 0.0) -> float:
 	return maxf(0.0, 1.0 + float(agility - BASELINE + bonus) * JUMP_PER_AGILITY)
+
+## AGILITY: the stamina RECOVERY rate runs 5% faster per point over baseline — multiply whichever tier rate the
+## regen curve picked (idle / moving / airborne / special-movement) by this, at StaminaManager.recovery_rate_for.
+## Endurance and agility deliberately split the stamina economy: endurance buys the pool's SIZE (stamina_bonus, a
+## flat capacity), agility buys the speed it comes BACK. So a heavy build sprints in long bursts with long lulls
+## between them, and a light build sprints in short bursts it can take again almost immediately — two different
+## rhythms out of the same tuning numbers, instead of one stat that is simply "more stamina".
+## A MULTIPLIER, for the same reasons hp_regen_mult is one (see above): the four authored tier rates are the
+## designer's curve and this scales all four together, so re-tuning stamina_regen_idle in the .tres can never move
+## the point at which agility stops helping. That point is always agility -20, whatever the tiers say.
+## Floored at 0 like every other multiplier, and the floor is LOAD-BEARING here: a negative rate would flow into
+## _set_stamina and quietly DRAIN a standing player's pool toward the Dark-Souls negative clamp — an invisible,
+## un-spendable leak with no verb behind it. Straight line all the way down to that floor, no interior plateau (the
+## NO SOFT CAP contract). `bonus` folds active/held agility status modifiers in exactly like move_speed_mult, so a
+## kickstart stim or a carried +agility trinket really does hand the pool back quicker.
+func stamina_regen_mult(bonus: float = 0.0) -> float:
+	return maxf(0.0, 1.0 + float(agility - BASELINE + bonus) * STAMINA_REGEN_PER_AGILITY)
+
+## AGILITY: a MELEE swing runs 5% quicker per point over baseline — multiply BOTH halves of the swing's clock by
+## this, the per-shot cadence (WeaponData.attack_speed) and the wind-up before the hit lands
+## (WeaponData.attack_windup), at Attack.effective_attack_speed / effective_attack_windup.
+## A TIME multiplier in the takedown_time_mult voice, so LESS is better and the readouts share that stat's sign
+## convention. 1.0 at baseline (an unsheeted character swings at exactly the authored cadence); a NEGATIVE agility
+## runs it past 1.0, dragging every swing out ever longer, without limit — worse forever, the no-soft-cap contract.
+##
+## ⭐ BOTH halves, and that is not tidiness. The wind-up sits INSIDE the cadence (Attack starts the cooldown, then
+## awaits the wind-up before the hit lands), so scaling the cadence alone would leave the wind-up as an unscaled
+## constant that eventually swallows the whole shortened window: past agility 15 the knife's 0.15 s wind-up would
+## be more than half of its 0.44 s cooldown, and the swing rate a player actually FEELS would stop improving while
+## the tooltip kept promising it did. Scaling both keeps their ratio fixed, so a quick build's swing is the same
+## animation played faster rather than a normal animation with the recovery shaved off it.
+##
+## RANGED weapons deliberately do NOT read this — a gun's cyclic rate is mechanical, not athletic, and scaling it
+## would hand agility the DPS lever that gunplay's weapon_damage_mult already owns (and would multiply straight
+## through the shot-stamina clamp in Attack._shot_stamina_cost, which is derived FROM attack_speed). Agility's
+## contribution to a gunfight is the reload, below.
+##
+## Floored at 0 like every other multiplier, but the floor that MATTERS is the consumer's: a zero here would
+## become a Timer.wait_time of 0, which Godot rejects outright ("Time should be greater than zero"), so
+## Attack floors the product at GameSettings.weapon_general.min_melee_attack_speed — and agility has no upper
+## bound at the level-up station, so a high-enough build really does reach this 0. `bonus` folds active/held
+## agility status modifiers in exactly like move_speed_mult, so a kickstart stim really does swing faster.
+func melee_time_mult(bonus: float = 0.0) -> float:
+	return maxf(0.0, 1.0 - float(agility - BASELINE + bonus) * MELEE_TIME_PER_AGILITY)
+
+## AGILITY: a reload finishes 5% quicker per point over baseline — multiply the weapon's authored reload_time by
+## this at Attack.effective_reload_time. The same "less is better" TIME multiplier as melee_time_mult above, and
+## it applies to EVERY weapon (a reload is hands, not the gun's mechanism — which is exactly why this half is not
+## restricted to melee the way the cadence is).
+## 1.0 at baseline; a NEGATIVE agility runs it past 1.0 and leaves a clumsy character exposed longer on every
+## magazine change, without limit. Floored at 0 for the same Timer reason as above — Attack floors the product at
+## GameSettings.weapon_general.min_reload_time. `bonus` folds active/held agility status modifiers in.
+##
+## This is the reason a fast build is worth something in a GUNFIGHT and not only in melee: gunplay buys the
+## damage a magazine does, agility buys how much of the fight you spend with a full one.
+func reload_time_mult(bonus: float = 0.0) -> float:
+	return maxf(0.0, 1.0 - float(agility - BASELINE + bonus) * RELOAD_TIME_PER_AGILITY)
 
 ## LARCENY: an enemy's detection meter fills 5% slower per point over baseline — multiply the per-frame detection
 ## rate by this (Perception.sense). Floored at 0 (at very high larceny the meter never fills — you're a ghost); a

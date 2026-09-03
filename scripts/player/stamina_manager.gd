@@ -31,6 +31,7 @@ extends RefCounted
 ## NULL-GUARD table — a BARE manager (host == null, straight `load(...).new()` in a test) must never crash; every
 ## host touch degrades to the bare off-tree Player's own defaults:
 ##   endurance stamina bonus -> 0.0 (stamina_max = the base tuning max, still floored at 1.0)
+##   agility regen mult      -> 1.0 (the authored tier rate, unscaled)
 ##   is_on_floor -> false          velocity -> Vector3.ZERO       input_dir -> Vector2.ZERO
 ##   crouch -> null (standing)     _is_scoped -> false            climbing / sliding / grappling -> false
 ##
@@ -38,6 +39,9 @@ extends RefCounted
 ## stamina_regen_* tier rates, stamina_regen_delay_after_spend, stamina_sprint_drain / stamina_sprint_lockout,
 ## and the per-verb jump / melee / dash / slide / grapple / SHOT costs read by the callers) plus
 ## GameSettings.weapon_general.allow_sprint_while_scoped — designer-tuned .tres resources, never consts here.
+## The four stamina_regen_* tiers are the authored CURVE; AGILITY scales all four together at the point of use
+## (CharacterStats.stamina_regen_mult, folded in below) rather than being baked into any knob, so a designer
+## re-tuning a tier never has to think about builds and a build never re-authors the curve.
 ## The ONE stamina cost that is not a flat player_movement number: the RANGED SHOT, which attack.gd DERIVES
 ## per weapon as stamina_shot_cost x WeaponData.stamina_effort() (damage / pellets / blast payload) x that
 ## weapon's stamina_cost_mult trim, clamped by stamina_shot_drain_ceiling so no gun can out-drain sprinting.
@@ -201,7 +205,19 @@ func _special_movement_active() -> bool:
 ## idle, where "moving" = real stick input OR real horizontal speed (the footstep threshold, so residual slide
 ## still counts as moving). The four rates are the GameSettings.player_movement.stamina_regen_* knobs;
 ## test_settings_load pins their idle > moving > active ordering.
-static func recovery_rate_for(special_active: bool, airborne: bool, input_len: float, horiz_speed: float) -> float:
+##
+## `agility_mult` is the picked tier's AGILITY scale (CharacterStats.stamina_regen_mult, +5%/point over baseline,
+## with any live agility status/held-item bonus already folded in). It multiplies AFTER the tier pick, on purpose:
+## agility makes you recover faster in whatever state you're in, it never promotes you to a better tier — a
+## high-agility climber still recovers on the climbing tier, just more of it. Defaulted to 1.0 so the four-arg
+## calls (the bare-manager tests, any curve probe with no sheet in hand) read the authored curve unchanged, and
+## floored at 0 so a mis-authored negative scale can only ever stop recovery, never invert it into a drain.
+static func recovery_rate_for(special_active: bool, airborne: bool, input_len: float, horiz_speed: float, agility_mult: float = 1.0) -> float:
+	return _tier_rate_for(special_active, airborne, input_len, horiz_speed) * maxf(agility_mult, 0.0)
+
+## The tier PICK alone, split out of recovery_rate_for so the state machine (which of the four authored rates
+## applies) stays one unscaled, readable ladder and the agility scale is visibly a multiplier over it.
+static func _tier_rate_for(special_active: bool, airborne: bool, input_len: float, horiz_speed: float) -> float:
 	if special_active:
 		return GameSettings.player_movement.stamina_regen_active
 	if airborne:
@@ -211,7 +227,14 @@ static func recovery_rate_for(special_active: bool, airborne: bool, input_len: f
 		return GameSettings.player_movement.stamina_regen_moving
 	return GameSettings.player_movement.stamina_regen_idle
 
-## Instance wrapper over the pure curve: sample the host's live movement state, then pick the tier.
+## AGILITY's scale on the regen curve, re-read live every frame (a timed stim or a picked-up trinket must move it
+## between frames, exactly like move_speed_mult at the locomotion seam). Bare manager: no host, no sheet -> 1.0.
+func _agility_regen_mult() -> float:
+	if host == null:
+		return 1.0
+	return host.stats_or_default().stamina_regen_mult(host.status_stat_modifier(&"agility"))
+
+## Instance wrapper over the pure curve: sample the host's live movement state, then pick the tier and scale it.
 func _stamina_recovery_rate() -> float:
 	var vel: Vector3 = host.velocity if host != null else Vector3.ZERO
 	var input_vec := Vector2.ZERO
@@ -220,7 +243,8 @@ func _stamina_recovery_rate() -> float:
 		if raw is Vector2:
 			input_vec = raw
 	var airborne := host == null or not host.is_on_floor()
-	return recovery_rate_for(_special_movement_active(), airborne, input_vec.length(), Vector2(vel.x, vel.z).length())
+	return recovery_rate_for(_special_movement_active(), airborne, input_vec.length(), Vector2(vel.x, vel.z).length(),
+		_agility_regen_mult())
 
 ## ⭐ Driven from BOTH Player._physics_process branches — the dialogue-frozen early-out AND the live tail — so
 ## stamina regenerates while frozen in a conversation. The delay gate eats the post-spend hold first; an OVERFULL

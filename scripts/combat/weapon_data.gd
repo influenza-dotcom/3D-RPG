@@ -63,7 +63,8 @@ const MOD_SLOT_PROPS: Array[StringName] = [
 @export var overkill_penetration: bool = true
 
 # How a DROPPED copy of this weapon behaves as a physics prop — the H verb takes the wielded weapon into your hands,
-# and left-click / a Z-hold throws it. A weapon drop carries NO ThrowableData, so these are its authoring surface.
+# and left-click / a Z-hold throws it; throw_on_scoped_attack (the last field here) folds that
+# whole sequence into one ADS + trigger gesture. A weapon drop carries NO ThrowableData, so these are its authoring surface.
 # MOST of them (thrown_impact_damage_mult / thrown_faces_travel / thrown_face_rotation_degrees / thrown_impulse_mult /
 # thrown_sound / held_faces_aim / dropped_item_light_always_lit) are stamped onto the drop's Throwable — or, for
 # the item light, onto its CanPickUp, and for thrown_trail / thrown_trail_color onto a ThrowTrail CHILD it adds —
@@ -90,6 +91,17 @@ const MOD_SLOT_PROPS: Array[StringName] = [
 ## surface in range the kill silently plays as an ordinary burst. OFF by default: it is a signature move for a
 ## thrown BLADE, not something a tossed pistol should do.
 @export var thrown_pins_body_part: bool = false
+## A thrown hit the victim SURVIVES leaves a dropped copy of this weapon EMBEDDED in the body part it struck,
+## riding that part until they die or someone pulls it out (stamped onto Throwable.sticks_in_body; the effect lives
+## in Throwable.stick_in_body and the "Blades left in the body" group on GameSettings.effects).
+## The other half of `thrown_pins_body_part`, on the far side of the kill line: that one is what a LETHAL throw
+## does, this is what a survivable one does, and one hit can never do both — the stick is gated on the victim
+## still being alive one line after the damage lands, which is the same instant the pin marker is left behind.
+## Same two requirements as the pin, and for the same reasons: `thrown_uses_weapon_damage` (the located contact
+## point is what names the part) and a BodyModelSwap on the victim (its live parts are what the blade rides). With
+## neither, the throw simply rebounds and drops. OFF by default — a thrown PISTOL should clatter to the floor, not
+## hang out of somebody's ribs.
+@export var thrown_sticks_in_body: bool = false
 ## Multiplier on the IMPACT damage a DROPPED copy of this weapon deals to a Character when THROWN (stamped onto the
 ## drop's Throwable.impact_damage_mult). Applies on BOTH damage paths, so it keeps one meaning — "how hard this prop
 ## hits when thrown" — whether the hit is the speed-based bludgeon or a `thrown_uses_weapon_damage` weapon hit. It is
@@ -184,6 +196,21 @@ const MOD_SLOT_PROPS: Array[StringName] = [
 ## the posed model's own extents (the knife is a slender ~0.44 m blade along local Z). Read only in WorldItem.build
 ## case 3; the pickup hitbox is derived from it, so it keeps its easy-to-aim-at margin automatically.
 @export var dropped_collision_size: Vector3 = Vector3.ZERO
+## ADS + ATTACK THROWS this weapon instead of swinging it: aim down sights with the knife, pull the trigger, and you
+## hurl the blade down your look ray in one gesture — no H press, no carry step. Hip-fire is untouched (a SCOPED
+## attack is the only trigger) and ADS on its own still just zooms, so nothing leaves your hand until you fire.
+## It is the SAME launch a left-click gives a weapon you are already carrying: Player.throw_equipped_weapon pulls the
+## wielded item out of the bag as a physics drop and hands it straight to PickupRay.throw_held. So every knob in this
+## group applies exactly as it does to a hand-thrown copy — the nosing, the trail, the throw sound,
+## thrown_uses_weapon_damage, the pin kill — and there is nothing extra to author for the gesture.
+## The weapon really LEAVES you: the item is out of the backpack and lying in the world until you walk over and pick
+## it back up, and you drop to bare fists (which are no_ads, so the sights come down with the throw).
+## Priced and paced like a swing — stamina_melee_attack_cost, and this weapon's own attack_speed as the cooldown,
+## both read BEFORE the throw because it swaps the fists in synchronously. A throw that cannot be built (nothing
+## equipped, hands already full, off-tree) falls through to the ordinary scoped attack rather than eating the click.
+## OFF by default: only a weapon meant to be thrown away mid-fight should give up its trigger while you are aiming.
+## ⭐ Pointless alongside no_ads — no ADS means no scoped attack, so the gesture can never fire.
+@export var throw_on_scoped_attack: bool = false
 
 @export_group("Firing")
 ## Shots fired per trigger pull. 1 = single bullet; >1 = a shotgun spread (each pellet rolls damage + knockback independently).
@@ -197,6 +224,27 @@ const MOD_SLOT_PROPS: Array[StringName] = [
 @export var attack_windup: float = 0.0
 ## Cooldown between shots (seconds) — the fire-rate timer. LOWER = faster gun (0.1 = 10 shots/sec); higher = slower.
 @export var attack_speed: float = 0.1
+## BURST FIRE — AI WIELDERS ONLY: how many rounds an NPC answers ONE trigger pull with. 1 (the default) is the
+## single aimed shot every weapon fired before this existed; >1 fires a short string of rounds spaced by
+## npc_burst_interval below, and only THEN pays the full telegraphed cadence (NPC._shot_interval, floored by
+## GameSettings.npc_ai.min_shot_interval) before the next burst. The PLAYER's trigger is untouched — a human holds
+## the button and `auto_fire` decides what that does.
+## ⭐ WHY IT EXISTS: min_shot_interval paces every NPC's ranged fire to a 0.9 s breathing rhythm so the telegraph
+## package (lock-on sting, laser/aim-radial ramp, incoming beep) has an off-beat to sit in — right for the pistol,
+## but it turned the SMG, a gun whose entire identity is its 0.125 s cyclic rate, into a slow single-shot pistol
+## with a big magazine. The burst gives the gun its VOICE back INSIDE that rhythm: brrrp, breathe, brrrp — with one
+## charge sting and one incoming beep per BURST, not per round, so the warning still means something.
+## The burst ABORTS mid-string the moment the shot stops being takeable (LOS broken, target out of range, clip run
+## dry), so an NPC never keeps spraying at a wall the target just ducked behind.
+## ⭐ It MULTIPLIES this weapon's AI damage output — three rounds per cadence is ~3x the DPS of one. Rebalance a
+## bursting weapon with this count (and its `damage`), not by fighting the shared cadence floor.
+@export var npc_burst_count: int = 1
+## Seconds between the rounds INSIDE an NPC's burst. 0 (the default) = this weapon's own attack_speed, i.e. the
+## gun's real cyclic rate — an SMG bursts at 8 rounds/sec because that is what the gun does. Set it only to slow a
+## burst down for readability: it can never make one fire FASTER than attack_speed, because Attack refuses a shot
+## while its own cadence timer is still running (NpcCombat waits for it rather than dropping the owed round).
+## Inert while npc_burst_count is 1.
+@export var npc_burst_interval: float = 0.0
 ## Does a round from this weapon EXPLODE on impact? Purely a stamina-pricing / authoring FACT — it does not make
 ## anything blow up (whether a round blasts is decided inside its projectile_scene: rock_projectile.tscn wires its
 ## Explosion node to the full blast path, Projectile.tscn to a cosmetic spark that hardcodes force 0 and the global
@@ -404,24 +452,42 @@ func held_view_model() -> PackedScene:
 ## so this multiplies the model's OWN inherent (child-chain) size. 1.0 = the model's native size. Only consulted
 ## when the override is on.
 @export var npc_hold_scale: float = 1.0
-## Readability boost for a GUN's held-out NPC display: multiplies the baked FP root scale the rotation-only
-## mount leaves on the mesh. View-models are first-person-tuned, and at NPC viewing distance that FP world
-## size reads squint-small — the player couldn't tell WHAT an enemy was holding. NOT applied to
-## npc_hold_override weapons: their authored npc_hold_scale IS the final held size (tune that instead).
+## Extra local offset (metres) applied to the held model AT THE NPC'S HAND ONLY, in the hand anchor's own frame
+## (+Z is the way the NPC — and so the barrel — points; +Y is up). The knob for pulling an ENLARGED view-model
+## back into the fist: these scenes bake their first-person pose into the model's child chain, so
+## `npc_held_display_scale` grows the model AND pushes it forward by the same factor. A weapon boosted much past
+## its authored size therefore floats ahead of the hand until it is trimmed back here. ZERO = the model sits
+## exactly where its own pose puts it (the pre-trim behaviour for every weapon that doesn't need one).
+##
+## Applied in BOTH mount branches, so an npc_hold_override weapon can be trimmed too. Read ONLY by
+## npc.gd._build_weapon_mesh — the player's FP rig, ground drops (world_item) and the character preview never
+## see it, so trimming an NPC's hold can never disturb those. (For a DROP's re-centring use
+## `dropped_model_offset`, which is the same idea on the other side of the fence.)
+@export var npc_hold_trim: Vector3 = Vector3.ZERO
+## Readability boost for the held-out NPC display: multiplies the mesh's surviving scale (a gun's baked FP root
+## scale on the rotation-only mount; `npc_hold_scale` on an override weapon). View-models are first-person-tuned,
+## and at NPC viewing distance that FP world size reads squint-small against this project's deliberately chunky
+## character rig — whose HEAD alone is 0.68 m and whose arm is a 0.75 m plank — so a life-scale gun disappears
+## into the fist and the player cannot tell WHAT an enemy is holding.
 ## Consulted ONLY by npc.gd._build_weapon_mesh (the hand display): the player's own view-model, ground drops
-## (world_item), inventory icons, and the inspect preview never read this field. Per-weapon so a long rifle
-## can boost less than a pocket pistol (a 1.75x sniper barrel reaches ~1.6m — consider ~1.2 there); 1.0 = off.
-@export var npc_held_display_scale: float = 1.75
+## (world_item), inventory icons, and the inspect preview never read this field, so it is safe to retune per
+## weapon. It scales the model's baked forward OFFSET as well as its size (see `npc_hold_trim`), and it moves
+## the child "Muzzle" marker outward with the barrel tip — which is intended (fire leaves the gun's real
+## muzzle) but is also why the long guns are boosted less than the short ones: that marker is the shot,
+## tracer, laser and clear-shot-ray ORIGIN, and pushing it metres in front of the NPC would start shots
+## past cover. 1.0 = off.
+@export var npc_held_display_scale: float = 2.6
 
 @export_group("Muzzle & Casing")
 ## Show the muzzle flash mesh/light + sparks on fire? Cosmetic; off for muzzle-less weapons (rock, fists).
 @export var has_muzzle_flash: bool = true # show the muzzle flash mesh/light + sparks on fire?
 ## Show the laser sight beam for this weapon? Off for melee / thrown / unsighted weapons.
-## ⭐NPC-ONLY NOW. The PLAYER's laser sight was retired when the flashlight took the "Light" key — this flag
-## survives because it still gates the NPC aiming laser (npc.gd `_current_weapon_has_laser_sight`, the red
-## beam an armed enemy sweeps at you). Turning it off on a weapon hides that enemy beam; it no longer affects
-## anything the player carries.
-@export var has_laser_sight: bool = true # show the NPC aiming laser for this weapon?
+## ⭐BOTH SIDES READ THIS ONE FLAG. It gates the NPC aiming laser (npc.gd `_current_weapon_has_laser_sight`, the
+## red beam an armed enemy sweeps at you) AND the PLAYER's own laser sight (scenes/player/laser_sight_rig.gd),
+## which is back after a spell in retirement. Turning it off on a weapon hides the beam for whoever holds it —
+## which is the point: a laser has to hang off a gun, so fists, melee and the spray can author it false.
+## ⭐The player's sight is ALSO gated on the `laser_sight` implant, so this flag alone never puts a dot on screen.
+@export var has_laser_sight: bool = true # show the laser sight for this weapon (player AND NPC)?
 ## Eject a physical shell casing on fire? Off for weapons that don't shell out (melee, energy, thrown).
 @export var spawns_casing: bool = true   # eject a shell casing on fire?
 ## Scales the ejected shell casing — its mesh (and the RigidBody casing's collision). 1.0 = unchanged;
@@ -450,9 +516,6 @@ func held_view_model() -> PackedScene:
 @export_group("Feedback")
 ## Camera kick fired off on every shot (trauma units fed to ScreenShake). Higher = punchier recoil; 0 = no shake.
 @export var screen_shake_amount: float = 0.3
-## Bigger one-shot shake for a scoped-attack launch / air dash specifically (screen_shake_amount stays
-## the per-shot fire shake).
-@export var launch_screen_shake: float = 0.6
 ## Opacity of the player's full-screen white hit-flash on this weapon's instant-hit (hitscan) shots.
 ## 1 = full-strength white; the knife authors 0.5 so its fast repeat swings read as a soft pop instead of
 ## a strobe (the same concern that exempts view_model_punch weapons outright, dimmed rather than dropped).
@@ -468,8 +531,8 @@ func held_view_model() -> PackedScene:
 
 @export_group("ADS / Scope")
 ## When true this weapon can't aim down sights AT ALL -- holding Zoom does nothing (no scope, no zoom). For a
-## weapon with no sight to raise: the fists / bare hands. Leave false for guns and for melee weapons that ADS to
-## trigger a scoped-attack launch (launch_on_scoped_attack below). Mirrors is_spray_paint's no-ADS handling.
+## weapon with no sight to raise: the fists / bare hands. Leave false for guns, and for any melee weapon you want
+## to be able to raise. Mirrors is_spray_paint's no-ADS handling.
 @export var no_ads: bool = false
 ## scoped_fov_override: FOV this weapon zooms to while scoped (ADS). 0.0 = use the global ADS zoom (which is
 ## SOLVED from the player's rest FOV via GameSettings.camera.scope_magnification); > 0.0 = this weapon's own
@@ -508,17 +571,12 @@ func held_view_model() -> PackedScene:
 func has_variable_scope_zoom() -> bool:
 	return scoped_zoom_fov_min > 0.0 and scoped_zoom_fov_max > scoped_zoom_fov_min
 
-@export_group("Scoped-Attack Launch")
-## When true, ATTACKING WHILE SCOPED (ADS) launches the player in the look direction instead of doing a
-## normal attack (e.g. melee dash). Hip-fire still does the normal attack; you still zoom with the
-## secondary as usual. Uses the weapon's attack_speed as the launch cooldown.
-@export var launch_on_scoped_attack: bool = false
-## Forward shove (m/s) along the look direction when a scoped attack launches the player. Higher = a longer lunge/dash.
-@export var launch_force: float = 15.0
-## Extra straight-up boost (m/s) added to the launch, so the dash also hops. 0 = a flat horizontal lunge.
-@export var launch_upward: float = 4.0
-## If true, only one launch/dash is allowed per airtime (must touch ground to refresh). false = dash repeatedly mid-air.
-@export var single_air_dash: bool = false # if true, only one launch/dash allowed per airtime
+# The "Scoped-Attack Launch" group (launch_on_scoped_attack / launch_force / launch_upward / single_air_dash) is
+# GONE: the air dash stopped being a weapon behaviour you triggered by ADS-ing a knife and swinging. It is its own
+# key now (default Left Alt) and its own component — scripts/components/abilities/air_dash.gd — which carries the
+# force/lift/one-per-airtime tuning as its own exports. A weapon no longer has anything to say about dashing.
+# ADS + attack is not a dead gesture, though — it is throw_on_scoped_attack in the Thrown group now, and it HURLS
+# the weapon down your look ray instead of launching you along it.
 
 @export_group("Spray Paint")
 ## Spray-paint "graffiti" mode: hold fire to spray persistent coloured paint decals onto whatever surface

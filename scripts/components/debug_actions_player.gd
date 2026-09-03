@@ -625,6 +625,22 @@ static func _me(ctx: Dictionary, p: Player) -> PackedStringArray:
 		_num(p.limb_move_multiplier()), _num(p.encumbrance_move_multiplier()), _num(p.current_carry_weight()), _num(p.carry_capacity), _num(p.heaviness()),
 		_num(p.stats_or_default().move_speed_mult(p.status_stat_modifier(&"agility"))), _num(p.status_move_multiplier()), weapon_factor])
 
+	# --- air control ------------------------------------------------------------------------------------
+	# The chain above is only half the story off the floor, and its silence is part of why a frozen air target
+	# survived here for so long: "why does WASD do nothing mid-jump" had no answer in the one diagnostic built
+	# to explain movement. The air CEILING is max(banked, this frame's ground target x air_speed_mult) — see
+	# AirMovement. crouch_ok gates the compute_target_speed call for the same reason it does above
+	# (ground_movement.gd dereferences player.crouch UNGUARDED).
+	var air_h := Vector2(p.velocity.x, p.velocity.z).length()
+	var air_wish := (GroundMovement.compute_target_speed(p, Vector2(0.0, -1.0)) * mv.air_speed_mult) if crouch_ok else 0.0
+	var air_banked: float = p.current_speed
+	out.append("  air: on_floor %s   horizontal %s m/s   banked (current_speed, frozen at takeoff) %s   wish floor %s   => CEILING %s m/s" % [
+		_onoff(p.is_on_floor()), _num(air_h), _num(air_banked), _num(air_wish), _num(maxf(air_banked, air_wish))])
+	out.append("    accel %s m/s^2   steer %s m/s^2 = %s deg/s at THIS speed   over-ceiling settle %s /frame (smoothing %s / divisor %s)   stands down: climbing %s rope-attached %s (rope active %s, which does NOT gate air control)" % [
+		_num(mv.air_accel), _num(mv.air_steer_accel), _num(rad_to_deg(mv.air_steer_accel / maxf(air_h, 0.05))),
+		_num(mv.smoothing / maxf(mv.air_smoothing_divisor, 0.0001)), _num(mv.smoothing), _num(mv.air_smoothing_divisor),
+		_onoff(p.is_climbing()), _onoff(p.is_grapple_attached()), _onoff(p.is_grappling())])
+
 	# --- limbs ------------------------------------------------------------------------------------------
 	out.append("  limbs: head %s   arms %s   legs %s   (has_limb_damage %s; pools seed at %s = max_hp x limb_condition_frac %s)" % [
 		_limb_state(p, Character.BodyPart.HEAD), _limb_state(p, Character.BodyPart.ARMS), _limb_state(p, Character.BodyPart.LEGS),
@@ -669,6 +685,38 @@ static func _me(ctx: Dictionary, p: Player) -> PackedStringArray:
 		if ws.is_busy():
 			hub += "   (reload/swap in flight)"
 		out.append(hub)
+		# --- the AGILITY-scaled clocks --------------------------------------------------------------
+		# The floors are declared load-bearing, but their PLATEAU is otherwise invisible in play: past a
+		# certain agility the cadence and the reload stop moving and nothing tells you further points bought
+		# nothing. Same shape as the move-speed chain above — authored value, the multiplier, the result —
+		# plus an explicit AT FLOOR flag when the clamp is what decided the number.
+		if attack != null and drawn != null:
+			var wg: WeaponGeneralSettings = GameSettings.weapon_general
+			var eff_cadence: float = attack.effective_attack_speed()
+			var eff_windup: float = attack.effective_attack_windup()
+			var eff_reload: float = attack.effective_reload_time()
+			var agi_mod: float = p.status_stat_modifier(&"agility")
+			var sheet := p.stats_or_default()
+			var swing := "    swing: %ss authored" % _num(drawn.attack_speed)
+			if drawn.is_melee:
+				swing += "   x agility %s -> %ss" % [_num(sheet.melee_time_mult(agi_mod)), _num(eff_cadence)]
+				if is_equal_approx(eff_cadence, wg.min_melee_attack_speed):
+					swing += "   ! AT FLOOR (min_melee_attack_speed %s) — more agility buys no more swing speed" % _num(wg.min_melee_attack_speed)
+				swing += "   wind-up %ss -> %ss" % [_num(drawn.attack_windup), _num(eff_windup)]
+			else:
+				swing += "   (RANGED — a gun's cyclic rate is not agility-scaled; that is gunplay's domain)"
+			out.append(swing)
+			var rel := "    reload: %ss authored   x agility %s -> %ss" % [
+				_num(drawn.reload_time), _num(sheet.reload_time_mult(agi_mod)), _num(eff_reload)]
+			if drawn.reload_time > 0.0 and is_equal_approx(eff_reload, wg.min_reload_time):
+				rel += "   ! AT FLOOR (min_reload_time %s)" % _num(wg.min_reload_time)
+			# The view model's dip + raise ride the same factor; the raise BLOCKS FIRING, so it is part of the
+			# reload the player actually feels (see Attack.reload_view_scale).
+			var view_scale: float = attack.reload_view_scale()
+			rel += "   + raise %ss (view scale %s) = %ss felt" % [
+				_num(GameSettings.effects.gun_raise_time * view_scale), _num(view_scale),
+				_num(eff_reload + GameSettings.effects.gun_raise_time * view_scale)]
+			out.append(rel)
 	if inv == null:
 		out.append("  bag: n/a (no CharacterInventory — built in Character._ready)")
 	else:

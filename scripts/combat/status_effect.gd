@@ -20,7 +20,10 @@ extends Resource
 @export var tick_interval: float = 1.0
 ## HP applied to the host on each tick (positive = damage, e.g. poison/burn). Needs tick_interval > 0.
 @export var damage_per_tick: float = 0.0
-## Per-stat additive tweaks while active, e.g. { "agility": 2 }. CONSUMED for the live stats — agility (move/jump),
+## Per-stat additive tweaks while active, e.g. { "agility": 2 }. CONSUMED for the live stats — agility (move/jump/
+## stamina recovery rate, MELEE swing cadence + wind-up, and every RELOAD — the last two folded in at
+## Attack.effective_attack_speed / _windup / effective_reload_time, so a stim really does swing and reload faster
+## rather than merely printing faster on the Stats screen),
 ## gunplay (gun damage / sway), streetwise (shop prices + reputation), larceny (detection + pickpocketing), and strength's
 ## MELEE damage — via Character.status_stat_modifier, which each live seam folds into the CharacterStats derived
 ## method's `bonus` arg. NOT consumed for strength's carry/max_hp on the TIMED path: those are stamped once at spawn

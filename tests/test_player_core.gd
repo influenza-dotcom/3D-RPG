@@ -439,6 +439,10 @@ func test_player_plain_var_initial_defaults() -> void:
 	var p = load(PLAYER_SCRIPT_PATH).new()
 	assert_eq(p.current_speed, 0.0,
 		"current_speed must start at 0.0 — the movement lerp ramps it up from rest")
+	assert_eq(p._air_ceiling, 0.0,
+		"_air_ceiling must start at 0.0 — a fresh player has banked no air tier, so the settle floor is their banked ground speed alone (which is what keeps blast knockback damping to rest)")
+	assert_eq(p._air_exit_speed, -1.0,
+		"_air_exit_speed must start at -1.0 — it is the airborne-speed latch the grounded arm's landing seed consumes, and -1.0 (not 0.0) is what distinguishes 'no airborne frame yet' from 'landed at a dead stop'")
 	assert_eq(p.noise_radius, 0.0,
 		"noise_radius must start at 0.0 (silent) so a freshly spawned player isn't 'heard' before moving")
 	assert_false(p._dying,
@@ -451,6 +455,8 @@ func test_player_plain_var_initial_defaults() -> void:
 		"is_sliding() must start false — no Slide ability on a bare player, and a slide begins only on a fast crouched landing")
 	assert_false(p.is_grappling(),
 		"is_grappling() must start false — no Grapple ability on a bare player, so stamina recovery treats it as idle")
+	assert_false(p.is_grapple_attached(),
+		"is_grapple_attached() must start false too — it is the NARROW rope gate AirMovement stands down on (attached only), as distinct from is_grappling()'s wider fired-attached-or-retracting sense that step assist wants")
 	p.free()
 
 
@@ -586,6 +592,41 @@ func test_bare_stamina_manager_null_guards_and_pure_regen_curve() -> void:
 	m = null
 
 
+func test_agility_scales_the_stamina_regen_curve() -> void:
+	# AGILITY's third derived effect (CharacterStats.stamina_regen_mult) lands HERE: it scales whichever tier the
+	# curve already picked, and never promotes the tier — a high-agility climber recovers faster ON the climbing
+	# rate, they don't get handed the idle rate. The scale is a DEFAULTED trailing arg, so every four-arg probe in
+	# the test above still reads the authored curve unscaled.
+	var m = load(STAMINA_SCRIPT_PATH).new()
+	var idle: float = m.recovery_rate_for(false, false, 0.0, 0.0)
+	assert_almost_eq(m.recovery_rate_for(false, false, 0.0, 0.0, 1.2), idle * 1.2, 0.001,
+		"the agility scale multiplies the picked tier rate")
+	assert_almost_eq(m.recovery_rate_for(false, false, 0.0, 0.0, -2.0), 0.0, 0.001,
+		"a negative scale floors at 0 — recovery can stop dead, but it must never invert into a silent drain")
+	assert_almost_eq(m.recovery_rate_for(true, false, 0.0, 0.0, 2.0),
+		GameSettings.player_movement.stamina_regen_active * 2.0, 0.001,
+		"the scale rides the special-movement tier too — agility helps in every state, it doesn't change which state you're in")
+	m = null
+	# The LIVE host wiring. Both players are bare and off-tree, so is_on_floor() is false for both and each picks
+	# the SAME (airborne) tier — the only difference between the two ticks is the stat sheet.
+	var baseline_p = load(PLAYER_SCRIPT_PATH).new()
+	var nimble_p = load(PLAYER_SCRIPT_PATH).new()
+	var quick := CharacterStats.new()
+	quick.agility = 10
+	nimble_p.stats = quick
+	baseline_p.stamina = 10.0
+	nimble_p.stamina = 10.0
+	baseline_p._update_stamina_recovery(0.5)
+	nimble_p._update_stamina_recovery(0.5)
+	assert_gt(nimble_p.stamina, baseline_p.stamina,
+		"agility refills the pool faster than a baseline sheet over the same tick — the whole point of the stat")
+	assert_almost_eq(nimble_p.stamina - 10.0, (baseline_p.stamina - 10.0) * 1.5, 0.001,
+		"agility 10 -> exactly +50% recovered per tick (5%/pt), the linear no-soft-cap contract")
+	baseline_p.free()
+	nimble_p.free()
+	quick = null
+
+
 func test_player_apply_velocity_runs_step_assist() -> void:
 	var src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
 	assert_true(src.contains("func apply_velocity()"),
@@ -606,6 +647,37 @@ func test_player_apply_velocity_runs_step_assist() -> void:
 		"Player.apply_velocity must snap down after walking off a stair tread while grounded")
 	assert_true(src.contains("GameSettings.player_movement.step_up_height"),
 		"Player stair assist must read the designer-tunable step_up_height")
+
+
+## The airborne arm, pinned as source text for the same reason the step-assist beats above are: it is
+## byte-order-critical control flow inside _physics_process that no off-tree test can execute.
+func test_player_air_arm_delegates_to_airmovement_and_seeds_the_landing() -> void:
+	var src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
+	assert_true(src.contains("AirMovement.step(self, direction, target_speed, _air_ceiling, delta, fps_factor)"),
+		"the airborne arm must delegate to AirMovement — the whole never-raises-speed safety argument lives in that function, and an inline lerp here is what froze the air target at takeoff")
+	assert_false(src.contains("velocity.x = lerpf(velocity.x, direction.x * current_speed, t_air)"),
+		"the airborne lerp must be GONE — while it exists someone can chase `direction` scaled by the ground-frozen speed again, which is the exact defect (a standing jump steering toward the zero vector for 14 cm)")
+	assert_true(src.contains("current_speed = maxf(current_speed, minf(_air_exit_speed, target_speed))"),
+		"the grounded arm must seed the landing from the speed we actually arrived with — one-way and capped at the ground target, or maintained airborne speed is lerped back down on touchdown as a ~29% stumble")
+	assert_true(src.contains("_air_exit_speed = Vector2(velocity.x, velocity.z).length()"),
+		"the airborne arm must record the speed it will hand the ground, unconditionally — including on the frames AirMovement stands down, so a climb or grapple exit lands with an honest number too")
+	assert_true(src.contains("_air_ceiling = maxf(_air_ceiling, target_speed * GameSettings.player_movement.air_speed_mult)"),
+		"the air tier must be latched as a per-airtime HIGH-WATER, so releasing the key / feathering a stick / scoping / opening a modal stops you BUILDING without retroactively BRAKING what you already built")
+	assert_true(src.contains("current_speed = maxf(current_speed, launched)"),
+		"the momentum launch must bank the boosted speed as the air ceiling — AirMovement's settle floor is current_speed, so a launch that does not raise it is settled straight back off on the very next airborne frame")
+	assert_true(src.contains("AirMovement.takeoff_speed(carried, target_speed, GameSettings.player_movement.jump_momentum_boost)"),
+		"the momentum launch must route through AirMovement.takeoff_speed — its ground-legal gate is the only thing stopping the boost compounding into a free bunny-hop that out-runs the paid chip")
+	# Anchored on the launch BODY, not "if jumped_now:" — that header occurs twice (the variable-jump
+	# cut ~100 lines earlier reuses it), so find() returned the cut block and the ordering assert below
+	# held even if the launch were deleted outright.
+	var launch_at := src.find("var carried := Vector2(velocity.x, velocity.z).length()")
+	var stamp_at := src.find("var bhop_speed := bunnyhop.get_target_speed(Vector2(velocity.x, velocity.z).length())")
+	assert_gt(launch_at, 0,
+		"the momentum launch must exist — it is the only lever that lengthens a FAST jump, since travel is speed x a fixed airtime")
+	assert_lt(launch_at, stamp_at,
+		"the momentum launch must sit BEFORE the bunny-hop stamp, so a chained hop overwrites it and the chip stays exempt by construction — boosting a 12 m/s chain would clear the wind, look-sensitivity, pinball and ram thresholds at once")
+	assert_true(src.contains("if input_dir != Vector2.ZERO:"),
+		"...and the latch must be gated on input actually being held: latching unconditionally would floor the settle at the walk tier for a player who never pressed anything, leaving every blast knockback coasting instead of damping to rest")
 
 
 func test_player_step_assist_blocks_live_blast_impulse() -> void:
@@ -666,8 +738,8 @@ func test_player_weapon_host_aim_overrides_exist() -> void:
 		"Player.get_aim_basis must exist so weapon spread is oriented to the camera basis")
 	assert_true(p.has_method("on_weapon_fired"),
 		"Player.on_weapon_fired must exist — it applies screen-shake and the gunfire noise spike")
-	assert_true(p.has_method("on_weapon_launched"),
-		"Player.on_weapon_launched must exist — it applies the launch shake + FOV punch")
+	assert_true(p.has_method("on_air_dash"),
+		"Player.on_air_dash must exist — it applies the air dash's shake + FOV punch")
 	p.free()
 
 

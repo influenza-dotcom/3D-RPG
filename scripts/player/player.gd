@@ -1,7 +1,29 @@
 class_name Player
 extends Character
 
+## GROUND move speed (m/s) the horizontal lerp chases while on the floor — and, once you leave it, the air
+## SPEED CEILING AirMovement reads. Written ONLY on grounded paths (the grounded arm below, its edge brake,
+## the bhop stamp, Slide.update_movement, and the landing seed), so while airborne it is frozen at exactly
+## "the speed I banked on the ground", which is the value AirMovement wants.
+## ⭐Do NOT start writing it in the air to "fix" that freeze: CameraEffects.bob divides it by max_speed for the
+## head-bob amplitude, so a mid-air write lands a stale, oversized bob on the touchdown frame — and it was
+## never the freeze that was the bug, it was reading the frozen value as a lerp TARGET (a standing jump then
+## steered toward zero and travelled 14 cm).
 var current_speed: float = 0.0
+## Horizontal speed (m/s) recorded on the last airborne frame and consumed ONCE by the grounded arm's landing
+## seed, then reset. -1.0 rather than 0.0 so "no airborne frame since the last landing" is distinguishable from
+## "landed at a dead stop". Private to the movement step — nothing outside _physics_process reads it.
+var _air_exit_speed: float = -1.0
+## PER-AIRTIME HIGH-WATER of the air speed tier (m/s), latched ONLY on frames where a direction is actually
+## held and reset the moment we are back under ground control. AirMovement settles speed above it back toward
+## it, so this is what makes "keeping what you built is not a live decision" true: releasing the key,
+## feathering a stick, scoping, crouching, letting go of Run, or opening a modal (which zeroes input_dir) all
+## stop you BUILDING without retroactively BRAKING what you already built.
+## ⭐The input gate is why blast physics is untouched. Latching unconditionally would floor the settle at the
+## walk tier even for a player who never pressed anything — so a rocket that launched you from a standstill
+## would coast at ~2.1 m/s forever instead of damping to rest, silently rewriting every knockback in the game.
+## No input this airtime = no latch = the historical decay toward zero, bit for bit.
+var _air_ceiling: float = 0.0
 # (The wallet — money / money_changed / add_money / reward_kill — was HOISTED to Character so every NPC
 # carries one too. The player's fresh-game 100 zm default is set in _ready, before the loadout override.)
 
@@ -30,6 +52,7 @@ var _abilities_mgr: AbilityManager = AbilityManager.new()
 var _wall_climb: WallClimb = null    ## hot-path refs resolved in _register_ability (null = ability not present)
 var _slide: Slide = null
 var _grapple_ability: Grapple = null  ## owns the GrappleHook; pull forwarded at the physics beat
+var _air_dash: AirDash = null        ## owns the look-direction dash; ticked at the physics beat, before apply_blast
 
 ## The STAMINA / SPRINT subsystem: the pool, spend/drain, the regen curve + post-spend delay, and the sprint
 ## lockout live in StaminaManager (scripts/player/stamina_manager.gd) on the AbilityManager idiom — RefCounted,
@@ -128,6 +151,10 @@ var _held_inv_prev_destructible: bool = true
 ## return_held_weapon_to_hands + the re-draw at the end of stash_held_item). Cleared on every carry-end path —
 ## the put-back itself, and a genuine drop/throw/prop-freed release (_on_carry_changed). Runtime-only.
 var _held_from_weapon_slot: bool = false
+## Up for the span of throw_equipped_weapon — the ADS weapon throw, whose carry begins and ends inside ONE call.
+## _on_carry_changed reads it to skip the parts of the carry dance that only make sense for a carry you can see:
+## the holster round-trip and the FP-hands relay. Runtime-only; see throw_equipped_weapon for why.
+var _throwing_wielded_weapon: bool = false
 ## Up for the span of a put-back that immediately REWIELDS the weapon (stash_held_item, the H toggle's second
 ## stage): armed before the carry release, dropped once the rewield's equip request has gone out. While armed,
 ## FirstPersonBody._unarmed_hands_wanted() refuses (it READS this latch off its host; the latch itself is pure
@@ -372,6 +399,7 @@ var target_speed: float = GameSettings.player_movement.max_speed
 # scope slow, and the StaminaManager reads it (host.get, behind the sprint_blocked_by_scope forwarder) for the
 # run lockout. It stays HERE — not on the manager — because those writers/readers (and the scope tests) all
 # address it on the Player.
+@warning_ignore("unused_private_class_variable")  # host-owned; ScopeCoordinator writes it and GroundMovement / StaminaManager read it off the host
 var _is_scoped: bool = false
 # Stealth HUD throttle: the full nearby-NPC awareness scan is heavy, so run it ~10x/sec and reuse the last
 # snapshot on the in-between frames (the HUD readout doesn't need per-frame precision). Behaviour-preserving —
@@ -460,10 +488,22 @@ func _on_carry_changed(holding: bool) -> void:
 	# dropping unlocks and restores the pre-carry holster. Kept ABOVE the fp_body relay so the lock can never get
 	# stuck if the arms rig is absent or torn down mid-carry — the "no gun while your hands are full" rule
 	# doesn't depend on the hands being drawn (the connect in _ready is unconditional for the same reason).
+	# A ZERO-FRAME carry (the ADS weapon throw: grab and launch inside one call) skips the two COSMETIC halves of
+	# this dance. Both exist to sell a carry you can actually see, and here there is none — what the player sees is
+	# the weapon leaving and the fists arriving, which is exactly the ordinary weapon SWAP the throw already starts.
+	#  * The holster round-trip would put the weapon away and take it straight back out, and GunMesh.unholster()
+	#    kills the swap DIP and raises the OUTGOING model back into the ready pose — so the knife you just threw
+	#    swings up into frame for 0.35 s and then pops out of existence when the 0.4 s swap mounts the fists.
+	#  * The FirstPersonBody relay would raise the bare fists at once, 0.4 s before the fists MODEL exists. Left
+	#    alone, attack.swap_finished -> refresh_unarmed_hands brings them up in step with it (wired in _ready).
+	# Everything load-bearing still runs: the _carrying latch, the reservation release, draw_locked, and the fire
+	# suppression for the still-held click.
+	var zero_frame_throw := _throwing_wielded_weapon
 	if weapon_system != null and weapon_system.attack != null:
 		if holding:
 			_holster_before_carry = weapon_system.attack.holstered
-			weapon_system.attack.set_holstered(true)  # weapon away FIRST...
+			if not zero_frame_throw:
+				weapon_system.attack.set_holstered(true)  # weapon away FIRST...
 			weapon_system.attack.draw_locked = true   # ...and LOCKED away: no drawing the gun while carrying
 		else:
 			# Hands free: LIFT the lock FIRST — always, even mid-death (die() force-releases the prop, routing here
@@ -475,7 +515,8 @@ func _on_carry_changed(holding: bool) -> void:
 				# launched the prop; suppress that click's fire so it can't also shoot the instant the gun raises
 				# (FNV draw-click rule). No-op unless the fire button is actually held now, so Z/E throws are unaffected.
 				weapon_system.attack.suppress_fire_for_carry_release()
-				weapon_system.attack.set_holstered(_holster_before_carry)
+				if not zero_frame_throw:
+					weapon_system.attack.set_holstered(_holster_before_carry)
 	# ...and the RETICLE comes BACK for the carry, overriding the hide the holster above just requested: a
 	# carried prop launches straight down the look ray (left-click / Z release), so there IS an aim point to
 	# annotate even with the gun stowed and draw-locked. Routed to ui.gd's own latch (never a
@@ -489,7 +530,7 @@ func _on_carry_changed(holding: bool) -> void:
 	# the time the component's _unarmed_hands_wanted() reads attack.holstered. A second connection on the signal
 	# would re-open a connection-order dependency (children's _ready runs before the parent's — the component
 	# would have connected first and read the STALE holster).
-	if fp_body != null:
+	if fp_body != null and not zero_frame_throw:
 		fp_body.on_carry_changed(holding)
 
 ## The character's chosen name, from character creation (mirrors GameState.player_name). Display-only — the Stats
@@ -569,7 +610,6 @@ func _ready() -> void:
 	_death_mix.host = self
 	add_child(_death_mix)
 	weapon_system.scope_in.scoped_in.connect(_scope.on_scoped_in)
-	weapon_system.attack.air_dash_recharged.connect(_on_air_dash_recharged)
 	# Body-impact reactions (ram damage / air thump / pinball bounce), ticked from _physics_process.
 	_ram_reactor = RamReactor.new()
 	_ram_reactor.host = self
@@ -1018,6 +1058,49 @@ func return_held_weapon_to_hands() -> bool:
 	stash_held_item()
 	return true
 
+## ADS + ATTACK on a weapon that authors WeaponData.throw_on_scoped_attack (the knife): HURL the wielded weapon down
+## your look ray in ONE gesture — no H press, no carry step in between. Returns true only when the weapon actually
+## left your hands, so Attack can fall through to the ordinary scoped attack on a refusal instead of eating the click.
+##
+## Deliberately the SAME two calls the H-then-left-click sequence makes, run back to back: _pull_and_hold builds the
+## weapon's world drop, takes the item out of the bag (clearing equipped_item -> equipped_item_lost -> the fists
+## re-arm) and grabs it at the hold anchor, then PickupRay.throw_held launches it at full impulse. Reusing that path
+## IS the feature: the nosing, the streak, the throw sound, the weapon-damage hit and the pin kill all come from the
+## stamps WorldItem put on the drop, so an ADS throw and a hand throw can never drift apart. The carry itself lasts
+## zero frames — the grab and the launch fire carry_changed(true) then (false) inside this call, which is exactly
+## what makes the gun-away / draw-lock dance and the fire-suppression on the SAME held click fall out for free.
+##
+## ⭐ It must NOT set _held_from_weapon_slot. That latch means "H can put this back"; the weapon is gone from your
+## hands before this returns, so arming it would leave the H toggle pointing at a prop already in flight.
+## ⭐ And there is deliberately NO drop_item fallback (unlike hold_equipped_weapon, where H must always DO something):
+## a refused pull leaves the bag untouched and the weapon wielded. An aimed trigger pull that silently dumped your
+## knife on the floor would be far worse than one that just swings.
+func throw_equipped_weapon() -> bool:
+	if _dying or _dead:
+		return false  # nothing leaves your hands over the death cinematic — die() is already emptying them
+	if inventory == null:
+		return false
+	var eq := inventory.equipped_item
+	if eq == null or not eq.is_weapon():
+		return false  # bare fists: there is no item to throw
+	var ray: PickupRay = head.pickup_ray if head != null else null
+	if ray == null or ray.held_object != null:
+		return false  # no carry rig, or the hands are already full of another prop (whose own throw owns this click)
+	# Raised across BOTH halves so _on_carry_changed can tell this zero-frame carry from a real one and skip the
+	# holster round-trip / FP-hands relay (see there). Lowered on every exit below — GDScript has no `finally`, so
+	# each return clears it rather than risk leaving the flag stuck up over ordinary carries.
+	_throwing_wielded_weapon = true
+	if not _pull_and_hold(eq):
+		_throwing_wielded_weapon = false
+		return false  # no world / nothing carriable built — the bag is untouched, so just swing instead
+	var threw := ray.throw_held()
+	if not threw:
+		# Unreachable while _pull_and_hold's success means the ray IS holding it — but a weapon left carried would
+		# strand the player with the gun draw-locked, so set it down rather than trust the invariant.
+		ray.force_release_held()
+	_throwing_wielded_weapon = false
+	return threw
+
 ## The physics money-bag factory. Preloaded BY PATH (not the MoneyBag class_name) so player.gd never depends on that
 ## brand-new global class being registered — avoids the "unknown type" parse cascade on a cold cache / headless run.
 const MoneyBagBuilder := preload("res://scripts/components/money_bag.gd")
@@ -1237,10 +1320,14 @@ func focus_camera_on(target_pos: Vector3) -> void:
 # the crosshair points), so hitscan + spread match what it sees. Overrides the Character
 # defaults (which fire straight forward from the body). camera_effects is the active
 # Camera3D, so this reproduces exactly what Attack used to compute from the passed camera.
-## --- Continuous autosave: every wallet change AND every bag change queue a ONE-FRAME-DEFERRED flush. The
-## deferral makes multi-step transactions atomic on disk: a merchant buy charges money BEFORE transferring the
-## item — an immediate save would snapshot charged-but-itemless — and a loot-all fires `changed` per stack.
-## Coalescing to one end-of-frame write means the snapshot always holds the COMPLETED transaction. ---
+## --- Continuous autosave: every wallet change, every bag change AND every XP grant (add_xp) queue a
+## ONE-FRAME-DEFERRED flush. The deferral makes multi-step transactions atomic on disk: a merchant buy charges
+## money BEFORE transferring the item — an immediate save would snapshot charged-but-itemless — and a loot-all
+## fires `changed` per stack. Coalescing to one end-of-frame write means the snapshot always holds the COMPLETED
+## transaction — and a kill (bounty + XP in the same frame; a kill-quest objective rides GameState's own
+## coalesced autosave_world_state) collapses to ONE deferred write instead of a synchronous full-profile
+## serialise + FileAccess write on the kill frame (2026-09-01: that write sat inside the death-freeze beat and
+## read as a hitch). Off-tree the deferred flush hits GameState.autosave's is_inside_tree guard — a no-op. ---
 var _autosave_queued: bool = false
 
 func _on_money_autosave(_total: float, _delta: float) -> void:
@@ -1304,6 +1391,13 @@ func _register_ability(a: Ability) -> void:
 		_slide = a as Slide
 	elif a is Grapple:
 		_grapple_ability = a as Grapple
+	elif a is AirDash:
+		_air_dash = a as AirDash
+		# The recharge cue used to ride Attack's signal; it moved with the dash. Connected HERE (not in _ready)
+		# so a runtime grant — a paid chip, a save reload — gets the chirp too, and guarded because revoke +
+		# re-grant of the SAME node would otherwise double-connect.
+		if not _air_dash.air_dash_recharged.is_connected(_on_air_dash_recharged):
+			_air_dash.air_dash_recharged.connect(_on_air_dash_recharged)
 
 ## True while an ENABLED ability child grants `id`. Gated abilities (air_dash / grapple) call this;
 ## wall_climb / slide are driven through their typed refs instead. Thin forwarder to the ability subsystem — kept
@@ -1337,10 +1431,13 @@ func set_mechanic_active(id: StringName, on: bool) -> bool:
 ## Player override of Character._apply_fall_damage: the fall-immunity UPGRADE (a FallImmunity Ability granted by an
 ## UpgradePickup) makes a hard landing cost nothing. Without it, defers to the shared base (FallDamage speed->HP +
 ## take_damage), so a profiled fall-damage knob on the player is finally live.
+##
+## The dmg re-computation here is a PREVIEW — it decides whether to arm the fall death card before super() deals the
+## blow — so it must use the same scaled cost the base will, or a lethal fall could land with a generic death card.
 func _apply_fall_damage(fall_speed: float) -> void:
 	if has_mechanic(&"fall_immunity"):
 		return
-	var dmg := FallDamage.hp_loss(fall_speed, fall_damage_min_speed, fall_damage_per_speed)
+	var dmg := FallDamage.hp_loss(fall_speed, fall_damage_min_speed, effective_fall_damage_per_speed())
 	if dmg <= 0:
 		return
 	_has_death_card_override = true
@@ -1427,6 +1524,8 @@ func revoke_ability(id: StringName) -> void:
 			_slide = null
 		elif a == _grapple_ability:
 			_grapple_ability = null
+		elif a == _air_dash:
+			_air_dash = null
 		a.enabled = false
 		a.queue_free()
 
@@ -1491,8 +1590,9 @@ func _restore_status_effects() -> void:
 			mgr.restore_effect(fx, float(e.get("remaining", 0.0)))
 
 ## Award `amount` XP (kills, quests). Recomputes level from GameSettings.xp; each level CROSSED grants
-## points_per_level skill points to the PerkManager. Autosaves the run (a milestone; a no-op off-tree). No-op
-## for amount <= 0. Returns the number of levels gained.
+## points_per_level skill points to the PerkManager. Queues the coalesced end-of-frame autosave (_queue_autosave
+## — the kill's bounty queues the same one, so a kill is ONE deferred write, never a synchronous write on the
+## kill frame; a no-op off-tree). No-op for amount <= 0. Returns the number of levels gained.
 func add_xp(amount: float) -> int:
 	if amount <= 0.0:
 		return 0
@@ -1510,7 +1610,7 @@ func add_xp(amount: float) -> int:
 		if is_inside_tree():
 			notify_toast(PlayerText.level_up(level, pts), Color(0.7, 0.9, 1.0))
 	xp_changed.emit(xp, level)
-	GameState.autosave(self)
+	_queue_autosave()
 	return gained
 
 ## Find or create the player's PerkManager child (mirrors PerkStation / GameState._perk_manager_of).
@@ -1562,13 +1662,14 @@ func get_aim_direction() -> Vector3:
 	var dir := camera_effects.project_ray_normal(get_viewport().get_visible_rect().size / 2.0)
 	# Deus Ex aim wander (AimSway): the SHOT direction drifts around the camera centre — steadier standing
 	# still, steadier again crouched, settling further the longer you hold still — instead of landing exactly
-	# on the camera ray. ⭐NOTHING VISUALLY TRACKS THIS ANY MORE: the retired laser sight's dot used to ride it
-	# and show the true shot point, but the laser is gone (the flashlight took that key, and now sits on L) and flash_light.gd
-	# never reads this — it eases its rotation toward the CAMERA's. So the sway is currently felt, not seen: the
-	# crosshair stays pinned at centre (_update_crosshair) and the shot lands wherever this drifted to.
-	# ⭐DO NOT "fix" that by re-centring the flashlight on the camera. The torch's beam apex is authored OFF the
-	# lens on purpose (camera_rig.tscn LightPosition) and its bright spot is parallel-offset from the crosshair
-	# by design — that separation is the only reason the torch casts visible shadows at all. See flash_light.gd.
+	# on the camera ray. ⭐THE LASER SIGHT IS WHAT SHOWS IT. scenes/player/laser_sight_rig.gd reads THIS function
+	# and converges its dot on the resulting ray, so the dot sits on the true impact point and visibly wanders as
+	# the sway does — that is the entire value of the implant, and the reason it reads this rather than the camera
+	# facing. Without the chip the sway is felt but never seen: the crosshair stays pinned at centre
+	# (_update_crosshair) and the shot lands wherever this drifted to.
+	# ⭐DO NOT make the FLASHLIGHT the stand-in for that. The torch's beam apex is authored OFF the lens on purpose
+	# (camera_rig.tscn LightPosition) and its bright spot is parallel-offset from the crosshair by design — that
+	# separation is the only reason the torch casts visible shadows at all. See flash_light.gd.
 	return _aim_sway.apply(dir, camera_effects.global_transform.basis) if _aim_sway != null else dir
 
 func get_aim_basis() -> Basis:
@@ -1708,6 +1809,16 @@ func is_sliding() -> bool:
 func is_grappling() -> bool:
 	return _grapple_ability != null and _grapple_ability.is_active()
 
+## True only while the rope is ACTUALLY ATTACHED — the narrow sense of is_grappling() above, which is the wide
+## one (fired, attached, OR retracting). The difference is load-bearing for air control: GrappleHook.apply_pull
+## and its swing_assist both early-out unless the state is ATTACHED, so a rope merely flying out, and the whole
+## RETRACT that follows a release, are ordinary free flight with nothing else driving velocity — and the
+## release slingshot is applied BEFORE the state flips to RETRACTING, so the wide sense would kill air control
+## at the exact instant the player is flung 12 m/s and most wants to steer. Step assist keeps the WIDE sense
+## (it must not fire during any rope activity); only AirMovement wants this one.
+func is_grapple_attached() -> bool:
+	return _grapple_ability != null and _grapple_ability.is_attached()
+
 ## Project the blob shadow onto the WALL while climbing, easing back to the ground otherwise. The decal
 ## casts along its local -Y, so to land it on the wall we build a basis whose +Y is the wall normal (-Y
 ## points INTO the wall) and blend the decal's GLOBAL transform from its ground pose to that. Grounded, we
@@ -1756,10 +1867,14 @@ func on_shot_resolved(weapon: WeaponData, hit_npc: bool) -> void:
 	if not weapon.is_infinite_ammo and not hit_npc:
 		_remark_reckless_fire()
 
-func on_weapon_launched(weapon: WeaponData) -> void:
+## Launch feedback for the AIR DASH: block the stair step-assist briefly (it would otherwise eat the launch by
+## treating it as a walk into a riser), kick the shake, punch the FOV. Was on_weapon_launched(WeaponData) back when
+## the dash was a scoped melee ATTACK and the trauma was read off the weapon; the dash owns its own trauma now, so
+## the hook takes the number instead of a weapon. Character declares the base no-op.
+func on_air_dash(shake_trauma: float) -> void:
 	_step_assist_launch_block_timer = STEP_LAUNCH_ASSIST_BLOCK_TIME
 	if screen_shake:
-		screen_shake.shake(weapon.launch_screen_shake)
+		screen_shake.shake(shake_trauma)
 	camera_effects.fov_punch()
 
 ## #2: after a gunshot, the nearest calm (non-hostile, out-of-combat) talker within reckless_remark_radius
@@ -1937,7 +2052,8 @@ const FALL_GREY_EPSILON: float = 0.002
 ## The whole mechanic is one number (`_fall_grey`) pushed into the post-process `fall_grey` uniform. What makes it
 ## honest rather than decorative is where that number comes from: it is the fraction of your REMAINING HP the
 ## landing would cost, scored by the very formula that will score it (FallDamage.lethal_fraction reads the same
-## fall_damage_min_speed / fall_damage_per_speed that Landing.on_land hands to _apply_fall_damage). So the screen
+## fall_damage_min_speed and the same MAX-HP-SCALED effective_fall_damage_per_speed() that Landing.on_land hands to
+## _apply_fall_damage — ⭐ the raw export in either place and the warning drifts off the damage). So the screen
 ## cannot lie — full grey means the next contact with the ground kills you, at the HP you have this instant, and a
 ## drop that is a scratch at full health greys out completely when you are down to your last point.
 ##
@@ -1987,7 +2103,7 @@ func _fall_grey_target() -> float:
 	# a landing that costs nothing would train the player to ignore the one that doesn't.
 	var t := 0.0
 	if not has_mechanic(&"fall_immunity"):
-		t = FallDamage.lethal_fraction(-velocity.y, fall_damage_min_speed, fall_damage_per_speed, hp)
+		t = FallDamage.lethal_fraction(-velocity.y, fall_damage_min_speed, effective_fall_damage_per_speed(), hp)
 	# VOID channel. Not gated on immunity — see the header.
 	t = maxf(t, FallDamage.void_fraction(
 			_continuous_fall_time,
@@ -2395,7 +2511,7 @@ func _trigger_hurt() -> void:
 		_hurt.trigger()
 
 ## Air-dash recharge cue: a quick white screen-flash (via PlayerHud) + a chirp the instant the dash is
-## available again (fired from Attack.air_dash_recharged on landing).
+## available again (fired from the AirDash ability's air_dash_recharged on landing).
 func _on_air_dash_recharged() -> void:
 	if _hud:
 		_hud.flash_dash()
@@ -2408,10 +2524,15 @@ const EDGE_MIN_SPEED: float = 0.2         ## below this gap-ward speed there's n
 ## hanging over a ledge in `gap_dir` (a horizontal, normalized velocity-ward direction) and, if so,
 ## return the EXTRA friction lerp applied to the gap-ward velocity component this frame; 0.0 when not
 ## near an edge (caller then leaves movement unchanged). The probe math lives in MovementHelpers (and
-## carries the EDGE_PROBE_AHEAD / EDGE_FLOOR_PROBE / EDGE_DROP_TOLERANCE / EDGE_FRICTION_MULT tuning);
-## this thin wrapper keeps the call site in _physics_process unchanged.
-func _edge_friction_t(gap_dir: Vector3, t_ground: float) -> float:
-	return MovementHelpers.extra_brake_t(self, gap_dir, t_ground)
+## carries the EDGE_PROBE_AHEAD / EDGE_FLOOR_PROBE / EDGE_DROP_TOLERANCE / EDGE_FRICTION_MULT tuning
+## plus the EDGE_INTENT_DOT_* gate); this thin wrapper keeps the call site in _physics_process tidy.
+## `wish_dir` is the player's own steering direction (`direction` at the call site): intent WINS — a
+## wish gap-ward within the intent cone disarms the brake entirely (real sv_edgefriction only raises
+## friction and lets acceleration win), while a zero wish keeps the full protective brake. REQUIRED
+## (no default) on purpose: the Player always has `direction` in scope, and forcing the arg keeps a
+## future call from silently dropping intent.
+func _edge_friction_t(gap_dir: Vector3, t_ground: float, wish_dir: Vector3) -> float:
+	return MovementHelpers.extra_brake_t(self, gap_dir, t_ground, wish_dir)
 
 # The riser-climb probe consts (clearance / forward-probe / angled-probe / riser-normal / riser-dot) now live on
 # Locomotor — the Player delegates the step-up kinematics to Locomotor.compute_step_up/compute_step_down (one shared
@@ -2568,8 +2689,10 @@ func _physics_process(delta: float) -> void:
 		# No BUNNY-HOP IMPLANT, over-encumbered, or CROUCHED: the jump fires (already lowered, above) but earns
 		# NO bhop speed — see bhop_chain_allowed(). BREAK any live chain rather than merely declining, so that
 		# standing up, dropping the load, or switching the implant back on inside the land window can't resume a
-		# stale boost; you re-earn it from chain 1. Without the implant this branch is the ONLY one ever taken,
-		# so the chain stays pinned at 0 and get_target_speed() degrades to plain player_movement.max_speed.
+		# stale boost; you re-earn it from chain 1. Without the implant this branch is the ONLY one ever taken, so
+		# the chain stays pinned at 0 and the stamp below never runs at all — an unimplanted jump keeps just the
+		# one-shot jump_momentum_boost, which cannot accumulate. Simple boost without the chip, momentum GAIN with
+		# it: that contrast is the implant's whole product.
 		if bhop_chain_allowed():
 			bhop_engaged = bunnyhop.try_engage(input_dir != Vector2.ZERO)
 		else:
@@ -2596,13 +2719,30 @@ func _physics_process(delta: float) -> void:
 	target_speed = GroundMovement.compute_target_speed(self, input_dir)
 
 	var ground_ratio := GameSettings.player_movement.smoothing
-	var air_ratio := GameSettings.player_movement.smoothing / GameSettings.player_movement.air_smoothing_divisor
 	var fps_factor := delta * GameSettings.player_movement.smoothing_reference_fps
 	var t_ground := 1.0 - pow(1.0 - ground_ratio, fps_factor)
-	var t_air := 1.0 - pow(1.0 - air_ratio, fps_factor)
 	if _slide != null and _slide.is_active():
+		# The slide OWNS current_speed (it writes host.current_speed every frame), so the landing seed has nothing
+		# to contribute — SPEND both airborne latches here rather than deferring them. Without this the seed is
+		# still armed when the slide ends and fires on that later, non-landing frame, snapping current_speed from
+		# the slide's decayed value straight to the walk target instead of letting the ground lerp ramp it.
+		_air_exit_speed = -1.0
+		_air_ceiling = 0.0
 		_slide.update_movement(delta, direction)  # the slide replaces normal ground control while active
 	elif is_on_floor():
+		# LANDING SEED — one-way, first grounded frame only. Airborne horizontal speed is now genuinely
+		# maintained (AirMovement, the `else` arm below), so touching down faster than `current_speed` — frozen
+		# since takeoff — would make the very next lines lerp your velocity DOWN toward a stale walking number:
+		# a ~29% momentum loss inside the first tenth of a second, felt as a stumble on every good landing. That
+		# dip is a bug the air fix CREATES, so it is closed here rather than left for a playtest to find.
+		# Seeded from the speed we actually arrived with, never DOWN (the maxf) and never above what the ground
+		# would chase anyway (the minf) — so this can only remove the dip: it never hands the player free ground
+		# speed, and it keeps the head-bob amplitude CameraEffects.bob derives from this field inside its
+		# authored range. The bhop stamp below still overwrites it outright on a chained landing.
+		if _air_exit_speed >= 0.0:
+			current_speed = maxf(current_speed, minf(_air_exit_speed, target_speed))
+			_air_exit_speed = -1.0
+		_air_ceiling = 0.0  # back under ground control: the next airtime re-earns its own high-water from scratch
 		if direction:
 			current_speed = lerpf(current_speed, target_speed, t_ground)
 		else:
@@ -2612,11 +2752,14 @@ func _physics_process(delta: float) -> void:
 		# Quake edge friction: if we're sliding toward a ledge, brake the gap-ward velocity
 		# component extra hard so you stick to the surface instead of skating off. Only kicks in
 		# while actually moving toward an unsupported edge (the probe); flat ground is unchanged.
+		# Only fights momentum, never intent: `direction` gates it, so actively steering at/off the
+		# ledge wins (real sv_edgefriction never overpowers acceleration); input-less slides still
+		# get the full brake.
 		var horiz := Vector3(velocity.x, 0.0, velocity.z)
 		var horiz_speed := horiz.length()
 		if horiz_speed > EDGE_MIN_SPEED:
 			var gap_dir := horiz / horiz_speed
-			var edge_t := _edge_friction_t(gap_dir, t_ground)
+			var edge_t := _edge_friction_t(gap_dir, t_ground, direction)
 			if edge_t > 0.0:
 				# Bleed the gap-ward speed toward zero by the extra friction lerp (the probe ray runs
 				# along this same direction, so the whole horizontal velocity is heading off the ledge).
@@ -2627,17 +2770,70 @@ func _physics_process(delta: float) -> void:
 				current_speed = lerpf(current_speed, 0.0, edge_t)
 		camera_effects.bob(velocity)
 	else:
-		velocity.x = lerpf(velocity.x, direction.x * current_speed, t_air)
-		velocity.z = lerpf(velocity.z, direction.z * current_speed, t_air)
+		# AIRBORNE. The whole air-control model is AirMovement (scripts/player/air_movement.gd) — the air half of
+		# what GroundMovement is for the ground: settle only the speed ABOVE the ceiling you banked on the floor,
+		# rotate the rest toward the direction you are holding for free, and accelerate up to
+		# target_speed x air_speed_mult from below. It provably never RAISES horizontal speed, so nothing
+		# reachable in the air was not already reachable on foot — which is what leaves every landing-side
+		# threshold (Slide's 4.0, the ram gates, the wind swell, the look-sensitivity falloff) in the regime it
+		# is tuned for. It stands down while climbing or while the rope is ATTACHED — both own `velocity` further
+		# down this step — but NOT during a grapple's flight or retract, which are ordinary free flight.
+		# ⭐`current_speed` is read in there as the air CEILING and is deliberately never WRITTEN while airborne:
+		# it is a GROUND scalar CameraEffects.bob divides by max_speed for the head-bob amplitude, and reading its
+		# takeoff-frozen value as a lerp TARGET is precisely what made a standing jump travel 14 cm.
+		# Latch the air tier ONLY while a direction is actually held (input_dir is already zeroed by the
+		# gameplay_suppressed gate above, so a modal cannot raise it either). See _air_ceiling's declaration for
+		# why the input gate is what keeps blast knockback bit-for-bit identical.
+		if input_dir != Vector2.ZERO:
+			_air_ceiling = maxf(_air_ceiling, target_speed * GameSettings.player_movement.air_speed_mult)
+		AirMovement.step(self, direction, target_speed, _air_ceiling, delta, fps_factor)
+		# The horizontal speed we will hand the ground on touchdown — consumed by the grounded arm's landing seed
+		# (see there). Recorded unconditionally, including on the frames AirMovement stands down, so a climb or
+		# grapple exit lands with an honest number too.
+		_air_exit_speed = Vector2(velocity.x, velocity.z).length()
 
+	# MOMENTUM LAUNCH — a run-up is REWARDED, not merely preserved. Scales the horizontal speed we are actually
+	# carrying on the frame the jump fires, so it pays in proportion to the run-up and pays a standing jump
+	# exactly nothing. Travel is speed x airtime and airtime is fixed, so this is the only lever that lengthens a
+	# fast jump at all.
+	# ⭐WHY IT SITS HERE and not in the jump block ~130 lines up: the jump frame is still GROUNDED, so the
+	# grounded arm above runs after the jump and lerps the horizontal velocity back toward direction *
+	# current_speed — a boost applied at the jump would be quietly eaten by that same frame. This is the first
+	# point past every arm.
+	# ⭐AND WHY IT SITS BEFORE THE BHOP STAMP: a chained hop's stamp overwrites both channels on this very frame,
+	# so the chip is exempt by construction. That is deliberate — a chain is already its own momentum economy,
+	# and boosting a 12.0 m/s chain would clear the wind, look-sensitivity, pinball and ram thresholds at once.
+	# The banked speed is raised to match, or the very next airborne frame would settle the launch straight back
+	# off (AirMovement's ceiling is current_speed). maxf so this can only ever add.
+	# ⭐⭐AirMovement.takeoff_speed owns the GROUND-LEGAL gate that stops this compounding into a free bunny-hop
+	# — read its header before touching any of this; a bare `velocity *= 1.15` here reaches 24 m/s in twelve hops.
+	if jumped_now:
+		var carried := Vector2(velocity.x, velocity.z).length()
+		var launched := AirMovement.takeoff_speed(carried, target_speed, GameSettings.player_movement.jump_momentum_boost)
+		if launched > carried:
+			var launch := launched / carried
+			velocity.x *= launch
+			velocity.z *= launch
+			current_speed = maxf(current_speed, launched)
+
+	# BUNNY-HOP CHIP: the chain STAMP, and the one mechanic that genuinely gains momentum. It reads the speed we
+	# are carrying at this instant — after the free take-off boost above, so the implant builds on top of that
+	# rather than discarding it — and adds one boost_per_hop, compounding hop over hop up to the 12 m/s ceiling.
+	# Without the implant bhop_engaged is never true, so a jump keeps only the one-shot boost, which cannot
+	# accumulate. That contrast IS the 300 zm product; see Bunnyhop's header.
 	if bhop_engaged:
-		var bhop_speed := bunnyhop.get_target_speed()
+		var bhop_speed := bunnyhop.get_target_speed(Vector2(velocity.x, velocity.z).length())
 		velocity.x = direction.x * bhop_speed
 		velocity.z = direction.z * bhop_speed
 		current_speed = bhop_speed
 
 	if _step_assist_launch_block_timer > 0.0:
 		_step_assist_launch_block_timer = maxf(0.0, _step_assist_launch_block_timer - delta)
+	# Air dash (AirDash ability): reads its own key and stacks the look-direction impulse onto explosion_velocity.
+	# Must run BEFORE apply_blast so a fresh dash is armed + decayed on the SAME frame it fires, exactly where the
+	# old weapon-driven launch landed. Absent / disabled = no dash at all.
+	if _air_dash != null:
+		_air_dash.tick(delta)
 	apply_blast()
 
 	# Wall climb: the WallClimb ability owns the grip + climb logic (same spot in the step, same operations).
@@ -2733,11 +2929,11 @@ func _update_stealth_hud(delta: float) -> void:
 
 ## Keep the crosshair pinned to SCREEN CENTRE — a fixed reticle (Deus Ex). It deliberately does NOT track the
 ## shot: the real shot direction sways around centre (get_aim_direction), drifting wide on the move and settling
-## back as you stand still, and the reticle stays put through all of it. ⭐The swaying LASER DOT that used to
-## SHOW you that drift is retired along with the laser sight, so nothing draws the true shot point today — and
-## the flashlight is NOT a stand-in for it: its beam apex is deliberately offset from the lens so the torch can
-## cast shadows, which puts its bright spot beside the crosshair by design. Re-set each frame so a viewport
-## resize keeps it centred. No-op without a HUD.
+## back as you stand still, and the reticle stays put through all of it. ⭐The swaying LASER DOT is what SHOWS you
+## that drift — but only once you have bought the laser-sight implant, so an unchipped player reads a fixed
+## reticle and never sees the true shot point. The flashlight is NOT a stand-in for it: its beam apex is
+## deliberately offset from the lens so the torch can cast shadows, which puts its bright spot beside the
+## crosshair by design. Re-set each frame so a viewport resize keeps it centred. No-op without a HUD.
 func _update_crosshair() -> void:
 	if ui == null or not is_inside_tree():
 		return
@@ -2826,9 +3022,22 @@ func on_nearby_death(distance: float) -> void:
 ## the death card ("You were killed by <name>. They were using a <weapon>.") fades in, holds, then fades
 ## out; a beat later the world fades back up and you respawn. Every timing/feel number (sequence time,
 ## slow-mo target, camera roll, card fade/hold, the spawn fade-up) is a designer knob on
-## GameSettings.player_feedback; the card LINES + fallbacks live there too.
+## GameSettings.player_feedback; the card LINES + fallbacks live there too. A CLICK fast-forwards it in two
+## beats (straight to the card, then back to the game) — see _try_skip_death_beat.
 var _dying: bool = false
 var _death_cam_base_z: float = 0.0       ## camera roll at the instant death starts; the keel-over adds onto it
+## The ONE tween the whole cinematic runs on (built in _run_death_sequence), held so a click can fast-forward
+## it — see _try_skip_death_beat. Null / invalid = there is nothing to skip: an off-tree death built no tween,
+## or the sequence has already handed over to the respawn.
+var _death_tween: Tween = null
+## Time.get_ticks_msec() at which the beat of the cinematic playing RIGHT NOW becomes skippable; -1 = not
+## armed (a skip was already spent on this beat, or death_skip_enabled is off). Wall-clock on purpose, like
+## every other death timing: the cinematic's own slow-mo must not stretch the window the player waits through.
+var _death_skip_ready_msec: int = -1
+## True once a click has fast-forwarded THIS death. The sting was scored to the full-length cinematic, so a
+## skipped one hands the world back long before the clip's final chord — the revive releases it instead of
+## letting the back half ring on over a life that is already running (see _respawn_at_checkpoint).
+var _death_skipped: bool = false
 var _death_card: Label = null            ## the death card, created lazily over the black hold (ML-2)
 var _death_card_text: String = ""        ## the death card's line, composed in die() from the killer + weapon (the attacker can free before the card shows)
 var _death_card_override_text: String = ""
@@ -2894,10 +3103,10 @@ func indicate_damage_from(world_pos: Vector3, source: Object = null) -> void:
 
 ## Show the red "being aimed at" radial + distant-sniper glint toward `source` — forwards to PlayerHud.
 ## Kept as a NAME here because the enemy aim telegraph calls player.indicate_aimed_from.
-func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float, damage: float = 0.0, warning: bool = false, clear_shot: bool = true) -> void:
+func indicate_aimed_from(source: Object, world_pos: Vector3, aim_charge: float, damage: float = 0.0, warning: bool = false, clear_shot: bool = true) -> void:
 	note_combat()  # an enemy is drawing a bead on us — that's combat, keep the gun up
 	if _hud:
-		_hud.indicate_aimed_from(source, world_pos, charge, damage, warning, clear_shot)
+		_hud.indicate_aimed_from(source, world_pos, aim_charge, damage, warning, clear_shot)
 
 ## The player's hit-confirm "ding" + crosshair hitmarker — the body lives in PlayerHud. These consts
 ## stay on the Player because PlayerHud references them as Player.HIT_SFX / Player.HEADSHOT_PITCH_MULT.
@@ -2994,10 +3203,10 @@ func set_claim_cue(active: bool, text: String, progress: float = 0.0) -> void:
 ## Off-tree (_hud null) it no-ops.
 ## `hp_before` is the target's HP an instant earlier — it drives the bar's chip shard, and defaults to
 ## "unknown" (a flat trail) so an off-tree/legacy 3-arg call still works.
-func on_damaged_target(target: Node, hp: float, max_hp: float, hp_before: float = -1.0) -> void:
+func on_damaged_target(target: Node, target_hp: float, target_max_hp: float, hp_before: float = -1.0) -> void:
 	if _dying or _hud == null:
 		return
-	_hud.show_enemy_health(target, hp, max_hp, hp_before)
+	_hud.show_enemy_health(target, target_hp, target_max_hp, hp_before)
 
 ## DEATH MOVES YOUR ZORKMIDS — it never destroys them. GameSettings.economy.death_purse_loss_fraction (1.0 = all of
 ## it, by default) leaves your pocket and goes to exactly ONE of two recoverable places:
@@ -3227,6 +3436,12 @@ func die() -> void:
 	# reload — the bus is global, a reload won't reset it, and the next life would read it as base.
 	if _hurt:
 		_hurt.clear()
+	# Neutralize any in-flight HITSTOP for the same reason as bullet time below — but note _hurt.clear()
+	# CANNOT do it: HurtFeedback kills only its own screen-drain tween, while the hitstop lives on the
+	# FreezeFrame autoload. A freeze armed within its hold of the killing blow builds its recovery tween
+	# AFTER the death tween and would out-write the death slow-mo, then snap back. cancel() drops it
+	# without touching Engine.time_scale (the death tween owns that).
+	FreezeFrame.cancel()
 	# Neutralize bullet time so it stops writing Engine.time_scale: the death cinematic owns the slow-mo
 	# now (its own ignore-time-scale tween), and an active air-scoped bullet time would otherwise keep
 	# lerping the global time_scale every frame, fighting the death dilation. reset() forces it READY and
@@ -3306,7 +3521,13 @@ func die() -> void:
 	# ...and the LEAN driver, for exactly the same reason: it runs its OWN _physics_process, which the player's
 	# set_physics_process(false) above does not stop, so a dead player could keep peeking the death camera
 	# sideways off a held key. Restored (via reset(), see _respawn_at_checkpoint) on the in-place revive.
+	# ⭐The reset() comes FIRST and is not optional: freezing ALONE latches whatever lean_t the death frame
+	# caught, so dying with a lean key held holds the eye up to max_offset off-centre and rolled max_roll_deg
+	# over for the WHOLE cinematic (death_sequence_time at the death time scale) — the keel-over then plays
+	# from a crooked, side-shifted camera. Snap upright on this frame, THEN freeze. The revive runs the same
+	# pair in the mirror order (reset() then re-enable), which is what makes this the crouch idiom.
 	if lean != null:
+		lean.reset()
 		lean.set_physics_process(false)
 	# Kill all residual motion so a death taken mid-launch (rocket-jump, explosion knock, melee-dash, ram)
 	# doesn't linger on the frozen corpse — and, above all, doesn't survive the in-place revive. `velocity`
@@ -3316,6 +3537,10 @@ func die() -> void:
 	# bodies from touching us) — leaving it would fling the fresh life the instant physics comes back.
 	velocity = Vector3.ZERO
 	explosion_velocity = Vector3.ZERO
+	# ...and the DASH LATCH with it, for the same reason: a dash spent on the death frame would otherwise still
+	# read as spent after the in-place revive, leaving the fresh life unable to dash until it next lands.
+	if _air_dash != null:
+		_air_dash.reset_for_life()
 	# ...and kill the residual NOISE for the same reason, on the same beat: set_physics_process(false) above stops
 	# NoiseEmitter.tick(), which would otherwise leave whatever radius was last written FROZEN on noise_radius and on
 	# the live &"noise" source — a dead player ringing every hostile in earshot to their own body, permanently. A
@@ -3344,8 +3569,29 @@ func _compose_death_message() -> String:
 	var kname := _killer_display_name(killer, fb.death_unknown_killer, fb.death_stranger_killer)
 	var wname := _killer_weapon_name(killer)
 	if wname != "":
-		return fb.death_message_killed_by_weapon % [kname, wname]
-	return fb.death_message_killed_by % kname
+		return _subst_killed_by_slots(fb.death_message_killed_by_weapon, [kname, wname])
+	return _subst_killed_by_slots(fb.death_message_killed_by, [kname])
+
+## Ordered, ONE-occurrence-per-value "%s" substitution for the LEGACY killed-by templates — never the `%`
+## format operator (a designer-authored line with a stray literal '%', e.g. "100% dead", would raise
+## "unsupported format character" inside die(), before _run_death_sequence: a soft-locked death with no
+## cinematic and no reload — the same rationale as _compose_fall_death_message's replace() path). And never
+## String.replace, which swaps ALL occurrences — the two-slot weapon template would get the killer's name
+## stamped into BOTH slots. Each value fills the next "%s" left to right; the search resumes AFTER the
+## inserted value, so a killer name that itself contains "%s" can't swallow the weapon slot. A template
+## with too few slots drops the extra values; leftover slots stay visible (a loud authoring bug, matching
+## TextFormat.subst's missing-token contract). These templates keep their "%s" slots on purpose — the
+## {named}-token migration is phase-2 (see PlayerText's death-card block); this only fixes HOW they're filled.
+func _subst_killed_by_slots(template: String, values: Array[String]) -> String:
+	var out := template
+	var from := 0
+	for value in values:
+		var at := out.find("%s", from)
+		if at < 0:
+			break
+		out = out.substr(0, at) + value + out.substr(at + 2)
+		from = at + value.length()
+	return out
 
 func _clear_death_card_override() -> void:
 	_has_death_card_override = false
@@ -3397,10 +3643,12 @@ func _killer_faction_noun(killer: Object) -> String:
 ## Item's label() off the killer's CharacterInventory BACKPACK (character.inventory.equipped_item). NOT the
 ## Weapon hub's Inventory (weapon_system.inventory): that one holds only equipped_weapon: WeaponData, and
 ## WeaponData carries no name. So this stays single-source-of-truth for the weapon name. "" when the killer
-## is unarmed / holstered / not a Character, so the caller drops the weapon clause. Fully duck-typed + guarded.
+## is unarmed / holstered / not a Character, so the caller drops the weapon clause. Fully duck-typed + guarded —
+## including against a FREED inventory on a still-valid killer (Godot never nulls typed members on free, and a
+## .get() on the dangling node would hard-error inside die()): validity FIRST, degrading to the unarmed line.
 func _killer_weapon_name(killer: Object) -> String:
 	var inv: Variant = killer.get(&"inventory")          # the CharacterInventory backpack (Character.inventory), not the weapon hub
-	if inv == null:
+	if not is_instance_valid(inv):                       # covers null AND freed-but-referenced (validity first — house rule)
 		return ""
 	var item: Variant = inv.get(&"equipped_item")        # the drawn Item instance (set by equip_item / _ensure_armed_from_backpack)
 	if item is Item:
@@ -3428,6 +3676,8 @@ func _close_open_modals() -> void:
 ## the screen drains to black & white and fades to black, hold a beat on black, then reload. Driven by ONE
 ## tween in WALL-CLOCK time (ignore_time_scale) so it finishes on schedule even as it slows the world;
 ## _death_step maps the tween's 0..1 progress onto each effect. Off-tree it just reloads directly.
+## A click SPEEDS THIS TWEEN UP rather than cutting it short (_try_skip_death_beat), which is why every
+## beat below is a link in this one chain and not a scattering of timers.
 func _run_death_sequence() -> void:
 	# The MIX takes over here: DeathMix ducks the world buses and starts the death sting (death_mix.gd). It also
 	# kills a still-running revive fade-up from a PREVIOUS death — a rapid re-death lands mid-fade-up, and two
@@ -3445,6 +3695,11 @@ func _run_death_sequence() -> void:
 		_death_cam_base_z = camera_effects.rotation.z
 	var fb := GameSettings.player_feedback
 	var tw := create_tween().set_ignore_time_scale(true)
+	# Hold the tween for the click-to-skip: a click SPEEDS THIS TWEEN UP (see _try_skip_death_beat) instead
+	# of jumping past it, so nothing the chain drives below can be skipped over. Armed death_skip_delay from now.
+	_death_tween = tw
+	_death_skipped = false
+	_arm_death_skip()
 	# Phase 1: close the vignette to black + duck the world audio away + keel over (mapped from t in _death_step).
 	tw.tween_method(_death_step, 0.0, 1.0, fb.death_sequence_time)
 	# On full black, BEFORE the card: broadcast the world-reset cue while nothing is visible (see the method).
@@ -3457,6 +3712,8 @@ func _run_death_sequence() -> void:
 	# After the beat of black: create the death card (transparent) and fade it in.
 	tw.tween_callback(_show_death_card)
 	tw.tween_method(_set_card_alpha, 0.0, 1.0, fb.death_card_fade_time)
+	# The card is now fully up: hand the cinematic back to its authored pace and re-arm the skip (see below).
+	tw.tween_callback(_on_death_card_shown)
 	# Hold the card fully visible, then fade it out — the screen stays black underneath it the whole time.
 	# The hold STRETCHES to cover the death sting (DeathMix.card_hold_seconds): the clip is longer than the
 	# cinematic, so a fixed beat would cut it off mid-phrase. respawn_delay stays the floor, and the stretch
@@ -3515,6 +3772,82 @@ func _death_step(t: float) -> void:
 func _set_card_alpha(a: float) -> void:
 	if _death_card != null:
 		_death_card.modulate.a = a
+
+## CLICK TO SKIP THE DEATH CINEMATIC. Lives on the Player rather than on MouseInput because die() switches that
+## node's input off — while you are dead this is the only input you still have. Costs one bool test per event
+## in normal play.
+##
+## Deliberately NOT the start menu's "press anything" rule (StartMenu._is_skip_press): dying with a movement
+## key half-pressed is normal, and a stray WASD tap must not spend a beat of the cinematic. Click / ui_accept
+## only — the same pair that advances a conversation.
+func _unhandled_input(event: InputEvent) -> void:
+	if not _dying:
+		return
+	if not _is_death_skip_press(event):
+		return
+	if _try_skip_death_beat():
+		get_viewport().set_input_as_handled()
+
+## The inputs that skip a beat of the cinematic: the ATTACK action (so a rebind follows it), ui_accept, or a
+## raw left-click — which covers an Attack rebound off the mouse, the same belt-and-braces DialogueManager's
+## advance uses.
+func _is_death_skip_press(event: InputEvent) -> bool:
+	if event.is_action_pressed(InputManager.action_attack) or event.is_action_pressed(&"ui_accept"):
+		return true
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		return mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT
+	return false
+
+## Fast-forward the beat of the death cinematic playing right now. True when the click was consumed.
+##
+## THE SKIP IS A SPEED, NOT A CUT (death_skip_speed). It scales the ONE cinematic tween rather than killing it
+## and jumping to the end, so every callback that chain owns still fires, in order, exactly once: the
+## world-reset cue on the fully-black frame (_on_death_screen_covered -> GameState.player_died, which the
+## encounter reset and the survivor heal ride), the card, and the death-mode branch that ends it
+## (_on_death_sequence_done — the in-place respawn, or a RELOAD_* through GameState's autosave-freeze seam). A
+## skip that jumped the queue would have to re-implement all three, and would silently drop whichever beat is
+## added next.
+##
+## TWO BEATS, ONE RULE. _on_death_card_shown re-arms the skip (and drops the speed back to 1) when the card
+## reaches full opacity, so the first click collapses the keel-over and the beat of black and lands you ON the
+## card; a second one, once it has been readable for death_skip_delay, takes you back to the game. The wait is
+## not just anti-mash politeness: dying while mashing the fire button at your killer is the COMMON case, and
+## without it the death card — the one place the game tells you who killed you — would be skipped by the same
+## clicks that got you killed, on the frame you died.
+func _try_skip_death_beat() -> bool:
+	if not GameSettings.player_feedback.death_skip_enabled:
+		return false
+	if _death_tween == null or not _death_tween.is_valid():
+		return false                 # off-tree death (no tween was built) or the sequence is already over
+	if _death_skip_ready_msec < 0 or Time.get_ticks_msec() < _death_skip_ready_msec:
+		return false                 # this beat is already spent, or still inside its watch window
+	if InputManager.any_modal_open():
+		return false                 # a screen opened over the cinematic owns the click (its empty space included)
+	_death_skip_ready_msec = -1      # spent — _on_death_card_shown re-arms it for the card's own beat
+	_death_skipped = true
+	_death_tween.set_speed_scale(maxf(GameSettings.player_feedback.death_skip_speed, 1.0))
+	return true
+
+## Arm the skip for the beat starting NOW: a click lands from death_skip_delay onwards. A disabled skip stays
+## unarmed, so the whole feature costs one early-out.
+func _arm_death_skip() -> void:
+	var fb := GameSettings.player_feedback
+	if not fb.death_skip_enabled:
+		_death_skip_ready_msec = -1
+		return
+	_death_skip_ready_msec = Time.get_ticks_msec() + int(maxf(fb.death_skip_delay, 0.0) * 1000.0)
+
+## The death card just reached full opacity (a callback in the cinematic's chain). Hand the tween back to its
+## authored pace — a first click fast-forwarded it TO here, not THROUGH here — and re-arm the skip so the
+## card's hold can be dismissed in turn. On a cinematic nobody skipped, the speed reset is a no-op and this is
+## simply where the hold becomes skippable.
+func _on_death_card_shown() -> void:
+	# ...unless there is no card to stop for: a designer who blanked the death line (_show_death_card early-outs
+	# on it) left nothing to read, so a skip runs straight through the hold instead of parking on a blank screen.
+	if _death_tween != null and _death_tween.is_valid() and _death_card_text != "":
+		_death_tween.set_speed_scale(1.0)
+	_arm_death_skip()
 
 ## Put every bus the cinematic ducked (death_cinematic_buses) back to its CONFIGURED level, and cut the sting.
 ## The buses are GLOBAL, so a reload won't reset them — every death-exit path that RELOADS (the RELOAD_* modes
@@ -3590,6 +3923,10 @@ func _respawn_at_checkpoint() -> void:
 	velocity = Vector3.ZERO
 	input_dir = Vector2.ZERO                             # camera FOV/tilt reads this; don't carry pre-death strafe into the first live frame
 	explosion_velocity = Vector3.ZERO                    # drop any launch/blast impulse — else apply_velocity re-adds it the instant physics resumes and flings the fresh life
+	_air_exit_speed = -1.0                               # ...and the banked airborne speed, so a death taken mid-flight can't seed the fresh life's first grounded frame
+	_air_ceiling = 0.0                                   # ...and the air-tier high-water, so the fresh life re-earns its air ceiling instead of inheriting the dying one's
+	if _air_dash != null:
+		_air_dash.reset_for_life()       # ...and the spent airborne dash, so the fresh life starts with its dash in hand
 	_continuous_fall_time = 0.0
 	hp = max_hp
 	_health_regen_carry = 0.0                            # a slice banked at the moment of death must not pay into the fresh life
@@ -3661,6 +3998,17 @@ func _respawn_at_checkpoint() -> void:
 	# sync to, and the sting IS cut dead there.
 	if _death_mix != null:
 		_death_mix.begin_revive()
+		# ...AND A SKIPPED DEATH IS NO EXCEPTION: the song plays out IN FULL over the life you just clicked
+		# your way back into. A skip hands the world back long before the chord the card's hold was solved
+		# against (card_hold_seconds vs death_sting_sync_point), so the clip's whole back half now lands on
+		# live gameplay — which is the point. The click asks to get past the PICTURES; the sting is the one
+		# beat a fast-forward cannot compress, because it runs on DeathMix's own wall-clock rather than on
+		# this tween, so cutting it short would shorten nothing and only truncate the track.
+		# death_skip_sting_release stays as the designer's opt-out (0 by default = this never fires), and the
+		# call goes AFTER begin_revive(), whose own _kill_tweens() would otherwise cancel the fade.
+		var skip_release: float = GameSettings.player_feedback.death_skip_sting_release
+		if _death_skipped and skip_release > 0.0:
+			_death_mix.release_sting(skip_release)
 
 ## Start the revive's QUIET WINDOW: hold the HUD restore + the respawn receipts back respawn_hud_delay
 ## seconds so the world fades up clean first (see _hud_quiet). Wall-clock, like every death timing, so the

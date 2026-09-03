@@ -120,6 +120,22 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 ## keeps control from frame one — only the HUD visuals and the receipts wait. Keep it under
 ## spawn_fade_in_time so the HUD is back before the fade finishes.
 @export var respawn_hud_delay: float = 1.0
+## --- Clicking through it: the death SKIP ---
+## Whether a click (Attack / ui_accept / a left-click) may fast-forward the death cinematic. The skip is a
+## SPEED, not a cut: it runs the same one tween faster, so every beat the cinematic drives still happens in
+## order (the world-reset cue on full black, the card, the death-mode branch at the end). Off = death always
+## plays at its authored pace, which is what you want for a trailer capture or a scored set-piece death.
+@export var death_skip_enabled: bool = true
+## Seconds each half of the cinematic must play before a click is accepted. It does TWO jobs with one number:
+## it stops a death taken mid-firefight (the fire button already being mashed at your killer) from skipping
+## itself on the frame you die, and — because the skip RE-ARMS when the death card reaches full opacity — it
+## is also the minimum time that card is readable before a second click can dismiss it. So you can hurry past
+## your own death, but you cannot mash past being told who killed you. 0 = skippable the instant you die.
+@export var death_skip_delay: float = 0.5
+## How much faster the cinematic runs once a click skips it (8 = the ~6.5 s sequence collapses to under a
+## second). A multiplier on the tween rather than a jump to the end, so the vignette, the keel-over and the
+## card's fades still read as motion instead of a hard snap. 1 = a skip that changes nothing.
+@export_range(1.0, 32.0, 0.5) var death_skip_speed: float = 8.0
 
 @export_group("Death sting (the cinematic's soundtrack)")
 ## The clip that plays when YOU die, riding OVER the cinematic while the world ducks out from under it.
@@ -163,6 +179,15 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 ## silence is perceptually done long before it mathematically finishes. Set a value here only if a particular
 ## clip genuinely outstays its welcome. The RELOAD_* death modes always cut it dead regardless (fresh scene).
 @export_range(0.0, 8.0, 0.05) var death_sting_release: float = 0.0
+## OPTIONAL forced fade-out for the sting when the cinematic is SKIPPED. **0 (the default) = don't touch it —
+## the song PLAYS OUT IN FULL over the life you just clicked your way back into.** A skip is a request to get
+## past the PICTURES, not past the music: the clip is the one beat a fast-forward cannot compress (it runs on
+## DeathMix's own wall-clock, not on the cinematic's tween), so a release here would not shorten the death at
+## all — it would only delete the back half of the track. Same rule, and the same reasoning, as
+## `death_sting_release` above; this is simply its skipped-death twin.
+## Set a value only if a clip genuinely outstays its welcome under live gameplay, and keep it brief when you
+## do. The RELOAD_* death modes still cut the sting dead regardless (fresh scene), skipped or not.
+@export_range(0.0, 4.0, 0.05) var death_skip_sting_release: float = 0.0
 ## The moment INSIDE the clip (seconds from the clip's own start) that should land exactly as the screen
 ## begins fading back in. For the shipped sting that is its FINAL SYNTH CHORD, measured at 6.32 s — the last
 ## real attack in the track, after which it is pure decay to silence at ~7.95 s. The cinematic solves the

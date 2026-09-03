@@ -21,6 +21,18 @@ extends Resource
 @export var jump_velocity: float = 4.5
 ## Gravity multiplier applied only once the player is descending. 1.0 = symmetric jump arc; >1 makes falls snap down faster.
 @export var fall_gravity_mult: float = 1.75
+## MOMENTUM LAUNCH — the fraction of your horizontal speed ADDED at the instant a jump fires, so a run-up is
+## actively rewarded rather than merely preserved. 0.15 = a 5.0 m/s sprint leaves the ground at 5.75 and covers
+## 4.60 m instead of 4.00. It is a MULTIPLIER on the speed you already carry, so it scales continuously with the
+## run-up and pays a standing jump exactly nothing — which is the whole point.
+## ⭐HARD BOUND, test-pinned: max_speed x (1 + this) must stay under the 6.5 m/s that BOTH the wind loop
+## (AudioSettings.falling_air_min_move_speed) and the bunny-hop look-sensitivity falloff
+## (BunnyhopSettings.sens_reduction_threshold) trigger on. At max_speed 5.0 that caps this at 0.30; 0.15 leaves
+## 0.75 m/s of headroom. Cross it and a plain sprint jump silently starts howling wind and damping your aim.
+## (AGILITY can already push ground speed past 6.5 on its own; that is pre-existing and unchanged.)
+## The BUNNY-HOP chip is deliberately exempt — its chain stamp overwrites this on the same frame, because a
+## chain is its own momentum economy and 12.0 x 1.15 would clear every threshold in the game at once.
+@export var jump_momentum_boost: float = 0.15
 ## Grace window (s) after walking off a ledge during which you can still jump — forgiveness for late presses. 0 = must jump while grounded.
 @export var coyote_time: float = 0.12
 ## Window (s) before landing in which a jump press is remembered and fires the instant you touch down. 0 = no buffering.
@@ -29,8 +41,53 @@ extends Resource
 @export_group("Acceleration")
 ## Ground move smoothing — the fraction the velocity closes toward target per reference frame. Higher = snappier starts/stops; lower = more glide.
 @export var smoothing: float = 0.135
-## Divisor that WEAKENS smoothing in the air (air accel = ground smoothing / this) so air control is floatier. Bigger = less air control.
+## Divisor that WEAKENS smoothing in the air (settle rate = ground smoothing / this): how fast horizontal speed
+## ABOVE your air ceiling — an air dash, a rocket shove, a slide-jump, a ram bounce, a grapple fling — settles
+## back toward it. Speed at or BELOW the ceiling is never touched, so plain jump momentum is kept whole.
+## Bigger = launched momentum lingers longer (10.0 leaves ~52% of the excess after a 0.81 s jump).
+## ⭐This is the air BRAKE, not the accelerator — steering is air_accel / air_steer_accel below. It reads the
+## SAME value it always has on purpose: apply_velocity adds explosion_velocity for the move and gives back only
+## 1/blast_damp_divisor of it, so `velocity` permanently gains ~10.7% of a live blast every frame, and this is
+## the rate that has always damped that leak. Retune it and every launch in the game carries further.
+## Must be >= 1 (tests/test_managers_tuning.gd): 0 divides by zero, and under 1 the air would brake harder than
+## the ground, inverting the whole floaty-air contract.
 @export var air_smoothing_divisor: float = 10.0
+## AIR ACCELERATION (m/s^2) along the direction you are holding — how fast you BUILD speed off the ground.
+## Quake-shaped and purely additive: it only ever supplies the wish speed you are not already carrying that
+## way, so it switches itself off at the ceiling and NEVER claws back a bhop chain, a grapple fling or a dash.
+## Doubles as the counter-thrust when you hold a direction against your own travel (killing your own momentum
+## has to be possible). 12.0 saturates the standing-jump wish (1.75 m/s) in 0.15 s — the first fifth of a full
+## 0.81 s jump, and well inside a jump_cut_factor TAP's 0.32 s, so short hops steer too. 0 = no air build at all.
+@export var air_accel: float = 12.0
+## AIR STEERING — lateral acceleration (m/s^2) rotating your existing horizontal velocity toward the direction
+## you are holding. A PURE ROTATION: your speed does not change, only your heading, which is why this can be
+## generous without devaluing a paid movement chip. Expressed as an acceleration rather than a turn rate so
+## authority scales inversely with momentum for free — the rate is this / your speed rad/s, i.e. 252 deg/s at a
+## 5 m/s running jump (a 90-degree correction costs 44% of the airtime) but 105 deg/s on a 12 m/s bunny-hop
+## chain (~84 degrees per hop), so a fast line still has to be planned. 0 = the vector you launch is the vector
+## you land.
+@export var air_steer_accel: float = 22.0
+## Fraction of THIS frame's ground target speed a jump may build up to in the air. The real ceiling is
+## max(the speed you left the ground with, ground target x this), so it only ever sets the FLOOR — it can never
+## slow you down, and a running or bunny-hop takeoff always keeps its own speed as the ceiling. Because it
+## scales the ground target, crouch / ADS / a drawn heavy weapon / encumbrance / crippled legs / AGILITY shape
+## how hard you can BUILD in the air, and can never take away what you banked before you scoped.
+## ⭐Keep it at or below walk_speed_mult (test-pinned): jumping repeatedly must never be a faster way to travel
+## than walking — and, since noise_emitter gates the movement noise radius on is_on_floor(), a faster air tier
+## would also be a QUIETER one.
+## ⭐⭐IT IS ALSO THE FLAT SPOT IN THE MOMENTUM CURVE, which is why it is this low. Air travel is
+## max(the speed you took off with, this tier) x airtime, so every ground speed BELOW the tier lands the same
+## distance and a run-up buys nothing there. At 0.6 the tier was 3.0 m/s and a standing jump carried 2.05 m
+## against a sprint's 4.00 — barely 2x for a full run-up. At 0.35 the tier is 1.75, a standing jump carries
+## 1.29 m, and (with jump_momentum_boost) a sprint carries 4.60: a 3.6x spread. RAISING this flattens the
+## reward for running; it does not make the air more controllable, because STEERING is a pure rotation and is
+## not scaled by it at all.
+## The tier it scales is whichever one the ground chain reports THIS frame, so holding Run in the air asks for
+## 5.0 x 0.35 = 1.75 while the default walk tier asks for 3.5 x 0.35 = 1.23. That is deliberate — Run costs no
+## stamina off the floor because _wants_sprint gates on is_on_floor, so it reads as "lean into the jump", not
+## as a second speed economy — and the Player latches the tier as a per-airtime HIGH-WATER, so letting go of
+## Run mid-flight stops you building further without clawing back what you built.
+@export var air_speed_mult: float = 0.35
 ## FPS the smoothing values are tuned for; movement is rescaled to this so accel feels identical at any framerate. Don't change unless retuning all smoothing.
 @export var smoothing_reference_fps: float = 60.0
 
@@ -97,7 +154,7 @@ extends Resource
 @export var stamina_grapple_attached_drain: float = 10.0
 ## Stamina drained per second while actively wall-climbing.
 @export var stamina_wall_climb_drain: float = 16.0
-## One-time stamina cost for the scoped-attack air dash.
+## One-time stamina cost for the air dash.
 @export var stamina_air_dash_cost: float = 25.0
 ## One-time stamina cost when a fast crouched landing starts a slide.
 @export var stamina_slide_start_cost: float = 12.0

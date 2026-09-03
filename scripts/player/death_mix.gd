@@ -2,7 +2,7 @@ class_name DeathMix
 extends AudioStreamPlayer
 
 ## @system Effect And Audio Seams
-## @seam Owns everything you HEAR while dying: begin() / set_world_duck(t) / restore_world() / begin_revive() are the four seams Player's death cinematic delegates to, and the sting plays on this very node.
+## @seam Owns everything you HEAR while dying: begin() / set_world_duck(t) / restore_world() / begin_revive() / release_sting() are the five seams Player's death cinematic delegates to, and the sting plays on this very node.
 ## @risk Listing death_sting_bus INSIDE death_cinematic_buses ducks the sting along with the world — the one wiring mistake that silently un-does the whole feature; _ready() push_warning's it and tests/test_death_mix.gd pins it.
 ## @risk The duck writes GLOBAL bus volumes, so any teardown that frees the Player without reaching a death branch would leave the world silent into the next life; _exit_tree() is the backstop (and fixes the same pre-existing hole for the Options -> Main Menu / Load-game escapes).
 ## @risk An authored AudioStreamPlayer with no `bus =` line lands on Master, which the cinematic deliberately no longer ducks — such a sound now plays at FULL volume under the death card; tests/test_audio_bus_hygiene.gd guards the scene side.
@@ -55,8 +55,8 @@ var host: Node
 static var _owned_buses: Array[StringName] = []
 
 ## True while the death cinematic is animating this bus and nothing else may write it.
-static func owns_bus(bus: StringName) -> bool:
-	return _owned_buses.has(bus)
+static func owns_bus(bus_name: StringName) -> bool:
+	return _owned_buses.has(bus_name)
 
 ## True between begin() and restore_world()/begin_revive()'s end — gates the per-frame re-assert and tells
 ## _exit_tree() whether it still owes the world a restore.
@@ -94,8 +94,8 @@ func _warn_on_bad_wiring() -> void:
 
 
 # ---------------------------------------------------------------------------------------------------
-# The four seams the death cinematic drives (Player._run_death_sequence / _death_step /
-# _restore_death_audio / the in-place revive)
+# The five seams the death cinematic drives (Player._run_death_sequence / _death_step /
+# _restore_death_audio / the in-place revive / the click-to-skip)
 # ---------------------------------------------------------------------------------------------------
 
 ## Death starts. Snap the world to its configured level (so the duck always begins from a known reference,
@@ -195,6 +195,35 @@ func begin_revive() -> void:
 		_sting_tween = create_tween().set_ignore_time_scale(true)
 		_sting_tween.tween_property(self, ^"volume_db", SILENT_DB, fb.death_sting_release)
 		_sting_tween.tween_callback(stop)
+
+
+## Let the sting OUT — the OPT-IN release for a skipped cinematic, and a path that is NOT taken by default.
+##
+## A SKIPPED DEATH STILL PLAYS THE SONG IN FULL (death_skip_sting_release = 0). The skip speed-scales the
+## cinematic's tween; it does not — and cannot — speed up an audio stream, which runs on this node's own
+## wall-clock. So the respawn arrives seconds before the chord the card's hold was solved against
+## (card_hold_seconds vs death_sting_sync_point) and the clip's back half plays over a life that is already
+## running again. That is the intended shape: a click asks to get past the PICTURES, and fading here would
+## shorten nothing — it would only truncate the track. Same rule, same reasoning, as begin_revive() above.
+##
+## A designer may still opt in (death_skip_sting_release > 0) for a clip that outstays its welcome once the
+## player is back in the world. Player._respawn_at_checkpoint then calls this AFTER begin_revive(),
+## deliberately: begin_revive()'s own _kill_tweens() would cancel this fade if it ran first. The RELOAD_*
+## death modes need nothing — restore_world() stops the player dead on a scene that is about to be rebuilt.
+## `fade` <= 0 (or off-tree, where no tween can tick) cuts it instead of ramping. No-op when nothing is
+## playing.
+func release_sting(fade: float) -> void:
+	if not playing:
+		return
+	# NOT _kill_tweens(): the revive's world swell is already running on _revive_tween and must survive this.
+	if _sting_tween != null and _sting_tween.is_valid():
+		_sting_tween.kill()
+	if fade <= 0.0 or not is_inside_tree():
+		stop()
+		return
+	_sting_tween = create_tween().set_ignore_time_scale(true)
+	_sting_tween.tween_property(self, ^"volume_db", SILENT_DB, fade)
+	_sting_tween.tween_callback(stop)
 
 
 # ---------------------------------------------------------------------------------------------------

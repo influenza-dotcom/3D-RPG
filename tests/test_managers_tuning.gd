@@ -235,7 +235,71 @@ func test_player_movement_settings_defaults() -> void:
 		"step_down_snap must cover step_up_height so stepped-up/down stairs keep the player grounded")
 	assert_gt(s.step_min_horizontal_speed, 0.0,
 		"step_min_horizontal_speed must be > 0 so passive collision recovery does not auto-step")
+	assert_gte(s.air_smoothing_divisor, 1.0,
+		"air_smoothing_divisor must be >= 1 — AirMovement DIVIDES smoothing by it for the over-ceiling settle rate (0 divides by zero), and under 1 the air would settle harder than the ground accelerates, inverting the floaty-air contract")
+	assert_lt(s.smoothing / s.air_smoothing_divisor, 1.0,
+		"the derived air settle ratio must stay < 1 — like `smoothing` it is a per-frame lerp weight, and 1+ would snap instead of easing")
+	assert_gt(s.air_accel, 0.0,
+		"air_accel must be > 0 — it is the only thing that BUILDS horizontal speed in the air; 0 restores the standing-jump dead zone this replaced (0.14 m of travel over a whole jump)")
+	assert_gt(s.air_steer_accel, 0.0,
+		"air_steer_accel must be > 0 — it is the only in-air turn authority; 0 means the vector you launch is the vector you land")
+	assert_gt(s.air_speed_mult, 0.0,
+		"air_speed_mult must be > 0 so a standing jump can build any horizontal speed at all")
+	assert_lte(s.air_speed_mult, s.walk_speed_mult,
+		"air_speed_mult must stay at/below walk_speed_mult — free air build must never out-run the slow-walk tier, or repeated jumping becomes a faster way to travel than walking AND (since noise_emitter gates the movement noise radius on is_on_floor) a quieter one")
 	s = null
+
+
+## The one air-control invariant that spans TWO tuning resources, so neither file's own defaults test can hold
+## it: free air control must top out strictly below what the paid Bunny-Hop chip sells.
+func test_free_air_control_stays_under_the_bunnyhop_ceiling() -> void:
+	var m := PlayerMovementSettings.new()
+	var b := BunnyhopSettings.new()
+	assert_lt(m.max_speed * m.air_speed_mult, b.max_speed,
+		"free air control must top out strictly BELOW the Bunny-Hop chip's chain ceiling, or a 300 zm implant buys nothing")
+	m = null
+	b = null
+
+
+## The momentum launch is the one thing in the movement set that lets a PLAIN jump exceed the player's ground
+## speed, so its bound is a cross-resource invariant no single tuning file can hold.
+func test_the_momentum_launch_stays_under_every_speed_threshold() -> void:
+	var m := PlayerMovementSettings.new()
+	var a := AudioSettings.new()
+	var b := BunnyhopSettings.new()
+	var launched := m.max_speed * (1.0 + m.jump_momentum_boost)
+	assert_lt(launched, a.falling_air_min_move_speed,
+		"a sprint jump's launch speed must stay under the wind loop's threshold, or a plain running jump starts howling like a long fall every single time")
+	assert_lt(launched, b.sens_reduction_threshold,
+		"...and under the bunny-hop look-sensitivity falloff, or an ordinary jump silently damps the player's aim — a bug that reads as input lag, not as a speed effect")
+	assert_gte(m.jump_momentum_boost, 0.0,
+		"jump_momentum_boost is a FRACTION ADDED to the speed you carry; negative would make a run-up punish you")
+	m = null
+	a = null
+	b = null
+
+
+## The 300 zm Bunny-Hop chip has to out-perform the free take-off boost every player already gets, or the
+## implant is strictly worse than not owning it. Spans two tuning resources, so neither file can hold it alone.
+func test_the_bunnyhop_chip_out_gains_the_free_takeoff_boost() -> void:
+	var m := PlayerMovementSettings.new()
+	var b := BunnyhopSettings.new()
+	assert_gt(b.boost_per_hop, m.max_speed * m.jump_momentum_boost,
+		"one chained hop must gain MORE than the free one-shot take-off boost (0.75 m/s at the shipped tuning), or buying the chip makes your jumps worse")
+	assert_gt(b.max_speed, m.max_speed * (1.0 + m.jump_momentum_boost),
+		"...and the chain ceiling must sit above what a boosted sprint jump reaches unaided, or the chip's top speed is reachable for free")
+	m = null
+	b = null
+
+
+## The whole point of the air tier being low: air travel is max(takeoff speed, tier) x airtime, so any ground
+## speed below the tier lands the same distance. Keeping the tier under the walk tier is what leaves room for
+## momentum to matter across the normal speed range.
+func test_the_air_tier_leaves_room_for_momentum_to_matter() -> void:
+	var m := PlayerMovementSettings.new()
+	assert_lt(m.max_speed * m.air_speed_mult, m.max_speed * m.walk_speed_mult,
+		"the air build tier must sit strictly below the WALK speed, not merely below the run speed — at or above it, walking up to a jump buys exactly nothing over standing still, which is the flat spot that makes a run-up feel unrewarded")
+	m = null
 
 
 func test_player_crouch_settings_defaults() -> void:
@@ -407,6 +471,30 @@ func test_weapon_general_settings_defaults() -> void:
 		"bullet_time_lerp_speed must be > 0 so the slow-mo ramps in/out instead of snapping")
 	assert_gt(s.bullet_time_duration, 0.0,
 		"bullet_time_duration must be > 0 so the bullet-time effect lasts a measurable time")
+	s = null
+
+
+func test_weapon_general_settings_agility_floors() -> void:
+	# The two AGILITY floors (2026-09-02). They are the ONLY thing standing between a high-agility build and a
+	# stalled fire loop: CharacterStats.melee_time_mult / reload_time_mult reach EXACTLY 0 at agility 20, the
+	# level-up station puts no cap on a stat, and a Timer.wait_time of 0 is a Godot engine error. Attack holds the
+	# scaled product to these, so if either ever reaches 0 the game breaks rather than merely rebalancing.
+	var s = WeaponGeneralSettings.new()
+	assert_gt(s.min_melee_attack_speed, 0.0,
+		"min_melee_attack_speed must be > 0 — attack.gd assigns the scaled cadence to a Timer's wait_time, and Godot rejects a wait_time of 0 outright")
+	assert_gt(s.min_reload_time, 0.0,
+		"min_reload_time must be > 0 for the same reason — the reload Timer needs a positive wait_time")
+	# The melee floor's VALUE is tied to the view model, not picked freely: FirstPersonBody.fp_arm_punch_duration
+	# is the documented "one punch, start to fully settled" window and must fit inside the cadence, or spamming
+	# attack restarts the swing before it ever completes (scripts/player/first_person_body.gd:286).
+	var body = load("res://scripts/player/first_person_body.gd").new()
+	assert_gt(s.min_melee_attack_speed, body.fp_arm_punch_duration,
+		"min_melee_attack_speed must leave room for a whole punch animation — the rule is UNDER, strictly (at equality the next click lands on the very frame the punch settles), and below it a maxed-agility player restarts the swing mid-punch, forever")
+	body.free()
+	# And the reload floor must stay clear of the auto-reload beat, so an auto-reloading weapon's
+	# "shot, pause, reload" rhythm keeps its ordering instead of the pause outlasting the reload.
+	assert_gt(s.min_reload_time, s.auto_reload_delay,
+		"min_reload_time must exceed auto_reload_delay — otherwise the beat BEFORE an auto-reload is longer than the reload itself")
 	s = null
 
 

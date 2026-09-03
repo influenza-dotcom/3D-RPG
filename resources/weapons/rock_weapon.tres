@@ -26,6 +26,7 @@ max_explosion_force = 10.0
 self_knockback = 2.0
 enemy_lift = 5.0
 view_model = ExtResource("6_0l3eg")
+npc_held_display_scale = 2.2
 spawns_casing = false
 muzzle_smoke_scale = 2.1
 audio = ExtResource("1_u6xaq")

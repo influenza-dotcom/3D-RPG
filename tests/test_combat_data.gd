@@ -6,10 +6,9 @@ extends GutTest
 ## verified field/method/signal signature read straight from source):
 ##   - WeaponData SOURCE defaults via WeaponData.new() (NOT a .tres): the exact
 ##     numeric/float/int default VALUES (effective_range, damage, multipliers,
-##     projectile, explosion, pellet, knockback, shake, hitstop, launch fields)
-##     and the bool defaults (spawns_casing, has_muzzle_flash, has_laser_sight,
-##     auto_fire, single_air_dash, launch_on_scoped_attack, use_hitscan,
-##     is_spray_paint). These are the design defaults a freshly-authored weapon
+##     projectile, explosion, pellet, knockback, shake, hitstop) and the bool
+##     defaults (spawns_casing, has_muzzle_flash, has_laser_sight, auto_fire,
+##     use_hitscan, is_spray_paint). These are the design defaults a freshly-authored weapon
 ##     inherits — distinct from test_smoke.gd (which only checks the TYPES of
 ##     these flags on existing .tres) and test_weapon_data_completeness.gd
 ##     (which only checks field presence/type on .tres, never source defaults).
@@ -393,10 +392,8 @@ func test_weapon_data_default_shake_fields() -> void:
 		"screen_shake_amount is a float (per-shot camera trauma)")
 	assert_eq(w.screen_shake_amount, 0.3,
 		"Default screen_shake_amount is 0.3 — a moderate per-shot kick")
-	assert_eq(typeof(w.launch_screen_shake), TYPE_FLOAT,
-		"launch_screen_shake is a float (the bigger one-shot shake for a scoped-attack launch)")
-	assert_eq(w.launch_screen_shake, 0.6,
-		"Default launch_screen_shake is 0.6 — a dash/launch kicks harder than a normal shot")
+	# (launch_screen_shake is gone with the rest of the scoped-attack launch — the dash's trauma is
+	# AirDash.screen_shake now, pinned in tests/test_upgrades.gd.)
 	w = null
 
 
@@ -426,16 +423,15 @@ func test_weapon_data_default_scope_fields() -> void:
 	w = null
 
 
-func test_weapon_data_default_launch_fields() -> void:
+func test_weapon_data_has_no_launch_fields() -> void:
+	# The scoped-attack launch is GONE from the weapon. This used to pin launch_force / launch_upward defaults;
+	# it now pins their ABSENCE, so nobody re-adds a "this gun can fling the player" knob by reflex. The dash's
+	# real tuning is AirDash's (tests/test_upgrades.gd).
 	var w := WeaponData.new()
-	assert_eq(typeof(w.launch_force), TYPE_FLOAT,
-		"launch_force is a float (forward impulse of a scoped-attack dash)")
-	assert_eq(w.launch_force, 15.0,
-		"Default launch_force is 15.0 — the baseline dash power for launch-on-scope weapons")
-	assert_eq(typeof(w.launch_upward), TYPE_FLOAT,
-		"launch_upward is a float (vertical component of the dash launch)")
-	assert_eq(w.launch_upward, 4.0,
-		"Default launch_upward is 4.0 — a dash also lifts you, not just shoves forward")
+	for dead in [&"launch_force", &"launch_upward", &"launch_on_scoped_attack", &"single_air_dash",
+			&"launch_screen_shake"]:
+		assert_eq(w.get(dead), null,
+			"WeaponData.%s must stay removed — the air dash belongs to the AirDash ability, not to a weapon" % dead)
 	w = null
 
 
@@ -457,10 +453,8 @@ func test_weapon_data_default_bool_flags() -> void:
 		"auto_fire defaults true — hold-to-fire is the default; semi-auto weapons opt out")
 	assert_false(w.auto_reload,
 		"auto_reload defaults false — only weapons that opt in reload themselves when a shot runs the clip dry")
-	assert_false(w.single_air_dash,
-		"single_air_dash defaults false — only dash weapons cap to one launch per airtime")
-	assert_false(w.launch_on_scoped_attack,
-		"launch_on_scoped_attack defaults false — scoped fire is a normal attack unless opted in")
+	# (single_air_dash / launch_on_scoped_attack are gone: a weapon no longer launches the player at all. The
+	# air dash is its own key on the AirDash ability, whose defaults are pinned in tests/test_upgrades.gd.)
 	w = null
 
 

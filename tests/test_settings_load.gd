@@ -16,6 +16,15 @@ func test_player_movement_settings() -> void:
 		"player_movement.step_down_snap should cover at least the step-up height so descending stairs stay grounded")
 	assert_gt(r.step_min_horizontal_speed, 0.0,
 		"player_movement.step_min_horizontal_speed must be > 0 so idle wall contacts do not auto-step")
+	assert_gte(r.air_smoothing_divisor, 1.0,
+		"player_movement.air_smoothing_divisor must be >= 1 — AirMovement divides smoothing by it and 0 divides by zero")
+	assert_gt(r.air_accel, 0.0, "player_movement.air_accel must be > 0 or there is no air control at all")
+	assert_lte(r.air_speed_mult, r.walk_speed_mult,
+		"player_movement.air_speed_mult must stay at/below walk_speed_mult, so jumping never out-travels walking")
+	assert_gte(r.jump_momentum_boost, 0.0,
+		"player_movement.jump_momentum_boost must be >= 0 — it is a fraction ADDED to the speed you carry into a jump")
+	assert_lt(r.max_speed * (1.0 + r.jump_momentum_boost), 6.5,
+		"a sprint jump's launch speed must stay under 6.5 m/s, the wind-loop and look-sensitivity thresholds")
 	assert_gt(r.max_stamina, 0.0, "player_movement.max_stamina must be > 0")
 	assert_gt(r.stamina_regen_idle, r.stamina_regen_moving,
 		"standing still should restore stamina faster than moving")

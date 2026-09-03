@@ -7,7 +7,12 @@ extends Resource
 ## runs controllable.
 
 @export_group("Bunnyhop Chain")
-## Speed (m/s) each chained hop adds on top of base run speed — higher = the chain ramps up faster.
+## Speed (m/s) each chained hop adds ON TOP OF THE SPEED YOU CARRIED INTO IT — higher = the chain ramps up
+## faster. This COMPOUNDS (each hop's carry is the last hop's result), which is what makes the chip a momentum
+## GAIN rather than a fixed ladder, and it is why a slow start has to be ramped in instead of snapping to a
+## tier. ⭐Keep it above PlayerMovementSettings.max_speed x jump_momentum_boost (the free one-shot take-off
+## boost every player gets, 0.75 m/s) or one chained hop gains LESS than not owning the implant — test-pinned
+## in tests/test_managers_tuning.gd.
 @export var boost_per_hop: float = 1.2
 ## Hard ceiling (m/s) the bhop chain can reach no matter how long it runs — caps the boost stack.
 @export var max_speed: float = 12.0
