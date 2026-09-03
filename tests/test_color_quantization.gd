@@ -42,15 +42,19 @@ func _read(path: String) -> String:
 # =============================================================================================================
 
 ## Index 0 is not a depth, it is the "leave it alone" sentinel. It has to stay Vector3.ZERO, because that exact
-## value is what the shader tests for before falling back to the material's authored `color_steps` — and it has
-## to stay index 0, because that is the shipped default and therefore the frame everyone already has.
-func test_the_default_index_is_the_leave_it_authored_sentinel() -> void:
+## value is what the shader tests for before falling back to the material's authored `color_steps`. The shipped
+## DEFAULT moved off it on 08-31: fresh installs now boot on index 4 (12-bit RGB444), and the sentinel remains
+## the player's one-click opt-out back to the untouched materials. Existing installs are unaffected — a stored
+## cfg index always wins on load, so nobody's saved look changes, only the first frame of a brand-new install.
+func test_the_default_index_is_the_dev_authored_12_bit_look() -> void:
 	assert_eq(SettingsScript.COLOR_QUANTIZE_LEVELS[0], Vector3.ZERO,
 		"index 0 must be Vector3.ZERO — the sentinel post_process.gdshader tests for (`quantize_levels.r > 0.0`) before falling back to the material's own color_steps")
 	var fresh = SettingsScript.new()
-	assert_eq(fresh.color_quantization, 0,
-		"Colour Depth must SHIP on the sentinel: any other default changes the look of the game on the first frame of every existing save, which is not a thing a new option gets to do")
+	assert_eq(fresh.color_quantization, 4,
+		"Colour Depth ships on index 4: the 08-31 defaults pass made the dev-authored 12-bit RGB444 quantise the out-of-box frame (a deliberate reversal of the old ship-on-the-sentinel rule — stored cfg indices still win on load, so only fresh installs see it)")
 	fresh.free()
+	assert_eq(SettingsScript.COLOR_QUANTIZE_LEVELS[4], Vector3(15, 15, 15),
+		"...and index 4 must still BE 12-bit RGB444 — reorder the table and the shipped default silently becomes a different depth")
 
 ## The named depths must actually be the depths they are named after, because the caption is the only thing the
 ## player is told. 5 bits a channel is 32 levels is 31 steps — an off-by-one here is a wrong claim in the menu.

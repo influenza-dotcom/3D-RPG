@@ -9,10 +9,12 @@ extends Resource
 ## Radians of view rotation per SCREEN pixel of mouse movement — the master look speed (the in-game slider scales this). Higher = faster aim.
 ## The unit is raw OS pixels (MouseInput reads InputEventMouseMotion.screen_relative, never `relative`, which the `viewport`
 ## stretch mode pre-scales by canvas/window width), so one value feels the same fullscreen, windowed, 1080p or 4K. The default
-## is the old canvas-px 0.002 re-expressed at 1080p fullscreen (x 792/1920) so that setup feels exactly as it did — retune
-## it and Settings.SENS_MIN/SENS_MAX + the SettingsCatalog slider range together (Settings.read_mouse_sensitivity migrates
-## a pre-switch settings.cfg by the same factor).
-@export var mouse_sensitivity: float = 0.000825
+## is the 08-31 playtest retune: a legacy 0.0028 canvas-px feel re-expressed at 1080p fullscreen (x 792/1920 = 0.001155),
+## snapped DOWN one notch onto the Options slider's step grid (SENS_MIN 0.0002 + 38 x 0.000025 = 0.00115 — Range snaps every
+## value to min + n*step, so an off-grid default would move the first time the slider is touched). Retune it and
+## Settings.SENS_MIN/SENS_MAX + the SettingsCatalog slider range together (Settings.read_mouse_sensitivity migrates
+## a pre-switch settings.cfg by the same 792/1920 factor).
+@export var mouse_sensitivity: float = 0.00115
 ## Normal up/down look limit (degrees) — how far the view can tilt before it clamps. 89 = just shy of straight up/down.
 @export var pitch_max_deg: float = 89.0
 ## Degrees before the pitch limit where the look starts easing (soft ramp) instead of hitting a hard wall — bigger = a longer, mushier approach to the clamp.
@@ -25,7 +27,9 @@ extends Resource
 
 @export_group("FOV")
 ## Resting field of view (degrees) when not scoped — the ONE rest-FOV source of truth. Higher = wider, more peripheral view.
-@export var default_fov: float = 75.0
+## 120 (the 08-31 defaults retune, up from the original 75) sits exactly ON Settings.FOV_MAX and the Options slider's
+## ceiling — widening further means moving the clamp constants and the SettingsCatalog fov row together.
+@export var default_fov: float = 120.0
 ## Field of view (degrees) the camera zooms to when aiming down sights (a weapon's scoped_fov_override beats this). Lower = tighter zoom.
 ## ONLY consulted when scope_magnification is 0 — see that field for why an ABSOLUTE ADS angle is the wrong shape.
 @export var scoped_fov: float = 40.0
@@ -33,10 +37,11 @@ extends Resource
 ## as close. This is the Field-of-View-INVARIANT knob, and the one to tune. The scoped FOV is SOLVED from
 ## default_fov, so ADS feels the same at 75 FOV as at 120 — whereas the absolute scoped_fov above pins ADS to
 ## one angle, which silently STRENGTHENS the zoom every time a player widens their FOV slider (at 110 rest the
-## authored 40-degree scope is a 3.9x jump instead of the intended 2.1x, and reads as "way too far in").
+## original 40-degree scope tune is a 3.9x jump instead of the intended 2.1x, and reads as "way too far in").
 ## Magnification is a TANGENT ratio, not a ratio of degrees: apparent size goes with tan(fov/2), so halving the
 ## degrees does NOT double the apparent size. 0 = off, fall back to the absolute scoped_fov (the legacy
-## behaviour). The default reproduces the authored 75 -> 40 ADS feel exactly.
+## behaviour). The 2.108 default is the magnification the original 75 -> 40 ADS tune worked out to — kept
+## verbatim through the 08-31 default_fov retune to 120, which is exactly the drift this knob exists to absorb.
 @export var scope_magnification: float = 2.108
 ## How fast the FOV eases in/out of the scoped zoom (higher = snappier ADS).
 @export var scope_zoom_speed: float = 8.0

@@ -48,16 +48,21 @@ func test_set_mouse_sensitivity_clamps_and_writes_through() -> void:
 # in a 720p window) — so the OLD 0.002 default turned the view 1.5x further the moment the game went windowed. The
 # whole sensitivity domain (design default, SENS_MIN/MAX, the catalog slider, and a saved cfg) moved to the new unit
 # at the 1080p-fullscreen factor, so THAT setup feels exactly as it did. These pin the retune + the migration.
+# The design DEFAULT then moved AGAIN on 08-31 (0.000825 -> 0.00115, the playtest feel snapped to the slider grid);
+# the unit, the range constants and the legacy migration below were all left untouched by that second move.
 
-## The design default is the old canvas-px 0.002 re-expressed per screen pixel at 1080p fullscreen — a re-tune to
-## any other number is a FEEL change and must be deliberate. CameraSettings.new() reads the script default (the live
-## GameSettings.camera has already been overwritten by this machine's settings.cfg); a bare Settings seeds the same.
-func test_mouse_sensitivity_default_is_the_1080p_fullscreen_retune() -> void:
+## The design default is the 08-31 playtest retune: a legacy 0.0028 canvas-px feel re-expressed per screen pixel at
+## 1080p fullscreen (x 792/1920 = 0.001155), snapped DOWN one notch onto the catalog slider's step grid (SENS_MIN +
+## 38 x 0.000025 = 0.00115 — Range snaps every value to min + n*step, so an off-grid default would move the first
+## time the slider is dragged; the on-grid pin lives in the catalog test below). A re-tune to any other number is a
+## FEEL change and must be deliberate. CameraSettings.new() reads the script default (the live GameSettings.camera
+## has already been overwritten by this machine's settings.cfg); a bare Settings seeds the same.
+func test_mouse_sensitivity_default_is_the_playtest_retune_snapped_to_grid() -> void:
 	assert_almost_eq(Settings.LEGACY_MOUSE_SENS_SCALE, 792.0 / 1920.0, 0.000001,
 		"the legacy factor is the 792 px canvas (396 viewport / 0.5 stretch scale) over the 1920 px 1080p fullscreen width")
 	var cs := CameraSettings.new()
-	assert_almost_eq(cs.mouse_sensitivity, 0.002 * Settings.LEGACY_MOUSE_SENS_SCALE, 0.000001,
-		"CameraSettings.mouse_sensitivity must be 0.002 canvas-px x 792/1920 = 0.000825 rad per screen px, so 1080p fullscreen feels identical after the screen_relative switch")
+	assert_almost_eq(cs.mouse_sensitivity, 0.00115, 0.000001,
+		"CameraSettings.mouse_sensitivity must be 0.00115 rad per screen px — the 08-31 playtest retune (legacy 0.0028 canvas-px x 792/1920 = 0.001155) snapped down onto the slider's 0.000025 step grid so the default survives the first drag")
 	var fresh = load("res://managers/Settings.gd").new()
 	assert_almost_eq(fresh.mouse_sensitivity, cs.mouse_sensitivity, 0.000001,
 		"a bare Settings seeds the same default as CameraSettings (the field default only matters off-tree, but it must not drift)")
@@ -74,8 +79,8 @@ func test_mouse_sensitivity_range_matches_the_catalog_slider() -> void:
 	assert_lt(Settings.SENS_MIN, def, "the design default sits above the slider floor")
 	assert_gt(Settings.SENS_MAX, def, "the design default sits below the slider ceiling")
 	var readout := int(round(remap(def, Settings.SENS_MIN, Settings.SENS_MAX, 1.0, 100.0)))
-	assert_eq(readout, 17,
-		"the default must still read '17' on the 1..100 slider — the old range 0.0005..0.01 put 0.002 there, and the retune shifted both ends by the same factor")
+	assert_eq(readout, 26,
+		"the 08-31 default 0.00115 must read '26' on the 1..100 slider (remap over SENS_MIN..SENS_MAX lands at 25.75 and the readout rounds) — the pre-retune 0.000825 read '17'; a drift here means the default or the range moved without the other")
 	var cat := load("res://resources/settings/SettingsCatalog.tres") as SettingsCatalog
 	assert_not_null(cat, "the settings catalog must load")
 	if cat == null:
@@ -107,8 +112,9 @@ func test_mouse_sensitivity_legacy_cfg_value_is_rescaled_once_on_load() -> void:
 	legacy.set_value("input", Settings.MOUSE_SENS_LEGACY_KEY, 0.002)  # the old shipped default, canvas-px units
 	assert_almost_eq(Settings.read_mouse_sensitivity(legacy, 9.0), 0.002 * Settings.LEGACY_MOUSE_SENS_SCALE, 0.000001,
 		"a legacy 0.002 must load as 0.000825 rad per screen px — the same 1080p-fullscreen feel, not 2.4x faster")
-	assert_almost_eq(Settings.read_mouse_sensitivity(legacy, 9.0), CameraSettings.new().mouse_sensitivity, 0.000001,
-		"...which is exactly the new design default, so a returning player and a new one feel the same")
+	# NOTE: a migrated legacy 0.002 used to land EXACTLY on the design default; the 08-31 default retune
+	# (0.000825 -> 0.00115) broke that identity ON PURPOSE — the migration preserves the RETURNING player's
+	# feel verbatim, it does not chase the fresh-install default. Do not re-add an equality pin here.
 	# The old ceiling rescales to ~3% over SENS_MAX; load_settings clamps (mirrors contrast / ps1_warp_intensity).
 	legacy.set_value("input", Settings.MOUSE_SENS_LEGACY_KEY, 0.01)
 	var top := clampf(Settings.read_mouse_sensitivity(legacy, 9.0), Settings.SENS_MIN, Settings.SENS_MAX)
@@ -120,7 +126,7 @@ func test_mouse_sensitivity_legacy_cfg_value_is_rescaled_once_on_load() -> void:
 	assert_almost_eq(Settings.read_mouse_sensitivity(current, 9.0), 0.003, 0.000001,
 		"the screen-px key is authoritative and is NOT rescaled")
 	var empty := ConfigFile.new()
-	assert_almost_eq(Settings.read_mouse_sensitivity(empty, 0.000825), 0.000825, 0.000001,
+	assert_almost_eq(Settings.read_mouse_sensitivity(empty, 0.00115), 0.00115, 0.000001,
 		"no key at all -> the fallback (the design default seeded in _ready)")
 
 ## save_settings must persist ONLY the new key: writing the legacy key again would hand the next boot a screen-px
@@ -248,19 +254,21 @@ func test_music_folder_default_blank_and_round_trips() -> void:
 	Settings.set_music_folder("")
 	assert_eq(Settings.music_folder, "", "set_music_folder('') clears the override back to the per-radio default")
 
-func test_tts_default_off_and_toggles() -> void:
-	# OFF by default (the accessibility requirement): a fresh Settings (var default, no cfg load) is off.
+func test_tts_default_on_and_toggles() -> void:
+	# ON by default (2026-09-01 design call: players must HEAR an NPC when they talk to them): a fresh
+	# Settings (var default, no cfg load) speaks. The old ship-silent accessibility framing is deliberately
+	# overruled — silence is now the opt-OUT, the same shape as the heartbeat row below.
 	var fresh = load("res://managers/Settings.gd").new()
-	assert_false(fresh.tts_enabled, "Text-to-Speech is OFF by default")
+	assert_true(fresh.tts_enabled, "Text-to-Speech is ON by default — hearing NPCs is part of the design")
 	fresh.free()
-	# Round-trips through the live setter (restored to off so the suite leaves it at the default).
-	Settings.set_tts_enabled(true)
-	assert_true(Settings.tts_enabled, "TTS can be enabled")
+	# Round-trips through the live setter (restored to on so the suite leaves it at the default).
 	Settings.set_tts_enabled(false)
 	assert_false(Settings.tts_enabled, "TTS can be disabled")
+	Settings.set_tts_enabled(true)
+	assert_true(Settings.tts_enabled, "TTS can be re-enabled")
 
 func test_heartbeat_default_on_and_toggles() -> void:
-	# ON by default (the silence is opt-IN, the inverse of tts): a fresh Settings (var default, no cfg) is on.
+	# ON by default (the silence is opt-IN, same shape as tts above): a fresh Settings (var default, no cfg) is on.
 	var fresh = load("res://managers/Settings.gd").new()
 	assert_true(fresh.heartbeat_enabled, "the low-HP heartbeat is ON by default (the toggle only SILENCES it)")
 	fresh.free()
@@ -270,11 +278,13 @@ func test_heartbeat_default_on_and_toggles() -> void:
 	Settings.set_heartbeat_enabled(true)
 	assert_true(Settings.heartbeat_enabled, "the heartbeat pulse can be re-enabled")
 
-func test_ps1_warp_intensity_default_full_and_clamps() -> void:
-	# FULL (1.0) by default — a fresh Settings (var default, no cfg) leaves the authored PS1 warp unscaled
-	# until a player dials the Options -> Accessibility slider down (motion comfort).
+func test_ps1_warp_intensity_default_off_and_clamps() -> void:
+	# OFF (0.0) by default — since the 08-31 defaults retune the PS1 vertex wobble is opt-IN: a fresh Settings
+	# (var default, no cfg) renders the level with no warp at all (PS1Applier holds no material overrides at 0),
+	# and the Options -> Accessibility slider dials the authored effect back up.
 	var fresh = load("res://managers/Settings.gd").new()
-	assert_eq(fresh.ps1_warp_intensity, 1.0, "PS1 vertex-warp intensity defaults to 100% (full authored effect)")
+	assert_eq(fresh.ps1_warp_intensity, 0.0,
+		"PS1 vertex-warp intensity defaults to 0% — the wobble is opt-in since 08-31; a stored cfg value still wins on load, so only fresh installs boot warp-free")
 	fresh.free()
 	# Round-trips + clamps through the live setter PS1Applier polls each frame.
 	Settings.set_ps1_warp_intensity(2.0)
@@ -283,7 +293,7 @@ func test_ps1_warp_intensity_default_full_and_clamps() -> void:
 	assert_eq(Settings.ps1_warp_intensity, 0.0, "intensity clamps to 0% (warp off)")
 	Settings.set_ps1_warp_intensity(0.5)
 	assert_eq(Settings.ps1_warp_intensity, 0.5, "an in-range intensity is stored verbatim")
-	Settings.set_ps1_warp_intensity(1.0)  # restore the default so the suite leaves it unscaled
+	Settings.set_ps1_warp_intensity(0.0)  # restore the shipped default so the suite leaves the warp off
 
 
 ## The three minimap rows (Options -> Accessibility). ALL THREE are polled live — there is deliberately no
@@ -293,10 +303,13 @@ func test_ps1_warp_intensity_default_full_and_clamps() -> void:
 func test_minimap_defaults() -> void:
 	var fresh = load("res://managers/Settings.gd").new()
 	assert_true(fresh.minimap_enabled, "the minimap ships ON — it is the shipped HUD, not an opt-in")
-	assert_true(fresh.minimap_rotates, "heading-up is the shipped mode (the plan turns under a fixed caret)")
-	assert_eq(fresh.minimap_zoom, 1.0, "zoom ships at 1x = GameSettings.hud.minimap_world_span verbatim")
+	assert_false(fresh.minimap_rotates,
+		"north-up is the shipped mode since 08-31 (the plan stays axis-locked and the caret spins, matching the Map tab) — heading-up is the Rotate Minimap opt-in")
+	assert_eq(fresh.minimap_zoom, 1.5,
+		"the corner box ships zoomed IN at 1.5x — GameSettings.hud.minimap_world_span / 1.5 metres across (the 08-31 defaults retune)")
 	assert_true(fresh.minimap_show_npcs, "NPC dots ship visible")
-	assert_eq(fresh.map_zoom, 1.0, "the MAP TAB ships at 1x = GameSettings.hud.map_world_span verbatim")
+	assert_eq(fresh.map_zoom, 2.0,
+		"the MAP TAB ships at 2x — GameSettings.hud.map_world_span / 2 metres across, a readable district rather than the whole level (the 08-31 defaults retune)")
 	fresh.free()
 
 func test_minimap_zoom_clamps() -> void:
@@ -304,10 +317,10 @@ func test_minimap_zoom_clamps() -> void:
 	assert_almost_eq(Settings.minimap_zoom, Settings.MINIMAP_ZOOM_MAX, 0.0001, "zoom clamps to MINIMAP_ZOOM_MAX")
 	Settings.set_minimap_zoom(0.0)
 	assert_almost_eq(Settings.minimap_zoom, Settings.MINIMAP_ZOOM_MIN, 0.0001, "zoom clamps to MINIMAP_ZOOM_MIN")
-	Settings.set_minimap_zoom(1.5)
-	assert_almost_eq(Settings.minimap_zoom, 1.5, 0.0001, "an in-range zoom is stored verbatim")
+	Settings.set_minimap_zoom(2.5)
+	assert_almost_eq(Settings.minimap_zoom, 2.5, 0.0001, "an in-range zoom is stored verbatim")
 	assert_lt(Settings.MINIMAP_ZOOM_MIN, Settings.MINIMAP_ZOOM_MAX, "the range is the right way round")
-	Settings.set_minimap_zoom(1.0)  # restore the default so the suite leaves the HUD unzoomed
+	Settings.set_minimap_zoom(1.5)  # restore the shipped default (1.5 since 08-31) so the suite leaves the HUD at its out-of-box zoom
 
 ## The MAP TAB's zoom is its OWN stored value on the SHARED clamp — the two maps are the same widget at two
 ## sizes, so one range describes both, but scrolling the page-sized map must never move the corner box (they
@@ -318,11 +331,11 @@ func test_map_zoom_clamps_and_is_independent_of_the_minimap_row() -> void:
 	assert_almost_eq(Settings.map_zoom, Settings.MINIMAP_ZOOM_MAX, 0.0001, "map zoom clamps to the shared MAX")
 	Settings.set_map_zoom(0.0)
 	assert_almost_eq(Settings.map_zoom, Settings.MINIMAP_ZOOM_MIN, 0.0001, "map zoom clamps to the shared MIN")
-	Settings.set_map_zoom(2.0)
-	assert_almost_eq(Settings.map_zoom, 2.0, 0.0001, "an in-range map zoom is stored verbatim")
+	Settings.set_map_zoom(1.5)
+	assert_almost_eq(Settings.map_zoom, 1.5, 0.0001, "an in-range map zoom is stored verbatim")
 	assert_almost_eq(Settings.minimap_zoom, was_minimap, 0.0001,
 		"...and moving the MAP's zoom leaves the HUD minimap's row untouched — a shared field would make scrolling the map re-zoom the corner box")
-	Settings.set_map_zoom(1.0)  # restore the default so the suite leaves the map unzoomed
+	Settings.set_map_zoom(2.0)  # restore the shipped default (2.0 since 08-31) so the suite leaves the map at its out-of-box zoom
 
 func test_minimap_toggles_round_trip() -> void:
 	Settings.set_minimap_enabled(false)

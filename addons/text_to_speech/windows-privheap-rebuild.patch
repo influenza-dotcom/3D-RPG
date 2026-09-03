@@ -1,0 +1,199 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2650849..bfd5819 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -55,6 +55,11 @@ endif()
+ 
+ set(FLITE_BUILD_DIR "${FLITE_BUILD_SOURCE_DIR}/build/${FLITE_TARGET_PLATFORM}")
+ set(FLITE_LIB_DIR "${FLITE_BUILD_DIR}/lib")
++# Local override: point at an already-built flite lib dir (skips the ExternalProject,
++# whose in-tree copy build miscomputes archive paths under some MSYS2 layouts).
++if(DEFINED FLITE_PREBUILT_LIB_DIR)
++    set(FLITE_LIB_DIR "${FLITE_PREBUILT_LIB_DIR}")
++endif()
+ set(FLITE_LIBS
+     ${FLITE_LIB_DIR}/libflite.a
+     ${FLITE_LIB_DIR}/libflite_usenglish.a
+@@ -66,6 +71,7 @@ set(FLITE_LIBS
+     ${FLITE_LIB_DIR}/libflite_cmu_indic_lex.a
+ )
+ 
++if(NOT DEFINED FLITE_PREBUILT_LIB_DIR)
+ ExternalProject_Add(flite_external
+     PREFIX ${CMAKE_BINARY_DIR}/flite-external
+     SOURCE_DIR ${FLITE_BUILD_SOURCE_DIR}
+@@ -84,12 +90,14 @@ ExternalProject_Add(flite_external
+     INSTALL_COMMAND ""
+     BUILD_BYPRODUCTS ${FLITE_LIBS}
+ )
++endif()
+ 
+ add_library(${PROJECT_NAME} SHARED
+     src/text_to_speech.cpp
+     src/text_to_speech.h
+     src/register_types.cpp
+     src/flite_wrapper.c
++    src/cst_private_heap.c
+ )
+ 
+ target_include_directories(${PROJECT_NAME} PRIVATE
+@@ -118,7 +126,9 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
+     LIBRARY_OUTPUT_DIRECTORY "${GODOT_PLUGIN_LIB_DIR}"
+ )
+ 
+-add_dependencies(${PROJECT_NAME} flite_external)
++if(NOT DEFINED FLITE_PREBUILT_LIB_DIR)
++    add_dependencies(${PROJECT_NAME} flite_external)
++endif()
+ 
+ if(APPLE)
+     target_link_libraries(${PROJECT_NAME} PRIVATE godot-cpp m)
+diff --git a/addons/text_to_speech/lib/win/libgodot_text_to_speech.dll b/addons/text_to_speech/lib/win/libgodot_text_to_speech.dll
+index 1ee2b76..736554c 100644
+Binary files a/addons/text_to_speech/lib/win/libgodot_text_to_speech.dll and b/addons/text_to_speech/lib/win/libgodot_text_to_speech.dll differ
+diff --git a/src/cst_private_heap.c b/src/cst_private_heap.c
+new file mode 100644
+index 0000000..f65aa6b
+--- /dev/null
++++ b/src/cst_private_heap.c
+@@ -0,0 +1,60 @@
++/* Private-heap allocator for flite (Windows).
++ *
++ * Built with -DCST_USER_MALLOC on the flite side, which drops flite's default
++ * cst_safe_alloc/cst_safe_calloc/cst_safe_realloc/cst_free (all thin wrappers
++ * over the C runtime) and expects the host to provide them. We back them with
++ * a dedicated Win32 heap (HeapCreate) instead of the CRT heap.
++ *
++ * WHY: msvcrt and ucrtbase both allocate from the PROCESS DEFAULT heap on
++ * modern Windows, so a MinGW/msvcrt GDExtension shares one RtlHeap with the
++ * host engine, every other extension, and GPU driver user-mode code. Crash
++ * forensics on CYBERSUNDAY playtests (2026-08-28/29) showed heap-corruption
++ * fail-fasts DETECTED at this extension's frees while the extension's own
++ * allocation behavior audits clean (72M-allocation guarded stress, all voices,
++ * real game text). A private heap isolates flite completely: its blocks cannot
++ * neighbor foreign allocations, so foreign overflows cannot corrupt TTS data
++ * and TTS frees cannot be the process-heap corruption detector that kills the
++ * game. Non-Windows builds keep flite's stock allocator (see the #else).
++ *
++ * All flite allocation goes through these four functions (cst_alloc/cst_free
++ * macros); flite never frees these pointers with raw free() nor frees raw
++ * malloc() pointers with cst_free (audited against the pinned flite tree).
++ */
++#ifdef _WIN32
++
++#include <windows.h>
++#include <string.h>
++
++static HANDLE flite_heap(void) {
++    /* Created on first use; single-threaded use in practice (all extension
++     * calls are synchronous main-thread), but HeapCreate(0,...) is serialized
++     * anyway, so a future threaded caller stays safe. Never destroyed: voices
++     * live for the whole process, exactly like the engine's own singletons. */
++    static HANDLE h = NULL;
++    if (h == NULL)
++        h = HeapCreate(0, 1 << 20, 0);  /* growable, 1 MB initial reserve */
++    return h;
++}
++
++void *cst_safe_alloc(int size) {
++    if (size < 0) return NULL;
++    if (size == 0) size = 1;
++    return HeapAlloc(flite_heap(), HEAP_ZERO_MEMORY, (SIZE_T)size);
++}
++
++void *cst_safe_calloc(int size) {
++    return cst_safe_alloc(size);
++}
++
++void *cst_safe_realloc(void *p, int size) {
++    if (p == NULL) return cst_safe_alloc(size);
++    if (size <= 0) size = 1;
++    return HeapReAlloc(flite_heap(), HEAP_ZERO_MEMORY, p, (SIZE_T)size);
++}
++
++void cst_free(void *p) {
++    if (p != NULL)
++        HeapFree(flite_heap(), 0, p);
++}
++
++#endif /* _WIN32 */
+diff --git a/src/text_to_speech.cpp b/src/text_to_speech.cpp
+index bbcecaf..b377af5 100644
+--- a/src/text_to_speech.cpp
++++ b/src/text_to_speech.cpp
+@@ -2,6 +2,8 @@
+ #include <godot_cpp/core/class_db.hpp>
+ #include <godot_cpp/variant/utility_functions.hpp>
+ #include <flite.h>
++#include <map>
++#include <string>
+ 
+ using namespace godot;
+ 
+@@ -11,34 +13,58 @@ extern "C" {
+     cst_lexicon *cmulex_init(void);
+ }
+ 
+-TextToSpeech::TextToSpeech() {
+-    UtilityFunctions::print("TTS constructor");
+-
++// Process-wide cache of loaded voices, keyed by file path. Voices are loaded at
++// most ONCE per process and never deleted: every game engine instance asking
++// for the same .flitevox shares one cst_voice. This removes delete_voice() --
++// and with it flite's entire cg_db/cart/features teardown -- from the runtime
++// path entirely (its free counts are derived from voice-file fields read
++// independently of the arrays they free, a fragility not worth exercising
++// mid-game), and makes repeat voice switches instant instead of a 6-12 MB
++// reload. Bounded by the shipped voice set; all calls are main-thread.
++static std::map<std::string, cst_voice *> g_voice_cache;
++
++// flite's language list is a global with a fixed capacity; register the
++// language exactly once per process instead of once per TextToSpeech instance
++// (the game builds up to ~16 instances across its speech pools).
++static void ensure_flite_ready() {
++    static bool inited = false;
++    if (inited)
++        return;
++    inited = true;
+     flite_init();
+     flite_add_lang("eng", usenglish_init, cmulex_init);
+     flite_add_lang("usenglish", usenglish_init, cmulex_init);
++}
++
++TextToSpeech::TextToSpeech() {
++    UtilityFunctions::print("TTS constructor");
++
++    ensure_flite_ready();
+ 
+     current_voice = nullptr;
+ }
+ 
+ TextToSpeech::~TextToSpeech() {
+     UtilityFunctions::print("TTS destructor");
++    // current_voice is owned by g_voice_cache -- never deleted here.
+ }
+ 
+ Error TextToSpeech::set_voice_path(const String &p_path) {
+-    if (current_voice) {
+-        delete_voice(current_voice); // Flite API frees memory
+-        current_voice = nullptr;
+-    }
+-
+     std::string path = p_path.utf8().get_data();
+ 
++    auto cached = g_voice_cache.find(path);
++    if (cached != g_voice_cache.end()) {
++        current_voice = cached->second;
++        return OK;
++    }
++
+     cst_voice *v = flite_voice_load(path.c_str());
+     if (!v) {
+         UtilityFunctions::printerr("Failed to load voice: ", path.c_str());
+         return ERR_CANT_OPEN;
+     }
+ 
++    g_voice_cache[path] = v;
+     current_voice = v;
+     UtilityFunctions::print("Voice loaded: ", path.c_str());
+     return OK;
