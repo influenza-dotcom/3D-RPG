@@ -5,8 +5,13 @@ extends GutTest
 ## The script itself is NOT instantiated in-tree here: its _process drives global_rotation off a parent
 ## transform and _ready walks ancestors, which a bare node has none of (the same reason test_camera_input_ui
 ## deliberately skips flash_light.gd). What IS pinned is the AUTHORING contract — the rig's node exists, is a
-## real light rather than the retired laser, starts off, and reaches the view-model layer — plus the file-level
-## invariants that a future edit could silently break, and the fact that the retired laser sight is really gone.
+## real light rather than the laser, starts off, and reaches the view-model layer — plus the file-level
+## invariants that a future edit could silently break.
+##
+## It ALSO guards the boundary with the LASER SIGHT, which used to live on this very node and share its key. The
+## laser is back as its own rig node (scenes/player/laser_sight_rig.gd) and the two must never re-merge, so the
+## tests near the bottom pin them apart from both sides: the torch must not gate on the weapon's laser flag, and
+## the laser must not grow a keybind or a stealth cost.
 
 const RIG := "res://scenes/player/camera_rig.tscn"
 const SCRIPT_PATH := "res://scenes/player/flash_light.gd"
@@ -280,28 +285,82 @@ func _player_source() -> String:
 	return f.get_as_text() if f != null else ""
 
 
-func test_retired_laser_sight_is_gone_everywhere_it_would_break() -> void:
-	# The ability, its scene, its chip and the beam mesh were removed when the flashlight took F. The registry is
-	# scanned from disk, so a leftover would silently re-offer an unbuildable id in the UpgradePickup dropdown.
-	assert_false(FileAccess.file_exists("res://scripts/components/abilities/laser_sight.gd"),
-		"the LaserSight ability script must be gone")
-	assert_false(FileAccess.file_exists("res://scenes/components/abilities/LaserSight.tscn"),
-		"the LaserSight ability scene must be gone (the registry scans this folder)")
-	assert_false(FileAccess.file_exists("res://resources/items/chip_laser_sight.tres"),
-		"the laser-sight chip item must be gone — there is nothing left to install")
-	assert_false(FileAccess.file_exists("res://scenes/player/laser_mesh.gd"),
-		"the player's laser beam mesh script must be gone")
-	assert_false(AbilityRegistry.ids().has("laser_sight"),
-		"the ability registry must no longer offer laser_sight (it could not be built if picked)")
+func test_the_laser_sight_is_back_and_is_its_own_node() -> void:
+	# ⭐The laser sight was RETIRED when the flashlight took this key, and is now RESTORED as a separate node —
+	# these asserts used to pin the opposite (that every laser file was gone). The registry is scanned from disk,
+	# so the four files below are exactly what makes `laser_sight` a real, buildable, purchasable mechanic again;
+	# losing any one of them re-creates a different silent failure (an unbuildable id in the UpgradePickup
+	# dropdown, a chip that installs nothing, a dot with no beam).
+	assert_true(FileAccess.file_exists("res://scripts/components/abilities/laser_sight.gd"),
+		"the LaserSight ability script must exist — a runtime grant builds from it")
+	assert_true(FileAccess.file_exists("res://scenes/components/abilities/LaserSight.tscn"),
+		"the LaserSight ability scene must exist (the registry scans this folder for ids)")
+	assert_true(FileAccess.file_exists("res://resources/items/chip_laser_sight.tres"),
+		"the laser-sight chip must exist — it is what puts the row in the New Game implant roster")
+	assert_true(FileAccess.file_exists("res://scenes/player/laser_mesh.gd"),
+		"the player's laser beam mesh script must exist")
+	assert_true(AbilityRegistry.ids().has("laser_sight"),
+		"the ability registry must offer laser_sight again")
+	assert_true(AbilityRegistry.can_build(&"laser_sight"),
+		"laser_sight must be runtime-buildable — a chip install and a save load both go through _build")
 
 
-func test_a_save_that_still_lists_laser_sight_degrades_quietly() -> void:
-	# Old profiles carry the id. The rebuild must grant nothing rather than crash — the documented @risk on the
-	# Ability base, and the reason removing an ability is safe at all.
+func test_the_torch_and_the_laser_are_separate_nodes() -> void:
+	# ⭐THE WHOLE REASON THE LASER DIED THE FIRST TIME: it lived ON the flashlight and shared its key. They are now
+	# two nodes on the rig with two different jobs, and this pins that they cannot silently re-merge — a wide white
+	# lamp with a stealth cost, and a 0.5-degree energy-1000 pinprick with none.
+	var scene := load(RIG) as PackedScene
+	assert_not_null(scene, "camera_rig.tscn must load")
+	var inst := scene.instantiate()
+	var torch := inst.find_child("FlashLight", true, false) as SpotLight3D
+	var laser := inst.find_child("LaserSight", true, false) as SpotLight3D
+	assert_not_null(torch, "the rig must carry the FlashLight node")
+	assert_not_null(laser, "the rig must carry the LaserSight node")
+	if torch != null and laser != null:
+		assert_ne(torch, laser, "the torch and the laser must be DIFFERENT nodes — merging them is what retired the sight")
+		assert_lt(laser.spot_angle, 1.0, "the laser is a pinprick (0.5 degrees), not a cone")
+		assert_gt(laser.light_energy, 100.0, "the laser dot needs its energy-1000 punch to read on a lit wall")
+		assert_false(laser.visible, "the laser starts dark — it lights up only once the chip is installed")
+	inst.free()
+
+
+func test_the_laser_never_feeds_the_stealth_light_meter() -> void:
+	# ⭐PlayerLightLevel auto-collects EVERY visible Light3D and weighs it by energy alone — it never reads
+	# light_negative. An energy-1000 dot sitting at the player, plus the NEGATIVE sub-light that carves its core,
+	# would together saturate the meter the moment the chip was fitted: buying a laser sight would silently mean
+	# "enemies always see you". The exemption must cover the whole subtree, not just the scripted node.
+	var f := FileAccess.open("res://scenes/player/laser_sight_rig.gd", FileAccess.READ)
+	assert_not_null(f, "laser_sight_rig.gd must exist")
+	var src := f.get_as_text() if f != null else ""
+	assert_true("STEALTH_LIGHT_EXEMPT" in src,
+		"the laser must join Groups.STEALTH_LIGHT_EXEMPT — the seam PlayerLightLevel already checks")
+	assert_true("get_children()" in src,
+		"the exemption must WALK the subtree: the negative sub-light is a child, and it is summed as energy too")
+	# Pin the CALL, not the bare identifier: the header comment above names Groups.CARRIED_LIGHT to explain the
+	# trade the laser deliberately does NOT make, and a substring test on the name alone reads that prose as the
+	# very thing it is disclaiming. add_to_group(...) is the only line that would actually charge the penalty.
+	assert_false("add_to_group(Groups.CARRIED_LIGHT)" in src,
+		"the laser must NOT take the torch's beacon penalty — it lights a wall, not you")
+
+
+func test_the_laser_has_no_keybind_of_its_own() -> void:
+	# ⭐The design decision, pinned: own the chip and the sight is on. No toggle, no action lookup, no _input.
+	# The Implants tab's per-implant on/off switch (Ability.enabled, which has_mechanic reads) is the only switch.
+	var f := FileAccess.open("res://scenes/player/laser_sight_rig.gd", FileAccess.READ)
+	var src := f.get_as_text() if f != null else ""
+	assert_false("_unhandled_input" in src, "the laser must not listen for input — it has no key")
+	assert_false("is_action_pressed" in src, "the laser must not poll an action — it has no key")
+	assert_true("has_mechanic" in src, "the laser must gate on the mechanic the chip grants")
+
+
+func test_a_save_that_lists_a_retired_ability_id_degrades_quietly() -> void:
+	# Old profiles can carry an id no longer on disk. The rebuild must grant nothing rather than crash — the
+	# documented @risk on the Ability base, and the reason retiring an ability is safe at all. (This used to use
+	# `laser_sight` as its dead id; that one is a live mechanic again, so it needs an id that never shipped.)
 	var p = load("res://scripts/player/player.gd").new()
-	p.set_unlocks([&"laser_sight", &"wall_climb"])
-	assert_false(p.has_mechanic(&"laser_sight"),
-		"a retired id in an old save grants nothing (AbilityManager._build returns null for an unknown id)")
+	p.set_unlocks([&"x_ray_vision", &"wall_climb"])
+	assert_false(p.has_mechanic(&"x_ray_vision"),
+		"an unknown id in an old save grants nothing (AbilityManager._build returns null for an unbuildable id)")
 	assert_true(p.has_mechanic(&"wall_climb"),
 		"...and the rest of that save's unlocks still load — one dead id must not poison the set")
 	p.free()

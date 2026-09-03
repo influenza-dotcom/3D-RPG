@@ -10,6 +10,9 @@
 [ext_resource type="AudioStream" uid="uid://bonxflok5t1cu" path="res://assets/audio/sfx/Click.mp3" id="10_3lxcb"]
 [ext_resource type="Texture2D" uid="uid://8iakx1jdiqch" path="res://assets/textures/whitesquare.png" id="11_pjx7t"]
 [ext_resource type="Script" path="res://scripts/effects/ink_outline.gd" id="12_inkol"]
+[ext_resource type="Shader" path="res://resources/shaders/laser.gdshader" id="13_laser"]
+[ext_resource type="Script" path="res://scenes/player/laser_mesh.gd" id="14_lasermesh"]
+[ext_resource type="Script" path="res://scenes/player/laser_sight_rig.gd" id="15_lasersight"]
 
 [sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_u3hyo"]
 dof_blur_near_distance = 0.5
@@ -22,6 +25,19 @@ shader_parameter/pixelation_level = 1
 shader_parameter/crush = 1.75
 
 [sub_resource type="QuadMesh" id="QuadMesh_n65jb"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_laser"]
+top_radius = 0.0
+bottom_radius = 0.001
+height = 0.25
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_Laser"]
+render_priority = 0
+shader = ExtResource("13_laser")
+shader_parameter/laser_color = Color(1, 0, 0, 1)
+shader_parameter/intensity = 4.0
+shader_parameter/fade_power = 8.0
+shader_parameter/invert_fade = false
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mwk7e"]
 transparency = 1
@@ -84,6 +100,34 @@ light_position = NodePath("../LightPosition")
 stream = ExtResource("10_3lxcb")
 volume_db = 80.0
 bus = &"world"
+
+[node name="LaserMesh" type="MeshInstance3D" parent="ScreenShake/Camera3D"]
+visible = false
+layers = 4
+cast_shadow = 0
+mesh = SubResource("CylinderMesh_laser")
+surface_material_override/0 = SubResource("ShaderMaterial_Laser")
+script = ExtResource("14_lasermesh")
+
+[node name="LaserSight" type="SpotLight3D" parent="ScreenShake/Camera3D" node_paths=PackedStringArray("beam")]
+visible = false
+light_color = Color(1, 0, 0, 1)
+light_energy = 1000.0
+light_indirect_energy = 0.0
+light_volumetric_fog_energy = 0.0
+spot_range = 4096.0
+spot_angle = 0.5
+script = ExtResource("15_lasersight")
+beam = NodePath("../LaserMesh")
+
+[node name="LaserSightSub" type="SpotLight3D" parent="ScreenShake/Camera3D/LaserSight"]
+light_color = Color(0.31209812, 0.03736606, 5.0296635e-06, 1)
+light_energy = 1000.0
+light_indirect_energy = 0.0
+light_volumetric_fog_energy = 0.0
+light_negative = true
+spot_range = 4096.0
+spot_angle = 0.5
 
 [node name="white flash" type="Sprite3D" parent="ScreenShake/Camera3D" unique_id=1837776006]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.5425763)

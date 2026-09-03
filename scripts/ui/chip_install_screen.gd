@@ -291,7 +291,9 @@ func _fill(list: VBoxContainer, chips: Array, is_buy: bool) -> void:
 		var it := item as Item
 		if it == null:
 			continue
-		var price: int = _installer.buy_and_install_cost(it) if is_buy else _installer.install_fee(it)
+		# _player is threaded so a stat-conditional price (Item.discount_stat) is quoted at what the installer
+		# will actually CHARGE this buyer — the same player object both sides read.
+		var price: int = _installer.buy_and_install_cost(it, _player) if is_buy else _installer.install_fee(it, _player)
 		var affordable := price > 0 and _player.can_pay(float(price))  # the SAME predicate ChipInstaller gates on
 		var row_btn := _make_row(it, price, affordable, is_buy)
 		list.add_child(row_btn)

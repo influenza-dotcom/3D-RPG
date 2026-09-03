@@ -4,7 +4,7 @@ extends Control
 ## is clicked (the creation overlay stays ALIVE-BUT-HIDDEN underneath, so "Back" returns to it with the typed
 ## name / stat build / painted shirt intact) and only this screen's confirm resets + stamps the profile and
 ## boots. Implants are fitted ON CREDIT: the player checks ANY set of starting chips (or none — buying
-## nothing is the default and Begin is never gated), each billed at its authored Item.value, and the whole
+## nothing is the default and Begin is never gated), each billed at its authored price, and the whole
 ## bill is subtracted from the starting wallet — the balance is ALLOWED to go NEGATIVE, so a loaded build
 ## starts the run in debt (every paid service then refuses until the wallet climbs back past its cost; the
 ## HUD's signed readout is the debt display). On "Begin" it emits confirmed(ability_ids, total_cost); on
@@ -28,7 +28,10 @@ extends Control
 ##
 ## ROSTER: one row per DISTINCT installable ability, disk-driven — ItemDb already scanned resources/items at
 ## boot, so dropping a new chip .tres in that folder adds a row here with no code change (its value IS its
-## creation price — the designer tunes debt on the chip resource). Chips are filtered by
+## creation price — the designer tunes debt on the chip resource). ⭐A chip may also price itself against the
+## BUILD the player just allocated (Item.discount_stat / discount_above / discount_value — the laser sight is
+## 200 zm, or 100 zm to anyone who put a point in gunplay), which is why present_build re-BUILDS the rows rather
+## than only re-tallying them: the sticker is per-build, and the row's cached price is what the cart bills. Chips are filtered by
 ## Item.is_upgrade_chip() and AbilityRegistry.can_build() (the ChipInstaller rule: never offer a grant a
 ## typo'd installs_ability would silently turn into nothing) and deduped by ABILITY id, not item id
 ## (chip_takedown installs silent_takedown — the ids don't mirror). Rows paint Item.label() raw ([PH] marker
@@ -119,6 +122,12 @@ func present_build(stat_values: Dictionary) -> void:
 	if _tally != null:  # already bound — a live re-present
 		_compute_credit()
 		_paint_credit_hint()
+		# ⭐The ROWS have to be rebuilt, not just re-tallied: a chip's price can DEPEND on the build now
+		# (Item.discount_stat), and each row caches its price in a meta that both the tally and the confirmed
+		# payload bill from. Re-scoring without re-pricing would leave the old sticker on the row and charge it.
+		# This clears the cart, which is correct — a build change is exactly when a re-priced cart should be
+		# re-decided. (Only tests reach this branch: the real flow calls present_build BEFORE add_child.)
+		_build_rows()
 		_refresh_tally()
 
 ## Rate the build and derive its limit from the economy knobs — the two pure EconomySettings curves are the
@@ -205,7 +214,7 @@ func _build_rows() -> void:
 		c.queue_free()
 	_rows.clear()
 	for item: Item in _chip_roster():
-		var price: float = snappedf(item.value, Zorkmids.QUANTUM)
+		var price: float = snappedf(_price_of(item), Zorkmids.QUANTUM)
 		var row := _make_row(item.label(), AbilityRegistry.display_name_for(item.installs_ability),
 				Zorkmids.money_text(price))
 		row.set_meta("ability_id", item.installs_ability)
@@ -215,6 +224,17 @@ func _build_rows() -> void:
 		MenuStyle.attach_tip(row, ItemInfo.tooltip(item))
 		_chip_list.add_child(row)
 		_rows.append(row)
+
+## What THIS build pays for `item` — the list `value`, or its conditional price when the pending stat sheet
+## already covers the chip's `discount_stat` (the laser sight halves for anyone who put a point in gunplay).
+## The sheet is the SAME Dictionary the profile stamp will write to GameState.stat_values, so the price quoted
+## here is the price the finished character would be charged at a mechanic; an ABSENT sheet reads every stat as
+## 0 and therefore quotes LIST — the fail-CLOSED direction, and the opposite of how the missing sheet is treated
+## by the credit rating (which fails OPEN to the ceiling). Different questions: "what can this applicant borrow"
+## may safely assume the best, "what does this cost" must never assume a discount nobody earned.
+func _price_of(item: Item) -> float:
+	return item.value_at(int(_stat_values.get(item.discount_stat, 0)))
+
 
 ## Every distinct installable ability's chip Item, from the ItemDb boot scan (export-safe, unlike the
 ## editor-only AbilityRegistry.ids() directory listing). Sorted by label so the list order is stable.

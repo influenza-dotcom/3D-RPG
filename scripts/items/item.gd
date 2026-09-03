@@ -48,7 +48,28 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## Base trade value in zorkmids — what this item is worth at a merchant. The player BUYS it at value × the
 ## merchant's buy multiplier and SELLS it at value × the (lower) sell multiplier. 0 = worthless (can't sell).
 ## FRACTIONAL: zorkmids run in hundredths (0.5 = half a zorkmid), so cheap goods can price under 1 zm.
+## ⭐This is the LIST price. An item may also carry a CONDITIONAL price keyed on one of the buyer's stats — see
+## `discount_stat` below and read it through `value_at()`, never off this field, wherever a buyer is known.
 @export var value: float = 0.0
+## OPTIONAL buyer stat that makes this item CHEAPER for someone who has it (&"gunplay", &"streetwise", …). Blank
+## (the default) = one flat price for everybody, which is what nearly every item wants. Set it and `value` becomes
+## the LIST price paid by a buyer scoring `discount_above` or LESS, while anyone scoring ABOVE that pays
+## `discount_value` instead. It is a CLIFF, not a curve — one threshold, two prices — because the price has to be
+## legible on a shop row at a glance, and because the discount reads as a fact about the buyer ("you already know
+## guns") rather than a sliding scale to optimise. This is deliberately NOT the streetwise haggling multiplier
+## every merchant already applies: that one scales EVERY price on the shelf, this one is authored per item.
+## ⭐The stats are CharacterStats' own (baseline 0, range -5..10), so `discount_above = 0` means "any point
+## actually invested". The dropdown is fed from CharacterStats.STAT_NAMES so a typo can't silently mean
+## "never discounted".
+@export var discount_stat: StringName = &""
+## The buyer must score STRICTLY ABOVE this to get `discount_value`. 0 = any invested point qualifies; negatives
+## let a merely-not-terrible buyer qualify. Ignored while `discount_stat` is blank.
+@export var discount_above: int = 0
+## The price a qualifying buyer pays instead of `value`. ⭐FAILS CLOSED: 0 or less means NO conditional price at
+## all (the list price stands), matching the `value <= 0` convention everywhere else — a half-authored discount
+## must never be able to hand an item over for nothing. Nothing forces it below `value`; authoring it higher is a
+## legal (if odd) surcharge for the skilled.
+@export var discount_value: float = 0.0
 ## For CONSUMABLE-category items: HP restored when used from the inventory (Player.use_consumable). The
 ## first consumable effect — later ones (stims, buffs) hang off the same category without a subclass.
 @export var heal_amount: float = 0.0
@@ -136,6 +157,22 @@ func is_stackable() -> bool:
 
 ## True when this item is a MICROCHIP UPGRADE — carrying it grants nothing, but a ChipInstaller can consume it to
 ## install `installs_ability` on the player. The mechanic + ChipInstallScreen key on this.
+## THE price of this item for a buyer scoring `stat_value` in `discount_stat` — the ONE formula every surface
+## that prices an item against a known buyer must read (the pickpocket rule: what you SHOW is what you CHARGE).
+## Degrades to the flat `value` whenever there is no conditional price authored, so a caller may hand it any
+## number without checking first, and a caller with no buyer in hand can simply read `value` and be correct for
+## every ordinary item.
+##
+## ⭐Callers resolve the stat themselves rather than passing a whole character, because the two surfaces that
+## need this read the buyer from completely different places: the New Game implant screen has only a pending
+## {stat -> int} sheet (nobody exists yet), while a ChipInstaller has a live Player. Threading an int keeps this
+## a pure function of the two, testable with neither.
+func value_at(stat_value: int) -> float:
+	if discount_stat == &"" or discount_value <= 0.0:
+		return value
+	return discount_value if stat_value > discount_above else value
+
+
 func is_upgrade_chip() -> bool:
 	return installs_ability != &""
 
@@ -201,3 +238,8 @@ func _validate_property(property: Dictionary) -> void:
 	if property.name == "installs_ability":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = AbilityRegistry.ids_csv()
+	if property.name == "discount_stat":
+		# Fed from the MASTER stat-name list, so a renamed/added stat reaches this dropdown for free and a typo
+		# (which would silently read as "never discounted") can't be typed in the first place.
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = ",".join(CharacterStats.STAT_NAMES)

@@ -19,14 +19,18 @@ extends LookAtInteractable
 ##   2. ON A DIALOGUE NPC: set `standalone` = false so the ray IGNORES it (the NPC's Talkable drives the
 ##      conversation); the dialogue then offers an "Install" option that opens THIS installer's screen.
 ##
-## ECONOMY (all derived from the chip Item's `value`, no hardcoded price consts):
-##   - INSTALL a chip the player already carries -> value × install_mult (floored at min_fee). Just labour.
-##   - BUY & INSTALL a chip the mechanic stocks    -> value × buy_mult (the chip) PLUS the install fee, so
+## ECONOMY (all derived from the chip Item's price, no hardcoded price consts):
+##   - INSTALL a chip the player already carries -> price × install_mult (floored at min_fee). Just labour.
+##   - BUY & INSTALL a chip the mechanic stocks    -> price × buy_mult (the chip) PLUS the install fee, so
 ##     finding a chip yourself is always cheaper than buying it here (rewards exploration).
 ## Both consume the chip (it goes into the machine — never lingers in the bag) and route the charge through the
 ## player's wallet seam (add_money), then unlock_mechanic + autosave (a new ability is a milestone). Each path
 ## first verifies the grant resolves via Player.can_grant_mechanic (a typo'd installs_ability builds nothing) —
 ## so an unresolvable chip is refused with NO charge, never taking money for an ability it can't install.
+## ⭐"price" is `Item.value_at(<the buyer's stat>)`, NOT the raw `value`: a chip may be cheaper for a buyer who
+## already has the relevant stat (the laser sight halves once you have any gunplay — Item.discount_stat). Both
+## fee functions take the buyer for that reason and every caller must pass it, or the screen quotes one number
+## and the till takes another.
 ##
 ## SETUP: drop it under the mechanic / workbench (or assign highlight_target), size its CollisionShape3D to the
 ## body you aim at (or set auto_fit_collider), fill `stock_counts` with the chips it sells, and tune the fees.
@@ -42,10 +46,11 @@ extends LookAtInteractable
 ## Shown on the look-at hover + the install screen title. Blank -> just "Mechanic".
 @export var installer_name: String = ""
 @export_group("Pricing")
-## Fee to install a chip the player ALREADY CARRIES = chip.value × this (floored at min_fee). < 1.0 = cheaper
+## Fee to install a chip the player ALREADY CARRIES = the chip's price for THIS buyer × this (floored at
+## min_fee; the price is Item.value_at, so a stat-conditional chip discounts before the multiplier). < 1.0 = cheaper
 ## than the chip's face value (you paid for the chip by finding it; this is just the labour).
 @export var install_mult: float = 0.5
-## Sale markup for a chip the mechanic STOCKS = chip.value × this. The buy-&-install total is this PLUS the
+## Sale markup for a chip the mechanic STOCKS = the chip's price for THIS buyer × this. The total is this PLUS the
 ## install fee, so buying here always costs more than installing a chip you found.
 @export var buy_mult: float = 1.25
 ## Minimum install fee (zorkmids), so a cheap chip still costs something to fit.
@@ -101,19 +106,43 @@ func _seed_stock(into: CharacterInventory) -> void:
 # Pricing
 # ---------------------------------------------------------------------------
 
-## Zorkmids to INSTALL a chip the player already carries — value × install_mult, floored at min_fee. 0 for a
+## Zorkmids to INSTALL a chip the player already carries — price × install_mult, floored at min_fee. 0 for a
 ## null / non-chip / worthless item (the install screen won't offer those).
-func install_fee(item: Item) -> int:
-	if item == null or not item.is_upgrade_chip() or item.value <= 0.0:
+## ⭐`buyer` is OPTIONAL only so the long-standing one-arg duck-call keeps parsing; PASS IT. A chip may carry a
+## stat-conditional price (Item.discount_stat — the laser sight is half price once you have any gunplay), and
+## omitting the buyer quietly quotes the LIST price, which is the show-≠-charge bug this codebase keeps banning.
+func install_fee(item: Item, buyer: Node = null) -> int:
+	var price := _price_for(item, buyer)
+	if price <= 0.0:
 		return 0
-	return maxi(min_fee, int(round(item.value * install_mult)))
+	return maxi(min_fee, int(round(price * install_mult)))
 
 ## Zorkmids to BUY & INSTALL a stocked chip the player doesn't have — the marked-up chip PLUS the install fee,
-## so it's always dearer than installing a chip you found yourself.
-func buy_and_install_cost(item: Item) -> int:
-	if item == null or not item.is_upgrade_chip() or item.value <= 0.0:
+## so it's always dearer than installing a chip you found yourself. `buyer` as above: pass it.
+func buy_and_install_cost(item: Item, buyer: Node = null) -> int:
+	var price := _price_for(item, buyer)
+	if price <= 0.0:
 		return 0
-	return int(round(item.value * buy_mult)) + install_fee(item)
+	return int(round(price * buy_mult)) + install_fee(item, buyer)
+
+## What this chip actually costs THIS buyer before the fee multipliers — the one place the conditional price is
+## resolved, so the install fee and the buy-and-install total can never disagree about the sticker.
+## ⭐The worthless-item gate stays on the authored `value`, not on the resolved price: "a value <= 0 chip is not
+## installable" is an existing contract (installable_carried / installable_stock filter on it, and tests pin it),
+## and a discount must not be able to drag a real chip under that bar and make it vanish from the screen.
+func _price_for(item: Item, buyer: Node) -> float:
+	if item == null or not item.is_upgrade_chip() or item.value <= 0.0:
+		return 0.0
+	return item.value_at(_buyer_stat(buyer, item.discount_stat))
+
+## The buyer's score in `stat`, or 0 (the CharacterStats baseline) when there is no buyer, no stat asked for, or
+## no sheet to read — so an unknown buyer pays LIST price rather than being handed a discount by accident.
+## Duck-typed on stats_or_default() like every other stat read outside the Player.
+func _buyer_stat(buyer: Node, stat: StringName) -> int:
+	if buyer == null or stat == &"" or not buyer.has_method(&"stats_or_default"):
+		return 0
+	var sheet: CharacterStats = buyer.stats_or_default()
+	return sheet.get_stat(stat) if sheet != null else 0
 
 # ---------------------------------------------------------------------------
 # What's installable right now (the two screen sections)
@@ -176,7 +205,7 @@ func install_carried(item: Item, player_node: Node) -> bool:
 	if not player.can_grant_mechanic(item.installs_ability):
 		push_warning("ChipInstaller: chip '%s' installs unknown ability '%s' — install refused, no charge." % [item.label(), item.installs_ability])
 		return false
-	var cost := install_fee(item)
+	var cost := install_fee(item, player)  # the BUYER decides the price (conditional discounts) — never quote list here
 	if cost <= 0 or not player.can_pay(float(cost)):  # the ONE affordability predicate (cash -> savings -> armed rail)
 		return false
 	if not player.charge(float(cost)):      # routes through the payment seam -> HUD readout + floating -N
@@ -197,7 +226,7 @@ func buy_and_install(item: Item, player_node: Node) -> bool:
 	if not player.can_grant_mechanic(item.installs_ability):
 		push_warning("ChipInstaller: chip '%s' installs unknown ability '%s' — install refused, no charge." % [item.label(), item.installs_ability])
 		return false
-	var cost := buy_and_install_cost(item)
+	var cost := buy_and_install_cost(item, player)  # ditto: charge exactly what the screen showed this buyer
 	if cost <= 0 or not player.can_pay(float(cost)):  # the ONE affordability predicate (cash -> savings -> armed rail)
 		return false
 	if not player.charge(float(cost)):

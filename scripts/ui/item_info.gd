@@ -73,8 +73,8 @@ static func _weapon_block(w: WeaponData, holder: CharacterInventory) -> String:
 			parts.append("Clip %d" % w.max_ammo)  # a real self-contained clip; max_ammo 0 (spray paint) has none to show
 	# (No laser-sight tag on purpose: WeaponData.has_laser_sight is a cosmetic "render the beam" flag that DEFAULTS TRUE
 	# and is left unset on most guns — even the rock — so surfacing it would be noise/nonsense, not a real capability.
-	# Since the player's laser sight was retired for the flashlight it drives only the NPC aiming beam, which makes it
-	# even less of a thing the player's own tooltip should claim.)
+	# It says "a laser CAN hang off this", not "this weapon has one": whether a dot actually appears is the
+	# `laser_sight` IMPLANT's call, so a per-weapon tooltip is the wrong place to claim it either way.)
 	# Weight class you FEEL: a heavy weapon slows you while wielded, a light one can speed you up (move_speed_multiplier
 	# is applied by the equip). Rounded so a ≈1.0 that isn't exactly 1.0 stays silent.
 	var move_pct := roundi((w.move_speed_multiplier - 1.0) * 100.0)

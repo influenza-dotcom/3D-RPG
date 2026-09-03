@@ -4,7 +4,8 @@ extends GutTest
 ## tested OFF-TREE like test_merchant: ChipInstaller.new() WITHOUT add_child (so _ready never runs — we set
 ## `stock` / the multipliers by hand) and a bare Player with a hand-set backpack + money. The install tail's
 ## autosave + toast are already off-tree no-ops (GameState.autosave early-returns off-tree; notify_toast needs a
-## `ui`), so a bare-Player install doesn't touch disk. Also pins the 8 authored chip .tres + the mechanic scene.
+## `ui`), so a bare-Player install doesn't touch disk. Also pins the authored chip .tres set + the mechanic scene,
+## and the STAT-CONDITIONAL price (Item.discount_stat) the laser-sight chip introduced.
 
 const PLAYER_PATH := "res://scripts/player/player.gd"
 const AbilityRegistry := preload("res://scripts/components/abilities/ability_registry.gd")
@@ -319,7 +320,7 @@ func test_all_chip_resources_are_valid() -> void:
 		assert_true(known.has(String(item.installs_ability)),
 			"'%s' installs '%s', which must be a real ability on disk" % [fn, item.installs_ability])
 		assert_not_null(item.world_model, "'%s' must carry a world_model (the microchip look)" % fn)
-	assert_eq(count, 10, "expected 10 authored upgrade chips (one per shipped ability, incl. the Board Visualizer, the Takedown Chip, the Bunny-Hop Chip + the two body scanners) — the Laser-Sight Chip was retired when the flashlight took the Light key")
+	assert_eq(count, 11, "expected 11 authored upgrade chips (one per shipped ability, incl. the Board Visualizer, the Takedown Chip, the Bunny-Hop Chip, the two body scanners + the Laser-Sight Chip, which is back after being retired when the flashlight took the Light key)")
 
 func test_mechanic_scene_loads_and_can_instantiate() -> void:
 	# The hand-authored mechanic scene must resolve its whole resource graph (NPC + Talkable dialogue +
@@ -328,3 +329,97 @@ func test_mechanic_scene_loads_and_can_instantiate() -> void:
 	assert_not_null(scene, "chip_mechanic.tscn must load")
 	if scene != null:
 		assert_true(scene.can_instantiate(), "chip_mechanic.tscn must be instantiable (all ext_resources resolve)")
+
+
+# --- Conditional (stat-gated) pricing ----------------------------------------------------------------------
+# An item may cost LESS for a buyer who already has the relevant stat (Item.discount_stat / discount_above /
+# discount_value; the laser sight halves for anyone with gunplay). Item.value_at() is the one resolver, and the
+# rule these tests exist to defend is that the QUOTE and the CHARGE are the same number.
+
+## A chip whose price drops to `discounted` once the buyer is strictly above `above` in `stat`.
+func _discount_chip(value: float, stat: StringName, above: int, discounted: float) -> Item:
+	var it := _chip(&"grapple", value)
+	it.discount_stat = stat
+	it.discount_above = above
+	it.discount_value = discounted
+	return it
+
+func test_value_at_is_the_flat_value_when_no_discount_is_authored() -> void:
+	var plain := _chip(&"grapple", 400.0)
+	for score in [-5, 0, 1, 10]:
+		assert_eq(plain.value_at(score), 400.0,
+			"an item with no discount_stat costs the same at every stat level (asked at %d)" % score)
+	plain = null
+
+func test_value_at_is_a_cliff_at_discount_above() -> void:
+	var chip := _discount_chip(200.0, &"gunplay", 0, 100.0)
+	assert_eq(chip.value_at(-5), 200.0, "a DUMPED stat pays list")
+	assert_eq(chip.value_at(0), 200.0, "the baseline pays list — discount_above 0 means STRICTLY above")
+	assert_eq(chip.value_at(1), 100.0, "one invested point is the whole qualification")
+	assert_eq(chip.value_at(10), 100.0, "...and it stays a flat second price, never a curve")
+	chip = null
+
+func test_a_half_authored_discount_fails_closed_to_the_list_price() -> void:
+	# ⭐The `value <= 0` convention applied to the discount: a price nobody finished authoring must never be able
+	# to hand the item over for free (or to pay the player to take it).
+	var zero := _discount_chip(200.0, &"gunplay", 0, 0.0)
+	assert_eq(zero.value_at(10), 200.0, "discount_value 0 = no conditional price at all, not a free chip")
+	var negative := _discount_chip(200.0, &"gunplay", 0, -50.0)
+	assert_eq(negative.value_at(10), 200.0, "a negative discount_value must not pay the player to take it")
+	var nameless := _chip(&"grapple", 200.0)
+	nameless.discount_value = 100.0  # a second price with no stat to test it against
+	assert_eq(nameless.value_at(10), 200.0, "a discount with no discount_stat never triggers")
+	zero = null
+	negative = null
+	nameless = null
+
+func test_the_laser_sight_chip_is_authored_200_and_100_on_gunplay() -> void:
+	# The shipped rule, pinned on the REAL resource: worth 200 zm, half price once you have any gunplay at all.
+	var chip := load(ITEMS_DIR + "chip_laser_sight.tres") as Item
+	assert_not_null(chip, "the laser-sight chip must load")
+	if chip == null:
+		return
+	assert_eq(chip.value, 200.0, "the laser sight lists at 200 zm")
+	assert_eq(chip.discount_stat, &"gunplay", "its conditional price watches GUNPLAY")
+	assert_eq(chip.discount_above, 0, "any invested gunplay point qualifies (CharacterStats baseline is 0)")
+	assert_eq(chip.value_at(0), 200.0, "no gunplay -> the full 200 zm")
+	assert_eq(chip.value_at(1), 100.0, "one point of gunplay -> 100 zm")
+	chip = null
+
+func test_installer_quotes_the_buyers_conditional_price() -> void:
+	var m := _installer(0.5, 1.25, 10)
+	var chip := _discount_chip(200.0, &"gunplay", 0, 100.0)
+	var novice := _player()
+	var shooter := _player()
+	shooter.stats = CharacterStats.new()
+	shooter.stats.gunplay = 1
+	assert_eq(m.install_fee(chip, novice), 100, "a novice pays list x install_mult (200 x 0.5)")
+	assert_eq(m.install_fee(chip, shooter), 50, "a shooter pays the discounted 100 x 0.5")
+	assert_eq(m.buy_and_install_cost(chip, novice), 350, "buy & install at list (250 + 100)")
+	assert_eq(m.buy_and_install_cost(chip, shooter), 175, "...and at the discount (125 + 50)")
+	# ⭐No buyer = LIST. An unknown buyer must never be handed a discount nobody proved they earned.
+	assert_eq(m.install_fee(chip), 100, "a buyer-less quote falls back to the list price")
+	m.stock.free()
+	m.free()
+	novice.inventory.free()
+	novice.free()
+	shooter.inventory.free()
+	shooter.free()
+	chip = null
+
+func test_the_till_charges_exactly_what_the_quote_said() -> void:
+	# ⭐THE POINT OF THE WHOLE SEAM (the pickpocket rule): the fee functions and the charge path must resolve the
+	# SAME buyer. The bug shape being pinned out is a screen advertising 50 zm while the wallet loses 100.
+	var m := _installer(0.5, 1.25, 10)
+	var chip := _discount_chip(200.0, &"gunplay", 0, 100.0)
+	var p := _player(1000.0)
+	p.stats = CharacterStats.new()
+	p.stats.gunplay = 4
+	p.inventory.add(chip, 1)
+	var quoted := m.install_fee(chip, p)
+	assert_eq(quoted, 50, "the shooter's quote is the discounted fee")
+	assert_true(m.install_carried(chip, p), "the install goes through")
+	assert_eq(p.money, 1000.0 - float(quoted), "the wallet lost exactly the QUOTED fee, not the list one")
+	assert_true(p.has_mechanic(&"grapple"), "and the ability was actually granted for that money")
+	_teardown(m, p)
+	chip = null

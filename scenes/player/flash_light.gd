@@ -3,8 +3,14 @@ extends SpotLight3D
 ## The player's FLASHLIGHT — a head-height torch toggled by the "Light" action (F OR L by default, left-stick
 ## click on a pad — F is shared with Interact and defers to it, L never does; see _unhandled_input). EVERY
 ## player has it from the first frame: it is part of the camera rig, NOT an unlockable Ability, so there is no
-## chip to buy and no has_mechanic gate. (This node used to drive the LASER SIGHT, which was an unlockable and
-## shared this key; the laser is gone and the key is the torch's alone.)
+## chip to buy and no has_mechanic gate.
+##
+## ⭐THIS NODE ONCE DROVE THE LASER SIGHT TOO, AND MUST NEVER AGAIN. The laser was an unlockable sharing this key,
+## and it was retired outright when the torch claimed the key for itself. It is back — as its OWN rig node,
+## scenes/player/laser_sight_rig.gd, with no key at all (own the chip and it is on). The two are opposites and
+## the split is load-bearing: a wide white shadow-casting lamp that COSTS you stealth, versus a 0.5-degree
+## energy-1000 pinprick that is exempt from the light meter. Do not re-merge them, and do not gate this node on
+## WeaponData.has_laser_sight — a torch answers unarmed and holstered; that flag belongs to the sight.
 ##
 ## ⭐IT FOLLOWS YOUR AIM WITH A LAG, ON PURPOSE. `top_level` (set in _ready) detaches it from the parent
 ## transform, so instead of rigidly welding to the camera it snaps its POSITION to `light_position` each frame
