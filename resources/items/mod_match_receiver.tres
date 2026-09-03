@@ -1,8 +1,8 @@
-[gd_resource type="Resource" script_class="Item" load_steps=8 format=3]
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://diiacklvlf4mt"]
 
 [ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1_item"]
-[ext_resource type="Script" path="res://scripts/items/weapon_mod.gd" id="2_mod"]
-[ext_resource type="Script" path="res://scripts/items/weapon_stat_delta.gd" id="3_delta"]
+[ext_resource type="Script" uid="uid://btl141eq2n8qa" path="res://scripts/items/weapon_mod.gd" id="2_mod"]
+[ext_resource type="Script" uid="uid://c5gtrmu67noes" path="res://scripts/items/weapon_stat_delta.gd" id="3_delta"]
 
 [sub_resource type="Resource" id="Delta_damage"]
 script = ExtResource("3_delta")
@@ -24,7 +24,6 @@ amount = 1.15
 
 [sub_resource type="Resource" id="Mod_match_receiver"]
 script = ExtResource("2_mod")
-slot = 0
 fits_weapon_ids = Array[StringName]([&"pistol", &"smg", &"sniper"])
 min_gunplay = 6
 deltas = Array[ExtResource("3_delta")]([SubResource("Delta_damage"), SubResource("Delta_rate"), SubResource("Delta_stamina")])
@@ -35,12 +34,7 @@ script = ExtResource("1_item")
 id = &"mod_match_receiver"
 display_name = "[PH] Match Receiver"
 description = "[PH] Hand-fitted trigger group, lapped bolt face, every tolerance closed up with a file and a lot of patience. Hits harder and faster, and asks more of the arms behind it."
-category = 3
 max_stack = 10
-weapon = null
-caliber = &""
-weight = 1.0
 value = 180.0
 weapon_mod = SubResource("Mod_match_receiver")
 grid_width = 2
-grid_height = 1
