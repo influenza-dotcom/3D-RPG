@@ -114,18 +114,20 @@ static func quest_rows(dir: String) -> Dictionary:
 ## exists on NO .tres is a third on-disk certainty, but proving it needs the folder scan this signature does not
 ## take — leave it to a caller that has one rather than widening a pure audit into a second scan.)
 ##
-## KEEP EACH LINE SHORT. The tab renders these joined onto its `_status` Label, which lives OUTSIDE the right
-## column's ScrollContainer with autowrap on — so every wrapped line is real, permanent height on a bottom panel
-## whose TabContainer already sizes itself to its tallest tab. Name the problem, the consequence, and the fix; the
-## reasoning belongs in this docstring, not on screen.
+## KEEP EACH LINE SHORT, and keep it in DESIGNER words -- no method names, no field names in backticks, no file
+## extensions. These land on the tab's `_status` Label, which is read by someone who never opens a script, and which
+## lives OUTSIDE the right column's ScrollContainer with autowrap on -- so every wrapped line is real, permanent
+## height. (The panel's height is the CURRENT tab's minimum plus whatever the editor's bottom splitter has already
+## grown to; it does not track the tallest tab, so a long line here costs height on THIS tab and keeps it.) Name the
+## problem, the consequence and the fix; the reasoning belongs in this docstring, not on screen.
 static func quest_start_warnings(quest: Quest) -> PackedStringArray:
 	var w := PackedStringArray()
 	if quest == null:
 		return w  # nothing assigned is not an error — "(none)" is a legitimate authored state
 	if quest.id == &"":
-		w.append("Quest `id` is BLANK — start_quest returns immediately, so this choice starts NOTHING. Set `id` on the .tres (Quests tab).")
+		w.append("this quest has no id, so picking the choice starts nothing -- give it one on the Quests tab.")
 	if quest.prereq_quest_id != &"":
-		w.append("Prereq: '%s' must be COMPLETED first or this choice starts nothing — start_quest refuses silently." % String(quest.prereq_quest_id))
+		w.append("it only starts after quest '%s' is completed -- until then, picking the choice does nothing." % String(quest.prereq_quest_id))
 	return w
 
 

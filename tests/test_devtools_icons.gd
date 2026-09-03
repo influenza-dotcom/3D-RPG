@@ -218,3 +218,19 @@ func test_icon_view_constructs() -> void:
 	assert_not_null(v, "the Icons tab constructs (compiles + _init builds UI off-tree)")
 	assert_eq(v.name, "Icons")
 	v.free()
+
+
+## The bake's re-entrancy latch: EVERY exit path must clear _baking AND hand the button back with its real tooltip.
+## A bare tab is off-tree (and headless has no renderer), so the press takes one of the two early refusals -- which
+## is exactly the shape of exit that used to leave the button greyed for the rest of the session.
+func test_bake_refusal_releases_the_latch_and_re_enables_the_button() -> void:
+	var v = IconView.new()
+	v._on_bake_all()
+	assert_false(v._baking, "a refused bake clears the re-entrancy latch")
+	assert_false(v._bake_btn.disabled, "a refused bake hands the button back")
+	assert_eq(v._bake_btn.tooltip_text, IconView.BAKE_TIP, "the button gets its real tooltip back, not 'Baking now'")
+	assert_true(v._status.text.begins_with("Couldn't bake icons"),
+		"the refusal says so in plain words; got: %s" % v._status.text)
+	assert_eq(v._status.max_lines_visible, 2, "the status stays clamped to two lines (the panel height contract)")
+	assert_eq(v._status.tooltip_text, v._status.text, "every status write mirrors the whole line into the tooltip")
+	v.free()

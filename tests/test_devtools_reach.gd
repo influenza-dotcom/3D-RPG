@@ -386,6 +386,41 @@ func test_quest_start_sites_matches_all_three_component_fields() -> void:
 	assert_has(labels, "DialogueChoice.start_quest_on_choice", "the DialogueChoice start path is found")
 
 
+func test_quest_start_sites_captures_the_node_name_of_the_matched_block() -> void:
+	# The report row reads 'QuestStarter.quest on node "QuestBoard" in SliceTestLevel.tscn' so the designer can find
+	# the starter in the scene dock — the node name is what they type into its filter. It must come from the block
+	# the field was matched in (never a neighbouring node), and a site inside a [sub_resource] block (a
+	# DialogueChoice in a .tres) has no node to name, so it carries "".
+	var text := "[gd_scene format=3]\n" \
+		+ "[ext_resource type=\"Resource\" path=\"res://resources/quests/recover_the_package.tres\" id=\"9_quest\"]\n" \
+		+ "[node name=\"Decoy\" type=\"Node3D\" parent=\"Objects\"]\n" \
+		+ "[node name=\"QuestBoard\" type=\"Area3D\" parent=\"Objects\" groups=[\"interact\"]]\nquest = ExtResource(\"9_quest\")\n" \
+		+ "[node name=\"WalkIn\" type=\"Area3D\" parent=\"Objects\"]\nstart_quest = ExtResource(\"9_quest\")\n" \
+		+ "[sub_resource type=\"Resource\" id=\"Choice_1\"]\nstart_quest_on_choice = ExtResource(\"9_quest\")\n"
+	var sites := Reach.quest_start_sites(text)
+	assert_eq(sites.size(), 3, "three sites, one per block: %s" % str(sites))
+	var node_of := {}
+	for s in sites:
+		var sd := s as Dictionary
+		node_of[str(sd["label"])] = str(sd.get("node", "<missing>"))
+	assert_eq(str(node_of.get("QuestStarter.quest", "")), "QuestBoard", "the [node name=...] of the matched block is captured")
+	assert_eq(str(node_of.get("TriggerVolume.start_quest", "")), "WalkIn", "each site names ITS OWN node, not a neighbour's")
+	assert_eq(str(node_of.get("DialogueChoice.start_quest_on_choice", "x")), "", "a [sub_resource] block has no node name — \"\", never invented")
+
+
+func test_block_node_name_reads_only_a_node_header() -> void:
+	# The header line taken from scenes/levels/SliceTestLevel.tscn:347 (the real QuestStarter block), plus the shape
+	# with a groups=[...] attribute — its `]` must not cut the capture short (name is always the FIRST attribute).
+	assert_eq(Reach.block_node_name("[node name=\"QuestStarter\" type=\"Area3D\" parent=\"Objects/QuestBoard\" node_paths=PackedStringArray(\"highlight_target\")]\nscript = ExtResource(\"8_qstart\")\n"),
+		"QuestStarter", "the name attribute of a [node ...] header")
+	assert_eq(Reach.block_node_name("[node name=\"NavigationRegion3D\" type=\"NavigationRegion3D\" parent=\".\" groups=[\"navmesh\"]]\n"),
+		"NavigationRegion3D", "a groups=[...] bracket later on the header does not truncate the capture")
+	assert_eq(Reach.block_node_name("[sub_resource type=\"Resource\" id=\"Choice_1\"]\nstart_quest_on_choice = ExtResource(\"9_quest\")\n"),
+		"", "a [sub_resource] block is not a node")
+	assert_eq(Reach.block_node_name("[resource]\nid = &\"clear_the_block\"\n"), "", "nor is the [resource] block")
+	assert_eq(Reach.block_node_name("quest = ExtResource(\"9_quest\")\n"), "", "a bare fixture with no header names nothing")
+
+
 func test_quest_start_sites_ignores_quest_id_STRING_fields() -> void:
 	# The reference-vs-string distinction is the entire reason this module exists instead of another
 	# scan_wiring.QUEST_ID_FIELDS entry: an id string is not a start site, and `quest` must not match
@@ -507,7 +542,7 @@ func test_build_report_counts_verdicts_levels_dialogue_and_skips() -> void:
 		"levels_wired": ["res://scenes/levels/live.tscn", "res://scenes/levels/orphan.tscn"],
 		"levels_authored": ["res://scenes/levels/live.tscn", "res://scenes/levels/orphan.tscn", "res://scenes/levels/unwired.tscn"],
 		"quests": ["res://q/lonely.tres", "res://q/hosted.tres"],
-		"quest_sites": {"res://q/hosted.tres": [{"file": "res://scenes/levels/orphan.tscn", "field": "quest", "label": "QuestStarter.quest"}]},
+		"quest_sites": {"res://q/hosted.tres": [{"file": "res://scenes/levels/orphan.tscn", "field": "quest", "label": "QuestStarter.quest", "node": "QuestBoard"}]},
 		"quest_next": {},
 		"dialogue": ["res://d/never_reached.tres"],
 		"skipped": ["res://scenes/locked.tscn"],
@@ -531,6 +566,8 @@ func test_build_report_counts_verdicts_levels_dialogue_and_skips() -> void:
 	var hosted_sites: Array = hosted.get("sites", [])
 	assert_eq(hosted_sites.size(), 1, "its start site is reported so the designer knows WHERE to look")
 	assert_false(bool((hosted_sites[0] as Dictionary)["reachable"]), "and that the site's host is not reached")
+	assert_eq(str((hosted_sites[0] as Dictionary).get("node", "")), "QuestBoard",
+		"the scene node holding the starter rides through to the row, so the tab can print 'on node \"QuestBoard\"'")
 
 	assert_eq(int(counts["dialogue_total"]), 1, "the dialogue roster is the glue's survey")
 	assert_eq(int(counts["dialogue_reachable"]), 0, "nothing reachable points at it")
@@ -573,13 +610,71 @@ func test_reach_view_constructs() -> void:
 	var v = ReachView.new()
 	assert_not_null(v, "the Reach tab constructs (compiles + _init builds UI off-tree)")
 	assert_eq(v.name, "Reach")
+	# The Quest / Dialogue tabs' Check Reach buttons do Host.show_tab("Reach") then call("rescan") — a rename here
+	# would leave those buttons switching tabs and silently re-running nothing.
+	assert_true(v.has_method("rescan"), "rescan() is the public entry the Check Reach handoffs call")
+	assert_eq(v._status.text, ReachView.MSG_IDLE, "idle status is one imperative next step, not a blank line")
+	assert_eq(v._status.tooltip_text, v._status.text, "the status tooltip mirrors the text from the first write")
+	assert_eq(v._status.max_lines_visible, 2, "the status Label is clamped to two lines (the tooltip carries the rest)")
 	v.free()
 
 
+func test_reach_view_status_leads_with_the_verdict_then_the_counts() -> void:
+	# The status is the one line a designer reads without opening the tree, so its shape is pinned: the verdict in
+	# plain words FIRST, then the denominators — the numbers that make "0 problems out of 0 looked at" and "0 problems
+	# out of 378 looked at" read differently. Off-tree: _status_text is a pure formatter over a counts dictionary.
+	var v = ReachView.new()
+	var counts := {
+		"quests_ok": 1, "quests_total": 2, "levels_reachable": 1, "levels_total": 5,
+		"dialogue_reachable": 2, "dialogue_total": 3, "reached": 412,
+		"folder_scan_roots": 1, "folder_scan_members": 18, "skipped": 0,
+	}
+	var line: String = v._status_text(counts, 15, 378, false)
+	assert_true(line.begins_with("Quests: 1 of 2 can be started by a player -- Levels: 1 of 5 are loaded from the boot scene -- Conversations: 2 of 3 reachable."),
+		"the verdict leads, quests first (they are why the tab exists): %s" % line)
+	assert_true(line.ends_with("Scanned 378 files, walked 412 from 15 boot roots, 1 folder loaded whole (18 files), 0 unreadable, 0 start sites unmatched."),
+		"then the denominators in plain words with real plurals: %s" % line)
+	assert_false(line.contains("SUSPECT"), "no capitalised token outside the verdict words")
+	var bad: String = v._status_text(counts, 15, 378, true)
+	assert_true(bad.begins_with("Scan incomplete -- "), "a degenerate scan leads with the warning, in words: %s" % bad)
+	assert_true(bad.contains("press Scan again"), "and says what to do about it")
+	assert_true(bad.contains("Quests: 1 of 2"), "the verdict still follows, so the two-line Label shows both")
+	v.free()
+
+
+func test_reach_view_site_rows_name_the_node_and_the_file() -> void:
+	# 'QuestStarter.quest on node "QuestStarter" in SliceTestLevel.tscn' — file NAME in the row (the res:// path rides
+	# on the tooltip), the node so the designer can find it in the scene dock, and no node clause at all for a site
+	# inside a resource (a DialogueChoice), where there is no node to name.
+	assert_eq(ReachView._site_where("QuestStarter", SLICE_LEVEL), "on node \"QuestStarter\" in SliceTestLevel.tscn",
+		"a scene-node site names the node and the file, not the path")
+	assert_eq(ReachView._site_where("", OLD_MAN), "in old_man.tres", "a resource site names only the file")
+	assert_eq(ReachView._count(1, "hop", "hops"), "1 hop", "singular")
+	assert_eq(ReachView._count(5, "hop", "hops"), "5 hops", "plural — never a hand-rolled (s)")
+
+
+func test_reach_view_double_click_opens_a_scene_as_a_scene() -> void:
+	# A site row's file is the .tscn HOLDING the starter, so a double-click must land the designer IN that scene
+	# (open_scene_from_path), not merely show a PackedScene in the Inspector. Source-scanned like the other tab
+	# contracts: the handler needs a live editor. The Scan button and its "Scanning..." feedback are pinned beside it
+	# — Rescan/Refresh mean other things elsewhere in the panel, and a long walk with no feedback reads as a hang.
+	var src := FileAccess.get_file_as_string("res://addons/cybersunday_tools/dock_reach/reach_view.gd")
+	assert_ne(src, "", "reach_view.gd source should be readable")
+	assert_true(src.contains("EditorInterface.open_scene_from_path("), "a .tscn row opens as the edited scene")
+	assert_true(src.contains("EditorInterface.edit_resource("), "any other file keeps the Inspector / script editor route")
+	assert_true(src.contains("EditorInterface.select_file("), "and the file is revealed in the FileSystem dock")
+	assert_true(src.contains("text = \"Scan\""), "the one verb on this tab is Scan")
+	assert_false(src.contains("\"Rescan\""), "Rescan is retired — it is not a panel verb")
+	assert_true(src.contains("\"Scanning...\""), "the walk announces itself before it holds the main thread")
+	assert_true(src.contains("await get_tree().process_frame"), "and yields one frame so that announcement paints")
+
+
 func test_reach_view_bounds_its_own_height() -> void:
-	# The bottom-panel TabContainer sizes itself to its TALLEST tab, and this plugin has TWICE shipped a tab that
-	# pushed the panel past the bottom of the screen. Source-scanned rather than measured: an off-tree Control has
-	# no layout pass to measure, and what must not regress is the STRUCTURE (a small floor + no horizontal growth).
+	# A TabContainer's minimum is the CURRENT tab's minimum, and the editor's bottom splitter keeps whatever height it
+	# grew to — so one tall tab, once shown, leaves the panel tall for every tab after it, and this plugin has TWICE
+	# shipped a tab that pushed the panel past the bottom of the screen that way. Source-scanned rather than
+	# measured: an off-tree Control has no layout pass to measure, and what must not regress is the STRUCTURE (a
+	# small floor + no horizontal growth).
 	var src := FileAccess.get_file_as_string("res://addons/cybersunday_tools/dock_reach/reach_view.gd")
 	assert_ne(src, "", "reach_view.gd source should be readable")
 	assert_true(src.contains("ScrollContainer.SCROLL_MODE_DISABLED"),
@@ -714,6 +809,14 @@ func test_acceptance_quests_are_the_finding() -> void:
 	assert_has(sites, "QuestStarter.quest in %s" % SLICE_LEVEL,
 		"the finding must name the component AND the file, or the designer cannot act on it")
 	assert_eq(reachable_sites, 0, "no start site for it sits inside the closure")
+	# scenes/levels/SliceTestLevel.tscn:347 — `[node name="QuestStarter" type="Area3D" parent="Objects/QuestBoard"`
+	# holds the `quest = ExtResource("9_quest")` line, so the row can say WHICH node to look for in the scene dock.
+	var node_names: Array = []
+	for s in hosted.get("sites", []):
+		var sd := s as Dictionary
+		if str(sd["file"]) == SLICE_LEVEL:
+			node_names.append(str(sd.get("node", "")))
+	assert_has(node_names, "QuestStarter", "the real start site names the scene node holding it: %s" % str(node_names))
 
 	var counts: Dictionary = report["counts"]
 	assert_gte(int(counts["quests_no_start"]), 1, "at least one quest is unwired")

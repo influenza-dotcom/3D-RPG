@@ -12,9 +12,21 @@ const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")
 const FACTION_DIR := "res://resources/factions/"
 
 ## The full report — a list of human-readable content problems (empty = content is clean).
-static func run() -> PackedStringArray:
+## `items`: EVERY EDIT-TIME CALLER MUST PASS ONE. `ItemDb` is a NON-@tool autoload, so inside the editor it is a bare
+## Node with an EMPTY index — the old unconditional `ItemDb.all_items()` made every edit-time report PASS with the item
+## checks silently skipped. The `Engine.is_editor_hint()` guard below only stops that call from ERRORING; it cannot
+## invent a list, so an editor caller that passes nothing gets NO item checks at all. The three that exist all hand
+## over the shared folder scan (addons/cybersunday_tools/core/item_scan.gd): the CYBER SUNDAY Level tab, the Audit
+## tab's content domain (panel_audit/scan_content.gd), and the File -> Run wrapper scripts/tools/validate_content.gd
+## — File -> Run is an EditorScript, so is_editor_hint() is TRUE there too and the registry is NOT a fallback for it.
+## Only genuinely non-editor callers — `godot --headless -s scripts/tools/validate_all.gd`, a running game, GUT —
+## get the registry by passing nothing.
+static func run(items: Array = []) -> PackedStringArray:
 	var problems := PackedStringArray()
-	check_items(ItemDb.all_items(), problems)
+	var list: Array = items
+	if list.is_empty() and not Engine.is_editor_hint():
+		list = ItemDb.all_items()
+	check_items(list, problems)
 	_check_factions(problems)
 	_check_authored(problems)
 	return problems

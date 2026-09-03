@@ -1,11 +1,17 @@
 extends GutTest
 
 ## Unified Content Browser (plugin "Browse" tab) -- exercises the PURE browse_scan.gd helper: the search filter (over
-## in-memory fixtures, no disk) and the grouped scan (against the real resources/* tree). EditorInterface / edit_resource
-## / select_file is editor-only and is NOT exercised here (it can't run headless). The @tool Control itself isn't
-## instantiated (its _ready builds widgets that want a live tree); the logic under test is all in browse_scan.
+## in-memory fixtures, no disk) and the grouped scan (against the real resources/* tree). EditorInterface /
+## edit_resource / select_file is editor-only and is NOT exercised here (it can't run headless).
+##
+## The @tool Control IS constructed at the bottom now: every widget is built in _init (nothing waits on a live tree)
+## and the editor wiring sits behind Engine.is_editor_hint(), so .new() is safe headless. That buys the ROOTS test --
+## the one thing this tab can silently get wrong is listing FEWER folders than the generators write to, and a
+## designer then cannot find the file they just made in the one tab whose whole job is "find any content file".
 
 const Browse := preload("res://addons/cybersunday_tools/dock_browser/browse_scan.gd")
+const ContentBrowser := preload("res://addons/cybersunday_tools/dock_browser/content_browser.gd")
+const CONTENT_DOCK_PATH := "res://addons/cybersunday_tools/dock_content/content_dock.gd"
 
 
 # --- filter_paths: pure, disk-free ----------------------------------------------------------------------------
@@ -134,3 +140,44 @@ func test_maps_scan_is_dedicated_to_map_data() -> void:
 	assert_true(got.has("res://resources/maps/sample_map.tres"), "Maps should scan the dedicated maps folder")
 	for path in got:
 		assert_true(load(path) is MapData, "every resource in resources/maps should be MapData: %s" % path)
+
+
+# --- the tab itself -------------------------------------------------------------------------------------------
+
+## Browse must list EVERY folder the New tab writes into. content_dock names its targets as `*_DIR` constants, so
+## read them straight off that script instead of re-typing the list here: a NEW generator pointed at a new folder
+## then fails THIS test until Browse grows a group for it, rather than quietly going missing from the browser.
+func test_browse_roots_cover_every_generator_folder() -> void:
+	var listed: Array = []
+	var roots: Dictionary = ContentBrowser.ROOTS
+	for label in roots:
+		listed.append(String(roots[label]))
+	var checked := 0
+	# load()ed into a GDScript VALUE, not used as a class name: get_script_constant_map() is an instance method of
+	# Script, and calling it on a const-preloaded script identifier reads as a static call on the class.
+	var dock_script: GDScript = load(CONTENT_DOCK_PATH)
+	assert_not_null(dock_script, "the New tab's script should load")
+	var consts: Dictionary = dock_script.get_script_constant_map()
+	for key in consts:
+		if not String(key).ends_with("_DIR"):
+			continue
+		var folder: Variant = consts[key]
+		if not (folder is String):
+			continue
+		checked += 1
+		assert_true(listed.has(String(folder)),
+			"Browse's ROOTS must list the New tab's %s (%s); it lists %s" % [key, folder, str(listed)])
+	assert_gt(checked, 10, "the New tab's folder constants should have been found (matched %d of them)" % checked)
+
+
+## The tab constructs off-tree (GUT and the plugin's headless probe both do exactly this) under its pinned Control
+## name, and the host seam refuses cleanly. select_path is what cyber_panel.open_in_editor calls, so a crash -- or a
+## stray true for a file that is in no group -- would break the Blueprints / New "open it over there" handoff.
+func test_content_browser_constructs_and_refuses_paths_it_cannot_show() -> void:
+	var v = ContentBrowser.new()
+	assert_not_null(v, "the Browse tab constructs (compiles + _init builds every widget off-tree)")
+	assert_eq(v.name, "Browse", "the Control name is pinned -- cyber_panel paints the title and routes by this name")
+	assert_false(v.select_path(""), "a blank path is refused without starting a disk walk")
+	assert_false(v.select_path("res://resources/quests/zzz_not_a_real_quest.tres"),
+		"a file that is in no group is refused (the caller then opens the Inspector itself)")
+	v.free()

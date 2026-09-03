@@ -7,13 +7,19 @@ extends RefCounted
 ## deferred tr() localization sweep will wrap, so a raw literal at a paint site is debt this domain surfaces.
 ## The GUT guard (tests/test_player_text.gd) reuses scan_gd_text over a hand-maintained SHRINK-ONLY baseline,
 ## so the guard and this panel can never disagree — the panel lists the live debt, the test stops it growing.
-## run() returns Array[{severity, source, message}] rows like the other domains; scan_gd_text is the pure,
-## unit-testable core returning offender dicts {source, line, pattern, excerpt}.
+## run() returns Array[{severity, source, message, domain}] rows like the other domains (every row is domain "code":
+## the fix is a programmer moving a literal into PlayerText, so the Audit tab hides these under its default
+## "Scene + Content" view); scan_gd_text is the pure, unit-testable core returning offender dicts
+## {source, line, pattern, excerpt}, and to_finding() is the pure offender -> row step run() maps through. The
+## offender dict is what the GUT ratchet and scripts/tools/text_debt.gd read -- its shape never changes; the row
+## dict may only GAIN keys (validate_all.gd and cyber_cmds.gd print its message and severity).
 
 const ScanDisk := preload("res://addons/cybersunday_tools/panel_audit/scan_disk.gd")
 ## Shared one-read-per-file cache (see scan_cache.gd) — this domain re-reads the same .gd files scan_disk and
-## scan_menu_sound already read during one Re-scan. Inert outside audit_panel's begin()/end() window.
+## scan_menu_sound already read during one Scan. Inert outside audit_panel's begin()/end() window.
 const ScanCache := preload("res://addons/cybersunday_tools/panel_audit/scan_cache.gd")
+## The Audit tab's row-filter domain for every row this scanner emits.
+const DOMAIN := "code"
 
 ## Mirrors ScanDisk.SKIP_DIRS (+ tests_soak, excluded for the same reason as tests: soak fixtures are
 ## synthetic, not shipped content). addons/ is editor tooling — its strings paint editor surfaces.
@@ -77,12 +83,19 @@ static func run() -> Array:
 	_scan_dir("res://", offenders)
 	var out: Array = []
 	for o: Dictionary in offenders:
-		out.append({
-			"severity": "WARN",
-			"source": String(o["source"]),
-			"message": "Hardcoded player-facing string (line %d, %s): %s — move it into PlayerText (tests/test_player_text.gd ratchets the count down-only)." % [int(o["line"]), String(o["pattern"]), String(o["excerpt"])],
-		})
+		out.append(to_finding(o))
 	return out
+
+
+## One scan_gd_text offender ({source, line, pattern, excerpt}) -> the audit row the panel lists. PURE, so the row's
+## severity / message / domain are pinned by tests/test_devtools_audit.gd without a project walk.
+static func to_finding(o: Dictionary) -> Dictionary:
+	return {
+		"severity": "WARN",
+		"source": String(o["source"]),
+		"message": "Hardcoded player-facing string (line %d, %s): %s — move it into PlayerText (tests/test_player_text.gd ratchets the count down-only)." % [int(o["line"]), String(o["pattern"]), String(o["excerpt"])],
+		"domain": DOMAIN,
+	}
 
 
 ## Paint-site literal findings in one .gd's source text. Comments are masked FIRST via ScanDisk.mask_comments

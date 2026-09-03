@@ -1,7 +1,14 @@
 @tool
 extends VBoxContainer
 
-## CYBER SUNDAY "Bridge" tab -- the editor-side half of the external tool bridge.
+## CYBER SUNDAY "Bridge" tab -- the editor-side half of the external tool bridge. The panel shows it as "AI Bridge"
+## (cyber_panel.gd sets the display title; this Control's `name` stays "Bridge" and is pinned by tests).
+##
+## WHO IT IS FOR -- and who should ignore it. ONLY the operator of an attached AI assistant (Claude Code / MCP) ever
+## needs this tab. A designer who is not running one can skip it entirely, and the tab says so twice: as its idle
+## status and as the first line of its body while nothing is listening. Everything an operator needs to audit the
+## surface (bind address, auth, handshake file, protocol, the served-tool list, the CLI verbs that do NOT need it)
+## is folded away under a "Details" header so the head stays two short rows for everyone else.
 ##
 ## WHAT IT IS FOR: an external process (the MCP server at tools/mcp/cyber_mcp.py, driving an AI agent) can already
 ## read the project headlessly, but it cannot see the OPEN EDITOR: which scene is being edited, what is selected,
@@ -12,16 +19,17 @@ extends VBoxContainer
 ## SECURITY POSTURE, and why this tab exists at all instead of the plugin just always listening:
 ##  - The server is OFF BY DEFAULT. Nothing opens a port unless the user presses Start on this tab.
 ##  - bridge_server.gd binds 127.0.0.1 EXPLICITLY (the TCPServer default is "*", i.e. every interface -- that would
-##    be a network-reachable command channel into a game editor). This tab states the bind address on screen so the
-##    posture is verifiable at a glance, not just in a comment.
+##    be a network-reachable command channel into a game editor). This tab states the bind address on screen (banner
+##    + Details) so the posture is verifiable at a glance, not just in a comment.
 ##  - Every request must carry the random token from the handshake file (res://.godot/cyber_bridge.json), which is
 ##    written on Start and DELETED on Stop.
 ## The banner is deliberately loud: a user glancing at this tab must instantly know whether a port is open.
 ##
-## HEIGHT CONTRACT (load-bearing -- read dock_content/content_dock.gd's header for the same rule): the bottom-panel
-## TabContainer sizes itself to its TALLEST tab, so a tab that grows freely makes the whole editor unusable on a
-## short display. This plugin has shipped that bug twice. Therefore: head (button bar + banner + status) stays a
-## few fixed rows OUTSIDE the scroll, and everything that can grow -- the exposure summary and the rolling request
+## HEIGHT CONTRACT (load-bearing -- every tab in this panel follows it): a TabContainer's minimum is the CURRENT
+## tab's minimum, and the editor's bottom splitter keeps the height it grew to -- so one tab that grows freely, once
+## shown, leaves the shared bottom panel too tall for a short display until the user drags it back. This plugin has
+## shipped that bug twice. Therefore: head (button bar + banner + ONE line-capped status) stays a few fixed rows
+## OUTSIDE the scroll, and everything that can grow -- the summary, the folded Details block and the rolling request
 ## log -- lives in ONE ScrollContainer with a small height floor and horizontal scrolling disabled.
 
 const BridgeServer := preload("res://addons/cybersunday_tools/dock_bridge/bridge_server.gd")
@@ -30,7 +38,7 @@ const BridgeServer := preload("res://addons/cybersunday_tools/dock_bridge/bridge
 ## (see CLAUDE.md: ports/timeouts/UI caps in a dev tool are not designer-tunable values).
 const LOG_CAP := 50
 ## Height floor for the scrolled body. Small on purpose -- see the HEIGHT CONTRACT note above.
-const BODY_MIN_HEIGHT := 110.0
+const BODY_MIN_HEIGHT := 100.0
 ## How much of the token to show. Enough to match against the handshake file / an MCP error message, short enough
 ## that a screenshot or a screen-share of this panel does not hand out the whole credential.
 const TOKEN_PREVIEW_CHARS := 8
@@ -40,8 +48,26 @@ const TOKEN_PREVIEW_CHARS := 8
 ## above forbids. The untruncated text always survives in the request log and in the row's tooltip.
 const STATUS_ERROR_CHARS := 110
 ## Ceiling on the status row's painted lines. Caps Label.minsize.height at two rows no matter how the panel is
-## sized, so the head can never be the thing that makes this tab the tallest one in the bottom panel.
+## sized, so the head can never be the thing that grows the shared bottom panel.
 const STATUS_MAX_LINES := 2
+
+## The one sentence that tells a designer whether this tab concerns them at all. Painted as the idle status AND as
+## the first line of the body while nothing is listening, so it is read whichever place the eye lands first.
+const AUDIENCE_LINE := "Only used by an attached AI assistant (Claude Code / MCP). If you aren't running one, ignore this tab."
+## Title of the folded operator block in the body (bind / auth / handshake / protocol / tools served).
+const DETAILS_TITLE := "Details (for the AI assistant's operator)"
+
+## Button tooltips. Each action button carries an ENABLED text ("what it does. what it writes / read-only.") and a
+## DISABLED text naming what is missing, and _refresh_state() swaps them together with the enablement -- a greyed
+## button must explain itself, the post-click status is only the fallback. `%s` is the handshake FILE NAME, derived
+## from bridge_server.gd's path so the tooltip can never name a file the server does not write.
+const TIP_START := "Start listening for the attached AI assistant -- on this computer only, and nothing listens until you press it. Writes the handshake file %s (in the project's hidden .godot folder) so the assistant can find the port."
+const TIP_START_DISABLED := "Already listening -- press Stop first."
+const TIP_STOP := "Stop listening and close the port. Deletes the handshake file %s so no assistant can dial a dead port."
+const TIP_STOP_DISABLED := "Nothing is listening -- press Start first."
+const TIP_CLEAR := "Empty the served-requests log below. Does not stop the server."
+const TIP_PORT := "Only change this if %d is already taken. The AI assistant reads the real port from the handshake file, so it follows automatically."
+const TIP_PORT_LOCKED := "Locked while listening -- press Stop to change the port."
 
 const COLOR_ON_BG := Color(0.10, 0.33, 0.16)    ## listening: unmistakable green slab
 const COLOR_OFF_BG := Color(0.19, 0.19, 0.21)   ## off: flat neutral, reads as "nothing running"
@@ -78,16 +104,15 @@ func _init() -> void:
 	_server.request_served.connect(_on_request_served)
 
 	# --- head: the controls (outside the scroll, so they can never be scrolled away) ---
+	# Start / Stop tooltips are painted by _refresh_state() (they change with the enablement), not here.
 	var bar := HBoxContainer.new()
 	_start_btn = Button.new()
 	_start_btn.text = "Start"
-	_start_btn.tooltip_text = "Open the localhost command server and write the handshake file. Nothing listens until you press this."
 	_start_btn.pressed.connect(_on_start_pressed)
 	bar.add_child(_start_btn)
 
 	_stop_btn = Button.new()
 	_stop_btn.text = "Stop"
-	_stop_btn.tooltip_text = "Close the listener and DELETE the handshake file."
 	_stop_btn.pressed.connect(_on_stop_pressed)
 	bar.add_child(_stop_btn)
 
@@ -106,11 +131,11 @@ func _init() -> void:
 	# min/max BEFORE value: Range clamps on assignment, so setting the default first would snap it to 0.
 	_port_spin.value = BridgeServer.DEFAULT_PORT
 	_port_spin.custom_minimum_size = Vector2(96, 0)
-	_port_spin.tooltip_text = "Only change this if %d is already taken. The MCP server reads the real port from the handshake file, so it follows automatically." % BridgeServer.DEFAULT_PORT
 	bar.add_child(_port_spin)
 
 	var clear_btn := Button.new()
-	clear_btn.text = "Clear log"
+	clear_btn.text = "Clear Log"
+	clear_btn.tooltip_text = TIP_CLEAR
 	clear_btn.pressed.connect(_on_clear_pressed)
 	bar.add_child(clear_btn)
 	add_child(bar)
@@ -131,19 +156,23 @@ func _init() -> void:
 	_banner = Label.new()
 	_banner.add_theme_font_size_override("font_size", 16)
 	_banner.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# The banner is head geometry (outside the scroll), so its wrap is capped for the same reason the status row is:
+	# an uncapped autowrapped Label makes its own text the tab's minimum height.
+	_banner.max_lines_visible = STATUS_MAX_LINES
 	_banner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	banner_panel.add_child(_banner)
 	add_child(banner_panel)
 
-	# The detail row: handshake path + token fingerprint while listening, the reason while refused, an invitation
-	# while idle. It sits OUTSIDE the scroll (a user must not have to scroll to find out a port is open), which
-	# means it is head geometry and is therefore HARD-CAPPED at STATUS_MAX_LINES rows -- see the HEIGHT CONTRACT
-	# header note. Anything longer is clipped here and stays reachable via tooltip_text and the request log.
+	# The status row: the audience sentence while idle, the handshake file + token fingerprint while listening, the
+	# reason while refused. It sits OUTSIDE the scroll (a user must not have to scroll to find out a port is open),
+	# which means it is head geometry and is therefore HARD-CAPPED at STATUS_MAX_LINES rows -- see the HEIGHT
+	# CONTRACT header note. Anything longer is clipped here and stays reachable via tooltip_text and the request log.
 	_status = Label.new()
 	_status.modulate = Color(1, 1, 1, 0.75)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.max_lines_visible = STATUS_MAX_LINES
 	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status.mouse_filter = Control.MOUSE_FILTER_PASS  # a Label ignores the mouse by default, which also hides its tooltip
 	add_child(_status)
 
 	# --- body: everything that can GROW lives here, height-bounded (see the HEIGHT CONTRACT header note) ---
@@ -158,14 +187,32 @@ func _init() -> void:
 	body.add_theme_constant_override("separation", 4)
 	scroll.add_child(body)
 
-	# selection_enabled so the user can copy the handshake path straight out of the panel; bbcode off for the
-	# same reason content_dock's result dialog turns it off -- res:// paths must render literally.
+	# The two-line summary: who this tab is for, and what the current state means for the assistant. Repainted by
+	# _refresh_state(). selection_enabled so text can be copied straight out of the panel; bbcode off for the same
+	# reason content_dock's result dialog turns it off -- literal text must render literally.
 	_info = RichTextLabel.new()
 	_info.bbcode_enabled = false
 	_info.fit_content = true
 	_info.selection_enabled = true
 	_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.add_child(_info)
+
+	# The operator's audit block, FOLDED by default: it is the "what exactly is exposed" surface (bind address, auth,
+	# handshake path, protocol, every served tool) and it is the only place in this tab where full paths belong. A
+	# designer never has to read it; an operator opens it once. Static text, so it is painted once here rather than
+	# on every repaint -- every value in it is read from bridge_server.gd's consts, never retyped.
+	var details := FoldableContainer.new()
+	details.title = DETAILS_TITLE
+	details.folded = true
+	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_child(details)
+	var details_label := RichTextLabel.new()
+	details_label.bbcode_enabled = false
+	details_label.fit_content = true
+	details_label.selection_enabled = true
+	details_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	details_label.text = details_text()
+	details.add_child(details_label)
 
 	body.add_child(HSeparator.new())
 
@@ -305,6 +352,13 @@ static func clamp_line(s: String, budget: int) -> String:
 	return s.substr(0, budget) + "…"
 
 
+## The handshake file's bare name ("cyber_bridge.json"), for prose. Derived from bridge_server.gd's path so the
+## tooltips and status can never name a file the server does not actually write; the FULL path is shown only in
+## the folded Details block and in the status tooltip -- paths belong in tooltips, file names in prose.
+static func handshake_file() -> String:
+	return BridgeServer.HANDSHAKE_PATH.get_file()
+
+
 func _render_log() -> void:
 	if _log == null:
 		return
@@ -316,18 +370,22 @@ func _render_log() -> void:
 
 # --- state rendering -----------------------------------------------------------------------------------------
 
-## Repaint the banner / status / button enablement from the ONE source of truth (the server's own is_listening()),
-## so the UI can never claim a port is open after the listener dropped underneath it.
+## Repaint the banner / status / summary / button enablement from the ONE source of truth (the server's own
+## is_listening()), so the UI can never claim a port is open after the listener dropped underneath it.
 func _refresh_state() -> void:
 	var listening := _server != null and _server.is_listening()
+	# Enablement and tooltip move TOGETHER: a greyed button names what is missing, an enabled one says what it does.
 	if _start_btn != null:
 		_start_btn.disabled = listening
+		_start_btn.tooltip_text = TIP_START_DISABLED if listening else (TIP_START % handshake_file())
 	if _stop_btn != null:
 		_stop_btn.disabled = not listening
+		_stop_btn.tooltip_text = (TIP_STOP % handshake_file()) if listening else TIP_STOP_DISABLED
 	if _port_spin != null:
 		_port_spin.editable = not listening
+		_port_spin.tooltip_text = TIP_PORT_LOCKED if listening else (TIP_PORT % BridgeServer.DEFAULT_PORT)
 
-	# Built into locals first so the three widgets are written through ONE guarded block -- a half-painted banner
+	# Built into locals first so the widgets are written through ONE guarded block -- a half-painted banner
 	# (green slab, stale port) is the one lie this tab must never tell.
 	var banner_text := ""
 	var banner_bg := COLOR_OFF_BG
@@ -337,19 +395,22 @@ func _refresh_state() -> void:
 		# The bind address is READ from bridge_server.gd, never retyped. This banner is the user's only proof of
 		# the security posture, so it has to be derived from the const that actually reaches TCPServer.listen();
 		# a hardcoded "127.0.0.1" here would keep claiming localhost after someone widened the bind.
-		banner_text = "● LISTENING  —  %s:%d  (localhost only)" % [BridgeServer.BIND_ADDRESS, _server.port()]
+		banner_text = "● LISTENING -- %s:%d  (this computer only)" % [BridgeServer.BIND_ADDRESS, _server.port()]
 		banner_bg = COLOR_ON_BG
-		status_text = "Handshake: %s   ·   token %s…   ·   Stop deletes the handshake file." % [
-			BridgeServer.HANDSHAKE_PATH, _server.token().substr(0, TOKEN_PREVIEW_CHARS)]
-		status_full = status_text
+		status_text = "Started the Bridge -- wrote the handshake file %s (token starts %s…). Stop closes the port and deletes that file." % [
+			handshake_file(), _server.token().substr(0, TOKEN_PREVIEW_CHARS)]
+		# The full path rides the tooltip only (prose names the file, the tooltip carries where it lives).
+		status_full = status_text + "\nHandshake file: " + BridgeServer.HANDSHAKE_PATH
 	elif _last_error != "":
-		banner_text = "● OFF  —  start refused, no port is open"
+		# bridge_server.gd's message already reads "Couldn't bind <addr>:<port> -- <reason>. ..." -- it is the
+		# refusal, painted verbatim (clamped) so the operator sees the real cause, then the one next step.
+		banner_text = "● OFF -- start refused, no port is open"
 		banner_bg = COLOR_ERR_BG
-		status_text = "%s  Pick another port and press Start again — there is deliberately no fallback port." % clamp_line(_last_error, STATUS_ERROR_CHARS)
+		status_text = "%s  Pick another port and press Start again -- there is deliberately no fallback port." % clamp_line(_last_error, STATUS_ERROR_CHARS)
 		status_full = _last_error
 	else:
-		banner_text = "○ OFF  —  no port is open"
-		status_text = "Press Start to let an external tool talk to this editor. Nothing listens until you do."
+		banner_text = "○ OFF -- no port is open"
+		status_text = AUDIENCE_LINE
 		status_full = status_text
 
 	# Guarded like the widgets above: _refresh_state() is the one repaint entry point and must degrade rather than
@@ -362,31 +423,38 @@ func _refresh_state() -> void:
 		_status.text = status_text
 		_status.tooltip_text = status_full  # the untruncated message, since the row itself is line-capped
 	if _info != null:
-		_info.text = _exposure_text(listening)
+		_info.text = summary_text(listening)
 
 
-## The "what exactly is exposed" block. Spelled out rather than summarised: the whole point of a user-visible
-## on/off tab is that the user can audit the surface without reading bridge_server.gd.
-func _exposure_text(listening: bool) -> String:
+## The body's short summary: who the tab is for, and what the current state means for the assistant. While off it
+## LEADS with the audience sentence (the same one the idle status shows) so a designer who scrolled past the head
+## still gets the "ignore this" verdict first. Pure + static so it is checkable without an editor.
+static func summary_text(listening: bool) -> String:
+	if listening:
+		return "Listening for the attached AI assistant (Claude Code / MCP). It reads the handshake file, so it finds this port by itself -- press Stop when you are done and the file is deleted."
+	return AUDIENCE_LINE + "\n" + "While this is off the assistant cannot see the open editor: its editor tools answer with a message telling it to open this tab and press Start."
+
+
+## The folded "what exactly is exposed" block, for the assistant's operator. Spelled out rather than summarised:
+## the whole point of a user-visible on/off tab is that the operator can audit the surface without reading
+## bridge_server.gd. Every value is derived from bridge_server.gd's consts (bind address, handshake path, tool
+## names), not retyped: an audit surface that can drift from the code it describes is worse than no audit surface
+## at all. Pure + static, painted once at construction.
+static func details_text() -> String:
 	var lines := PackedStringArray()
-	# Derived from bridge_server.gd's const, not retyped: this block is an audit surface, and an audit surface that
-	# can drift from the code it describes is worse than no audit surface at all.
-	lines.append("Bind address:   %s only — never 0.0.0.0, so nothing on your network can reach it." % BridgeServer.BIND_ADDRESS)
+	lines.append("Bind address:   %s only -- never 0.0.0.0, so nothing on your network can reach it." % BridgeServer.BIND_ADDRESS)
 	lines.append("Auth:           every request must carry the random token from the handshake file; anything else is refused.")
 	lines.append("Handshake file: %s   (port + token + editor PID; written on Start, deleted on Stop)" % BridgeServer.HANDSHAKE_PATH)
 	lines.append("Protocol:       one connection = one JSON line in, one JSON line out, then close. No persistent sockets.")
 	lines.append("")
-	lines.append("Tools served (all read-only — none of them edits a scene or a resource):")
-	lines.append("  godot_fs_sync       tell the editor that files changed on disk (EditorFileSystem update_file/scan).")
-	lines.append("                      Without this, the editor's stale in-memory copy of an externally written .tres")
-	lines.append("                      silently wins on your next Ctrl+S.")
-	lines.append("  godot_editor_state  report the edited scene, the selected nodes, and the inspected resource.")
-	lines.append("  godot_reveal        open a resource in the Inspector / select a node in the edited scene.")
+	lines.append("Tools served (all read-only -- none of them edits a scene or a resource):")
+	lines.append("  %s tell the editor that files changed on disk (EditorFileSystem update_file/scan)." % BridgeServer.TOOL_FS_SYNC.rpad(20))
+	lines.append("                       Without this, the editor's stale in-memory copy of an externally written .tres")
+	lines.append("                       silently wins on your next Ctrl+S.")
+	lines.append("  %s report the edited scene, the selected nodes, and the inspected resource." % BridgeServer.TOOL_EDITOR_STATE.rpad(20))
+	lines.append("  %s open a resource in the Inspector / select a node in the edited scene." % BridgeServer.TOOL_REVEAL.rpad(20))
 	lines.append("")
-	if listening:
-		lines.append("The external MCP server (tools/mcp/cyber_mcp.py) reads the handshake file, so it finds this port by itself.")
-	else:
-		lines.append("While this is off, the MCP godot_* tools fail with a message telling the caller to open this tab and press Start.")
-		lines.append("The seven headless CLI verbs (catalog / audit / refs / graph / balance / list / describe) do NOT need it —")
-		lines.append("they shell out to scripts/tools/cyber.gd and never touch the editor.")
+	lines.append("The assistant's MCP server (tools/mcp/cyber_mcp.py) reads the handshake file, so it finds the port by itself.")
+	lines.append("The seven headless CLI verbs (catalog / audit / refs / graph / balance / list / describe) do NOT need the Bridge --")
+	lines.append("they shell out to scripts/tools/cyber.gd and never touch the editor.")
 	return "\n".join(lines)

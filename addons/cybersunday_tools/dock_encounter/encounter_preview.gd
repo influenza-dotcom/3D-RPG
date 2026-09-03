@@ -63,10 +63,12 @@ static func summarize(spawner) -> Dictionary:
 	return {"rows": rows, "total": total, "marker_count": marker_count, "attach_count": attach_count, "placement": placement}
 
 
-## A PackedScene's file basename (e.g. "NPC.tscn"), or "(none)" — the resource_path may be empty for a built scene.
+## A PackedScene's file basename (e.g. "NPC.tscn"), or a bracketed placeholder — the resource_path may be empty for a
+## scene built in memory. The placeholders are DESIGNER words (no field names, no engine spelling): encounter_view
+## renders them straight into a row, and "(no NPC scene set)" is what that row has to read.
 static func _scene_name(scene: PackedScene) -> String:
 	if scene == null:
-		return "(no npc_scene — definition spawns NOTHING)"
+		return "(no NPC scene set)"
 	var p := scene.resource_path
 	return p.get_file() if not p.is_empty() else "(unsaved scene)"
 

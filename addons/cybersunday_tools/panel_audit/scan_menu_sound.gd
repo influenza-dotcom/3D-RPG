@@ -23,15 +23,20 @@ extends RefCounted
 ## ChipInstaller._grant (reached only past the charge; its refusals are cued at the screen that owns the bool)
 ## and a never-gated act like StartMenu's new-run stamp, with no exemption list to maintain.
 ##
-## run() returns Array[{severity, source, message}] rows like the other domains; scan_gd_text is the pure,
-## unit-testable core returning offender dicts {source, line, func_name, cue}. The GUT guard
-## (tests/test_menu_sound_coverage.gd) reuses that core over a SHRINK-ONLY baseline, exactly as
-## tests/test_player_text.gd does over scan_text's — the panel lists the live debt, the test stops it growing.
+## run() returns Array[{severity, source, message, domain}] rows like the other domains (every row is domain "code":
+## pairing a cue is a programmer's edit, so the Audit tab hides these under its default "Scene + Content" view);
+## scan_gd_text is the pure, unit-testable core returning offender dicts {source, line, func_name, cue}, and
+## to_finding() is the pure offender -> row step run() maps through. The GUT guard
+## (tests/test_menu_sound_coverage.gd) reuses the offender core over a SHRINK-ONLY baseline, exactly as
+## tests/test_player_text.gd does over scan_text's — the panel lists the live debt, the test stops it growing. The
+## offender dict's shape never changes; the row dict may only GAIN keys (cyber_cmds.gd prints it).
 
 const ScanDisk := preload("res://addons/cybersunday_tools/panel_audit/scan_disk.gd")
 ## Shared one-read-per-file cache (see scan_cache.gd) — this domain re-reads the same .gd files scan_disk and
-## scan_text already read during one Re-scan. Inert outside audit_panel's begin()/end() window.
+## scan_text already read during one Scan. Inert outside audit_panel's begin()/end() window.
 const ScanCache := preload("res://addons/cybersunday_tools/panel_audit/scan_cache.gd")
+## The Audit tab's row-filter domain for every row this scanner emits.
+const DOMAIN := "code"
 
 ## Mirrors ScanText.SKIP_DIRS. tests/ and tests_soak/ call the play_* seams to ASSERT on them (a test that
 ## fires a commit with no denial is not a blindspot), and addons/ is editor tooling with no menu audio at all.
@@ -76,13 +81,20 @@ static func run() -> Array:
 	_scan_dir("res://", offenders)
 	var out: Array = []
 	for o: Dictionary in offenders:
-		out.append({
-			"severity": "WARN",
-			"source": String(o["source"]),
-			"message": "Silent refusal path (line %d, %s in %s): the success cue is branch-gated but the function never calls MenuStyle.play_denied() — the refused press makes no sound. Pair them, or hoist the cue out of the branch if it can never be refused." % [
-				int(o["line"]), String(o["cue"]), String(o["func_name"])],
-		})
+		out.append(to_finding(o))
 	return out
+
+
+## One scan_gd_text offender ({source, line, func_name, cue}) -> the audit row the panel lists. PURE, so the row's
+## severity / message / domain are pinned by tests/test_devtools_audit.gd without a project walk.
+static func to_finding(o: Dictionary) -> Dictionary:
+	return {
+		"severity": "WARN",
+		"source": String(o["source"]),
+		"message": "Silent refusal path (line %d, %s in %s): the success cue is branch-gated but the function never calls MenuStyle.play_denied() — the refused press makes no sound. Pair them, or hoist the cue out of the branch if it can never be refused." % [
+			int(o["line"]), String(o["cue"]), String(o["func_name"])],
+		"domain": DOMAIN,
+	}
 
 
 static func _scan_dir(path: String, out: Array) -> void:

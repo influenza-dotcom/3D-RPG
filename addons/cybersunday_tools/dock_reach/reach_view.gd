@@ -13,28 +13,37 @@ extends VBoxContainer
 ## THIS FILE IS THE THIN GLUE — every decision lives in reach_scan.gd, which is PURE (plain RefCounted, statics, no
 ## EditorInterface, no scene tree, no DirAccess) and GUT-driven on fixture strings. The glue owns exactly four
 ## editor-shaped things and nothing else: the roots read (ProjectSettings), the recursive res:// walk, the Tree
-## render, and the double-click jump. Same split as content_stats.gd + stats_view.gd.
+## render, and the double-click handoff. Same split as content_stats.gd + stats_view.gd.
+##
+## WHO READS IT: a designer who builds the game in the editor and does not read GDScript. So every row names a file
+## by its FILE NAME (the res:// path rides on the row's tooltip, with the double-click hint), every finding says what
+## to do next in editor words (which tab, which component), and capitals are kept for the verdict tokens.
+##
+## HANDOFFS. Public `rescan()` is what the Quest / Dialogue tabs' Check Reach buttons call after Host.show_tab
+## ("Reach") — the same routine the Scan button and the lazy first reveal run. Double-clicking a row whose file is a
+## .tscn opens THAT SCENE in the editor (EditorInterface.open_scene_from_path) so the designer lands in the level that
+## holds the starter; any other file opens in the Inspector / script editor (edit_resource); both then reveal the
+## file in the FileSystem dock (select_file). Those are the only editor mutations in this file, and they write nothing.
 ##
 ## READ-ONLY, and it must stay that way. No ResourceSaver, no FileAccess.WRITE, no ProjectSettings.save anywhere
 ## below — so the plugin's write contract (preview / confirm / report changed paths) does not apply and cannot be
-## got wrong. The single editor mutation in the file is EditorInterface.edit_resource + select_file on a
-## double-click, which opens a file in the Inspector and writes nothing.
+## got wrong.
 ##
 ## The survey is TEXT-ONLY on purpose: the designer usually has the editor open, and a load() during a reimport can
 ## hand back null or an empty PackedScene ("node count is 0"). A report built over a file nobody could read is the
-## exact lie this tab exists to catch, so an unreadable file becomes a SKIP row, never a silent clean result.
+## exact lie this tab exists to catch, so an unreadable file becomes an "unreadable" row, never a silent clean result.
 ##
 ## ------------------------------------------------------------------------------------------------------------
 ## HOW TO READ AN ALL-GREEN RESULT: with suspicion. This project has a scar precisely here — text_debt.gd once
 ## printed "TOTAL: 0" while 132 of 267 strings were unauthored placeholders. An empty Reach report is far more
 ## likely to mean the scan UNDER-fired (the folder-scan guard over-approximated, or the walk surveyed nothing) than
-## that the game is fully wired. That is why the status line always prints the DENOMINATORS it scanned — roots,
-## files reached, files surveyed, folder-scan roots, unresolved sites — beside what it found, prefixes SUSPECT when
-## a denominator is degenerate, AND repeats that verdict as the first row INSIDE the scrolled body (the status Label
-## is the one control this tab cannot height-bound, so on a narrow panel it is the one that gets squeezed; the
-## warning must survive that). "0 problems out of 0 things looked at" and "0 problems out of 378 things looked at"
-## must never read the same. Never "fix" a suspiciously clean report by widening a guard; go find what the scan
-## failed to walk.
+## that the game is fully wired. That is why the status line always prints the DENOMINATORS it scanned — files
+## scanned, files walked, boot roots, folders loaded whole, unreadable files, unmatched start sites — beside what it
+## found, leads with "Scan incomplete" when a denominator is degenerate, AND repeats that warning as the first row
+## INSIDE the scrolled body (the status Label is clamped to two lines, so on a narrow panel it is the one control
+## that gets squeezed; the warning must survive that). "0 problems out of 0 things looked at" and "0 problems out of
+## 378 things looked at" must never read the same. Never "fix" a suspiciously clean report by widening a guard; go
+## find what the scan failed to walk.
 
 const Reach := preload("res://addons/cybersunday_tools/dock_reach/reach_scan.gd")
 ## The audit panel's one-read-per-file cache. Its text_of is passed STRAIGHT into the closure as the injected
@@ -57,7 +66,7 @@ const SKIP_DIRS: Array[String] = [".godot", ".git"]
 const SURVEY_EXTS: Array[String] = ["tscn", "tres"]
 
 ## Every .tscn directly under here joins the level roster even when no LevelData points at it, so an authored-but-
-## unwired level reads as UNREACHABLE instead of quietly vanishing from the report.
+## unwired level reads as a WARN row instead of quietly vanishing from the report.
 const LEVELS_DIR := "res://scenes/levels"
 
 ## PRE-GATE for the quest-start-site pass, and it is EXACT rather than a heuristic: all three start fields
@@ -77,9 +86,11 @@ const CLASS_LEVEL_DATA := "LevelData"
 const CLASS_QUEST := "Quest"
 const CLASS_DIALOGUE := "DialogueResource"
 
-## Height floor for the scrolled body. The bottom-panel TabContainer sizes itself to its TALLEST tab, and this
-## plugin has twice shipped a tab that pushed the editor's panel past the screen — so the body's minimum is small
-## and fixed, and the head + status rows live OUTSIDE the scroll where they are always readable.
+## Height floor for the scrolled body. A TabContainer's minimum is the CURRENT tab's minimum, and the editor's
+## bottom splitter keeps whatever height it grew to — so one tall tab, once shown, leaves the panel tall for every
+## tab after it. This plugin has twice shipped a tab that pushed the editor's panel past the screen that way, so the
+## body's minimum is small and fixed, and the head + status rows live OUTSIDE the scroll where they are always
+## readable.
 const BODY_MIN_HEIGHT := 110.0
 
 const COLOR_HEAD := Color(0.6, 0.85, 1.0)
@@ -88,19 +99,43 @@ const COLOR_WARN := Color(1.0, 0.82, 0.3)
 const COLOR_ERROR := Color(1.0, 0.42, 0.42)
 const COLOR_DIM := Color(0.72, 0.72, 0.72)
 
+## Designer-facing strings. Files are named by file name (the res:// path rides on the row tooltip), the next step is
+## always stated in editor words, and the one verb for this tab is Scan — never Rescan / Refresh, which mean other
+## things elsewhere in the panel (Refresh = re-read a list, Reload = replace an open document).
+const SCAN_TIP := "Walks from the boot scene through every level, quest and conversation and reports what a player can actually get to. Read-only."
+const MSG_IDLE := "Press Scan to see what a player can reach from the boot scene."
+const MSG_SCANNING := "Scanning..."
+## The degenerate-scan warning. The FULL wording is the first row inside the scrolled body (where nothing squeezes it);
+## the status line carries the short form ahead of the verdict, because the Label is clamped to two lines.
+const MSG_SUSPECT := "Scan incomplete -- one of the counts came back empty. That usually means the editor was still importing; press Scan again."
+const MSG_SUSPECT_MORE := "If it persists, ask a programmer to check the boot scene and the file walk."
+const MSG_STATUS_SUSPECT := "Scan incomplete -- one of the counts came back empty; press Scan again."
+## The boot-chain head when NO level is reachable: build_report then aims the chain at the deepest file the walk
+## touched, which is not a route into the game and must never be read as one.
+const MSG_FALLBACK := "no level is reachable -- this shows how far the walk got, not a route into the game"
+const MSG_NOTHING_REACHED := "Nothing reached -- the boot scene resolved to no file. That is a scan problem, not a clean project; press Scan again."
+## Under a quest with no start site anywhere: the two ways a designer wires one, in the words of the tabs they use.
+const MSG_NO_START_HINT := "Nothing starts this quest yet. Start it from a conversation: Dialogue -> pick the conversation -> pick a choice -> Start quest. Or from the world: select a node in the scene -> Palette -> QuestStarter (aim + E board) or TriggerVolume (walk-in) -> set its quest to this file."
+
 var _tree: Tree = null
 var _status: Label = null
+var _scan_btn: Button = null
 
-## Start sites whose ExtResource id resolved to no `path=` row (a uid-only ext_resource row). Kept so they can be
-## SHOWN rather than dropped: a dropped site would silently downgrade a wired quest to "NO START SITE", and an
+## Start sites whose quest link resolved to no file (a uid-only ext_resource row), as [{text, file}]. Kept so they
+## can be SHOWN rather than dropped: a dropped site would silently downgrade a wired quest to "NO START SITE", and an
 ## invented finding is how a report loses a designer's trust.
 var _unresolved_sites: Array = []
 
 ## PL6 lazy first-reveal latch: the project walk runs the first time the tab is actually SHOWN, not at panel
 ## construction. cyber_panel builds every tab eagerly on each plugin reload, so without this a plugin toggle would
 ## fan out a full res:// walk for a tab nobody clicked. Only the selected tab is visible, so "first reveal" means
-## "the first time the designer opens Reach"; Rescan re-runs it on demand after that.
+## "the first time the designer opens Reach"; Scan re-runs it on demand after that.
 var _revealed := false
+
+## True from the moment a scan is requested (Scan, the first reveal, or another tab's Check Reach) until the report
+## is painted. It spans the one-frame yield that lets "Scanning..." paint, and a second request landing inside that
+## frame is folded into the walk already queued — the walk reads disk AFTER the yield, so it is just as fresh.
+var _scanning := false
 
 
 func _init() -> void:
@@ -109,19 +144,21 @@ func _init() -> void:
 
 	# --- head: OUTSIDE the scroll, so the controls never scroll out from under the user -------------------------
 	var bar := HBoxContainer.new()
-	var rescan := Button.new()
-	rescan.text = "Rescan"
-	rescan.tooltip_text = "Trace what the boot scene reaches: main_scene + every autoload, then every res:// reference transitively. Read-only — reports, writes nothing."
-	rescan.pressed.connect(_rescan)
-	bar.add_child(rescan)
+	_scan_btn = Button.new()
+	_scan_btn.text = "Scan"
+	_scan_btn.tooltip_text = SCAN_TIP
+	_scan_btn.pressed.connect(rescan)
+	bar.add_child(_scan_btn)
 	add_child(bar)
 
-	# The status line is its OWN full-width row (not wedged beside the button) and autowraps, so the long
-	# denominators-and-findings sentence wraps across the panel instead of shoving the button off the right edge.
+	# The status line is its OWN full-width row (not wedged beside the button), autowraps, and is clamped to TWO
+	# lines so a long verdict can never grow the head; the full text is mirrored onto its tooltip on every write.
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status.max_lines_visible = 2
 	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_status.modulate = Color(1, 1, 1, 0.75)
+	_status.mouse_filter = Control.MOUSE_FILTER_PASS  # a Label ignores the mouse by default, which also hides its tooltip
 	add_child(_status)
 
 	# --- body: bounded + scrolled -------------------------------------------------------------------------------
@@ -129,8 +166,8 @@ func _init() -> void:
 	# custom_minimum_size is the only vertical minimum this tab contributes to the TabContainer, no matter how many
 	# findings the Tree holds. The Tree keeps SIZE_EXPAND_FILL, which a Godot 4 ScrollContainer honours by stretching
 	# an expanding child to the container's size — so the Tree fills the panel and the outer scroll never engages.
-	# Horizontal scrolling is DISABLED because a long res:// path must never widen the bottom panel; the Tree elides
-	# and scrolls those rows internally, and every row carries its full text as a tooltip.
+	# Horizontal scrolling is DISABLED because a long row must never widen the bottom panel; the Tree elides and
+	# scrolls those rows internally, and every row carries its full text (plus the file's path) as a tooltip.
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -146,25 +183,45 @@ func _init() -> void:
 	_tree.item_activated.connect(_on_activated)  # double-click / Enter
 	scroll.add_child(_tree)
 
-	_status.text = "Click Rescan to trace what the boot scene reaches."
+	_set_status(MSG_IDLE)
 
 	visibility_changed.connect(_on_visibility_changed)
 	_on_visibility_changed()  # lazy: scan on first reveal, not at panel construction
 
 
-## Lazy first-reveal: run the project walk ONCE, the first time the tab is actually shown in the tree.
+## Lazy first-reveal: run the project walk ONCE, the first time the tab is actually shown in the tree. In-tree by
+## definition, so rescan()'s one-frame yield applies here too and "Scanning..." paints before the walk.
 func _on_visibility_changed() -> void:
 	if is_visible_in_tree() and not _revealed:
 		_revealed = true
-		_rescan()
+		rescan()
 
 
 # ================================================================================================================
 # THE SCAN
 # ================================================================================================================
 
+## PUBLIC. Re-run the whole report. The Scan button, the lazy first reveal, and the Quest / Dialogue tabs' Check
+## Reach (Host.show_tab("Reach") then call("rescan")) all land here. Says "Scanning..." and greys the button first,
+## then yields ONE frame so the editor paints that before the synchronous project walk holds the main thread (~380
+## serialized files read, plus the closure). The yield is in-tree only — a bare (GUT / headless) construction never
+## awaits, which keeps _init await-free and editor-call-free. Re-entrant requests during the yield are folded into
+## the queued walk (see _scanning).
+func rescan() -> void:
+	if _scanning:
+		return
+	_scanning = true
+	_scan_btn.disabled = true
+	_set_status(MSG_SCANNING)
+	if is_inside_tree():
+		await get_tree().process_frame
+	_run_scan()
+	_scan_btn.disabled = false
+	_scanning = false
+
+
 ## One pass: read the boot roots, survey the serialized files on disk, run the closure, render the report.
-func _rescan() -> void:
+func _run_scan() -> void:
 	var roots := boot_roots()
 	var survey := _survey()
 	var found: Dictionary = survey["found"]
@@ -203,8 +260,8 @@ static func boot_roots() -> Array:
 ## is REACHED, which is the closure's job). Returns {found, surveyed, unresolved}:
 ##   found      the bundle build_report consumes (see its docstring for the key contract)
 ##   surveyed   how many serialized files were actually read — the denominator that tells an empty report from a
-##              clean one, and the reason the status line can say "0 problems out of 378 looked at"
-##   unresolved start sites whose ExtResource id had no resolvable `path=` row, kept for display
+##              clean one, and the reason the status line can say "scanned 378 files" beside "0 unreadable"
+##   unresolved start sites whose quest link had no resolvable `path=` row, as [{text, file}] ready to render
 func _survey() -> Dictionary:
 	var files: Array = []
 	_walk("res://", files)
@@ -225,14 +282,15 @@ func _survey() -> Dictionary:
 			levels_authored.append(path)
 		var text := ScanCache.text_of(path)
 		if text.is_empty():
-			# Unreadable, or mid-reimport. Surfaced as a SKIP: a file nobody read cannot be evidence of anything,
-			# least of all of a clean project.
+			# Unreadable, or mid-reimport. Surfaced as an "unreadable" row: a file nobody read cannot be evidence of
+			# anything, least of all of a clean project.
 			skipped.append(path)
 			continue
 		surveyed += 1
 
-		# Quest START sites, project-wide and INVERTED to {quest: [{file, field, label}]}. `file` is what the
-		# reachability test keys on — a start site only counts if the file HOLDING it is itself reachable.
+		# Quest START sites, project-wide and INVERTED to {quest: [{file, field, label, node}]}. `file` is what the
+		# reachability test keys on — a start site only counts if the file HOLDING it is itself reachable; `node` is
+		# the scene node holding it, carried through so the row can name it.
 		# PRE-GATED on QUEST_FIELD_SUBSTRING (see that const): an exact skip, not a sampling heuristic, and the
 		# difference between a snappy button and a multi-second stall on the editor's main thread.
 		var sites: Array = Reach.quest_start_sites(text) if QUEST_FIELD_SUBSTRING in text else []
@@ -240,13 +298,19 @@ func _survey() -> Dictionary:
 			var sd := site as Dictionary
 			var quest_path := str(sd.get("path", ""))
 			var label := str(sd.get("label", ""))
+			var node := str(sd.get("node", ""))
 			if quest_path.is_empty():
-				unresolved.append("%s in %s (ExtResource \"%s\" — no path= row)" % [label, path, str(sd.get("id", ""))])
+				unresolved.append({
+					"text": "%s %s -- the quest it points at could not be matched to a file (link \"%s\")" % [
+						label, _site_where(node, path), str(sd.get("id", "")),
+					],
+					"file": path,
+				})
 				continue
 			if not quest_sites.has(quest_path):
 				quest_sites[quest_path] = []
 			(quest_sites[quest_path] as Array).append({
-				"file": path, "field": str(sd.get("field", "")), "label": label,
+				"file": path, "field": str(sd.get("field", "")), "label": label, "node": node,
 			})
 
 		if path.get_extension() != "tres":
@@ -308,7 +372,7 @@ func _walk(dir: String, out_files: Array) -> void:
 ## nothing references them by path. [] for a folder that is not on disk.
 ##
 ## `.import` and `.uid` sidecars are skipped: both are engine metadata for a file already listed beside them, so
-## marking one reached would inflate the closure's count and the "sparing N file(s)" receipt without naming
+## marking one reached would inflate the closure's count and the "loaded whole (N files)" receipt without naming
 ## anything a designer can act on. (A scanned folder holding .gd files — abilities resolve by filename — is exactly
 ## where the .gd.uid sidecars would otherwise double the count.)
 func _dir_members(dir: String) -> Array:
@@ -337,14 +401,14 @@ func _render(report: Dictionary, roots_n: int, surveyed: int) -> void:
 	var counts: Dictionary = report.get("counts", {})
 	var suspect := _is_suspect(counts, roots_n, surveyed)
 
-	# The SUSPECT verdict is repeated as the FIRST row inside the scrolled body, not left to the status Label alone.
-	# The head rows sit OUTSIDE the scroll (so the controls never scroll away), which means the Label is the one
-	# control this tab cannot height-bound: on a narrow bottom panel it wraps, and it is the first thing a designer
-	# squeezes. The one sentence that must never be lost is "this is evidence of a broken scan", so it lives here too,
-	# where the ScrollContainer bounds it and it reads before every count below it.
+	# The "Scan incomplete" warning is repeated as the FIRST row inside the scrolled body, not left to the status
+	# Label alone. The head rows sit OUTSIDE the scroll (so the controls never scroll away), which means the Label is
+	# clamped to two lines and is the first thing a narrow bottom panel squeezes. The one sentence that must never be
+	# lost is "this is evidence of a broken scan", so it lives here too, where the ScrollContainer bounds it and it
+	# reads before every count below it.
 	if suspect:
-		var banner := _row(root, "SUSPECT — a denominator below is degenerate: this report is evidence of a broken scan, not of a clean project.", COLOR_ERROR)
-		_row(banner, "Check the boot roots and the res:// walk before believing any row. Do NOT widen the folder-scan guard to make it go green — go find what the scan failed to walk.", COLOR_ERROR)
+		var banner := _row(root, MSG_SUSPECT, COLOR_ERROR)
+		_row(banner, MSG_SUSPECT_MORE, COLOR_ERROR)
 
 	_render_chain(root, report, counts)
 	_render_levels(root, report, counts)
@@ -353,17 +417,12 @@ func _render(report: Dictionary, roots_n: int, surveyed: int) -> void:
 	_render_folder_roots(root, report, counts)
 	_render_skips(root, report, counts)
 
-	var full_chain: Array = report.get("chain_full", [])
-	_status.text = _status_text(counts, roots_n, surveyed, full_chain.size(), suspect)
-	# Horizontal scrolling is disabled and the panel can be narrow, so the whole line is also the tooltip — a wrapped
-	# or clipped denominator is still readable in full on hover.
-	_status.tooltip_text = _status.text
-	_status.modulate = Color(1, 0.7, 0.7) if suspect else Color(1, 1, 1, 0.75)
+	_set_status(_status_text(counts, roots_n, surveyed, suspect), suspect)
 
 
 ## The chain the closure actually FOLLOWED, printed. A reachability gauge nobody can audit is a green light nobody
-## should trust — so the readable content chain heads the report (under the SUSPECT banner, when there is one), and
-## the full chain (including the .gd glue scripts that carried each edge) hangs underneath it for anyone checking
+## should trust — so the readable content chain heads the report (under the "Scan incomplete" warning, when there is
+## one), and the full chain (including the scripts that carried each edge) hangs underneath it for anyone checking
 ## the tab's work.
 func _render_chain(root: TreeItem, report: Dictionary, counts: Dictionary) -> void:
 	var chain: Array = report.get("chain", [])
@@ -373,52 +432,63 @@ func _render_chain(root: TreeItem, report: Dictionary, counts: Dictionary) -> vo
 	# one — an unlabelled fallback is precisely the "green gauge nobody should trust" this section exists to prevent.
 	var leaf := str(report.get("chain_leaf", ""))
 	var fallback := not chain.is_empty() and _int(counts, "levels_reachable") == 0
-	var title := ("Boot chain: %d hop(s)" % chain.size()) if leaf.is_empty() else ("Boot chain to %s: %d hop(s)" % [leaf, chain.size()])
+	# FILES, not hops. `chain` is content_chain(full) — the .gd glue hops have already been ELIDED from it, so its
+	# size is neither the number of arrows below it (that is size - 1) nor the depth the level rows print (that one
+	# counts the elided script hops too). Counting it as "hops" made the header contradict both. It counts exactly
+	# the rows hanging under it, so that is what it says. The level rows keep "hops" for `depth`, which really is one.
+	var files := _count(chain.size(), "file", "files")
+	var title := "Boot chain: %s" % files
 	if fallback:
-		title += "  — FALLBACK: no level is reachable, so this is the deepest path the walk followed, NOT a route to a playable level"
+		title = "Boot chain (%s, ending at %s): %s" % [files, leaf.get_file(), MSG_FALLBACK]
+	elif not leaf.is_empty():
+		title = "Boot chain to %s: %s" % [leaf.get_file(), files]
 	var head_color := COLOR_ERROR
 	if not chain.is_empty():
 		head_color = COLOR_WARN if fallback else COLOR_HEAD
 	var head := _row(root, title, head_color, (leaf if not leaf.is_empty() else null))
 	if chain.is_empty():
-		_row(head, "NOTHING REACHED — the roots resolved to no file. That is a scan failure, not a clean project.", COLOR_ERROR)
+		_row(head, MSG_NOTHING_REACHED, COLOR_ERROR)
 		return
 	for i in chain.size():
 		var path := str(chain[i])
 		var arrow := "" if i == 0 else "-> "
-		_row(head, arrow + path, COLOR_OK, path)
+		_row(head, arrow + path.get_file(), COLOR_OK, path)
 	head.set_collapsed(false)
-	var detail := _row(head, "full chain incl. .gd glue: %d hop(s)" % full.size(), COLOR_DIM)
+	var detail := _row(head, "Full chain (including scripts): %s" % _count(full.size(), "file", "files"), COLOR_DIM)
 	detail.set_collapsed(true)
 	for p in full:
-		_row(detail, str(p), COLOR_DIM, str(p))
+		_row(detail, str(p).get_file(), COLOR_DIM, str(p))
 
 
 func _render_levels(root: TreeItem, report: Dictionary, counts: Dictionary) -> void:
 	var levels: Array = report.get("levels", [])
 	var reachable := _int(counts, "levels_reachable")
 	var total := _int(counts, "levels_total")
-	var head := _row(root, "Levels: %d of %d reachable" % [reachable, total], _head_color(total > 0 and reachable > 0))
+	var head := _row(root, "Levels: %d of %d are loaded from the boot scene" % [reachable, total], _head_color(total > 0 and reachable > 0))
 	for row in levels:
 		var r := row as Dictionary
 		var path := str(r["path"])
 		var ok := bool(r["reachable"])
 		# The note names the ACTIONABLE difference: a wired-but-unloaded level needs something to point at its
 		# LevelData; an unwired one needs a LevelData at all. Collapsing both to "unreachable" hides the fix.
-		var note := "depth %d, via %s" % [int(r["depth"]), str(r["via"])]
+		var note := "loaded, %s from the boot scene" % _count(int(r["depth"]), "hop", "hops")
 		if not ok:
-			note = "wired to a LevelData, but nothing loads that LevelData" if bool(r["wired"]) else "authored, no LevelData points at it"
-		_row(head, "%s  %s  (%s)" % ["REACHABLE  " if ok else "UNREACHABLE", path, note], COLOR_OK if ok else COLOR_WARN, path)
+			if bool(r["wired"]):
+				note = "has a LevelData, but nothing a player reaches loads it -- point a LevelDoor or the starting level at that LevelData"
+			else:
+				note = "no LevelData points at this scene -- add one under resources/levels with its Scene set to this file"
+		_row(head, "%s  %s -- %s" % ["OK" if ok else "WARN", path.get_file(), note], COLOR_OK if ok else COLOR_WARN, path)
 
 
 ## Quests, the reason the tab exists. TWO axes, three verdicts, and each row carries its start sites so the fix is
-## obvious from the report alone: NO START SITE means "wire it", START SITE NOT REACHABLE means "its HOST is the
-## problem, not the wiring".
+## obvious from the report alone: NO START SITE means "wire it" (the hint row says how, in the words of the Dialogue
+## and Palette tabs), START SITE NOT REACHABLE means "its HOST is the problem, not the wiring" (the site row names
+## the node and the scene, and a double-click opens that scene).
 func _render_quests(root: TreeItem, report: Dictionary, counts: Dictionary) -> void:
 	var quests: Array = report.get("quests", [])
 	var ok := _int(counts, "quests_ok")
 	var total := _int(counts, "quests_total")
-	var head := _row(root, "Quests: %d of %d OK  (%d no start site, %d unreachable start)" % [
+	var head := _row(root, "Quests: %d of %d can be started by a player (%d with nothing that starts them, %d started only from somewhere a player never reaches)" % [
 		ok, total, _int(counts, "quests_no_start"), _int(counts, "quests_unreachable_start"),
 	], _head_color(total > 0 and ok == total))
 	for row in quests:
@@ -430,45 +500,47 @@ func _render_quests(root: TreeItem, report: Dictionary, counts: Dictionary) -> v
 			color = COLOR_ERROR
 		elif verdict == Reach.VERDICT_UNREACHABLE_START:
 			color = COLOR_WARN
-		var item := _row(head, "%s — %s" % [verdict, path], color, path)
+		var item := _row(head, "%s -- %s" % [verdict, path.get_file()], color, path)
 		var sites: Array = q.get("sites", [])
 		if sites.is_empty():
-			_row(item, "no %s / %s / %s anywhere in the project — nothing can start it" % [
-				Reach.QUEST_START_OWNERS["quest"], Reach.QUEST_START_OWNERS["start_quest"],
-				Reach.QUEST_START_OWNERS["start_quest_on_choice"],
-			], COLOR_DIM)
+			_row(item, MSG_NO_START_HINT, COLOR_DIM)
 			continue
 		for s in sites:
 			var sd := s as Dictionary
 			var file := str(sd["file"])
 			var site_ok := bool(sd["reachable"])
-			_row(item, "%s in %s — %s" % [str(sd["label"]), file, "REACHED" if site_ok else "NOT REACHED"],
-				COLOR_OK if site_ok else COLOR_WARN, file)
+			# 'QuestStarter.quest on node "QuestStarter" in SliceTestLevel.tscn -- not reached, so a player never
+			# gets there'. The node name is what the designer types into the scene dock's filter to find it.
+			_row(item, "%s %s -- %s" % [
+				str(sd["label"]), _site_where(str(sd.get("node", "")), file),
+				"reached" if site_ok else "not reached, so a player never gets there",
+			], COLOR_OK if site_ok else COLOR_WARN, file)
 	if not _unresolved_sites.is_empty():
 		# Shown, never dropped: an unresolvable site would otherwise downgrade a wired quest to NO START SITE.
-		var un := _row(head, "Start sites that resolved to no file: %d" % _unresolved_sites.size(), COLOR_WARN)
+		var un := _row(head, "Start sites that could not be matched to a quest file: %d" % _unresolved_sites.size(), COLOR_WARN)
 		for u in _unresolved_sites:
-			_row(un, str(u), COLOR_WARN)
+			var ud := u as Dictionary
+			_row(un, str(ud.get("text", "")), COLOR_WARN, str(ud.get("file", "")))
 
 
 func _render_dialogue(root: TreeItem, report: Dictionary, counts: Dictionary) -> void:
 	var dialogue: Array = report.get("dialogue", [])
 	var reachable := _int(counts, "dialogue_reachable")
 	var total := _int(counts, "dialogue_total")
-	var head := _row(root, "Dialogue: %d of %d reachable" % [reachable, total], _head_color(total > 0 and reachable > 0))
+	var head := _row(root, "Conversations: %d of %d reachable" % [reachable, total], _head_color(total > 0 and reachable > 0))
 	for row in dialogue:
 		var d := row as Dictionary
 		var path := str(d["path"])
 		var ok := bool(d["reachable"])
-		var note := "via %s" % str(d["via"])
+		var note := "an NPC or level a player reaches points at it"
 		if not ok:
-			note = "no reachable NPC / Talkable / level points at it"
-		_row(head, "%s  %s  (%s)" % ["REACHABLE  " if ok else "UNREACHABLE", path, note], COLOR_OK if ok else COLOR_WARN, path)
+			note = "no NPC, Talkable or level a player can reach points at it -- put it on a Talkable in a reachable level"
+		_row(head, "%s  %s -- %s" % ["OK" if ok else "WARN", path.get_file(), note], COLOR_OK if ok else COLOR_WARN, path)
 
 
-## The folder-scan guard's receipt. Printing which roots fired — and which file DECLARED each one — is what makes
-## the guard auditable: if this section is suspiciously long, the guard over-approximated and swallowed real
-## orphans, and THAT is the thing to go fix (never by widening it further).
+## The folder-scan guard's receipt. Printing which folders were loaded whole — and which script loads each one — is
+## what makes the guard auditable: if this section is suspiciously long, the guard over-approximated and swallowed
+## real orphans, and THAT is the thing to go fix (never by widening it further).
 func _render_folder_roots(root: TreeItem, report: Dictionary, counts: Dictionary) -> void:
 	var roots: Array = report.get("folder_roots", [])
 	# Amber at ZERO, by the same rule as every other section head: an empty section is a scan smell, not a pass.
@@ -476,62 +548,54 @@ func _render_folder_roots(root: TreeItem, report: Dictionary, counts: Dictionary
 	# hence a boot root, hence scripts/items/item_db.gd is always popped and its DirAccess.open(ITEMS_DIR) always
 	# fires res://resources/items. Zero roots therefore means the walk never reached an autoload, not that the
 	# project scans no folders.
-	var head := _row(root, "Folder-scan roots that fired: %d  (sparing %d file(s) from the orphan list)" % [
-		roots.size(), _int(counts, "folder_scan_members"),
+	var head := _row(root, "Loaded by folder scan, not checked one by one: %s, %s" % [
+		_count(roots.size(), "folder", "folders"), _count(_int(counts, "folder_scan_members"), "file", "files"),
 	], _head_color(not roots.is_empty()))
 	for row in roots:
 		var r := row as Dictionary
 		var declared := str(r["declared_by"])
-		_row(head, "%s — declared by %s" % [str(r["dir"]), declared], COLOR_DIM, declared)
+		_row(head, "%s -- every file in it is loaded by %s" % [str(r["dir"]).trim_prefix("res://"), declared.get_file()], COLOR_DIM, declared)
 
 
 ## Files nobody could read. Never silent: a clean report built over an unread file is the failure mode this tab
-## exists to catch, and a mid-reimport read returning "" is routine with the editor open (retry the Rescan).
+## exists to catch, and a mid-reimport read returning "" is routine with the editor open (press Scan again).
 func _render_skips(root: TreeItem, report: Dictionary, counts: Dictionary) -> void:
 	var skipped: Array = report.get("skipped", [])
 	var n := _int(counts, "skipped")
 	if n == 0:
 		return
-	var head := _row(root, "Skipped — unreadable when scanned: %d  (usually a reimport in flight; Rescan)" % n, COLOR_WARN)
+	var head := _row(root, "Unreadable when scanned: %d -- usually the editor was still importing; press Scan again" % n, COLOR_WARN)
 	for p in skipped:
-		_row(head, str(p), COLOR_WARN, str(p))
+		_row(head, str(p).get_file(), COLOR_WARN, str(p))
 
 
 # ================================================================================================================
 # STATUS — the line that must make an all-green result look SUSPICIOUS
 # ================================================================================================================
 
-## Always print the DENOMINATORS beside the findings. "0 unreachable quests" is meaningless without "of 2 quests
-## found, from 378 files surveyed, 412 files reached from 15 roots" — with the denominators, a scan that walked
-## nothing is instantly distinguishable from a project that is genuinely wired, and that distinction IS the
-## acceptance bar for this tab.
-func _status_text(counts: Dictionary, roots_n: int, surveyed: int, full_chain_hops: int, suspect: bool) -> String:
-	var parts := PackedStringArray([
-		# "full chain" is the .gd-inclusive hop count deliberately: it is the same number the tree's "full chain incl.
-		# .gd glue" detail row prints, so the two surfaces cannot disagree. The shorter CONTENT chain is the one the
-		# tree's head row shows, and it drops the glue scripts.
-		"%d root(s) -> %d file(s) reached (full chain %d hop(s))" % [roots_n, _int(counts, "reached"), full_chain_hops],
-		"surveyed %d serialized file(s) on disk" % surveyed,
-		"levels %d/%d reachable" % [_int(counts, "levels_reachable"), _int(counts, "levels_total")],
-		"quests %d/%d OK (%d no start site, %d unreachable start)" % [
-			_int(counts, "quests_ok"), _int(counts, "quests_total"),
-			_int(counts, "quests_no_start"), _int(counts, "quests_unreachable_start"),
-		],
-		"dialogue %d/%d reachable" % [_int(counts, "dialogue_reachable"), _int(counts, "dialogue_total")],
-		"%d folder-scan root(s) sparing %d file(s)" % [
-			_int(counts, "folder_scan_roots"), _int(counts, "folder_scan_members"),
-		],
-		"%d skipped" % _int(counts, "skipped"),
-		# Unresolved start sites belong in the DENOMINATORS, not only in the Quests subtree: each one is a start site
-		# the survey found but could not attribute to a quest file, and every one of them can silently downgrade a
-		# genuinely wired quest to "NO START SITE". A quests row of 0/0 OK next to "3 start site(s) unresolved" says
-		# something completely different from the same row next to "0 unresolved".
-		"%d start site(s) unresolved" % _unresolved_sites.size(),
-	])
-	var line := " · ".join(parts) + "."
-	# The full explanation of SUSPECT lives in the banner row inside the scrolled body (see _render); the status line
-	# carries the marker plus the numbers, so this Label — the one control outside the height fence — stays short.
-	return ("SUSPECT — " + line) if suspect else line
+## The verdict first, then the DENOMINATORS in plain words. "1 of 2 can be started" is meaningless without "scanned
+## 378 files, walked 412 from 15 boot roots" — with the denominators, a scan that walked nothing is instantly
+## distinguishable from a project that is genuinely wired, and that distinction IS the acceptance bar for this tab.
+## The "loaded whole" folder count and the unmatched start sites belong here too: every unmatched site is a start
+## site the survey found but could not attribute to a quest file, and each one can silently downgrade a genuinely
+## wired quest to NO START SITE — "0 of 2 can be started" next to "3 start sites unmatched" says something completely
+## different from the same verdict next to "0 start sites unmatched".
+func _status_text(counts: Dictionary, roots_n: int, surveyed: int, suspect: bool) -> String:
+	var verdict := "Quests: %d of %d can be started by a player -- Levels: %d of %d are loaded from the boot scene -- Conversations: %d of %d reachable." % [
+		_int(counts, "quests_ok"), _int(counts, "quests_total"),
+		_int(counts, "levels_reachable"), _int(counts, "levels_total"),
+		_int(counts, "dialogue_reachable"), _int(counts, "dialogue_total"),
+	]
+	var walked := "Scanned %s, walked %d from %s, %s loaded whole (%s), %d unreadable, %s unmatched." % [
+		_count(surveyed, "file", "files"), _int(counts, "reached"), _count(roots_n, "boot root", "boot roots"),
+		_count(_int(counts, "folder_scan_roots"), "folder", "folders"),
+		_count(_int(counts, "folder_scan_members"), "file", "files"),
+		_int(counts, "skipped"), _count(_unresolved_sites.size(), "start site", "start sites"),
+	]
+	var line := verdict + " " + walked
+	# The full explanation lives in the warning rows inside the scrolled body (see _render); the status line leads
+	# with the short form so the two-line Label still shows the verdict after it.
+	return (MSG_STATUS_SUSPECT + " " + line) if suspect else line
 
 
 ## Is this report degenerate enough that it says more about the scan than about the project? Each test names a way
@@ -546,10 +610,10 @@ func _status_text(counts: Dictionary, roots_n: int, surveyed: int, full_chain_ho
 ## unverifiable.
 ##
 ## The empty-roster tests are DELIBERATELY loud rather than precise: a project that genuinely holds zero quests
-## would read SUSPECT here. That is the trade this tab is built to make — a false "check your scan" costs a minute,
-## and the failure it guards against (a report that is empty because the walk found nothing, presented as a clean
-## bill of health) is the one that shipped 132 unauthored strings under a "TOTAL: 0". Do not soften these to make
-## the line go green.
+## would read "Scan incomplete" here. That is the trade this tab is built to make — a false "check your scan" costs a
+## minute, and the failure it guards against (a report that is empty because the walk found nothing, presented as a
+## clean bill of health) is the one that shipped 132 unauthored strings under a "TOTAL: 0". Do not soften these to
+## make the line go green.
 func _is_suspect(counts: Dictionary, roots_n: int, surveyed: int) -> bool:
 	if roots_n == 0 or surveyed == 0:
 		return true
@@ -564,15 +628,22 @@ func _is_suspect(counts: Dictionary, roots_n: int, surveyed: int) -> bool:
 # SMALL HELPERS
 # ================================================================================================================
 
-## One Tree row. `meta` is the res:// path the double-click jumps to (null for a row that names no single file).
-## The full text also becomes the tooltip, because horizontal scrolling is disabled and a long path elides.
+## One Tree row. `meta` is the res:// path the double-click opens (null for a row that names no single file). The
+## tooltip carries the full row text — horizontal scrolling is disabled and a long row elides — plus, for a file row,
+## the path itself and the double-click hint, so the res:// path is always one hover away without ever being in the
+## row text a designer reads.
 func _row(parent: TreeItem, text: String, color: Color, meta: Variant = null) -> TreeItem:
 	var it := _tree.create_item(parent)
 	it.set_text(0, text)
 	it.set_custom_color(0, color)
-	it.set_tooltip_text(0, text)
+	var tip := text
 	if meta != null:
 		it.set_metadata(0, meta)
+		if meta is String and not str(meta).is_empty():
+			var path := str(meta)
+			var opens := "Double-click to open this scene." if path.get_extension() == "tscn" else "Double-click to open it."
+			tip += "\n%s\n%s" % [path, opens]
+	it.set_tooltip_text(0, tip)
 	return it
 
 
@@ -587,8 +658,35 @@ func _int(d: Dictionary, key: String) -> int:
 	return int(d.get(key, 0))
 
 
-## Double-click a row: open the file it names in the Inspector and reveal it in the FileSystem dock. The ONLY
-## editor mutation in this file, and it writes nothing — mirrors stats_view / audit_panel.
+## "1 hop" / "2 hops" — a real plural, never a hand-rolled "(s)", in every count a designer reads.
+static func _count(n: int, one: String, many: String) -> String:
+	return "%d %s" % [n, one if n == 1 else many]
+
+
+## Where a start site lives, in designer words: 'on node "QuestStarter" in SliceTestLevel.tscn' when the site is a
+## scene node, 'in old_man.tres' when it is a DialogueChoice inside a resource (no node to name).
+static func _site_where(node: String, file: String) -> String:
+	if node.is_empty():
+		return "in %s" % file.get_file()
+	return "on node \"%s\" in %s" % [node, file.get_file()]
+
+
+## Write the status line and mirror it onto the tooltip (the Label is clamped to two lines, so the tooltip is where
+## a long verdict stays readable in full). `error` tints the text through a theme colour override — the modulate
+## alpha stays the panel-wide 0.75 either way.
+func _set_status(msg: String, error: bool = false) -> void:
+	_status.text = msg
+	_status.tooltip_text = msg
+	if error:
+		_status.add_theme_color_override("font_color", COLOR_ERROR)
+	else:
+		_status.remove_theme_color_override("font_color")
+
+
+## Double-click a row: open the file it names and reveal it in the FileSystem dock. A .tscn opens AS THE EDITED
+## SCENE, so a designer who double-clicks 'QuestStarter.quest on node "QuestStarter" in SliceTestLevel.tscn' lands in
+## the level holding that starter; anything else opens in the Inspector (a .tres) or the script editor (a .gd). The
+## only editor mutations in this file, and they write nothing — mirrors ref_viewer / stats_view.
 func _on_activated() -> void:
 	var it := _tree.get_selected()
 	if it == null:
@@ -599,7 +697,13 @@ func _on_activated() -> void:
 	var path := p as String
 	if not path.begins_with("res://"):
 		return
-	if ResourceLoader.exists(path):
+	if not ResourceLoader.exists(path):
+		# A row can outlive its file (renamed or deleted since the scan), or the editor may still be importing it.
+		_set_status("Couldn't open %s: the file is missing or still importing -- press Scan again." % path.get_file(), true)
+		return
+	if path.get_extension() == "tscn":
+		EditorInterface.open_scene_from_path(path)
+	else:
 		var res := load(path)
 		if res != null:
 			EditorInterface.edit_resource(res)  # a mid-reimport load can return null; revealing it is still useful

@@ -53,4 +53,35 @@ func test_save_inspector_constructs() -> void:
 	var p = SaveInspector.new()
 	assert_not_null(p, "the Saves tab constructs (compiles + _init builds UI off-tree)")
 	assert_eq(p.name, "Saves")
+	assert_eq(p._status.text, SaveInspector.MSG_IDLE, "the idle status is the one imperative next step")
+	assert_eq(p._status.tooltip_text, p._status.text, "the status tooltip mirrors the full text on every write")
+	assert_eq(p._status.max_lines_visible, 2, "the status clamps to two lines (a long file name or error rides the tooltip)")
+	assert_eq(p._status.autowrap_mode, TextServer.AUTOWRAP_WORD_SMART, "and autowraps")
+	assert_false(p._picker.fit_to_longest_item, "the slot picker never sizes the head to its longest row")
+	assert_true(p._picker.clip_text, "it clips a long row instead of widening the panel")
+	assert_true(p._refresh_btn.tooltip_text.contains("Read-only"), "the one command declares it writes nothing: %s" % p._refresh_btn.tooltip_text)
+	assert_false(p._revealed, "no user:// scan at construction -- the first reveal does it")
 	p.free()
+
+
+## Layout contract: the head and the ONE status Label sit OUTSIDE the scroll (a designer must never have to scroll
+## to find the verdict), the Tree lives INSIDE it, and the tab's vertical minimum stays small -- a TabContainer's
+## minimum is the CURRENT tab's minimum and the editor's bottom splitter keeps whatever height it grew to.
+func test_save_inspector_bounds_its_own_height() -> void:
+	var p = SaveInspector.new()
+	assert_true(p._tree.get_parent() is ScrollContainer, "the Tree lives inside the ScrollContainer")
+	assert_eq(p._status.get_parent(), p, "the status Label is a direct child of the tab, outside the scroll")
+	assert_eq(p._picker.get_parent().get_parent(), p, "so is the picker's head row")
+	assert_lte(SaveInspector.BODY_MIN_HEIGHT, 120.0, "the scrolled body's floor stays small")
+	assert_lte(SaveInspector.TREE_MIN_HEIGHT, SaveInspector.BODY_MIN_HEIGHT, "and the Tree never fights that fence")
+	p.free()
+
+
+## A save is named by its SLOT ("Autosave", "Slot 2") in every sentence -- a designer never has to recognise a
+## user:// file name to read the status. A path outside the known list degrades to its file name, not to blank.
+func test_slot_label_names_the_slot_not_the_file() -> void:
+	assert_eq(SaveInspector._slot_label("user://gamestate.cfg"), "Autosave", "the autosave is named, not 'gamestate'")
+	assert_eq(SaveInspector._slot_label("user://save_slot_2.cfg"), "Slot 2", "a numbered slot reads as the designer picked it")
+	assert_eq(SaveInspector._slot_label("user://something_else.cfg"), "something_else.cfg", "an unknown file still reads as something")
+	assert_eq(SaveInspector._count(1, "key", "keys"), "1 key", "a real singular")
+	assert_eq(SaveInspector._count(37, "key", "keys"), "37 keys")

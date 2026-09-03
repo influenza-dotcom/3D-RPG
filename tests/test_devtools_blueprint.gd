@@ -47,3 +47,19 @@ func test_blueprint_view_constructs() -> void:
 	assert_not_null(v, "the Blueprints tab constructs (compiles + _init builds UI off-tree)")
 	assert_eq(v.name, "Blueprints")
 	v.free()
+
+
+## The Scaffold button greys BEFORE the click, not after: an empty name is refused by the button's own disabled state
+## and its tooltip says what is missing. Drives _refresh_preview() BY HAND on purpose -- assigning LineEdit.text does
+## not emit text_changed, so a test that only set the text would be asserting against a preview nothing had rebuilt.
+func test_scaffold_button_greys_on_an_empty_name_and_arms_on_a_free_one() -> void:
+	var v = BlueprintView.new()
+	v._refresh_preview()
+	assert_true(v._scaffold_btn.disabled, "no name typed -> Scaffold is greyed")
+	assert_eq(v._scaffold_btn.tooltip_text, BlueprintView.MSG_NO_NAME, "the greyed tooltip names what is missing")
+	v._edit.text = "zzz Not A Real Enemy"  # slugifies to a base no shipped file can collide with
+	v._refresh_preview()
+	assert_false(v._scaffold_btn.disabled, "a name whose five files are all free arms Scaffold")
+	assert_eq(v._scaffold_btn.tooltip_text, BlueprintView.SCAFFOLD_TIP, "the armed tooltip is the real what-it-does text")
+	assert_true(v._preview.text.contains("Will create"), "the preview lists the pack's files before the click; got: %s" % v._preview.text)
+	v.free()

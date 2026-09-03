@@ -92,5 +92,98 @@ func test_scaled_total_excludes_non_spawning_rows() -> void:
 func test_encounter_view_constructs() -> void:
 	var v = EncounterView.new()
 	assert_not_null(v, "the Encounter tab constructs (compiles + _init builds UI off-tree)")
-	assert_eq(v.name, "Encounter")
+	assert_eq(v.name, "Encounter", "the Control name is pinned -- cyber_panel keys tabs by it (the painted title is separate)")
+	assert_eq(v._status.text, EncounterView.MSG_IDLE, "the idle status is the one imperative next step")
+	assert_eq(v._status.tooltip_text, v._status.text, "the status tooltip mirrors the full text from the first write")
+	assert_eq(v._status.max_lines_visible, 2, "the status clamps to two lines (the tooltip carries the rest)")
+	assert_eq(v._status.autowrap_mode, TextServer.AUTOWRAP_WORD_SMART, "and autowraps")
+	assert_lte(v._tree.custom_minimum_size.y, 120.0, "the wave list's floor stays small -- one tall tab leaves the shared panel tall")
 	v.free()
+
+
+## The two gates on Preview Selected, and the rule that a greyed button names what is missing. Off-tree there is no
+## editor selection at all, so a scene root alone leaves the "select a spawner" gate closed -- which is exactly the
+## state to pin: scene first, then selection.
+func test_preview_button_is_greyed_with_a_reason_for_each_missing_thing() -> void:
+	var v = EncounterView.new()
+	assert_true(v._preview_btn.disabled, "no scene known yet -> Preview Selected is greyed")
+	assert_eq(v._preview_btn.tooltip_text, EncounterView.MSG_NO_SCENE, "and the tooltip names the missing scene")
+	var root := Node.new()
+	v.on_scene_changed(root)
+	assert_true(v._preview_btn.disabled, "a scene alone is not enough -- nothing is selected")
+	assert_eq(v._preview_btn.tooltip_text, EncounterView.MSG_NO_SPAWNER, "the tooltip moves on to the missing selection")
+	v.on_scene_changed(null)
+	assert_eq(v._preview_btn.tooltip_text, EncounterView.MSG_NO_SCENE, "closing every scene puts the first gate back")
+	root.free()
+	v.free()
+
+
+## The post-click fallback: a click that slips past a stale button state must say the SAME sentence the greyed
+## button's tooltip does, never fail silently. Read-only either way -- the tree is emptied, nothing is spawned.
+func test_preview_refuses_out_loud_with_the_same_words_as_the_tooltip() -> void:
+	var v = EncounterView.new()
+	v._preview()
+	assert_eq(v._status.text, EncounterView.MSG_NO_SCENE, "no scene -> the refusal repeats the tooltip's sentence")
+	assert_eq(v._status.tooltip_text, v._status.text, "mirrored onto the tooltip")
+	var root := Node.new()
+	v.on_scene_changed(root)
+	v._preview()
+	assert_eq(v._status.text, EncounterView.MSG_NO_SPAWNER, "a scene but no spawner -> the second sentence")
+	assert_null(v._tree.get_root().get_first_child(), "a refused preview leaves no rows behind")
+	root.free()
+	v.free()
+
+
+# --- pure row / footer wording (pinned off-tree, so the designer's sentences can't drift) --------------------------
+
+func test_row_text_reads_as_a_designer_sentence() -> void:
+	var row := {
+		"index": 0, "npc": "NPC.tscn", "count": 3, "spawns": true, "radius": 6.0, "delay": 0.5,
+		"archetype": "raider.tres", "faction": "", "weapon": "", "aggro": true,
+	}
+	assert_eq(EncounterView.row_text(row, false),
+		"Wave 1: 3 x NPC, scattered within 6 m, 0.5 s apart, archetype: raider, hostile on spawn",
+		"waves count from 1, files lose their extension, and an unset override is left out")
+	assert_true(EncounterView.row_text(row, true).contains("placed at the markers"),
+		"with markers the radius is irrelevant, so the row says where they actually go")
+	var quiet := row.duplicate()
+	quiet["delay"] = 0.0
+	quiet["aggro"] = false
+	assert_true(EncounterView.row_text(quiet, false).contains("all at once"), "no stagger reads 'all at once', not '0 s apart'")
+	assert_true(EncounterView.row_text(quiet, false).ends_with("unaware until they spot you"), "and the aggro flag is spelled out either way")
+
+
+func test_row_text_says_so_when_a_wave_would_spawn_nothing() -> void:
+	var empty_slot := {"index": 0, "npc": "(empty definition)", "count": 0, "spawns": false}
+	assert_eq(EncounterView.row_text(empty_slot, false), "Wave 1: empty slot -- spawns nothing.", "an empty slot is named, not skipped")
+	var no_scene := {"index": 1, "npc": "(no NPC scene set)", "count": 2, "spawns": false}
+	assert_eq(EncounterView.row_text(no_scene, false), "Wave 2: 2 x (no NPC scene set) -- spawns nothing.",
+		"a wave the game would skip says so instead of promising 2 NPCs")
+	assert_true(EncounterView.row_tooltip(no_scene).begins_with("Slot 1 under Spawn Definitions"), "the tooltip says where to fix it")
+
+
+func test_footer_and_placement_wording() -> void:
+	assert_eq(EncounterView.footer_text(7, 5, 10, true),
+		"Authored total 7 -- difficulty scales it: Easy / Normal / Hard = 5 / 7 / 10 (estimate)",
+		"Normal sits in the middle and is the authored count")
+	assert_true(EncounterView.footer_text(7, 0, 0, false).contains("no Easy / Hard estimate"),
+		"without the presets file the footer says why, rather than claiming an estimate")
+	assert_eq(EncounterView.placement_text(0), "Placement: scattered around the spawner, each wave within its own radius.")
+	assert_eq(EncounterView.placement_text(1), "Placement: at the spawner's 1 marker, in order.", "a real singular")
+	assert_eq(EncounterView.placement_text(3), "Placement: at the spawner's 3 markers, in order.")
+
+
+## The model's placeholder for a definition with no scene is what the row renders, so it must be designer words --
+## never the export's field name.
+func test_summarize_placeholder_is_designer_words() -> void:
+	var sp := EncounterSpawner.new()
+	var no_scene := _def(2)
+	no_scene.npc_scene = null
+	sp.spawn_definitions = [no_scene]
+	var rows: Array = Preview.summarize(sp)["rows"]
+	var npc := String(rows[0]["npc"])
+	assert_eq(npc, "(no NPC scene set)", "the placeholder reads as a sentence a designer can act on")
+	assert_false(npc.contains("npc_scene"), "and never names the export field")
+	assert_eq(EncounterView.row_text(rows[0], false), "Wave 1: 2 x (no NPC scene set) -- spawns nothing.",
+		"the row and the model say the same words")
+	sp.free()

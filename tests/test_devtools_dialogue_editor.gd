@@ -11,6 +11,12 @@ extends GutTest
 ## It is covered here because it is pure: `quest_rows` does `load()` a .tres, which works headless, and everything
 ## else runs on bare `.new()` resources. Nothing in this file may reach EditorInterface, a socket or a SubViewport --
 ## GUT runs headless and 9.6 FAILS a test on any engine error, so an editor-only call would break the whole run.
+##
+## The HANDOFF + DIRTY half (select_path, the selection-preserving refresh, the `_dirty` flag, the off-tree dirty
+## guard, the failed-load branch) is pinned on the tab itself, OFF-TREE, against the two conversations on disk
+## (old_man.tres / slice_relay_terminal.tres -- both two lines). Those tests only ever READ the on-disk files: `load()`
+## hands back the process-wide cached instance, so a test that mutated one would leak the edit into every later test
+## that loads the same path. Every mutation test builds its own DialogueResource.new() instead.
 
 const Ops := preload("res://addons/cybersunday_tools/dock_dialogue/dialogue_edit_ops.gd")
 ## The consequence ops. A SECOND module beside `Ops` by design: dialogue_edit_ops owns list MUTATION, this owns the
@@ -33,6 +39,17 @@ const NON_QUEST_DIR := "res://resources/factions/"
 const QUEST_FIXTURE_PATH := "res://resources/quests/recover_the_package.tres"
 const QUEST_FIXTURE_ID := "recover_package"
 const QUEST_FIXTURE_STEM := "recover_the_package"
+
+## The two conversations on disk (both two lines: old_man's line 1 carries two choices, slice_relay_terminal's line 0
+## carries one), plus the VoiceData that sits in the SAME folder and must be filtered out of the picker. READ-ONLY
+## fixtures -- see the header on why no test may mutate them.
+const OLD_MAN := "res://resources/dialogue/old_man.tres"
+const SLICE_TERMINAL := "res://resources/dialogue/slice_relay_terminal.tres"
+const NOT_A_CONVERSATION := "res://resources/dialogue/old_man_voice.tres"
+## The Save button's resting text and the dirty marker the tab appends to it -- LITERALS, like the tags, so a renamed
+## button fails here instead of the test agreeing with whatever the tab now says.
+const SAVE_TEXT := "Save Conversation"
+const DIRTY_SUFFIX := "(unsaved changes)"
 
 ## The consequence tags, written out as LITERALS rather than read back off Ops2's own consts: an expectation built
 ## from the module under test would pass even if a tag were renamed to garbage, and the choice-row suffix is the
@@ -115,10 +132,12 @@ func test_choice_block_builds_every_consequence_row() -> void:
 	assert_not_null(d._c_req_item_stamp, "Req item id stamp built")
 	assert_not_null(d._c_give_item_stamp, "Give item id stamp built")
 	assert_not_null(d._c_reward_faction_stamp, "Reward faction id stamp built")
-	# HEIGHT POLICY, pinned. The bottom-panel TabContainer sizes to its TALLEST tab, so all 28 rows have to sit inside
-	# the right column's ScrollContainer -- vertical scrolling is what stops the stack's content height ever reaching
-	# the tab's minimum. This plugin has TWICE shipped a tab that grew past the panel and made the editor unusable, and
-	# nothing else in the suite checks it: a row parented to the head bar instead would look fine in every other assert.
+	# HEIGHT POLICY, pinned. A TabContainer's minimum is the CURRENT tab's minimum, and the editor's bottom splitter
+	# keeps the height it grew to -- so one tall tab, once shown, leaves the panel tall for every tab after it. All 28
+	# rows therefore have to sit inside the right column's ScrollContainer: vertical scrolling is what stops the
+	# stack's content height ever reaching the tab's minimum. This plugin has TWICE shipped a tab that grew past the
+	# panel and made the editor unusable, and nothing else in the suite checks it: a row parented to the head bar
+	# instead would look fine in every other assert.
 	assert_true(_has_scroll_ancestor(box),
 		"the choice field stack lives under a ScrollContainer, so 28 rows scroll instead of growing the bottom panel")
 	# WIDTH is the other half of the same policy, and it fails the opposite way. `fit_to_longest_item` defaults TRUE on
@@ -167,6 +186,453 @@ func test_choice_widget_signals_emit_with_the_right_arity() -> void:
 		stamp.item_selected.emit(0)
 	assert_null(d._selected_choice(),
 		"no conversation is loaded, so every handler above hit its null-choice guard and wrote nothing")
+	assert_false(d._dirty, "a stray emit with no choice selected must never mark an empty editor dirty")
+	d.free()
+
+
+# ==============================================================================================================
+# THE TAB'S OWN CONTRACTS -- layout words, handoff, refresh, dirty state. All off-tree; the on-disk fixtures are
+# only ever read (see the header).
+# ==============================================================================================================
+
+## Every Button under `node`, in tree order. The top bar is the tab's first child, so its buttons are found by text
+## rather than by pinning a child index the layout might reshuffle.
+func _buttons_in(node: Node) -> Array[Button]:
+	var out: Array[Button] = []
+	for c in node.get_children():
+		if c is Button:
+			out.append(c)
+		out.append_array(_buttons_in(c))
+	return out
+
+
+func _button_texts(node: Node) -> PackedStringArray:
+	var out := PackedStringArray()
+	for b in _buttons_in(node):
+		out.append(b.text)
+	return out
+
+
+## Every Label text under `node`, in tree order (the "Label:" column of each field row).
+func _label_texts(node: Node) -> PackedStringArray:
+	var out := PackedStringArray()
+	for c in node.get_children():
+		if c is Label:
+			out.append((c as Label).text)
+		out.append_array(_label_texts(c))
+	return out
+
+
+## The fixed top bar: picker + Refresh + Save Conversation + Check Reach, all OUTSIDE the scroll; the two Target
+## dropdowns and the picker carry the width guards; the status label follows the panel contract (two lines, autowrap,
+## default font size, tooltip mirroring). Nothing is open at construction, so Save Conversation is greyed with the
+## tooltip that names what is missing.
+func test_top_bar_and_status_follow_the_panel_contract() -> void:
+	var d = DialogueEditor.new()
+	var top := _button_texts(d.get_child(0))
+	assert_true(top.has("Refresh"), "the top bar keeps Refresh (re-read the list, never the open conversation)")
+	assert_true(top.has(SAVE_TEXT), "Save is worded 'Save Conversation' -- one verb per meaning")
+	assert_true(top.has("Check Reach"), "Check Reach hands off to the Reach tab from the top bar")
+	assert_false(_has_scroll_ancestor(d._save_btn), "the Save button lives in the fixed head bar, not inside the scroll")
+	for btn in [d._picker, d._c_target, d._c_target_on_fail, d._c_req_quest_state]:
+		var ob: OptionButton = btn
+		assert_false(ob.fit_to_longest_item, "a hand-filled dropdown never sizes to its longest row (the panel would widen)")
+		assert_true(ob.clip_text, "a hand-filled dropdown clips its text instead of growing")
+		assert_eq(ob.text_overrun_behavior, TextServer.OVERRUN_TRIM_ELLIPSIS, "a long row trims with an ellipsis, not a hard cut")
+	assert_eq(d._status.max_lines_visible, 2, "the status label clamps to two lines (the tooltip carries the rest)")
+	assert_eq(d._status.autowrap_mode, TextServer.AUTOWRAP_WORD_SMART, "the status label wraps on words")
+	assert_false(d._status.has_theme_font_size_override("font_size"), "the status label keeps the default font size (no 10 px override)")
+	assert_eq(d._status.tooltip_text, d._status.text, "the status tooltip mirrors the full text on every write")
+	assert_true(d._save_btn.disabled, "nothing is open, so Save Conversation is greyed")
+	assert_string_contains(d._save_btn.tooltip_text, "Pick a conversation")
+	assert_false(_has_scroll_ancestor(d._status), "the status row is outside the scroll, always visible")
+	d.free()
+
+
+## The list rows read Add / Remove / Up / Down (no bare glyphs), every one carries a tooltip, and the gate labels say
+## "Needs", never "Req" -- the designer reads these, not the code.
+func test_buttons_and_gate_labels_use_designer_words() -> void:
+	var d = DialogueEditor.new()
+	var expected := PackedStringArray(["Add", "Remove", "Up", "Down"])
+	for rows in [d._line_buttons, d._choice_buttons]:
+		var row: Array = rows
+		assert_eq(row.size(), 4, "each list has exactly Add / Remove / Up / Down")
+		for k in row.size():
+			var b: Button = row[k]
+			assert_eq(b.text, expected[k], "list button %d reads %s" % [k, expected[k]])
+			assert_ne(b.tooltip_text, "", "%s carries a tooltip" % b.text)
+	var labels := _label_texts(d._choice_box)
+	var needs := 0
+	for t in labels:
+		assert_false(t.begins_with("Req"), "no gate label abbreviates to 'Req' any more: %s" % t)
+		if t.begins_with("Needs"):
+			needs += 1
+	assert_gte(needs, 9, "the gate rows read 'Needs ...' (stat, value, flag, flag value, faction, reputation, perk, item, count, quest, state)")
+	assert_eq(d._c_set_flag_value.text, "Flag becomes true", "the set-flag checkbox says what it does, not 'value = true'")
+	assert_ne(d._c_set_flag_value.tooltip_text, "", "and explains the unchecked meaning in its tooltip")
+	d.free()
+
+
+## The choice list's tooltip is the legend for the row tags, and it is built from the SAME consts the summary emits
+## -- so every literal the tag tests pin must appear in it.
+func test_choice_list_legend_names_every_tag() -> void:
+	var d = DialogueEditor.new()
+	var legend: String = d._choice_list.tooltip_text
+	for tag in [TAG_START_QUEST, TAG_ADVANCE_QUEST, TAG_COMPLETE_QUEST, TAG_GIVE_ITEM, TAG_GIVE_MONEY, TAG_REWARD_REP, TAG_AGGRO]:
+		assert_string_contains(legend, tag)
+	d.free()
+
+
+## List sentinels are designer words in parentheses -- "(missing)" / "(empty)" / "(no text)" -- never the old
+## angle-bracket "<null>" / "<empty>" / "<no label>".
+func test_list_rows_use_designer_sentinels() -> void:
+	var d = DialogueEditor.new()
+	assert_eq(d._preview(null), "(missing)", "a null line previews as (missing)")
+	var ln := DialogueLine.new()
+	assert_eq(d._preview(ln), "(empty)", "a blank line previews as (empty)")
+	assert_eq(d._choice_row_text(0, null), "0: (missing)", "a null choice row reads (missing)")
+	var ch := DialogueChoice.new()
+	assert_eq(d._choice_row_text(2, ch), "2: (no text)", "a blank choice label reads (no text)")
+	ln = null
+	ch = null
+	d.free()
+
+
+## The two Target dropdowns name each line by number AND its opening words ("-> line 0: Halt. Who goes there, st..."),
+## with "(empty)" for a blank line, and the sentinels keep their ids (-2 Continue / -1 End / the line index).
+func test_target_rows_read_line_number_and_opening_words() -> void:
+	var d = DialogueEditor.new()
+	var r := _res_with_lines(0)
+	var a := Ops.add_line(r)
+	a.text = "Halt. Who goes there, stranger of the night?"
+	var b := Ops.add_line(r)
+	b.text = "\n  \n"
+	d._res = r
+	d._populate_target_options(d._c_target)
+	assert_eq(d._c_target.item_count, 4, "Continue + End + one row per line")
+	assert_eq(d._c_target.get_item_id(0), DialogueLine.CONTINUE, "row 0 carries the CONTINUE sentinel id")
+	assert_eq(d._c_target.get_item_id(1), DialogueLine.END, "row 1 carries the END sentinel id")
+	assert_eq(d._c_target.get_item_text(2), "-> line 0: Halt. Who goes there, st...", "a long line is cut at 24 characters with ...")
+	assert_eq(d._c_target.get_item_id(2), 0, "the line row's id IS the line index")
+	assert_eq(d._c_target.get_item_text(3), "-> line 1: (empty)", "a whitespace-only line reads (empty)")
+	# THE DANGLING ROW, and the same add_item id trap the two sentinels above carry: a target past the end of the
+	# list gets a transient row so the value ROUND-TRIPS. If that row's id were auto-assigned (its index) instead of
+	# stamped, the next _write_choice() would silently rewrite an out-of-range target to whatever the index happened
+	# to be -- the exact shape of the bug that made "End conversation" write "jump to line 1".
+	d._select_target(d._c_target, 7)
+	assert_eq(d._c_target.item_count, 5, "the dangling target added ONE transient row")
+	assert_eq(d._c_target.get_item_id(d._c_target.selected), 7, "and that row carries the REAL target id, so the next write round-trips it unchanged")
+	assert_string_contains(d._status.text, "only 2 line(s)")
+	d._res = null
+	r = null
+	d.free()
+
+
+## Host seam: select_path opens the file, points the picker at it BY PATH (the parallel `_paths` array), latches the
+## reveal, and leaves the editor clean with Save Conversation live.
+func test_select_path_opens_the_file_and_points_the_picker_at_it() -> void:
+	var d = DialogueEditor.new()
+	assert_true(d.select_path(OLD_MAN), "select_path finds a conversation that is in the dialogue folder")
+	assert_true(d._revealed, "a handoff counts as the first reveal (the registries were scanned)")
+	assert_eq(d._loaded_path, OLD_MAN, "the file is the open conversation")
+	assert_not_null(d._res, "and it loaded")
+	assert_gte(d._picker.selected, 0, "the picker points at a row")
+	assert_eq(d._paths[d._picker.selected], OLD_MAN, "the picker row and the parallel path array agree on the file")
+	assert_false(d._paths.has(NOT_A_CONVERSATION), "a VoiceData in the same folder is filtered out of the picker")
+	assert_eq(d._line_list.item_count, 2, "old_man.tres has two lines, so the list shows two rows")
+	assert_eq(d._selected_line_index(), 0, "line 0 is picked on open")
+	assert_false(d._dirty, "a fresh load is clean")
+	assert_false(d._save_btn.disabled, "Save Conversation is live once a conversation is open")
+	assert_eq(d._save_btn.text, SAVE_TEXT, "no dirty marker on a clean load")
+	assert_string_contains(d._status.text, "old_man.tres")
+	assert_false(d._status.text.contains("res://"), "status lines name files, never res:// paths")
+	# A second handoff to a DIFFERENT file swaps (the editor is clean, so no guard is needed).
+	assert_true(d.select_path(SLICE_TERMINAL), "a second handoff opens the other conversation")
+	assert_eq(d._loaded_path, SLICE_TERMINAL, "the open conversation followed the handoff")
+	assert_eq(d._paths[d._picker.selected], SLICE_TERMINAL, "and the picker followed it too")
+	d.free()
+
+
+func test_select_path_refuses_a_file_that_is_not_a_conversation() -> void:
+	var d = DialogueEditor.new()
+	assert_false(d.select_path(""), "a blank path is refused")
+	assert_false(d.select_path(NOT_A_CONVERSATION), "a VoiceData is not a conversation -- the host falls back to the Inspector")
+	assert_ne(d._loaded_path, NOT_A_CONVERSATION, "the refused file was never opened")
+	assert_string_contains(d._status.text, "old_man_voice.tres")
+	assert_false(d.select_path("res://resources/dialogue/__no_such_file__.tres"), "a missing file is refused, no error")
+	d.free()
+
+
+## Refresh = re-read the list, never touch what is open: the SAME resource instance stays open, the picker is
+## re-pointed by path, and the picked line + choice survive the rebuild.
+func test_refresh_keeps_the_open_conversation_and_its_selection() -> void:
+	var d = DialogueEditor.new()
+	d.select_path(SLICE_TERMINAL)
+	var before: DialogueResource = d._res
+	d._select_line(1)
+	d._refresh_picker()
+	assert_same(d._res, before, "Refresh keeps the very same open resource (no reload)")
+	assert_eq(d._loaded_path, SLICE_TERMINAL, "the loaded path is unchanged")
+	assert_eq(d._paths[d._picker.selected], SLICE_TERMINAL, "the picker was re-pointed BY PATH after the rebuild")
+	assert_eq(d._selected_line_index(), 1, "the picked line survived the refresh")
+	# With a choice picked too (line 0 of slice_relay_terminal carries one).
+	d._select_line(0)
+	d._choice_list.select(0)
+	d._on_choice_selected(0)
+	assert_true(d._choice_box.visible, "precondition: a choice is picked and its editor is showing")
+	d._refresh_picker()
+	assert_same(d._res, before, "still the same instance")
+	assert_eq(d._selected_line_index(), 0, "line selection restored")
+	assert_eq(d._selected_choice_index(), 0, "choice selection restored")
+	assert_true(d._choice_box.visible, "the choice editor is back on the same choice")
+	assert_false(d._dirty, "a refresh + selection restore is signal-free -- nothing was written")
+	d.free()
+
+
+## Every write-through raises `_dirty`, which shows as "*" on Save Conversation and the suffix on the status line.
+## Built on an in-memory conversation so no on-disk fixture is ever mutated.
+func test_a_write_sets_dirty_and_the_save_button_shows_it() -> void:
+	var d = DialogueEditor.new()
+	var r := _res_with_lines(1)
+	d._res = r
+	d._loaded_path = "res://resources/dialogue/__never_saved__.tres"
+	d._rebuild_line_list()
+	d._select_line(0)
+	assert_false(d._dirty, "selecting a line pushes model -> widgets and writes nothing")
+	assert_eq(d._save_btn.text, SAVE_TEXT, "clean: no marker")
+	# 1. the line text write-through
+	d._line_text.text = "Halt."
+	d._on_line_text_changed()
+	assert_true(d._dirty, "editing the line text marks the conversation dirty")
+	assert_eq(r.lines[0].text, "Halt.", "and the edit reached the model")
+	assert_eq(d._save_btn.text, SAVE_TEXT + "*", "the Save button shows the marker")
+	assert_string_contains(d._status.text, DIRTY_SUFFIX)
+	assert_eq(d._status.tooltip_text, d._status.text, "the tooltip mirrors the dirty status too")
+	# 2. a structural op
+	d._dirty = false
+	d._update_button_states()
+	d._add_choice()
+	assert_true(d._dirty, "adding a choice marks it dirty")
+	assert_eq(r.lines[0].choices.size(), 1, "the choice was added")
+	# 3. the choice write-through (the per-keystroke path)
+	d._dirty = false
+	d._update_button_states()
+	d._c_text.text = "A friend."
+	d._write_choice()
+	assert_true(d._dirty, "a choice field write marks it dirty")
+	assert_eq(r.lines[0].choices[0].text, "A friend.", "and the label reached the choice")
+	# 4. the reveals-name toggle
+	d._dirty = false
+	d._on_line_reveals_name_toggled(true)
+	assert_true(d._dirty, "toggling reveals-name marks it dirty")
+	assert_true(r.lines[0].reveals_name, "and the toggle reached the line")
+	d._res = null
+	r = null
+	d.free()
+
+
+## THE trap this whole tab is shaped around, driven end to end. `_write_choice` is wired to `_c_text.text_changed`,
+## so it fires on EVERY KEYSTROKE and writes EVERY widget it knows about -- which means a field written there but
+## never PUSHED model->widget in `_on_choice_selected` stamps its widget's CONSTRUCTION DEFAULT onto the live choice
+## the moment the designer types one character into an unrelated field. Silently: the row still looks authored, and
+## ContentSaveGuard keeps only ONE .bak, so a clobber plus one more Save loses the original bytes too.
+##
+## Nothing else in the suite can catch that. The construct smoke only proves the widget EXISTS; the arity test never
+## loads a choice, so every handler returns at its null guard. This authors a choice with EVERY field off its
+## default, selects it the way a click does, types into Label, and asserts that ONLY the label moved -- so a new
+## consequence row wired to `_write_choice` with no matching push fails HERE, naming the field that drifted.
+##
+## `start_quest_on_choice` is asserted alongside them for the opposite invariant: it is a Resource REFERENCE owned by
+## `_on_start_quest_picked` and deliberately NOT written by `_write_choice`, so a keystroke must never re-resolve it.
+func test_typing_in_one_field_never_clobbers_the_other_fields() -> void:
+	var d = DialogueEditor.new()
+	var r := _res_with_lines(2)
+	d._res = r
+	d._loaded_path = "res://resources/dialogue/__never_saved__.tres"
+	d._rebuild_line_list()
+	d._select_line(0)
+	d._add_choice()
+	var ch: DialogueChoice = r.lines[0].choices[0]
+	# Author every field off its default, ON THE MODEL -- this is the state a .tres on disk would load as.
+	var q := Quest.new()
+	q.id = &"clear_the_block"
+	ch.text = "Yes."
+	ch.target = 1
+	ch.target_on_fail = 0
+	ch.required_stat = &"streetwise"
+	ch.required_value = 6
+	ch.required_flag = &"met_the_old_man"
+	ch.required_flag_value = "false"
+	ch.required_faction_id = "townsfolk"
+	ch.required_reputation = 12.5
+	ch.required_perk_id = &"tough_hide"
+	ch.required_item_id = &"keycard"
+	ch.required_item_count = 3
+	ch.required_quest_id = &"recover_package"
+	ch.required_quest_state = DialogueChoice.QuestGate.COMPLETED
+	ch.set_flag = &"took_the_job"
+	ch.set_flag_value = false
+	ch.start_quest_on_choice = q
+	ch.complete_quest_id = &"clear_the_block"
+	ch.advance_quest_id = &"clear_the_block"
+	ch.advance_objective_id = &"kill_raiders"
+	ch.give_item_id = &"medkit"
+	ch.give_item_count = 4
+	ch.give_money = -12.5
+	ch.reward_reputation_faction_id = "raiders"
+	ch.reward_reputation = -8.25
+	ch.aggro_speaker = true
+	# Select it (model -> widgets), then type ONE field. This is the whole editor gesture.
+	d._on_choice_selected(0)
+	assert_eq(d._c_start_quest.selected, d._quest_rows.size() - 1,
+		"an inline / unsaved quest reference selects its own row, never '(none)' -- reading '(none)' is what invites the clobber")
+	d._c_text.text = "Yes, I'll do it."
+	d._write_choice()
+	assert_eq(ch.text, "Yes, I'll do it.", "the field the designer actually typed in DID change")
+	# ...and nothing else did.
+	assert_eq(ch.target, 1, "Target survived a keystroke in Label")
+	assert_eq(ch.target_on_fail, 0, "Fail target survived")
+	assert_eq(ch.required_stat, &"streetwise", "Needs stat survived")
+	assert_eq(ch.required_value, 6, "Needs stat value survived")
+	assert_eq(ch.required_flag, &"met_the_old_man", "Needs flag survived")
+	assert_eq(ch.required_flag_value, "false", "Needs flag value survived (its default is \"true\", not \"\")")
+	assert_eq(ch.required_faction_id, "townsfolk", "Needs faction id survived")
+	assert_almost_eq(ch.required_reputation, 12.5, 0.001, "Needs reputation survived")
+	assert_eq(ch.required_perk_id, &"tough_hide", "Needs perk id survived")
+	assert_eq(ch.required_item_id, &"keycard", "Needs item id survived")
+	assert_eq(ch.required_item_count, 3, "Needs item count survived")
+	assert_eq(ch.required_quest_id, &"recover_package", "Needs quest id survived")
+	assert_eq(ch.required_quest_state, DialogueChoice.QuestGate.COMPLETED, "Needs quest state survived")
+	assert_eq(ch.set_flag, &"took_the_job", "Set flag survived")
+	assert_false(ch.set_flag_value, "the set-flag value survived (its default is TRUE, so a lost push reads as unchanged)")
+	assert_eq(ch.complete_quest_id, &"clear_the_block", "Complete quest id survived")
+	assert_eq(ch.advance_quest_id, &"clear_the_block", "Advance quest id survived")
+	assert_eq(ch.advance_objective_id, &"kill_raiders", "Advance objective id survived")
+	assert_eq(ch.give_item_id, &"medkit", "Give item id survived")
+	assert_eq(ch.give_item_count, 4, "Give item count survived (its default is 1, not 0)")
+	assert_almost_eq(ch.give_money, -12.5, 0.001, "Give money survived -- a step-1 spin would have rounded it away")
+	assert_eq(ch.reward_reputation_faction_id, "raiders", "Reward faction id survived")
+	assert_almost_eq(ch.reward_reputation, -8.25, 0.001, "Reward reputation survived")
+	assert_true(ch.aggro_speaker, "Speaker-turns-hostile survived")
+	assert_same(ch.start_quest_on_choice, q,
+		"the Start quest REFERENCE is owned by the pick handler alone -- a keystroke elsewhere must never re-resolve or blank it")
+	d._res = null
+	ch = null
+	q = null
+	r = null
+	d.free()
+
+
+## The half of Discard that a reload cannot do on its own. A .tres OMITS default-valued fields -- old_man.tres on
+## disk carries `lines` and `choices` and NOTHING else, no line text, no choice label, no consequence -- so
+## re-reading it over the cached instance re-assigns two arrays and leaves every character the designer typed
+## exactly where it was. Discard therefore resets to script defaults FIRST and only then reloads. This pins the
+## reset on THROWAWAY resources, so the on-disk fixtures and the process-wide resource cache are never touched.
+func test_reset_to_defaults_is_what_makes_discard_real() -> void:
+	var fresh := DialogueChoice.new()
+	var ch := DialogueChoice.new()
+	ch.resource_name = "keep me"
+	ch.text = "Yes."
+	ch.target = 3
+	ch.give_item_id = &"medkit"
+	ch.give_money = -250.0
+	ch.aggro_speaker = true
+	assert_gte(DialogueEditor._reset_to_defaults(ch), 5, "every field that was off its default was put back")
+	assert_eq(ch.text, fresh.text, "the choice label is blank again")
+	assert_eq(ch.target, fresh.target, "Target is back to Continue, not left at the authored line")
+	assert_eq(ch.give_item_id, fresh.give_item_id, "Give item id is blank again")
+	assert_eq(ch.give_money, fresh.give_money, "Give money is back to 0")
+	assert_false(ch.aggro_speaker, "the hostility toggle is back off")
+	assert_eq(ch.give_item_count, 1, "a field already AT its default is left alone -- and that default is 1, not 0")
+	assert_eq(ch.resource_name, "keep me",
+		"only SCRIPT variables are reset: a built-in Resource field is never touched (clearing resource_path would evict it from the cache)")
+	# A DialogueLine is NOT a @tool script, unlike DialogueChoice -- worth pinning that the reset still reaches it,
+	# because that is the difference between Discard reverting a line's text and silently keeping it.
+	var ln := DialogueLine.new()
+	ln.text = "Halt."
+	ln.reveals_name = true
+	ln.choices.append(DialogueChoice.new())
+	assert_gte(DialogueEditor._reset_to_defaults(ln), 3, "a DialogueLine resets too, @tool script or not")
+	assert_eq(ln.text, "", "the line text is blank again")
+	assert_false(ln.reveals_name, "the legacy toggle is back off")
+	assert_true(ln.choices.is_empty(), "and the line's choice list is emptied, so the reload refills it from the file")
+	assert_eq(DialogueEditor._reset_to_defaults(null), 0, "a null object is a no-op, not a crash")
+	fresh = null
+	ch = null
+	ln = null
+
+
+## Off-tree there is no window to ask "Save changes first?" in, so a dirty swap is REFUSED: the open conversation
+## stays, the picker springs back to it, and the status says why. (In the editor the same chokepoint pops the
+## Save / Discard / Cancel dialog instead.) The flag is set by hand -- the on-disk fixture is never mutated.
+func test_dirty_guard_refuses_a_swap_off_tree_and_restores_the_picker() -> void:
+	var d = DialogueEditor.new()
+	d.select_path(OLD_MAN)
+	var open_idx: int = d._picker.selected
+	var other: int = d._paths.find(SLICE_TERMINAL)
+	assert_gte(other, 0, "precondition: the other conversation is in the list")
+	d._dirty = true
+	d._picker.select(other)  # what the widget does on its own before item_selected fires
+	d._on_pick(other)
+	assert_eq(d._loaded_path, OLD_MAN, "the dirty conversation was NOT replaced")
+	assert_eq(d._picker.selected, open_idx, "the picker sprang back to the open file")
+	assert_string_contains(d._status.text, "unsaved")
+	assert_null(d._save_dialog, "no dialog was built off-tree")
+	# Re-picking the OPEN conversation is a no-op, never a reload -- even while dirty.
+	d._on_pick(open_idx)
+	assert_eq(d._loaded_path, OLD_MAN, "re-picking the open row changes nothing")
+	assert_true(d._dirty, "and does not clear the flag")
+	d._dirty = false
+	d.free()
+
+
+## The failed-load branch: no document, empty lists, the choice editor hidden, every write button greyed, and a
+## status that names the file and the retry (Refresh).
+func test_failed_load_clears_the_editor_and_greys_the_writes() -> void:
+	var d = DialogueEditor.new()
+	d.select_path(OLD_MAN)
+	assert_not_null(d._res, "precondition: a conversation is open")
+	d._clear_loaded("res://resources/dialogue/broken.tres")
+	assert_null(d._res, "the open resource is nulled")
+	assert_eq(d._loaded_path, "", "no loaded path")
+	assert_false(d._dirty, "a cleared editor is not dirty")
+	assert_eq(d._line_list.item_count, 0, "the line list is emptied")
+	assert_eq(d._choice_list.item_count, 0, "the choice list is emptied")
+	assert_false(d._choice_box.visible, "the choice editor is hidden")
+	assert_eq(d._line_text.text, "", "the line text is cleared")
+	assert_true(d._save_btn.disabled, "Save Conversation is greyed")
+	for b in d._line_buttons:
+		assert_true((b as Button).disabled, "line list button '%s' is greyed with nothing open" % (b as Button).text)
+	for b in d._choice_buttons:
+		assert_true((b as Button).disabled, "choice list button '%s' is greyed with nothing open" % (b as Button).text)
+	assert_string_contains(d._status.text, "broken.tres")
+	assert_string_contains(d._status.text, "Refresh")
+	d.free()
+
+
+## The list buttons grey by what is picked: Add needs the parent, Remove / Up / Down need a picked row, and each
+## greyed button's tooltip names what is missing.
+func test_list_buttons_grey_by_what_is_picked() -> void:
+	var d = DialogueEditor.new()
+	var r := _res_with_lines(2)
+	d._res = r
+	d._loaded_path = "res://resources/dialogue/__never_saved__.tres"
+	d._rebuild_line_list()
+	d._select_line(-1)  # open, nothing picked
+	assert_false(d._line_buttons[0].disabled, "Add line is live once a conversation is open")
+	assert_true(d._line_buttons[1].disabled, "Remove line needs a picked line")
+	assert_string_contains(d._line_buttons[1].tooltip_text, "Pick a line")
+	assert_true(d._choice_buttons[0].disabled, "Add choice needs a picked line")
+	d._select_line(0)
+	assert_false(d._line_buttons[1].disabled, "Remove line is live with a line picked")
+	assert_false(d._choice_buttons[0].disabled, "Add choice is live with a line picked")
+	assert_true(d._choice_buttons[1].disabled, "Remove choice needs a picked choice")
+	assert_string_contains(d._choice_buttons[1].tooltip_text, "Pick a choice")
+	d._add_choice()
+	assert_false(d._choice_buttons[1].disabled, "Remove choice is live with a choice picked")
+	assert_ne(d._choice_buttons[1].tooltip_text, "Pick a choice in the list first", "a live button gets its real tooltip back")
+	d._res = null
+	r = null
 	d.free()
 
 

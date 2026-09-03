@@ -66,9 +66,11 @@ static func expected_drops(entry: LootEntry) -> float:
 
 ## A one-line, designer-readable summary of the whole table's expected yield (sum of expected_drops over every row,
 ## plus a flag for rows that drop nothing). PURE. Empty / null -> a friendly "nothing" line.
+## Real plurals, never a hand-rolled "(s)" — this line sits under the row list where the tab's own status prose
+## ("3 rows", "1 item") is one glance away, and the two must not read as if different people wrote them.
 static func summary_text(lt: LootTable) -> String:
 	if lt == null or lt.entries.is_empty():
-		return "Empty table — drops nothing."
+		return "Empty table -- drops nothing."
 	var total := 0.0
 	var dead := 0
 	for e in lt.entries:
@@ -76,5 +78,12 @@ static func summary_text(lt: LootTable) -> String:
 		total += ex
 		if ex <= 0.0:
 			dead += 1
-	var tail := "" if dead == 0 else "  (%d row%s drop nothing)" % [dead, "" if dead == 1 else "s"]
-	return "%d row(s) — ~%.2f item(s) expected per roll.%s" % [lt.entries.size(), total, tail]
+	var tail := "" if dead == 0 else "  (%s %s nothing)" % [_plural(dead, "row"), "drops" if dead == 1 else "drop"]
+	var yield_noun := "item" if is_equal_approx(total, 1.0) else "items"
+	return "%s -- about %.2f %s expected per roll.%s" % [_plural(lt.entries.size(), "row"), total, yield_noun, tail]
+
+
+## "1 row" / "3 rows" — the count wording shared by this summary and the tab's status lines. Editor tooling prose,
+## never PlayerText (which is the player-facing surface; this string only ever reaches the designer's panel).
+static func _plural(n: int, noun: String) -> String:
+	return "%d %s%s" % [n, noun, "" if n == 1 else "s"]

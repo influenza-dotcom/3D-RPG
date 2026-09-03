@@ -22,23 +22,50 @@ extends RefCounted
 ## Each entry: {
 ##   "label":  category name shown as the section header,
 ##   "dir":    res:// folder scanned for .tres,
-##   "fields": Array of { "name": <property>, "multiline": <bool> }  — a LineEdit when false, a TextEdit when true.
+##   "fields": Array of { "name": <property>, "multiline": <bool>, "label": <designer-facing word> }
+##             — a LineEdit when multiline is false, a TextEdit when true. "label" is what the Text tab prints
+##             above the widget (the designer reads "Name", never "display_name"); it is OPTIONAL — a row without
+##             one degrades through field_label() below, so a hastily added row still reads as words.
 ## }
 const SOURCES: Array = [
-	{ "label": "Items", "dir": "res://resources/items/",
-	  "fields": [ {"name": "display_name", "multiline": false}, {"name": "description", "multiline": true} ] },
-	{ "label": "Stats", "dir": "res://resources/stats/",
-	  "fields": [ {"name": "display_name", "multiline": false}, {"name": "description", "multiline": true} ] },
-	{ "label": "Status Effects", "dir": "res://resources/status/",
-	  "fields": [ {"name": "display_name", "multiline": false}, {"name": "description", "multiline": true} ] },
-	{ "label": "Perks", "dir": "res://resources/perks/",
-	  "fields": [ {"name": "display_name", "multiline": false}, {"name": "description", "multiline": true} ] },
-	{ "label": "Quests", "dir": "res://resources/quests/",
-	  "fields": [ {"name": "title", "multiline": false}, {"name": "description", "multiline": true} ] },
-	{ "label": "Factions", "dir": "res://resources/factions/",
-	  "fields": [ {"name": "display_name", "multiline": false} ] },
-	{ "label": "NPCs", "dir": "res://resources/characters/",
-	  "fields": [ {"name": "display_name", "multiline": false} ] },
-	{ "label": "Levels", "dir": "res://resources/levels/",
-	  "fields": [ {"name": "display_name", "multiline": false} ] },
+	{ "label": "Items", "dir": "res://resources/items/", "fields": [
+		{"name": "display_name", "multiline": false, "label": "Name"},
+		{"name": "description", "multiline": true, "label": "Description"},
+	] },
+	{ "label": "Stats", "dir": "res://resources/stats/", "fields": [
+		{"name": "display_name", "multiline": false, "label": "Name"},
+		{"name": "description", "multiline": true, "label": "Description"},
+	] },
+	{ "label": "Status Effects", "dir": "res://resources/status/", "fields": [
+		{"name": "display_name", "multiline": false, "label": "Name"},
+		{"name": "description", "multiline": true, "label": "Description"},
+	] },
+	{ "label": "Perks", "dir": "res://resources/perks/", "fields": [
+		{"name": "display_name", "multiline": false, "label": "Name"},
+		{"name": "description", "multiline": true, "label": "Description"},
+	] },
+	{ "label": "Quests", "dir": "res://resources/quests/", "fields": [
+		{"name": "title", "multiline": false, "label": "Title"},
+		{"name": "description", "multiline": true, "label": "Description"},
+	] },
+	{ "label": "Factions", "dir": "res://resources/factions/", "fields": [
+		{"name": "display_name", "multiline": false, "label": "Name"},
+	] },
+	{ "label": "NPCs", "dir": "res://resources/characters/", "fields": [
+		{"name": "display_name", "multiline": false, "label": "Name"},
+	] },
+	{ "label": "Levels", "dir": "res://resources/levels/", "fields": [
+		{"name": "display_name", "multiline": false, "label": "Name"},
+	] },
 ]
+
+
+## The word the Text tab prints above a field's widget: the row's "label" when authored, else the property name
+## turned into words ("display_name" -> "Display Name"). The capitalize() here is the missing-label DEGRADE only
+## (the same rule as the runtime display-name accessors) — every shipped row above carries a real label, so the
+## fallback exists for a future row added in a hurry, not as the normal path. Pure: safe headless and off-tree.
+static func field_label(field: Dictionary) -> String:
+	var authored: String = String(field.get("label", ""))
+	if authored != "":
+		return authored
+	return String(field.get("name", "")).capitalize()

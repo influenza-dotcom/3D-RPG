@@ -21,7 +21,8 @@ static func run(root: Node) -> Array:
 
 
 ## Instantiate each rule Script + call run_audit(root), merging the Array findings. Skips anything that isn't an
-## instantiable Script with a run_audit() returning an Array. Pure w.r.t. the filesystem (takes the scripts in).
+## instantiable Script with a run_audit() returning an Array -- and, INSIDE that Array, anything that isn't a
+## Dictionary finding. Pure w.r.t. the filesystem (takes the scripts in).
 ##
 ## LIFETIME: a CyberAuditRule is RefCounted, so it frees itself when `inst` goes out of scope — but the loader only
 ## checks can_instantiate() + has_method(), so a rule mistakenly written as `extends Node`/`extends Object` would be
@@ -38,7 +39,13 @@ static func run_rules(scripts: Array, root: Node) -> Array:
 			continue
 		var res: Variant = inst.run_audit(root)
 		if res is Array:
-			out.append_array(res)
+			# Row-by-row, NOT append_array: a rule may return an Array holding something that isn't a finding at all
+			# (a stray int, a null left by a half-written branch). The panel COUNTS every entry in the summary but can
+			# only DRAW a Dictionary, so a junk row would inflate "Found N problems" with a row nobody can find or
+			# click. Same fail-soft rule as the rest of this loader: skip it, keep the rule's good findings.
+			for row in (res as Array):
+				if row is Dictionary:
+					out.append(row)
 		_release(inst)
 	return out
 
@@ -47,7 +54,7 @@ static func run_rules(scripts: Array, root: Node) -> Array:
 ## only has to hand-free the manually-managed Object/Node case. A Node is never added to the tree here, so free()
 ## is correct — queue_free() would need a tree to be processed.
 static func _release(inst: Variant) -> void:
-	if inst is Object and not (inst is RefCounted) and is_instance_valid(inst):
+	if is_instance_valid(inst) and inst is Object and not (inst is RefCounted):
 		(inst as Object).free()
 
 

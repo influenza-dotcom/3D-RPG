@@ -2,15 +2,18 @@
 extends RefCounted
 
 ## PURE structural diff of two .tscn files (the Scene Diff tab). Parses each scene's TEXT into a node model
-## {node_path: {type, props}} WITHOUT instantiating it (no _init side effects, no renderer), then diffs the two
+## {node_path: {name, type, props}} WITHOUT instantiating it (no _init side effects, no renderer), then diffs the two
 ## models into added / removed / changed nodes with per-property differences. Both functions are pure + unit-tested;
 ## the tab does the file reads + tree render. READ-ONLY: this only compares — there is no merge (apply changes by
 ## hand; auto-merging scenes is unsafe). LIMITATION: property values are read one line at a time, so a rare
 ## multi-line node property is compared by its first line only — enough to FLAG a change, not to show every byte.
 
-## Parse a .tscn's text into {node_path: {type: String, props: {name: value_text}}}. The root keys as "." and every
-## other node as its NodePath-from-root (parent "." -> the node name; parent "Foo" -> "Foo/<name>"). ext_resource /
-## sub_resource / connection blocks are ignored — only [node ...] sections + their property lines are modelled.
+## Parse a .tscn's text into {node_path: {name: String, type: String, props: {name: value_text}}}. The root keys as
+## "." and every other node as its NodePath-from-root (parent "." -> the node name; parent "Foo" -> "Foo/<name>").
+## `name` is the node's own name from the [node ...] header — for every child it is also the last segment of the
+## key, but the ROOT's key is the fixed "." (the tab renders it as "<RootName> (root)", and diff_scenes reports a
+## root rename through it). ext_resource / sub_resource / connection blocks are ignored — only [node ...] sections +
+## their property lines are modelled.
 static func parse_scene(text: String) -> Dictionary:
 	var nodes := {}
 	var cur := ""
@@ -31,7 +34,7 @@ static func parse_scene(text: String) -> Dictionary:
 			var parent := pm.get_string(1) if pm != null else ""  # "" = the root node
 			var key := "." if parent == "" else (name if parent == "." else parent + "/" + name)
 			cur = key
-			nodes[key] = {"type": node_type, "props": {}}
+			nodes[key] = {"name": name, "type": node_type, "props": {}}
 		elif s.begins_with("["):
 			cur = ""  # left the node block (ext_resource / sub_resource / connection / editable / ...)
 		elif cur != "" and " = " in s:
@@ -42,7 +45,10 @@ static func parse_scene(text: String) -> Dictionary:
 
 ## Diff two parsed models (a = "before"/left, b = "after"/right). Returns {added, removed, changed} where added /
 ## removed are node-path arrays (in b-only / a-only) and changed is [{key, type_change, props_added, props_removed,
-## props_changed}] for nodes in BOTH whose type or any property differs. Pure.
+## props_changed}] for nodes in BOTH whose type or any property differs. A child rename shows up as one removed +
+## one added key (children key by name); the ROOT keys as "." on both sides, so its rename is reported as a
+## "name: Old -> New" entry in props_changed instead — the only place a rename is visible as a change. Models built
+## without a `name` (older callers, hand-made fixtures) diff as before. Pure.
 static func diff_scenes(a: Dictionary, b: Dictionary) -> Dictionary:
 	var added: Array = []
 	var removed: Array = []
@@ -62,6 +68,11 @@ static func diff_scenes(a: Dictionary, b: Dictionary) -> Dictionary:
 		var p_added: Array = []
 		var p_removed: Array = []
 		var p_changed: Array = []
+		if k == ".":
+			var name_a := String(a[k].get("name", ""))
+			var name_b := String(b[k].get("name", ""))
+			if name_a != name_b:
+				p_changed.append("name: %s -> %s" % [name_a, name_b])
 		for pk in pb:
 			if not pa.has(pk):
 				p_added.append(pk)

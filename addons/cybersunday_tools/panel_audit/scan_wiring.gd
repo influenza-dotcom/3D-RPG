@@ -6,7 +6,10 @@ extends RefCounted
 ## a story flag a dialogue READS that nothing ever WRITES (a dead gate), a quest-id a trigger advances that no
 ## .tres declares (a typo), a faction-id a merchant prices against that has no resource. Each pass GATHERS literals
 ## across every res:// .tscn/.tres/.gd into sets, then RESOLVES references against those sets. Returns
-## Array[{severity, source, message}] (errors first), the same finding shape scan_disk emits.
+## Array[{severity, source, message, domain}] (errors first), the same finding shape scan_disk emits. Every row is
+## domain "content" (a wiring slip is fixed in a .tres / .tscn field, never in code), so the Audit tab always lists
+## it under the designer's default view. The dict may only GAIN keys: validate_all.gd, cyber_cmds.gd and
+## tests/test_devtools_audit_wiring.gd read these rows and predate the key.
 ##
 ## SPLIT: every predicate below is a PURE static func (no EditorInterface / no scene tree / no autoload) so the GUT
 ## suite tests the classifier + resolver logic on small fixture strings/dicts; run() and the .tres LOADS are the
@@ -36,6 +39,8 @@ const OBJ_TYPE_FLAG := 5
 # real production wiring bug. Production flag/quest/faction wiring must be self-contained, so excluding tests is safe.
 const SKIP_DIRS: Array[String] = [".godot", "addons", ".git", "tests"]
 const FACTION_DIR := "res://resources/factions/"
+## The Audit tab's row-filter domain for every wiring row (see the header).
+const DOMAIN := "content"
 
 ## Shared one-read-per-file cache (see scan_cache.gd) — this pass walks res:// reading the SAME files scan_disk just
 ## read. Inert outside audit_panel's begin()/end() window, so a standalone run behaves exactly as before.
@@ -421,5 +426,6 @@ static func _has_flag_objective(text: String) -> bool:
 static func _src(src_of: Dictionary, name: String) -> String:
 	return str(src_of.get(name, "res:// (project-wide)"))
 
+## The finding shape (domain fixed at content -- see the header).
 static func _f(sev: String, src: String, msg: String) -> Dictionary:
-	return {"severity": sev, "source": src, "message": msg}
+	return {"severity": sev, "source": src, "message": msg, "domain": DOMAIN}

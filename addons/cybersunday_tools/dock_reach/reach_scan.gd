@@ -527,16 +527,21 @@ static func _type_bracket_spans(value: String) -> Array:
 	return out
 
 
-## Every quest START site declared in one file's text, as [{field, label, id, path}] — `path` is "" when the
+## Every quest START site declared in one file's text, as [{field, label, id, path, node}] — `path` is "" when the
 ## ExtResource id resolves to no row (a uid-only row, or a hand-written fixture with no header). The caller must
 ## SHOW those rather than drop them: a dropped site silently downgrades a wired quest to NO START SITE.
+## `node` is the `name="…"` of the `[node …]` header the site sits under (block_node_name), so the report row can say
+## WHICH node in the scene holds the starter — 'QuestStarter.quest on node "QuestStarter" in SliceTestLevel.tscn' —
+## and the designer can find it in the scene tree. "" for a site inside a [sub_resource] / [resource] block (a
+## DialogueChoice in a .tres) or a bare fixture with no header.
 ##
 ## `text` is SERIALIZED text (.tscn/.tres) and nothing else — the glue's SURVEY_EXTS enforces it. No comment masking
 ## happens here (a `#` in a .tscn is data, not a comment), so handing this .gd source would let a `## quest =
 ## ExtResource("x")` docstring register a phantom start site, which is a false GREEN. Use the serialized files.
 ##
 ## Split per `[node ...]` / `[sub_resource ...]` / `[resource]` block with ScanWiring._resource_blocks
-## (scan_wiring.gd:374-391) so a field never pairs with a value from a different node.
+## (scan_wiring.gd:379-396) so a field never pairs with a value from a different node. That split is also what makes
+## block_node_name's `^` anchor safe: each block is a substr starting AT its own `[` header character.
 ##
 ## The field names are the REAL exports: QuestStarter.quest (quest_starter.gd:13), TriggerVolume.start_quest
 ## (trigger_volume.gd:54), DialogueChoice.start_quest_on_choice (dialogue_choice.gd:72). Each is matched anchored at
@@ -574,15 +579,34 @@ static func quest_start_sites(text: String) -> Array:
 			var field := str(pair[0])
 			if not b.contains(field):
 				continue  # the same never-false-negative reject, per block: most blocks are geometry nodes
-			for value in _field_values_with(b, pair[1] as RegEx):
+			var values := _field_values_with(b, pair[1] as RegEx)
+			if values.is_empty():
+				continue
+			# Resolved only for a block that actually holds a start field: one small RegEx per matched block, and
+			# only ~8 files in the project get past the fast reject above, so this never touches the scan budget.
+			var node := block_node_name(b)
+			for value in values:
 				for id in ext_resource_ids(value):
 					out.append({
 						"field": field,                                       # the raw export name
 						"label": str(QUEST_START_OWNERS.get(field, field)),   # Component.field, for the finding row
 						"id": str(id),
 						"path": str(index.get(id, "")),
+						"node": node,                                         # the scene node holding it; "" in a .tres
 					})
 	return out
+
+
+## The `name="…"` of a `[node …]` block header, or "" for any other block — a [sub_resource] / [resource] block, or a
+## bare fixture string with no header. Anchored at the block START (blocks come from ScanWiring._resource_blocks,
+## which splits at every `[` header line, so a block begins with its own header) and bounded by the header's closing
+## `]`. Godot always writes `name` as the FIRST attribute, so a `groups=["navmesh"]` later on the same header line
+## (its `]` ends the `[^\]]*` run early) can never cut the capture short.
+static func block_node_name(block: String) -> String:
+	var re := RegEx.new()
+	re.compile("^\\[node\\b[^\\]]*\\bname=\"([^\"]*)\"")
+	var m := re.search(block)
+	return m.get_string(1) if m != null else ""
 
 
 ## The res:// path a single `field = ExtResource("N")` names, or "" when there is none. Read from the `[resource]`
@@ -651,7 +675,7 @@ static func _field_values_with(text: String, re: RegEx) -> Array:
 ##             scenes/levels/SliceTestLevel.tscn, and nothing points at SliceTestLevel.tres.)
 ##   both yes                                          -> OK
 ##
-## `sites` is every start site found for THIS quest project-wide, as [{file, field, label}] — only `file` is read
+## `sites` is every start site found for THIS quest project-wide, as [{file, field, label, node}] — only `file` is read
 ## here; `label` is what the view PRINTS ("QuestStarter.quest"). A site inside the quest's own file is skipped — a
 ## resource cannot be its own start site (it is the self-chain case of next_quest).
 static func classify_quest(path: String, sites: Array, reached: Dictionary) -> String:
@@ -674,9 +698,12 @@ static func classify_quest(path: String, sites: Array, reached: Dictionary) -> S
 ## classify_quest's `file == path` skip). Transitivity of the VERDICT comes free from the closure itself — a
 ## reachable A pulls B in as an ordinary ExtResource edge, which is what makes B's site test true.
 ##
-## `sites_by_quest` {quest_path: [{file, field, label}]}, `next_of` {quest_path: next_quest_path}. Returns a NEW
-## map; the input is not mutated. A quest that appears only in `next_of` gains an entry, so a chained stage with no
-## component wiring of its own is still classified rather than dropped.
+## `sites_by_quest` {quest_path: [{file, field, label, node}]}, `next_of` {quest_path: next_quest_path}. Returns a
+## NEW map; the input is not mutated (the existing rows are carried through untouched, `node` included). A quest that
+## appears only in `next_of` gains an entry, so a chained stage with no component wiring of its own is still
+## classified rather than dropped. The SYNTHESISED rows carry no `node`: a Quest.next_quest site lives in the parent
+## quest's .tres, where there is no scene node to name — build_report defaults the key to "" and the view then prints
+## "in <parent>.tres" rather than an invented node.
 static func inherit_chained_starts(sites_by_quest: Dictionary, next_of: Dictionary) -> Dictionary:
 	var out := {}
 	for q in sites_by_quest:
@@ -734,9 +761,11 @@ static func content_chain(chain: Array) -> Array:
 ##                                  unwired level shows as UNREACHABLE instead of vanishing from the roster
 ##   quests           [path]        every Quest .tres found (NOT just the ones with sites — a quest with no site
 ##                                  anywhere must still appear, as NO START SITE. This is the clear_the_block row.)
-##   quest_sites      {quest: [{file, field, label}]}   quest_start_sites() INVERTED: the glue walks the project,
-##                                  and for every site whose `path` resolved it appends {file: <the file scanned>,
-##                                  field, label} under that quest. `file` is what the reachability test keys on.
+##   quest_sites      {quest: [{file, field, label, node}]}   quest_start_sites() INVERTED: the glue walks the
+##                                  project, and for every site whose `path` resolved it appends {file: <the file
+##                                  scanned>, field, label, node} under that quest. `file` is what the reachability
+##                                  test keys on; `node` (the scene node holding the starter, "" for a .tres site) is
+##                                  carried through to the row so the designer can find it in the scene tree.
 ##   quest_next       {quest: next_quest_path}   resource_field_ref(text, "next_quest") per Quest .tres
 ##   dialogue         [path]        every DialogueResource .tres found
 ##   skipped          [path]        files the glue could not read/load (a mid-reimport load() returns null or an
@@ -785,6 +814,7 @@ static func build_report(cl: Dictionary, found: Dictionary) -> Dictionary:
 				"file": file,
 				"field": field,
 				"label": str(sd.get("label", QUEST_START_OWNERS.get(field, field))),
+				"node": str(sd.get("node", "")),   # "" for a .tres site or a synthesised Quest.next_quest site
 				"reachable": reached.has(file),
 			})
 		quests.append({

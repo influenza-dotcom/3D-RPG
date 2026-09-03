@@ -2,14 +2,24 @@
 extends RefCounted
 
 ## Domain B of the project audit: scans res:// files for silent breakage that per-node config warnings can't see --
-## dead/typo'd group literals (vs the Groups registry), broken ext_resource refs, and dead LootTable / out-of-range
-## DialogueResource entries. Returns Array[{severity, source, message}]. Button-triggered (it reads every file once).
+## dead/typo'd group literals (vs the Groups registry), missing ext_resource files, and dead LootTable / out-of-range
+## DialogueResource entries. Returns Array[{severity, source, message, domain}]. Button-triggered (it reads every
+## file once).
+##
+## `domain` is the Audit tab's row filter: the .gd group-literal rows are DOMAIN_CODE (a programmer's tidy-up the
+## designer can hide behind the default "Scene + Content" view), the resource rows and the chained wiring rows are
+## DOMAIN_CONTENT. The other consumers of these rows -- scripts/tools/validate_all.gd, scripts/tools/cyber_cmds.gd
+## (which stamps its OWN `domain` vocabulary over the row copy it returns), tests/test_groups.gd -- predate the key
+## and ignore it: this dict may only GAIN keys, never change shape, severity strings, or the messages they assert on.
 
 const GroupsReflect := preload("res://addons/cybersunday_tools/core/groups_reflect.gd")
 const WiringScan := preload("res://addons/cybersunday_tools/panel_audit/scan_wiring.gd")
 ## Shared one-read-per-file cache: this domain, scan_wiring, scan_text and scan_menu_sound all read the SAME .gd
-## files during one Re-scan. Inert outside audit_panel's begin()/end() window, so a standalone run is unchanged.
+## files during one Scan. Inert outside audit_panel's begin()/end() window, so a standalone run is unchanged.
 const ScanCache := preload("res://addons/cybersunday_tools/panel_audit/scan_cache.gd")
+## Finding domains (see the header). Rows without the key are read as content by the panel.
+const DOMAIN_CODE := "code"
+const DOMAIN_CONTENT := "content"
 # `tests` is skipped: GUT fixtures deliberately use synthetic group literals (e.g. "noise"/"vip"/"flammable")
 # and throwaway story flags that aren't real content — scanning them only adds permanent baseline noise that
 # hides a genuine production typo. A broken ref inside a test fails the GUT run itself, so it's covered there.
@@ -82,6 +92,8 @@ static func _scan_file(path: String, out: Array, allowed: Dictionary, const_name
 ##   - a REGISTERED name used as a raw string instead of its const — a WARN, auto-fixable to Groups.<CONST> (the
 ##     "non-const group use" this audit exists to eliminate: IDE autocomplete, safe rename, no silent typo drift).
 ##   - an UNREGISTERED name — a WARN (a typo, or a group to add to groups.gd); no single right fix, so flagged only.
+## Every row here is DOMAIN_CODE: it points at a line of script, so the panel prefixes it "[code]" and hides it under
+## the designer's default view (the Fix plan still includes it).
 static func scan_gd_text(text: String, source: String, allowed: Dictionary, const_names: Dictionary = {}) -> Array:
 	var out: Array = []
 	var re := RegEx.new()
@@ -89,16 +101,16 @@ static func scan_gd_text(text: String, source: String, allowed: Dictionary, cons
 	for m in re.search_all(mask_comments(text)):
 		var g := m.get_string(2)
 		if g == "player":
-			var f := _f("ERROR", source, "Group literal \"player\" (lowercase) is the DEAD group — nothing joins it. Use Groups.PLAYER (\"Player\").")
+			var f := _f("ERROR", source, "Group literal \"player\" (lowercase) is the DEAD group — nothing joins it. Use Groups.PLAYER (\"Player\").", DOMAIN_CODE)
 			f["fix"] = {"kind": "player_group", "source": source}  # one unambiguous fix -> the audit panel can batch-apply it
 			out.append(f)
 		elif allowed.has(StringName(g)):
 			var cname := String(const_names.get(StringName(g), g.to_upper()))
-			var f := _f("WARN", source, "Group literal \"%s\" — use Groups.%s instead of a raw string (autocomplete, safe rename, no typo drift)." % [g, cname])
+			var f := _f("WARN", source, "Group literal \"%s\" — use Groups.%s instead of a raw string (autocomplete, safe rename, no typo drift)." % [g, cname], DOMAIN_CODE)
 			f["fix"] = {"kind": "group_literal", "source": source}  # one mechanical rewrite -> the audit panel can batch-apply it
 			out.append(f)
 		else:
-			out.append(_f("WARN", source, "Group literal \"%s\" isn't a registered Groups name — a typo, or add it to scripts/world/groups.gd." % g))
+			out.append(_f("WARN", source, "Group literal \"%s\" isn't a registered Groups name — a typo, or add it to scripts/world/groups.gd." % g, DOMAIN_CODE))
 	return out
 
 
@@ -137,7 +149,8 @@ static func _mask_line_comment(line: String) -> String:
 		i += 1
 	return line
 
-## Broken ext_resource paths in one .tscn/.tres's text (a missing path loads as <null>).
+## Missing ext_resource files in one .tscn/.tres's text (a path that no longer exists loads as nothing, so the scene
+## or resource silently loses that piece). A content row: the designer fixes it by re-pointing the field, not in code.
 static func scan_ref_text(text: String, source: String) -> Array:
 	var out: Array = []
 	var re := RegEx.new()
@@ -145,7 +158,10 @@ static func scan_ref_text(text: String, source: String) -> Array:
 	for m in re.search_all(text):
 		var p := m.get_string(1)
 		if not ResourceLoader.exists(p):
-			out.append(_f("ERROR", source, "Broken ext_resource path: %s (loads as <null>)." % p))
+			# The missing path is named WITHOUT its "res://" prefix: this is a content row, so it sits in the
+			# designer's default view, and the engine prefix is noise they never type. The folders stay -- the file
+			# name alone would not say WHICH "icon.png" went missing.
+			out.append(_f("ERROR", source, "Missing file: %s -- this points at a file that no longer exists." % p.trim_prefix("res://")))
 	return out
 
 
@@ -157,14 +173,16 @@ static func _loot_findings(res: Variant, source: String) -> Array:
 		return out
 	var i := 0
 	for e in (res as LootTable).entries:
+		# Designer words, matching the Loot Edit tab the double-click opens: "row 2", "Chance", "Min", "Max" -- never
+		# the class name or the property identifiers, since these are content rows in the default view.
 		if e == null:
-			out.append(_f("WARN", source, "LootTable entry %d is null — drops nothing." % i))
+			out.append(_f("WARN", source, "Loot row %d is empty — it drops nothing." % i))
 		elif e.item == null:
-			out.append(_f("WARN", source, "LootTable entry %d has no item — drops nothing." % i))
+			out.append(_f("WARN", source, "Loot row %d has no item — it drops nothing." % i))
 		elif e.chance <= 0.0:
-			out.append(_f("WARN", source, "LootTable entry %d: chance is 0 — it never drops." % i))
+			out.append(_f("WARN", source, "Loot row %d: Chance is 0 — it never drops." % i))
 		elif e.max_count < e.min_count:
-			var f := _f("WARN", source, "LootTable entry %d: max_count < min_count (silently clamped)." % i)
+			var f := _f("WARN", source, "Loot row %d: Max is below Min — the count is quietly raised to Min every drop." % i)
 			f["fix"] = {"kind": "loot_clamp", "source": source}  # raise max up to min -> matches roll()'s maxi() clamp
 			out.append(f)
 		i += 1
@@ -181,16 +199,20 @@ static func _dialogue_findings(res: Variant, source: String) -> Array:
 		if line != null:
 			for c in line.choices:
 				if c != null:
-					_target_finding(c.target, n, source, li, "target", out)
-					_target_finding(c.target_on_fail, n, source, li, "target_on_fail", out)
+					# The field names are the Dialogue Edit tab's own labels, not the property identifiers: this row
+					# is what the designer reads, and double-clicking it opens exactly those two dropdowns.
+					_target_finding(c.target, n, source, li, "Target", out)
+					_target_finding(c.target_on_fail, n, source, li, "Fail target", out)
 		li += 1
 	return out
 
-## Dialogue targets must be a valid line index or a sentinel (-1 END, -2 CONTINUE).
+## Dialogue targets must be a valid line index or a sentinel (-1 END, -2 CONTINUE). The message names the sentinels by
+## their dropdown labels (End / Continue) rather than the raw -1 / -2 the designer never sees.
 static func _target_finding(t: int, n: int, source: String, li: int, field: String, out: Array) -> void:
 	if t < -2 or t >= n:
-		out.append(_f("ERROR", source, "Dialogue line %d choice %s=%d is out of range (valid -2..%d)." % [li, field, t, n - 1]))
+		out.append(_f("ERROR", source, "Line %d: a choice's %s points at line %d, which doesn't exist — the lines run 0 to %d (or End / Continue)." % [li, field, t, n - 1]))
 
 
-static func _f(sev: String, src: String, msg: String) -> Dictionary:
-	return {"severity": sev, "source": src, "message": msg}
+## The finding shape. `domain` defaults to content -- only the .gd group-literal rows pass DOMAIN_CODE.
+static func _f(sev: String, src: String, msg: String, domain: String = DOMAIN_CONTENT) -> Dictionary:
+	return {"severity": sev, "source": src, "message": msg, "domain": domain}

@@ -1,9 +1,11 @@
 extends GutTest
 
-## Unit tests for the CYBER SUNDAY "Content" dock's PURE scaffolders (content_scaffold.gd). Only the statics are
-## exercised — they build Resources via .new() with no EditorInterface / ResourceSaver / scene-tree, so they run
-## headless. The dock itself (content_dock.gd) is editor glue (EditorInterface / EditorInspector) and is NOT
-## instantiated here — those classes are unavailable in a headless run and would crash the suite.
+## Unit tests for the CYBER SUNDAY "New" tab's PURE scaffolders (content_scaffold.gd). Only the statics are
+## exercised -- they build Resources via .new() with no EditorInterface / ResourceSaver / scene-tree, so they run
+## headless. The tab itself (content_dock.gd) is editor GLUE: its _init builds widgets only and every EditorInterface
+## call lives in a button handler, so constructing it is harmless -- but PRESSING a generator writes a real file into
+## res://, so nothing here presses one. What IS pinned instead is every value those handlers depend on, including the
+## two shared name rules (slugify / titleize) that the tab's refusals are worded around.
 
 const Scaffold := preload("res://addons/cybersunday_tools/dock_content/content_scaffold.gd")
 
@@ -269,3 +271,33 @@ func test_build_map_data_has_nonzero_bounds() -> void:
 	assert_gt(m.world_bounds.size.x, 0.0, "map bounds must have a positive width so projection never divides by zero")
 	assert_gt(m.world_bounds.size.y, 0.0, "map bounds must have a positive height")
 	m = null
+
+
+# --- ThrowableData ---------------------------------------------------------------------------------------------
+
+func test_build_throwable_names_itself_and_keeps_the_resource_defaults() -> void:
+	var t := Scaffold.build_throwable("oil drum")
+	assert_eq(t.display_name, "Oil Drum", "the throwable is named from the typed name (titleized)")
+	assert_gt(t.max_hp, 0, "a starter throwable keeps the resource's own breakable hit points")
+	assert_null(t.mesh, "the model slot stays empty on purpose -- the Throwable scene keeps whatever mesh it ships")
+	t = null
+
+
+# --- the shared name rules -------------------------------------------------------------------------------------
+# slugify / titleize are the ONE naming seam every generator routes through (the New tab, Blueprints and New Level
+# all call them): slugify decides the FILE NAME, titleize the display name. The New tab's refusal -- "it needs at
+# least one letter or digit" -- is worded around slugify returning "", so that empty return is a CONTRACT here, not
+# an implementation detail of the loop.
+
+func test_slugify_makes_a_file_safe_snake_case_base() -> void:
+	assert_eq(Scaffold.slugify("Plasma Rifle!"), "plasma_rifle", "spaces and punctuation collapse to one underscore")
+	assert_eq(Scaffold.slugify("  Raider Camp  "), "raider_camp", "surrounding whitespace is trimmed off first")
+	assert_eq(Scaffold.slugify("Mk 2"), "mk_2", "digits are kept as-is")
+
+func test_slugify_returns_empty_when_there_is_no_letter_or_digit() -> void:
+	assert_eq(Scaffold.slugify("!!!"), "", "punctuation alone leaves no name to build a file from")
+	assert_eq(Scaffold.slugify("   "), "", "whitespace alone leaves no name either")
+
+func test_titleize_reads_any_spelling_back_as_a_display_name() -> void:
+	assert_eq(Scaffold.titleize("raider_camp"), "Raider Camp", "an id reads back as a display name")
+	assert_eq(Scaffold.titleize("ghoul"), "Ghoul", "a bare word is capitalised")
