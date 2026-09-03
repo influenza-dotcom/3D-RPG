@@ -1095,17 +1095,45 @@ func _apply_compass_visibility() -> void:
 ## HUD nodes hidden for the death cinematic; restored on the in-place revive (a full reload rebuilds a fresh UI).
 var _death_hidden_hud: Array[CanvasItem] = []
 
+## Meta flag marking a direct child of this layer as NOT A HUD READOUT, so hide_hud_for_death() leaves it
+## alone. Set it through set_death_hide_exempt(); nothing else reads it.
+const DEATH_HIDE_EXEMPT_META: StringName = &"ui_death_hide_exempt"
+
+## ⭐ Exempt a CanvasItem parked on this layer from the death cinematic's blanket hide — for a node that lives
+## here as a COMPOSITING DETAIL rather than as an instrument readout. This is _build_ghost()'s rule 5 ("IT
+## ISN'T THE HUD — the VIEW MODEL") applied to the other blanket sweep this layer owns, and it is the same
+## opt-out shape (`HudGhost.set_ghosted`) so a node that needs both flags itself twice, in one place.
+##
+## THE BUG IT FIXES (2026-09-02, user: "when you die and respawn, sometimes the outline for your view model is
+## visible when the view model itself is not"): ViewModelCamera composites the entire first-person view model —
+## gun, arms, legs — through a full-rect SubViewportContainer parented HERE, and it strips VIEW_MODEL_LAYER
+## from the main camera, so that one Control is the only thing putting the weapon on screen. The sweep below
+## hid it. Its OUTLINE, though, is an InkOutline tint duplicate in the 3D world on ACTOR_TINT_LAYER, drawn by
+## the ink pass on the main camera and reached by nothing on this layer — so the ring went on drawing around a
+## weapon that was no longer being composited: a hollow outline with nothing inside it, for the whole keel-over
+## and again for the revive's respawn_hud_delay quiet window. GENERALISE: this layer hosts things that are not
+## HUD, and a blanket `visible = false` over its children is a render-path decision, not a UI one.
+## Null-safe so a caller can flag an optional overlay without guarding it.
+static func set_death_hide_exempt(item: CanvasItem, exempt: bool) -> void:
+	if item == null:
+		return
+	if exempt:
+		item.set_meta(DEATH_HIDE_EXEMPT_META, true)
+	else:
+		item.remove_meta(DEATH_HIDE_EXEMPT_META)
+
 ## Hide the whole gameplay HUD for the death cinematic — but KEEP the post-process ColorRect. That rect is a
 ## child of THIS CanvasLayer and it renders the death grayscale / closing vignette / fade AND hosts the death
 ## card, so the old blunt `ui.visible = false` hid the entire cinematic along with the HUD (the bug that made
-## death snap-cut with no fade). This hides every currently-visible direct child EXCEPT the ColorRect,
-## remembering exactly which it hid so the revive shows back only those (placeholders already hidden stay hidden;
-## the death card, added AFTER this runs, is untouched and renders over the fade).
+## death snap-cut with no fade). This hides every currently-visible direct child EXCEPT the ColorRect and
+## anything flagged by set_death_hide_exempt() (the view-model composite — see there), remembering exactly
+## which it hid so the revive shows back only those (placeholders already hidden stay hidden; the death card,
+## added AFTER this runs, is untouched and renders over the fade).
 func hide_hud_for_death() -> void:
 	var keep := get_node_or_null(^"ColorRect")
 	_death_hidden_hud.clear()
 	for child in get_children():
-		if child == keep:
+		if child == keep or child.has_meta(DEATH_HIDE_EXEMPT_META):
 			continue
 		if child is CanvasItem and (child as CanvasItem).visible:
 			(child as CanvasItem).visible = false
@@ -1176,8 +1204,16 @@ func _make_hud_label(right_side: bool) -> Label:
 	lbl.add_theme_constant_override(&"outline_size", MenuStyle.hud.corner_label_outline_size)
 	lbl.z_index = 2
 	# Corner readout -> the HUD-weight carrier (self only as a pre-_ready fallback, mirroring setup()).
-	(_weighted if _weighted != null else self).add_child(lbl)
+	_weighted_parent().add_child(lbl)
 	return lbl
+
+## The HUD-weight carrier, or this layer as the pre-_ready fallback (setup() can run before _ready builds the
+## carrier; _ready then reparents whatever landed here). An `if` and not a ternary on purpose: Control and
+## CanvasLayer share no common type, so the ternary form types as Variant and the analyzer flags it.
+func _weighted_parent() -> Node:
+	if _weighted != null:
+		return _weighted
+	return self
 
 ## (Re)build the HP bar's DISPLAYED segments at the current _hp_seg_w. Called when max HP changes (level-up /
 ## perk strength); the caller stamps _hp_seg_w first so the rebuilt bar always fits its width budget.
@@ -1802,7 +1838,7 @@ func setup(p_player: Character, p_ammo_count: Ammo) -> void:
 		_hotbar = Hotbar.new()
 		# setup() runs from Player._enter_tree, BEFORE this layer's _ready builds the HUD-weight carrier —
 		# parent to the carrier when it already exists (a re-setup), else to the layer; _ready reparents.
-		(_weighted if _weighted != null else self).add_child(_hotbar)
+		_weighted_parent().add_child(_hotbar)
 		_hotbar.visible = not DialogueManager.is_engaged()
 		_hotbar.setup.call_deferred(p_player as Player)
 

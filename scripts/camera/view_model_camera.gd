@@ -93,6 +93,9 @@ var _main_camera: Camera3D            ## the live first-person camera we mirror 
 ## The HUD-ghost drop-in, for its `set_ghosted` opt-out helper alone (see _attach_container).
 ## Preloaded BY PATH + used through the const — the editor class-cache cascade guard.
 const HUD_GHOST_SCRIPT := preload("res://scripts/ui/hud_ghost.gd")
+## The HUD layer's own script, for its `set_death_hide_exempt` helper alone (see _attach_container).
+## Preloaded BY PATH + used through the const, the same class-cache cascade guard as HUD_GHOST_SCRIPT above.
+const UI_SCRIPT := preload("res://scripts/ui/ui.gd")
 
 var _sub_viewport: SubViewport        ## off-screen pass that renders ONLY the gun layer
 var _gun_camera: Camera3D             ## camera inside _sub_viewport; masks ONLY VIEW_MODEL_LAYER
@@ -185,6 +188,15 @@ func _attach_container(ui: CanvasLayer) -> void:
 	# which reads as the gun being made of light rather than as a UI afterimage. This one line is also why
 	# the arms/gun stay crisp while the panel and reticle around them ghost.
 	HUD_GHOST_SCRIPT.set_ghosted(_container, false)
+	# ...and OUT of the death cinematic's blanket HUD hide, for the SAME reason with a louder failure.
+	# UI.hide_hud_for_death() hides every visible CanvasItem child of this layer bar the post-process
+	# ColorRect, and this container is the ONLY thing putting the view model on screen (the main camera has
+	# VIEW_MODEL_LAYER stripped just below). Unflagged, dying deleted the gun, arms and legs from the frame
+	# while their InkOutline ring — tint duplicates in the 3D world, on a layer this sweep cannot reach — kept
+	# drawing, leaving a hollow outline with no weapon inside it: the whole 0.24 s keel-over, then again for
+	# the revive's 1.0 s respawn_hud_delay quiet window, with input already live. Measured 2026-09-02 by
+	# scripts/tools/__respawn_viewmodel_probe.gd, which counts exactly this disagreement per frame.
+	UI_SCRIPT.set_death_hide_exempt(_container, true)
 	_composited = true
 
 ## The gun pass's own render target, whose ALPHA is exactly the weapon's screen coverage — the SubViewport
