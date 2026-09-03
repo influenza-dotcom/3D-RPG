@@ -45,7 +45,7 @@ func _crouch_depth() -> float:
 	if host == null:
 		return 0.0
 	var crouch: Variant = host.get(&"crouch")
-	if not (crouch is Object) or not is_instance_valid(crouch):
+	if not is_instance_valid(crouch) or not (crouch is Object):  # validity FIRST — `is` on a freed instance crashes
 		return 0.0
 	var raw: Variant = (crouch as Object).get(&"crouch_t")
 	if not (raw is float or raw is int):

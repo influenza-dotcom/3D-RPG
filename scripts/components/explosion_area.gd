@@ -146,6 +146,14 @@ func _on_body_entered(body: Node3D) -> void:
 	var applied_force := max_explosion_force * force_multiplier
 	var push_direction := global_position.direction_to(body.global_position).normalized()
 
+	# The shooter can be freed mid-flight (a rocket/grenade whose non-pooled NPC shooter died before the
+	# blast landed). A freed reference passed to take_damage() errors (Character.take_damage calls
+	# has_method on the attacker behind only a null check), so collapse it to null = an unattributed
+	# blast — the same idiom as projectile.gd's shooter collapse. Validity FIRST (house rule): any
+	# `is`/method touch on a freed instance is a hard error, never a quiet false.
+	if not is_instance_valid(instigator):
+		instigator = null
+
 	if deals_damage and body.has_method("take_damage"):
 		# Attribute the blast to whoever fired it (instigator = the projectile's shooter), so a PLAYER
 		# explosion kill pays the zorkmid bounty. No hit_pos -> blasts don't apply locational/limb damage.

@@ -136,6 +136,7 @@ func _draw() -> void:
 		# Black outline first (the treatment every HUD label uses) so the count stays legible over the item art.
 		# The ink is the skin's GRID knob, never the panel ink (MenuStyle.text_color): this badge sits on the item
 		# art inside a dark tinted cell, not on the menu panel, so it stays light while the panel palette runs dark.
+		@warning_ignore("integer_division")  # an outline is whole pixels: a fifth of the font size, floored
 		draw_string_outline(font, pos, badge, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 3.0, fs, maxi(1, fs / 5), Color(0, 0, 0, 0.9))
 		draw_string(font, pos, badge, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 3.0, fs, MenuStyle.skin.tile_count_color)
 

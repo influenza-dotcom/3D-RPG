@@ -58,7 +58,7 @@ func _run() -> void:
 	# gives the right-of-centre camera framing something real to frame.
 	var speaker: Node3D = null
 	for n in get_tree().get_nodes_in_group(Groups.NPC):
-		if n is Node3D and is_instance_valid(n):
+		if is_instance_valid(n) and n is Node3D:
 			speaker = n
 			break
 	if speaker == null:

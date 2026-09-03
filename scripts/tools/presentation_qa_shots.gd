@@ -421,7 +421,7 @@ func _viewport_size_of(holder: Node, fields: Array) -> String:
 		return "-"
 	for f in fields:
 		var v: Variant = holder.get(f)
-		if v is SubViewport and is_instance_valid(v):
+		if is_instance_valid(v) and v is SubViewport:
 			return str((v as SubViewport).size)
 	return "-"
 

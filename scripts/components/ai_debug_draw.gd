@@ -84,6 +84,7 @@ func add_label(pos: Vector3, text: String, color: Color = Color.WHITE) -> void:
 		lbl.text = text
 	if lbl.font_size != label_font_size:
 		lbl.font_size = label_font_size
+		@warning_ignore("integer_division")  # an outline is whole pixels
 		lbl.outline_size = maxi(1, label_font_size / 6)
 	lbl.modulate = color
 	lbl.visible = true
@@ -130,6 +131,7 @@ func _make_label() -> Label3D:
 	lbl.pixel_size = 0.0006
 	lbl.no_depth_test = draw_through_walls
 	lbl.font_size = label_font_size
+	@warning_ignore("integer_division")  # an outline is whole pixels
 	lbl.outline_size = maxi(1, label_font_size / 6)
 	lbl.outline_modulate = Color(0, 0, 0, 0.85)
 	lbl.render_priority = 2       # draw over the wire lines

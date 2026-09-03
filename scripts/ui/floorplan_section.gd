@@ -188,6 +188,7 @@ static func slice_hull(world_points: PackedVector3Array, y: float) -> PackedVect
 ## an unordered set of segments and not a polygon.
 static func slice_faces(world_faces: PackedVector3Array, y: float) -> PackedVector2Array:
 	var out := PackedVector2Array()
+	@warning_ignore("integer_division")  # a triangle soup holds a whole number of triangles
 	var tris := world_faces.size() / 3
 	for t in tris:
 		var v := [world_faces[t * 3], world_faces[t * 3 + 1], world_faces[t * 3 + 2]]
@@ -443,6 +444,7 @@ static func clip_segments(segments: PackedVector2Array, occ: Array[PackedVector2
 	if occ.is_empty():
 		return segments
 	var out := PackedVector2Array()
+	@warning_ignore("integer_division")  # flat PAIRS: a whole number of segments
 	var pairs := segments.size() / 2
 	for s in pairs:
 		var a := segments[s * 2]

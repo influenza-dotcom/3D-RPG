@@ -1052,8 +1052,8 @@ func _mask_size() -> Vector2i:
 ## Pure mask-size mapping, so the resolution policy can be asserted off-tree. Rounds rather than
 ## truncates (a 0.5 mask of an odd-height window should not lose a row to the floor) and never returns
 ## a degenerate axis.
-static func mask_size(main: Vector2i, scale: float) -> Vector2i:
-	var s := clampf(scale, 0.125, 1.0)
+static func mask_size(main: Vector2i, resolution: float) -> Vector2i:
+	var s := clampf(resolution, 0.125, 1.0)
 	return Vector2i(
 		maxi(MASK_MIN_SIZE, int(roundf(float(main.x) * s))),
 		maxi(MASK_MIN_SIZE, int(roundf(float(main.y) * s))),

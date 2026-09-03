@@ -36,7 +36,7 @@ func _init(max_recent: int = DEFAULT_MAX_RECENT) -> void:
 ## exactly or the override is ignored). Classify push_warning + engine warnings as warnings, everything else as
 ## errors. Field updates only — no logging calls (re-entrancy) and no gameplay side effects.
 func _log_error(function: String, file: String, line: int, code: String, rationale: String,
-		editor_notify: bool, error_type: int, script_backtraces: Array[ScriptBacktrace]) -> void:
+		_editor_notify: bool, error_type: int, _script_backtraces: Array[ScriptBacktrace]) -> void:
 	var is_warning := error_type == WARNING_TYPE or function == &"push_warning"
 	_mutex.lock()
 	if is_warning:

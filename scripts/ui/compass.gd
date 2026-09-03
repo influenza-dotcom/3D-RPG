@@ -75,8 +75,8 @@ func _paint_marker(pos: Vector2, col: Color) -> void:
 
 ## Pure: the point on the viewport's inset-edge rectangle along `dir` from the center. `dir` need not be
 ## normalized; a near-zero dir returns the center. The inset is `margin` px in from each border. Unit-tested.
-static func project_to_edge(dir: Vector2, size: Vector2, margin: float = 0.0) -> Vector2:
-	var center := size * 0.5
+static func project_to_edge(dir: Vector2, viewport_size: Vector2, margin: float = 0.0) -> Vector2:
+	var center := viewport_size * 0.5
 	if dir.length_squared() < 0.000001:
 		return center
 	var d := dir.normalized()

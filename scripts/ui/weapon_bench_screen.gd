@@ -312,8 +312,8 @@ func _rebuild() -> void:
 	# keeps their place. The open-time rebuild lands here with the root still hidden, where grab_focus is a silent
 	# no-op — open_bench seeds again right after showing it.
 	if _is_open and _root.is_inside_tree() and is_instance_valid(_first_focus):
-		var owner: Control = _root.get_viewport().gui_get_focus_owner()
-		if owner == null or _fitted_list.is_ancestor_of(owner) or _parts_list.is_ancestor_of(owner):
+		var focused: Control = _root.get_viewport().gui_get_focus_owner()
+		if focused == null or _fitted_list.is_ancestor_of(focused) or _parts_list.is_ancestor_of(focused):
 			_first_focus.grab_focus()
 
 ## The cycler's caption (and the footer's resting header): the selected gun's authored label beside its

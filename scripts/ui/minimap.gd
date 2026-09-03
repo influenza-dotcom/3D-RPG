@@ -1662,7 +1662,7 @@ func _paint_noise_debug(view: Transform2D, skin, ppm: float) -> void:
 		# outlive its node, so it is validated rather than trusted.
 		var emitter_v: Variant = src.get(&"emitter")
 		var who := "-"
-		if emitter_v is Node and is_instance_valid(emitter_v):
+		if is_instance_valid(emitter_v) and emitter_v is Node:
 			who = String((emitter_v as Node).name)
 		draw_string(font, at + Vector2(3.0, -3.0), "%.1fm %s" % [radius_m, who],
 				HORIZONTAL_ALIGNMENT_LEFT, -1.0, 8, col)

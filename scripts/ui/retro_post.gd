@@ -40,6 +40,7 @@ static func apply_dials(mat: ShaderMaterial) -> void:
 	# Colour Depth as the per-channel STEP COUNT the shader wants, never the menu index — the mapping from
 	# "15-bit (PS1)" to vec3(31,31,31) lives in Settings.color_quantize_levels alone, and Vector3.ZERO is the
 	# sentinel for "leave this material at its authored color_steps" (what the default option pushes).
+	@warning_ignore("static_called_on_instance")  # `Settings` is the autoload INSTANCE; the mapping is static so tests can read it off-tree
 	mat.set_shader_parameter("quantize_levels", Settings.color_quantize_levels(Settings.color_quantization))
 	mat.set_shader_parameter("colorblind_mode", Settings.colorblind_mode)
 	mat.set_shader_parameter("contrast", Settings.contrast)

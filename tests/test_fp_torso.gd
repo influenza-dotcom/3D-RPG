@@ -30,7 +30,7 @@ func test_the_fp_torso_is_body_only() -> void:
 		"the FP torso slice must NEVER mount a head — it sits exactly where the camera is")
 	assert_true(src.contains("body.whole_body"),
 		"a whole_body appearance must be skipped — a one-piece character model can't have its head chopped off")
-	assert_true(src.contains("catalog.shirt_texture(host.appearance)"),
+	assert_true(src.contains("CharacterAppearanceCatalog.shirt_texture(host.appearance)"),
 		"the drawn shirt must reach the FP torso — the shirt creator's art belongs on YOUR chest too")
 	assert_true(src.contains("body_texture_planar = shirt != null"),
 		"a drawn shirt must planar-project (set BEFORE body_texture) — the torso's own UVs scatter it to scraps")

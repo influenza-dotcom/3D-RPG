@@ -103,7 +103,7 @@ func _face_anchor() -> Variant:
 			return p
 	if _target.has_method(&"head_visual"):
 		var h: Variant = _target.call(&"head_visual")
-		if h is Node3D and is_instance_valid(h):
+		if is_instance_valid(h) and h is Node3D:
 			return (h as Node3D).global_position
 	return null
 

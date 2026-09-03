@@ -106,7 +106,7 @@ func _aimed_pettable() -> Pettable:
 func _held_prop() -> Node:
 	if host != null and host.has_method(&"held_prop"):
 		var held: Variant = host.call(&"held_prop")
-		if held is Node:
+		if is_instance_valid(held) and held is Node:
 			return held as Node
 	return null
 

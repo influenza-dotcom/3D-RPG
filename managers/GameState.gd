@@ -87,6 +87,7 @@ const WorldSnapshot = preload("res://scripts/world/world_snapshot.gd")
 ## and keep that connection across an NpcPool reuse. First consumer: the NpcHomeReturn leash
 ## (scripts/npc/npc_home_return.gd), which blinks every NPC back to its authored post — the default
 ## CHECKPOINT_RESPAWN death mode leaves the world untouched, so without it an encounter never resets.
+@warning_ignore("unused_signal")  # emitted from Player.die() (player.gd), never from this autoload
 signal player_died()
 
 ## True once a save has been loaded into the fields below (boot found a file, or Continue was chosen). The Player's
@@ -1648,7 +1649,7 @@ func waypoint_at(level_path: String, index: int) -> Dictionary:
 ## the caller must answer with a denial cue rather than a success one, because a silently-dropped pin looks
 ## exactly like a broken map. Every field goes through WaypointBook.make, so a caller cannot store an
 ## over-long label, a control character, or an icon ordinal outside the vocabulary.
-func add_waypoint(level_path: String, pos: Vector3, name: String, note: String,
+func add_waypoint(level_path: String, pos: Vector3, label: String, note: String,
 		icon: int = 0, tint: int = 0) -> int:
 	if level_path.is_empty():
 		return -1  # no level = nowhere to file it; a boot with no level loaded must not accumulate orphans
@@ -1657,7 +1658,7 @@ func add_waypoint(level_path: String, pos: Vector3, name: String, note: String,
 	var list: Array = waypoints[level_path]
 	if list.size() >= WAYPOINT_BOOK.MAX_PER_LEVEL:
 		return -1
-	list.append(WAYPOINT_BOOK.make(pos, name, note, icon, tint))
+	list.append(WAYPOINT_BOOK.make(pos, label, note, icon, tint))
 	_waypoints_touched()
 	return list.size() - 1
 
@@ -1669,7 +1670,7 @@ func add_waypoint(level_path: String, pos: Vector3, name: String, note: String,
 ## be silently dropped by a rename — the player's navigation marker vanishing off the compass because they
 ## fixed a typo. Carried across explicitly here; there is nowhere else to do it, since make() must not learn
 ## about a flag whose invariant only the ledger can police.
-func update_waypoint(level_path: String, index: int, name: String, note: String,
+func update_waypoint(level_path: String, index: int, label: String, note: String,
 		icon: int, tint: int) -> bool:
 	var list := waypoints_for(level_path)
 	if index < 0 or index >= list.size() or not (list[index] is Dictionary):
@@ -1678,7 +1679,7 @@ func update_waypoint(level_path: String, index: int, name: String, note: String,
 	var pos: Variant = old.get("pos")
 	if not (pos is Vector3):
 		return false
-	var rec := WAYPOINT_BOOK.make(pos as Vector3, name, note, icon, tint)
+	var rec := WAYPOINT_BOOK.make(pos as Vector3, label, note, icon, tint)
 	if WAYPOINT_BOOK.is_tracked(old):
 		rec["tracked"] = true
 	list[index] = rec
