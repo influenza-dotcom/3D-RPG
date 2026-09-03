@@ -133,20 +133,30 @@ func clear() -> void:
 		_bark_bubble.queue_free()
 	_bark_bubble = null
 
-## Pop a billboarded icon above the head, hold briefly, fade its alpha to 0, then free — built entirely in code.
-## Used by the alert "!" and the turn-hostile cue. extra_y nudges the icon off the default head height so distinct
-## cues don't stack. follow=true parents it to us (tracks movement); follow=false parents to the tree root so the
-## cue SURVIVES our death (a one-shotted friendly still pops the "negative" icon even as we're freed this frame).
-func show_icon(tex: Texture2D, follow: bool = false, extra_y: float = 0.0) -> void:
-	if tex == null or not is_inside_tree():
-		return
+## Build the head-icon Sprite3D, UN-parented and un-animated: `tex` the cue art, `world_height` the metres it is
+## scaled to (any texture). Every flag here shapes the sprite's MATERIAL VARIANT (billboard, not fixed-size,
+## no_depth_test, unshaded) — which is why it lives in one static: show_icon and the in-level EffectPrewarmer
+## (which draws one "!" near-invisibly on the black fade-in after a level loads, so the first alert doesn't
+## compile it mid-firefight) must build the identical object. tests/test_effect_prewarm.gd pins the routing.
+static func build_icon(tex: Texture2D, world_height: float) -> Sprite3D:
 	var icon := Sprite3D.new()
 	icon.texture = tex
 	icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED  # always face the camera
 	icon.fixed_size = false      # world-space: planted above the head + scales with distance
 	icon.no_depth_test = true    # read through walls / our own mesh so the cue is never occluded
 	icon.shaded = false          # flat, unlit
-	icon.pixel_size = popup_world_height / maxf(float(tex.get_height()), 1.0)  # ~popup_world_height m tall, any texture
+	var tex_height := float(tex.get_height()) if tex != null else 1.0
+	icon.pixel_size = world_height / maxf(tex_height, 1.0)  # ~world_height m tall, any texture
+	return icon
+
+## Pop a billboarded icon above the head, hold briefly, fade its alpha to 0, then free — built through build_icon.
+## Used by the alert "!" and the turn-hostile cue. extra_y nudges the icon off the default head height so distinct
+## cues don't stack. follow=true parents it to us (tracks movement); follow=false parents to the tree root so the
+## cue SURVIVES our death (a one-shotted friendly still pops the "negative" icon even as we're freed this frame).
+func show_icon(tex: Texture2D, follow: bool = false, extra_y: float = 0.0) -> void:
+	if tex == null or not is_inside_tree():
+		return
+	var icon := build_icon(tex, popup_world_height)
 	if follow:
 		add_child(icon)
 		icon.position = Vector3(0.0, popup_head_y + extra_y, 0.0)

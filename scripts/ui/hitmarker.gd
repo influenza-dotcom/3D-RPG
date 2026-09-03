@@ -12,6 +12,8 @@ extends Control
 
 var _t: float = 0.0
 var _headshot: bool = false
+## > 0 = the next _draw paints ONE near-invisible marker at this strength and clears it (see warm_draw).
+var _warm_alpha: float = 0.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -22,6 +24,14 @@ func flash(headshot := false) -> void:
 	_headshot = headshot
 	queue_redraw()
 
+## Draw the marker ONCE at `alpha` strength (the in-level EffectPrewarmer's 2D pass, on the black fade-in after a
+## level loads) so its canvas draw is issued before the first real hit — 2D pipelines have no precompilation, and a
+## near-transparent draw is the only warm there is. Never touches _t / _headshot, so a live flash is unaffected: the
+## one warm paint happens on the next _draw and the flag clears itself.
+func warm_draw(alpha: float) -> void:
+	_warm_alpha = alpha
+	queue_redraw()
+
 func _process(delta: float) -> void:
 	if _t <= 0.0:
 		return
@@ -29,10 +39,20 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _draw() -> void:
+	if _warm_alpha > 0.0:
+		var warm := _warm_alpha
+		_warm_alpha = 0.0
+		if _t <= 0.0:  # a live flash already paints this frame at full strength — that draw warms the same pipeline
+			_draw_marker(warm)
+			return
 	if _t <= 0.0:
 		return
 	var hud = MenuStyle.hud  # untyped on purpose: HudSkin's class_name may not be cached yet
-	var a := clampf(_t / maxf(hud.hitmarker_duration, 0.001), 0.0, 1.0)
+	_draw_marker(clampf(_t / maxf(hud.hitmarker_duration, 0.001), 0.0, 1.0))
+
+## Paint the marker at fade strength `a` (1 = a fresh pop, 0 = gone): alpha AND the pop-out distance both ride it.
+func _draw_marker(a: float) -> void:
+	var hud = MenuStyle.hud  # untyped on purpose: HudSkin's class_name may not be cached yet
 	var col: Color = hud.hitmarker_headshot_color if _headshot else hud.hitmarker_color
 	col.a *= a
 	var mult: float = hud.hitmarker_headshot_scale if _headshot else 1.0

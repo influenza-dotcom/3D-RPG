@@ -6,10 +6,14 @@ extends CanvasLayer
 ## it only samples Engine / Performance / group counts and draws an overlay — it never touches gameplay. The graph
 ## math (push_capped / graph_points) is pure + unit-tested; the live sampling + draw are play-verified.
 ##
-## Below the perf readout it paints three optional blocks, each a sample_state (impure, guarded) -> player_state_text
-## (pure, unit-tested) pair: the game-state block (HP / stamina / wallet / clock / disk writes), the STEALTH block
-## (show_stealth) and the INPUT / MODAL lines (show_input_state). This file is in ScanText.SKIP_FILES: every string
-## it paints is developer copy, so raw literals are legal HERE and nowhere upstream of it.
+## Under the perf numbers sits the PIPELINES line (2026-09-01): per-sample deltas of the renderer's five
+## pipeline-compilation monitors (_sample_pipelines -> pipeline_text) — the instrument for the first-shot /
+## first-hit / first-kill hitch class, where a `+d` / `+c` is a synchronous draw-time shader compile that stalled
+## the frame. Below the perf readout it paints three optional blocks, each a sample_state (impure, guarded) ->
+## player_state_text (pure, unit-tested) pair: the game-state block (HP / stamina / wallet / clock / disk writes),
+## the STEALTH block (show_stealth) and the INPUT / MODAL lines (show_input_state). This file is in
+## ScanText.SKIP_FILES: every string it paints is developer copy, so raw literals are legal HERE and nowhere
+## upstream of it.
 
 ## Runtime error/warning capture: preloaded (NOT the global ErrorSink class_name) so a not-yet-rescanned editor
 ## cache can't cascade into "Could not find type ErrorSink". See [[new-classname-not-registered-cascade]].
@@ -54,12 +58,29 @@ const StealthStatusScript := preload("res://scripts/player/stealth_status.gd")
 ## block, and _process when show_player_state is off), and both must read identically.
 const SANDBOX_LINE := "SANDBOX SAVES ON"
 
+## The renderer's pipeline-compilation monitors (Godot 4.4+, Performance.Monitor 34..38 — present in the 4.7 this
+## project runs on; scripts/tools/__first_kill_hitch_probe.gd reads the same five), in the order the PIPELINES
+## line paints them. Each is a SESSION TOTAL, so the overlay shows per-sample deltas (_sample_pipelines).
+## What each class costs: CANVAS and DRAW are compiled SYNCHRONOUSLY at draw time — a non-zero delta there IS a
+## frame stall (the first-hit / first-kill hitch class); MESH and SURFACE are compiled while loading meshes /
+## building the surface cache (load-time stutter); SPECIALIZATION runs in the background (never a stall, but a
+## tell that the live world's variant differs from what a boot warm compiled).
+const PIPELINE_MONITORS := [
+	Performance.PIPELINE_COMPILATIONS_CANVAS, Performance.PIPELINE_COMPILATIONS_MESH,
+	Performance.PIPELINE_COMPILATIONS_SURFACE, Performance.PIPELINE_COMPILATIONS_DRAW,
+	Performance.PIPELINE_COMPILATIONS_SPECIALIZATION,
+]
+## Short tags for PIPELINE_MONITORS in the same order — "+c0 +m0 +s5 +d0 +sp4".
+const PIPELINE_TAGS := ["c", "m", "s", "d", "sp"]
+
 var _text: Label = null
 var _graph: _Graph = null
 var _t: float = 0.0
 var _fps := PackedFloat32Array()
 var _frame_ms := PackedFloat32Array()
 var _sink = null  ## an ErrorSink while installed (untyped: avoid annotating with the new global class_name)
+var _pipe_prev: Array[int] = []  ## PIPELINE_MONITORS values at the previous sample; empty until the first sample
+var _pipe_stalls: int = 0        ## running total of the synchronous (DRAW + CANVAS) compiles since the overlay first sampled
 
 
 func _ready() -> void:
@@ -115,6 +136,7 @@ func _process(delta: float) -> void:
 	var nodes := int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))
 	var npcs := get_tree().get_nodes_in_group(Groups.NPC).size() if is_inside_tree() else 0
 	var txt := "FPS %d   (%.1f ms)\nDraw calls %d\nStatic mem %.1f MB\nNodes %d\nNPCs %d" % [fps, frame_ms, draws, mem_mb, nodes, npcs]
+	txt += "\n" + pipeline_text(_sample_pipelines(), _pipe_stalls)
 	if _sink != null:
 		txt += "\nErrors %d   Warn %d" % [_sink.error_count, _sink.warning_count]
 	if show_player_state:
@@ -129,6 +151,44 @@ func _process(delta: float) -> void:
 	_graph.fps = _fps
 	_graph.frame_ms = _frame_ms
 	_graph.queue_redraw()
+
+
+## Per-SAMPLE deltas of PIPELINE_MONITORS (how many pipelines the renderer compiled since the previous sample, by
+## class), and the running DRAW + CANVAS stall total into _pipe_stalls. The monitors are session totals, so the
+## previous values are kept in _pipe_prev; the FIRST sample reports all-zero deltas rather than the whole boot
+## burst (the overlay usually opens minutes in — that number would be noise, not a hitch). A monitor that reads
+## lower than last time (never expected; a renderer reset) clamps to 0 instead of painting a negative. IMPURE
+## (reads Performance); the formatting is the pure pipeline_text.
+func _sample_pipelines() -> Array[int]:
+	var deltas: Array[int] = []
+	var first := _pipe_prev.is_empty()
+	for i in PIPELINE_MONITORS.size():
+		var now := int(Performance.get_monitor(PIPELINE_MONITORS[i]))
+		var d := 0 if first else maxi(0, now - _pipe_prev[i])
+		if first:
+			_pipe_prev.append(now)
+		else:
+			_pipe_prev[i] = now
+		deltas.append(d)
+	# DRAW (index 3) and CANVAS (index 0) are the synchronous, frame-stalling classes — see PIPELINE_MONITORS.
+	if deltas.size() >= 4:
+		_pipe_stalls += deltas[0] + deltas[3]
+	return deltas
+
+
+## "Pipelines +c0 +m0 +s5 +d0 +sp4" — one +delta per PIPELINE_MONITORS class, tagged per PIPELINE_TAGS, in that
+## order; a positive `stalls` appends " · stalls N" (the session's DRAW + CANVAS total) so a one-sample spike you
+## blinked through still leaves a mark. Fewer deltas than tags paints only what was given (a missing monitor
+## degrades to a shorter line, never a crash); a non-int is painted as 0. Pure.
+static func pipeline_text(deltas: Array, stalls: int = 0) -> String:
+	var bits := PackedStringArray()
+	for i in mini(deltas.size(), PIPELINE_TAGS.size()):
+		var d: Variant = deltas[i]
+		bits.append("+%s%d" % [PIPELINE_TAGS[i], int(d) if (d is int or d is float) else 0])
+	var line := "Pipelines " + " ".join(bits)
+	if stalls > 0:
+		line += " · stalls %d" % stalls
+	return line
 
 
 ## Tear down the error sink: deregister BEFORE the object frees (the engine holds a raw pointer to a live logger,
@@ -474,6 +534,7 @@ static func _yn(facts: Dictionary, key: String) -> String:
 static func clock_text(t: float) -> String:
 	var frac := fposmod(t, 1.0)
 	var minutes := int(round(frac * 1440.0)) % 1440
+	@warning_ignore("integer_division")  # whole hours beside the minute remainder — a clock face
 	return "%02d:%02d" % [minutes / 60, minutes % 60]
 
 

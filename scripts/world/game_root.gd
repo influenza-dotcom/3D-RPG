@@ -30,6 +30,15 @@ const DEV_START_FILE := "user://_dev_start_entry.txt"
 ## Exact-snapshot serializer applied after a manual quickload (preloaded, NOT class_name — matches the codebase's
 ## helper-script idiom so there's no global-class-cache dependency to miss). See _apply_world_snapshot.
 const WorldSnapshot = preload("res://scripts/world/world_snapshot.gd")
+## The in-level effect prewarmer (scripts/components/effect_prewarmer.gd) — stage two of the first-kill / first-hit
+## hitch fix, driven from load_level (see _prewarm_effects). Loaded BY PATH at runtime and driven duck-typed, never
+## by its class_name: this is a @tool script on game.tscn's root, and a brand-new class_name isn't in the editor's
+## global class cache until it reimports — naming the type here would fail this whole file to parse in the meantime
+## (the same reason PlayerHud preloads its helpers by path). A runtime load() also adds no parse-time edge.
+const EFFECT_PREWARMER_SCRIPT_PATH := "res://scripts/components/effect_prewarmer.gd"
+## Name of the prewarmer child under the host. A hand-placed child of this name (beside the Player in game.tscn) is
+## REUSED rather than duplicated, which is how its @exports (hold frames, spawn distance) stay Inspector-tunable.
+const EFFECT_PREWARMER_NODE := &"EffectPrewarmer"
 
 
 func _ready() -> void:
@@ -136,6 +145,15 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	# it drives the global PS1 warp directly instead of Ps1Warp watching the tree-wide node_added signal — one fewer
 	# global listener (see ps1_warp.gd + tests/test_global_node_added_listeners.gd).
 	_apply_ps1_warp(inst)
+	# In-level effect prewarm (EffectPrewarmer, scripts/components/effect_prewarmer.gd) — stage two of the first-kill /
+	# first-hit hitch fix (stage one is the boot-time PreloadManager SubViewport pass). It has to run HERE, in the live
+	# world, and not in that boot viewport: a draw pipeline is keyed on the RENDERER-GLOBAL requirement set (the
+	# InkOutline normal-roughness prepass, the 16-bit shadow atlases, cubemap shadows), which only exists once the
+	# level + the player rig are live; the decal atlas and the 2D layer are global too, and the first Decal / first
+	# canvas draw rebuild or compile them on the spot. AFTER _apply_ps1_warp so the warm instances (parented under the
+	# host, never under the level) are outside the applier's material sweep. Fired, not awaited: the helper waits its
+	# own two frames and load_level stays synchronous.
+	_prewarm_effects()
 	# Exact-snapshot tier (WorldSnapshot): after the level subtree is in the tree, a MANUAL quickload applies its
 	# snapshot as a central push — dead authored NPCs are freed, live ones repositioned, and every captured
 	# ItemContainer is handed back its exact saved contents (corpse rebuild + dynamic spawns are still unshipped —
@@ -257,6 +275,35 @@ func _apply_ps1_warp(level_root: Node) -> void:
 	var warp := get_node_or_null(^"/root/Ps1Warp")
 	if warp != null and warp.has_method(&"cover"):
 		warp.cover(level_root)
+
+
+## Async half of the in-level effect prewarm (called from load_level without await). Reuses (or builds, by script
+## path) the EffectPrewarmer child of the host, waits TWO process frames — so the level's WorldEnvironment /
+## DirectionalLight, the Player rig and its InkOutline have all rendered once and the renderer-global requirement
+## set has flipped to its in-game values (a warm before that compiles pipelines against the wrong keys) — then
+## resolves the live camera and fires warm(). Every hold is inside the fade-from-black. Headless / editor / off-tree
+## = no-op (nothing renders, so nothing compiles; the boot warm skips the same way), and a load_level that swapped
+## the level again meanwhile is harmless: the prewarmer's own once-per-process latch decides whether it draws.
+func _prewarm_effects() -> void:
+	if DisplayServer.get_name() == "headless" or Engine.is_editor_hint() or not is_inside_tree():
+		return
+	var host := _host()
+	var warmer: Node = host.get_node_or_null(NodePath(EFFECT_PREWARMER_NODE))
+	if warmer == null:
+		var warmer_script: GDScript = load(EFFECT_PREWARMER_SCRIPT_PATH)
+		if warmer_script == null or not warmer_script.can_instantiate():
+			push_warning("GameRoot: could not load '%s' — the in-level effect prewarm is skipped (first kill / hit will hitch)" % EFFECT_PREWARMER_SCRIPT_PATH)
+			return
+		warmer = warmer_script.new()
+		warmer.name = EFFECT_PREWARMER_NODE
+		host.add_child(warmer)
+	await get_tree().process_frame
+	if not is_inside_tree():
+		return
+	await get_tree().process_frame
+	if not is_inside_tree() or not is_instance_valid(warmer) or not warmer.is_inside_tree() or not warmer.has_method(&"warm"):
+		return
+	warmer.call(&"warm", get_viewport().get_camera_3d())
 
 
 ## No-op adoption path (no `level` assigned): cover the hand-placed "Level" child, if one exists, with the PS1 warp

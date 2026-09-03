@@ -69,8 +69,9 @@ enum ScreenCorner { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT }
 ## Escape hatch for the debug-build gate. Ticking it in an exported build is a deliberate act (a QA build); a
 ## normal release must carry no debug surface, so the default keeps the node fully inert (no UI, no connections).
 @export var force_in_release: bool = false
-## Column shown from the first frame. `events 0 off` (set_column_visible) hides it; the ring keeps recording either way.
-@export var start_visible: bool = true
+## Column shown from the first frame. Off by default (the on-screen text is opt-in); `events on`
+## (set_column_visible) shows it, `events off` hides it again. The ring keeps recording either way.
+@export var start_visible: bool = false
 
 @export_group("History")
 ## Ring capacity, applied to the STATIC ring in _ready (see the header). Older lines fall off the head.

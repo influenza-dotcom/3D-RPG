@@ -480,6 +480,22 @@ func flash_hurt() -> void:
 		_hurt_flash_tween = create_tween().set_ignore_time_scale(true)
 		_hurt_flash_tween.tween_property(_hurt_flash, "color:a", 0.0, GameSettings.player_feedback.hurt_flash_time)
 
+## The in-level EffectPrewarmer's 2D pass (on the black fade-in after a level loads): show the hurt-flash rect at
+## a near-invisible `alpha` for ONE drawn frame and hand the hitmarker its one warm paint, so both hit-feedback
+## draws are issued before the first hit lands — 2D pipelines have no precompilation. Honest expectation: the
+## ColorRect is drawn every frame at alpha 0 already (its `color`, not its modulate, so the canvas culler never
+## drops it), so the rect half is insurance that costs one write; the hitmarker's first paint is the real one.
+## Never fights a live flash: skipped while a hurt tween is running, and the restore re-checks before writing.
+func warm_draw(alpha: float) -> void:
+	if _hitmarker:
+		_hitmarker.warm_draw(alpha)
+	if _hurt_flash == null or (_hurt_flash_tween != null and _hurt_flash_tween.is_valid()):
+		return
+	_hurt_flash.color.a = alpha
+	await get_tree().process_frame  # one frame drawn at `alpha`
+	if is_instance_valid(_hurt_flash) and (_hurt_flash_tween == null or not _hurt_flash_tween.is_valid()):
+		_hurt_flash.color.a = 0.0
+
 ## Kill flash: a quick full-screen colour pop when the player lands a kill (Hotline Miami). Independent of the
 ## sky shader, so it shows over the authored skybox too. Real-time (ignore_time_scale) so a kill's slow-mo
 ## doesn't stretch it. Gated on the Accessibility "Screen Flashes" toggle (read live) — off = no pop

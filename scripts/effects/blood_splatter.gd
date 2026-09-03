@@ -26,7 +26,20 @@ func splash(intensity: float = 1.0) -> void:
 	for i in blob_count:
 		_spawn_blob(viewport_size, intensity)
 
-func _spawn_blob(viewport_size: Vector2, intensity: float) -> void:
+## Spray ONE blob at a near-invisible `alpha` (the in-level EffectPrewarmer's 2D pass, on the black fade-in after a
+## level loads) so the overlay's canvas draw + the blob texture are issued before the first nearby kill — 2D
+## pipelines have no precompilation, and a near-transparent draw is the only warm there is. The blob is a
+## full-strength splash blob with only its modulate alpha overridden (the fade tween then runs it to 0 and frees
+## it, exactly like a real one), so it exercises the same draw a real splash does.
+func warm_draw(alpha: float) -> void:
+	var viewport_size := get_viewport_rect().size
+	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0:
+		return
+	var blob := _spawn_blob(viewport_size, 1.0)
+	blob.modulate.a = alpha
+
+## Spawn one fading blob; returned so warm_draw can dim it (splash ignores the return).
+func _spawn_blob(viewport_size: Vector2, intensity: float) -> TextureRect:
 	var blob := TextureRect.new()
 	add_child(blob)
 	blob.texture = BLOOD_BLOB_TEXTURE
@@ -56,3 +69,4 @@ func _spawn_blob(viewport_size: Vector2, intensity: float) -> void:
 	var tween := blob.create_tween()
 	tween.tween_property(blob, "modulate:a", 0.0, GameSettings.effects.blood_splatter_fade_time)
 	tween.tween_callback(blob.queue_free)
+	return blob

@@ -9,6 +9,12 @@ class_name DamageNumberPopup
 ## shipped baseline + the GUT anchors (the NpcBarkSettings idiom): every damage_number_* field
 ## DEFAULTS to its const, so behaviour is byte-identical until a designer tunes the resource
 ## (test_damage_number_popup.gd pins the mirror).
+##
+## The Label3D itself is CONSTRUCTED in one static, build_label — show() parents and animates what it
+## returns, and the in-level EffectPrewarmer draws one (every digit, near-invisibly, on the black fade-in
+## after a level loads) so its material variant + glyph raster are built before the first hit instead of
+## on it. tests/test_effect_prewarm.gd pins that show() routes through it: an inline Label3D.new() here
+## would ship a label the prewarm never drew.
 
 ## Gameplay POLICY, not feel — the post-mitigation loss below which no number shows at all. Stays
 ## a const (not on EffectsSettings) so should_show() remains a pure, autoload-free static the
@@ -61,22 +67,7 @@ static func show(victim: Object, loss: float, hit_pos: Vector3, was_crit: bool, 
 	# (should_show / text_for) never touch the autoload and off-tree tests keep calling them bare.
 	var fx: EffectsSettings = GameSettings.effects
 
-	var label := Label3D.new()
-	label.name = "DamageNumber"
-	label.text = text_for(loss)
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.no_depth_test = true
-	label.shaded = false
-	label.font_size = fx.damage_number_font_size
-	label.pixel_size = fx.damage_number_pixel_size
-	label.outline_size = fx.damage_number_outline_size
-	label.outline_modulate = fx.damage_number_outline_color
-	label.modulate = fx.damage_number_crit_color if was_crit else fx.damage_number_body_color
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.render_priority = RENDER_PRIORITY
-	label.scale = Vector3.ONE * (fx.damage_number_start_scale if was_crit else 1.0)
-
+	var label := build_label(text_for(loss), was_crit, fx)
 	parent.add_child(label)
 	var start := _spawn_position(victim_node, hit_pos, fx)
 	var drift := Vector3(randf_range(-fx.damage_number_spread, fx.damage_number_spread), fx.damage_number_rise, randf_range(-fx.damage_number_spread, fx.damage_number_spread))
@@ -89,6 +80,31 @@ static func show(victim: Object, loss: float, hit_pos: Vector3, was_crit: bool, 
 	tween.tween_property(label, "modulate:a", 0.0, life).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	tween.tween_property(label, "outline_modulate:a", 0.0, life).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	tween.chain().tween_callback(label.queue_free)
+
+
+## Build the damage-number Label3D, UN-parented and un-animated: `text` already formatted (text_for), the
+## crit flag picking the colour + pop-in scale, `fx` the live EffectsSettings the sizes / colours are read
+## from. Every flag here shapes the label's MATERIAL VARIANT (billboard, no_depth_test, unshaded, outline)
+## — which is why it lives in one static: show() and the in-level EffectPrewarmer must build the identical
+## object, or the warm compiles one pipeline and the first hit pays for another. Keep it free of tree /
+## autoload reads so the warm can call it with whatever settings it holds.
+static func build_label(text: String, was_crit: bool, fx: EffectsSettings) -> Label3D:
+	var label := Label3D.new()
+	label.name = "DamageNumber"
+	label.text = text
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.shaded = false
+	label.font_size = fx.damage_number_font_size
+	label.pixel_size = fx.damage_number_pixel_size
+	label.outline_size = fx.damage_number_outline_size
+	label.outline_modulate = fx.damage_number_outline_color
+	label.modulate = fx.damage_number_crit_color if was_crit else fx.damage_number_body_color
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.render_priority = RENDER_PRIORITY
+	label.scale = Vector3.ONE * (fx.damage_number_start_scale if was_crit else 1.0)
+	return label
 
 
 static func _spawn_position(victim: Node3D, hit_pos: Vector3, fx: EffectsSettings) -> Vector3:

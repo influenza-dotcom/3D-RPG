@@ -9,11 +9,14 @@ extends GutTest
 ##   • the three genuinely pure paths (GunMesh.is_raised, BloodDropEmitter.start,
 ##     and the two decal _on_time_til_fadeout_timeout bool flips).
 ##
-## ONE deliberate exception to that scope, at the BOTTOM of this file: the on-kill cue is split across
-## subsystems — the sky flash is StarSky's (effects, and pinned here), but the camera kick belongs to
-## Player.on_scored_kill, which no headless test can build (see test_player_core.gd's construction note).
-## Both halves are pinned together here, next to each other, so a retune of one cannot silently orphan the
-## other. Those two tests read player.gd as TEXT and a ScreenShakeSettings resource, and stay side-effect-free.
+## Deliberate exceptions to that scope are SOURCE-TEXT pins on seams no headless test can drive and whose
+## drift fails silently: the ExplosionMesh ink-mask/ring contract (in its section below), the blood emitters' no-time-scale-script
+## contract (bottom of the file — headless never simulates GPU particles at all), and — at the BOTTOM
+## of this file — the on-kill cue, which is split across subsystems: the sky flash is StarSky's (effects, and
+## pinned here), but the camera kick belongs to Player.on_scored_kill, which no headless test can build (see
+## test_player_core.gd's construction note). Both halves of that cue are pinned together, next to each other,
+## so a retune of one cannot silently orphan the other. Those tests read source as TEXT (player.gd, the sky
+## shader, explosion_mesh.gd) plus a ScreenShakeSettings resource, and stay side-effect-free.
 ##
 ## Every effect node here grabs @onready/@export children, plays audio, spawns
 ## physics bodies, runs create_timer/create_tween, or reads get_tree()/get_viewport()/
@@ -30,8 +33,6 @@ extends GutTest
 ##     spawn handlers / blood_drop impact+raycast / *_process — they spawn nodes, play
 ##     audio, or dereference null @onready/@export children on a bare instance, so only
 ##     their has_method presence + scalar defaults are asserted, never CALLED.
-##   • particle_time_bind.gd — no consts and no public API worth a brittle private-default
-##     assertion; its only behaviour couples to Engine.time_scale. Skipped entirely.
 
 
 # --- explosion.gd (projectile-death -> blast bridge) -----------------------------
@@ -90,18 +91,34 @@ func test_explosion_area_has_safe_handlers() -> void:
 func test_explosion_mesh_constants_and_defaults() -> void:
 	# Bare instance: ExplosionMesh._process reads GameSettings.effects.explosion_flash_speed
 	# every frame, so stay out of the tree — read consts + scalar exports off the object.
+	# (The old OUTLINE_COLOR / OUTLINE_WIDTH pins died with the inverted hull on 2026-08-27 —
+	# the flash's optional outline is InkOutline's screen-space ring now; see the source pin below.)
 	var n = load("res://scripts/components/explosion_mesh.gd").new()
 	assert_eq(n.EMISSION_ENERGY_MULTIPLIER, 3.0,
 		"EMISSION_ENERGY_MULTIPLIER 3.0 is the base emissive brightness the flash pulses around")
-	assert_eq(n.OUTLINE_COLOR, Color.BLACK,
-		"OUTLINE_COLOR must be black so the optional cartoon outline reads as a dark rim")
-	assert_eq(n.OUTLINE_WIDTH, 1.0,
-		"OUTLINE_WIDTH 1.0 is the outline shader parameter set when has_outline is on")
 	assert_eq(n.speed_to_scale, 0.0,
 		"speed_to_scale default 0.0 => the mesh starts at full scale (instant flash); >0 grows from zero (explosion bloom)")
 	assert_false(n.has_outline,
 		"has_outline must default false so the flash mesh has no outline pass unless explicitly enabled")
 	n.free()
+
+
+## SILENT-FAILURE GUARD for the flash's ink contract, replacing the OUTLINE_COLOR / OUTLINE_WIDTH pins that
+## went with the inverted hull (2026-08-27, "the ring owns every actor"). has_outline now means "InkOutline's
+## screen-space ring, and only the ring", and BOTH halves of that contract fail invisibly: drop the
+## ACTOR_INK_MASK_LAYER stamp and the WORLD's edge-detect quietly re-inks every explosion / hit spark as if it
+## were geometry (the exact 2026-08-16 defect the stamp exists to prevent); drop the TINT_ID_NEUTRAL ring and
+## the muzzle flash just loses its line with no error anywhere. Both live in _ready, which needs real scene
+## children — so this is a source-text pin like the StarSky / on_scored_kill guards at the bottom of this file.
+## If it fails, restore the calls or update the pin to the new seam — do not just delete the assertion.
+func test_explosion_mesh_rides_the_ink_ring() -> void:
+	var src := FileAccess.get_file_as_string("res://scripts/components/explosion_mesh.gd")
+	assert_false(src.is_empty(),
+		"explosion_mesh.gd must be readable — it owns the flash's ink-mask + optional-ring contract")
+	assert_true(src.contains("layers |= InkOutline.ACTOR_INK_MASK_LAYER"),
+		"ExplosionMesh._ready must OR InkOutline.ACTOR_INK_MASK_LAYER into layers — a flash is LIGHT, not geometry, and without the mask bit the world's screen-space ink draws a black ring around every explosion and bullet-impact spark")
+	assert_true(src.contains("InkOutline.apply_tint_mesh(self, InkOutline.TINT_ID_NEUTRAL)"),
+		"has_outline's ON path must be InkOutline.apply_tint_mesh(self, InkOutline.TINT_ID_NEUTRAL) — since the hull's deletion the ring IS the flash's only outline, and the neutral id keeps it the same black at the same weight as every other line in the game")
 
 
 func test_explosion_mesh_has_tint() -> void:
@@ -634,3 +651,36 @@ func test_kill_shake_tuning_default() -> void:
 	assert_lte(s.kill_shake_amount, s.death_shake_amount,
 		"the credited-kill kick (%.2f) must not exceed the point-blank nearby-death kick (%.2f) — both stack on the same trauma pool at close range, and the up-close death is meant to be the more violent of the two" % [s.kill_shake_amount, s.death_shake_amount])
 	s = null
+
+
+# --- blood emitters must not hand-drive Engine.time_scale ------------------------
+
+## ⭐blood.tscn and bloody_mess.tscn used to carry a `ParticleTimeBind` script that re-wrote the emitter's
+## `speed_scale = base * Engine.time_scale` every frame. That SQUARED every slow-mo. Godot already multiplies the
+## frame step it hands the RenderingServer by Engine.time_scale, so the second multiply landed on top of it and the
+## burst advanced at time_scale**2. Measured in a real window at Engine.time_scale 0.2 (BulletTime's airborne
+## slow-mo, the project's clean repro): the blood burst needed 23.9x its normal wall-clock time to develop instead
+## of 5x, i.e. it crawled at 1/25 speed while the world merely halved-and-halved-again. dust.tscn never carried the
+## script and was the control at 4.6x.
+##
+## The same script also pinned the emitter to PROCESS_MODE_ALWAYS, which is the second half of the defect: Godot
+## zeroes a PAUSED GPUParticles3D's server-side speed scale through NOTIFICATION_PAUSED (the behaviour
+## EffectPrewarmer._arm_particles deliberately works around), so an always-processing emitter never gets the
+## notification. Blood was the only effect in the game that kept flying through a dialogue pause and through
+## FreezeFrame.pause_briefly()'s hard pause-on-kill, while dust, sparks, smoke and gibs all held still.
+##
+## SOURCE-TEXT pin rather than a behavioural one, and deliberately so: headless NEVER simulates GPU particles, so
+## no in-process test can observe either half. The cheap, honest guard is that the authored scenes carry no script
+## on the emitter at all — these are pure authored particle systems and their timing belongs to the engine.
+func test_blood_emitters_carry_no_timing_script() -> void:
+	for scene_path in ["res://scenes/effects/blood.tscn", "res://scenes/effects/bloody_mess.tscn"]:
+		var src := FileAccess.get_file_as_string(scene_path)
+		# An empty read (scene moved, or the editor is mid-reimport) would make both asserts below pass vacuously.
+		assert_false(src.is_empty(),
+			"%s must be readable as text — an empty read means the scene moved or is mid-reimport, and the two guards below would pass vacuously" % scene_path)
+		assert_false(src.contains("particle_time_bind"),
+			"%s must not carry particle_time_bind.gd. It multiplied speed_scale by Engine.time_scale on top of the frame step Godot has ALREADY scaled, so every bullet-time / hitstop slow-mo hit the burst twice — measured 23.9x slower instead of 5x at time_scale 0.2" % scene_path)
+		# Also pinned as a whole, because a re-save can reduce an ext_resource to a bare `uid://` with no path in it,
+		# and the name check above would then miss the very script it exists to catch.
+		assert_false(src.contains("script = ExtResource"),
+			"%s must carry NO script on its emitter — it is a pure authored GPUParticles3D and its speed_scale / process_mode belong to the engine and the Inspector. A script here is how the squared-slow-mo and pause-through bugs both got in" % scene_path)
