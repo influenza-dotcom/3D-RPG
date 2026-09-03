@@ -5,7 +5,7 @@ extends Projectile
 ## sprays blood on Characters / dust on everything else. The abstract [Projectile]
 ## base owns movement, damage and impact orchestration; this concrete variant just
 ## fills in the two per-variant hooks — the impact decal and the impact particles.
-## Used by Projectile.tscn (pistol/shotgun) and sphere_projectile.tscn (smg);
+## Used by Projectile.tscn (pistol/shotgun/SMG/sniper) and sphere_projectile.tscn (spray paint);
 ## rock_projectile.gd is the other variant.
 
 const BLOOD = preload("uid://c7v6vgs74fhn4")
@@ -13,6 +13,24 @@ const DUST = preload("uid://um6f8g8g6l7v")
 
 ## Backoff used to place the decal when the impact raycast finds no surface.
 const DECAL_FALLBACK_BACKOFF: float = 0.05
+
+## ⭐⭐A fired ROUND MUST NEVER TUMBLE — the structural guarantee behind the de-spin in Projectile's pierce.
+##
+## The visual and the collider are wildly mismatched: Projectile.tscn's MeshInstance3D scales a radius-0.2
+## SphereMesh by 6 on Z and offsets it +0.326, making a 2.4 m x 4 mm emissive needle spanning local z
+## [-0.874, +1.526] — around a SphereShape3D collider of radius 0.05. That is a 30:1 lever. A round that
+## stops with any residual spin sweeps its tip through a ~3 m disc, which reads to the player as a tracer
+## ORBITING whatever it stopped next to (it is what "the bullet is rotating around my corpse" was).
+##
+## Locking is behaviourally FREE: the only orientation a round ever receives is the one-shot look_at in
+## Projectile._ready(), which aims the needle along travel. There is no _physics_process, no
+## _integrate_forces and no custom_integrator anywhere in the Projectile hierarchy, so nothing re-orients a
+## round in flight and nothing depends on it spinning. Set AFTER super() so look_at has already aimed it.
+##
+## Deliberately NOT on the base Projectile: RockProjectile is a lobbed rock and SHOULD tumble.
+func _ready() -> void:
+	super()
+	lock_rotation = true
 
 func particles(_body, _last_velocity) -> void:
 	var is_character: bool = _body is Character

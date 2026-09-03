@@ -95,7 +95,11 @@ func _pass_see_through_geometry() -> void:
 	var whiz := get_node_or_null(^"WhizSFX") as AudioStreamPlayer3D
 	if whiz != null:
 		whiz.max_distance = GameSettings.audio.bullet_whiz_max_distance
-	await get_tree().create_timer(life_time).timeout
+	# create_timer(time, process_always=true, process_in_physics=false, ignore_time_scale=TRUE): life_time is a
+	# WALL-CLOCK budget, not a simulated one. The death cinematic pins Engine.time_scale at death_time_scale (0.3),
+	# which would otherwise stretch a 10 s round to ~33 s and stop it self-cleaning while the player is still
+	# watching. Same reasoning as FreezeFrame's hold timer, which spells the argument list out for the same reason.
+	await get_tree().create_timer(life_time, true, false, true).timeout
 	if is_inside_tree():
 		queue_free()
 
@@ -187,9 +191,24 @@ func _on_body_entered(body: Node) -> void:
 				# an armoured SURVIVOR. hp_before > 0 keeps a pierce through an already-dead body from counting.
 				if HitResolution.award_collateral_kill(real_loss, hp_before, was_crit, shooter, _killed_character):
 					_killed_character = true  # this Character kill qualifies whoever the round pierces into next
-				# Pierce ONLY on a confirmed KILL (real_loss >= hp_before, like damage_trace.gd:162) — an armoured/DR
+				# Pierce ONLY on a confirmed KILL of a LIVING victim (mirrors damage_trace.gd's gate) — an armoured/DR
 				# SURVIVOR keeps overkill > 0 yet must NOT be pierced through. Carried magnitude is the pre-mit excess.
-				var will_penetrate := overkill_penetration and real_loss >= hp_before and overkill > 0.0
+				# ⭐⭐TWO victims can never be pierced, and they fail for OPPOSITE reasons — both terms are load-bearing.
+				#
+				# (a) hp_before > 0.0 — an ALREADY-DEAD body. `hp` is unclamped (character.gd's `hp -= _amount`), so a corpse
+				# reads back a NEGATIVE hp_before; take_damage early-returns on the _dead latch so real_loss is 0.0; and
+				# `overkill` inflates to dealt + |hp| instead of collapsing to 0. Without the term `real_loss >= hp_before`
+				# is satisfied VACUOUSLY (0.0 >= -3.0) and every follow-up round pierces the corpse.
+				#
+				# (b) not the PLAYER — the round that KILLS you. Here the guard in (a) does NOT help: you were still ALIVE
+				# when it landed, so hp_before is a healthy positive number and every term passes DETERMINISTICALLY on every
+				# player death. The round then excepts itself from your corpse (the one body it is touching), un-consumes,
+				# and returns PAST the queue_free() below — a live round released half a metre from a first-person camera
+				# that is about to spend 1.6 s keeling over next to it. There is nothing behind the player worth carrying
+				# overkill into: the player IS the camera. Group-checked, not `body is Player`, to avoid the
+				# Character<->Player class cycle (same idiom as character.gd's difficulty gate). The precedent for
+				# "the player is a special victim" is ShotResolver's NPC-headshot immunity.
+				var will_penetrate := overkill_penetration and hp_before > 0.0 and not body.is_in_group(Groups.PLAYER) and real_loss >= hp_before and overkill > 0.0
 				# The player ALSO hears the per-weapon impact-against-a-character (impact_enemy_hit /
 				# impact_enemy_sound), HP-pitched, alongside the 2D ding from on_dealt_hit; an NPC-fired
 				# round plays the positional generic impact instead (no ding for a distant NPC-vs-NPC trade).
@@ -203,7 +222,17 @@ func _on_body_entered(body: Node) -> void:
 					damage = overkill
 					_has_pierced = true
 					add_collision_exception_with(body)
-					linear_velocity = last_velocity
+					# ⭐A SPEED FLOOR, not a zero-check. last_velocity is read POST-SOLVE inside body_entered, so a square hit
+					# on a heavy/kinematic body comes back at a crawl — and a crawl is not zero, so a bare `> 0.0001` guard
+					# almost never fires (a 60 Hz gravity step alone carries ~0.018 m/s, nearly 2x that threshold). Restoring
+					# THAT parks a live round at the impact point. Keep the deflected heading, but guarantee it actually
+					# departs: half the authored launch speed is still far faster than anything that reads as hanging.
+					var carry_dir := last_velocity.normalized() if last_velocity.length_squared() > 0.0001 else direction.normalized()
+					linear_velocity = carry_dir * maxf(last_velocity.length(), speed * 0.5)
+					# ⭐And DE-SPIN it. The round's collider is a 5 cm sphere but its mesh is a 2.4 m needle reaching 1.53 m
+					# past the pivot, so any residual angular_velocity sweeps a ~3 m disc. Nothing else in the project ever
+					# writes a projectile's angular_velocity, and contact friction is a torque source with no sink.
+					angular_velocity = Vector3.ZERO
 					_consumed = false
 					return
 			elif not body is Throwable:
@@ -252,7 +281,7 @@ func on_deletion() -> void:
 ## hitscan path). Inert (false) at the default backstab_multiplier of 1.0, or for a non-Character / missing
 ## shooter. Rear-arc geometry off the shooter's position vs the victim's +Z facing.
 func _projectile_behind(body: Object) -> bool:
-	if backstab_multiplier == 1.0 or not (body is Character) or not is_instance_valid(shooter):
+	if backstab_multiplier == 1.0 or not is_instance_valid(body) or not (body is Character) or not is_instance_valid(shooter):
 		return false
 	var v := body as Node3D
 	return DamageApplier.is_behind(shooter.global_position, v.global_position, v.global_transform.basis.z, backstab_arc_degrees)
