@@ -8,6 +8,7 @@ extends RayCast3D
 ## @risk Break the closer-prop block (_closer_prop_blocks — the _talk_distance / is_ancestor_of guard, now shared by the PickUp press, _update_talk_target and interact_available): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
 ## @risk Add an outcome to the PickUp branch without adding it to interact_available(): a fallback claims that press instead and the new interact silently never fires — the lean swallows it on Q, and on F the FLASHLIGHT toggles over it. The reverse is now just as costly: widen interact_available() and F stops reaching the torch for as long as the new condition holds (this is why carrying a prop, which is true the whole time you carry it, needs L as the torch's second key).
 ## @risk Remove either liveness bail (the `player as Character` is_alive() gates at the TOP of _unhandled_input AND _physics_process): a mid-death-cinematic F/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic — or the corpse camera keeps painting the hover outlines/readout and greeting NPCs it sweeps across.
+## @risk Re-implement a full throw instead of calling throw_held(): the left-click fling and the code-side ADS weapon throw (Player.throw_equipped_weapon) must stay ONE definition, or a copy drifts off the armed-timer discard and a stale F/Z key-up double-releases a prop that already left.
 ## @risk Fold the per-prop throw_impulse_mult multiply INTO the throw test (launch_impulse / is_throw_release read the RAW impulse first): a fast-throw prop's gentle tap-DROP then scales past the throw threshold and silently noses, plays the throw sound, and credits the player with an attack.
 ## @test res://tests/test_interaction_occlusion.gd
 ## @test res://tests/test_pickup_ray_liveness.gd
@@ -141,8 +142,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# event is flushed, so the latch is already up here. Not consumed — the same click may still close a screen.
 		if _refocus_latched():
 			return
-		_release_timer_started_us = -1  # discard any F/Z-armed release timer — this click owns the throw now
-		_release(GameSettings.physics_damage.pickup_throw_impulse)
+		throw_held()  # THE full-impulse throw — shared verbatim with the code-side thrower (see throw_held)
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed(InputManager.action_drop_held):
 		# DEDICATED DROP/HOLD (default H): empty your hands one stage at a time — a carried prop goes to the ground
@@ -205,6 +205,22 @@ func _release_held() -> void:
 		var impulse: float = GameSettings.physics_damage.pickup_throw_impulse if held_for_s >= GameSettings.physics_damage.pickup_e_hold_threshold else GameSettings.physics_damage.pickup_drop_impulse
 		_release(impulse)
 	_release_timer_started_us = -1
+
+## THROW whatever is in your hands RIGHT NOW at full impulse, straight down the look ray — the single definition of
+## "a full throw", shared by the left-click alternate throw above and by every code-side thrower (today: the ADS +
+## attack weapon throw, Player.throw_equipped_weapon, which pulls the wielded weapon into your hands and hurls it in
+## the same call). Discards any F/Z-armed release timer first, so the key-up that may still be coming can't fire a
+## SECOND release on a prop that has already left. Returns false — and does nothing at all — with empty hands, which
+## is what lets a caller treat "I could not throw" as "this press was not mine".
+## Deliberately NOT gated on dialogue / gameplay_suppressed: the INPUT branch that stands in for a fire click owns
+## that gate (it must suppress exactly where firing does), and a code-side caller has its own gates. Adding one here
+## would silently make a scripted throw a no-op inside a cutscene instead of at the caller that knows the rule.
+func throw_held() -> bool:
+	if held_object == null:
+		return false
+	_release_timer_started_us = -1  # discard any F/Z-armed release timer — this throw owns the release now
+	_release(GameSettings.physics_damage.pickup_throw_impulse)
+	return true
 
 ## Cleanup path for death / quickload / scene teardown: restore the carried prop's physics state without treating
 ## it as a deliberate throw. Normal key releases still use _release() and keep throw credit / decoy behavior.
@@ -621,6 +637,12 @@ func _pick_up(target: Throwable) -> void:
 	# no gravity" on a later drop would leave it hanging in mid-air), and so the carry system is never handed a
 	# body overlapping static geometry. unpin() also lifts it clear of the surface. No-op on everything else.
 	target.unpin()
+	# ...and the same release for the OTHER embedded state: a blade still in a LIVING victim (Throwable.stick_in_body).
+	# This is what "walk up and pull your knife back out of him" is — the prop keeps its collision layer while stuck
+	# precisely so the aim ray above can still find it. Same ordering reason as unpin(): the snapshot below must
+	# capture free physics, not the frozen/no-gravity/no-mask embedded state, and the mutual collision exception
+	# against the victim has to come off before the player takes ownership. No-op on everything else.
+	target.unstick()
 	held_object = target
 	_holding = true  # the sole grab entry (aimed F/Z AND the hotbar carry() both land here); paired with every _release / recovery
 	_pickup_grace_remaining = PICKUP_GRACE_TIME

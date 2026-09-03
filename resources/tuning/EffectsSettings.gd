@@ -184,6 +184,40 @@ extends Resource
 ## above — loose gore competes with the thing you want looked at. -1 inherits body_part_gib_meat_count.
 @export var pinned_part_meat_count: int = 0
 
+@export_group("Blades left in the body")
+## Master switch for a thrown blade that STICKS IN a victim who SURVIVES it: instead of rebounding and dropping at
+## their feet, the weapon is left embedded in the body part it struck and rides that part — a guard walks off with
+## your knife in his shoulder, and it swings with the limb as he moves and turns.
+##
+## This is the sibling of the PIN group above, split at the kill line: the pin is what a LETHAL thrown hit does
+## (carry the limb to the wall), this is what a SURVIVABLE one does, and no single hit does both — Throwable gates
+## the stick on `Character.is_alive()` immediately after the damage lands, which is the same instant the pin marker
+## is left for the death burst to spend. So the two effects can never fight over one blade.
+## Off = a thrown weapon bounces off a survivor and falls, exactly as it did before this existed.
+@export var stuck_blades_enabled: bool = true
+## How far (metres) the blade's TIP ends up INSIDE the body, measured from the contact point along the throw. The
+## same measure `pinned_part_blade_embed` uses against a wall, but deeper on purpose: a body is soft, and a blade
+## balanced on the surface reads as a clipping error rather than a wound. Too deep and the whole knife vanishes
+## inside the mesh and the player never sees what happened to their weapon.
+@export var stuck_blade_embed: float = 0.14
+## Accept a blade in the HEAD. The best read of the four — a knife jutting out of a head at eye height is legible
+## across a room, and the head-look keeps swinging it.
+@export var stuck_blade_head: bool = true
+## Accept a blade in the TORSO. Where most thrown hits land, so this is the common case.
+@export var stuck_blade_torso: bool = true
+## Accept a blade in an ARM. ON, unlike `pinned_part_arms` — and the difference is not an oversight. That one is
+## off because an arm stapled to a distant wall is a few pixels at this internal resolution; here the ARM is not
+## the thing being looked at, the knife is, and it stays at arm's length on a body that walks toward you.
+@export var stuck_blade_arms: bool = true
+## Accept a blade in a LEG. ON for the same reason as arms — and a limping guard with a knife in his thigh is the
+## clearest read the crippled-limb system has ever had.
+@export var stuck_blade_legs: bool = true
+## The pop (m/s) BACK OUT of the wound — the reverse of the throw that drove it in — that the blade gets when the
+## body it is stuck in DIES and it comes loose. Two jobs: the weapon visibly slips OUT of the collapsing body
+## instead of appearing on the floor underneath it, and it lands slightly toward the player rather than inside the
+## gore pile they now have to search for it in. 0 drops it straight down from wherever the corpse was.
+@export var stuck_blade_drop_impulse: float = 1.5
+
 @export_group("Thrown weapon trail")
 ## Master switch for the white STREAK a thrown weapon drags behind it in flight — the thrown-weapon tracer.
 ## Off = thrown props fly bare, as they did before the effect existed. Only props carrying a `ThrowTrail`

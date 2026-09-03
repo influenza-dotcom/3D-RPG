@@ -153,3 +153,68 @@ func test_surface_accepts_degrades_safely() -> void:
 		"no normal, no pin")
 	assert_false(PartPinner.surface_accepts(Vector3.FORWARD, Vector3.ZERO, 55.0),
 		"no travel direction, no pin")
+
+# --- rigid_anchor / attach_offset / attached_pose: riding a LIVING body part ------------------------------------
+#
+# The other half of PartPinner: a blade the victim SURVIVES stays in the part it struck and is re-posed onto that
+# part's frame every physics step (Throwable._follow_stuck_part). These three are that maths, and the property
+# that has to hold is a round trip — measure once at the strike, replay forever, and the blade must sit exactly
+# where it was put when nothing has moved, and rigidly with the part when something has.
+
+func test_rigid_anchor_strips_scale_but_keeps_rotation() -> void:
+	var scaled := Transform3D(Basis.from_euler(Vector3(0.0, 0.9, 0.0)).scaled(Vector3(1.3, 1.3, 1.3)), Vector3(0.0, 1.6, 2.0))
+	var anchor := PartPinner.rigid_anchor(scaled)
+	assert_almost_eq(anchor.basis.get_scale().x, 1.0, 0.0001,
+		"a 1.3x head must NOT make a 1.3x knife — the anchor carries rotation only")
+	assert_eq(anchor.origin, scaled.origin,
+		"...and it stays exactly where the part is")
+	assert_almost_eq(anchor.basis.get_euler().y, 0.9, 0.0001,
+		"the part's facing is the whole point of the anchor and survives untouched")
+
+func test_rigid_anchor_keeps_a_mirrored_limb_mirrored() -> void:
+	# A right limb is authored as a MIRROR of the left, so its basis has a negative determinant. Orthonormalising
+	# must not "fix" that: the mirror has to survive into the anchor so it cancels back out through the offset.
+	var mirrored := Transform3D(Basis.IDENTITY.scaled(Vector3(-1.0, 1.0, 1.0)), Vector3(0.4, 1.15, 0.0))
+	assert_lt(PartPinner.rigid_anchor(mirrored).basis.determinant(), 0.0,
+		"a mirrored part keeps its handedness in the anchor")
+
+func test_rigid_anchor_degrades_on_a_collapsed_basis() -> void:
+	var collapsed := Transform3D(Basis.IDENTITY.scaled(Vector3.ZERO), Vector3(1.0, 2.0, 3.0))
+	var anchor := PartPinner.rigid_anchor(collapsed)
+	assert_eq(anchor.origin, Vector3(1.0, 2.0, 3.0),
+		"a zero-scaled part still parks the blade AT the part rather than producing a NaN pose")
+	assert_almost_eq(anchor.basis.determinant(), 1.0, 0.0001,
+		"...with no rotation at all, which is visibly wrong but never invalid")
+
+func test_the_attach_round_trip_reproduces_the_strike_pose_exactly() -> void:
+	var part := Transform3D(Basis.from_euler(Vector3(0.0, 1.2, 0.0)), Vector3(0.0, 1.1, 0.0))
+	var pose := Transform3D(Basis.from_euler(Vector3(0.3, -0.4, 0.1)), Vector3(0.05, 1.18, 0.22))
+	var anchor := PartPinner.rigid_anchor(part)
+	var back := PartPinner.attached_pose(anchor, PartPinner.attach_offset(anchor, pose))
+	assert_almost_eq(back.origin.distance_to(pose.origin), 0.0, 0.0001,
+		"replaying the offset onto an UNMOVED part must put the blade back exactly where the strike left it")
+	assert_almost_eq((back.basis.get_euler() - pose.basis.get_euler()).length(), 0.0, 0.0001,
+		"...facing included, or the knife would snap to a new angle on its first frame")
+
+func test_the_blade_rides_a_part_that_moves_and_turns() -> void:
+	# The feature itself, as arithmetic: the guard walks 3 m and turns 90 degrees; the knife in his chest has to
+	# arrive at the same place ON him, not the same place in the room.
+	var part := Transform3D(Basis.IDENTITY, Vector3(0.0, 1.1, 0.0))
+	var pose := Transform3D(Basis.IDENTITY, Vector3(0.0, 1.1, 0.25))  # 25 cm out in front of his chest
+	var offset := PartPinner.attach_offset(PartPinner.rigid_anchor(part), pose)
+	var moved := Transform3D(Basis.from_euler(Vector3(0.0, PI * 0.5, 0.0)), Vector3(3.0, 1.1, 0.0))
+	var now := PartPinner.attached_pose(PartPinner.rigid_anchor(moved), offset)
+	assert_almost_eq(now.origin.distance_to(Vector3(3.25, 1.1, 0.0)), 0.0, 0.0001,
+		"a quarter-turn puts the hilt out to his +X side, still 25 cm from his chest")
+	assert_almost_eq(now.origin.distance_to(moved.origin), 0.25, 0.0001,
+		"the blade never drifts closer to or further from the part it is buried in")
+
+func test_the_blade_keeps_its_own_size_on_a_scaled_part() -> void:
+	# The regression rigid_anchor exists to prevent: bolting to the RAW transform would multiply the part's scale
+	# into the knife every frame, so a knife in a big head would be a big knife.
+	var big := Transform3D(Basis.IDENTITY.scaled(Vector3(2.0, 2.0, 2.0)), Vector3(0.0, 1.6, 0.0))
+	var pose := Transform3D(Basis.IDENTITY, Vector3(0.0, 1.6, 0.2))
+	var anchor := PartPinner.rigid_anchor(big)
+	var back := PartPinner.attached_pose(anchor, PartPinner.attach_offset(anchor, pose))
+	assert_almost_eq(back.basis.get_scale().distance_to(Vector3.ONE), 0.0, 0.0001,
+		"the blade comes back at its authored 1:1 scale however big the part it is in")

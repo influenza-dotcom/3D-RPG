@@ -37,6 +37,14 @@ const AUTOFIT_MIN_EXTENT: float = 0.01
 ## (the BodyPartGibs idiom in gore_spawner.gd) — this script sits on the actor parse path via Character.
 const PartPinnerScript := preload("res://scripts/effects/part_pinner.gd")
 
+## The body-part drop-in, for ONE static: wants_part, the single home for the "which limb key does this toggle
+## cover" mapping that both the wall pin and the stuck blade filter through. Reached by SCRIPT PATH rather than its
+## `BodyPartGibs` class_name for the same reason as the line above and as gore_spawner.gd's identical const — this
+## script is on Character's parse path, so a class_name here would have to be in the editor's global class cache
+## before any actor could compile. Safe in this direction only: body_part_gibs.gd `load()`s its chassis scene
+## lazily and never references Throwable at parse time, so there is no cycle back into this file.
+const BodyPartGibsScript := preload("res://scripts/components/body_part_gibs.gd")
+
 enum HeldVisibilityMode { INHERIT, FADE, OPAQUE }
 
 ## Safety floor: a stealth decoy NoiseSource MUST be one-shot (a non-positive lifetime would make it persistent
@@ -207,6 +215,14 @@ const GIB_HELD_DESPAWN_RECHECK: float = 0.5
 ## blunt speed path deliberately carries no location at all. A weapon drop takes this from
 ## WeaponData.thrown_pins_body_part; a hand-placed prop (a spear on a rack) can set it directly.
 @export var pins_body_part: bool = false
+## Whether a hit the victim SURVIVES leaves this prop EMBEDDED in the body part it struck, riding that part until
+## the victim dies or someone pulls it out (see stick_in_body / GameSettings.effects "Blades left in the body").
+## The other half of `pins_body_part`, on the far side of the kill line: that one is what a LETHAL throw does, this
+## is what a survivable one does, and the liveness gate in _try_damage_character means one hit can never do both.
+## Requires `thrown_weapon` for the same reason the pin does — the located weapon hit is what carries the contact
+## point that names the part. A weapon drop takes this from WeaponData.thrown_sticks_in_body; a hand-placed prop
+## (a spear on a rack) can set it directly.
+@export var sticks_in_body: bool = false
 ## Multiplier on the LAUNCH SPEED of a real throw: PickupRay._release scales
 ## GameSettings.physics_damage.pickup_throw_impulse by this before it becomes the released body's velocity. 1.0 = the
 ## normal throw every crate gets; raise it for something meant to be HURLED rather than lobbed (the knife leaves the
@@ -308,6 +324,11 @@ func _notification(what: int) -> void:
 
 func _exit_tree() -> void:
 	_stop_held_loop_sound()
+	# Hand back the mutual collision exception a stuck blade holds against its victim, and drop the reference to a
+	# part we are no longer in a position to ride. The HOST outlives us in the case that matters — the prop is shot
+	# apart, or a level swap frees it — and a pooled NPC carrying a stale exception against a recycled RID stops
+	# colliding with some unrelated prop several lives later. No pop: nothing is watching a prop leaving the tree.
+	unstick()
 
 func _set_data(value: ThrowableData) -> void:
 	data = value
@@ -530,6 +551,7 @@ func _physics_process(delta: float) -> void:
 	# straight up passes through zero velocity at its apex.
 	if _trailing and sleeping:
 		_trailing = false
+	_follow_stuck_part()  # a blade left in a living body rides its part; a no-op for every prop that isn't one
 	_animate_breathing(delta)
 	_update_ambient_loop(delta)
 	_pre_step_velocity = linear_velocity
@@ -592,6 +614,13 @@ func collider_size() -> Vector3:
 	return Vector3.ZERO
 
 func _on_body_entered(body: Node) -> void:
+	# An EMBEDDED prop is inert: it thuds at nobody, lures nobody and stabs nobody. Zeroing `collision_mask` in
+	# stick_in_body / pin_at is not enough on its own — Godot's broadphase pairs two bodies when EITHER one's mask
+	# covers the other's layer, and a stuck blade deliberately keeps its layer so PickupRay can still find it. So
+	# the victim walking around with it reports a fresh contact every time their capsule re-touches it, and without
+	# this line the knife in their shoulder would re-stab them (and re-emit its decoy noise) on a loop.
+	if _stuck_part != null or _pinned:
+		return
 	var my_speed := _pre_step_velocity.length()
 	var their_speed := 0.0
 	if body is RigidBody3D:
@@ -687,6 +716,14 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 	var hp_after := character.hp if is_instance_valid(character) else 0.0
 	var real_loss := hp_before - hp_after
 	DamageNumberPopupScript.show(character, real_loss, global_position, was_crit, attacker)
+	# STICK IN THE BODY — the survivable half of the pin, and the reason it is resolved HERE, one line after the
+	# damage, is that this is the only moment the answer is knowable: the pin marker above was stamped BLIND (armour,
+	# difficulty and DR all move the number after we hand it over), and `is_alive()` is the first read that says
+	# which of the two effects this hit actually was. A survivor keeps the blade; a corpse leaves it for the death
+	# burst to staple to the wall. `is_alive()` and not `hp_after > 0.0` because an overkill leaves hp NEGATIVE and
+	# a death latches `_dead` before hp is even read — the latch is the canonical liveness test (see Character).
+	if sticks_in_body and thrown_weapon != null and is_instance_valid(character) and character.is_alive():
+		_try_stick_in_body(character, hit_pos, _pre_step_velocity)
 	# NOTE: a thrown kill's SKY FLASH needs nothing here. take_damage's own lethal branch fires the kill cue on the
 	# resolved killer, and `attacker` is threaded into the call above, so a thrown-weapon kill flashes through the
 	# same one seam as a gunshot. (This path still shows no hitmarker and rings no ding — it never calls
@@ -882,6 +919,241 @@ func unpin() -> void:
 	linear_velocity = Vector3.ZERO
 	angular_velocity = Vector3.ZERO
 
+# --- Embedded (stuck) blade: the knife left in a LIVING body ---------------------------------------------------
+#
+# A thrown blade the victim SURVIVES stays in them. The prop stops being simulated and is instead written onto the
+# struck body part's frame every physics step, so it rides a walking, turning, head-looking actor — a guard leaves
+# with your knife in his shoulder, and pulling it back out is an ordinary pickup.
+#
+# WHY A PER-FRAME TRANSFORM WRITE AND NOT A REPARENT. Making the prop a child of the part would be one line, and
+# it is the wrong line three times over: this is a RigidBody3D (a physics body under an animated visual node is
+# exactly the setup Godot warns about), the pickup / grapple / gib systems all assume a prop hangs under the tree
+# ROOT and would follow the blade into the actor's subtree, and a POOLED NPC reuses those exact part nodes for its
+# next life (the DUPLICATE, NEVER TAKE rule GoreSpawner spells out) — a knife parented into one would ride into a
+# stranger. Driving the transform instead leaves the prop exactly where every other system expects to find it.
+#
+# The three ways out, all of which land in unstick():
+#   * the victim DIES               — polled through Character.is_alive(); the blade pops loose and falls
+#   * the part or victim GOES AWAY  — freed, or a level swap took the actor out from under us
+#   * the player PULLS IT OUT       — PickupRay._pick_up calls unstick() before it snapshots physics state
+
+var _stuck_part: Node3D = null           ## the live body part we are riding; non-null IS the "stuck" state
+var _stuck_host: Node = null             ## the Character that part belongs to — polled for is_alive(), and un-excepted on release
+var _stuck_offset: Transform3D = Transform3D.IDENTITY  ## our pose in the part's rigid frame, measured once at the strike
+var _stuck_dir: Vector3 = Vector3.ZERO   ## the throw direction that put it there; the death pop is fired back along it
+var _stuck_prior_gravity: float = 1.0
+var _stuck_prior_mask: int = 0
+var _stuck_prior_priority: int = 0        ## authored process_physics_priority, restored on release — see stick_in_body
+
+## The physics tick slot a stuck blade takes: LATER than the default 0 every actor runs at, so the part transform it
+## copies is this frame's and not last frame's. Ordering, not a feel knob — hence a const rather than a tuning field.
+const STUCK_PHYSICS_PRIORITY: int = 10
+
+## True while this prop is embedded in a living body. Read by PickupRay so a grab releases it first, and by
+## _on_body_entered so an embedded blade can't re-strike the body carrying it.
+func is_stuck_in_body() -> bool:
+	return _stuck_part != null
+
+## Decide whether this strike leaves the blade in the victim, and in WHICH part, then do it. Called from
+## _try_damage_character on the survive branch only. Silently does nothing whenever the answer is no — a victim
+## with no modelled body, a part the designer has switched off, the effect disabled — and the prop then rebounds
+## and drops exactly as a thrown prop always did.
+func _try_stick_in_body(character: Character, contact: Vector3, travel: Vector3) -> void:
+	if _stuck_part != null or _pinned or _held or not is_inside_tree():
+		return
+	var fx := GameSettings.effects
+	if not fx.stuck_blades_enabled:
+		return
+	if travel.length_squared() < 0.000001 or not contact.is_finite():
+		return
+	# The victim's modelled parts, duck-typed on `character_parts()` exactly as GoreSpawner._find_body_swap does —
+	# that is the marker method BodyModelSwap publishes, and matching it keeps the unit-test stubs working for both.
+	var swap := _find_part_source(character)
+	if swap == null:
+		return
+	# A FIRST-PERSON rig (the player's view-model arms) forces its meshes onto the gun camera's layer. Those are a
+	# HUD prop drawn over the world, not a body: a knife bolted to them would hang in front of the player's face at
+	# arm's length forever. Same guard, same reason, as the one that keeps them from gibbing.
+	var vm_layer: Variant = swap.get(&"view_model_layer")
+	if (vm_layer is int or vm_layer is float) and float(vm_layer) > 0.0:
+		return
+	var parts: Variant = swap.call(&"character_parts")
+	if not (parts is Array):
+		return
+	# WHICH part: the one whose live VISUAL centre is nearest the strike — the same choice, through the same
+	# static, that the pin kill makes. See PartPinner.nearest_key for why this beats Character.body_part_at
+	# (no left/right, and it desyncs on a seated actor).
+	var entries: Array = []
+	var nodes := {}
+	for entry in parts:
+		if not (entry is Dictionary):
+			continue
+		var key := String((entry as Dictionary).get("key", ""))
+		# is_instance_valid BEFORE the cast, not after: `as` / `is` on a FREED instance is a hard crash in this
+		# engine, and a rig rebuilt between the strike and this read can hand us exactly that.
+		var node: Variant = (entry as Dictionary).get("node", null)
+		if key == "" or not is_instance_valid(node):
+			continue
+		var part := node as Node3D
+		if part == null or not part.is_inside_tree():
+			continue
+		entries.append({"key": key, "centre": _visual_centre_of(part)})
+		nodes[key] = part
+	var chosen := PartPinnerScript.nearest_key(contact, entries)
+	if chosen == "":
+		return
+	# The acceptable set is its OWN filter, deliberately more permissive than the wall pin's (arms and legs ship ON
+	# here — see the "Blades left in the body" group for why the pin's reason to exclude them doesn't apply).
+	# Reusing wants_part's pure signature keeps ONE home for the key -> toggle mapping.
+	if not BodyPartGibsScript.wants_part(chosen, fx.stuck_blade_head, fx.stuck_blade_torso, fx.stuck_blade_arms, fx.stuck_blade_legs):
+		return
+	var part_node: Node3D = nodes[chosen]
+	var dir := travel.normalized()
+	# WHERE THE BLADE ENDS UP. `body_entered` fires on FIRST overlap, so at `contact` (this prop's origin at the
+	# strike) the blade's point is at the victim's surface and the origin sits one half-length back from it. Seating
+	# the tip `embed` metres inside is therefore just "carry on down the throw by `embed`" — PartPinner.blade_origin's
+	# wall form, `surface + dir * (embed - half)`, with that same surface point `contact + dir * half` substituted
+	# in and the two half-lengths cancelling. The BASIS is the thrown-flight facing, so the mesh-front correction
+	# applies and the blade goes in point-first rather than hilt-first (travel_facing_basis is the one home for it).
+	var pose := Transform3D(travel_facing_basis(dir), contact + dir * fx.stuck_blade_embed)
+	stick_in_body(character, part_node, pose, dir)
+
+## Duck-typed lookup of the node that publishes a character's live body parts — BodyModelSwap in the shipped
+## prefab. Mirrors GoreSpawner._find_body_swap rather than importing it: the marker method is the contract, and
+## keeping the search local means a test stub satisfies both without either script knowing about the other.
+func _find_part_source(character: Node) -> Node:
+	for c in character.get_children():
+		if c.has_method(&"character_parts"):
+			return c
+	return null
+
+## The world-space VISUAL centre of a subtree — where the thing actually LOOKS like it is, rather than wherever
+## its own origin happens to sit (a body part's origin is a joint, not a middle). This is the measure the pin
+## picks its limb by (BodyPartGib.mount_placement's centre), recomputed here off the LIVE part.
+##
+## It is recomputed rather than borrowed because Throwable CANNOT reach BodyPartGib: that script `extends
+## Throwable`, so a preload of it from this file would close a class parse cycle (the same trap the
+## Resource/PackedScene and class_name/preload cycles in this project document). _collect_visual_aabb is already
+## generic over any node, so the walk itself is shared. Falls back to the node's own origin when nothing under it
+## has a mesh, which keeps a placeholder part from poisoning the nearest-centre comparison with a NaN.
+func _visual_centre_of(node: Node3D) -> Vector3:
+	var state := {"has": false, "aabb": AABB()}
+	_collect_visual_aabb(node, Transform3D.IDENTITY, state)
+	if not bool(state["has"]):
+		return node.global_position
+	return node.global_transform * (state["aabb"] as AABB).get_center()
+
+## Embed this prop in `part` (a live body part of `host`) at world pose `pose`, travelling along `dir`. The pose is
+## converted into the part's RIGID frame once, here, and replayed onto the body every physics step from then on.
+##
+## PHYSICS STATE, and why each piece:
+##   * FREEZE_MODE_KINEMATIC, not the STATIC that pin_at uses. The two differ precisely because this one MOVES: a
+##     kinematic frozen body is the engine's sanctioned "code drives this every frame" mode and derives a velocity
+##     from the transform delta, so a crate the guard brushes past gets shoved by the hilt. pin_at wants STATIC for
+##     the mirror-image reason — its blade never moves and is deliberately buried in a wall it must not push.
+##   * gravity + velocities zeroed, and the two thrown ARMS cleared: the flight is over, so nothing is left for
+##     _integrate_forces to nose toward or for a ThrowTrail to streak behind.
+##   * collision_mask -> 0. We detect nothing while riding a body; the layer is deliberately LEFT ALONE so the prop
+##     stays solid to PickupRay's aim ray, which is the whole "walk up and pull your knife back out" beat.
+##   * a MUTUAL collision exception with the host. Without it the victim's own capsule fights the blade buried in
+##     it — the NPC prefab masks layer 1, which is the layer the blade keeps — and every step depenetrates them
+##     apart. Registered in BOTH directions because Godot's exception list is per-body and it is the CharacterBody3D's
+##     own motion test that has to skip us; the player carry code (PickupRay._pick_up) takes the same belt-and-braces.
+##   * process_physics_priority raised, so our _physics_process runs AFTER the victim's. Godot ticks nodes in tree
+##     order by default, and a prop that happens to sit above the actor would read a stale part transform and leave
+##     the blade a frame behind — 10 cm at a sprint, which is most of the depth it is buried by, so the knife visibly
+##     floats outside a running body. Restored on release so the prop's authored ordering is never permanently changed.
+func stick_in_body(host: Node, part: Node3D, pose: Transform3D, dir: Vector3) -> void:
+	if _stuck_part != null or _pinned or _held or not is_inside_tree():
+		return
+	if not is_instance_valid(part) or not part.is_inside_tree():
+		return
+	_stuck_part = part
+	_stuck_host = host
+	_stuck_dir = dir.normalized() if dir.length_squared() > 0.000001 else Vector3.ZERO
+	_stuck_offset = PartPinnerScript.attach_offset(PartPinnerScript.rigid_anchor(part.global_transform), pose)
+	_stuck_prior_gravity = gravity_scale
+	_stuck_prior_mask = collision_mask
+	_stuck_prior_priority = process_physics_priority
+	process_physics_priority = STUCK_PHYSICS_PRIORITY
+	_facing_travel = false
+	_trailing = false
+	linear_velocity = Vector3.ZERO
+	angular_velocity = Vector3.ZERO
+	gravity_scale = 0.0
+	collision_mask = 0
+	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+	freeze = true
+	global_transform = pose
+	_add_stuck_exceptions()
+
+## Come out of the body: restore physics and let the prop fall. `pop` is a speed BACK OUT of the wound — the
+## reverse of the direction the throw drove it in — so on a death (GameSettings.effects.stuck_blade_drop_impulse)
+## the weapon visibly slips loose instead of appearing on the floor under the gore, and lands slightly toward the
+## player rather than inside the pile they now have to search. A pickup passes 0 and takes it cleanly.
+##
+## Two guards, both load-bearing and both inherited from unpin() for the same reasons:
+##   * not stuck — the death poll, the pickup and _exit_tree can all reach here for one blade, and the later ones
+##     must not stomp physics state the first already handed back.
+##   * _held — while carried, PickupRay OWNS this body's freeze / gravity / layer and restores its own snapshot on
+##     release; writing freeze here would drop a carried knife out of the player's hands mid-carry.
+func unstick(pop: float = 0.0) -> void:
+	if _stuck_part == null:
+		return
+	_release_stuck_exceptions()
+	_stuck_part = null
+	_stuck_host = null
+	var away := _stuck_dir
+	_stuck_dir = Vector3.ZERO
+	# ABOVE the _held bail on purpose: the carry code owns freeze / gravity / layer and restores its own snapshot of
+	# them, but it never touches tick ordering — so this one is ours to hand back on every exit, or a knife pulled out
+	# of a guard would keep the late slot for the rest of its life.
+	process_physics_priority = _stuck_prior_priority
+	if _held:
+		return
+	freeze = false
+	gravity_scale = _stuck_prior_gravity
+	collision_mask = _stuck_prior_mask
+	angular_velocity = Vector3.ZERO
+	linear_velocity = -away * maxf(pop, 0.0)  # back out of the wound, not further through it
+
+## Replay the stored pose onto the body for this physics step, or let go if there is no longer anything to ride.
+## Called from _physics_process, so the blade lands on the same frame the part it is bolted to does.
+##
+## The three release conditions are POLLED rather than signalled on purpose: the part can leave through doors we
+## do not own (freed outright, a level swap freeing the actor, an NPC pooled back out) and only one of them is a
+## call anyone would think to make — the same reasoning BodyPartGib uses to watch its wall.
+func _follow_stuck_part() -> void:
+	if _stuck_part == null:
+		return
+	# Plain `var`, not `:=` — the liveness read is a duck-typed call on a `Node`, so its result is Variant and
+	# inference off it is an analyzer error. has_method first: the host is typed loosely on purpose (stick_in_body
+	# takes a Node so a test stub or a non-Character victim can host a blade without a class edge).
+	var host_alive: bool = is_instance_valid(_stuck_host) and _stuck_host.has_method(&"is_alive") and _stuck_host.is_alive()
+	if not is_instance_valid(_stuck_part) or not _stuck_part.is_inside_tree() or not host_alive:
+		unstick(GameSettings.effects.stuck_blade_drop_impulse)
+		return
+	global_transform = PartPinnerScript.attached_pose(PartPinnerScript.rigid_anchor(_stuck_part.global_transform), _stuck_offset)
+
+func _add_stuck_exceptions() -> void:
+	var body := _stuck_host as PhysicsBody3D
+	if body == null:
+		return
+	add_collision_exception_with(body)
+	body.add_collision_exception_with(self)
+
+## Symmetrical to _add_stuck_exceptions, and it must run on EVERY exit — including the prop being freed or the
+## level unloading under it — because the host may outlive us: a POOLED NPC handed back to the pool with a stale
+## exception against a recycled prop RID is a collision that silently stops working several lives later.
+func _release_stuck_exceptions() -> void:
+	if not is_instance_valid(_stuck_host):
+		return
+	var body := _stuck_host as PhysicsBody3D
+	if body == null:
+		return
+	remove_collision_exception_with(body)
+	body.remove_collision_exception_with(self)
+
 ## Who to blame for this prop's impact damage right now: whoever just threw it (within the throw grace),
 ## else whoever is grappling / just released it (a tethered slam is a deliberate hit too), else no-one — a
 ## stray bump while at rest credits nobody, so it can't wrongly aggro an NPC at the player.
@@ -1061,14 +1333,21 @@ func _is_airborne() -> bool:
 	query.exclude = [get_rid()]
 	return space.intersect_ray(query).is_empty()
 
-## Burst of multicolour confetti flecks at our position — a self-freeing, code-built GPUParticles3D
-## (one-shot). Each fleck draws a random colour from a rainbow ramp (color_initial_ramp) and tumbles.
-func _spawn_confetti() -> void:
+## Builds and returns the fully configured confetti-burst emitter (node + rainbow-fleck material + mesh),
+## UN-parented and with emission untouched — the caller decides where it lives and when it fires. STATIC on
+## purpose, and keep it that way: PreloadManager._prewarm_gpu_particles renders one of these in its warm
+## viewport at boot, because this material's feature set (a color_INITIAL_ramp + turbulence) generates its
+## own ParticlesShaderRD variant, and a FIRST-TIME particle-pipeline compile mid-combat is both a stutter and a
+## known (rare) NVIDIA D3D12 first-compile crash class on this machine — the confetti trick-shot fires seconds
+## after a kill, the worst possible moment. A static can't quietly grow instance-state reads that would let the warmed
+## material drift from the spawned one. Any new code-generating FEATURE added here (emission shape, ramps,
+## curves, turbulence, collision) rides the same prewarm automatically; plain values are free to vary.
+## tests/test_preload_prewarm.gd pins that _spawn_confetti and the prewarm both route through this builder.
+static func build_confetti_burst(amount: int, lifetime: float, velocity_min: float,
+		velocity_max: float, scale_min: float, scale_max: float) -> GPUParticles3D:
 	var p := GPUParticles3D.new()
-	get_tree().root.add_child(p)
-	p.global_position = global_position
-	p.amount = confetti_amount
-	p.lifetime = confetti_lifetime
+	p.amount = amount
+	p.lifetime = lifetime
 	p.one_shot = true
 	p.explosiveness = 1.0
 	p.speed_scale = 1.3
@@ -1085,13 +1364,13 @@ func _spawn_confetti() -> void:
 	ppm.emission_sphere_radius = 0.12
 	ppm.direction = Vector3(0.0, 1.0, 0.0)
 	ppm.spread = 120.0
-	ppm.initial_velocity_min = confetti_velocity_min
-	ppm.initial_velocity_max = confetti_velocity_max
+	ppm.initial_velocity_min = velocity_min
+	ppm.initial_velocity_max = velocity_max
 	ppm.gravity = Vector3(0.0, -9.0, 0.0)
 	ppm.angular_velocity_min = -540.0
 	ppm.angular_velocity_max = 540.0
-	ppm.scale_min = confetti_scale_min
-	ppm.scale_max = confetti_scale_max
+	ppm.scale_min = scale_min
+	ppm.scale_max = scale_max
 	ppm.color_initial_ramp = grad_tex
 	ppm.turbulence_enabled = true
 	ppm.turbulence_noise_strength = 2.2
@@ -1105,6 +1384,17 @@ func _spawn_confetti() -> void:
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	flake.material = mat
 	p.draw_pass_1 = flake
+	return p
+
+## Burst of multicolour confetti flecks at our position — a self-freeing, code-built GPUParticles3D
+## (one-shot). Each fleck draws a random colour from a rainbow ramp (color_initial_ramp) and tumbles.
+## Construction lives in the shared static above (so the boot prewarm compiles the identical pipeline);
+## this wrapper only parents, positions and fires it.
+func _spawn_confetti() -> void:
+	var p := build_confetti_burst(confetti_amount, confetti_lifetime, confetti_velocity_min,
+			confetti_velocity_max, confetti_scale_min, confetti_scale_max)
+	get_tree().root.add_child(p)
+	p.global_position = global_position
 	p.emitting = true
 	p.finished.connect(p.queue_free)
 

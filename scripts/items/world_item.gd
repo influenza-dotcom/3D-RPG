@@ -136,6 +136,10 @@ static func _make_throwable(item: Item, amount: int, visual: Node, body_size: Ve
 	#   • pins_body_part ← weapon.thrown_pins_body_part — a LETHAL thrown hit staples the struck body part to the wall
 	#     behind, blade embedded (GoreSpawner._resolve_pin). Rides on the thrown_weapon path above for its located
 	#     contact point, so a weapon that sets it without thrown_uses_weapon_damage simply never pins.
+	#   • sticks_in_body ← weapon.thrown_sticks_in_body — a SURVIVED thrown hit leaves the drop embedded in the body
+	#     part it struck, riding that part (Throwable.stick_in_body). The far side of the same kill line as
+	#     pins_body_part above, and it rides the same thrown_weapon path for its located contact point, so a weapon
+	#     that sets it without thrown_uses_weapon_damage simply never sticks.
 	#   • throw_impulse_mult ← weapon.thrown_impulse_mult — how fast a real throw launches it (the knife is HURLED,
 	#     a gun is tossed). See the continuous_cd note below.
 	#   • throw_sound ← weapon.thrown_sound — a signature throw sound, played instead of the drop's release sound.
@@ -168,6 +172,7 @@ static func _make_throwable(item: Item, amount: int, visual: Node, body_size: Ve
 		t.impact_damage_mult = item.weapon.thrown_impact_damage_mult
 		t.thrown_weapon = item.weapon if item.weapon.thrown_uses_weapon_damage else null
 		t.pins_body_part = item.weapon.thrown_pins_body_part
+		t.sticks_in_body = item.weapon.thrown_sticks_in_body
 		t.throw_impulse_mult = item.weapon.thrown_impulse_mult
 		t.throw_sound = item.weapon.thrown_sound
 		t.face_travel_when_thrown = item.weapon.thrown_faces_travel

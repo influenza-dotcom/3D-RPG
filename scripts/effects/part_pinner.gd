@@ -1,15 +1,21 @@
 class_name PartPinner
 extends RefCounted
 
-## PURE GEOMETRY + POLICY for the thrown-weapon PIN kill: a knife thrown hard enough to kill carries the body
-## part it struck off the corpse and staples it to the wall behind, blade still through it.
+## PURE GEOMETRY + POLICY for WHERE A THROWN BLADE ENDS UP once it goes into a body. Two effects share it, split
+## at the kill line:
+##   * the PIN KILL -- a knife thrown hard enough to kill carries the body part it struck off the corpse and
+##     staples it to the wall behind, blade still through it (seat_origin / blade_origin / reached /
+##     surface_accepts).
+##   * the STUCK BLADE -- a knife the victim SURVIVES is left embedded in the part it hit and rides it as that
+##     part moves (rigid_anchor / attach_offset / attached_pose). Same nearest_key choice of limb.
 ##
 ## Nothing here touches a node, a tree or the physics server -- every function is a static over plain values, so
 ## GUT can pin the whole decision layer off-tree (tests/test_part_pinner.gd) exactly the way
 ## BodyPartGib.mount_placement and BodyPartGibs.wants_part are pinned. The in-tree halves live where they belong:
 ##   * GoreSpawner._spawn_pinned_part  -- reads the intent, raycasts for the surface, hands the flight over
 ##   * BodyPartGib.begin_pin_flight    -- flies the limb to the wall and freezes it there
-##   * Throwable.pin_at / unpin        -- parks and releases the blade
+##   * Throwable.pin_at / unpin        -- parks and releases the blade (wall)
+##   * Throwable.stick_in_body / unstick / _follow_stuck_part -- parks and releases the blade (body)
 ##
 ## WHY NEAREST-CENTRE AND NOT Character.body_part_at: that classifier splits zones against the CHARACTER ROOT's
 ## local frame with fixed thresholds (head_local_y / leg_local_y / arm_local_x), which is right for damage
@@ -75,6 +81,31 @@ static func reached(pos: Vector3, seat: Vector3, dir: Vector3) -> bool:
 	if dir.length_squared() < 0.000001:
 		return true
 	return (pos - seat).dot(dir.normalized()) >= 0.0
+
+## The RIGID frame of a live body part: its world position, with the basis stripped back to pure rotation. This
+## is the anchor a stuck blade is bolted to, and stripping the scale is the whole point of it existing.
+##
+## A character's parts carry SCALE — the appearance catalog sizes a head and the customiser scales limbs
+## (BodyModelSwap writes `_head.scale`), and a right limb is a MIRROR of the left, so its basis has a negative
+## determinant. Bolting the blade to the raw transform would multiply that scale into the knife every frame: a
+## knife in a 1.3x head would be a 1.3x knife, and one in a mirrored arm would be a mirrored knife. Orthonormalising
+## keeps the rotation (including the mirror, which then cancels exactly through attach_offset/attached_pose) and
+## discards the size. A degenerate basis falls back to no rotation at all, which parks the blade axis-aligned at
+## the part rather than producing a NaN pose.
+static func rigid_anchor(part_xf: Transform3D) -> Transform3D:
+	if absf(part_xf.basis.determinant()) < 0.000001:
+		return Transform3D(Basis.IDENTITY, part_xf.origin)
+	return Transform3D(part_xf.basis.orthonormalized(), part_xf.origin)
+
+## The blade's world pose expressed IN the anchor's frame — computed once, at the strike, and then held for as
+## long as the blade is in the body. Inverse of attached_pose.
+static func attach_offset(anchor: Transform3D, world_pose: Transform3D) -> Transform3D:
+	return anchor.affine_inverse() * world_pose
+
+## Where the blade sits NOW, given the anchor's current frame and the offset attach_offset measured. Written onto
+## the body every physics frame, which is what makes the knife ride a walking, turning, head-looking actor.
+static func attached_pose(anchor: Transform3D, offset: Transform3D) -> Transform3D:
+	return anchor * offset
 
 ## Is this surface worth stapling to? The probe already fires ALONG the throw, so anything it hits was in the
 ## knife's path; the only thing left to reject is a surface the knife merely GRAZED -- a floor caught by a
