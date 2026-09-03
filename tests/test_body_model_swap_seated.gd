@@ -125,7 +125,7 @@ func test_seated_arms_hold_a_drawn_gun_instead_of_resting_in_the_lap() -> void:
 	# The armed half of "sitting doesn't mesh with hostile NPCs": hostiles are the NPCs that keep a gun OUT
 	# (WeaponStance's always_out), and the seated pose used to ignore it entirely — hands folded into the lap
 	# while the rifle hovered beside them. The preferred seated pitch is the STANDING hold angle when the gun is
-	# up, because the hand anchor rides the same seated drop (NPC._sync_muzzle_to_posture).
+	# up, because the weapon rides these very hands (weapon_grip_position -> NPC._sync_weapon_anchor).
 	var host := _GunHost.new()
 	var bms = _shipped_seated_swap()
 	host.add_child(bms)
@@ -180,7 +180,7 @@ func test_lower_arms_puts_a_seated_armed_speaker_hands_in_its_lap() -> void:
 	host.free()
 
 func test_posture_offset_public_seam_matches_the_applied_offset() -> void:
-	# The seam host-owned nodes glue themselves to the visible body with (NPC._sync_muzzle_to_posture keeps the
+	# The seam host-owned nodes glue themselves to the visible body with (NPC._sync_weapon_anchor keeps the
 	# held gun on it). It must report EXACTLY what the parts are placed with, or the gun drifts off the hands.
 	var npc = load(NPC_PATH).new()
 	var bms = _shipped_seated_swap()

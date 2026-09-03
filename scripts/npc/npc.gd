@@ -15,8 +15,9 @@ extends Character
 ## (NpcVoice.emit) / bark UI / targeting / locomotion (+ the Locomotor nav brain) / scavenge / combat dispatch /
 ## mortality / senses / home leash / cripple callout / distraction+unaware reactions (NpcDistraction).
 ## REMAINING ON THE ROOT BY CONTRACT (deliberate — do NOT re-extract): aim computation (_aim_point /
-## get_aim_origin / get_aim_direction / _lead_aim_point — DEFER verdict, see ARCHITECTURE_REVIEW.md "NPC
-## Gravity"; the lead solve's GEOMETRY lives in NpcCombat.lead_aim_point, only the wiring is here), the charge-sting
+## get_aim_origin / get_aim_direction / _lead_aim_point / _tick_aim_tracking — DEFER verdict, see
+## ARCHITECTURE_REVIEW.md "NPC Gravity"; the lead solve's GEOMETRY and the aim-inertia slew live in
+## NpcCombat.lead_aim_point / NpcCombat.slew_toward, only the wiring is here), the charge-sting
 ## scheduling (_on_locked_on / _on_aim / _last_aim_msec — bare-instance test-poked), the bark DATA + host-owned
 ## latches + *_LINES consts (test anchors), and the _physics_process branch ORDER (the @risk lines above).
 ## New behaviour goes on a component / Resource with a thin facade here — never a new branch on the root.
@@ -188,9 +189,39 @@ var _pre_panic_threat_response: int = -1
 ## The weapon this NPC fires — any WeaponData .tres, exactly like the player's. NULL => CIVILIAN
 ## (no weapon, laser, or fire path is built; the NPC still senses, wanders, flees, and faces).
 @export var weapon_data: WeaponData = null
-## Local offset of the held gun's grip from the NPC origin — where the weapon view-model hangs (and
+## FALLBACK local offset of the held gun's grip from the NPC origin — where the weapon view-model hangs (and
 ## the shot/laser origin when the model has no barrel marker of its own). This model faces +Z.
+## ⭐Only consulted when `weapon_in_hands` is OFF or this NPC has no swapped ARMS to hold the gun with: with
+## hands available the grip comes from THEM (see weapon_in_hands), and this authored guess is ignored rather
+## than added on top — it was always a stand-in for "roughly where the hands are", so composing the two would
+## just push the gun forward of the fists on the scenes that authored one (NPC.tscn / medicine_person.tscn
+## both author (0, 0, 0.45)).
 @export var muzzle_offset: Vector3 = Vector3(0.0, 0.0, 0.0)
+## Hang the held weapon off the NPC's ANIMATED HANDS instead of the fixed `muzzle_offset` anchor. The grip
+## point comes from the BodyModelSwap arm pair (BodyModelSwap.weapon_grip_position), re-read every physics
+## frame, so the gun rides the hold pose, the aim swing, the walk swing and the seated drop — the weapon is
+## carried BY the arms rather than floating beside them. OFF (or no swapped arms, e.g. a bare mob) falls back
+## to `muzzle_offset` exactly as before.
+##
+## Everything downstream follows for free, because they all read this same anchor's descendants: the shot and
+## laser origin (get_aim_origin), the tracer, `attack.muzzle` / `projectile_spawner.muzzle`, and the muzzle FX.
+@export var weapon_in_hands: bool = true
+## Swing the held weapon's BARREL up/down at the target, instead of leaving the model level while only the
+## bullets pitch (`_face_point` turns the body in YAW only — the pitch has nowhere else to live). The anchor
+## is rotated about the GRIP, so the gun pivots in the hands; BodyModelSwap.arm_aim_follow swings the arms by
+## the same angle, so the two stay together.
+##
+## HONEST, not omniscient: the pitch is held at zero unless the gun is actually drawn AND this NPC has genuinely
+## SENSED its foe (has_sensed_foe) — `_target` is acquired by pure PROXIMITY with no line-of-sight test, so
+## without that gate every hostile on the map would visibly track a crouched player through a wall. Same rule
+## the head-look follows (head_look_point).
+@export var weapon_aim_pitch: bool = true
+## Clamp (degrees, each way) on that barrel pitch — a foe directly overhead or straight down would otherwise
+## fold the gun back through the NPC's own chest. Shots are NOT clamped: this is presentation only.
+@export var weapon_aim_pitch_limit: float = 75.0
+## Exponential rate the barrel pitch eases toward the target angle (higher = snappier). Kept near the body's
+## own `turn_speed` so the gun rises about as fast as the NPC turns, and the two read as one motion.
+@export var weapon_aim_pitch_speed: float = 9.0
 ## Corrective local rotation (degrees) for the held weapon model. View-models point their barrel down
 ## +X (e.g. ak_472), while this NPC faces +Z, so the default -90 deg yaw maps the gun's +X onto the
 ## NPC's forward. Tune per scene if a particular weapon needs a different grip pose.
@@ -410,7 +441,23 @@ var _last_aim_msec: int = 0
 var _aim_sfx_delay: float = -1.0  # >= 0 = a charge sting counting down to play; < 0 = idle (none pending)
 var _aim_targeting_player: bool = false  # captured at lock-on: was the charge aimed at the PLAYER? (drives the sting volume)
 var _weapon: Weapon
-var _muzzle: Marker3D        # hand/grip anchor the gun model hangs off (at muzzle_offset + the body's posture offset)
+var _muzzle: Marker3D        # hand/grip anchor the gun model hangs off (at the swapped hands' grip, else muzzle_offset + the body's posture offset)
+## Smoothed barrel ELEVATION in radians, + = aiming up. Written once per physics frame by _sync_weapon_anchor
+## (above the AI-LOD gate, so it eases on the real delta and never in slow motion), applied as the hand anchor's
+## local pitch, and published to the arm rig via aim_pitch_degrees(). Per-LIFE state: reset_for_reuse zeroes it,
+## or a pooled body comes back holding the previous life's aim angle on frame one.
+var _aim_pitch: float = 0.0
+## AIM INERTIA (2026-08-31) — the direction this NPC's shots actually fly, as tracked STATE rather than a fresh
+## solve. Written once per physics frame by _tick_aim_tracking (above the AI-LOD gate, on the real delta), which
+## turns it toward the ideal led aim point at a capped angular rate, and read by get_aim_direction. Vector3.ZERO
+## means "not tracked yet" — an off-tree / never-ticked NPC (unit tests, a bare instance) then falls back to the
+## instantaneous solve, which is exactly the pre-inertia behaviour. Per-LIFE state: reset_for_reuse zeroes it, or
+## a pooled body comes back aimed wherever it died pointing and skips the swing onto its new target.
+var _aim_dir: Vector3 = Vector3.ZERO
+## What this NPC BELIEVES its target's velocity to be — an eased read of the real thing, fed to the intercept
+## solve in place of the instantaneous value so starting / stopping / reversing beats the prediction for a beat.
+## Decays toward zero while the target is out of sight. Per-LIFE state, zeroed by reset_for_reuse with _aim_dir.
+var _aim_target_vel: Vector3 = Vector3.ZERO
 var _body_swap: Node         # cached BodyModelSwap child (see _find_body_swap); revalidated, so a rebuild re-resolves
 var _weapon_mesh: Node3D     # the equipped weapon's instantiated view-model, held at the hand
 var _gun_muzzle: Marker3D    # the held gun's own "Muzzle" barrel marker; null => shots/laser fall back to _muzzle
@@ -952,6 +999,7 @@ func _build_components() -> void:
 		hr.return_on_player_death = GameSettings.npc_ai.home_return_on_player_death
 		hr.death_return_delay = GameSettings.npc_ai.home_return_death_delay
 		hr.heal_on_player_death = GameSettings.npc_ai.home_return_heal_on_player_death
+		hr.restore_ammo_on_player_death = GameSettings.npc_ai.home_return_restore_ammo_on_player_death
 		hr.return_when_off_screen = GameSettings.npc_ai.home_return_off_screen
 		hr.off_screen_delay = GameSettings.npc_ai.home_return_off_screen_delay
 		hr.off_screen_requires_calm = GameSettings.npc_ai.home_return_requires_calm
@@ -1553,12 +1601,17 @@ func die() -> void:
 	else:
 		queue_free()
 
-## Pooling: before this body is parked for reuse, tell every other NPC to drop any reference it holds to us. A freed
-## (non-pooled) body's references lapse naturally — the next spawn is a NEW pointer that fails the stale match; a
+## Pooling: before this body is parked for reuse, tell every other NPC to drop any reference it holds to us. A
 ## POOLED body is the SAME instance reborn, so a peer's grudge/target/last-attacker would resurrect against a fresh
 ## life that never provoked it (phantom feud / unprovoked aggro). Mirrors the liveness contract that already drops a
 ## dead PLAYER as a target — _npc_grudges, uniquely, isn't liveness-gated, so it needs the explicit sweep. O(N) over
 ## the npc group per pooled death; fine for authored encounter sizes.
+##
+## ⚠ A freed (non-pooled) body is NOT swept, and its peers' refs do NOT become null — Godot leaves a DANGLING
+## pointer in a typed Object field. That is safe ONLY because every reader is liveness-gated, and the gate must be
+## `is_instance_valid()` FIRST: `is`/`as`/a property read on a previously freed instance is a HARD CRASH, not a
+## quiet false. (That exact ordering slip in NpcHomeReturn._engaged crashed the game when a dead `_target`
+## outlived its holder.) Never read a peer ref without validating it first.
 func _notify_peers_forget_me() -> void:
 	if not is_inside_tree():
 		return
@@ -1599,6 +1652,24 @@ func send_home(force: bool = false) -> bool:
 	if _home_return == null:
 		return false
 	return bool(_home_return.call(&"return_home", force))
+
+## Hand this NPC back the ammo it BURNED — full magazine, plus every spare clip its reloads spent — the ammo half
+## of the player-death encounter reset (NpcHomeReturn.restore_spent_ammo drives it on the cinematic's black frame,
+## next to the full heal). Facade onto the weapon hub's Ammo ledger (scripts/combat/ammo.gd), which is what makes
+## this exact: it books each clip AS IT IS SPENT, so a restore can only ever return rounds this NPC actually fired.
+##
+## WHY IT IS NEEDED AT ALL: the default CHECKPOINT_RESPAWN death mode is an in-place revive that leaves the world
+## untouched, so without this a guard's spent ammo persists for the rest of the session. Die at the same fight
+## three times and the fourth attempt is against an enemy who has run dry and dropped to fists (_can_fight_with_gun) —
+## the same "the fight gets easier every time you lose it" drift the full heal exists to stop.
+##
+## ⭐IT NEVER TAKES AMMO AWAY, and never refills from the authored loadout. Ammo the player PICKPOCKETED off this
+## NPC to disarm it was never fired, so it is not in the ledger and stays stolen. Returns false for a civilian /
+## disarmed NPC (no weapon hub) and for anyone who has spent nothing.
+func restore_spent_ammo() -> bool:
+	if _weapon == null or _weapon.ammo == null:
+		return false
+	return bool(_weapon.ammo.restore_spent_ammo())
 
 ## NPC-pooling reuse reset (NpcPool): return this instance to its pristine post-_ready state so it can be re-spawned
 ## as a fresh combatant, WITHOUT rebuilding any child node or re-running _apply_stats / _build_* (that would add
@@ -1696,6 +1767,19 @@ func reset_for_reuse() -> void:
 	# zeroing here, post-equip, keeps a reused dry ambusher actually dry.
 	if _weapon != null and _weapon.ammo != null and starts_unloaded:
 		_weapon.ammo.current_ammo = 0
+	# Held-weapon AIM PITCH is per-life cosmetic state too: zero the eased angle AND the anchor rotation it wrote,
+	# so a reused body doesn't spawn with its barrel still tilted at last life's target. (The anchor's POSITION
+	# needs no reset — _sync_weapon_anchor rewrites it every physics frame; its rotation is only ever written
+	# here and there, so this is the one place that can leave it stale.)
+	_aim_pitch = 0.0
+	if is_instance_valid(_muzzle):
+		_muzzle.rotation = Vector3.ZERO
+	# The TRACKED aim is per-life state too (aim inertia): a reused body must swing onto its new target from
+	# its own facing, not come back already pointed wherever the previous life died aiming — which would hand
+	# a pooled respawn the free instant lock the whole feature exists to remove. Its velocity BELIEF goes with
+	# it, or the first shot of the new life is led by the last life's target's motion.
+	_aim_dir = Vector3.ZERO
+	_aim_target_vel = Vector3.ZERO
 	# Stair step-smoothing is per-life cosmetic state: clear the eased offset and restore the model's rest Y so a pooled
 	# NPC never spawns with a leftover visual dip from a prior life's staircase.
 	_step_smooth_y = 0.0
@@ -2473,9 +2557,15 @@ func _on_avoidance_velocity(safe_velocity: Vector3) -> void:
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return  # @tool: the AI tick never runs in the editor
-	# Glue the held gun to the visible body's posture BEFORE any branch returns — the anchor is presentation, not
-	# a decision, so a cutscene-driven / talking / fleeing NPC needs it as much as a fighting one.
-	_sync_muzzle_to_posture()
+	# Glue the held gun to the HANDS (and swing its barrel to the target) BEFORE any branch returns — the anchor
+	# is presentation, not a decision, so a cutscene-driven / talking / fleeing NPC needs it as much as a
+	# fighting one, and above the AI-LOD gate it eases on the real delta rather than the banked think delta.
+	_sync_weapon_anchor(delta)
+	# Swing the AIM onto the target — the shot direction is tracked state with a capped turn rate, not a fresh
+	# solve at trigger time (see _tick_aim_tracking). Sits HERE, above the AI-LOD gate, for the same reason the
+	# anchor does: it must ease on the REAL delta. Below the gate a throttled NPC would slew on the banked think
+	# delta and, worse, a shot taken between thinks would fire down a stale direction.
+	_tick_aim_tracking(delta)
 	# Cutscene control overrides ALL AI: a CutsceneActor has the wheel, so the brain (perception / GOAP /
 	# targeting) is suppressed and only the scripted walk/face + gravity run. CutscenePlayer._finish always
 	# releases control, so the NPC can never get stuck frozen.
@@ -3197,19 +3287,40 @@ func _engage_range_for(w: WeaponData) -> float:
 ## Seconds between this NPC's shots: the equipped WEAPON's own attack cadence (attack_speed) scaled by
 ## rate_of_fire_factor, then held to the species-wide RANGED breathing floor
 ## (GameSettings.npc_ai.min_shot_interval) so a fast gun cannot telegraph continuously. The weapon is the
-## single source of truth for the rate (this replaced the per-NPC fire_cooldown). Floored so the charge math
-## never divides by zero; falls back to a 1s base pre-equip.
+## single source of truth for the RANGED rate (this replaced the per-NPC fire_cooldown). Floored so the charge
+## math never divides by zero; falls back to a 1s base pre-equip.
+##
+## ⭐ For a MELEE weapon the weapon is no longer the WHOLE source: this body's AGILITY compresses a swing
+## (CharacterStats.melee_time_mult) at Attack.effective_attack_speed, and the AI clock has to be scaled by the
+## SAME number or the two disagree. They must not, in either direction. Ask faster than Attack can swing and
+## Attack silently REFUSES the shot (its `attack.is_stopped()` gate, which from_ai does not bypass) while
+## NpcCombat._fire_round re-arms the timer anyway — a sluggish body would drop every second swing and land at
+## HALF the rate its own stat sheet asked for. Ask slower and a quick body simply never gets its stat back.
+## Scaling both sides by one factor preserves the authored relationship exactly, so a baseline sheet
+## (multiplier 1.0) is byte-identical to the pre-stat behaviour.
 func _shot_interval() -> float:
 	# Unarmed (disarmed / dry): pace to the FISTS cadence so the close-range wind-up applies to
 	# a punch instead of a stale or absent gun. NOT floored — a punch carries no beep or aim radial, so
 	# there is no telegraph rhythm to give room to (and the fists cadence is source-pinned by tests).
+	# NOTE this branch never touches Attack at all — NpcCombat.act_unarmed lands the hit itself — so the melee
+	# scale is the ONLY thing that makes an agile body punch quicker.
 	if not _can_fight_with_gun():
-		return maxf(0.05, FISTS.attack_speed * rate_of_fire_factor)
+		return maxf(0.05, FISTS.attack_speed * _melee_time_scale(FISTS) * rate_of_fire_factor)
 	var w: WeaponData = _weapon.equipped_weapon if _weapon else null
-	return shot_interval_for(w, rate_of_fire_factor, GameSettings.npc_ai.min_shot_interval)
+	return shot_interval_for(w, rate_of_fire_factor, GameSettings.npc_ai.min_shot_interval, _melee_time_scale(w))
+
+## This body's AGILITY factor for `w`'s melee clock, already held to the global minimum cadence — the SAME
+## Attack.melee_time_scale_for the wielded Attack component uses, so the AI's clock and the weapon's Timer can
+## never drift apart. 1.0 (a no-op) for a ranged weapon, a null weapon, or a baseline sheet.
+func _melee_time_scale(w: WeaponData) -> float:
+	if w == null or not w.is_melee:
+		return 1.0
+	return Attack.melee_time_scale_for(w, stats_or_default().melee_time_mult(status_stat_modifier(&"agility")),
+			GameSettings.weapon_general.min_melee_attack_speed)
 
 ## Pure + static (the NpcCombat.attempt_fire_range idiom) so tests can pin the cadence against the shipped
-## WeaponData .tres with no live NPC: the weapon's authored attack_speed scaled by the per-NPC `rate` factor,
+## WeaponData .tres with no live NPC: the weapon's authored attack_speed scaled by the wielder's `melee_scale`
+## (1.0 = the default and every ranged case) and then by the per-NPC `rate` factor,
 ## then held to the RANGED breathing floor `min_interval` (GameSettings.npc_ai.min_shot_interval — see its
 ## doc for WHY: the charge sting, laser/aim-radial ramp and incoming beep are all sized by this cadence, so a
 ## sub-beep_lead_time gun telegraphs nonstop and the warning stops meaning anything).
@@ -3219,9 +3330,11 @@ func _shot_interval() -> float:
 ## hard ceiling on rate of fire that a profile's rate_of_fire_factor cannot author its way under. A null /
 ## unequipped weapon keeps the old 1 s base (and is never floored — it has no telegraphs either). Always at
 ## least 0.05 s so the charge math that divides by this never divides by zero; a negative floor is ignored.
-static func shot_interval_for(w: WeaponData, rate: float, min_interval: float) -> float:
+## `melee_scale` is the wielder's agility factor from Attack.melee_time_scale_for — already floor-held, and
+## already 1.0 for anything that is not a melee weapon, so it is applied unconditionally here.
+static func shot_interval_for(w: WeaponData, rate: float, min_interval: float, melee_scale: float = 1.0) -> float:
 	var base: float = w.attack_speed if w != null else 1.0
-	var interval: float = maxf(0.05, base * rate)
+	var interval: float = maxf(0.05, base * melee_scale * rate)
 	if _weapon_uses_ranged_attack_telegraphs(w):
 		interval = maxf(interval, maxf(0.0, min_interval))
 	return interval
@@ -3290,13 +3403,15 @@ func _build_weapon_mesh() -> void:
 	# 1.585, a Z-tilt, and a forward offset for the player's gun camera — would keep that baked scale + offset
 	# here (setting rotation_degrees leaves scale/position untouched), so it floats off-hand and oversized.
 	# When the weapon opts into an NPC hold override, place the model FRESH from its authored hand pose,
-	# discarding the baked FP root transform entirely — the authored npc_hold_scale IS its final held size
-	# (a designer who wants an override weapon bigger tunes that field; no silent boost on hand-tuned poses).
-	# Guns (no override) keep the rotation-only mount and get the weapon's npc_held_display_scale readability
-	# boost: their FP-tuned world size is squint-small at NPC viewing distance — MULTIPLIED onto the surviving
-	# scale, never overwritten (the pistol's baked 0.001 root is load-bearing). The boost also scales the
-	# child "Muzzle" marker outward to the enlarged barrel tip, which is correct for every consumer that reads
-	# its POSITION — the shot, laser and tracer origins, and attack.muzzle / projectile_spawner.muzzle below.
+	# discarding the baked FP root transform entirely. Guns (no override) keep the rotation-only mount.
+	# EITHER WAY the weapon's npc_held_display_scale readability boost is MULTIPLIED onto whatever scale
+	# survives — the baked FP root for a gun (whose 0.001 on the pistol is load-bearing, hence `*=` and never
+	# an assignment), the authored npc_hold_scale for an override weapon. One field, one meaning: "how big
+	# this weapon reads in an NPC's hand", tuned against a character rig with a 0.68 m head and 0.75 m arms.
+	# npc_hold_trim then nudges the result back into the fist, because the boost scales the model's baked
+	# forward offset along with its size. The boost also scales the child "Muzzle" marker outward to the
+	# enlarged barrel tip, which is correct for every consumer that reads its POSITION — the shot, laser and
+	# tracer origins, and attack.muzzle / projectile_spawner.muzzle below.
 	# ⭐⭐BUT "position only" IS NOT TRUE OF EVERYTHING, and believing it was is what broke the muzzle FX for
 	# two years: _build_muzzle_fx PARENTS three emitters to that same marker, so they inherit its full
 	# transform — SCALE included. Anything you hang off this marker must cancel that scale itself; see
@@ -3304,10 +3419,19 @@ func _build_weapon_mesh() -> void:
 	if wd != null and wd.npc_hold_override:
 		_weapon_mesh.position = wd.npc_hold_position
 		_weapon_mesh.rotation_degrees = wd.npc_hold_rotation
-		_weapon_mesh.scale = Vector3.ONE * wd.npc_hold_scale
+		_weapon_mesh.scale = Vector3.ONE * wd.npc_hold_scale * wd.npc_held_display_scale
 	else:
 		_weapon_mesh.rotation_degrees = weapon_mesh_rotation
 		_weapon_mesh.scale *= wd.npc_held_display_scale
+	_weapon_mesh.position += wd.npc_hold_trim  # the fist trim, in the hand anchor's frame (+Z = where the barrel points)
+	# ⭐AND MAKE IT A WORLD OBJECT. Everything above mounts a FIRST-PERSON rig, and an FP rig is authored to draw
+	# on the view-model layer with depth testing off — that is how the PLAYER's gun draws over the world from
+	# inside its own SubViewport. Hung on an NPC as-is, the same mesh is picked up by that same view-model pass
+	# and composited over the frame with NO depth relationship to the level: the gun renders THROUGH WALLS.
+	# (ak_472.tscn authors `layers = 4` = ViewModelCamera.VIEW_MODEL_LAYER on its receiver mesh, so every SMG
+	# raider in the level was a floating rifle visible through cover.) Must run BEFORE _build_muzzle_fx, whose
+	# emitters are children of this mesh and keep their own authored layers.
+	_make_held_model_world_renderable(_weapon_mesh)
 	# Resolve the gun's own barrel marker (case-insensitive, like GunMesh). When present, shots,
 	# tracers, and the laser all originate from the barrel; otherwise they fall back to _muzzle.
 	_gun_muzzle = _find_muzzle_marker(_weapon_mesh) as Marker3D
@@ -3392,6 +3516,43 @@ func _unscale_muzzle_fx(fx: Node3D, anchor: Node3D) -> void:
 	# scale never changes afterwards, so this stays correct as the gun swings around with the NPC.
 	fx.scale = Vector3(1.0 / s.x, 1.0 / s.y, 1.0 / s.z)
 
+## ⭐MAKE AN INSTANCED FIRST-PERSON VIEW MODEL RENDER LIKE A NORMAL WORLD OBJECT — move every visible mesh onto
+## the world render layer (1) and turn `no_depth_test` off so it depth-tests level geometry.
+##
+## WHY an NPC needs this at all: `view_model` scenes are authored for the PLAYER's rig, which draws them from a
+## dedicated camera inside its own SubViewport (ViewModelCamera.VIEW_MODEL_LAYER = 4, stripped from the main
+## camera's cull_mask) and composites the result over the finished frame. That is exactly what makes your own
+## gun never clip into a wall — and exactly what makes an NPC's copy of the same mesh draw THROUGH one, because
+## the composite has no depth relationship to the level. It went unnoticed while the gun sat small and buried in
+## the torso; putting the weapon out in the hands made every SMG raider a rifle floating through cover.
+##
+## The one exception is InkOutline's tint DUPLICATE (meta `npc_tint_dup`): it must keep its ACTOR_TINT_LAYER bit
+## and nothing else, or the main camera draws ink_tint.gdshader's raw R/G log-depth bytes as moving yellow/green
+## stripe bands over the weapon. A duplicate has no children, so returning skips nothing else.
+##
+## Copied (not imported) from `WorldItem._make_world_renderable`, which does the same job for the DROPPED copy of
+## a weapon — same reason `_find_muzzle_marker` below is a copy: npc.gd deliberately avoids pulling the
+## view-model / items stack into its load-time dependencies. **Keep the two in step**; if a third consumer ever
+## needs it, promote it to a shared static rather than adding another copy.
+static func _make_held_model_world_renderable(node: Node) -> void:
+	if node is MeshInstance3D:
+		var mi := node as MeshInstance3D
+		if mi.has_meta(&"npc_tint_dup"):
+			return
+		mi.layers = 1
+		if mi.mesh != null:
+			for i in mi.mesh.get_surface_count():
+				var mat := mi.get_active_material(i)
+				# DUPLICATE before clearing: these materials are shared with the player's own view model (and
+				# every other instance of this weapon), so mutating in place would strip the no-depth draw off
+				# the gun in your hands too.
+				if mat is BaseMaterial3D and (mat as BaseMaterial3D).no_depth_test:
+					var m := (mat as BaseMaterial3D).duplicate() as BaseMaterial3D
+					m.no_depth_test = false
+					mi.set_surface_override_material(i, m)
+	for child in node.get_children():
+		_make_held_model_world_renderable(child)
+
 ## Find a marker named "Muzzle" anywhere under a node, case-insensitively. Copied (not imported) from
 ## GunMesh._find_muzzle_marker to keep the NPC self-contained — npc.gd deliberately avoids pulling in
 ## the view-model/GunMesh stack at load time (see the lazy weapon.tscn load() rationale above).
@@ -3453,8 +3614,9 @@ func prompt_talk(player: Node3D, on_ready: Callable) -> void:
 		_talk.prompt_talk(player, on_ready)
 
 ## Feed the player's aim indicator our position + how ready we are to fire (0 = just noticing you,
-## 1 = locked / about to shoot), so a white radial points at us and ramps opaque.
-func _report_aim(charge: float, clear_shot: bool = true) -> void:
+## 1 = locked / about to shoot), so a white radial points at us and ramps opaque. (`aim_charge`, not
+## `charge` — the base Character.charge() is the WALLET one.)
+func _report_aim(aim_charge: float, clear_shot: bool = true) -> void:
 	if is_instance_valid(_target) and _target.has_method(&"indicate_aimed_from"):
 		var dmg := _attack_damage()
 		# Blink the radial in the final pre-shot window. Clamp the lead BELOW the shot cadence so a fast weapon whose
@@ -3469,7 +3631,7 @@ func _report_aim(charge: float, clear_shot: bool = true) -> void:
 		# Report from our actual HEAD, not the body origin at the feet — so the sniper glint/flare the player
 		# sees blooms at the NPC's head (the scope/eyes) instead of down at the ground. _head_position()
 		# prefers the rigged "Head" bone, then the capsule top, then an eye_height offset (see its doc).
-		_target.indicate_aimed_from(self, _head_position(), charge, dmg, warning, clear_shot)
+		_target.indicate_aimed_from(self, _head_position(), aim_charge, dmg, warning, clear_shot)
 
 ## World position of this NPC's HEAD, for the sniper-glint origin (Feature #8). Resolves, in order:
 ##   1. the rigged "Head" bone on the mesh's Skeleton3D (Man.glb rigs one) — its live global pose, so
@@ -3542,7 +3704,7 @@ func _apply_overlay_to_meshes(overlay: Material) -> void:
 		_outline.apply_part_overlays(overlay)
 
 ## The BodyModelSwap child (the drop-in character swap), or null -- duck-typed so npc.gd doesn't hard-depend on it.
-## CACHED (revalidated, so a freed / rebuilt swap re-resolves): _sync_muzzle_to_posture calls this every physics
+## CACHED (revalidated, so a freed / rebuilt swap re-resolves): _sync_weapon_anchor calls this every physics
 ## frame for a combatant, and a linear scan of ~20 children per NPC per tick is not worth paying twice a frame.
 func _find_body_swap() -> Node:
 	if is_instance_valid(_body_swap):
@@ -3554,21 +3716,86 @@ func _find_body_swap() -> Node:
 			break
 	return _body_swap
 
-## Keep the held gun on the BODY rather than on the capsule. The weapon view-model hangs off `_muzzle`, a Marker3D
-## on the NPC ROOT at muzzle_offset — but the VISIBLE body is the BodyModelSwap child, which DROPS onto the seat
-## when this NPC sits down (and ground-snaps to whatever it's sitting on). Without this the rifle of a seated
-## guard hangs at standing chest height, roughly 0.7 m above the hands supposedly holding it: the loudest half of
-## "hostile NPCs don't mesh with sitting", since hostiles are precisely the NPCs that keep a gun out
-## (WeaponStance's always_out for a predisposed-hostile enemy).
-## Re-anchoring by the swap's live posture offset keeps the gun in the same place ON THE BODY in both postures, so
-## BodyModelSwap's seated gun-hold arms land on it exactly as the standing hold does — and every downstream
-## consumer (shot origin, laser, tracer, muzzle FX) follows for free, because they all read this marker's
-## descendants. The offset is in the swap's LOCAL space, so rotate it into ours (identity on the shipped rig, but
-## a swap node authored with an offset/yaw must not skew the anchor). No swap / standing -> the authored offset.
-func _sync_muzzle_to_posture() -> void:
+## PUT THE GUN IN THE HANDS AND POINT IT AT THE TARGET — the whole presentation half of "this NPC is holding a
+## weapon", reconciled once per physics frame from the top of _physics_process (deliberately ABOVE the AI-LOD
+## gate: the anchor is presentation, not a decision, so a cutscene-driven / talking / fleeing NPC needs it as
+## much as a fighting one, and it eases on the REAL delta instead of the gate's banked think delta).
+##
+## Two writes, both onto `_muzzle` — the Marker3D on the NPC ROOT that the view-model, the barrel marker, the
+## shot/laser origin and the muzzle FX all hang off, so every one of them follows for free:
+##  * POSITION -> the grip the swapped ARMS currently form (BodyModelSwap.weapon_grip_position, in the swap's
+##    LOCAL space, so it is mapped through the swap node's full transform — basis AND origin — into ours). The
+##    arm pose already bakes in the seated drop and its ground snap, so riding the hands supersedes the old
+##    posture-offset hack: the gun sits in the same place ON THE BODY standing, walking, aiming and seated.
+##    With `weapon_in_hands` off, or on a rig with no swapped arms, it falls back to the authored
+##    `muzzle_offset` PLUS that posture offset, which is exactly the old behaviour.
+##  * ROTATION -> the smoothed aim elevation, about the GRIP, so the barrel swings up at a foe on a roof and
+##    down at one in a pit. YAW is deliberately untouched: the body already yaws to face the target
+##    (_face_point), and pitching the NPC ROOT instead would tilt the collision capsule, the shadow decal, the
+##    leg gait and the head-look, none of which are pitch-aware.
+## `delta` is passed in rather than read from get_physics_process_delta_time() for two reasons: the caller has
+## the REAL tick delta in hand at this point (the AI-LOD gate has not yet rebound it to the banked think delta,
+## which would ease the pitch in slow motion on a throttled NPC), and an off-tree unit-test NPC can drive this
+## with an explicit step instead of tripping the engine's "not inside tree" error.
+func _sync_weapon_anchor(delta: float) -> void:
 	if not is_instance_valid(_muzzle):
 		return
-	_muzzle.position = muzzle_offset + _body_posture_offset()
+	_muzzle.position = _weapon_anchor_position()
+	# AFTER the position write: the goal angle is measured from the anchor's own ORIGIN, which the rotation
+	# below never moves (a node rotates about its origin), so there is no feedback loop — but it does need
+	# this frame's grip, not last frame's.
+	_aim_pitch = lerpf(_aim_pitch, _aim_pitch_goal(), 1.0 - exp(-maxf(weapon_aim_pitch_speed, 0.01) * delta))
+	_muzzle.rotation.x = -_aim_pitch  # the mounted model faces +Z, and rotating +Z about +X by -p tilts it UP by p
+
+## Where the held weapon's grip sits this frame, in NPC-local space: the swapped hands when this NPC carries its
+## weapon in them, else the authored `muzzle_offset` ridden down by the body's posture offset (the pre-hands
+## behaviour, kept intact for a rig with no arms and for `weapon_in_hands = false`).
+##
+## The swap value is a POSITION in the swap's own space, so it goes through the swap node's FULL transform —
+## `transform * p`, not `transform.basis * p` like `_body_posture_offset` (which converts a pure OFFSET). On the
+## shipped rig the swap sits at identity and the two agree; on a swap authored with an offset they do not, and
+## using the basis alone would drop the gun at the wrong place on the body.
+func _weapon_anchor_position() -> Vector3:
+	if weapon_in_hands:
+		var swap := _find_body_swap()
+		if swap != null and swap.has_method(&"weapon_grip_position"):
+			var raw: Variant = swap.call(&"weapon_grip_position")
+			if raw is Vector3:  # null => this rig has no arms to hold anything with; fall through
+				var node := swap as Node3D
+				return (node.transform * (raw as Vector3)) if node != null else (raw as Vector3)
+	return muzzle_offset + _body_posture_offset()
+
+## The elevation (radians, + = up) the barrel SHOULD be at right now, before smoothing: the angle from the grip
+## to the aim point, clamped to weapon_aim_pitch_limit. Zero — i.e. ease back to level — whenever pointing the
+## gun anywhere would be a lie or a distraction: the feature is off, the gun is holstered/absent, or this NPC has
+## not genuinely SENSED a foe yet (`_target` is acquired by pure PROXIMITY with no LOS test and NPC.tscn ships a
+## 500 m sight_range, so without that last gate every hostile in the level would visibly track a hidden player).
+##
+## ⭐Reads `_aim_point()`, NOT `get_aim_direction()`: that one CONSUMES the one-shot `_shot_miss` flag
+## (npc.gd's miss roll), so calling it for a per-frame visual would silently eat every deliberate miss.
+func _aim_pitch_goal() -> float:
+	if not weapon_aim_pitch or not is_holding_gun() or not has_sensed_foe() or not _muzzle.is_inside_tree():
+		return 0.0
+	return aim_elevation(_muzzle.global_position, _aim_point(), weapon_aim_pitch_limit)
+
+## Pure aim math (static, off-tree-safe -> unit-tested; never touches the tree), the twin of
+## NpcHeadLookMount.aim_offsets: the ELEVATION in radians (+ = up) from `from` to `target`, clamped to
+## +/-`limit_deg`. A degenerate straight-up/straight-down or zero-length line returns the clamp / zero rather
+## than a NaN, so a target standing exactly on the muzzle can never write garbage into the anchor's rotation.
+static func aim_elevation(from: Vector3, target: Vector3, limit_deg: float) -> float:
+	var to := target - from
+	var flat := Vector2(to.x, to.z).length()
+	if flat < 0.0001 and is_zero_approx(to.y):
+		return 0.0
+	var limit := deg_to_rad(maxf(limit_deg, 0.0))
+	return clampf(atan2(to.y, maxf(flat, 0.0001)), -limit, limit)
+
+## The barrel's current elevation in DEGREES (+ = up) — the public read BodyModelSwap's arm rig polls
+## (arm_aim_follow) so the hands swing with the gun instead of the weapon pivoting out of them. Already smoothed
+## and already perception-gated by _aim_pitch_goal, so a consumer needs no gates of its own. Zero for a civilian
+## and for an off-tree NPC (nothing ever writes _aim_pitch there).
+func aim_pitch_degrees() -> float:
+	return rad_to_deg(_aim_pitch)
 
 ## The visible body's current posture offset (the seated drop + its ground snap; ZERO standing) expressed in OUR
 ## local space. Duck-typed onto the BodyModelSwap child, per the duck-typed-read rule: a missing method / a
@@ -3668,11 +3895,11 @@ func _capsule_top() -> Variant:
 		return col.global_position + global_basis.y * (cap.height * 0.5)
 	return null
 
-## Point the laser from the muzzle toward `point` (capped at weapon range), glowing by `charge`
+## Point the laser from the muzzle toward `point` (capped at weapon range), glowing by `aim_charge`
 ## (0..1). Returns the ray hit so callers can reuse it (e.g. the clear-shot test).
-func _aim_laser_at(point: Vector3, charge: float, report_aim: bool = true) -> Dictionary:
+func _aim_laser_at(point: Vector3, aim_charge: float, report_aim: bool = true) -> Dictionary:
 	if report_aim:
-		_report_aim(charge)  # warn the player (the white aim radial); ALERTED overrides with fire-readiness
+		_report_aim(aim_charge)  # warn the player (the white aim radial); ALERTED overrides with fire-readiness
 	var origin := get_aim_origin()
 	var dir := point - origin
 	if dir.length() < 0.01:
@@ -3700,7 +3927,7 @@ func _aim_laser_at(point: Vector3, charge: float, report_aim: bool = true) -> Di
 		_hide_laser()
 		return hit
 	var endpoint: Vector3 = hit.position if not hit.is_empty() else origin + dir * _aim_range()
-	_laser.draw_beam(origin, endpoint, charge, _outline_color_for_disposition())
+	_laser.draw_beam(origin, endpoint, aim_charge, _outline_color_for_disposition())
 	return hit
 
 # --- WeaponHost aim contract: from the muzzle toward the target, no camera ---
@@ -3717,9 +3944,17 @@ func get_aim_direction() -> Vector3:
 	if not is_instance_valid(_target) or not _muzzle:
 		return global_basis.z
 	var origin := get_aim_origin()
-	# Aim where the target WILL BE, not where it is — see _lead_aim_point. Every ranged AI shot is a
-	# travelling round now, so without this a held strafe simply walks out of the bullet.
-	var dir := (_lead_aim_point(origin) - origin).normalized()
+	# Fire down the TRACKED aim: _tick_aim_tracking has already solved the ideal point (where the target WILL
+	# be — see _lead_aim_point) and turned us as far onto it as the turn rate allows, so a shot taken mid-swing
+	# genuinely goes wide. That IS the feature; re-solving here would hand the snap-on aim straight back.
+	var dir: Vector3
+	if _aim_is_tracked():
+		dir = _aim_dir
+	else:
+		# Never ticked (off-tree, or a bare unit-test NPC): solve it instantaneously, exactly as this did before
+		# aim inertia existed. Every ranged AI shot is a travelling round, so without the lead a held strafe
+		# simply walks out of the bullet.
+		dir = (_lead_aim_point(origin) - origin).normalized()
 	if _shot_miss:
 		_shot_miss = false  # consume: this deflection applies only to the one shot we rolled to miss
 		dir = _deflect_for_miss(dir)  # send it wide so it whiffs past the target
@@ -3751,7 +3986,7 @@ func _lead_aim_point(origin: Vector3) -> Vector3:
 	return NpcCombat.lead_aim_point(
 			origin,
 			point,
-			_target_velocity(),
+			_lead_velocity(),
 			ProjectileSpawner.round_speed(w, false),
 			aim_lead_fraction(),
 			GameSettings.npc_ai.aim_lead_max_time)
@@ -3760,8 +3995,11 @@ func _lead_aim_point(origin: Vector3) -> Vector3:
 ## How fast our target is moving RIGHT NOW, for the lead solve. Duck-typed (`get`) rather than cast: both the
 ## player and an NPC are CharacterBody3D and carry `velocity`, but _target is only ever Node3D-typed here and a
 ## scripted / prop target may carry no such property at all — a missing one reads as null and we simply don't
-## lead. Sampled fresh at the instant the trigger pulls (never smoothed) ON PURPOSE: that is what makes a
-## direction CHANGE the counterplay leading cannot predict, while a constant strafe is fully solved for.
+## lead. This is the RAW, instantaneous read; what the intercept solve actually consumes is the NPC's eased
+## BELIEF about it (_lead_velocity / _aim_target_vel), so a direction CHANGE under-leads for a beat before the
+## prediction catches up, while a constant strafe converges on being fully solved for. Aim inertia (2026-08-31)
+## moved that lag in deliberately: reading your velocity instantaneously meant the predicted point snapped a
+## body-width ahead of you in the same frame you started moving.
 func _target_velocity() -> Vector3:
 	if not is_instance_valid(_target):
 		return Vector3.ZERO
@@ -3770,6 +4008,112 @@ func _target_velocity() -> Vector3:
 	if raw is Vector3:
 		vel = raw
 	return vel
+
+
+# --- AIM INERTIA (2026-08-31): the shot direction is tracked STATE that has to swing, not a fresh solve. ------
+# USER complaint: "enemies aim onto your position/projected position instantly. this feels bad." Every ranged
+# AI shot resolved its direction from geometry at the instant the trigger pulled, so an NPC's aim was simply
+# wherever it needed to be, with no transition: step out of cover and the first round is already on your chest,
+# dash past a guard and its muzzle teleports with you, and the intercept jumped a body-width ahead the frame
+# you started moving. Two dials, both on GameSettings.npc_ai, both zeroable back to that exact behaviour:
+#   * aim_turn_rate_deg  -> _aim_dir swings toward the ideal point at a capped angular rate (NpcCombat.slew_toward)
+#   * aim_velocity_lag   -> the intercept is solved against an EASED read of your velocity, not this frame's
+# ⭐The turn rate is a hard CAP, never a smoothing ease, and that is load-bearing: a cap has zero steady-state
+# error, so an NPC tracking an ordinary strafe still sits exactly on the intercept and the 2026-08-26 "holding
+# a strafe dodges forever" fix survives intact. See NpcCombat.slew_toward for the geometry and the full why.
+
+## True once this NPC's aim is real tracked state — i.e. _tick_aim_tracking has run at least once while holding
+## a target. False off-tree and on a bare instance that has never had a physics frame (unit tests build these),
+## where every aim consumer falls back to the instantaneous solve: the pre-inertia behaviour, deliberately kept
+## so the geometry stays testable without spinning a live brain.
+func _aim_is_tracked() -> bool:
+	return not _aim_dir.is_zero_approx()
+
+## The velocity the intercept solve is fed: this NPC's eased BELIEF about the target's motion while its aim is
+## tracked, and the raw instantaneous value otherwise (see _aim_is_tracked).
+func _lead_velocity() -> Vector3:
+	return _aim_target_vel if _aim_is_tracked() else _target_velocity()
+
+## Swing the aim. Called once per physics frame from the top of _physics_process, ABOVE the AI-LOD gate and on
+## the REAL delta — a throttled NPC must not slew in slow motion, and a shot taken between two thinks has to
+## fire down a current direction rather than a stale one. Cheap (no raycast: the LOS answer is Perception's
+## cached saw_target) and it early-outs entirely for the target-less idle cast.
+func _tick_aim_tracking(delta: float) -> void:
+	if not is_instance_valid(_target):
+		# Nothing to track. DROP the state rather than letting it coast, so the next target is acquired from
+		# the body's own facing instead of from a direction left pointing at whoever came before.
+		_aim_dir = Vector3.ZERO
+		_aim_target_vel = Vector3.ZERO
+		return
+	_aim_target_vel = _eased_target_velocity(delta)  # BEFORE the goal below, which solves the intercept off it
+	if _aim_dir.is_zero_approx():
+		# First tracked frame: start on the body's FACING, never on the goal. Seeding from the goal would hand
+		# a free instant lock to exactly the cases this exists for — an NPC alerted by an ally's shout, or one
+		# that walks into range with you already inside its perception cone.
+		_aim_dir = _body_forward()
+	_aim_dir = NpcCombat.slew_toward(_aim_dir, _aim_track_goal(), aim_turn_rate() * delta)
+
+## Where the aim WANTS to be this frame, as a direction from the shot origin. Three cases, in escalating
+## knowledge:
+##  * hasn't noticed us / no anchor -> the body's own facing, so an unaware guard's gun rides where he is
+##    looking and noticing you costs the whole swing from there.
+##  * noticed AND can see us        -> the full led intercept (_lead_aim_point), i.e. the ideal shot.
+##  * noticed but BLIND to us       -> the last place it saw us. Deliberately NOT the live target: tracking
+##    you through a wall would let an NPC hold a perfect lock the entire time you were in cover and shoot the
+##    instant you leaned out. Holding the last-known spot instead is what makes re-peeking a DIFFERENT angle
+##    cost a real swing while re-peeking the same hole finds the gun already pointed at it.
+## Reads Perception.saw_target — the CACHED can_see() from the last sense() tick, not a fresh cast.
+func _aim_track_goal() -> Vector3:
+	var forward := _body_forward()
+	if not has_sensed_foe() or not is_instance_valid(_muzzle):
+		return forward
+	var origin := get_aim_origin()
+	var point: Vector3 = _lead_aim_point(origin) if _perception.saw_target else _perception.last_known_position
+	var to_point := point - origin
+	# Degenerate (the aim point sits exactly on the muzzle, or an un-seeded last-known spot): hold the facing.
+	return to_point if to_point.length_squared() > 0.000001 else forward
+
+## This NPC's eased read of its target's velocity, stepped one frame. Eases toward the raw value while the
+## target is in sight and toward ZERO while it is not — you cannot extrapolate motion you cannot see, so a shot
+## taken the instant someone re-peeks is barely led at all. A zero lag (or a zero delta) returns the raw value,
+## which is the pre-inertia solve exactly.
+func _eased_target_velocity(delta: float) -> Vector3:
+	var seen: bool = _perception != null and _perception.saw_target
+	var goal: Vector3 = _target_velocity() if seen else Vector3.ZERO
+	var lag := aim_velocity_lag()
+	if lag <= 0.0 or delta <= 0.0:
+		return goal
+	return _aim_target_vel.lerp(goal, clampf(1.0 - exp(-delta / lag), 0.0, 1.0))
+
+## The direction the BODY is facing, in world space. +Z is this model's front — the same convention
+## Perception.can_see and get_aim_direction's target-less fallback already use.
+func _body_forward() -> Vector3:
+	return global_basis.z
+
+## How fast THIS NPC's aim may swing, in RADIANS per second — the third member of the marksmanship family with
+## aim_error_spread() and aim_lead_fraction(), and scaled off the same one stat. Base is
+## GameSettings.npc_ai.aim_turn_rate_deg, DIVIDED by the gunplay steadiness factor the aim cone is multiplied by
+## (CharacterStats.sway_mult, live gunplay buff folded in): sway_mult is <= 1 and shrinks as gunplay rises, so a
+## steadier shooter whips onto a target faster while scattering less and predicting better — one stat, three
+## dials, all pointing the same way. A gunplay 12.5+ elite drives sway_mult to 0 and swings effectively
+## instantly (the floored divisor keeps that finite), which is the same "surgical" end the other two dials
+## reach. Returns 0 for a non-positive tuned base, which slew_toward reads as "no cap" — the old snap-on aim.
+func aim_turn_rate() -> float:
+	var base_deg: float = GameSettings.npc_ai.aim_turn_rate_deg
+	if base_deg <= 0.0:
+		return 0.0
+	var steadiness: float = maxf(stats_or_default().sway_mult(status_stat_modifier(&"gunplay")), 0.001)
+	return deg_to_rad(base_deg) / steadiness
+
+## How long THIS NPC's read of its target's velocity takes to catch up (seconds, the time constant of the ease
+## in _eased_target_velocity). Base is GameSettings.npc_ai.aim_velocity_lag, MULTIPLIED by the same gunplay
+## steadiness — a steadier shooter reads your motion sooner, and a gunplay 12.5+ elite reads it instantly.
+## Floored at 0; 0 means the solve consumes the raw instantaneous velocity, i.e. the pre-inertia behaviour.
+func aim_velocity_lag() -> float:
+	var base: float = GameSettings.npc_ai.aim_velocity_lag
+	if base <= 0.0:
+		return 0.0
+	return maxf(base * stats_or_default().sway_mult(status_stat_modifier(&"gunplay")), 0.0)
 
 
 ## The marksmanship half of target leading — how much of the computed intercept offset THIS NPC applies (0..1),

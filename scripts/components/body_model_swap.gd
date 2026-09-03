@@ -283,8 +283,50 @@ const SEATED_REPROBE_DISTANCE := 0.02
 @export var arm_swing_amplitude: float = 35.0
 ## How fast the arms swing while walking.
 @export var arm_swing_rate: float = 9.0
-## Pitch (degrees) the arms raise to when the NPC has a weapon drawn (holding it forward). Flip the sign if your arm model points the wrong way.
-@export var arm_hold_pitch: float = -65.0
+## Pitch (degrees) the arms raise to when the NPC has a weapon drawn (holding it forward). Flip the sign if your
+## arm model points the wrong way. ⭐This angle now also decides WHERE THE GUN IS: the host hangs the held
+## view-model off the grip these arms form (NPC.weapon_in_hands -> weapon_grip_position() below), so lowering it
+## drops the weapon toward the hip and raising it brings the weapon up to a shouldered stance. -90 is arms dead
+## level (the model's hand axis horizontal); the shipped -78 is a shade below level, which reads as a braced
+## two-handed hold rather than a stiff zombie reach.
+@export var arm_hold_pitch: float = -78.0
+## How much of the host's AIM ELEVATION the raised arms add on top of arm_hold_pitch (1 = follow it exactly,
+## 0 = the arms hold one fixed angle however high or low the target is). Read off the host's duck-typed
+## `aim_pitch_degrees()` (NPC computes it from the hand anchor to its aim point, already smoothed and
+## perception-gated), so the hands — and the weapon hanging off them — SWING UP at a foe on a rooftop and DOWN
+## at one in a pit, instead of the gun staying level while only the bullets pitch. A host without that method
+## (the Player's FP rig, a unit-test stub) contributes nothing and the arms behave exactly as before.
+@export_range(0.0, 1.0, 0.05) var arm_aim_follow: float = 1.0
+## Clamp (degrees, each way) on that aim contribution, so a target directly overhead or straight down cannot fold
+## the arms back through the torso. Roughly a shoulder's real range; raise it for a rig with more clearance.
+@export var arm_aim_pitch_limit: float = 55.0
+## Degrees each raised arm swings INWARD, toward the body centreline, while holding a weapon — so the two hands
+## MEET ON THE GUN instead of reaching straight forward a shoulder-width apart with the weapon floating between
+## them. On the shipped rig the shoulders are 0.54 m apart and the hands reach ~0.69 m, so ~24° closes that gap
+## almost exactly; the ⭐default is a shade under full convergence so the fists read as two hands on one weapon
+## rather than one hand drawn twice. 0 = the old parallel reach.
+##
+## Applied as a PRE-multiplied yaw about the body's UP axis (the `_leg_pose` idiom), never as an `arm_rotation.y`:
+## every animated term this rig has — the hold pitch, the aim swing, the walk swing, the fists sway, the strike
+## flail — is added to rot.x and baked into the model's own euler, so a yaw *inside* that euler would turn the
+## forward/back swing into a sideways sway. Pre-multiplying rotates the finished arm about the body instead, and
+## the right arm's `_reflect()` mirror flips the yaw for free (Reflect * R_up(θ) == R_up(-θ) * Reflect).
+@export var arm_hold_converge_deg: float = 24.0
+## How far (metres) the LEFT hand sits AHEAD of the right along the weapon while holding it — a foregrip and a
+## trigger hand, instead of both fists landing on the same point. Applied as an antisymmetric shift of the two
+## arms' shoulder anchors along the body's forward axis (+Z here, negated for the right arm), which is the only
+## way this elbow-less rig can offset the hands ALONG the barrel: pitching one arm further than the other splits
+## the hands VERTICALLY instead, because at a near-level hold the pitch term moves a hand up and down, not
+## fore and aft. 0 = both hands at the same point on the weapon.
+@export var arm_hold_stagger: float = 0.08
+## Where along the arm a HELD WEAPON's grip sits, as a fraction of the measured shoulder->fingertip reach
+## (1 = the fingertips, 0 = the shoulder). Just under 1 puts it in the palm rather than floating off the
+## fingertips. Consumed by weapon_grip_position(); a host that does not mount its weapon on the hands ignores it.
+@export_range(0.0, 1.2, 0.01) var weapon_grip_reach: float = 0.92
+## Extra nudge (metres, swap-local) added to that computed grip — the per-rig fine-tune for a hand model whose
+## palm is not on its centreline, or to sit a bulky weapon a little forward of the fists. ZERO = dead between the
+## two hands, which is the two-handed centreline hold the arm pose already forms.
+@export var weapon_grip_offset: Vector3 = Vector3.ZERO
 ## Hold the weapon in a two-handed READY stance the WHOLE time it's DRAWN — the natural "armed enemy" look. On
 ## (default) a hostile that keeps its gun permanently out has both hands ON the gun, instead of letting the arms
 ## hang at its sides while the weapon floats at the hand anchor (the disconnected look this fixes). Stealth-safe:
@@ -510,6 +552,7 @@ static var _mouth_texture: Texture2D = null  ## the shared black-circle texture 
 var _strike_t: float = 0.0       ## 1 -> 0 fist-strike flail envelope, set by strike() on a punch, decays over arm_strike_duration
 var _strike_side: float = 1.0    ## which fist LEADS the current strike (+1 = left); flipped per strike when arm_strike_alternate
 var _fists_sway: float = 0.0     ## smoothed fists-out alternating-sway amplitude (eases to 0 when not squared up)
+var _hold_blend: float = 0.0     ## smoothed 0..1 fade for the two-handed GRIP terms (arm_hold_converge_deg + arm_hold_stagger_deg); 1 = hands closed on the weapon
 var _breathe_phase: float = 0.0  ## breathing sine phase (advances at breathe_rate while alive)
 var _body_base_scale: float = 1.0  ## the torso's authored uniform scale; breathing modulates AROUND it (cached so _process doesn't re-resolve _eff_body each frame)
 var _sitting_pose_active: bool = false  ## last host is_sitting() state applied to base transforms
@@ -842,7 +885,9 @@ func _animate_limbs(delta: float, sitting: bool) -> void:
 	if animate_arms and is_instance_valid(_arm_left):
 		var mode_target := 0.0  # by the side
 		if raised:
-			mode_target = arm_hold_pitch        # holding the gun forward — whenever it's drawn (see `raised`)
+			# Holding the gun forward — whenever it's drawn (see `raised`) — SWUNG by the host's aim elevation,
+			# so the hands (and the weapon hanging off them) rise at a foe above and drop at one below.
+			mode_target = arm_hold_pitch - aim_pitch_contribution()
 		elif airborne and not in_dialogue:
 			mode_target = arm_air_pitch          # both arms straight up (roller coaster); suppressed while being talked to
 		elif fists_out:
@@ -855,6 +900,10 @@ func _animate_limbs(delta: float, sitting: bool) -> void:
 		var amp := strike_amplitude(_strike_t, arm_strike_curve) if not gun_out else 0.0
 		var amp_lead := amp if _strike_side >= 0.0 else amp * arm_strike_offhand_scale
 		var amp_off := amp * arm_strike_offhand_scale if _strike_side >= 0.0 else amp
+		# The two-handed GRIP fade: while the weapon is up the arms swing inward onto it (converge) and one hand
+		# leads the other along it (stagger). Eased on its own envelope so drawing / holstering closes and opens
+		# the hands smoothly instead of snapping them together.
+		_hold_blend = lerpf(_hold_blend, 1.0 if raised else 0.0, 1.0 - exp(-10.0 * delta))
 		_swing_blend = lerpf(_swing_blend, 1.0 if arms_walking else 0.0, 1.0 - exp(-10.0 * delta))
 		var a := swing * arm_swing_amplitude * _swing_blend  # antisymmetric walk swing (0 while fists are out)
 		# Fists-out: an ANTISYMMETRIC sway (arms ALTERNATE -- one forward, one back, like a natural stride) on top
@@ -862,9 +911,13 @@ func _animate_limbs(delta: float, sitting: bool) -> void:
 		var sway_target := (arm_fists_walk_sway if moving else arm_fists_idle_sway) if fists_out else 0.0
 		_fists_sway = lerpf(_fists_sway, sway_target, 1.0 - exp(-8.0 * delta))
 		var s := swing * _fists_sway  # left +s / right -s -> the arms alternate (same shape as the walk swing)
-		_arm_left.transform = _arm_pose(arm_rotation + Vector3(_mode_pitch + arm_strike_pitch * amp_lead + a + s, 0.0, 0.0), arm_strike_thrust * amp_lead)
+		var converge := arm_hold_converge_deg * _hold_blend  # inward yaw: the hands close on the weapon
+		# ...and an antisymmetric shift ALONG the barrel so one hand leads. `_reflect()` negates X only, so a +Z
+		# offset would otherwise stay +Z on both arms — the right one is negated here to make it a true stagger.
+		var stagger := Vector3(0.0, 0.0, arm_hold_stagger * _hold_blend)
+		_arm_left.transform = _arm_pose(arm_rotation + Vector3(_mode_pitch + arm_strike_pitch * amp_lead + a + s, 0.0, 0.0), arm_strike_thrust * amp_lead + stagger, converge)
 		if is_instance_valid(_arm_right):
-			_arm_right.transform = _reflect() * _arm_pose(arm_rotation + Vector3(_mode_pitch + arm_strike_pitch * amp_off - a - s, 0.0, 0.0), arm_strike_thrust * amp_off)
+			_arm_right.transform = _reflect() * _arm_pose(arm_rotation + Vector3(_mode_pitch + arm_strike_pitch * amp_off - a - s, 0.0, 0.0), arm_strike_thrust * amp_off - stagger, converge)
 	# STRIKE-ONLY path — how an animate_arms-OFF rig punches. The player's unarmed view-model hands
 	# (FirstPersonBody._build_first_person_arms, animate_arms = false) live here: they must NOT walk-swing, mode-pitch or fists-sway just
 	# because they can throw a punch, so instead of enabling all of that we write rest pose + the strike terms
@@ -917,14 +970,20 @@ func _animate_limbs(delta: float, sitting: bool) -> void:
 
 func _apply_seated_limb_pose(delta: float) -> void:
 	_mode_pitch = lerpf(_mode_pitch, _seated_arm_pitch_eff(), 1.0 - exp(-12.0 * delta))
+	# A seated NPC with its weapon up closes the SAME two-handed grip a standing one does — the gun hangs off
+	# these hands in both postures, so letting the seated pose skip it would leave the weapon between two
+	# shoulder-width fists again the moment a guard sat down.
+	_hold_blend = lerpf(_hold_blend, 1.0 if _seated_holds_gun() else 0.0, 1.0 - exp(-10.0 * delta))
 	_swing_blend = lerpf(_swing_blend, 0.0, 1.0 - exp(-10.0 * delta))
 	_leg_blend = lerpf(_leg_blend, 0.0, 1.0 - exp(-10.0 * delta))
 	_fists_sway = lerpf(_fists_sway, 0.0, 1.0 - exp(-8.0 * delta))
 	_strike_t = 0.0
 	if animate_arms and is_instance_valid(_arm_left):
-		_arm_left.transform = _arm_pose(arm_rotation + Vector3(_mode_pitch, 0.0, 0.0))
+		var converge := arm_hold_converge_deg * _hold_blend
+		var stagger := Vector3(0.0, 0.0, arm_hold_stagger * _hold_blend)
+		_arm_left.transform = _arm_pose(arm_rotation + Vector3(_mode_pitch, 0.0, 0.0), stagger, converge)
 		if is_instance_valid(_arm_right):
-			_arm_right.transform = _reflect() * _arm_pose(arm_rotation + Vector3(_mode_pitch, 0.0, 0.0))
+			_arm_right.transform = _reflect() * _arm_pose(arm_rotation + Vector3(_mode_pitch, 0.0, 0.0), -stagger, converge)
 	if animate_legs and is_instance_valid(_leg_left):
 		_leg_left.transform = _leg_pose(seated_leg_pitch)
 		if is_instance_valid(_leg_right):
@@ -947,8 +1006,10 @@ func _posture_offset() -> Vector3:
 ## PUBLIC posture seam: the live visual offset EVERY swapped part rides (the seated drop + its ground snap; ZERO
 ## while standing), in this node's LOCAL space. head_rest_position() is the same seam narrowed to the head's rest
 ## placement; this one exists for host-owned nodes that must stay glued to the visible BODY rather than to the
-## capsule — the NPC's held-weapon hand anchor (NPC._sync_muzzle_to_posture) is the one that ships. ANY new
-## absolute writer of a body-relative position has the same requirement, or it floats when the NPC sits down.
+## capsule. The NPC's held-weapon anchor is the one that ships (NPC._sync_weapon_anchor), though it now prefers
+## the ARMS' own grip (weapon_grip_position, which already carries this drop via _arm_pose) and only falls back to
+## composing this offset with muzzle_offset on a rig that HAS no arms. ANY new absolute writer of a body-relative
+## position has the same requirement, or it floats when the NPC sits down.
 func posture_offset() -> Vector3:
 	return _posture_offset()
 
@@ -1017,8 +1078,8 @@ func _seated_pitch_clamped(preferred: float) -> float:
 
 ## The arms' preferred pitch while seated, BEFORE that clamp: the GUN-HOLD pose whenever this NPC has its weapon
 ## up, else the authored lap rest. The STANDING hold angle is the right one seated because the held view-model
-## hangs off a hand anchor the host keeps in step with the seated drop (NPC._sync_muzzle_to_posture) — the gun
-## sits at the same place ON THE BODY in both postures. Without this a seated guard folded its hands into its lap
+## hangs off the grip THESE ARMS form (weapon_grip_position, read by NPC._sync_weapon_anchor) — the gun sits at the
+## same place ON THE BODY in both postures because it rides the hands in both. Without this a seated guard folded its hands into its lap
 ## while the rifle it is holding hovered beside them (the armed half of "sitting doesn't mesh with hostile NPCs",
 ## and hostiles are exactly the NPCs that have a gun out).
 ## The gates MIRROR _animate_limbs' standing `raised` logic so the stealth tells read identically in both
@@ -1026,7 +1087,11 @@ func _seated_pitch_clamped(preferred: float) -> float:
 ## the lap until the foe is inside arm_raise_range AND has genuinely been SENSED. A seated dialogue speaker drops
 ## to the lap either way — lower_arms() clamps seated_arm_pitch directly, and this agrees once the world unpauses.
 func _seated_preferred_arm_pitch() -> float:
-	return arm_hold_pitch if _seated_holds_gun() else seated_arm_pitch
+	# The aim swing rides along seated too (same reason the hold angle does): a sitter tracking a foe on a
+	# balcony must raise the same hands the standing pose would, or its rifle — which now hangs off those
+	# hands — stays level while it is supposedly aiming up. The seat clearance clamp below only ever RAISES,
+	# so a downward swing can still never push the hands through the seat.
+	return (arm_hold_pitch - aim_pitch_contribution()) if _seated_holds_gun() else seated_arm_pitch
 
 func _seated_holds_gun() -> bool:
 	var host := get_parent()
@@ -1053,6 +1118,57 @@ static func seated_pitch_to_clear(preferred_deg: float, room: float, reach: floa
 	var needed := 90.0 if room <= 0.0 else rad_to_deg(acos(clampf(room / reach, 0.0, 1.0)))
 	var side := -1.0 if preferred_deg <= 0.0 else 1.0
 	return side * maxf(absf(preferred_deg), needed)
+
+## Degrees of AIM ELEVATION the raised arms should swing by, already scaled by arm_aim_follow and clamped to
+## arm_aim_pitch_limit. POSITIVE = the host is aiming UP; callers SUBTRACT it from arm_hold_pitch, because this
+## rig's arm pitch runs the other way (a more negative rot.x lifts the arm — see arm_air_pitch -160 = straight up).
+##
+## Duck-typed off the host's `aim_pitch_degrees()` (NPC computes it from its hand anchor to its aim point,
+## already smoothed AND perception-gated, so the arms never point at a foe the NPC has not actually sensed —
+## the same truthfulness rule head_look_point follows). A host without the method — the Player's first-person
+## rig, a unit-test stub, a civilian — contributes exactly ZERO, so the arms behave as they always did.
+func aim_pitch_contribution() -> float:
+	if arm_aim_follow <= 0.0:
+		return 0.0
+	var host := get_parent()
+	if host == null or not host.has_method(&"aim_pitch_degrees"):
+		return 0.0
+	var raw: Variant = host.call(&"aim_pitch_degrees")
+	if not (raw is float or raw is int):
+		return 0.0
+	return clampf(float(raw) * arm_aim_follow, -arm_aim_pitch_limit, arm_aim_pitch_limit)
+
+
+## WHERE A HELD WEAPON'S GRIP SITS RIGHT NOW, in swap-LOCAL metres — the point midway between the two hands at
+## the CURRENT animated arm pose. This is the seam that puts an NPC's gun IN ITS HANDS instead of leaving it
+## floating at a fixed anchor on the body while the arms reach past it (NPC.weapon_in_hands reads this every
+## physics frame and moves its `_muzzle` anchor here).
+##
+## Derived from the LIVE `_arm_left` / `_arm_right` transforms rather than recomputed from the exports, so every
+## term the gait writes comes along for free — the hold pitch, the aim swing, the fists sway, the walk swing, the
+## strike thrust, and the seated drop `_arm_pose` already bakes into the arm's origin. That is also why the
+## weapon can never visibly detach from the hands: it is not a second pose that has to agree with the arms, it
+## IS the arms' pose.
+##
+## The two hand tips are mirror images across X (`_reflect`), so their midpoint lands on the body centreline —
+## the two-handed hold the symmetric arm pose already forms. Only the POSITIONS are used: the right arm's basis
+## has a NEGATIVE determinant and adopting it as a rotation would render the weapon inside-out.
+##
+## Returns null (not a zero vector) when this rig has no arms to hold anything with — no arm_model, or a swap
+## that has not rebuilt yet — so the caller can tell "no hands" from "hands at the origin" and fall back to its
+## own authored anchor. `single_arm` rigs return the one hand they have.
+func weapon_grip_position() -> Variant:
+	if not is_instance_valid(_arm_left):
+		return null
+	var reach := _arm_reach_measured()
+	if reach <= 0.0:
+		return null
+	var tip := Vector3(0.0, 0.0, reach * weapon_grip_reach)  # the arm model's hand lies down its local +Z
+	var p: Vector3 = _arm_left.transform * tip
+	if is_instance_valid(_arm_right):
+		p = (p + _arm_right.transform * tip) * 0.5
+	return p + weapon_grip_offset
+
 
 ## Shoulder->fingertip reach of the swapped arm model (swap-space metres, BEFORE arm_scale — the pose's basis
 ## scaling applies it), measured lazily once per rebuild from the instanced meshes' AABB corners: the arm pivots
@@ -1163,6 +1279,7 @@ func lower_arms() -> void:
 	_mode_pitch = _seated_pitch_clamped(seated_arm_pitch) if _host_sitting() else 0.0
 	_swing_blend = 0.0
 	_fists_sway = 0.0
+	_hold_blend = 0.0  # open the two-handed grip too, or a speaker's hands stay closed on a weapon it just lowered
 	_strike_t = 0.0
 	_apply_arm_transform()
 
@@ -1403,8 +1520,14 @@ func _apply_arm_transform() -> void:
 ## One arm's local transform from its rotation (degrees) at the shoulder, sized by arm_scale.
 ## `extra_pos` is an additive local translation (the strike thrust); the RIGHT arm's copy is mirrored by the
 ## caller's _reflect(), which negates X only -- so a forward/up thrust stays forward/up on both hands.
-func _arm_pose(rot_deg: Vector3, extra_pos: Vector3 = Vector3.ZERO) -> Transform3D:
+## `converge_deg` swings the finished arm INWARD about the body's UP axis (positive = the LEFT arm's hand moves
+## toward the centreline; the right arm's `_reflect()` mirror flips it automatically). PRE-multiplied on purpose —
+## folded into the euler above it would turn every pitch term into a sideways sway. It rotates the BASIS only, so
+## the shoulder stays where it was authored and only the hand travels.
+func _arm_pose(rot_deg: Vector3, extra_pos: Vector3 = Vector3.ZERO, converge_deg: float = 0.0) -> Transform3D:
 	var b := Basis.from_euler(Vector3(deg_to_rad(rot_deg.x), deg_to_rad(rot_deg.y), deg_to_rad(rot_deg.z)))
+	if not is_zero_approx(converge_deg):
+		b = Basis(Vector3.UP, deg_to_rad(converge_deg)) * b
 	return Transform3D(b.scaled(Vector3.ONE * arm_scale), arm_position + _posture_offset() + extra_pos)
 
 ## Place the LEFT leg at its rest pose, then mirror it across the body centre (X=0) for the RIGHT leg -- the same

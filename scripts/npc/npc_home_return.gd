@@ -9,8 +9,9 @@ extends Node
 ##   1. THE PLAYER DIED (`GameState.player_died`). The default CHECKPOINT_RESPAWN death mode is a Dark-Souls
 ##      in-place revive — the world is NOT reloaded — so without this every NPC that chased you across the map is
 ##      still standing wherever it lost you when you come back, still on the sliver of HP you left it on. This
-##      trigger owns BOTH halves of that encounter reset: the return home AND a FULL HEAL of the survivors
-##      (`heal_on_player_death`), so the second attempt at a fight is the same fight as the first. That cue is
+##      trigger owns the WHOLE encounter reset: the return home, a FULL HEAL of the survivors
+##      (`heal_on_player_death`), and the AMMO they burned handed back (`restore_ammo_on_player_death`), so the
+##      second attempt at a fight is the same fight as the first. That cue is
 ##      timed to the death cinematic's FULLY BLACK frame (the beat the "You were killed by X" card fades in on),
 ##      NOT the moment of death: fired earlier you can literally watch the cast teleport away through the closing
 ##      vignette. Because the screen is covered, the on-screen guard is ignored by default here
@@ -96,6 +97,15 @@ extends Node
 ## STAY DEAD — this only tops up survivors; a corpse is never revived. Seeded from
 ## GameSettings.npc_ai.home_return_heal_on_player_death.
 @export var heal_on_player_death: bool = true
+## Also hand this NPC back the AMMO it BURNED on the same player-death cue: its magazine refilled and every spare
+## clip its reloads spent returned to its backpack. The third piece of the encounter reset, and it exists for the
+## same reason as the heal — under CHECKPOINT_RESPAWN (the default in-place revive) spent ammo persists for the
+## rest of the session, so dying at the same fight repeatedly leaves the enemy progressively more disarmed until
+## it runs dry and drops to fists. Independent of the other two knobs. THE DEAD ARE NOT RESTOCKED (a corpse's bag
+## is the loot the player earned), and ammo the player PICKPOCKETED is never given back — only what was actually
+## fired, tracked as it is spent (Ammo.restore_spent_ammo). Seeded from
+## GameSettings.npc_ai.home_return_restore_ammo_on_player_death.
+@export var restore_ammo_on_player_death: bool = true
 
 @export_group("Off screen")
 ## Send this NPC home once it has been out of the player's view for `off_screen_delay` seconds.
@@ -207,6 +217,26 @@ func restore_full_health() -> bool:
 	return true
 
 
+## Hand this NPC back the ammo it EXPENDED: magazine refilled, plus every spare clip its reloads burned returned
+## to its backpack. Returns true when anything was actually given back (a wielder that never fired, a civilian
+## with no weapon hub, and the dead all report no work done).
+##
+## Goes through the host's public `restore_spent_ammo()` facade (npc.gd -> Ammo.restore_spent_ammo), which owns
+## the LEDGER: each spare clip is booked at the instant a reload spends it, so the restore can only ever return
+## rounds this NPC really fired. That is the whole reason this is not a "top the backpack back up to
+## starting_clips" refill — such a refill would also hand back ammo the PLAYER STOLE, and pickpocketing an NPC's
+## ammo to disarm it is a real mechanic (npc.gd `_can_fight_with_gun`), not a bug to paper over.
+##
+## Duck-typed like every other host.* call here, and a hard no-op on the dead: a corpse's backpack is the loot
+## the player earned by winning that trade, so it is never restocked.
+func restore_spent_ammo() -> bool:
+	if host == null or not is_instance_valid(host) or not host.has_method(&"restore_spent_ammo"):
+		return false
+	if bool(host.get(&"_dead")) or float(host.get(&"hp")) <= 0.0:
+		return false
+	return bool(host.call(&"restore_spent_ammo"))
+
+
 ## May we TELEPORT right now, as opposed to standing down and walking back? Two HARD refusals that hold even when a
 ## designer has opened the leash up (they are not behind `off_screen_requires_calm` — that knob only paces the
 ## clock). Only the player-death reset overrides them, and that one runs on a fully black screen.
@@ -263,8 +293,10 @@ func _physics_process(delta: float) -> void:
 		_death_due_msec = -1
 		if heal_on_player_death:
 			restore_full_health()
+		if restore_ammo_on_player_death:
+			restore_spent_ammo()
 		if not return_on_player_death:
-			return  # heal-only: nothing to move
+			return  # heal / restock only: nothing to move
 		if not return_home(death_return_ignores_view):
 			# Refused (the post / the body is on screen). Hand the request to the off-screen path with its clock
 			# already full, so it fires the instant the NPC is genuinely unobserved instead of being dropped.
@@ -288,16 +320,17 @@ func _physics_process(delta: float) -> void:
 		_off_screen_t = 0.0
 
 
-## GameState.player_died handler — arm the delayed reset (the return and/or the full heal). Nothing happens here
-## directly: die() emits this from inside the player's own death teardown, so the actual work is deferred to
-## _physics_process a beat later.
+## GameState.player_died handler — arm the delayed reset (any of the return, the full heal, the ammo restock).
+## Nothing happens here directly: die() emits this from inside the player's own death teardown, so the actual work
+## is deferred to _physics_process a beat later.
 ##
 ## Deliberately only ALIVENESS-gated here, not `_eligible()`: the exemptions that list guards (a companion, a
 ## bodyguard on duty, a cutscene body, one walking up to talk) are reasons not to MOVE an NPC, not reasons to
-## leave it wounded — a companion who fought beside you through the losing fight should come back topped up too.
-## The move half re-checks `_eligible()` inside `return_home()`, so those NPCs still stay exactly where they are.
+## leave it wounded or dry — a companion who fought beside you through the losing fight should come back topped up
+## and reloaded too. The move half re-checks `_eligible()` inside `return_home()`, so those NPCs still stay
+## exactly where they are.
 func _on_player_died() -> void:
-	if not enabled or not (return_on_player_death or heal_on_player_death):
+	if not enabled or not (return_on_player_death or heal_on_player_death or restore_ammo_on_player_death):
 		return
 	if host == null or not is_instance_valid(host) or not host.is_inside_tree():
 		return
@@ -316,7 +349,7 @@ func _teleport_to(dest: Vector3) -> void:
 	host.rotation = rot
 	host.velocity = Vector3.ZERO
 	var nav: Variant = host.get(&"_nav")
-	if nav is Object and is_instance_valid(nav):
+	if is_instance_valid(nav) and nav is Object:  # validity FIRST — `is` on a freed instance crashes (house rule)
 		nav.target_position = dest  # re-seed the agent so it doesn't path back from where we just left
 	_reset_child(host.get(&"_locomotor"))   # anti-stuck / give-up latches + the cached path
 	_reset_child(host.get(&"_locomotion"))  # the stale wander destination + dwell
@@ -325,7 +358,7 @@ func _teleport_to(dest: Vector3) -> void:
 ## Call reset_for_reuse() on a host child if it's a live node that has one. (Both callers above are per-life
 ## steering state whose reuse reset is exactly the "forget where you were going" we need here.)
 func _reset_child(child: Variant) -> void:
-	if child is Object and is_instance_valid(child) and child.has_method(&"reset_for_reuse"):
+	if is_instance_valid(child) and child is Object and child.has_method(&"reset_for_reuse"):
 		child.call(&"reset_for_reuse")
 
 
@@ -348,10 +381,10 @@ func _eligible() -> bool:
 	if host.has_method(&"is_following") and bool(host.call(&"is_following")):
 		return false  # a companion's home is the player — CompanionFollow owns its own catch-up blink
 	var vip: Variant = host.get(&"_guarding")
-	if vip is Object and is_instance_valid(vip):
+	if is_instance_valid(vip) and vip is Object:
 		return false  # a bodyguard stays beside its protectee, not at its spawn point
 	var talk: Variant = host.get(&"_talk")
-	if talk is Object and is_instance_valid(talk) and talk.has_method(&"is_approaching") \
+	if is_instance_valid(talk) and talk is Object and talk.has_method(&"is_approaching") \
 			and bool(talk.call(&"is_approaching")):
 		return false  # walking up to be framed for dialogue — let it finish
 	# Belt-and-braces: an open conversation pauses the tree (so this rarely gets a chance to run), but the
@@ -369,10 +402,10 @@ func _eligible() -> bool:
 ## FORBIDS the teleport in `_may_blink()` regardless of that knob.
 func _engaged() -> bool:
 	var perception: Variant = host.get(&"_perception")
-	if perception is Object and is_instance_valid(perception) and int(perception.state) != Perception.State.UNAWARE:
+	if is_instance_valid(perception) and perception is Object and int(perception.state) != Perception.State.UNAWARE:
 		return true
 	var target: Variant = host.get(&"_target")
-	return target is Object and is_instance_valid(target)
+	return is_instance_valid(target) and target is Object
 
 
 ## Flat (horizontal) distance from this NPC to the human player, or INF when there is no player in the tree (a
@@ -433,7 +466,7 @@ func _player_camera() -> Camera3D:
 	if player == null:
 		return null
 	var cam: Variant = player.get(&"camera_effects")
-	if cam is Camera3D and is_instance_valid(cam):
+	if is_instance_valid(cam) and cam is Camera3D:
 		return cam as Camera3D
 	return null
 

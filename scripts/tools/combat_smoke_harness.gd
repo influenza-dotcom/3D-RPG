@@ -30,6 +30,11 @@ const ReportScript := preload("res://scripts/tools/combat_smoke_report.gd")
 @export var combat_seconds: float = 9.0    ## generous window: perception time_to_detect + GOAP plan + aim + fire + travel
 @export var nav_ready_timeout_frames: int = 600
 @export var orphan_slack: int = 8
+## Record the physics frame of every round that leaves the shooter's muzzle into CombatSmokeReport.shot_frames.
+## OFF by default, so the standing smoke run is untouched. ON for the BURST gate (WeaponData.npc_burst_count):
+## burst fire's whole meaning is a timing PATTERN — three rounds at the gun's cyclic rate, then the telegraphed
+## breathing gap — which no off-tree unit test can see, so the timeline is sampled from a real firefight instead.
+@export var sample_shots: bool = false
 
 var _shooter: Node3D = null
 var _dummy: Node3D = null
@@ -65,8 +70,17 @@ func run_smoke() -> RefCounted:
 	report.initial_distance = _shooter.global_position.distance_to(_dummy.global_position)
 
 	var frames := int(maxf(1.0, combat_seconds) * maxi(1, Engine.physics_ticks_per_second))
+	var last_ammo := _shooter_ammo()  # -1 while the gun isn't readable; the sampler ignores anything but a DECREMENT
 	for i in frames:
 		await get_tree().physics_frame
+		# Shot timeline (opt-in): a magazine DECREMENT is one round actually downrange — a refused trigger pull
+		# spends nothing, and a reload only ever raises the count, so both are ignored by the "went down" test.
+		if sample_shots and is_instance_valid(_shooter):
+			var ammo := _shooter_ammo()
+			if last_ammo >= 0 and ammo >= 0 and ammo < last_ammo:
+				for _round in (last_ammo - ammo):  # a multi-pellet shell still spends one round; a burst never fires two in a frame
+					report.shot_frames.append(i)
+			last_ammo = ammo
 		if not is_instance_valid(_shooter):
 			report.notes.append("shooter freed mid-run (died?)")
 			break
@@ -111,6 +125,17 @@ func _spawn_npc(name_str: String, fac: Faction, wep, pos: Vector3, face_dir: Vec
 	parent.add_child(npc)
 	_spawned.append(npc)
 	return npc as Node3D
+
+
+## Rounds left in the shooter's magazine, or -1 when the gun isn't readable yet (pre-_ready, disarmed, freed).
+## Duck-typed off the NPC's WeaponSystem child, the same way the harness reads hp/_dead off the dummy.
+func _shooter_ammo() -> int:
+	if not is_instance_valid(_shooter):
+		return -1
+	var ws = _shooter.get(&"_weapon")
+	if ws == null:
+		return -1
+	return int(ws.current_ammo)
 
 
 func _free_combatants() -> void:

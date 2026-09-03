@@ -1365,6 +1365,7 @@ static func _cmd_npc(ctx: Dictionary, args: PackedStringArray) -> PackedStringAr
 	match verb:
 		"kill": out.append_array(_npc_kill(ctx, npc))
 		"heal": out.append_array(_npc_heal(npc))
+		"restock": out.append_array(_npc_restock(npc))
 		"hostile": out.append_array(_npc_disposition(npc, DispositionScript.Kind.HOSTILE))
 		"neutral": out.append_array(_npc_disposition(npc, DispositionScript.Kind.NEUTRAL))
 		"friendly": out.append_array(_npc_disposition(npc, DispositionScript.Kind.FRIENDLY))
@@ -1439,6 +1440,42 @@ static func _npc_heal(npc: Node) -> PackedStringArray:
 		npc.call(&"heal_limbs")
 	npc.call(&"heal", maxf(max_hp - before, 0.0))
 	out.append("heal(): hp %.0f -> %.0f / %.0f, limbs cleared (no NpcHomeReturn on this NPC — healed by hand)" % [before, _float_of(npc.get(&"hp")), max_hp])
+	return out
+
+
+## restock: NPC.restore_spent_ammo — the AMMO half of the player-death encounter reset, driven by hand so you can
+## watch it without dying. Refills the magazine and returns every spare clip this NPC's reloads BURNED; it never
+## hands back ammo you PICKPOCKETED (the ledger only books clips as they are spent), so a guard you stripped to
+## disarm him stays stripped no matter how often you run this. Prints the mag + reserve either side of the call,
+## which is what makes the "stolen ammo did NOT come back" half visible.
+static func _npc_restock(npc: Node) -> PackedStringArray:
+	if not _alive(npc):
+		return _one("dead — a corpse's backpack is the loot you earned; the restock only tops up survivors")
+	if not npc.has_method(&"restore_spent_ammo"):
+		return _one("no restore_spent_ammo() on this node")
+	var weapon: Variant = npc.get(&"_weapon")
+	if weapon == null or not is_instance_valid(weapon):
+		return _one("no weapon hub — a CIVILIAN (weapon_data unset) has no magazine to fill and no caliber to stock")
+	var caliber: StringName = &""
+	var wd: Variant = weapon.get(&"equipped_weapon")
+	if wd != null and is_instance_valid(wd):
+		caliber = wd.caliber
+	var bag: Variant = npc.get(&"inventory")
+	var has_bag := bag != null and is_instance_valid(bag)
+	var mag_before := _int_of(weapon.get(&"current_ammo"))
+	var clips_before := int(bag.call(&"ammo_count", caliber)) if has_bag and caliber != &"" else 0
+	var restored := bool(npc.call(&"restore_spent_ammo"))
+	var out := PackedStringArray()
+	out.append("NPC.restore_spent_ammo: %s  magazine %d -> %d" % [
+		"gave ammo back" if restored else "nothing owed (it has fired nothing since the last restock)",
+		mag_before, _int_of(weapon.get(&"current_ammo"))])
+	if caliber == &"":
+		out.append("  its weapon is caliber-less (melee / free-refill) — there is no reserve to restock")
+	elif has_bag:
+		out.append("  reserve %s: %d -> %d clips  (only clips its RELOADS spent; anything you pickpocketed stays yours)" % [
+			caliber, clips_before, int(bag.call(&"ammo_count", caliber))])
+	else:
+		out.append("  no backpack on this body — the magazine free-refills and no reserve is tracked")
 	return out
 
 
@@ -2987,9 +3024,11 @@ static func _cmd_quantize(args: PackedStringArray) -> PackedStringArray:
 ## One depth index as a line: its per-channel steps and how many colours that actually is. The counts come from
 ## Settings so this can never quote a different number than the shader is given.
 static func _quantize_text(mode: int) -> String:
+	@warning_ignore("static_called_on_instance")  # `Settings` is the autoload instance; these mappings are static
 	var levels: Vector3 = Settings.color_quantize_levels(mode)
 	if levels == Vector3.ZERO:
 		return "authored (the material's own color_steps)"
+	@warning_ignore("static_called_on_instance")  # as above
 	var colors := int(Settings.color_quantize_color_count(mode))
 	return "steps r%d g%d b%d = %s colours" % [int(levels.x), int(levels.y), int(levels.z), _grouped(colors)]
 
@@ -3789,7 +3828,7 @@ const LENS_AUTHORED := {"barrel": 0.12, "chroma": 0.35}
 ## by every scene, so an override survives death, respawn and level changes (the same lifetime as a `dof` override
 ## and the opposite of `sway`) — but nothing ever writes it to disk. To keep a value, put it in
 ## resources/tuning/CameraSettings.tres in the Inspector, or change the @export default in CameraSettings.gd.
-static func _cmd_lens(ctx: Dictionary, args: PackedStringArray) -> PackedStringArray:
+static func _cmd_lens(_ctx: Dictionary, args: PackedStringArray) -> PackedStringArray:
 	var cam_set: Variant = GameSettings.get(&"camera")
 	if cam_set == null:
 		return _one("lens: GameSettings has no `camera` group — nothing to drive (a reimport transient; try again in a second)")

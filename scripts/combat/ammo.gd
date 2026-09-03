@@ -25,6 +25,17 @@ var character: Character
 ## the WeaponData resource instance.
 var _ammo_per_weapon: Dictionary = {}
 
+## Reserve clips this wielder has BURNED reloading, per caliber (StringName -> int), since the last
+## restore_spent_ammo(). The ledger for the player-death encounter reset: an NPC that emptied four clips into
+## you would otherwise stay dry forever, because the default CHECKPOINT_RESPAWN death mode leaves the world
+## untouched — so every retry of a fight you lost is against a progressively more disarmed enemy.
+##
+## ⭐COUNTED AT THE ONE SEAM THAT SPENDS THEM (_refilled_clip), never inferred from a "should have" baseline, so
+## it can only ever describe ammo this wielder actually FIRED OFF. A clip the player PICKPOCKETED never lands in
+## here — stealing an NPC's ammo to disarm it (npc.gd is_armed / _can_fight_with_gun) is a real mechanic, and
+## refilling from a baseline would silently undo it on the next death.
+var _spent_clips: Dictionary = {}
+
 ## A backgrounded (swapped-away mid-reload) reload runs this much slower than a normal one.
 @export var bg_reload_slowdown: float = 1.5
 ## Weapons reloading in the BACKGROUND after you swapped away mid-reload (WeaponData -> normal-speed
@@ -68,7 +79,56 @@ func reset_for_reuse() -> void:
 	set_to_max_ammo()
 	_ammo_per_weapon.clear()  # per-weapon banked clip counts across swaps — no stale partial clip resurfaces later
 	_bg_reloads.clear()
+	# The spent-clip ledger is per-LIFE too: NPC.reset_for_reuse wipes and re-seeds the whole backpack right after
+	# this, so a debt carried over from the previous life would pay out as FREE clips on the fresh body's first
+	# player-death restore — ammo nobody ever fired.
+	_spent_clips.clear()
 	set_process(false)
+
+## Hand back the ammo this wielder has EXPENDED since the last call — the ammo half of the player-death encounter
+## reset (npc_home_return.gd, alongside the full heal). Two halves, which together restore the exact state the
+## wielder started the fight in:
+##   1. EVERY MAGAZINE back to full — the live one and each weapon's clip banked across a swap. This covers both
+##      the rounds that were fired and the partial mag a reload EJECTED (those rounds are lost, see _refilled_clip).
+##      Uses the free set-to-max fill, never reload(), which would spend yet another spare clip.
+##   2. EVERY SPARE CLIP reloading burned back into the reserve, from the `_spent_clips` ledger.
+##
+## Returns true when anything was actually given back (an untouched wielder reports no work done).
+##
+## ⭐THIS ONLY EVER GIVES. It never takes rounds away and it never tops the reserve up to some authored baseline:
+## the ledger is the only source, so ammo the player PICKPOCKETED off an NPC stays stolen and the disarm-by-theft
+## mechanic survives the reset. (The corollary: an NPC authored `starts_unloaded` comes back with a LOADED gun
+## once it has reloaded during the fight — the dry-gun opening is a spawn state, not something this restores.)
+##
+## ⭐A clip that will not FIT (the bounded grid backpack is full) stays on the ledger rather than being dropped, so
+## it is handed back on the next death instead of being silently eaten.
+func restore_spent_ammo() -> bool:
+	var restored := false
+	if current_weapon != null and current_ammo < current_weapon.max_ammo:
+		current_ammo = current_weapon.max_ammo
+		restored = true
+	for w in _ammo_per_weapon:
+		var banked: WeaponData = w
+		if banked != null and int(_ammo_per_weapon[w]) < banked.max_ammo:
+			_ammo_per_weapon[w] = banked.max_ammo
+			restored = true
+	if character == null or character.inventory == null:
+		_spent_clips.clear()  # a free-refilling wielder never took clips out of a bag; nothing to owe
+		return restored
+	for caliber in _spent_clips.keys():
+		var owed: int = int(_spent_clips[caliber])
+		var item: Item = ItemDb.ammo_item_for(caliber)
+		if owed <= 0 or item == null:
+			_spent_clips.erase(caliber)
+			continue
+		var given: int = character.inventory.add(item, owed)
+		if given > 0:
+			restored = true
+		if given >= owed:
+			_spent_clips.erase(caliber)
+		else:
+			_spent_clips[caliber] = owed - given  # bag full — keep the remainder owed for next time
+	return restored
 
 ## Hand a weapon's banked clip + any in-flight background reload to a REPLACEMENT WeaponData object (a
 ## weapon-bench refit rebuilds the stat block into a NEW resource, so every WeaponData-KEYED cache here
@@ -138,7 +198,11 @@ func _refilled_clip(weapon: WeaponData, from_current: int) -> int:
 		return weapon.max_ammo
 	if character.inventory.ammo_count(weapon.caliber) <= 0:
 		return from_current  # no spare clips -> keep what's chambered
-	character.inventory.take_ammo(weapon.caliber, 1)  # spend ONE clip
+	# Spend ONE clip, and BOOK it: take_ammo's return (not a blind 1) is what actually left the backpack, so the
+	# ledger restore_spent_ammo() hands back can never exceed what was really burned.
+	var taken: int = character.inventory.take_ammo(weapon.caliber, 1)
+	if taken > 0:
+		_spent_clips[weapon.caliber] = int(_spent_clips.get(weapon.caliber, 0)) + taken
 	return weapon.max_ammo  # old clip discarded; the spare clip seats a full magazine
 
 func _on_reload_timeout() -> void:

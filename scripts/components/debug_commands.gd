@@ -465,8 +465,8 @@ const COMMANDS: Array[Dictionary] = [
 	{
 		"name": "npc", "mod": &"world", "category": "AI",
 		"args": [Kind.VERB, Kind.NUMBER], "min_args": 1, "arg_names": ["verb", "value"],
-		"verbs": ["kill", "heal", "hostile", "neutral", "friendly", "provoke", "alert", "investigate", "walkto", "release", "home", "panic", "freeze", "unfreeze", "sight", "rebrain"],
-		"help": "Act on the NPC under your crosshair (the F4 inspector's last physics-tick target). investigate/walkto use the crosshair hit point; `sight <r>` sets its sight range; `walkto` latches cutscene control until `release`.",
+		"verbs": ["kill", "heal", "restock", "hostile", "neutral", "friendly", "provoke", "alert", "investigate", "walkto", "release", "home", "panic", "freeze", "unfreeze", "sight", "rebrain"],
+		"help": "Act on the NPC under your crosshair (the F4 inspector's last physics-tick target). investigate/walkto use the crosshair hit point; `sight <r>` sets its sight range; `walkto` latches cutscene control until `release`; `heal` and `restock` are the player-death encounter reset (full HP / the ammo it FIRED back) driven by hand.",
 		"danger": false,
 	},
 	{

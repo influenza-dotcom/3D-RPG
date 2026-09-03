@@ -137,13 +137,73 @@ func test_reset_for_reuse_clears_the_timers() -> void:
 	assert_eq(_hr._death_due_msec, -1, "a pending player-death return is dropped (-1 = none armed)")
 	assert_eq(_hr._scan_t, 0.0, "the scan throttle rewinds")
 
-func test_player_death_handler_is_inert_when_both_triggers_are_off() -> void:
-	# The cue now drives TWO independent halves of the encounter reset (go home + full heal); it must arm when
-	# EITHER is wanted, and only stay dark when neither is.
+func test_player_death_handler_is_inert_when_every_trigger_is_off() -> void:
+	# The cue drives THREE independent pieces of the encounter reset (go home + full heal + ammo restock); it must
+	# arm when ANY is wanted, and only stay dark when none is.
 	_hr.return_on_player_death = false
 	_hr.heal_on_player_death = false
+	_hr.restore_ammo_on_player_death = false
 	_hr._on_player_died()
-	assert_eq(_hr._death_due_msec, -1, "with both triggers off, the death cue arms nothing")
+	assert_eq(_hr._death_due_msec, -1, "with every trigger off, the death cue arms nothing")
+
+## --- The ammo restock (the third piece of the player-death reset) ----------------------------------------------
+
+func test_the_ammo_restock_ships_on_and_is_independent_of_the_other_two() -> void:
+	assert_true(_hr.restore_ammo_on_player_death,
+		"spent ammo is handed back on player death by default — otherwise CHECKPOINT_RESPAWN leaves an enemy "
+		+ "progressively more disarmed every time you die at the same fight, until it runs dry and drops to fists")
+	var src := FileAccess.get_file_as_string("res://scripts/npc/npc_home_return.gd")
+	assert_true(src.contains("if restore_ammo_on_player_death:\n\t\t\trestore_spent_ammo()"),
+		"the armed death beat restocks BEFORE it decides whether to move the body")
+	var handler := src.find("func _on_player_died()")
+	assert_gt(handler, -1, "func _on_player_died() no longer present — the pin is stale")
+	var gate := src.find("if not enabled or not (", handler)
+	assert_gt(gate, -1, "the handler's arming gate no longer present — the pin is stale")
+	assert_true(src.substr(gate, 160).contains("restore_ammo_on_player_death"),
+		"restock-only is a valid configuration: the cue must arm for it even with the return and the heal off")
+
+func test_restore_spent_ammo_is_inert_without_a_host() -> void:
+	assert_false(_hr.restore_spent_ammo(), "no host -> nothing to restock, not a null-deref")
+
+func test_restore_spent_ammo_never_restocks_a_corpse() -> void:
+	# A dead NPC's backpack is the LOOT the player earned by winning that trade. Refilling it would mint ammo
+	# onto a body they are about to search.
+	var host = load("res://scripts/npc/npc.gd").new()
+	host.max_hp = 40.0
+	host.hp = 0.0
+	host._dead = true
+	_hr.host = host
+	assert_false(_hr.restore_spent_ammo(), "a corpse is not restocked")
+	host.free()
+
+func test_restore_spent_ammo_goes_through_the_npc_facade_not_a_raw_refill() -> void:
+	# The ledger (Ammo._spent_clips) is the whole safety property: it books each spare clip AS IT IS SPENT, so
+	# the restore can only return rounds that were actually fired. A "top the bag back up to starting_clips"
+	# refill would also hand back ammo the PLAYER PICKPOCKETED, and stripping an NPC of ammo to disarm it is a
+	# real mechanic (npc.gd _can_fight_with_gun), not a bug.
+	var src := FileAccess.get_file_as_string("res://scripts/npc/npc_home_return.gd")
+	assert_true(src.contains('host.call(&"restore_spent_ammo")'),
+		"the restock goes through the NPC facade, which owns the weapon hub")
+	assert_false(src.contains("GameSettings.npc_ai.starting_clips"),
+		"the leash must NEVER refill from the authored loadout — that would undo the player's pickpocketing")
+
+func test_npc_exposes_the_restore_spent_ammo_seam() -> void:
+	var npc = load("res://scripts/npc/npc.gd").new()
+	assert_true(npc.has_method("restore_spent_ammo"),
+		"NPC.restore_spent_ammo() is the facade the leash calls (and the `npc restock` console verb)")
+	assert_false(npc.restore_spent_ammo(),
+		"a bare NPC has no weapon hub — the facade degrades to false instead of null-dereffing _weapon.ammo")
+	npc.free()
+
+func test_ammo_owns_the_ledger_and_the_restore() -> void:
+	# The arithmetic lives in scripts/combat/ammo.gd (pinned by tests/test_ammo_reserve.gd); this is the wiring.
+	var src := FileAccess.get_file_as_string("res://scripts/combat/ammo.gd")
+	assert_true(src.contains("func restore_spent_ammo() -> bool:"), "Ammo owns the restore")
+	assert_true(src.contains("_spent_clips[weapon.caliber] = int(_spent_clips.get(weapon.caliber, 0)) + taken"),
+		"the ledger is written at _refilled_clip — the ONE seam that takes a clip out of the backpack")
+	assert_true(src.contains("_spent_clips.clear()"),
+		"pool reuse drops the ledger, or last life's debt mints free clips into the re-seeded bag")
+
 
 ## --- The full heal (the other half of the player-death reset) --------------------------------------------------
 
@@ -294,7 +354,7 @@ func test_npc_ai_settings_expose_the_leash_dials() -> void:
 	# The auto-built component seeds from these; a renamed field would fail at spawn, not here, so pin the names.
 	var s := NpcAiSettings.new()
 	for field in ["home_return", "home_return_on_player_death", "home_return_death_delay",
-			"home_return_heal_on_player_death", "home_return_off_screen",
+			"home_return_heal_on_player_death", "home_return_restore_ammo_on_player_death", "home_return_off_screen",
 			"home_return_off_screen_delay", "home_return_requires_calm", "home_return_slack", "home_return_blink",
 			"home_return_min_blink_distance"]:
 		assert_true(field in s, "NpcAiSettings exposes %s (NPC._build_components seeds the leash from it)" % field)

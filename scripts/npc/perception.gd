@@ -95,6 +95,12 @@ var is_hostile: bool = true
 
 var state: State = State.UNAWARE
 var detection: float = 0.0          ## 0..1 awareness meter (also drives the laser glow)
+## Did the LAST sense() tick have an actual clear line to the target? A CACHE of can_see(), which costs a
+## FOV test plus a SightRay cast — far too expensive to re-ask from a per-frame consumer, and sense() has
+## already paid for it. Read by NPC._tick_aim_tracking to decide whether the aim tracks the live target or
+## holds on last_known_position (you cannot swing onto, or predict the motion of, someone you cannot see).
+## Refreshed on the AI-LOD think cadence like the rest of sensing, and false whenever we have forgotten.
+var saw_target: bool = false
 var last_known_position: Vector3
 var target: Node3D                  ## the target root — player or NPC (set by the owner)
 var target_body: Node3D             ## target's collision shape for LOS; falls back to target
@@ -132,6 +138,7 @@ func sense(delta: float) -> void:
 	# look-toward-it INVESTIGATING (you can't be shot through a wall just for being heard), and
 	# refreshes that wariness while the noise lasts.
 	var seen := can_see()
+	saw_target = seen  # cache the expensive LOS answer for this think (see saw_target)
 	var heard := can_hear()
 	if seen or heard:
 		last_known_position = _target_point()
@@ -298,6 +305,7 @@ func investigate_point(pos: Vector3, alerting: bool = true, seed_radius: float =
 func forget() -> void:
 	state = State.UNAWARE
 	detection = 0.0
+	saw_target = false  # forgotten means we are not looking at anything — never leave a stale clear line behind
 	_investigate_t = 0.0
 	_pursuit_grace_t = 0.0  # drop any in-flight pursuit coast so a re-detect starts fresh (and NpcPool reuse is clean)
 	noticed = null  # the last "!" is over; a stale (possibly freed) stimulus must not leak into the next edge / pooled life
@@ -491,7 +499,7 @@ func _crouch_range_mult() -> float:
 	if not is_instance_valid(target):
 		return 1.0
 	var crouch: Variant = target.get(&"crouch")
-	if not (crouch is Object) or not is_instance_valid(crouch):
+	if not is_instance_valid(crouch) or not (crouch is Object):  # validity FIRST — `is` on a freed instance crashes
 		return 1.0
 	# Duck-typed read: the crouch component's crouch_t into a Variant + a numeric type-guard. A target whose
 	# crouch node lacks it (or holds a non-number) is treated as standing — full range, the neutral fallback.

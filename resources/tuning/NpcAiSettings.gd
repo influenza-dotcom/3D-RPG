@@ -56,6 +56,36 @@ extends Resource
 ## round covers the whole grace band in ~0.4 s), so it is purely a sanity clamp; lower it to blunt leading at
 ## long range only. Irrelevant when aim_lead_fraction is 0.
 @export var aim_lead_max_time: float = 1.5
+## AIM INERTIA (degrees per second): the fastest an NPC's SHOT DIRECTION may swing across the world. The
+## "stop snapping onto me" dial. Before this the fired direction was solved fresh from geometry at the instant
+## the trigger pulled, so an NPC's aim was wherever it needed to be with no transition at all: step out of
+## cover and the first round was already on your chest, dash past a guard and its muzzle teleported with you.
+## The aim is now a tracked vector that has to TURN — it starts on the body's own facing, and every frame it
+## rotates toward the ideal (led) aim point by at most this many degrees, so a big correction costs real time.
+## For scale at the default: a 90 deg swing takes ~0.55 s (about one min_shot_interval — the NPC gets roughly
+## one shot off mid-turn, and it goes wide), a full 180 deg about-face ~1.1 s.
+## ⭐It deliberately does NOT re-open the infinite strafe [[aim_lead_fraction]] was added to close. A rate CAP
+## has zero steady-state error: while tracking needs less than this many deg/s the aim sits exactly on the
+## intercept, so a held strafe is punished as before (10 m out, a 5 m/s sidestep needs only ~29 deg/s). It
+## bites on CHANGE — appearing, dashing, an about-face, a close-range circle strafe — which is the counterplay
+## the design already asks for: juke, don't hold a line. An exponential ease would have leaked a permanent
+## tracking lag into the steady case and undone that, which is why this is a hard cap and not a smoothing.
+## While an NPC cannot SEE its target the aim holds on the last-known position instead of tracking through the
+## wall, so re-peeking a DIFFERENT angle costs the full swing and re-peeking the same hole does not.
+## Scaled PER NPC by the same gunplay steadiness the cone and the lead use (divided by CharacterStats.sway_mult),
+## so a marksman whips on faster; a gunplay 12.5+ elite swings instantly. 0 = no cap, i.e. the old snap-on aim.
+@export var aim_turn_rate_deg: float = 160.0
+## AIM INERTIA, second half (seconds): how long an NPC's READ of your velocity takes to catch up, as the time
+## constant of an exponential ease. The intercept solve above is only as good as the velocity it is fed, and
+## feeding it your instantaneous velocity meant the predicted point snapped the moment you moved — start a
+## strafe and the aim jumped a body-width ahead of you in the same frame it began. The NPC now believes a
+## LAGGED velocity, so starting, stopping and reversing all under-lead for a beat before the prediction
+## catches up (a held strafe still converges to the full intercept within ~2-3x this, so it is not a way back
+## to dodging forever). Eases toward ZERO while the target is out of sight — you cannot predict motion you
+## cannot see — so a shot taken the instant someone re-peeks is barely led at all.
+## Scaled PER NPC by gunplay (multiplied by CharacterStats.sway_mult), so a steadier shooter reads you sooner;
+## a gunplay 12.5+ elite reads you instantly. 0 = the raw instantaneous velocity, i.e. the pre-inertia solve.
+@export var aim_velocity_lag: float = 0.25
 ## Within this (m) a combatant treats its shot as CLEAR even when the LOS ray self-occludes
 ## (a target crowded onto the muzzle starts the ray inside its own collider) — fire anyway.
 @export var point_blank_range: float = 2.0
@@ -125,6 +155,16 @@ extends Resource
 ## Applies to the whole cast, companions and shopkeepers included. OFF -> damage persists (the pre-heal
 ## behaviour); per-NPC overrides live on `heal_on_player_death` in a hand-placed NpcHomeReturn.
 @export var home_return_heal_on_player_death: bool = true
+## Also hand every surviving NPC back the AMMO it BURNED on that same player-death beat — magazines refilled and
+## every spare clip its reloads spent returned to its backpack. The third piece of the encounter reset, for the
+## same reason as the heal: under CHECKPOINT_RESPAWN spent ammo persists for the rest of the session, so dying at
+## the same fight over and over leaves the enemy progressively more disarmed until it runs dry and drops to fists
+## — a fight that gets easier every time you lose it. ONLY WHAT WAS FIRED comes back: the count is booked as each
+## clip is spent, so ammo the player PICKPOCKETED off an NPC stays stolen and stripping a guard to disarm him
+## still works. THE DEAD ARE NOT RESTOCKED — a corpse's backpack is the loot you earned. OFF -> spent ammo
+## persists (the pre-restock behaviour); per-NPC overrides live on `restore_ammo_on_player_death` in a
+## hand-placed NpcHomeReturn.
+@export var home_return_restore_ammo_on_player_death: bool = true
 ## Send an NPC home once the player hasn't been able to SEE it for a while (the leash for a chase that wandered
 ## off the map). Never moves a body in view: the blink is refused while the NPC or its post is on screen.
 @export var home_return_off_screen: bool = true

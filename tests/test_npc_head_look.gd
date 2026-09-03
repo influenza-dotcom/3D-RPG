@@ -49,19 +49,58 @@ func test_aim_offsets_pitch_up_and_down() -> void:
 	assert_lt(down.y, 0.0, "a target below eye level pitches the head DOWN (-)")
 
 
-func test_in_cone_passes_inside() -> void:
-	assert_true(
-		HL.in_cone(5.0, deg_to_rad(10.0), deg_to_rad(5.0), 12.0, deg_to_rad(70.0), deg_to_rad(35.0)),
-		"in range and inside both cones -> the head may track it")
+# --- clamp_offsets: the cone is a CLAMP, not a pass/fail gate --------------------------------------------------
+# ⭐The bug these pin: this used to be in_cone(), a bool that dropped the head to NEUTRAL the moment a target
+# crossed max_yaw/max_pitch — so every NPC had an invisible angle you could cross to switch its attention off
+# mid-look, dialogue included (the tight ±25° pitch cone is exceeded just standing close to a seated NPC).
+
+const MAX_YAW := deg_to_rad(70.0)
+const MAX_PITCH := deg_to_rad(35.0)
+const REL_YAW := deg_to_rad(100.0)
+const REL_PITCH := deg_to_rad(70.0)
 
 
-func test_in_cone_rejects_out_of_range_or_cone() -> void:
-	assert_false(HL.in_cone(20.0, 0.0, 0.0, 12.0, deg_to_rad(70.0), deg_to_rad(35.0)),
+func _clamped(range_m: float, yaw_deg: float, pitch_deg: float, max_range: float = 12.0) -> Vector2:
+	return HL.clamp_offsets(range_m, deg_to_rad(yaw_deg), deg_to_rad(pitch_deg), max_range,
+		MAX_YAW, MAX_PITCH, REL_YAW, REL_PITCH)
+
+
+func test_clamp_offsets_passes_inside_untouched() -> void:
+	var o := _clamped(5.0, 10.0, 5.0)
+	assert_almost_eq(rad_to_deg(o.x), 10.0, 0.001, "in range and inside both cones -> the head tracks it exactly")
+	assert_almost_eq(rad_to_deg(o.y), 5.0, 0.001, "and the pitch passes through untouched too")
+
+
+func test_clamp_offsets_clamps_past_the_cone_instead_of_dropping() -> void:
+	# THE REGRESSION: past the yaw cone the head must HOLD at the cone edge, still leaning at the target --
+	# never ease dead ahead, which is what made an NPC blink out of attention at one specific angle.
+	var yawed := _clamped(5.0, 85.0, 0.0)
+	assert_almost_eq(rad_to_deg(yawed.x), 70.0, 0.001, "past the yaw cone -> CLAMPED to the cone edge, not neutral")
+	var down := _clamped(1.2, 0.0, -50.0)
+	assert_almost_eq(rad_to_deg(down.y), -35.0, 0.001,
+		"a steep down-look (close talk to a seated NPC) -> clamped to the pitch cone, not neutral")
+	# ...and the clamp NEVER exceeds the authored limit, so it can't introduce the head-into-collar clip.
+	assert_lte(absf(_clamped(5.0, 99.0, 0.0).x), MAX_YAW + 0.0001, "the clamp never craned past max_yaw")
+
+
+func test_clamp_offsets_keeps_the_other_axis_while_clamping_one() -> void:
+	var o := _clamped(5.0, 85.0, 12.0)
+	assert_almost_eq(rad_to_deg(o.x), 70.0, 0.001, "the out-of-cone yaw clamps")
+	assert_almost_eq(rad_to_deg(o.y), 12.0, 0.001, "while the in-cone pitch is still tracked exactly")
+
+
+func test_clamp_offsets_releases_to_neutral_past_the_outer_cone() -> void:
+	assert_eq(_clamped(20.0, 0.0, 0.0), Vector2.ZERO,
 		"past look_range -> neutral (head doesn't track a far target)")
-	assert_false(HL.in_cone(5.0, deg_to_rad(80.0), 0.0, 12.0, deg_to_rad(70.0), deg_to_rad(35.0)),
-		"past the yaw cone -> neutral (the body must turn first, head won't crane)")
-	assert_false(HL.in_cone(5.0, 0.0, deg_to_rad(50.0), 12.0, deg_to_rad(70.0), deg_to_rad(35.0)),
-		"past the pitch cone -> neutral")
+	assert_eq(_clamped(5.0, 130.0, 0.0), Vector2.ZERO,
+		"past the RELEASE yaw cone (target behind us) -> neutral; a head held hard over would just stare at a wall")
+	assert_eq(_clamped(5.0, 0.0, 80.0), Vector2.ZERO,
+		"past the release pitch cone (target overhead) -> neutral")
+
+
+func test_clamp_offsets_sign_is_preserved_both_ways() -> void:
+	assert_almost_eq(rad_to_deg(_clamped(5.0, -85.0, 0.0).x), -70.0, 0.001, "a target off the LEFT clamps to -max_yaw")
+	assert_almost_eq(rad_to_deg(_clamped(5.0, 0.0, 60.0).y), 35.0, 0.001, "a target above clamps to +max_pitch")
 
 
 func test_ease_toward_converges_to_target_and_neutral() -> void:

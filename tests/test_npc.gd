@@ -181,11 +181,87 @@ func test_at_post_is_true_off_tree() -> void:
 	assert_true(n._at_post(), "an off-tree NPC has never left its post, so the seat applies")
 	n.free()
 
-# --- Held-gun anchor rides the seated drop --------------------------------------------------------------
+# --- Held-gun anchor: the HANDS first, the authored offset as the fallback ------------------------------
+# The weapon view-model hangs off `_muzzle`, a Marker3D on the NPC ROOT, and everything downstream (shot and
+# laser origin, tracer, attack.muzzle, the muzzle FX) reads that marker's descendants. Two anchoring rules,
+# in priority order, and both are pinned below:
+#   1. weapon_in_hands (default) -> the grip the swapped ARMS currently form (BodyModelSwap.weapon_grip_position).
+#      The arm pose already bakes in the seated drop, so this supersedes the posture-offset hack for any rig
+#      that HAS arms.
+#   2. no arms / feature off -> the authored `muzzle_offset`, ridden down by the body's posture offset, which
+#      is the pre-hands behaviour a bare mob and every unit-test rig still gets.
 
-func test_muzzle_anchor_follows_the_body_posture_offset() -> void:
-	# The weapon view-model hangs off _muzzle on the NPC ROOT while the visible body drops onto the seat, so
-	# without this sync a seated guard's rifle floats at standing chest height above the hands holding it.
+## A BodyModelSwap with a real ARM PAIR, off-tree: two bare Node3D "arms" carrying a mesh so the reach measures,
+## placed by the swap's own _apply_arm_transform. Returns the swap (already childed to `n`).
+func _swap_with_arms(n: Node, arm_pos: Vector3, hold_pitch: float) -> Node:
+	var bms = load("res://scripts/components/body_model_swap.gd").new()
+	bms.arm_position = arm_pos
+	bms.arm_rotation = Vector3(90.0, 0.0, 0.0)   # the shipped rig: the arm model's +Z hand axis is turned DOWN
+	bms.arm_scale = 1.0
+	bms.arm_hold_pitch = hold_pitch
+	n.add_child(bms)
+	for side in 2:
+		var arm := Node3D.new()
+		var mi := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(0.1, 0.1, 2.0)
+		mi.mesh = box
+		mi.position = Vector3(0.0, 0.0, 1.0)     # so the farthest AABB corner (the "hand") is ~2 m down local +Z
+		arm.add_child(mi)
+		bms.add_child(arm)
+		if side == 0:
+			bms._arm_left = arm
+		else:
+			bms._arm_right = arm
+	# _apply_arm_transform writes the REST pose (arms hanging); the HOLD pitch only reaches the arms through
+	# _animate_limbs, which needs a live _process. Pose them by hand at the hold angle — the same expression
+	# _animate_limbs writes — so these off-tree asserts describe the pose a gun is actually carried in.
+	bms._apply_arm_transform()
+	bms._arm_left.transform = bms._arm_pose(bms.arm_rotation + Vector3(hold_pitch, 0.0, 0.0))
+	bms._arm_right.transform = bms._reflect() * bms._arm_pose(bms.arm_rotation + Vector3(hold_pitch, 0.0, 0.0))
+	return bms
+
+func test_weapon_anchor_sits_at_the_grip_the_arms_form() -> void:
+	var n = load(NPC_PATH).new()
+	n.muzzle_offset = Vector3(0.1, 0.2, 0.3)   # deliberately non-zero: with hands available it must be IGNORED
+	var muzzle := Marker3D.new()
+	n.add_child(muzzle)
+	n._muzzle = muzzle
+	var bms = _swap_with_arms(n, Vector3(-0.27, 0.155, -0.05), -78.0)
+	n._sync_weapon_anchor(0.016)
+	var grip: Variant = bms.weapon_grip_position()
+	assert_true(grip is Vector3, "a swap with arms must offer a grip point")
+	assert_almost_eq(muzzle.position, grip as Vector3, Vector3.ONE * 0.0001,
+		"weapon_in_hands -> the anchor IS the arms' grip, not the authored muzzle_offset")
+	# The grip is on the body centreline (the two hands mirror across X) and OUT IN FRONT of the shoulders,
+	# which is the whole point: the gun stops floating at the belly while the arms reach past it.
+	assert_almost_eq((grip as Vector3).x, 0.0, 0.0001, "two mirrored hands meet on the centreline")
+	assert_gt((grip as Vector3).z, bms.arm_position.z, "and the grip is forward of the shoulder, in the hands")
+	n.free()
+
+func test_weapon_anchor_grip_rises_with_the_hold_pitch() -> void:
+	# arm_hold_pitch now decides WHERE THE GUN IS, not just how the arms look: a higher hold must lift the grip.
+	var low = load(NPC_PATH).new()
+	var low_muzzle := Marker3D.new()
+	low.add_child(low_muzzle)
+	low._muzzle = low_muzzle
+	var low_swap = _swap_with_arms(low, Vector3(-0.27, 0.155, -0.05), -50.0)
+	low._sync_weapon_anchor(0.016)
+	var high = load(NPC_PATH).new()
+	var high_muzzle := Marker3D.new()
+	high.add_child(high_muzzle)
+	high._muzzle = high_muzzle
+	var high_swap = _swap_with_arms(high, Vector3(-0.27, 0.155, -0.05), -90.0)
+	high._sync_weapon_anchor(0.016)
+	assert_gt(high_muzzle.position.y, low_muzzle.position.y,
+		"raising arm_hold_pitch toward level (-90) lifts the grip, and the gun with it")
+	assert_true(low_swap != null and high_swap != null, "both rigs built a swap")
+	low.free()
+	high.free()
+
+func test_weapon_anchor_falls_back_to_the_posture_offset_without_arms() -> void:
+	# An armless swap (a bare mob, or a swap that has not rebuilt) keeps the pre-hands behaviour EXACTLY: the
+	# authored anchor, ridden down by the seated drop so a seated guard's rifle doesn't float at standing height.
 	var n = load(NPC_PATH).new()
 	n.muzzle_offset = Vector3(0.1, 0.2, 0.3)
 	var muzzle := Marker3D.new()
@@ -197,14 +273,29 @@ func test_muzzle_anchor_follows_the_body_posture_offset() -> void:
 	bms._seat_ground_valid = true
 	bms._seat_ground_y = -1.0
 	n.add_child(bms)
+	assert_null(bms.weapon_grip_position(), "no arm nodes -> no grip to offer")
 	n.sitting = false
-	n._sync_muzzle_to_posture()
+	n._sync_weapon_anchor(0.016)
 	assert_eq(muzzle.position, n.muzzle_offset, "standing -> the gun sits at its authored hand anchor")
 	n.sitting = true
-	n._sync_muzzle_to_posture()
+	n._sync_weapon_anchor(0.016)
 	assert_eq(muzzle.position, n.muzzle_offset + bms.posture_offset(),
 		"seated -> the anchor drops by the SAME offset the visible body does, so the gun stays in the hands")
 	assert_lt(muzzle.position.y, n.muzzle_offset.y, "and that means it actually moves DOWN onto the seated body")
+	n.free()
+
+func test_weapon_in_hands_off_keeps_the_authored_anchor() -> void:
+	# The per-NPC escape hatch: a designer who has hand-tuned muzzle_offset can switch the hands off and get
+	# byte-identical placement back, even on a rig that HAS arms.
+	var n = load(NPC_PATH).new()
+	n.muzzle_offset = Vector3(0.1, 0.2, 0.3)
+	n.weapon_in_hands = false
+	var muzzle := Marker3D.new()
+	n.add_child(muzzle)
+	n._muzzle = muzzle
+	_swap_with_arms(n, Vector3(-0.27, 0.155, -0.05), -78.0)
+	n._sync_weapon_anchor(0.016)
+	assert_eq(muzzle.position, n.muzzle_offset, "weapon_in_hands off -> the authored anchor, arms or not")
 	n.free()
 
 func test_muzzle_sync_is_a_noop_without_a_body_swap() -> void:
@@ -216,8 +307,118 @@ func test_muzzle_sync_is_a_noop_without_a_body_swap() -> void:
 	n._muzzle = muzzle
 	n.sitting = true
 	assert_eq(n._body_posture_offset(), Vector3.ZERO, "no BodyModelSwap child -> the neutral ZERO offset")
-	n._sync_muzzle_to_posture()
+	n._sync_weapon_anchor(0.016)
 	assert_eq(muzzle.position, n.muzzle_offset, "so the hand anchor is untouched")
+	n.free()
+
+# --- The held view-model must render as a WORLD object, not as a view model ------------------------------
+# A `view_model` scene is authored for the PLAYER's rig: it draws from a dedicated camera inside its own
+# SubViewport (ViewModelCamera.VIEW_MODEL_LAYER = 4, stripped from the main camera's cull_mask) and composites
+# over the finished frame — which is exactly what stops your own gun clipping into a wall, and exactly what
+# makes an NPC's copy of the same mesh draw THROUGH one. ak_472.tscn authors `layers = 4` on its receiver mesh,
+# so every SMG raider was a rifle visible through cover. `_make_held_model_world_renderable` is the correction,
+# the twin of `WorldItem._make_world_renderable` for the dropped copy. Pure static -> testable off-tree.
+
+func _no_depth_mesh(layer: int) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	var mat := StandardMaterial3D.new()
+	mat.no_depth_test = true
+	bm.material = mat
+	mi.mesh = bm
+	mi.layers = layer
+	return mi
+
+func test_held_model_is_moved_to_the_world_layer_and_depth_tested() -> void:
+	var root := _no_depth_mesh(4)          # the view-model layer, as ak_472.tscn authors it
+	var child := _no_depth_mesh(4)
+	root.add_child(child)
+	NPC._make_held_model_world_renderable(root)
+	for mi in [root, child]:
+		assert_eq(mi.layers, 1, "every visible mesh of a held view-model must draw on the WORLD layer")
+		var active: Material = mi.get_active_material(0)
+		assert_false((active as BaseMaterial3D).no_depth_test,
+			"...and must depth-test level geometry, or the gun draws through walls")
+	root.free()
+
+func test_held_model_fix_does_not_mutate_the_shared_material() -> void:
+	# These materials are shared with the PLAYER's own view model and every other instance of the weapon.
+	# Clearing no_depth_test in place would strip the no-depth draw off the gun in your hands too.
+	var mi := _no_depth_mesh(4)
+	var shared: BaseMaterial3D = mi.mesh.surface_get_material(0)
+	NPC._make_held_model_world_renderable(mi)
+	assert_true(shared.no_depth_test,
+		"the shared material is untouched — the fix duplicates it onto a surface override instead")
+	assert_true(mi.get_surface_override_material(0) != null, "and the override is what carries the corrected copy")
+	mi.free()
+
+func test_held_model_fix_leaves_ink_outline_tint_duplicates_alone() -> void:
+	# InkOutline's tint duplicate must keep its ACTOR_TINT_LAYER bit: on layer 1 the main camera would draw
+	# ink_tint.gdshader's raw R/G log-depth bytes as moving yellow/green stripe bands over the weapon.
+	var dup := _no_depth_mesh(512)
+	dup.set_meta(&"npc_tint_dup", true)
+	NPC._make_held_model_world_renderable(dup)
+	assert_eq(dup.layers, 512, "a tint duplicate keeps its own layer — it is not a visible mesh")
+	dup.free()
+
+# --- Held-gun AIM PITCH ---------------------------------------------------------------------------------
+# _face_point turns the body in YAW ONLY, so before this the barrel stayed level while the bullets pitched.
+# The elevation now lives on the hand anchor's local X rotation (pivoting the gun IN the grip) and is
+# published to the arm rig via aim_pitch_degrees() so the hands swing with it. Two invariants matter more
+# than the angle itself: it must ease (never snap), and it must be a LIE-FREE tell — zero unless the gun is
+# out AND perception has actually sensed the foe.
+
+func test_aim_pitch_is_zero_without_a_drawn_gun_or_a_sensed_foe() -> void:
+	# An off-tree NPC has no _weapon at all (is_holding_gun false) and no Perception (has_sensed_foe false),
+	# which is exactly the "nothing to point at" case the goal must refuse.
+	var n = load(NPC_PATH).new()
+	assert_false(n.is_holding_gun(), "off-tree: no weapon hub, so nothing is drawn")
+	assert_false(n.has_sensed_foe(), "off-tree: no perception, so no foe has been sensed")
+	var muzzle := Marker3D.new()
+	n.add_child(muzzle)
+	n._muzzle = muzzle
+	assert_almost_eq(n._aim_pitch_goal(), 0.0, 0.0001, "no drawn gun / no sensed foe -> the barrel stays level")
+	n.free()
+
+func test_aim_pitch_eases_toward_its_goal_and_publishes_degrees() -> void:
+	# The ease is the same exponential shape the body turn uses; step it by hand and assert it CONVERGES rather
+	# than jumping, and that the public degrees read tracks the stored radians (the arm rig reads that seam).
+	var n = load(NPC_PATH).new()
+	var muzzle := Marker3D.new()
+	n.add_child(muzzle)
+	n._muzzle = muzzle
+	n._aim_pitch = deg_to_rad(40.0)
+	n._sync_weapon_anchor(0.05)   # goal is 0 here (no gun / no foe), so this must decay toward level
+	assert_lt(n._aim_pitch, deg_to_rad(40.0), "the pitch eases DOWN toward the goal")
+	assert_gt(n._aim_pitch, 0.0, "and it eases — it does not snap to the goal in one step")
+	assert_almost_eq(n.aim_pitch_degrees(), rad_to_deg(n._aim_pitch), 0.0001,
+		"aim_pitch_degrees() is the same angle the anchor carries, in degrees")
+	assert_almost_eq(muzzle.rotation.x, -n._aim_pitch, 0.0001,
+		"the anchor pitches by MINUS the elevation: the model faces +Z, so a negative X rotation tilts it UP")
+	n.free()
+
+func test_aim_elevation_is_signed_clamped_and_degenerate_safe() -> void:
+	# Pure static, so the angle itself is testable without a weapon hub, a Perception or a tree.
+	var origin := Vector3(0.0, 1.5, 0.0)
+	assert_almost_eq(NPC.aim_elevation(origin, origin + Vector3(0.0, 0.0, 5.0), 75.0), 0.0, 0.0001,
+		"a target dead level is zero elevation")
+	assert_almost_eq(NPC.aim_elevation(origin, origin + Vector3(0.0, 5.0, 5.0), 75.0), deg_to_rad(45.0), 0.0001,
+		"5 m up and 5 m out is 45 degrees UP, and up is POSITIVE")
+	assert_almost_eq(NPC.aim_elevation(origin, origin + Vector3(0.0, -5.0, 5.0), 75.0), deg_to_rad(-45.0), 0.0001,
+		"and 5 m down is the same angle negated")
+	assert_almost_eq(NPC.aim_elevation(origin, origin + Vector3(0.0, 40.0, 0.5), 75.0), deg_to_rad(75.0), 0.0001,
+		"a foe almost straight overhead clamps, so the barrel never folds back through the chest")
+	assert_almost_eq(NPC.aim_elevation(origin, origin + Vector3(0.0, -40.0, 0.5), 75.0), deg_to_rad(-75.0), 0.0001,
+		"and the clamp is symmetric downward")
+	assert_almost_eq(NPC.aim_elevation(origin, origin, 75.0), 0.0, 0.0001,
+		"a target standing exactly on the muzzle is level, never a NaN written into the anchor")
+
+func test_npc_weapon_pitch_defaults_are_sane() -> void:
+	var n = load(NPC_PATH).new()
+	assert_true(n.weapon_in_hands, "NPCs carry their weapon in their hands by default")
+	assert_true(n.weapon_aim_pitch, "and point it at what they are aiming at by default")
+	assert_gt(n.weapon_aim_pitch_limit, 0.0, "the clamp must be a real angle or the barrel can fold through the chest")
+	assert_gt(n.weapon_aim_pitch_speed, 0.0, "a zero ease rate would freeze the barrel level forever")
 	n.free()
 
 # --- Muzzle FX cancel the scale they inherit from the barrel anchor ------------------------------------
@@ -260,7 +461,11 @@ func _muzzle_fx_rig(mesh_scale: Vector3, marker_scale: Vector3) -> Node3D:
 
 func test_muzzle_fx_come_out_at_world_scale_one_whatever_the_gun_bakes() -> void:
 	var n = load(NPC_PATH).new()
-	var boost := 1.75  # WeaponData.npc_held_display_scale's default; _build_weapon_mesh puts it on the MESH
+	# A stand-in for WeaponData.npc_held_display_scale (currently 2.6 by default, retuned per weapon), which
+	# _build_weapon_mesh multiplies onto the MESH. The exact number does not matter here — what is being pinned
+	# is that _unscale_muzzle_fx cancels WHATEVER the chain composes — but keep it above 1 so the correction it
+	# has to make is a real one.
+	var boost := 2.6
 	# [label, view-model ROOT scale, extra scale baked into the Muzzle marker itself]
 	var guns := [
 		["ak_472 — identity root, so the FX fight only the display boost", 1.0, 1.0],

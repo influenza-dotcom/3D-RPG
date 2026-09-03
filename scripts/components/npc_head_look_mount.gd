@@ -21,14 +21,26 @@ extends Node3D
 @export var enabled: bool = true
 ## Max distance (m) the head tracks a target; past it the head returns to neutral. A sniper can crane farther than a townsperson.
 @export var look_range: float = 12.0
-## Half-cone yaw clamp (deg) of head rotation relative to the body's forward -- a target past this is dropped to
-## neutral (the body must turn first). Keep it near a real neck's INDEPENDENT range (~50-60): crank it toward 90 and
+## Half-cone yaw clamp (deg) of head rotation relative to the body's forward -- a target past this is CLAMPED to
+## the cone edge (the head holds there, craned, while the body turns to close the rest; see clamp_offsets), and is
+## only abandoned once it passes release_yaw_deg. Keep it near a real neck's INDEPENDENT range (~50-60): crank it toward 90 and
 ## the head craning that far owl-swings the jaw / back of the skull into the collar + shoulders (the head-into-body
 ## clip). Tighten it and the head hands off to a body turn sooner instead of clipping.
 @export var max_yaw_deg: float = 55.0
-## Half-cone pitch clamp (deg) up/down -- caps how far the head tilts to look high/low. Same clip caution as the yaw:
-## a big down-tilt dives the chin into the chest, so keep it modest (~25) unless neck_pivot is dialed in below.
+## Half-cone pitch clamp (deg) up/down -- caps how far the head tilts to look high/low; a steeper target is CLAMPED
+## to this (not dropped), and only released past release_pitch_deg. Same clip caution as the yaw: a big down-tilt
+## dives the chin into the chest, so keep it modest (~25) unless neck_pivot is dialed in below.
 @export var max_pitch_deg: float = 25.0
+## OUTER yaw half-cone (deg) past which the head gives up and eases to neutral instead of holding craned at the
+## max_yaw_deg clamp. The band between max_yaw_deg and this is where the head sits pinned at the edge of its neck
+## cone, still leaning toward the target while the body turns to close the rest — which is what makes a target
+## drifting past the clamp keep reading as "watched" instead of blinking out of the NPC's attention. Past THIS,
+## the target is effectively behind the NPC, where a head held hard over reads as staring at a wall rather than
+## at anything, so neutral is the honest pose. Values below max_yaw_deg are ignored (the clamp always wins).
+@export var release_yaw_deg: float = 100.0
+## OUTER pitch half-cone (deg), the up/down twin of release_yaw_deg: past it (a target basically overhead or at
+## the NPC's feet) the head stops straining and returns to neutral. Same rule — below max_pitch_deg is ignored.
+@export var release_pitch_deg: float = 70.0
 ## Hinge the head turn at the base of the NECK instead of the head node's own origin — an offset (metres, in the
 ## head's PARENT space, i.e. below/behind the head origin) about which the look rotation pivots. WHY: the head-look
 ## composes its rotation onto the swapped head node, which rotates about THAT node's origin — and each head .glb
@@ -73,10 +85,29 @@ static func aim_offsets(from: Vector3, target: Vector3, body_yaw: float) -> Vect
 	var pitch := atan2(to.y, flat)
 	return Vector2(yaw_off, pitch)
 
-## True when planar `range_m` + the yaw/pitch offsets (rad) all sit inside the look cone -- otherwise the head
-## would crane unnaturally and we command neutral instead. Pure.
-static func in_cone(range_m: float, yaw_off: float, pitch: float, max_range: float, max_yaw: float, max_pitch: float) -> bool:
-	return range_m <= max_range and absf(yaw_off) <= max_yaw and absf(pitch) <= max_pitch
+## The head's COMMANDED yaw/pitch (rad) for a target at 3D distance `range_m` whose raw offsets are `yaw_off` /
+## `pitch`: CLAMPED into the neck cone, or Vector2.ZERO (neutral) when the target is out of reach entirely. Pure.
+##
+## ⭐THE CLAMP MUST NEVER GO BACK TO BEING A BINARY GATE. This was `in_cone()`, which returned false — and so
+## commanded NEUTRAL — the instant a target crossed max_yaw/max_pitch. That is the exact opposite of what a clamp
+## is for: at one specific angle the NPC stopped looking at whatever it was looking at and eased dead ahead, so
+## every head had an invisible edge you could walk across to switch its attention off. It bit worst in DIALOGUE,
+## where the deliberately tight ±25° pitch cone is blown just by standing close to a SEATED NPC (its head ~1.0 m,
+## your eye ~1.6 m, a metre apart = 31° down): the NPC you were talking to stared straight through you for the
+## whole conversation. Clamping holds the head at the edge of its cone instead — craned as far as the neck goes,
+## still leaning toward the target — which is what the max_yaw_deg / max_pitch_deg docs describe, and it never
+## exceeds those authored limits, so it can't introduce the head-into-collar clip they exist to prevent.
+##
+## `release_yaw` / `release_pitch` are the OUTER cone where giving up IS right: a target that far off is behind
+## the NPC (or overhead), where a head pinned hard over reads as staring at a wall rather than at anything. The
+## hand-off is smooth on its own — the caller eases toward whatever we return, so crossing the release angle is a
+## gentle swing home, not a snap. Both are floored at their clamp twin by the caller, so a release cone authored
+## narrower than the clamp can't make the head bail before it ever cranes.
+static func clamp_offsets(range_m: float, yaw_off: float, pitch: float, max_range: float,
+		max_yaw: float, max_pitch: float, release_yaw: float, release_pitch: float) -> Vector2:
+	if range_m > max_range or absf(yaw_off) > release_yaw or absf(pitch) > release_pitch:
+		return Vector2.ZERO
+	return Vector2(clampf(yaw_off, -max_yaw, max_yaw), clampf(pitch, -max_pitch, max_pitch))
 
 ## Frame-rate-independent exponential ease of `cur` toward `target` at rate `k` (the same shape as _face_yaw). Pure.
 static func ease_toward(cur: float, target: float, k: float, delta: float) -> float:
@@ -212,9 +243,11 @@ func _desired_offsets(head: Node3D) -> Vector2:
 		var host_range: Variant = host.call(&"head_look_max_range", look_range)
 		if host_range is float or host_range is int:
 			max_range = maxf(0.0, float(host_range))
-	if not in_cone(rng, off.x, off.y, max_range, deg_to_rad(max_yaw_deg), deg_to_rad(max_pitch_deg)):
-		return Vector2.ZERO
-	return off
+	# CLAMP into the neck cone (never a pass/fail drop to neutral -- see clamp_offsets). The release cones are
+	# floored at their clamp twins so a designer can't author an outer cone tighter than the inner one.
+	return clamp_offsets(rng, off.x, off.y, max_range,
+		deg_to_rad(max_yaw_deg), deg_to_rad(max_pitch_deg),
+		deg_to_rad(maxf(release_yaw_deg, max_yaw_deg)), deg_to_rad(maxf(release_pitch_deg, max_pitch_deg)))
 
 ## Editor warning: this component is INERT until the right switches are on, which isn't obvious from the
 ## scene tree. Surfaces WHY the head won't move so a designer doesn't think it's broken. (Reads the saved

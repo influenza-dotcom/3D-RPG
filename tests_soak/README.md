@@ -12,8 +12,9 @@ and watches for:
   trend across waves means a spawn path leaked (a failed `.free()`, a signal holding a dead NPC alive).
 
 The soak harness itself needs **no player and no combat**: idle NPCs with `wanders = true` roam the navmesh on their
-own, which is exactly what surfaces traversal faults. (The `tests_soak/` folder also hosts two other harnesses
-that *do* spawn combatants — the combat smoke test and the NPC-pool reuse test — see **Pieces** below.)
+own, which is exactly what surfaces traversal faults. (The `tests_soak/` folder also hosts other harnesses
+that *do* spawn combatants — the combat smoke test, the burst-fire gate and the NPC-pool reuse test — see
+**Pieces** below.)
 
 ## Why it lives here (not in `tests/`)
 
@@ -40,9 +41,10 @@ godot --headless -s addons/gut/gut_cmdln.gd -gconfig=res://tests_soak/soak.gutco
 `-gconfig` points at [`soak.gutconfig.json`](soak.gutconfig.json) (dirs = `res://tests_soak`) so the default
 `res://.gutconfig.json` (dirs = `res://tests`) is **not** loaded — otherwise GUT would run the whole fast suite
 alongside the soak. Because that config sets `include_subdirs = true` with the `test_` prefix, this one command runs
-**all three** heavy harnesses in `tests_soak/`: the wandering-NPC soak (`test_soak.gd`), the combat smoke test
-(`test_combat_smoke.gd`, an armed raider vs. a dummy), and the NPC-pool reuse test (`test_npc_pool_reuse.gd`,
-acquire→kill→re-acquire cycles against a real `NpcPool`).
+**all four** heavy harnesses in `tests_soak/`: the wandering-NPC soak (`test_soak.gd`), the combat smoke test
+(`test_combat_smoke.gd`, an armed raider vs. a dummy), the burst-fire gate (`test_npc_burst_fire.gd`, the SMG's
+*brrrp — breathe — brrrp* rhythm sampled off a real magazine), and the NPC-pool reuse test
+(`test_npc_pool_reuse.gd`, acquire→kill→re-acquire cycles against a real `NpcPool`).
 
 The test always prints the `SoakReport.summary()` (pass or fail) — FPS-free numbers you can read at a glance.
 
@@ -68,6 +70,7 @@ A stranded NPC then **fails** with its name and the exact `(x, y, z)` of the bad
 | [`scripts/tools/combat_smoke_harness.gd`](../scripts/tools/combat_smoke_harness.gd) | `CombatSmokeHarness` Node — spawns a real armed raider vs. an unarmed dummy and runs the full perceive→fire→hit→`take_damage` combat chain, returning a `CombatSmokeReport`. |
 | [`scripts/tools/combat_smoke_report.gd`](../scripts/tools/combat_smoke_report.gd) | `CombatSmokeReport` — pure result + verdict (`damage_landed()`, `converged()`, `leaking()`, `summary()`). |
 | [`tests_soak/test_combat_smoke.gd`](test_combat_smoke.gd) | The opt-in combat integration test that drives the harness on `NavSandbox`. |
+| [`tests_soak/test_npc_burst_fire.gd`](test_npc_burst_fire.gd) | The opt-in BURST gate (`WeaponData.npc_burst_count`). Runs the same harness with `sample_shots` on and times the shooter's magazine: full strings happen, none exceed the authored count, rounds inside a string come at the gun's cyclic rate, the gap between strings is still `min_shot_interval`, and a bursting SMG clearly out-shoots one round per cadence. Burst fire's whole meaning is a timing PATTERN, which no off-tree test can see. |
 | [`scripts/tools/npc_pool_reuse_harness.gd`](../scripts/tools/npc_pool_reuse_harness.gd) | `NpcPoolReuseHarness` Node — warms a fleet into an `NpcPool` and runs acquire→kill→re-acquire cycles, returning an `NpcPoolReuseReport`. Proves REAL `NPC._ready` + death + `reset_for_reuse` (the pooling reset surface the fast suite can't run). |
 | [`scripts/tools/npc_pool_reuse_report.gd`](../scripts/tools/npc_pool_reuse_report.gd) | `NpcPoolReuseReport` — pure result + verdict (`reused_all_same`, `pool_stable()`, `reset_clean`, `ok()`, `summary()`). |
 | [`tests_soak/test_npc_pool_reuse.gd`](test_npc_pool_reuse.gd) | The opt-in pooling integration test that drives the harness on `NavSandbox` (pairs with the fast [`tests/test_npc_pool.gd`](../tests/test_npc_pool.gd) that pins the pure reset surface). |

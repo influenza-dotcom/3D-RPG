@@ -10,7 +10,8 @@ extends Node
 ## `host` is Node-typed to break the NpcCombat <-> NPC class cycle, so every host.X is a DYNAMIC call — see the
 ## host-facade table in scripts/npc/README.md and grep before renaming an npc.gd member this reads.
 ##
-## STATE SPLIT: the combat-dodge bookkeeping (_dodge_cd / _dodge_t / _dodge_dir + DODGE_MIN_INTERVAL) lives HERE. The
+## STATE SPLIT: the combat-dodge bookkeeping (_dodge_cd / _dodge_t / _dodge_dir + DODGE_MIN_INTERVAL) and the
+## burst-fire bookkeeping (_burst_* + the BURST_* dials, WeaponData.npc_burst_count) live HERE. The
 ## shared attack timers (_fire_timer / _charging / _warned / _shot_miss) STAY on the host — npc.gd._physics_process
 ## bleeds _fire_timer every frame, get_aim_direction consumes _shot_miss, and a melee<->ranged switch reads
 ## _charging / _warned — so this component reads/writes them through host. Built in NPC._build_components.
@@ -24,6 +25,27 @@ const LEAD_MIN_SPEED_SQ := 0.04  # (0.2 m/s)^2
 ## Coefficient magnitude under which the intercept quadratic is treated as degenerate (target receding at
 ## exactly the round's own speed) and solved as a linear equation instead.
 const LEAD_QUADRATIC_EPSILON := 0.0001
+## Below this squared cross-product length two aim directions share no unique rotation PLANE (they are
+## collinear — identical or exactly opposed), so slew_toward has to invent an axis rather than normalise a
+## zero vector. Sized well above float noise at unit length.
+const AIM_SLEW_AXIS_EPSILON := 1e-12
+## SANITY FLOOR (seconds) on the gap between two rounds of a BURST — roughly two physics frames, so a weapon
+## authored with a zero/negative npc_burst_interval AND a zero attack_speed can't try to empty its clip in one tick.
+const MIN_BURST_INTERVAL := 0.03
+## How long (seconds) a burst HOLDS its remaining rounds while the shot is momentarily un-takeable before writing
+## them off. A trigger squeeze is committed: measured in a live firefight the clear-shot test flickers for single
+## frames mid-burst (the NPC's own round crossing its LOS ray, a limb collider answering instead of the body), and
+## without this grace roughly a quarter of every SMG burst was truncated to one round for no reason a player could
+## see. It does NOT let a round through — every round still passes the full clear-shot gate at the instant it
+## fires — so a target that genuinely reaches cover eats nothing; the burst just doesn't forget itself over a blink.
+const BURST_LOST_GRACE := 0.15
+## Extra seconds (on top of the string's own span) a burst is allowed to take before its owed rounds expire. This is
+## the ABANDONMENT guard, measured in real frames rather than in act_alerted calls, because the case it catches is
+## act_alerted no longer running at all: a GOAP replan away from FireArmed (perception dropped, we were disarmed, a
+## coward bolted) has no exit hook to clear the burst, and without an expiry those rounds would be spat out with no
+## wind-up whenever combat resumed. Sized well above the worst legitimate stretch — an AI-LOD far-band NPC thinks
+## only every lod_far_interval, so its burst takes several thinks to walk out.
+const BURST_WINDOW_SLACK := 0.75
 
 var host: Node = null  ## the NPC we fight for (Node-typed to avoid the class cycle)
 
@@ -34,6 +56,19 @@ var _dodge_cd: float = 0.0
 var _dodge_t: float = 0.0
 var _dodge_dir: Vector3 = Vector3.ZERO
 
+## BURST-FIRE bookkeeping (WeaponData.npc_burst_count). _burst_left is how many rounds of the CURRENT burst are
+## still OWED after the one already downrange (0 = not mid-burst — the single-shot default every non-bursting
+## weapon sits at forever); _burst_gap counts down to the next of them at the gun's own cyclic rate; _burst_lost
+## accumulates the time the shot has been un-takeable inside the string (BURST_LOST_GRACE); _burst_deadline is the
+## physics frame the whole string expires on (BURST_WINDOW_SLACK). Lives HERE beside the dodge state, and
+## deliberately gets NO cadence timer of its own: every round re-arms the host's full _shot_interval() (see
+## _fire_round), so the owed rounds ride _burst_gap alone and a burst abandoned mid-string leaves the NPC already
+## paying the normal between-shots cadence.
+var _burst_left: int = 0
+var _burst_gap: float = 0.0
+var _burst_lost: float = 0.0
+var _burst_deadline: int = 0
+
 
 ## NPC-pooling reuse reset (NpcPool): clear the dodge state so a reused NPC doesn't strafe sideways on its first
 ## combat frame from a mid-burst death (_dodge_t > 0 overrides _desired_velocity) and its dodge cadence is
@@ -42,6 +77,12 @@ func reset_for_reuse() -> void:
 	_dodge_cd = 0.0
 	_dodge_t = 0.0
 	_dodge_dir = Vector3.ZERO
+	# Drop any half-fired burst: a body that died mid-string would otherwise owe those rounds on its next life
+	# and spit them out on its first armed frame, ahead of the fresh wind-up NPC.reset_for_reuse just seeded.
+	_burst_left = 0
+	_burst_gap = 0.0
+	_burst_lost = 0.0
+	_burst_deadline = 0
 
 
 func act_alerted(delta: float) -> void:
@@ -104,7 +145,10 @@ func act_alerted(delta: float) -> void:
 		host._fire_timer = maxf(0.0, host._fire_timer - 2.0 * delta)
 		# Incoming-shot warning: a beat before the shot, beep 2D so the player always hears it. The
 		# beep_lead_time window (GameSettings.npc_ai) is our firing cadence; the beep's mix/pitch is the audio child's.
-		if uses_ranged_telegraphs and not host._warned and host._fire_timer <= GameSettings.npc_ai.beep_lead_time \
+		# ONE beep per BURST, not per round: mid-burst (_burst_left > 0) the rounds are already arriving, so a
+		# warning is both too late and wrong — it re-arms for the NEXT burst once the string finishes.
+		if uses_ranged_telegraphs and not host._warned and _burst_left <= 0 \
+				and host._fire_timer <= GameSettings.npc_ai.beep_lead_time \
 				and is_instance_valid(host._target) and host._target.is_in_group(Groups.PLAYER):
 			host._warned = true
 			if host._audio_cues != null:
@@ -118,28 +162,111 @@ func act_alerted(delta: float) -> void:
 		host._charging = false
 		if host._fire_timer >= host._shot_interval():
 			host._warned = false
-	if can_shoot and host._fire_timer <= 0.0 and host._weapon.current_ammo != 0:
-		# Roll a miss only on shots AT THE PLAYER ("npcs firing at you"); on a miss the shot deflects wide
-		# (get_aim_direction consumes _shot_miss) and a ricochet whiffs past. Default miss_chance 0 = never.
-		host._shot_miss = host.miss_chance > 0.0 \
-				and is_instance_valid(host._target) and host._target.is_in_group(Groups.PLAYER) \
-				and randf() < host.miss_chance
-		host._weapon.attack.try_fire()
-		host._emit_gunfire_noise()  # GA-2: let allies HEAR the shot on the &"noise" channel (throttled; opt-in)
-		if host._shot_miss and host._audio_cues != null:
-			host._audio_cues.play_miss()
-		host._fire_timer = host._shot_interval()
-		host._warned = false  # re-arm the warning for the next shot
-		# Drop back to "not charging" so the next shot's lock-on sting only re-fires if we're STILL in
-		# range next frame. A melee swing that knocks the player out of range then won't phantom-charge
-		# (and re-play the sting) the instant the attack finishes; it re-stings when it re-closes to range.
-		host._charging = false
+	# BURST FIRE (WeaponData.npc_burst_count — the SMG ships 3). The FIRST round of a burst is the ordinary
+	# telegraphed trigger pull in the `elif` below; the 2nd..Nth are OWED rounds that ride _burst_gap at the gun's
+	# own cyclic rate, independent of the far slower telegraph cadence every round re-arms. So an automatic weapon
+	# reads brrrp / breathe / brrrp instead of one paced shot, while the breathing floor keeps owning the gap
+	# BETWEEN bursts. A weapon left at the default count of 1 never enters the first branch at all — its
+	# `_burst_left` is 0 forever and the fire path is byte-identical to before bursts existed.
+	var burst_weapon: WeaponData = host._weapon.equipped_weapon
+	if _burst_left > 0:
+		if Engine.get_physics_frames() > _burst_deadline or host._weapon.current_ammo == 0:
+			# Expired (act_alerted stopped running mid-string — see BURST_WINDOW_SLACK) or the clip ran dry: the
+			# owed rounds are written off. A dry gun's next trigger pull belongs to the reload above, not here.
+			_burst_left = 0
+		elif not can_shoot:
+			# The shot is momentarily un-takeable. HOLD the rest of the string through a brief flicker
+			# (BURST_LOST_GRACE) but fire nothing — a round only ever leaves the barrel on a frame that passes
+			# the full clear-shot gate, so a target that actually reaches cover still eats nothing.
+			_burst_lost += delta
+			if _burst_lost > BURST_LOST_GRACE:
+				_burst_left = 0
+		else:
+			_burst_lost = 0.0
+			_burst_gap -= delta
+			# The weapon's OWN cadence timer is the hard ceiling, and at the default interval (attack_speed) the
+			# two land on the same frame — so WAIT for it rather than spend an owed round on a refused shot.
+			# (Under AI LOD a distant NPC thinks every lod_*_interval, so its burst simply stretches to that.)
+			if _burst_gap <= 0.0 and not _weapon_shot_in_progress():
+				_fire_round()
+				_burst_left -= 1
+				_burst_gap = burst_interval_for(burst_weapon)
+	elif can_shoot and host._fire_timer <= 0.0 and host._weapon.current_ammo != 0:
+		_fire_round()
+		_burst_left = burst_rounds_for(burst_weapon) - 1
+		_burst_gap = burst_interval_for(burst_weapon)
+		_burst_lost = 0.0
+		_burst_deadline = Engine.get_physics_frames() + burst_window_frames(burst_weapon)
 	# Pass whether we can actually fire on the player RIGHT NOW: the glint clears the instant we lose the
 	# clear shot, instead of lingering at our position through the post-shot / lost-LOS charge bleed.
 	if uses_ranged_telegraphs:
 		host._report_aim(charge, can_shoot)
 	else:
 		host._report_aim(0.0, false)
+
+
+## Send ONE round downrange and re-arm the shared telegraph cadence — the body of a trigger pull, shared by the
+## FIRST round of a burst and every owed round after it, so a bursting weapon and a single-shot one fire through
+## exactly the same code. The miss roll is PER ROUND rather than per burst, so a spray partly connects instead of
+## whiffing as a block. Every round re-arms the host's FULL _shot_interval(): the owed rounds ride _burst_gap
+## instead, so nothing here can fire early, and a burst abandoned mid-string leaves the cadence already paid.
+func _fire_round() -> void:
+	# Roll a miss only on shots AT THE PLAYER ("npcs firing at you"); on a miss the shot deflects wide
+	# (get_aim_direction consumes _shot_miss) and a ricochet whiffs past. Default miss_chance 0 = never.
+	host._shot_miss = host.miss_chance > 0.0 \
+			and is_instance_valid(host._target) and host._target.is_in_group(Groups.PLAYER) \
+			and randf() < host.miss_chance
+	host._weapon.attack.try_fire()
+	host._emit_gunfire_noise()  # GA-2: let allies HEAR the shot on the &"noise" channel (throttled; opt-in)
+	if host._shot_miss and host._audio_cues != null:
+		host._audio_cues.play_miss()
+	host._fire_timer = host._shot_interval()
+	host._warned = false  # re-arm the warning for the next shot
+	# Drop back to "not charging" so the next shot's lock-on sting only re-fires if we're STILL in
+	# range next frame. A melee swing that knocks the player out of range then won't phantom-charge
+	# (and re-play the sting) the instant the attack finishes; it re-stings when it re-closes to range.
+	host._charging = false
+
+
+## True while the weapon's own cadence timer is still running from the last round (Attack.is_shot_in_progress).
+## A burst asks BEFORE spending an owed round: WeaponData.attack_speed is the gun's hard ceiling and Attack
+## silently REFUSES a shot inside it, so at the default burst interval (attack_speed itself) a one-frame race
+## between the physics tick and that idle-processed Timer would otherwise eat rounds out of the middle of a burst.
+func _weapon_shot_in_progress() -> bool:
+	if host._weapon == null:
+		return false
+	var atk = host._weapon.attack  # duck-typed off the Node-typed host (Attack; null on a stub weapon)
+	return atk != null and atk.is_shot_in_progress()
+
+
+## How many rounds an NPC wielding `w` answers ONE trigger pull with — WeaponData.npc_burst_count, floored at the
+## single aimed shot so an unauthored (or nonsense) weapon behaves exactly as it did before bursts existed.
+## Pure + static (the attempt_fire_range idiom) so tests pin the burst against the authored .tres with no live NPC.
+static func burst_rounds_for(w: WeaponData) -> int:
+	if w == null:
+		return 1
+	return maxi(1, w.npc_burst_count)
+
+
+## Seconds between the rounds INSIDE that burst: the weapon's authored npc_burst_interval, or — at its 0 default —
+## the gun's own cyclic rate, attack_speed. Held above MIN_BURST_INTERVAL so a weapon authoring neither can't try
+## to empty its clip in a single frame. Pure + static, same reason as burst_rounds_for.
+static func burst_interval_for(w: WeaponData) -> float:
+	if w == null:
+		return MIN_BURST_INTERVAL
+	if w.npc_burst_interval > 0.0:
+		return maxf(MIN_BURST_INTERVAL, w.npc_burst_interval)
+	return maxf(MIN_BURST_INTERVAL, w.attack_speed)
+
+
+## How many physics frames a burst has to finish in before its owed rounds expire: the string's own span plus
+## BURST_WINDOW_SLACK. Real frames rather than think ticks, because the case this catches is act_alerted no longer
+## being called at all (a GOAP replan away from FireArmed, which has no exit hook to clear the burst with).
+## Deliberately generous — a resumed round still has to pass the whole clear-shot gate to leave the barrel, so the
+## only thing an over-long window costs is a round that skipped its wind-up telegraph.
+static func burst_window_frames(w: WeaponData) -> int:
+	var span: float = (burst_rounds_for(w) - 1) * burst_interval_for(w) + BURST_WINDOW_SLACK
+	return maxi(1, int(ceil(span * float(maxi(1, Engine.physics_ticks_per_second)))))
 
 
 ## The distance an armed NPC still ATTEMPTS a shot at: the weapon-scaled engage range, extended by the
@@ -224,6 +351,42 @@ static func lead_aim_point(
 	if t <= 0.0:
 		return target_pos  # unreachable / no intercept — aim at the body rather than at a guess
 	return target_pos + vel * minf(t, max_lead_time) * lead_fraction
+
+
+## AIM INERTIA: rotate `current` toward `goal` by AT MOST `max_step_rad`, and return the unit direction that
+## lands on. The geometry half of "an NPC's aim has to swing onto you" — NPC._tick_aim_tracking calls this once
+## a physics frame with `aim_turn_rate() * delta` and keeps the result as the direction its shots actually fly.
+##
+## WHY a hard rate cap rather than a smoothing ease: the cap has ZERO steady-state error. Once the required
+## turn rate drops under the cap this returns `goal` EXACTLY, so an NPC tracking an ordinary strafe is aimed
+## precisely at the intercept lead_aim_point solved — the 2026-08-26 "holding a strafe dodges forever" fix
+## stays fully intact. An exponential ease would instead leave a permanent angular lag proportional to your
+## lateral speed, which is exactly that infinite dodge handed back. The cost is paid on CHANGE only: acquiring,
+## re-acquiring from a new angle, a dash, an about-face, a close-range circle strafe.
+##
+## Degenerate inputs all fall back to snapping onto `goal` (a legal aim is always better than a stuck one): a
+## zero-length goal is refused outright by returning `current` (nothing to aim at), an un-seeded `current`
+## and a non-positive step both mean "no inertia yet / none configured".
+## Pure + static (the attempt_fire_range idiom) so tests pin the geometry without a tree.
+static func slew_toward(current: Vector3, goal: Vector3, max_step_rad: float) -> Vector3:
+	var to := goal.normalized()
+	if to.is_zero_approx():
+		return current  # no aim point at all — hold what we have
+	var from := current.normalized()
+	if from.is_zero_approx() or max_step_rad <= 0.0:
+		return to  # never tracked before, or the cap is switched off: snap (the pre-inertia behaviour)
+	var angle := from.angle_to(to)
+	if angle <= max_step_rad:
+		return to  # within reach this frame — land EXACTLY on the goal, so tracking has no residual lag
+	var axis := from.cross(to)
+	if axis.length_squared() < AIM_SLEW_AXIS_EPSILON:
+		# Collinear: either already there (caught by the angle test above) or aiming EXACTLY 180 deg away, where
+		# every plane is an equally valid way round. Pick a stable perpendicular so a target dead behind still
+		# costs a full about-face instead of snapping; UP fails only when `from` is itself vertical.
+		axis = from.cross(Vector3.UP)
+		if axis.length_squared() < AIM_SLEW_AXIS_EPSILON:
+			axis = from.cross(Vector3.RIGHT)
+	return from.rotated(axis.normalized(), max_step_rad).normalized()
 
 
 static func should_chase_while_alerted(

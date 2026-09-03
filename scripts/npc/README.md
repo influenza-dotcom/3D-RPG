@@ -15,7 +15,7 @@ component ↔ host coupling only.
 A component's `host` is typed one of two ways, and that choice decides whether a bad rename fails LOUD or SILENT:
 
 - **`var host: NPC`** (6 components) — a rename of a host member is a **compile error** in the component. Safe-ish.
-- **`var host: Node`** (9 components) — deliberately `Node`-typed to break the `Component ↔ NPC` class cycle (a
+- **`var host: Node`** (10 components) — deliberately `Node`-typed to break the `Component ↔ NPC` class cycle (a
   component that `NPC` builds, typed as `NPC`, would re-form the cycle). Every `host.X` is a **dynamic** call, so a
   renamed/removed host member is **NOT** caught at compile time — it fails at runtime (or silently no-ops). These are
   the dangerous ones.
@@ -105,6 +105,56 @@ the `LocomotionFx` idiom) that works on any `Node3D`, and the NPC merely seeds i
 `*_noise_*` exports and calls `pulse(radius, throttled)`. Prefer this shape — a portable component the root drives
 through a public method — when extracting new behaviour off the root; it's the direction the whole class is headed.
 
+## The held weapon rides the HANDS, and its barrel carries the aim pitch
+
+`NPC._sync_weapon_anchor(delta)` (called from the very top of `_physics_process`, **above** the AI-LOD gate) is the
+one place the held weapon's presentation is reconciled. It makes two writes onto `_muzzle` — the Marker3D on the NPC
+root that the view-model, the barrel marker, the shot/laser origin and the muzzle FX all hang off, so every one of
+them follows from these two:
+
+- **position** → the grip the swapped ARMS currently form, read duck-typed off the `BodyModelSwap` child
+  (`weapon_grip_position()`, swap-local, mapped through the swap node's **full** transform — `transform * p`, not
+  `transform.basis * p` like `_body_posture_offset`, because this is a POSITION and not an offset). The arm pose
+  already bakes in the seated drop and its ground snap, so riding the hands supersedes the old posture-offset
+  patch. `weapon_in_hands = false`, or a rig with no swapped arms, falls back to `muzzle_offset + posture offset`
+  — the pre-hands behaviour, byte-identical.
+- **rotation.x** → the smoothed aim ELEVATION, about the grip, so the barrel swings up at a foe on a roof and down
+  at one in a pit. `_face_point` turns the body in **yaw only**, so this is where the pitch has to live: pitching
+  the NPC ROOT would tilt the collision capsule, the shadow decal, the leg gait and the head-look, none of which
+  are pitch-aware. `aim_pitch_degrees()` publishes the same angle to the arm rig (`BodyModelSwap.arm_aim_follow`),
+  so the hands swing with the gun instead of it pivoting out of them.
+
+Three traps live here, and all three have bitten:
+
+1. **Never call `get_aim_direction()` for a visual.** It CONSUMES the one-shot `_shot_miss` flag, so a per-frame
+   read would silently eat every deliberate miss. The pitch is computed from `_aim_point()`.
+2. **Keep it above the AI-LOD gate.** Below it, `delta` is the BANKED think delta and the ease would run in slow
+   motion by exactly the throttle factor on a distant NPC. `_sync_weapon_anchor` takes the real tick delta as an
+   argument for that reason (and so an off-tree unit test can step it without a tree).
+3. **Gate the pitch on PERCEPTION, not on holding a target.** `_target` is acquired by pure proximity with no
+   line-of-sight test and `NPC.tscn` ships `sight_range = 500`, so every hostile in the level holds the player as
+   `_target` from load. `_aim_pitch_goal` therefore requires `is_holding_gun()` **and** `has_sensed_foe()` —
+   the same truthfulness rule `head_look_point` follows.
+
+⭐**A mounted `view_model` is a FIRST-PERSON rig and must be converted before it is a world object.** These
+scenes draw on `ViewModelCamera.VIEW_MODEL_LAYER` (4, stripped from the main camera's cull mask) with
+`no_depth_test` materials, composited over the finished frame from their own SubViewport — which is what keeps
+the PLAYER's gun from clipping into geometry, and what makes an NPC's copy draw **through** it.
+`_build_weapon_mesh` therefore ends with `_make_held_model_world_renderable`: layer 1, depth test on, the
+material DUPLICATED first (it is shared with the player's own view model). It must run **before**
+`_build_muzzle_fx`, whose emitters are children of that mesh and keep their own authored layers. This is a copy
+of `WorldItem._make_world_renderable`, which does the same job for the dropped copy — keep the two in step.
+(`ak_472.tscn` authors `layers = 4` on its receiver mesh; that is the one that shipped visible through cover.)
+
+`reset_for_reuse` zeroes `_aim_pitch` **and** the anchor's rotation: the position is rewritten every frame, but
+the rotation is only ever written here, so a pooled body would otherwise come back holding last life's angle.
+
+⚠ **Consequence worth knowing:** the shot/laser/tracer origin (`get_aim_origin()` → the gun's own `Muzzle` marker)
+now sits at the hands plus the barrel rather than at the NPC's centre plus the barrel — roughly 0.7 m further
+forward. The clear-shot LOS ray starts from the same point, so the fire gate and the round still agree, but a gun
+enlarged much past the shipped `npc_held_display_scale` values pushes that origin far enough forward to start
+rounds past thin cover. That is why the long guns are boosted least; see `docs/AUTHORING_GUIDE.md`.
+
 ## Sight rays go through `SightRay`, never straight to `intersect_ray`
 
 Every "can this NPC SEE / HEAR past that?" ray in this folder is cast by **`SightRay.cast(world, query)`**
@@ -115,7 +165,7 @@ and a chain-link fence, a wire grille or a shop window stops hiding you from a g
 
 Current callers: `Perception.can_see`, `Perception.can_see_node`, `Perception._wall_between` (hearing occlusion),
 `NpcSenses._corpse_occluded`, `NpcHomeReturn._occluded` (the "can the player see this NPC blink?" gate), and
-`NPC._aim_laser_at` — the AIM ray, which feeds `NpcCombat.act_attack`'s clear-shot test and the laser beam's
+`NPC._aim_laser_at` — the AIM ray, which feeds `NpcCombat.act_alerted`'s clear-shot test and the laser beam's
 endpoint. **Add new perception rays here too.**
 
 **Gunfire passes through the same geometry**, which is why the aim ray is on that list: an NPC that can see you
