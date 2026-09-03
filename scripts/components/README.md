@@ -12,7 +12,8 @@ The established idiom is the **`LookAtInteractable` family** — the base suppli
 hitbox + look-at outline, and each subclass writes only its own behaviour (`start_talk` /
 `can_be_talked_to` / `look_name`): `CanPickUp`, `MoneyPickUp`, `ItemContainer`, `Merchant`,
 `LootableCorpse`, the service stations (`Healer`, `Bonfire`, `LevelUp`, `PerkStation`, `RespecStation`), `Door`,
-`Radio`, and more — **20 scripts extend `LookAtInteractable`** (see the full tree below). Plus standalone
+`Radio`, and more — **21 scripts extend `LookAtInteractable`** directly, 22 in the family with `DogPickup`
+under `CanPickUp` (see the full tree below). Plus standalone
 drop-ins: `Lock`, `SpawnOnDestroy`, `CanDestroy`, `Throwable`, `Pettable`, `NoisePulser`, `Locomotor`, `NavBlocker`, `NavLink`,
 `AmbientSound`, `AudioZone`, `IndoorAmbienceDucker`, `AiLod`, and more — that list is a sampler, not the roster; the full
 designer-facing catalogue (every drop-in with its knobs) is `docs/AUTHORING_GUIDE.md` §11, *The drop-in component
@@ -24,7 +25,7 @@ The **in-game debug suite** (2026-08-18) is also built as drop-ins, all debug-bu
 search bar over `DebugCommands.search()`), `DebugNoclip`
 (F2 — fly the real body), `DebugOverlay` (F3 — perf + game-state + stealth + input HUD), `DebugInspector` (F4 —
 look-at NPC/prop state via `AiDebugDraw`), `AiEventLog` (the AI transition ring) and `DebugEventTicker` (the game-event
-column). 86 commands; the save sandbox (`GameState.resolve_save_path`) keeps cheats off the real profile. See the
+column). 93 commands; the save sandbox (`GameState.resolve_save_path`) keeps cheats off the real profile. See the
 *In-game debug tools* chapter in `docs/AUTHORING_GUIDE.md`.
 
 ## The `LookAtInteractable` hierarchy
@@ -42,7 +43,7 @@ new subclass needs zero ray changes). A subclass overrides the first three; `hos
 | method | what it does | base default |
 | --- | --- | --- |
 | `look_name() -> String` | the hover readout ("Take Medkit", "Trade", "Read Note") | `"Interact"` |
-| `start_talk(player) -> void` | the action when E is pressed (open a screen, pick up, swing) | no-op |
+| `start_talk(player) -> void` | the action when F is pressed (open a screen, pick up, swing) | no-op |
 | `can_be_talked_to() -> bool` | whether it's offerable right now (e.g. only while non-empty) | `true` |
 | `host_npc() -> Node` | the NPC behind it, if any (world objects return `null`) | `null` |
 
@@ -72,33 +73,33 @@ LookAtInteractable            look_at_interactable.gd   (extends Area3D)
 │  talk-layer hitbox + look-at outline; duck-typed surface
 │  (look_name / start_talk / can_be_talked_to / host_npc)
 │
-├─ CanPickUp                  can_pick_up.gd        — E: add an Item (± loot_table) to the backpack
+├─ CanPickUp                  can_pick_up.gd        — F: add an Item (± loot_table) to the backpack
 │   └─ DogPickup              dog_pickup.gd         — a CanPickUp whose Item is priced/sized/coated from the live dog
-├─ MoneyPickUp                money_pickup.gd       — E: collect zorkmids, update the HUD, self-free
-├─ UpgradePickup              upgrade_pickup.gd     — E: permanently grant a player ability
-├─ ItemContainer              container.gd          — E: open the loot screen (persistent crate/chest/locker)
-├─ LootableCorpse             lootable_corpse.gd    — E: open the loot screen on a dead body (spawned by the death system)
-├─ Merchant                   merchant.gd           — E / dialogue "Trade": open the shop screen
-├─ Healer                     healer.gd             — E / dialogue: pay to heal to full + clear limb damage
-├─ Bonfire                    bonfire.gd            — E / dialogue: rest — full heal + set the respawn checkpoint
-├─ LevelUp                    level_up.gd           — E / dialogue: spend zorkmids to raise a stat / skill points on perks
-├─ PerkStation                perk_station.gd       — E: learn a Perk (permanent bonus / ability grant)
-├─ RespecStation              respec_station.gd     — E: pay to reverse every perk and refund the points, re-pick from scratch
-├─ ChipInstaller              chip_installer.gd     — E / dialogue "Install": pay to install an ability microchip
-├─ WeaponBench                weapon_bench.gd       — E / dialogue "Modify": pay to fit / buy & fit / remove a WeaponMod part in a gun's slot
-├─ ChessMatch                 chess_match.gd        — E / dialogue "Play Chess": blindfold-chess minigame vs a ChessAi
-├─ Atm                        atm.gd                — E / dialogue "Bank": deposit / withdraw on the signed ledger account (GameState.account)
-├─ Door                       door.gd               — E: swing a door open/closed (lockable: built-in key/lockpick gate, or a child Lock)
-├─ LevelDoor                  level_door.gd         — E: travel to another level (GameRoot.load_level → matching PlayerSpawn)
-├─ Radio                      radio.gd              — E: play / cycle a folder of music tracks (takes precedence over the score)
-├─ Readable                   readable.gd           — E: read a note / sign / datapad through the dialogue UI
-├─ Switch                     switch_lever.gd       — E: set a flag / call a method on target / toast (the manual TriggerVolume)
-└─ QuestStarter               quest_starter.gd      — E: accept a Quest (a quest board / giver)
+├─ MoneyPickUp                money_pickup.gd       — F: collect zorkmids, update the HUD, self-free
+├─ UpgradePickup              upgrade_pickup.gd     — F: permanently grant a player ability
+├─ ItemContainer              container.gd          — F: open the loot screen (persistent crate/chest/locker)
+├─ LootableCorpse             lootable_corpse.gd    — F: open the loot screen on a dead body (spawned by the death system)
+├─ Merchant                   merchant.gd           — F / dialogue "Trade": open the shop screen
+├─ Healer                     healer.gd             — F / dialogue: pay to heal to full + clear limb damage
+├─ Bonfire                    bonfire.gd            — F / dialogue: rest — full heal + set the respawn checkpoint
+├─ LevelUp                    level_up.gd           — F / dialogue: spend zorkmids to raise a stat / skill points on perks
+├─ PerkStation                perk_station.gd       — F: learn a Perk (permanent bonus / ability grant)
+├─ RespecStation              respec_station.gd     — F: pay to reverse every perk and refund the points, re-pick from scratch
+├─ ChipInstaller              chip_installer.gd     — F / dialogue "Install": pay to install an ability microchip
+├─ WeaponBench                weapon_bench.gd       — F / dialogue "Modify": pay to fit / buy & fit / remove a WeaponMod part in a gun's slot
+├─ ChessMatch                 chess_match.gd        — F / dialogue "Play Chess": blindfold-chess minigame vs a ChessAi
+├─ Atm                        atm.gd                — F / dialogue "Bank": deposit / withdraw on the signed ledger account (GameState.account)
+├─ Door                       door.gd               — F: swing a door open/closed (lockable: built-in key/lockpick gate, or a child Lock)
+├─ LevelDoor                  level_door.gd         — F: travel to another level (GameRoot.load_level → matching PlayerSpawn)
+├─ Radio                      radio.gd              — F: play / cycle a folder of music tracks (takes precedence over the score)
+├─ Readable                   readable.gd           — F: read a note / sign / datapad through the dialogue UI
+├─ Switch                     switch_lever.gd       — F: set a flag / call a method on target / toast (the manual TriggerVolume)
+└─ QuestStarter               quest_starter.gd      — F: accept a Quest (a quest board / giver)
 ```
 
 The eight **dual-mode** subclasses (`Merchant`, `Healer`, `Bonfire`, `LevelUp`, `ChipInstaller`, `WeaponBench`,
 `ChessMatch`, `Atm`)
-run standalone by default (aim + E) OR, with `standalone = false`, sit as a data-only child of a `DialogueNPC`
+run standalone by default (aim + **F**) OR, with `standalone = false`, sit as a data-only child of a `DialogueNPC`
 whose conversation offers the action ("Trade" / "Install" / "Modify" / "Play Chess") — the NPC's `Talkable` owns the ray
 in that mode. `_on_dialogue_host()` on the base powers their config warning against stealing the ray.
 
@@ -209,7 +210,7 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
 
 1. `class_name Foo` / `extends LookAtInteractable`. Add `@tool` only if you want an in-editor preview or a
    config warning (most leaves do) — then keep the base's editor guard intact (see step 3).
-2. Override **`look_name()`** (the hover verb), **`start_talk(player)`** (what E does), and, if conditional,
+2. Override **`look_name()`** (the hover verb), **`start_talk(player)`** (what F does), and, if conditional,
    **`can_be_talked_to()`**. That is the whole interaction contract — `PickupRay` finds you automatically.
 3. If you need extra setup, override `_ready`, do your pre-work, then call **`super()`** (which wires the talk
    layer + builds the outline). If you set your own `collision_layer` first (the `Merchant` pattern), call
@@ -257,8 +258,8 @@ REPLACEMENT `WeaponData` object without the caches noticing — is solved once i
 `Weapon.migrate_weapon_state`, not at the station; a new station that replaces a live resource should copy
 that shape rather than reach into `Ammo` / `ScopeIn` itself.
 
-**Dual item** — a `CanPickUp` parented under a `Throwable` makes one prop both stashable (E → backpack)
-and throwable (Z → carry/throw). `ray_cast.gd` resolves E-vs-Z by ancestry, so the `CanPickUp` MUST be a
+**Dual item** — a `CanPickUp` parented under a `Throwable` makes one prop both stashable (F → backpack)
+and throwable (Z → carry/throw). `ray_cast.gd` resolves F-vs-Z by ancestry, so the `CanPickUp` MUST be a
 descendant of the `Throwable`. This is what `WorldItem.build()` constructs for dropped loot, and what
 `scenes/throwable/stashable_crate.tscn` ships as a ready-to-place example. See `docs/AUTHORING_GUIDE.md` §9 (Items, loot, money and pickups).
 
@@ -445,6 +446,44 @@ shelf made four lights sum into a map-wide dull wash, which the duck merely UNMA
 12 dB indoors; see `MyLight`'s Buzz-mix group). Both directions of the routing contract — `ambient_bed` → `ambient`
 with a low-pass on it, and the fixture buzz staying off that bus — are pinned by `tests/test_audio_bus_hygiene.gd`.
 
+**`BodyModelSwap` also CARRIES the host's weapon, and that is a two-way duck-typed seam.** Two public reads let a
+host mount a held weapon on the animated arms instead of at a fixed point on the body (`NPC.weapon_in_hands` /
+`NPC._sync_weapon_anchor` is the only consumer today):
+
+* `weapon_grip_position()` — swap-local metres, midway between the two hand tips at the CURRENT arm pose, derived
+  from the LIVE `_arm_left` / `_arm_right` transforms so every term the gait writes (hold pitch, aim swing, fists
+  sway, walk swing, strike thrust, the seated drop `_arm_pose` bakes into the arm's origin) comes along for free.
+  That is also why the weapon can never visibly detach from the hands: it is not a second pose that has to AGREE
+  with the arms, it IS the arms' pose. Returns **null**, not a zero vector, when the rig has no arms — the caller
+  has to be able to tell "no hands" from "hands at the origin" and fall back to its own anchor.
+  Only the hand POSITIONS are used: `_arm_right`'s basis has a NEGATIVE determinant (`_reflect`) and adopting it
+  as a rotation renders a mounted model inside-out.
+* `aim_pitch_contribution()` — degrees of the host's aim ELEVATION the raised arms swing by, read duck-typed off
+  the host's `aim_pitch_degrees()` (already smoothed and perception-gated there). Callers SUBTRACT it from
+  `arm_hold_pitch`, because this rig lifts an arm with a MORE NEGATIVE pitch (see `arm_air_pitch = -160` = straight
+  up). A host without the method — the Player's first-person rig, a civilian, a test stub — contributes exactly
+  zero, so those arms behave as they always did.
+
+Two more exports shape that grip, and both are applied so they cannot corrupt the gait:
+
+* `arm_hold_converge_deg` swings each raised arm INWARD onto the weapon, so the fists meet on it instead of
+  reaching forward a shoulder-width apart with the gun floating between them. It is a yaw **pre-multiplied about
+  UP** (`_arm_pose`'s `converge_deg`), never a component of `arm_rotation`: every animated term this rig has is
+  added to rot.x and baked into the model's own euler, so a yaw *inside* that euler turns the forward/back swing
+  into a sideways sway — the same trap `_leg_pose` pre-multiplies to avoid. The right arm's `_reflect()` mirror
+  flips it for free (`Reflect * R_up(θ) == R_up(-θ) * Reflect`).
+* `arm_hold_stagger` offsets one hand ALONG the weapon (foregrip vs trigger hand) by shifting the two shoulder
+  anchors fore/aft antisymmetrically. ⭐It is a TRANSLATION, not an antisymmetric pitch: at a near-level hold a
+  pitch term moves a hand up and down, so the pitch version split the fists 0.23 m *vertically* instead of along
+  the barrel. `_reflect()` negates X only, so the right arm's copy is negated at the call site.
+
+Both ride one eased `_hold_blend` so the grip opens and closes with the weapon draw, and `lower_arms()` (the
+dialogue drop) zeroes it — a speaker must not keep its hands closed on a weapon it has just lowered.
+
+⭐ Consequence for anyone editing the arm exports: `arm_hold_pitch` is no longer cosmetic. It decides where the
+weapon IS, so changing it moves an NPC's gun. Its default moved `-65` → `-78` for exactly that reason.
+`tests/test_body_model_swap_weapon_grip.gd` pins every one of these reads.
+
 `BodyPartGibs` is the **per-actor switch for the body-part death burst** (`body_part_gibs.gd`): a dying character
 coming apart into its OWN head / torso / arms / legs — lifted live off its `BodyModelSwap`, skin and tint included —
 instead of only spraying the generic meat chunks (`gore_gib.tscn`). The burst itself lives in
@@ -485,6 +524,16 @@ its material must stay `TRANSPARENCY_ALPHA` (writing no depth is what hides it f
 `bulletmat.tres` trick, not a layer trick), and it reads its host's throw state through a duck-typed
 `is_trailing()` rather than typing against `Throwable`, which sits on the actor parse path via `Character`.
 Pinned by `tests/test_throw_trail.gd`.
+
+`EffectPrewarmer` (`effect_prewarmer.gd`, `extends Node3D`) is the **in-level effect warm-up** — the second stage of
+the first-kill / first-hit hitch fix (2026-09-01). It is NOT a designer drop-in: `GameRoot.load_level` builds one BY
+SCRIPT PATH under the game host right after the level enters the tree and calls `warm(camera)`, which instantiates
+every scene in `WARM_PATHS` (plus the code-built damage number, alert icon and confetti) frozen / muted /
+collision-less in front of the live camera for a few frames so their draw pipelines, the decal atlas and the 2D
+hit feedback compile on the load screen instead of the first firefight. `WARM_PATHS` is a coverage CONTRACT
+ratcheted by `tests/test_effect_prewarm.gd` (every particle scene and every drawable `PreloadManager.PATHS` scene
+must be on it — the test names the missing path); stage one, the boot `SubViewport` particle pass, lives in
+`managers/PreloadManager.gd`. `docs/CURRENT_ARCHITECTURE.md` (Effect prewarm — two stages) has the full contract.
 
 **New drop-in components go here.** Internal helpers composed in code with `.new()` under the
 Player/NPC (HurtFeedback, NpcVoice, NpcDistraction, AimSway, PassiveItemBuffs, …) are NOT editor-attached and stay

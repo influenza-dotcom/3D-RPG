@@ -6,10 +6,13 @@ extends EditorScript
 ## `NavLink` for each real ledge gap, so you don't hand-place them. Reuses the same island detection as the navmesh
 ## audit (NavLinkPlanner mirrors NavMeshAudit).
 ##
-## SAFE BY DEFAULT: APPLY = false only PREVIEWS (prints what it WOULD create; writes nothing). Set APPLY = true to
-## actually insert the nodes, then **Ctrl+S to save**. Regeneration is idempotent — it replaces only the tagged
-## `GeneratedNavLinks` container it owns, so any NavLink you hand-placed elsewhere is left untouched. Re-run after any
-## RE-BAKE (the islands change).
+## DESTRUCTIVE BY DEFAULT: this ships **APPLY = true**, so File > Run WRITES the nodes immediately — there is no
+## preview step to walk you up to it. For a print-only pass (prints what it WOULD create, writes nothing) you must
+## edit the const to `false` yourself and re-run. After a real run, **Ctrl+S to save**. Regeneration is idempotent by
+## DELETION: it FREES the whole tagged `GeneratedNavLinks` container and rebuilds it, so a NavLink you hand-placed
+## **inside** that container is DESTROYED — the live trenchboom_test_level has ten such hand-added
+## `_NavigationLink3D_492xx` links parked in there. Only links parented ELSEWHERE survive; keep hand-authored links
+## out of the container. Re-run after any RE-BAKE (the islands change).
 ##
 ## NOTES / LIMITATIONS:
 ## - THE EDITOR FREEZES WHILE IT RUNS, and shows nothing until it finishes. File > Run blocks the main thread, so the
@@ -29,7 +32,7 @@ extends EditorScript
 ## Preloaded (not the `NavLinkPlanner` global) so this runs even before the editor has registered the new class.
 const Planner := preload("res://scripts/tools/nav_link_planner.gd")
 
-const APPLY := true    ## false = PREVIEW ONLY (print, write nothing). Flip to true to insert nodes, then Ctrl+S.
+const APPLY := true    ## SHIPS TRUE — every run WRITES (and frees the container first). Flip to false for a print-only pass.
 const CONTAINER := "GeneratedNavLinks"   ## all generated links live under this one tagged child of the region
 
 ## Budget override (empty {} = NavLinkPlanner.DEFAULT_BUDGET). Tune here if links are too sparse/dense or reach too far.

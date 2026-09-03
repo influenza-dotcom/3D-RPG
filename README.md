@@ -6,7 +6,7 @@ a selectable colour depth (24-bit down to 3-bit, with the PlayStation's own
 grain, night vision, a Borderlands-style black ink outline over every surface,
 and PS1-style material warping — rides on a dense first-person movement and
 combat sandbox. It **presents at native resolution by default** (Options ->
-Video -> Presentation: *High Fidelity* — crisp text, native-res world, the
+Video -> Presentation: *Crisp* — crisp text, native-res world, the
 retro effects scale-compensated), with the original chunky low-internal-
 resolution pipeline preserved as the *Retro* option
 (see `docs/CURRENT_ARCHITECTURE.md` -> "Presentation").
@@ -76,11 +76,11 @@ the current `LevelData` as the runtime `Level` child. Run levels through
 | Crouch / slide | `Ctrl` |
 | Run (sprint; walking is the default; ignored while aiming down sights) | `Shift` |
 | Lean left / right — peek round cover (hold) | `Q` / `E` |
-| Attack / fire (throw the prop while carrying) | Left mouse |
+| Attack / fire — throws the prop while carrying, and **hurls the knife** while aiming down sights | Left mouse |
 | Aim down sights | Right mouse |
 | Reload | `R` |
 | Pick up / carry / throw / interact | `F` / `Z` / configured actions |
-| Take the wielded weapon into your hands to throw (press again to put it back), or set down a held prop | `H` |
+| Take the wielded weapon into your hands to throw (press again to put it back), or set down a held prop — aiming and firing throws the knife without this step | `H` |
 | Silent takedown / pet (hold, aimed at an unaware NPC or a pettable) | `Q` |
 | Befriend a stray (aim + tap) | `B` |
 | Wait — let in-game hours pass | `T` |
@@ -173,9 +173,11 @@ rpg/
   without opening a menu. Pins are per level, capped at 32, and ride the profile save. A time-of-day
   clock sits under it, so the hour is a readout rather than something to infer
   from how dark the street looks. A heading tape across the top-centre answers the
-  question the map deliberately cannot: heading-up, the plan turns under a fixed
+  question the map deliberately cannot: the corner box ships **north-up**, so your
+  facing is one tiny spinning caret and nothing else — and flipping **Rotate Minimap**
+  to heading-up loses even that, because the plan then turns under a fixed
   caret, so spinning on the spot moves every landmark and nothing says which way you
-  are pointing — the tape's rose slides under a fixed index instead, and it carries a
+  are pointing. The tape's rose slides under a fixed index instead, and it carries a
   pip for each objective at its true bearing plus one, in the pin's own colour, for the
   waypoint you are tracking. Markers carry their meaning in their **shape**
   before their colour — a hostile is a caret, a companion a diamond, a bystander a
@@ -219,10 +221,10 @@ rpg/
 **Author content fast:** open the **CYBER SUNDAY** bottom panel in the editor.
 Its Content tab scaffolds any content `.tres` (quest, NPC, weapon, item,
 faction, dialogue, loot table, perk, status effect, encounter, schedule,
-cutscene, bark set, loadout, grapple, map) with one click, seeded and opened in
-the Inspector; the Browse tab finds and opens any existing resource by type with
-a live search filter. See the [authoring guide](docs/AUTHORING_GUIDE.md) for
-which fields drive what.
+cutscene, bark set, loadout, grapple, map, throwable) with one click, seeded and
+opened in the Inspector; the Browse tab finds and opens any existing resource by
+type with a live search filter. See the [authoring guide](docs/AUTHORING_GUIDE.md)
+for which fields drive what.
 
 **Change the CYBER SUNDAY plugin:** use the
 [plugin QA checklist](docs/CYBER_SUNDAY_PLUGIN_QA.md). Plugin tools must be

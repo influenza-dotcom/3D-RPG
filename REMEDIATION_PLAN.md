@@ -13,13 +13,13 @@ refuted, and three problems were found that the assessment never saw.
 
 ---
 
-## Baseline, measured now
+## Baseline, re-measured 2026-09-02
 
 | | |
 | --- | --- |
-| Test suite | ~~3756 tests, 3753 passing, 3 failing~~ → **3769 tests, all passing** (2026-08-13 23:57) |
-| `git HEAD` | ~~`7f26405`~~ → `0c2b11c` — Phase 4 + 2.4 landed as two path-scoped commits |
-| Working tree | **~220 files dirty** and *growing* — see the concurrency warning below |
+| Test suite | ~~3756 tests, 3753 passing, 3 failing~~ → **3769 tests, all passing** (2026-08-13 23:57). ⚠ Long stale: a static count on 2026-09-02 gives **426 `tests/test_*.gd` files / 5,191 `func test_`** — the suite has grown ~38% and has **not** been re-run for this plan, so treat "all passing" as unverified |
+| `git HEAD` | ~~`7f26405`~~ → ~~`0c2b11c`~~ → **`122c391`** ("Docs: catch AUTHORING_GUIDE, CURRENT_ARCHITECTURE and SYSTEM_MAP up", 2026-08-28) — `0c2b11c` is **36 commits back**; Phase 1.2 has since landed |
+| Working tree | **224 paths dirty** (175 modified, 47 untracked, 2 deleted) — ordinary churn on top of a committed tree, not the un-landed tangle Phase 1 was written against. It still *moves* — it grew 166 → 224 in a day; see the concurrency warning below |
 | Boot | ⚠ `scenes/game.tscn` headless is **not reliably 0 script errors**; see Phase 4 note |
 | Text debt | `scripts/tools/text_debt.gd` reports `TOTAL: 0` |
 
@@ -129,9 +129,15 @@ Three red tests. None are yours from the assessment; all are in-flight work.
 
 ## Phase 1 — commit the tree (8–10 h)
 
-**This is the highest-value item in the plan and the least interesting.** ~190 dirty files, zero
-commits, eight tangled features. Right now a single bad edit loses a day's work with no way back, and
-nobody — including you in a month — can tell which change caused which behaviour.
+**⚠ 1.2 is DONE — this section is history, not work.** Re-measured 2026-09-01: **36 commits have landed**
+since this plan's stated HEAD, and every file the commit-group table below names is tracked. What follows
+is kept only as the record of how it was split. **Only 1.1 is still open.** The tree is dirty again
+(224 paths on 2026-09-02: 175 modified, 47 untracked, 2 deleted) but that is ordinary post-commit churn,
+not the eight-feature tangle this item was written against.
+
+*Original text follows.* **This is the highest-value item in the plan and the least interesting.** ~190
+dirty files, zero commits, eight tangled features. Right now a single bad edit loses a day's work with no
+way back, and nobody — including you in a month — can tell which change caused which behaviour.
 
 - [ ] **1.1 — Land the export preset first.** `export_presets.cfg` is gitignored (`.gitignore:5`,
   inherited from the stock GitHub Godot template). Un-ignore it, point `export_path` at a
@@ -145,20 +151,24 @@ nobody — including you in a month — can tell which change caused which behav
   | # | Group | Notes |
   | --- | --- | --- |
   | 1 | Rename to CYBERSUNDAY | `project.godot`, `icon.png/.ico`, README, docs |
-  | 2 | Wait feature (`B`) | `WaitSettings`, `wait_screen.*`, `scripts/ui/hud_clock.gd` |
+  | 2 | Wait feature (`T`) | `WaitSettings`, `wait_screen.*`, `scripts/ui/hud_clock.gd` — Wait is on **T** (the Fallout 3/NV key); `B` is `Claim`/Befriend Pet, which was moved off T precisely to free it (`InputManager.gd:125-133`) |
   | 3 | AI LOD | `ai_lod.gd`, `scripts/npc/npc.gd`, `scripts/npc/npc_combat.gd`, `NpcAiSettings` |
   | 4 | Ink outline | `resources/shaders/ink_outline.gdshader`, `ink_outline.gd` |
-  | 5 | Flashlight replaces laser sight | the 8 tracked deletions |
+  | 5 | Flashlight (the laser-sight deletions — **since reversed**) | the 8 tracked deletions landed, then the laser sight came back 2026-08-31 as its own chip-gated rig (`scripts/components/abilities/laser_sight.gd`, `scenes/player/laser_sight_rig.gd`, `resources/items/chip_laser_sight.tres`, the `LaserMesh`/`LaserSight`/`LaserSightSub` nodes at `scenes/player/camera_rig.tscn:104,112,123`). **Both ship** — the flashlight did not replace it |
   | 6 | Rent notice + grace | `scripts/components/rent_collector.gd`, the level, `DESIGN.md` |
   | 7 | Audio/light fixes | `volume_db`/`max_db`, the light-buzz wash |
   | 8 | `cyber` CLI + Bridge tab | includes the 0.1 fix |
   | 9 | Editor plugin / audit panel | `panel_audit`, `addons/cybersunday_tools/panel_audit/scan_cache.gd` |
-  | 10 | Docs + `DESIGN.md` | `DESIGN.md` is untracked, not a doc edit |
+  | 10 | Docs + `DESIGN.md` | `DESIGN.md` *was* untracked, not a doc edit (it is tracked now) |
 
 - [ ] **1.3 — Do not commit** the dev probes (`__perf_probe.*`) unless you fix 0.2 by patching.
   **Decided: patched, keep.** ⚠ `scripts/tools/__npc_cost_probe.gd` **does not exist** — this plan
-  invented it. The real `__`-prefixed tools are `__ink_mask_probe.gd`, `__perf_probe.gd`, `__shirt_qa.gd`,
-  `__verify_shirt.gd`, `__verify_shirt_tools.gd`.
+  invented it. `scripts/tools/` holds **18** `__`-prefixed probes today (`__applause_probe`,
+  `__death_skip_probe`, `__first_kill_hitch_probe`, `__ghost_align_probe`, `__ink_cb_ring_shots`,
+  `__ink_gap_probe`, `__ink_occlusion_shots`, `__ink_seam_shots`, `__kill_shake_probe`, `__lens_probe`,
+  `__perf_probe`, `__shadow_probe`, `__shirt_qa`, `__stamina_ring_probe`, `__tts_dll_probe`,
+  `__verify_shirt`, `__verify_shirt_tools`, `__viewmodel_ring_shot`). There is no `__ink_mask_probe.gd`
+  either — the correction had a phantom of its own.
 
 > **One note on the rename:** `config/name` *is* the `user://` path. Renaming to CYBERSUNDAY orphaned
 > `user://RPG/` — your old `gamestate.cfg` is still sitting there, dated before the rename. A new
@@ -185,8 +195,11 @@ every player death; a Freesound export as the dialogue music bed; a Pixabay expo
 including the player's own weapons (`shotgun`, `sniper_rifle`, `knife`, `hammer`, `silenced`,
 `spraycan`) and `scenes/player/view_model.tscn`. A meaningful share of Sketchfab models are CC-BY-NC.
 
-**Nothing is stripped at export.** `export_presets.cfg` uses `export_filter="all_resources"` with
-empty filters, so even the orphaned commercial files land in the `.pck` verbatim.
+**The commercial assets are not stripped at export.** `export_presets.cfg` uses
+`export_filter="all_resources"` (`:11`) with an empty `include_filter` (`:12`), and `exclude_filter`
+(`:13`) already carries `tests/*,tests_soak/*,docs/*,maps/autosave/*,addons/text_to_speech/example*,addons/text_to_speech/README.md`
+— so **2.6 must EXTEND that list, not replace it**. Nothing under `assets/` is covered, so even the
+orphaned commercial files land in the `.pck` verbatim.
 
 **The one piece of good news:** `C:/Users/dalla/Desktop/my fps/` does not exist. Nothing was ever
 distributed. This is a repo cleanup, not a recall.
@@ -249,8 +262,9 @@ distributed. This is a repo cleanup, not a recall.
   **This is the open tail: 6 h is a floor, not an estimate.** Re-finding a model by slug from a GLB
   binary is not reliably possible, and anything unfindable — or CC-BY-NC — needs *replacing*, not
   documenting. Start here; it only gets harder.
-- [ ] **2.6 — Add `exclude_filter` entries** so orphaned third-party files stop shipping. Fold into
-  the same `export_presets.cfg` pass as 1.1.
+- [ ] **2.6 — *Extend* the existing `exclude_filter`** (six entries already, quoted above — do not
+  overwrite them) so orphaned third-party files stop shipping. Fold into the same `export_presets.cfg`
+  pass as 1.1.
 - [ ] **2.7 — Verify windowed, not headless.** A broken material loads clean headlessly and passes
   every test. You must look at the grenade launcher and the radio.
 
@@ -273,8 +287,10 @@ One at a time, commit between each, in the editor.
   `start_quest_on_choice` on the old man's 56-Zorkmid ask and `complete_quest_id` + `give_money` on
   the raider's contract. The systems are finished; this is authoring. *(3 h)*
 
-- [ ] **3.3 — Give `payment_missed` a listener.** Nothing anywhere connects to it —
-  the signal exists only in `rent_collector.gd` and its own test. Two cautions from the code:
+- [ ] **3.3 — Give `payment_missed` a real consequence.** Its only listener today is the debug overlay
+  (`scripts/components/debug_event_ticker.gd:616` → `_on_rent_missed` at `:729`, instanced via
+  `scenes/game.tscn:18`) — a printed line is not a consequence, and nothing in the game reacts to a
+  missed rent. Two cautions from the code:
   - Copy the guards from `ledger_accrual.gd:41-45` (`profile_active`, `reload_pending()`,
     `is_alive()`). `RentCollector.collect()` has none, so a dev boot or a test-level dawn would dock
     a profile that isn't running.
@@ -284,11 +300,17 @@ One at a time, commit between each, in the editor.
   Code half (the export) lands before the scene half (arming it). *(1.5 h)*
 
 - [ ] **3.4 — Re-bake navigation. ⚠ Read this before running the generator.**
-  `generate_nav_links.gd:80-83` does `region.remove_child(old); old.free()` on the entire
-  `GeneratedNavLinks` container — and **10 hand-placed links live inside it**
-  (`:3736, 3750, 3771, 3918, 3925, 3932, 3967, 3988, 4030, 4170`). Regenerating without moving them
-  out first **deletes them silently**. Move them to a sibling node, then re-bake, then regenerate
-  (note `const APPLY := false` at `:24` — it previews by default).
+  `generate_nav_links.gd:99-100` does `region.remove_child(old); old.free()` on the entire
+  `GeneratedNavLinks` container — and **10 hand-placed links live inside it**: the
+  `_NavigationLink3D_492xx` nodes, as distinct from the generator's own `Link_dn_` / `Link_tw_` /
+  `Link_wk_` names, at `:4714, 4728, 4749, 4896, 4903, 4910, 4945, 4966, 5008, 5148` (re-located
+  2026-09-01 — the level has been re-authored, so grep `_NavigationLink3D_` rather than trusting these).
+  Regenerating without moving them out first **deletes them silently**. Move them to a sibling node,
+  then re-bake, then regenerate — and note ⚠⚠ `const APPLY := true` at `:35`: it **WRITES by default**.
+  The file's own header at `:9` now says "DESTRUCTIVE BY DEFAULT" and the const carries an inline
+  `SHIPS TRUE` note, so the source no longer misleads you — but the *behaviour* is unchanged. Set
+  `APPLY = false` yourself before any exploratory run, or the `if not APPLY or
+  specs.is_empty(): return` guard at `:93` falls straight through into the wipe.
 
   **Honest framing: this is a 3 h investigation, not a 3 h fix.** The bake parameters are already
   correct to policy (`parsed_geometry_type = 1`, `agent_radius = 0.6`, `agent_max_climb = 0.4`), so
@@ -347,8 +369,8 @@ change what the plan said:
 - [x] **4.3 — Move `tests_soak/` onto push in CI.** Done; the `if:` gate is gone and `workflow_dispatch` stays for manual runs. (The "27 s" figure is an observation, not a repo fact.) It is gated to `workflow_dispatch` and runs in
   27 s. It is the only automated thing that touches the real runtime. *(0.5 h)*
 
-- [x] **4.4 — Fix the README's first instruction.** Edited on disk but **NOT committed** — `README.md` carries unrelated uncommitted rename work, so committing it would sweep. It lands with commit group 1. Confirmed the error is README-only; `AUTHORING_GUIDE.md` already documents `computerroom.tscn` correctly. `README.md:51` still says "Run
-  `scenes/game.tscn`"; `project.godot:14` boots `computerroom.tscn`. Following the README skips the
+- [x] **4.4 — Fix the README's first instruction.** Done **and committed**: `README.md:56` reads "The main scene is `scenes/computerroom.tscn`" and `:60` flags `scenes/game.tscn` as a level-authoring shortcut, not the way in. (`README.md` is still `M` in `git status`, but on unrelated later edits — the fix itself is in.) Confirmed the error was README-only; `AUTHORING_GUIDE.md` already documents `computerroom.tscn` correctly. The old text said "Run
+  `scenes/game.tscn`"; `project.godot:14` boots `computerroom.tscn`. Following the old README skipped the
   warning card, the TOS gate, character creation and the implant purchase — all four are
   `StartMenu`-owned, not autoloads. One sentence. *(0.25 h)*
 
@@ -357,13 +379,14 @@ change what the plan said:
 ## Phase 5 — gated and deferred
 
 - [ ] **5.1 — Boot time (H1). Do not start this until you have measured an exported build.**
-  35 autoloads, 18 of them UI `.tscn` screens. The lazy-shim conversion is ~18 h — but the measured
+  38 autoloads, 20 of them UI `.tscn` screens. The lazy-shim conversion is ~18 h — but the measured
   saving is **GDScript compilation of the screen scripts**, and `export_presets.cfg` sets
   `script_export_mode=2` (binary tokens, precompiled). In a shipped build that cost largely does not
   exist. Phase 1.1 makes an export possible; measure that first, then decide.
 
-  Two things to know if you do it: `InputManager.gd:180` calls `NameEntryDialog.is_open()` *directly*,
-  outside the modal registry, and `any_modal_open()` iterates all 17 — this is the per-frame source
+  Two things to know if you do it: `managers/InputManager.gd:250` (`gameplay_suppressed()`) calls
+  `NameEntryDialog.is_open()` *directly*, outside the modal registry (a second direct call sits at `:325`),
+  and `any_modal_open()` at `:276` iterates all **19** `_modal_reg` rows — this is the per-frame source
   of truth for movement/fire suppression, so a shim that answers wrong unfreezes the player under an
   open menu. And you would be trading a boot cost for the in-game hitch `PreloadManager` exists to
   prevent.
@@ -371,11 +394,13 @@ change what the plan said:
   **Free win available now:** deleting the CoD asset (2.1) removes a 7.27 MB GLB + 8 textures from
   the boot path. Measure after Phase 2, before costing this at all.
 
-- [ ] **5.2 — Docs.** **183 occurrences of a bogus `rpg/` path prefix** in `docs/AUTHORING_GUIDE.md`
-  (count confirmed). ⚠ **"One sed pass" is the bug — 180 are bogus, 3 are legitimate prose** about the
-  repo root, at `:132` ("all under the repo's `rpg/` folder"), `:3262` ("from `rpg/` --", a cwd
-  instruction) and `:4190` ("the project root is `rpg/`"). A blind `s|rpg/||g` turns those into empty
-  backticks. Anchoring on a leading backtick under-matches too: `:3445` and `:3454` are headings where the
+- [ ] **5.2 — Docs.** **189 occurrences of a bogus `rpg/` path prefix** in `docs/AUTHORING_GUIDE.md`
+  (re-counted 2026-09-02; the guide is live and its line numbers drift weekly — re-derive these rather
+  than trusting them).
+  ⚠ **"One sed pass" is the bug — 186 are bogus, 3 are legitimate prose** about the
+  repo root, at `:133` ("all under the repo's `rpg/` folder"), `:4195` ("from `rpg/` --", a cwd
+  instruction) and `:5360` ("the project root is `rpg/`"). A blind `s|rpg/||g` turns those into empty
+  backticks. Anchoring on a leading backtick under-matches too: `:4418` and `:4427` are headings where the
   prefix is not backticked. Use a **segment-anchored** pass, verified by executing it on a scratch copy —
   it leaves exactly the 3 prose mentions and nothing else:
 
@@ -383,13 +408,13 @@ change what the plan said:
   sed -i -E 's#\brpg/(scripts|resources|scenes|managers|tests|addons|docs|project\.godot|CLAUDE\.md)#\1#g' docs/AUTHORING_GUIDE.md
   ```
 
-  Then verify with `grep -o 'rpg/' docs/AUTHORING_GUIDE.md | wc -l` — must be **3**, on lines 132, 3262,
-  4190. Do **not** use `grep -c`; it counts lines, not occurrences (this plan's own earlier text made that
+  Then verify with `grep -o 'rpg/' docs/AUTHORING_GUIDE.md | wc -l` — must be **3**, on lines 133, 4195,
+  5360. Do **not** use `grep -c`; it counts lines, not occurrences (this plan's own earlier text made that
   mistake — it returns 3 here only because the survivors happen to sit on 3 distinct lines). Human-read
-  `:132` afterward: it keeps one legitimate mention while four paths on the same line get stripped.
+  `:133` afterward: it keeps one legitimate mention while four paths on the same line get stripped.
   Land it with commit group 10. *(0.5 h)*
 
-  **Recommendation: freeze, don't shrink.** `AUTHORING_GUIDE.md` is 4,222 lines / 804 KB and its
+  **Recommendation: freeze, don't shrink.** `AUTHORING_GUIDE.md` is 5,402 lines / ~1.03 MB and its
   423 over-long lines hold half its bytes — but rewriting it is days of work on something that is not
   the product, and its factual accuracy is genuinely high (every `res://` path in it resolves). Add
   no new sections until the pipeline being documented has produced one shipping asset.
@@ -415,10 +440,10 @@ Each one looks like an obvious cleanup and each one breaks something.
 
 - **Do not fill the empty bark arrays.** 21 pools are empty, and **14 assertions across FIVE test files**
   pin `size() == 0` — `test_attack_reactions.gd:17,18,44`, `test_hostility.gd:580-582,623,634,635,636`,
-  `test_body_discovery.gd:61`, `test_default_barks.gd:95,96`, `test_npc.gd:287` (the plan's "12+ across two
+  `test_body_discovery.gd:61`, `test_default_barks.gd:95,96`, `test_npc.gd:627` (the plan's "12+ across two
   files" under-counted the blast radius). Emptiness is a deliberate contract from the AI-text scrub.
   ⚠ **But it is not an absolute block on shipping barks**, which the original wording implied: `bark_set.gd`
-  exposes the same categories as designer-authored `@export` arrays, and `npc.gd:2096 _pick_bark(fallback,
+  exposes the same categories as designer-authored `@export` arrays, and `npc.gd:2223 _pick_bark(fallback,
   override)` is the seam. **Authoring a `BarkSet` `.tres` adds barks and breaks nothing** — all 14
   assertions read the `NPC.*_LINES` const fallback. That is the supported route; editing the consts is not.
 - **Do not bulk-strip `[PH]` markers.** ⚠ The rule is right; the stated reason is wrong. It is **not**
@@ -430,7 +455,8 @@ Each one looks like an obvious cleanup and each one breaks something.
   marker also appears mid-expression (`player_text.gd:479`), not only in const declarations.
 - **Do not gitignore `__perf_probe.gd` to silence `test_groups`.** The test walks the filesystem.
   Delete it or fix it.
-- **Do not run `scripts/tools/generate_nav_links.gd` before rescuing the 10 hand-placed links.** See 3.4.
+- **Do not run `scripts/tools/generate_nav_links.gd` before rescuing the 10 hand-placed links.** It ships
+  `APPLY := true` — there is no harmless "just to see" run. See 3.4.
 - **Do not hand-edit `trenchboom_test_level.tscn`.** Editor only.
 - **Do not extract anything from `scripts/player/player.gd` or `npc.gd`.** The extractions work — I checked — but
   the marginal one buys almost nothing. Resume only when a specific feature is blocked by file size.

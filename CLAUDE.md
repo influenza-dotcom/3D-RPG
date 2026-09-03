@@ -130,9 +130,16 @@ NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in pla
   collider (changes player stair-feel) unless you intend those trade-offs.
 - **Auto-generate links instead of hand-placing them: File→Run `scripts/tools/generate_nav_links.gd`.** It scans the
   region for disconnected islands within a jump/drop budget and emits a `NavLink` per gap (brain = `NavLinkPlanner`,
-  which mirrors `NavMeshAudit`'s island detection; unit-tested). PREVIEW-first (`APPLY = false` prints, writes nothing;
-  set `APPLY = true` + Ctrl+S to insert). Idempotent — replaces only its `GeneratedNavLinks` container, so hand-placed
-  links survive; **re-run after every re-bake**. It auto-classifies each gap: bare ledge→`LAUNCH`, cliff→`ONE_WAY_DOWN`,
+  which mirrors `NavMeshAudit`'s island detection; unit-tested). **DESTRUCTIVE BY DEFAULT: it ships
+  `const APPLY := true`, so a single File→Run prints the plan and then WRITES the nodes straight into the open
+  scene — there is no preview step.** ⭐**Ctrl+Z CANNOT undo it** — it is an `EditorScript` that mutates the tree
+  directly and never touches `EditorUndoRedoManager`, so undo pops whatever unrelated action was last on the stack.
+  **Closing the scene WITHOUT saving is the only recovery.** Edit the const to `false`
+  for a print-only pass; Ctrl+S to keep a real run. Idempotent by DELETION — it FREES the whole `GeneratedNavLinks` container
+  and rebuilds it, so **a hand-placed link parked INSIDE that container is DESTROYED** (the live
+  `trenchboom_test_level` has ten such `_NavigationLink3D_492xx` links in there); only links parented ELSEWHERE
+  survive — keep hand-authored links out of the container. **Re-run after every re-bake**. It auto-classifies each
+  gap: bare ledge→`LAUNCH`, cliff→`ONE_WAY_DOWN`,
   and — via a physics raycast probe (a self-built `PhysicsServer3D` space over the scene's colliders, so it works in
   File→Run) between the island rims — a **staircase/ramp**→`WALK` link (continuous ground rising in ≤`step_up_height`
   steps). So stairs are handled automatically. It also RESCUES sinks: a *small* drop-only island (only one-way-down
@@ -194,6 +201,14 @@ NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in pla
 - Before editing `addons/cybersunday_tools/`, read `docs/CYBER_SUNDAY_PLUGIN_QA.md`.
 - Plugin features that write files must preview, confirm, and report changed paths.
 - Read-only tabs must stay read-only unless the UI label and authoring docs make the write behavior explicit.
+- **Never rename a tool's Control `name`.** Tests pin them ("Quest Edit", "Dialogue Edit", "Loot Edit", "Items",
+  "Content", "Level", "Bridge", "Scene Diff", …) and `cyber_panel.gd`'s tab registry keys on them, so a rename
+  breaks `show_tab` / `open_in_editor` / `on_scene_changed`. The DISPLAY title a designer reads is set in
+  `cyber_panel.gd` with `set_tab_title` — retitle there.
+- **Tabs reach the panel ONLY through `core/host.gd`** (`Host.find(self)` / `Host.show_tab(self, name)` /
+  `Host.open_in_editor(self, path)`), never a `get_parent()` chain or a node path — the nesting depth is a private
+  layout detail that has already changed once. All three are null-safe off-tree, which is what keeps handoff
+  buttons harmless under GUT.
 - After plugin script edits, toggle **CYBER SUNDAY Tools** off/on in Project Settings → Plugins so Godot reloads it.
 
 ## GDScript / editor

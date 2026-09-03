@@ -35,6 +35,50 @@ from a `TriggerVolume`/cutscene). The `LevelDoor` prefab wiring is pinned by
 The level scene itself does not contain the Player. Play levels through
 `game.tscn` unless you are intentionally inspecting a bare level.
 
+### Effect prewarm — two stages (boot SubViewport + in-level `EffectPrewarmer`)
+
+The first kill and the first hit used to hitch — a real-renderer probe measured the first-kill frame at
+~+45 ms and the first hit at ~+20 ms over a warm repeat in the same process, with `surface`/`spec`
+pipeline compiles appearing ONLY in the first-use phases (a cold shader cache adds DXC compiles on top) —
+because the effects they spawn drew for the first time mid-combat, inside the death freeze. Two distinct
+first-time costs hide there and need two different warms. **Stage 1, boot:**
+`PreloadManager._prewarm_gpu_particles` (`managers/PreloadManager.gd`, deferred from the autoload's
+`_ready`, skipped headless) renders every `PARTICLE_WARM_PATHS` scene plus `Throwable.build_confetti_burst`
+for 8 frames in a 16×16 own-world `SubViewport`; that compiles each `ParticleProcessMaterial`'s generated
+compute shader (a DXC compile on D3D12 — the known NVIDIA first-compile crash class) during the boot
+screen, before `game.tscn` exists. It cannot warm draw pipelines faithfully: a PSO is keyed on the
+renderer-GLOBAL requirement set (the `InkOutline` normal-roughness prepass, the 16-bit shadow atlases,
+cubemap shadows), which only exists once the level and the player rig are live, and the warm world's
+instances are freed before those requirements flip. **Stage 2, in-level:** `EffectPrewarmer`
+(`scripts/components/effect_prewarmer.gd`, `WARM_PATHS`, `warm(camera)`) is driven by
+`GameRoot.load_level` right after `_apply_ps1_warp(inst)` — level, Player, camera rig and `InkOutline` are
+all in the tree and the fade-from-black is still up — and instances every combat spawnable (the blood /
+dust / muzzle / shell / spark particles, both decals, the projectiles and casing, `explosion_area`,
+`gore_gib` / `body_part_gib` / `loot_bag`) once in the REAL `World3D`, frozen, muted and collision-less,
+in front of the live camera for a few frames, then frees them; the code-built billboard feedback is
+exposed through statics (`DamageNumberPopup.build_label`, `NpcBarkUi.build_icon`) so the same pass draws
+exactly what gameplay builds, since 2D/canvas pipelines have no precompilation at all. `Player.add_xp` no
+longer writes the profile synchronously on the kill frame — it rides the wallet's coalesced
+`_queue_autosave()`. Ratchets: `tests/test_preload_prewarm.gd` (every `GPUParticles3D` scene is in
+`PARTICLE_WARM_PATHS`) and `tests/test_effect_prewarm.gd` (every particle-list entry and every drawable
+`PreloadManager.PATHS` scene is in `WARM_PATHS`, every entry exists, the builders are routed through,
+`load_level` invokes the prewarmer after the PS1 warp, `add_xp` queues its save). Exports set
+`shader_baker/enabled=true` (`export_presets.cfg`) so a fresh machine never DXC-compiles an authored
+material — shader *code* only; PSOs are per-process and still need stage 2. **Measure, don't guess:**
+`scripts/tools/__first_kill_hitch_probe.gd` (a `__` throwaway, run windowed as
+`godot --path <abs project> res://scripts/tools/__first_kill_hitch_probe.tscn -- --run=<tag>`) boots
+`game.tscn`, drives the DebugConsole (`sandbox on; god on; spawn raider 1; killall 8; hurt 5`, then the
+same beat again warm), logs wall-clock frame spikes per phase with the per-frame deltas of
+`Performance.PIPELINE_COMPILATIONS_*` (`draw`/`canvas` deltas are synchronous stalls; `spec` is
+background) and lists every shader-cache file written since launch — `first_*` minus `*_control` is the
+one-time cost. Headless never exercises either stage. The one NON-render first-use on the same frames is
+speech: the first NPC bark (a kill's witness reaction, or the aggro shout when you are first shot at) used
+to build the Flite engine and synchronously load a 6–12 MB voice on the main thread. `SpeechTts.prewarm()`
+(deferred from `PreloadManager._ready`, non-headless, gated on `Settings.tts_enabled`) now loads every
+bundled voice into the rebuilt TTS DLL's process-wide voice cache through one throwaway native engine and
+runs one discarded synthesis, so every later `set_voice_path` on any pool player is a cache hit (measured:
+7 voices in ~0.6 s at boot; a cached voice switch + synthesis ~23 ms, no reload). Nothing is played.
+
 ## Save Model
 
 **Debug save sandbox (2026-08-18).** `GameState.resolve_save_path(path)` is an allowlist rewrite applied at
@@ -741,14 +785,24 @@ logged. Debug readout: the `wandermusic` console command, whose first line is *w
 `GameSettings.audio.global_pitch_spread` (default `0.15` — deliberately the same number as
 `interactable_impact_pitch_spread`, this project's own impact spread; `0.0` switches the whole effect
 off). Sizing matters more than it looks: the first cut shipped at `0.04` and was **inaudible**, six
-consecutive enemy hits spanning ~1.2 semitones in total. Two entry points apply it:
+consecutive enemy hits spanning ~1.2 semitones in total. Three entry points apply it:
 
 * **Spawned one-shots** get it by default — `play_sfx` / `play_2d_sfx` call `vary_pitch` on the
   caller's `pitch_scale` unless the caller passes `vary = false`.
 * **Node-driven world sites** — the places that retrigger a persistent authored `AudioStreamPlayer`
-  living in a scene (gunfire, the dry-fire click, the shell tink, the reload, an NPC death cry, the
+  living in a scene (the dry-fire click, the reload, the spray-can hiss, an NPC death cry, the
   explosion, the flashlight click, a radio's on/off switch) — call
   **`AudioManager.play_varied(player, base_pitch := 1.0)`** instead of `player.play()`.
+* **Sounds that RETRIGGER faster than they finish** — the gunshot and the shell tink — take a THIRD
+  route, because `play_varied` on one shared node still restarts it and so cuts the play before:
+  `WeaponAudio._play_voice` `duplicate()`s the authored node into a throwaway sibling voice, sets
+  `voice.pitch_scale = AudioManager.vary_pitch(base_pitch)` on the CLONE, and cuts the oldest survivor
+  once `GameSettings.audio.retrigger_voice_limit` (default `8`) voices are live. The SMG's 0.125 s
+  cadence used to chop a 3.55 s report 125 ms in, at the loudest point of its decay, and clip every
+  casing 125 ms into a 1.9 s bounce. A node-level `max_polyphony` cannot fix that: `pitch_scale` is a
+  NODE property the 3D mixer re-applies to every live playback, so the next shot's ammo sag and pitch
+  roll would yank every still-ringing tail with it — one clone per play is the only shape in which a
+  shot keeps the pitch it was fired at.
 
 ### The boundary is DIEGETIC, and it is the whole design
 
@@ -827,9 +881,10 @@ survive the player's own death. The duck therefore moved down onto the four **wo
 `music`, `ambient_bed` into `ambient`, and the diegetic `world` trunk — fed by `speaker`
 and the `gunshots` echo — sends into `sfx`), and the death sting plays on `sting` — a bus
 deliberately absent from that list, sending straight to Master. The Player's cinematic
-reaches it through exactly four seams (`begin` / `set_world_duck` / `restore_world` /
-`begin_revive`), one on each
-death-exit path; `restore_world` iterates the designer's bus list rather than a captured
+reaches it through FIVE seams (`begin` / `set_world_duck` / `restore_world` /
+`begin_revive` / `release_sting`) — the first four one on each death-exit path,
+the fifth the click-to-skip's own (below);
+`restore_world` iterates the designer's bus list rather than a captured
 snapshot, so adding a bus can never leave one death mode stale. No level is captured
 anywhere: every write recomputes from `Settings.current_bus_db(bus)` scaled by one duck
 factor, which is what makes the "re-trigger snapshots the ducked level and ratchets the mix
@@ -837,6 +892,27 @@ quieter" bug inexpressible. **Consequence for authoring: an `AudioStreamPlayer` 
 `bus` set lands on Master, which is no longer ducked — it plays at full volume under the
 death card.** `tests/test_audio_bus_hygiene.gd` guards the scene side; every `.new()` site
 already assigns a bus.
+
+**`release_sting` is the fifth seam, and it is the OPT-OUT nobody takes by default.** No death
+fades the sting. The card's hold (`card_hold_seconds`) was solved against `death_sting_sync_point`
+so an unskipped clip's final chord attacks on the very frame the screen fades back up and rings on
+into the new life — forcing a fade there amputates a decay that was composed to land, which is why
+`begin_revive` leaves the sting alone. **A skipped cinematic breaks that arithmetic, and the song
+still plays out in full.** `Player._try_skip_death_beat` sets the `_death_skipped` latch and
+*speed-scales* the death tween (it never `kill()`s it — the chain's callbacks ARE the death), so the
+world comes back seconds before the chord is due and the clip's whole back half lands on live
+gameplay. That is the intended shape: a click asks to get past the PICTURES, and the sting is the
+one beat a fast-forward cannot compress — it runs on DeathMix's own wall-clock, not on that tween,
+so releasing it would shorten no part of the death and only truncate the track.
+`Player._respawn_at_checkpoint` therefore reads `death_skip_sting_release` (**0** by default) and
+calls `release_sting` only when a designer has opted in — strictly AFTER `begin_revive()`, whose own
+`_kill_tweens()` would cancel the fade if it ran first, and note that `release_sting(0)` means CUT
+IT DEAD at the seam, so the opt-out has to be read at the call site rather than passed down. The
+RELOAD_* modes need none of it — `restore_world` stops the sting dead on a scene that is about to be
+rebuilt. `tests/test_death_mix.gd` pins the seam roster, the shipped `0`, and the two gates on the
+call (a source-text assert on `if _death_skipped and skip_release > 0.0:` immediately followed by
+the call, plus the begin_revive ordering): losing the latch would fade every death, losing the knob
+test would fade every skipped one.
 
 **Menu audio is a SEPARATE seam from `AudioManager`, and deliberately so.** Every menu cue plays on
 `MenuStyle`'s OWN pool of `AudioStreamPlayer`s, not through `AudioManager.play_2d_sfx` — because
@@ -873,9 +949,11 @@ structural backstop is that every `play_*` early-outs while the pool is empty, s
 `BaseButton` under a menu root is auto-click-wired by the `node_added` hook, so a button with a more
 specific meaning must be re-pointed or muted through `MenuStyle.set_button_sound`, the one sanctioned
 way; (3) **throttles use `Time.get_ticks_msec()`, never a delta**, since a paused tree freezes delta.
-Three seams carry the whole system: `ModalMenu.grab_mouse/restore_mouse` cue open/close for all eight
-standalone modals (they sit *past* every refusal guard, unlike the `closed` signal, which fires even for
-a screen that never appeared), `PlayerMenus.enter/leave` distinguish a cold group open from a sibling tab
+Three seams carry the whole system: `ModalMenu.grab_mouse/restore_mouse` cue open/close for all ten
+standalone modals (shop / heal / atm / level-up / respec / chip-install / chess / loot / weapon bench /
+wait — every `blocks_tabs` row of `InputManager._modal_reg` except the Options takeover; they sit
+*past* every refusal guard, unlike the `closed` signal, which fires even for a screen that never
+appeared), `PlayerMenus.enter/leave` distinguish a cold group open from a sibling tab
 swap, and `InputManager.close_all_modals` holds `MenuStyle.set_quiet` so the death/quickload sweep does
 not fire a wall of close cues at once.
 
@@ -951,6 +1029,37 @@ Geometry and policy are pure statics in `PartPinner` (`scripts/effects/part_pinn
 because that classifier has no left/right and desyncs by ~0.28 m on a seated actor. Feel numbers: the
 `pinned_part_*` group on `EffectsSettings`, which also quiets the rest of the burst on a pin kill — the staple only
 reads if it is the only thing moving. Not persisted in either save tier, like all gore.
+
+**The STUCK blade — a SURVIVED thrown hit leaves the knife in the body, riding the part it struck.** The far side
+of the same kill line (`WeaponData.thrown_sticks_in_body` → `Throwable.sticks_in_body`, shipped ON for `melee.tres`
+only). `_try_damage_character` marks the pin intent *blind*, immediately **before** `take_damage` (armour,
+difficulty and DR all move the number after we hand it over), then reads `Character.is_alive()` immediately
+**after** it — the first moment the answer exists. A survivor keeps the blade; a corpse leaves it for the death
+burst. **One hit can never do both**, and that single gate is why neither effect needs to know about the other.
+`is_alive()` and not `hp > 0`: an overkill leaves hp NEGATIVE and the `_dead` latch is set before hp is read.
+Four contracts:
+(1) **A per-frame transform write, NOT a reparent.** The prop is frozen (`FREEZE_MODE_KINEMATIC` — the engine's
+"code drives this" mode, unlike the pin's STATIC, which never moves) and re-posed from the part's frame each
+physics step in `_follow_stuck_part`. Parenting it under the part would put a `RigidBody3D` beneath an animated
+visual node, would drag the pickup / grapple / gib systems into the actor's subtree (they all assume a prop hangs
+under the tree ROOT), and — worst — a **pooled NPC reuses those exact part nodes**, so a parented knife would ride
+into a stranger's next life. The anchor is scale-stripped (`PartPinner.rigid_anchor`), so a scaled part cannot
+resize the blade; the mirror on a right limb is kept and cancels through the offset.
+(2) **It stays solid, and takes a mutual collision exception with its victim.** The layer is kept deliberately so
+`PickupRay`'s aim ray can still find it (pulling your knife back out is the retrieval beat, and `_pick_up` calls
+`unstick()` beside `unpin()`); `collision_mask` goes to 0 and `_on_body_entered` bails while embedded, because the
+victim's own capsule re-touches the hilt every step and would otherwise be re-stabbed on a loop. The exception is
+registered in **both** directions — it is the `CharacterBody3D`'s own motion test that has to skip the blade.
+(3) **The ways out are POLLED.** Death (`is_alive()`), the part or victim going away (freed, level swap), and the
+player's grab all land in `unstick()`, which is idempotent for exactly that reason; `_exit_tree` calls it too, so a
+prop shot apart mid-wound cannot leave a stale exception on a body that outlives it.
+(4) **Which part** is `PartPinner.nearest_key` over the live **visual** centres, the same choice the pin makes —
+recomputed in `Throwable._visual_centre_of` rather than borrowed from `BodyPartGib.mount_placement`, because
+`body_part_gib.gd` *extends* `Throwable` and preloading it from there would close a class parse cycle. Which parts
+are eligible reuses `BodyPartGibs.wants_part`, fed from the `stuck_blade_*` group on `EffectsSettings` — where all
+four ship ON, deliberately more permissive than the pin's head+torso. Tests: `tests/test_stuck_blade.gd` (in-tree,
+including a **source-text pin on the call site**, the guard against the "every seam correct, nothing calls it" bug
+the pin kill actually shipped with) plus the anchor maths in `tests/test_part_pinner.gd`. Not persisted.
 
 **The thrown-weapon tracer — a white streak, drawn OUTSIDE the prop it follows.** EVERY weapon
 (`WeaponData.thrown_trail` → a `ThrowTrail` child stamped on the drop by `WorldItem._make_throwable`; the flag
@@ -1477,6 +1586,49 @@ The no-target branch is planner-owned too: the full no-target branch routes
 through GOAP rather than a separate pre-seam path — see
 `scripts/npc/goap/README.md` for the canonical behaviour/goal/action roster.
 
+### The held weapon — one anchor, two writes (`NPC._sync_weapon_anchor`)
+
+An NPC's whole held-weapon presentation is one Marker3D on the NPC root (`_muzzle`). The view-model, the gun's own
+`Muzzle` barrel marker, the shot / laser / tracer origin (`get_aim_origin`), `attack.muzzle`,
+`projectile_spawner.muzzle` and the three muzzle FX emitters are all descendants of it, so reconciling that ONE
+node reconciles all of them. `_sync_weapon_anchor(delta)` runs at the very top of `_physics_process`, **above** the
+AI-LOD gate — the anchor is presentation, not a decision, so a cutscene-driven / talking / fleeing NPC needs it as
+much as a fighting one, and above the gate it eases on the real tick delta instead of the banked think delta.
+
+- **Position** comes from the swapped ARMS, not from a fixed point on the body: `BodyModelSwap.weapon_grip_position()`
+  (duck-typed, swap-local, mapped through the swap node's full `transform`). The arm pose already carries the hold
+  pitch, the aim swing, the walk swing and the seated ground-snapped drop, so the weapon is *carried by* the arms
+  rather than being a second pose that has to agree with them. `NPC.weapon_in_hands = false`, or a rig with no
+  swapped arms, falls back to the authored `muzzle_offset` plus the body posture offset — the pre-hands contract,
+  unchanged, and the one every off-tree test rig still exercises.
+- **Rotation** is the smoothed aim ELEVATION about the grip. The body turns in yaw only (`_face_point`), so this is
+  the only place a pitch can live: pitching the NPC ROOT would tilt the collision capsule, the shadow decal, the leg
+  gait and the head-look, none of which are pitch-aware. `NPC.aim_pitch_degrees()` republishes the angle to
+  `BodyModelSwap.arm_aim_follow` so the arms swing with the barrel.
+
+Three contracts hold it together. (1) The pitch is derived from `_aim_point()`, never `get_aim_direction()` — that
+one CONSUMES the one-shot `_shot_miss` flag, so a per-frame visual read would silently eat every deliberate miss.
+(2) It is gated on `has_sensed_foe()`, not on merely holding a target: `_target` is acquired by pure proximity with
+no LOS test and `NPC.tscn` ships a 500 m `sight_range`, so an ungated pitch would point every hostile's gun at a
+hidden player through a wall. (3) `reset_for_reuse` clears both the eased angle and the anchor's rotation — the
+position is rewritten every frame, but the rotation is written only here, so a pooled body would otherwise return
+holding the previous life's aim.
+
+A fourth contract sits at the MOUNT rather than the sync. The scene being hung on the anchor is a
+**first-person view model** — authored to draw on `ViewModelCamera.VIEW_MODEL_LAYER` (stripped from the main
+camera's cull mask) with `no_depth_test`, composited over the finished frame from its own SubViewport. That is
+what stops the player's gun clipping into geometry, and it is what makes an NPC's copy of the same mesh draw
+THROUGH it. `_build_weapon_mesh` converts the mount with `_make_held_model_world_renderable` (layer 1, depth
+test on, material duplicated because it is shared with the player's rig) — the twin of
+`WorldItem._make_world_renderable` for the dropped copy. Any future consumer that mounts a `view_model` on a
+world actor owes the same conversion.
+
+**Risk carried by this shape:** the shot origin now sits at the hands plus the barrel (~0.7 m further forward than
+the old body-centre anchor), and `WeaponData.npc_held_display_scale` pushes the barrel marker further still. The
+clear-shot LOS ray starts from the same point, so the fire gate and the round agree with each other — but a weapon
+boosted well past the shipped values starts rounds past thin cover. That is why the long guns carry the smallest
+boosts. Judged by screenshot (`scripts/tools/npc_hold_qa_shots.tscn`), never by a green test.
+
 ### AI level of detail — the tick-cadence gate (`AiLod`)
 
 NPC count is the frame budget's cliff, and it is **CPU on the main thread**.
@@ -1555,7 +1707,7 @@ it on the next. Everything below follows from that constraint.
    since enemies never hitscan.
 
 ⭐**`NPC._aim_laser_at` is on list 1 on purpose.** Its hit feeds
-`NpcCombat.act_attack`'s `clear` test: an enemy that can see you through a fence
+`NpcCombat.act_alerted`'s `clear` test: an enemy that can see you through a fence
 can also shoot you through it, so it must read the shot as clear and stand and
 fire. Leave it on a raw `intersect_ray` and enemies see you through the wire but
 refuse to shoot, and `should_chase_while_alerted` walks them in circles.
@@ -1701,6 +1853,22 @@ under the NPC wins). It returns an NPC to its authored post — `_spawn_position
   gated on **aliveness alone**, not `_eligible()` — the move exemptions
   (companion, bodyguard, cutscene, mid-talk) are reasons not to relocate a body,
   not reasons to leave it wounded. The dead are never revived.
+  The **ammo restock** (`restore_ammo_on_player_death`, seeded from
+  `home_return_restore_ammo_on_player_death`) is the third piece and rides the
+  same beat and the same aliveness gate: `restore_spent_ammo()` refills the
+  magazine and hands back every spare clip the NPC's reloads burned, because
+  spent ammo persists exactly like damage under `CHECKPOINT_RESPAWN` — die at
+  the same fight enough times and the enemy runs dry and drops to fists
+  (`NPC._can_fight_with_gun`). It is exact rather than a top-up to the authored
+  loadout: `Ammo` books each clip in a `_spent_clips` ledger **at the moment
+  `_refilled_clip` takes it out of the backpack**, so only rounds that were
+  actually fired come back and ammo the player **pickpocketed** stays stolen —
+  stripping a guard to disarm him survives any number of deaths. A corpse is
+  never restocked (its bag is the loot the player earned), and the ledger is
+  cleared by `Ammo.reset_for_reuse()` so a pooled body cannot inherit the
+  previous life's debt. Seams: `NpcHomeReturn.restore_spent_ammo()` →
+  `NPC.restore_spent_ammo()` → `Ammo.restore_spent_ammo()`; the `npc restock`
+  debug-console verb drives the same chain by hand.
 - **an off-screen timer** (`off_screen_delay`), gated by default on the NPC
   being calm (perception `UNAWARE`, no target) so the clock doesn't run
   mid-firefight.
@@ -1749,7 +1917,10 @@ The contract that makes reuse correct:
   process/visible) → `NPC.reset_for_reuse()` (targeting, provoke, combat + bark
   latches, cutscene, nav intents, `_fire_timer` re-seeded to `_shot_interval()`,
   the panicked `threat_response` put back from `_pre_panic_threat_response`,
-  wallet baseline, backpack **clear + re-seed authored loadout**) → each
+  backpack **clear + re-seed authored loadout**; the authored **wallet baseline is
+  NOT reset here** — `NpcPool` stamps it as a `pool_money` meta when it builds or
+  adopts a body and writes it back in `acquire()` on the line *before* it calls
+  `reset_for_reuse()`) → each
   stateful child's own `reset_for_reuse()` (`Perception`, `Locomotor`,
   `NpcLocomotion`, `GoapExecutor`, `NpcCombat`, `WeaponStance`, `NpcOutline`,
   `NpcLaser`, `NpcHomeReturn`, `Ammo`, `CharacterInventory.clear()`). Components own their reset
@@ -2143,14 +2314,15 @@ Four things about it are load-bearing and easy to undo by accident:
   Options toggle, the dialogue hide and the death hide genuinely free rather than a hidden
   node still slicing and redrawing.
 
-**THREE MARKER CHANNELS** (2026-08-13), painted back-to-front, each with its own group and its
-own rules — a node in two channels is drawn by both on purpose, because a shop riding a dialogue
-NPC is two different facts about one body:
+**FOUR MARKER CHANNELS** (the first three 2026-08-13, the player's own waypoints added since),
+painted back-to-front, each with its own rules — a node in two channels is drawn by both on
+purpose, because a shop riding a dialogue NPC is two different facts about one body:
 
 | Channel | Group | Shape | Pins to the rim? |
 |---|---|---|---|
 | POI beacons (`WorldMarker`, `QuestMarkerSync`) | `Groups.MINIMAP` | a plain dot at `marker_radius` | always |
 | Stations (`StationMarker`) | `Groups.MINIMAP_STATION` | a STROKED kind glyph | per `StationMarker.pin_offscreen`, defaulted from the station's own `standalone` |
+| The player's own WAYPOINTS | **none** — `GameState.waypoints_for(level)` read as DATA (`Minimap._paint_waypoints`) | FILLED *and* STROKED, larger still, labelled on the map tab | per RECORD: the TRACKED pin always, the rest only where the host set `waypoint_pin_offscreen` |
 | Bodies | `Groups.NPC` | a FILLED allegiance glyph | never — that would be a radar |
 
 - **SHAPE is the primary channel and HUE the secondary one** (`MapGlyph`, pure statics). At a ~4 px
@@ -2211,7 +2383,8 @@ NPC is two different facts about one body:
   station never sets it. Same defect and same fix as the stuck aim arc (`aim_indicators.gd`'s own
   `_painted`). **A new painted channel added without a trailing edge strands its art on the map
   forever.**
-- **The NOISE RING is the fourth painted channel, and the only one that is a function of TIME.**
+- **The NOISE RING is the FIFTH painted channel — over the plan but UNDER all four marker channels —
+  and the only one that is a function of TIME.**
   A circle around the caret at `Player.noise_radius` metres — the scalar enemy `Perception.can_hear()`
   tests against — drawn in true WORLD METRES (every other marker is a fixed pixel size) so a body dot
   inside it is a body that can hear you. It is centred at `size * 0.5` with no projection, which is
@@ -2316,9 +2489,11 @@ squint at the sun.
   conversation sees no movement.
 
 **The HUD compass** (`scripts/ui/hud_compass.gd`, code-built by `ui.gd`) is the top-CENTRE instrument, and
-the other half of the same reasoning as the clock: it exists because the minimap in its shipped HEADING-UP
-mode carries no fixed bearing at all — the plan turns under a fixed caret, so spinning on the spot moves
-every landmark and nothing on screen answers "which way am I facing". (Its north tick is a spoke on a 108 px
+the other half of the same reasoning as the clock: it exists because the shipped NORTH-UP minimap answers
+"which way am I facing" only through a tiny caret spinning inside an axis-locked plan — and a player who
+flips **Rotate Minimap** to HEADING-UP loses even that, since the plan then turns under a fixed caret and
+every landmark moves instead. Nothing else on the HUD gives a PRECISE bearing, and nothing else serves
+both minimap modes. (Its north tick is a spoke on a 108 px
 rim; `minimap.gd` records why a LETTER there would be a smudge.) The tape is a horizontal heading scale
 across the top of the screen: the eight rose letters and their degree ticks sliding under a fixed index
 caret, plus a chevron for every `Groups.COMPASS` marker at its bearing.
@@ -2538,8 +2713,10 @@ guarded, and what is deliberately deferred.
   bug).
 - **User-typed text never enters translation lookup.** Controls that echo typed
   input — name entry, character-creation name, the chess move box/log/hint, the
-  CYBER SUNDAY dock, and the labels that paint a renamed pet's name (look-at
-  readout, toasts, hotbar slots, item tooltips) — set
+  CYBER SUNDAY dock, the player's own map waypoints (the waypoint prompt's name and
+  note fields, and the Map tab's pin-card name/note labels that paint them back), and
+  the labels that paint a renamed pet's name (look-at readout, toasts, hotbar slots,
+  item tooltips) — set
   `auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED`, so a player's text is
   never looked up as a message id. A no-op today (no Translations ship), a guard
   the moment one does.
@@ -2561,9 +2738,13 @@ guarded, and what is deliberately deferred.
   (`resources/ui/futura_system_font.tres`) is a `SystemFont` listing Latin-only
   face names, so the in-scope CJK SKU needs a real `FontFile` shipped before the
   `MenuSkin` remap above can even be evaluated.
-  CLOSED 2026-07-27: `LineEdit` right-click context menus (engine-provided
-  English) are now disabled at all three fields we build — name entry, character
-  creation, and the chess move box — alongside their existing `atr` opt-outs.
+  CLOSED 2026-07-27, and extended since: right-click context menus (engine-provided
+  English) are disabled on every text field we build but one — the three authored
+  fields (name entry, character creation, the chess move box) alongside their existing
+  `atr` opt-outs, plus the code-built amount prompt, the waypoint prompt's name
+  `LineEdit` **and** its note `TextEdit`, and the debug console / debug menu fields.
+  The ATM screen's authored `%AmountEdit` (`scenes/ui/atm_screen.tscn`) is the one
+  holdout, and it carries neither this opt-out nor an `atr` one.
 
 ## Documentation Contract
 

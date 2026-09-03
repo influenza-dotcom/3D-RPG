@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CYBERSUNDAY Field Manual</title>
+<style>
+:root{
+  --paper:#E9EBE6;
+  --paper-2:#E1E4DD;
+  --card:#F3F4F0;
+  --ink:#16191B;
+  --ink-2:#4A5250;
+  --ink-3:#767E79;
+  --rule:#C6CAC1;
+  --rule-2:#D6D9D1;
+  --accent:#1F5D4C;
+  --accent-2:#2C7C64;
+  --accent-wash:#DDE6E0;
+  --signal:#A81F1B;
+  --signal-wash:#F0DDDA;
+  --amber:#8A5B08;
+  --amber-wash:#EFE4CD;
+  --kbd-face:#FBFCF9;
+  --kbd-edge:#B9BEB4;
+  --shadow:rgba(20,28,24,.10);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#111413;
+    --paper-2:#161A18;
+    --card:#191E1B;
+    --ink:#E3E7E0;
+    --ink-2:#A3ADA6;
+    --ink-3:#79847C;
+    --rule:#2A312D;
+    --rule-2:#232926;
+    --accent:#63C4A5;
+    --accent-2:#7FD6BA;
+    --accent-wash:#172A24;
+    --signal:#FF7062;
+    --signal-wash:#301917;
+    --amber:#D9A548;
+    --amber-wash:#2A2216;
+    --kbd-face:#232926;
+    --kbd-edge:#3A423C;
+    --shadow:rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#111413;
+  --paper-2:#161A18;
+  --card:#191E1B;
+  --ink:#E3E7E0;
+  --ink-2:#A3ADA6;
+  --ink-3:#79847C;
+  --rule:#2A312D;
+  --rule-2:#232926;
+  --accent:#63C4A5;
+  --accent-2:#7FD6BA;
+  --accent-wash:#172A24;
+  --signal:#FF7062;
+  --signal-wash:#301917;
+  --amber:#D9A548;
+  --amber-wash:#2A2216;
+  --kbd-face:#232926;
+  --kbd-edge:#3A423C;
+  --shadow:rgba(0,0,0,.4);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:Georgia,"Iowan Old Style","Palatino Linotype",serif;
+  font-size:17px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4,.ui{font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif}
+code,kbd,.mono,td.k,.num{font-family:Consolas,"SFMono-Regular",ui-monospace,monospace}
+
+/* ---------- shell ---------- */
+.wrap{max-width:1240px;margin:0 auto;padding:0 24px;display:grid;grid-template-columns:236px minmax(0,1fr);gap:56px}
+@media (max-width:940px){.wrap{grid-template-columns:1fr;gap:0}}
+
+/* ---------- masthead ---------- */
+.masthead{border-bottom:2px solid var(--ink);margin-bottom:38px}
+.masthead-in{max-width:1240px;margin:0 auto;padding:34px 24px 22px}
+.stamp{
+  display:inline-flex;align-items:center;gap:9px;
+  font-family:Consolas,monospace;font-size:10.5px;font-weight:700;
+  letter-spacing:.2em;text-transform:uppercase;color:var(--accent);
+  border:1px solid var(--accent);border-radius:2px;padding:5px 10px;margin-bottom:20px;
+}
+.stamp::before{content:"";width:6px;height:6px;background:var(--accent);border-radius:50%}
+h1{
+  font-size:clamp(2.6rem,7vw,4.6rem);font-weight:800;letter-spacing:-.035em;
+  line-height:.92;margin:0 0 12px;text-wrap:balance;
+}
+h1 .sub{display:block;font-size:clamp(.9rem,2vw,1.15rem);font-weight:600;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--ink-3);margin-top:16px}
+.dek{font-size:1.06rem;color:var(--ink-2);max-width:64ch;margin:0}
+.meta-strip{
+  display:flex;flex-wrap:wrap;gap:26px;margin-top:24px;padding-top:16px;border-top:1px solid var(--rule);
+  font-family:Consolas,monospace;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
+}
+.meta-strip b{color:var(--ink);font-weight:500}
+
+/* ---------- side nav ---------- */
+nav.rail{position:sticky;top:0;align-self:start;max-height:100vh;overflow-y:auto;padding:8px 0 40px}
+@media (max-width:940px){
+  nav.rail{position:static;max-height:none;border-bottom:1px solid var(--rule);margin-bottom:30px;padding-bottom:20px}
+}
+.rail-h{font-family:Consolas,monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--ink-3);margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--rule)}
+.rail a{
+  display:flex;gap:10px;align-items:baseline;
+  font-family:"Segoe UI",Arial,sans-serif;font-size:13.5px;font-weight:500;line-height:1.35;
+  color:var(--ink-2);text-decoration:none;padding:6px 8px 6px 0;border-left:2px solid transparent;padding-left:10px;
+  transition:color .12s,border-color .12s;
+}
+.rail a .n{font-family:Consolas,monospace;font-size:10.5px;color:var(--ink-3);min-width:14px}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--accent);border-left-color:var(--accent);font-weight:700}
+.rail a.on .n{color:var(--accent)}
+.rail a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+
+/* ---------- sections ---------- */
+main{padding-bottom:100px;min-width:0}
+section{scroll-margin-top:20px;margin-bottom:64px}
+h2{
+  font-size:1.9rem;font-weight:800;letter-spacing:-.02em;line-height:1.1;margin:0 0 6px;
+  display:flex;align-items:baseline;gap:14px;text-wrap:balance;
+}
+h2 .n{
+  font-family:Consolas,monospace;font-size:.78rem;font-weight:700;color:var(--accent);
+  letter-spacing:.1em;border:1px solid var(--accent);border-radius:2px;padding:3px 7px;flex:none;
+}
+.h2rule{height:2px;background:var(--ink);margin:14px 0 26px}
+h3{font-size:1.13rem;font-weight:700;letter-spacing:-.005em;margin:34px 0 10px;text-wrap:balance}
+h4{font-size:.78rem;font-weight:700;letter-spacing:.17em;text-transform:uppercase;color:var(--ink-3);margin:28px 0 10px}
+p{margin:0 0 14px;max-width:68ch}
+ul,ol{margin:0 0 16px;padding-left:22px;max-width:68ch}
+li{margin-bottom:7px}
+strong{font-weight:600;color:var(--ink)}
+a{color:var(--accent);text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
+
+/* ---------- keycaps ---------- */
+kbd{
+  display:inline-block;background:var(--kbd-face);border:1px solid var(--kbd-edge);
+  border-bottom-width:2px;border-radius:4px;padding:1px 7px;margin:0 1px;
+  font-size:.79em;font-weight:700;line-height:1.5;color:var(--ink);white-space:nowrap;
+  box-shadow:0 1px 0 var(--shadow);
+}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto;margin:0 0 20px;border:1px solid var(--rule);border-radius:3px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:430px}
+thead th{
+  font-family:"Segoe UI",Arial,sans-serif;font-size:10.5px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;
+  text-align:left;color:var(--ink-3);padding:11px 14px;border-bottom:1.5px solid var(--rule);white-space:nowrap;
+}
+td{padding:10px 14px;border-bottom:1px solid var(--rule-2);vertical-align:top;line-height:1.5}
+tbody tr:last-child td{border-bottom:none}
+td.k{white-space:nowrap;width:1%}
+td.num,.num{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+th.num{text-align:right}
+table strong{font-weight:600}
+
+/* ---------- callouts ---------- */
+.note{
+  border-left:3px solid var(--accent);background:var(--accent-wash);
+  padding:15px 18px;margin:0 0 20px;border-radius:0 3px 3px 0;max-width:70ch;
+}
+.note.warn{border-left-color:var(--signal);background:var(--signal-wash)}
+.note.tip{border-left-color:var(--amber);background:var(--amber-wash)}
+.note p:last-child{margin-bottom:0}
+.note .lbl{
+  display:block;font-family:Consolas,monospace;font-size:10px;font-weight:700;
+  letter-spacing:.19em;text-transform:uppercase;margin-bottom:7px;color:var(--accent);
+}
+.note.warn .lbl{color:var(--signal)}
+.note.tip .lbl{color:var(--amber)}
+
+/* ---------- quick ref grid ---------- */
+.qr{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:1px;background:var(--rule);
+  border:1px solid var(--rule);border-radius:3px;margin-bottom:26px;overflow:hidden}
+.qr div{background:var(--card);padding:14px 16px}
+.qr h5{font-family:"Segoe UI",Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:.17em;text-transform:uppercase;
+  color:var(--ink-3);margin:0 0 9px}
+.qr p{margin:0;font-size:14px;line-height:1.95;max-width:none}
+
+/* ---------- FAQ ---------- */
+.faq{border-top:1px solid var(--rule)}
+.faq details{border-bottom:1px solid var(--rule)}
+.faq summary{
+  cursor:pointer;padding:13px 30px 13px 2px;font-family:"Segoe UI",Arial,sans-serif;font-weight:600;font-size:15px;
+  list-style:none;position:relative;color:var(--ink);
+}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{
+  content:"+";position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  font-family:Consolas,monospace;font-size:17px;color:var(--accent);font-weight:400;
+}
+.faq details[open] summary::after{content:"\2212"}
+.faq summary:hover{color:var(--accent)}
+.faq summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.faq .a{padding:0 30px 16px 2px;font-size:15.5px;color:var(--ink-2)}
+.faq .a p:last-child{margin-bottom:0}
+
+/* ---------- misc ---------- */
+.lede{font-size:1.13rem;line-height:1.6;color:var(--ink-2);border-left:2px solid var(--rule);padding-left:18px;margin-bottom:26px}
+.hr{height:1px;background:var(--rule);margin:34px 0;border:0}
+footer{border-top:2px solid var(--ink);margin-top:20px;padding:22px 0 60px;
+  font-family:Consolas,monospace;font-size:11px;letter-spacing:.07em;color:var(--ink-3);text-transform:uppercase}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+html{scroll-behavior:smooth}
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="masthead-in">
+    <span class="stamp">Playtest Build · Field Manual</span>
+    <h1>CYBERSUNDAY<span class="sub">How to play</span></h1>
+    <p class="dek">A first-person cyberpunk RPG about debt. You start with four hit points, no abilities, no money, and rent due at dawn. This manual covers every control and the mechanics that are not obvious from playing.</p>
+    <div class="meta-strip">
+      <span>Controls <b>45 actions</b></span>
+      <span>Starting HP <b>4</b></span>
+      <span>In-game day <b>600s real</b></span>
+      <span>Rent <b>20 zm / day</b></span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="rail">
+  <p class="rail-h">Contents</p>
+  <a href="#controls"><span class="n">1</span> Controls</a>
+  <a href="#start"><span class="n">2</span> First Five Minutes</a>
+  <a href="#movement"><span class="n">3</span> Movement &amp; Stamina</a>
+  <a href="#combat"><span class="n">4</span> Combat</a>
+  <a href="#interface"><span class="n">5</span> Interface &amp; Inventory</a>
+  <a href="#progression"><span class="n">6</span> Progression &amp; Implants</a>
+  <a href="#world"><span class="n">7</span> The World</a>
+  <a href="#settings"><span class="n">8</span> Settings &amp; Comfort</a>
+  <a href="#trouble"><span class="n">9</span> Troubleshooting</a>
+  <a href="#build"><span class="n">10</span> About This Build</a>
+</nav>
+
+<main>
+
+<!-- ============ 1 CONTROLS ============ -->
+<section id="controls">
+  <h2><span class="n">01</span> Controls</h2>
+  <div class="h2rule"></div>
+  <p class="lede">Every key below is a default and every one can be rebound in <strong>Settings → Controls</strong>. Bindings are stored as <em>physical</em> keycodes, so on AZERTY or Dvorak the WASD cluster stays where your fingers are rather than following the printed letters.</p>
+
+  <div class="qr">
+    <div><h5>Move</h5><p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk<br><kbd>Shift</kbd> run · <kbd>Ctrl</kbd> crouch<br><kbd>Space</kbd> jump · <kbd>Alt</kbd> dash</p></div>
+    <div><h5>Fight</h5><p><kbd>LMB</kbd> attack · <kbd>RMB</kbd> aim<br><kbd>R</kbd> reload · <kbd>Z</kbd> grab/throw<br><kbd>Q</kbd> takedown</p></div>
+    <div><h5>Use</h5><p><kbd>F</kbd> interact · <kbd>L</kbd> torch<br><kbd>H</kbd> hold weapon · <kbd>B</kbd> adopt<br><kbd>1</kbd>–<kbd>0</kbd> hotbar</p></div>
+    <div><h5>Screens</h5><p><kbd>Tab</kbd> bag · <kbd>C</kbd> stats<br><kbd>I</kbd> implants · <kbd>M</kbd> map<br><kbd>J</kbd> journal · <kbd>V</kbd> factions</p></div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">Three keys do two jobs</span>
+    <p><kbd>F</kbd> is interact <em>and</em> flashlight — it only toggles the torch when there is nothing to interact with. Use <kbd>L</kbd> when you want the torch regardless. <kbd>Q</kbd> is takedown/pet <em>and</em> lean-left — if a valid target is in front of you it does that, otherwise it leans. <kbd>R</kbd> is reload, and also rotate while you are dragging an item in the grid.</p>
+  </div>
+
+  <h3>Movement</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Action</th><th>Key</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Move</td><td class="k"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Backpedalling is 0.6× speed, pure sideways strafe 0.8×. A forward diagonal costs nothing.</td></tr>
+      <tr><td>Look</td><td class="k">Mouse</td><td>Sensitivity scales down above 6.5 m/s, reaching half at 12 m/s. Invert-Y available.</td></tr>
+      <tr><td>Run</td><td class="k"><kbd>Shift</kbd></td><td>Hold, not toggle. Drains stamina. Aiming pins you to a walk regardless.</td></tr>
+      <tr><td>Jump</td><td class="k"><kbd>Space</kbd></td><td>Tap for a short hop, hold for the full arc. Costs 10 stamina.</td></tr>
+      <tr><td>Crouch</td><td class="k"><kbd>Ctrl</kbd></td><td>Hold, not toggle. You stay crouched automatically under a low ceiling.</td></tr>
+      <tr><td>Lean left / right</td><td class="k"><kbd>Q</kbd> <kbd>E</kbd></td><td><kbd>E</kbd> always leans. <kbd>Q</kbd> leans only when no takedown or pet target is live.</td></tr>
+      <tr><td>Wall climb</td><td class="k"><kbd>Space</kbd> at a wall</td><td><strong>Needs the Wall Climb implant.</strong> <kbd>W</kbd> climbs, <kbd>S</kbd> descends.</td></tr>
+      <tr><td>Air dash</td><td class="k"><kbd>Left Alt</kbd></td><td><strong>Needs the Air Dash implant.</strong> Tap to fling yourself where you are looking — any weapon, or none. One per airtime; costs 25 stamina.</td></tr>
+      <tr><td>Grapple</td><td class="k"><kbd>G</kbd></td><td><strong>Needs the Grapple implant.</strong> Hold to stay attached, release to drop.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Combat</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Action</th><th>Key</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Attack / fire</td><td class="k">Left Mouse</td><td>If holstered, the first click only <em>draws</em>. Release and click again to fire. <strong>Aiming down sights with the knife throws it</strong> instead of swinging — see below.</td></tr>
+      <tr><td>Aim down sights</td><td class="k">Right Mouse</td><td>Hold, not toggle. Fists cannot aim. With the <strong>knife</strong> raised, a left click <strong>hurls the blade</strong> down your look ray — it leaves your hands and lies where it lands until you pick it back up.</td></tr>
+      <tr><td>Alt attack (fists)</td><td class="k">Right Mouse</td><td>Throws your right fist; left click throws the left. Hold either to keep swinging.</td></tr>
+      <tr><td>Reload</td><td class="k"><kbd>R</kbd> tap</td><td>A tap under ~0.3 s.</td></tr>
+      <tr><td>Holster / draw</td><td class="k"><kbd>R</kbd> hold</td><td>Fires the moment the hold passes ~0.3 s, while the key is still down.</td></tr>
+      <tr><td>Hotbar slots</td><td class="k"><kbd>1</kbd>–<kbd>9</kbd> <kbd>0</kbd></td><td>With the bag open these <em>assign</em> the hovered item to that slot instead.</td></tr>
+      <tr><td>Cycle weapons</td><td class="k">Mouse Wheel</td><td>Down = next, up = previous. Skips consumables.</td></tr>
+      <tr><td>Silent takedown / pet</td><td class="k"><kbd>Q</kbd> hold</td><td><strong>Takedown needs the Takedown implant.</strong> Petting an animal does not.</td></tr>
+      <tr><td>Grab / throw prop</td><td class="k"><kbd>Z</kbd></td><td>Press to grab; press again then release — tap sets it down, hold hurls it.</td></tr>
+      <tr><td>Hold weapon in hands</td><td class="k"><kbd>H</kbd></td><td>Pulls your drawn weapon into your hands so you can throw it. Press again to stow.</td></tr>
+      <tr><td>Night vision</td><td class="k"><kbd>N</kbd></td><td>Fades in and out.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Interaction &amp; world</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Action</th><th>Key</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Interact</td><td class="k"><kbd>F</kbd></td><td>Talk, loot, pickpocket, stash, open station screens.</td></tr>
+      <tr><td>Flashlight</td><td class="k"><kbd>F</kbd> or <kbd>L</kbd></td><td><kbd>F</kbd> works only with nothing to interact with. <kbd>L</kbd> always works.</td></tr>
+      <tr><td>Adopt / release pet</td><td class="k"><kbd>B</kbd></td><td>Tap to adopt and name a stray. Hold on a claimed pet to release it.</td></tr>
+      <tr><td>Mark waypoint</td><td class="k"><kbd>X</kbd></td><td>Pins whatever you are looking at, or the ground under you. Auto-named, auto-tracked.</td></tr>
+      <tr><td>Wait</td><td class="k"><kbd>T</kbd></td><td>Opens the Wait panel, 1–24 in-game hours.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Interface</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Screen</th><th>Key</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Backpack</td><td class="k"><kbd>Tab</kbd></td><td rowspan="6">Press the same key again to close, or another tab's key to switch straight across.</td></tr>
+      <tr><td>Stats</td><td class="k"><kbd>C</kbd></td></tr>
+      <tr><td>Implants</td><td class="k"><kbd>I</kbd></td></tr>
+      <tr><td>Map</td><td class="k"><kbd>M</kbd></td></tr>
+      <tr><td>Reputation</td><td class="k"><kbd>V</kbd></td></tr>
+      <tr><td>Quest journal</td><td class="k"><kbd>J</kbd></td></tr>
+      <tr><td>Rotate dragged item</td><td class="k"><kbd>R</kbd></td><td>Only while dragging in the grid.</td></tr>
+      <tr><td>Cycle minimap zoom</td><td class="k"><kbd>K</kbd></td><td>Corner minimap only. Does nothing while the Map tab is open.</td></tr>
+      <tr><td>Settings / back out</td><td class="k"><kbd>Esc</kbd></td><td>Backs out one layer. With nothing open, it opens Settings.</td></tr>
+      <tr><td>Quicksave / quickload</td><td class="k"><kbd>F5</kbd> <kbd>F9</kbd></td><td>Blocked while a menu, shop, cutscene or conversation is open.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>In conversation</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Action</th><th>Key</th></tr></thead>
+    <tbody>
+      <tr><td>Advance a line</td><td class="k"><kbd>Space</kbd> <kbd>Enter</kbd> <kbd>F</kbd> or Left Mouse</td></tr>
+      <tr><td>Pick a response</td><td class="k"><kbd>1</kbd>–<kbd>9</kbd></td></tr>
+      <tr><td>Goodbye</td><td class="k"><kbd>0</kbd> or <kbd>Esc</kbd></td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Controller</h3>
+  <p>Left stick moves, right stick looks. <strong>A</strong> jump · <strong>B</strong> crouch · <strong>X</strong> reload · <strong>Y</strong> interact · <strong>RT</strong> fire · <strong>LT</strong> aim · <strong>L1/R1</strong> lean · <strong>L3</strong> flashlight · <strong>R3</strong> grapple · <strong>D-pad</strong> hotbar 1–4.</p>
+  <p>Everything else — takedown, adopt, wait, throw, hold-weapon, minimap zoom, waypoint, all six tabs, quicksave, night vision, slots 5–10 and wheel cycling — has no pad default. Leaning on a pad is unconditional, since L1/R1 aren't shared. The pad goes silent when the window loses focus.</p>
+
+  <div class="note warn">
+    <span class="lbl">Avoid the End key</span>
+    <p><kbd>End</kbd> instantly restarts the current level and loses unsaved progress. It is a leftover developer key and it is live in this build. <kbd>Home</kbd> prints a harmless technical readout. <kbd>F1</kbd>–<kbd>F4</kbd> and <kbd>`</kbd> are developer tools and do nothing in a normal build.</p>
+  </div>
+</section>
+
+<!-- ============ 2 START ============ -->
+<section id="start">
+  <h2><span class="n">02</span> First Five Minutes</h2>
+  <div class="h2rule"></div>
+
+  <p><strong>First launch</strong> plays two black warning cards you cannot skip, then a Terms of Service screen you have to accept — declining only offers Quit. On later launches any key skips the cards.</p>
+
+  <p><strong>Character creation is zero-sum.</strong> Every stat starts at 0 and is clamped to −5…+10. You raise one only by lowering another; you can never come out net-positive, though you may deliberately underspend. <strong>Begin stays greyed out until you type a character name</strong> — if the button looks broken, it's the name field, not your stats.</p>
+
+  <p><strong>Then the Ledger.</strong> The second screen rates your build, hands you a credit score and spending limit, and offers the whole implant catalogue as a shopping cart. There is no free starting implant — everything here is bought <em>on credit</em> and lands on your ledger as debt. Buying nothing is fine and never blocks Begin. A dumped stat sheet lowers your credit limit, so bad stats cost you implants too.</p>
+
+  <div class="note warn">
+    <span class="lbl">You have 4 hit points</span>
+    <p>That is not a typo. A pistol round does 1. You also start with nothing but your fists, zero zorkmids, and your weapon holstered.</p>
+  </div>
+
+  <h4>Practically, in order</h4>
+  <ol>
+    <li><strong>Learn the draw.</strong> Your weapon starts stowed — the first left click only pulls it out.</li>
+    <li><strong>Find something to fight.</strong> Kills pay 25 XP and 1–4 zorkmids.</li>
+    <li><strong>Press <kbd>F</kbd> on everything</strong> that looks like a person or a container.</li>
+    <li><strong>Watch the clock.</strong> Rent is 20 zorkmids a day and the first notice lands at your first dawn — roughly seven and a half minutes into a fresh run.</li>
+  </ol>
+</section>
+
+<!-- ============ 3 MOVEMENT ============ -->
+<section id="movement">
+  <h2><span class="n">03</span> Movement &amp; Stamina</h2>
+  <div class="h2rule"></div>
+
+  <p>Base speed is 5.0 m/s, but <strong>walking is the default</strong> — running is opt-in on <kbd>Shift</kbd>, and without it you move at 0.7× (3.5 m/s). Aiming stacks a further 0.4× on top of the walk tier, so aimed movement is about 28% of full speed. Crouching is 0.5× and skips the walk multiplier. In the air you can always change <em>direction</em> — the faster you are travelling the wider the turn, so a running jump commits you and a light hop does not. What you cannot do is manufacture much <em>speed</em>: from a standstill you build to about 1.75&nbsp;m/s and carry roughly 1.3&nbsp;metres. <strong>The run-up is what buys distance.</strong> Jumping fires you off at 15% more than the speed you carried into it, so a full sprint leaves the ground at 5.75&nbsp;m/s and clears about 4.6&nbsp;metres — three and a half times a standing hop, and further still off a bunny-hop chain. Letting go of the keys mid-air no longer slows you down, and nothing you launched with is taken away: a chain, a grapple fling and an air dash keep every metre per second they gave you — you can just aim them now.</p>
+
+  <div class="note warn">
+    <span class="lbl">Most of the movement kit is bought, not given</span>
+    <p>A fresh character has <strong>zero abilities</strong>. Slide, wall climb, bunny hop, air dash, fall immunity and the grapple are each a separate microchip you must find or buy, then pay a mechanic to install. <strong>Without the chip, the key does nothing.</strong> Pressing <kbd>Space</kbd> at a wall on a fresh save and getting nothing is correct behaviour, not a bug.</p>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Implant</th><th class="num">Chip value</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td>Slide</td><td class="num">200 zm</td><td>Land above 4 m/s holding <kbd>Ctrl</kbd> with no movement keys pressed. Jumping out flings you at 1.5× slide speed.</td></tr>
+      <tr><td>Fall Immunity</td><td class="num">300 zm</td><td>Hard landings cost no HP. Does <em>not</em> save you from the four-second void death.</td></tr>
+      <tr><td>Wall Climb</td><td class="num">300 zm</td><td>Push into a wall and hold <kbd>Space</kbd>. 4.5 m/s vertical. Blocked while over-encumbered.</td></tr>
+      <tr><td>Bunny Hop</td><td class="num">300 zm</td><td>Unlocks the chained-jump speed chain.</td></tr>
+      <tr><td>Air Dash</td><td class="num">350 zm</td><td>Dash where you look on <kbd>Left Alt</kbd>. One per airtime.</td></tr>
+      <tr><td>Grapple</td><td class="num">500 zm</td><td>Hook, rope, swing and yank on <kbd>G</kbd>.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Stamina — the resource that will surprise you</h3>
+  <p>The pool is 100. The ring around your crosshair is the readout; Accessibility can move it to a bottom-left bar instead.</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Drain</th><th class="num">Cost</th><th>Regen</th><th class="num">Rate</th></tr></thead>
+    <tbody>
+      <tr><td>Sprinting</td><td class="num">18 / s</td><td>Standing perfectly still</td><td class="num">24 / s</td></tr>
+      <tr><td>Jumping</td><td class="num">10</td><td>Walking</td><td class="num">12 / s</td></tr>
+      <tr><td>Slide start</td><td class="num">12</td><td>Airborne</td><td class="num">8 / s</td></tr>
+      <tr><td>Melee swing</td><td class="num">14</td><td>Climbing / sliding / grappling</td><td class="num">4 / s</td></tr>
+      <tr><td>Wall climb</td><td class="num">16 / s</td><td></td><td></td></tr>
+      <tr><td>Air dash</td><td class="num">25</td><td></td><td></td></tr>
+      <tr><td>Grapple</td><td class="num">18 +10/s</td><td></td><td></td></tr>
+    </tbody>
+  </table></div>
+
+  <p><strong>Empty the bar by sprinting and you lose sprint for three full seconds</strong> no matter how fast it refills. Jumping is not locked that long — it fails only while the pool is actually at zero and returns about a third of a second later. At zero, jump, slide, dash, grapple and <strong>fists</strong> all refuse. Guns are the deliberate exception: they keep firing.</p>
+
+  <h3>Falling</h3>
+  <ul>
+    <li>Below 16 m/s of impact speed: <strong>free</strong>.</li>
+    <li>Above that: 0.5 HP per m/s over the threshold <em>at the 4 max HP you start with</em> — <strong>the cost scales with your max HP</strong>, so a drop always takes the same slice of your bar and a Strength build pays proportionally more per m/s rather than growing out of the danger.</li>
+    <li>With 4 HP a <strong>24 m/s landing kills you instantly</strong>; at 1 HP that drops to 18 m/s.</li>
+    <li><strong>Falling for four unbroken seconds kills you regardless of impact</strong>, even with Fall Immunity.</li>
+    <li>Crouching on landing does <strong>not</strong> reduce fall damage. It only softens the camera.</li>
+  </ul>
+
+  <div class="note">
+    <span class="lbl">The grey screen is a warning, not a bug</span>
+    <p>The screen drains to grey as you fall. Full grey means the next contact with the ground kills you <em>at your current HP</em>. A survivable hop never tints at all. The grey also ramps during the last two seconds before the four-second void death.</p>
+  </div>
+
+  <h3>Leaning and stairs</h3>
+  <p>Lean slides your camera 0.45 m sideways and rolls it 12°. <strong>Your hitbox does not move</strong> — you can see and shoot around cover without exposing your body, but enemies still shoot where your body actually is. Holding both sides puts you upright. Lean refuses during dialogue, with a menu open, or while dead.</p>
+  <p>You automatically step up ledges and risers to <strong>0.6 m</strong> while walking — no jump needed — and the camera glides over the step rather than snapping.</p>
+
+  <h3>Bunny-hopping</h3>
+  <p>With the Bunny Hop implant installed <em>and switched on</em>: land, then jump again within <strong>0.4 seconds while holding a movement direction</strong>. Each clean hop adds 1.2&nbsp;m/s <em>to the speed you carried into it</em> — the chain compounds, so it genuinely accelerates you rather than snapping you to a fixed tier. That means your run-up still matters with the chip on: entering a chain at a sprint reaches the 12&nbsp;m/s ceiling in about eight hops, while starting from a walk takes longer to wind up. This is the difference the implant buys — without it a jump gets only the flat 15% take-off boost, which cannot stack and decays straight back to running speed.</p>
+  <ul>
+    <li>A <strong>standing</strong> jump never chains — it earns nothing.</li>
+    <li>Staying on the ground past the window kills the chain.</li>
+    <li><strong>Crouching kills the chain</strong>, and so does being over-encumbered. The jump still fires, it just earns nothing and wipes what you had.</li>
+    <li>Switching the implant off drops any banked chain immediately.</li>
+  </ul>
+  <p>The look-sensitivity falloff above 6.5 m/s exists so hop-runs stay controllable. It is not a bug and it is not implant-gated.</p>
+</section>
+
+<!-- ============ 4 COMBAT ============ -->
+<section id="combat">
+  <h2><span class="n">04</span> Combat</h2>
+  <div class="h2rule"></div>
+
+  <p><strong>Full-auto is the default</strong> — pistol, SMG, shotgun and fists fire while held. Knife, sniper and grenade launcher are one click per shot. Aiming divides spread by three, extends instant-hit reach by half, and locks you to a crawl. Fists cannot aim, which is why right-click is free to be your second fist.</p>
+
+  <div class="note warn">
+    <span class="lbl">Shooting costs stamina — and freezes its recovery</span>
+    <p>Every shot spends stamina: SMG ~1.2, pistol ~1.8, sniper ~2.3, shotgun ~7.2, grenade launcher ~14.4 out of a pool of 100. Worse, <strong>you never regenerate between your own shots</strong> — one trigger pull locks recovery for at least 1.5 seconds, and for the whole reload if that shot emptied the magazine. The sniper locks it for 3.5 seconds every single shot. Movement only locks recovery for 0.35 s; firing is in a different league.</p>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">Reloading throws away the rounds in your magazine</span>
+    <p>Ammo is counted in <strong>whole magazines</strong>, not loose bullets. Reloading a half-empty gun ejects that partial mag — those rounds are gone — and seats a fresh full one. <strong>Reload when empty, not when convenient.</strong> You start with 4 magazines per calibre. You can swap away mid-reload; the stowed gun keeps loading at two-thirds speed.</p>
+  </div>
+
+  <h3>Accuracy is a stance choice</h3>
+  <p><strong>Your shots do not land exactly on the crosshair, and the crosshair does not show you where they go.</strong> The reticle stays pinned dead centre; the drift is something you feel in your results. Aim wander runs from 2.0° standing to 5.0° at full speed. Stand completely still for <strong>1.4 seconds</strong> and it tightens to a sixth of that — then move and you lose all of it in 0.35 seconds. Crouching multiplies by 0.4, aiming by 0.35, and Gunplay makes it 8% steadier per point.</p>
+  <p>There is <strong>no muzzle climb</strong>. No shipped gun kicks your aim upward. What you get instead is per-weapon screen shake — the SMG barely nudges, the sniper and launcher saturate it in one shot.</p>
+
+  <h3>Range and damage</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Weapon</th><th class="num">Instant-hit range</th><th class="num">Headshot</th><th class="num">Sneak</th></tr></thead>
+    <tbody>
+      <tr><td>Fists</td><td class="num">1.5 m</td><td class="num">×1.5</td><td class="num">×1.2</td></tr>
+      <tr><td>Knife</td><td class="num">3 m</td><td class="num">×3</td><td class="num">×4</td></tr>
+      <tr><td>Shotgun</td><td class="num">5 m</td><td class="num">×2</td><td class="num">×2</td></tr>
+      <tr><td>SMG</td><td class="num">10 m</td><td class="num">×2</td><td class="num">×2</td></tr>
+      <tr><td>Pistol</td><td class="num">20 m</td><td class="num">×2</td><td class="num">×2</td></tr>
+      <tr><td>Sniper</td><td class="num">500 m</td><td class="num">×8</td><td class="num">—</td></tr>
+      <tr><td>Grenade launcher</td><td class="num">projectile</td><td class="num">×2</td><td class="num">×2</td></tr>
+    </tbody>
+  </table></div>
+  <p>Inside effective range a shot hits instantly. Past it the shot becomes a real flying bullet that still hurts but takes time to arrive and can be dodged. <strong>Headshot and sneak multipliers stack</strong> — a sneak headshot with the knife is 24 damage against enemies who mostly have single-digit health, making it the best stealth weapon in the game. <strong>Enemies cannot headshot you at all.</strong></p>
+  <p><strong>Overkill punches through:</strong> excess damage carries on and hits whoever is behind. Damage is also tracked per limb — crippled legs halve movement, a crippled arm widens that shooter's spread. This works on you too, and only a Healer mends limbs.</p>
+
+  <h3>Reading enemies</h3>
+  <p><strong>The coloured outline is their attitude.</strong> Red hostile, green friendly, blue companion, black neutral, deepening as they close. <strong>The instant a hostile locks onto you its ring goes full red at any distance, right across the map</strong>, fading when you break the lock. Full red means that one is hunting you now.</p>
+  <p><strong>Enemies telegraph every shot.</strong> An armed enemy paints a laser at you that brightens as its shot charges — fully lit means it is about to fire. Half a second before impact you hear a warning beep. Red arcs grow around your crosshair pointing at each enemy drawing a bead, sized by incoming damage.</p>
+  <p><strong>Enemies never hitscan, and they lead you.</strong> Every enemy shot is a real travelling bullet at half your bullet speed — but they aim where you <em>will</em> be, so a steady held strafe will not save you. Change direction, use cover, or close the distance.</p>
+
+  <div class="note warn">
+    <span class="lbl">Fences and windows are not cover</span>
+    <p>Anything drawn as mesh, wire, glass or foliage stops bullets from neither side. Enemies see you through a fence and shoot you through it — and so can you. It still blocks walking, thrown objects, the grapple and the interact ray. Find solid cover.</p>
+  </div>
+
+  <h3>Three things worth knowing</h3>
+  <div class="note tip">
+    <span class="lbl">Holster to talk your way out — once</span>
+    <p>If you attacked a neutral or friendly and they turned on you, <strong>hold <kbd>R</kbd> to holster</strong> and they stand down: the grudge drops and the reputation you lost is restored. <strong>It works once per person.</strong> Genuinely hostile factions were never provoked and are unaffected.</p>
+  </div>
+  <div class="note tip">
+    <span class="lbl">Bullet time</span>
+    <p><strong>Start aiming while airborne</strong> and the world drops to 40% speed for 0.7 seconds. Your first shot ends it instantly, as do landing and releasing aim. One per jump — and a scope entered on the ground then launched does not arm it.</p>
+  </div>
+  <div class="note tip">
+    <span class="lbl">You cannot draw a gun with your hands full</span>
+    <p>The moment you pick up a physics prop your weapon is stowed and <em>locked</em>. Clicking won't draw it, hold-<kbd>R</kbd> won't, switching weapons won't. Put the prop down first. Left click while carrying throws the prop instead.</p>
+  </div>
+
+  <h3>The Gunsmith Bench</h3>
+  <p>Six slots per gun — Receiver, Barrel, Magazine, Sight, Muzzle, Stock. Fitting costs 40% of the part's value; <strong>removing costs only 20% and you keep the part</strong>, so experimenting is safe. Every refusal is checked before you are charged. Mods trade one stat against another — there is no pure upgrade. A Suppressor cuts your gunshot's carry to a third and kills the muzzle flash at 8% less damage; a Long Barrel adds range and tightens spread but slows you; a Match Receiver adds 30% damage <em>and</em> fires 10% faster, paying for it with 15% more stamina per shot, a fitting bill 1.3× the usual, and a Gunplay of 6 before the bench will fit it at all.</p>
+
+  <h3>Health and death</h3>
+  <p><strong>Health regenerates on its own — but only six quiet seconds after the fight really ends.</strong> Quiet means you haven't fired, haven't taken damage, and no hostile holds you as its target. A full refill takes about 83 seconds. The tell is audible: your low-HP heartbeat softens the moment healing starts. Sitting in a conversation does not heal you.</p>
+  <p><strong>Death is a respawn, not a reload.</strong> You get a death card, then revive at your last checkpoint with full HP, full stamina and healed limbs — and the world stays exactly as you left it. Your new life starts holstered. <strong>The cinematic is click-to-skip:</strong> half a second in, a click (attack, <kbd>Enter</kbd> or plain left mouse) runs it eight times over and lands you on the death card, and once that card has been readable for another half second a second click returns you to play. Nothing is cut — every beat still fires in order, so you can hurry past your own death but not past being told who killed you.</p>
+  <div class="note warn">
+    <span class="lbl">Your wallet dies with you</span>
+    <p>Whoever killed you pockets your cash — hunt them down and loot it back. If nothing killed you it spills on the ground as a physics money bag where you fell. <strong>Money in the bank is untouched.</strong> Bank anything you can't afford to lose.</p>
+  </div>
+</section>
+
+<!-- ============ 5 INTERFACE ============ -->
+<section id="interface">
+  <h2><span class="n">05</span> Interface &amp; Inventory</h2>
+  <div class="h2rule"></div>
+
+  <div class="note warn">
+    <span class="lbl">Menus do not pause the game</span>
+    <p>Opening the inventory, map, a shop, an ATM or even Settings pauses <strong>nothing</strong>. The city keeps running and <strong>you can be shot while you read</strong>. Your character just stops responding to input. The only thing that freezes the world is a conversation — during which you are also immune to damage.</p>
+  </div>
+
+  <h3>The backpack</h3>
+  <p>A <strong>6-wide × 5-tall Tetris grid</strong> — 30 cells. Every item is a rectangle, so what fits is about <em>shape</em>, not count. World containers are roomier at 10 × 8.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Gesture</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Left-drag a tile</td><td>Move it</td></tr>
+      <tr><td class="k"><kbd>R</kbd> while dragging</td><td>Rotate 90°</td></tr>
+      <tr><td class="k"><kbd>Esc</kbd> while dragging</td><td>Cancel, snap back</td></tr>
+      <tr><td class="k">Click a weapon</td><td>Equip — click again to stow and fall back to fists</td></tr>
+      <tr><td class="k">Click a consumable</td><td>Use it (refuses at full HP and consumes nothing)</td></tr>
+      <tr><td class="k">Right-click a tile</td><td>Drop just that stack on the floor</td></tr>
+      <tr><td class="k">Number key while hovering</td><td>Assign to that hotbar slot</td></tr>
+    </tbody>
+  </table></div>
+  <p>A stack that can't fit isn't lost — it appears in an <strong>overflow strip</strong> under the grid. The line beneath shows carry weight against capacity, reading <strong>ENCUMBERED</strong> in red when you're over. Encumbrance blocks the bunny-hop chain, wall climb and grapple reel, and lowers your jump.</p>
+
+  <div class="note">
+    <span class="lbl">Money is not an inventory item</span>
+    <p>Zorkmids are a <strong>wallet number</strong>, not a tile — they never eat backpack space. The amount sits above the grid and top-left on the HUD, with a floating +N/−N on every change, turning red while negative. To drop cash use the "Drop…" button on the wallet row. Loot money on corpses <em>is</em> a coin tile, which converts when you take it. There is no Sort button in your own bag — Sort exists on the shop screen only.</p>
+  </div>
+
+  <h3>The HUD</h3>
+  <ul>
+    <li><strong>Bottom-left</strong> — HP bar with the ammo line "clip / reserve" above it.</li>
+    <li><strong>Top-left</strong> — zorkmids, plus an "Owed" figure whenever you're in the red.</li>
+    <li><strong>Top-right</strong> — minimap, clock below it.</li>
+    <li><strong>Top-centre</strong> — heading tape, stealth badge, detection meter, enemy health bar.</li>
+    <li><strong>Centre</strong> — crosshair with the stamina arc around it, and the name of what you're looking at.</li>
+  </ul>
+  <p>Every hit pops an X and a confirm ding. <strong>The ding's pitch drops as the target nears death, and drops deeper on a headshot</strong> — you can hear how close they are without looking.</p>
+
+  <h3>The map</h3>
+  <p>The corner minimap is north-up by default — the plan stays axis-locked while your caret spins; Accessibility → Rotate Minimap flips it to heading-up — and <kbd>K</kbd> cycles three zoom steps. The Map tab is always north-up. On the Map tab: wheel zooms about your cursor, left-drag pans, clicking empty ground places a pin, clicking a pin selects it, and clicking again opens its editor for name, note, mark and colour. <kbd>X</kbd> in the world pins whatever you're looking at, auto-names it, and makes it your tracked marker.</p>
+
+  <div class="note warn">
+    <span class="lbl">You need a scanner implant to see people on the map</span>
+    <p>Without a scanner chip installed <strong>and switched on</strong>, the map draws <strong>no bodies at all</strong> — at any zoom, on both the corner minimap and the Map tab. Bio Scanner shows bodies within 22 m, Deep Scanner within 55 m; own both and the widest enabled one wins. Also check Accessibility → NPCs On Minimap.</p>
+  </div>
+
+  <h4>Glyph alphabet — shape first, colour second</h4>
+  <p>Bodies are small filled shapes: filled <strong>triangle</strong> hostile, filled <strong>diamond</strong> companion, filled <strong>circle</strong> friendly, hollow <strong>ring</strong> neutral bystander. A hostile that has noticed you grows a ring that steps outward as its suspicion rises. Stations are larger outlined shapes: shop diamond, bank hexagon, clinic cross, trainer <em>downward</em> triangle (so it can never be mistaken for a hostile), tech square, leisure circle, exit chevron. Markers on another floor fade and grow a tick showing above or below.</p>
+
+  <div class="note">
+    <span class="lbl">The noise ring is your own footprint</span>
+    <p>The circle pulsing around your caret on the minimap is <strong>exactly how far your noise currently carries</strong>, drawn to true world scale — the same number the AI tests against. If a body dot sits inside it, that body is close enough to have heard you. Firing bursts it past the edge of the box. It shows your noise only, never sound made at you, and it is a worst case: walls attenuate it, and only hostiles act on it.</p>
+  </div>
+
+  <h3>Stations, looting and saving</h3>
+  <p>Walk up and press <kbd>F</kbd>, or pick the option in an NPC's conversation. <strong>None of these pause the world</strong> — don't stop at a counter mid-firefight. Shops put the merchant's stock on the left and your bag on the right; the ATM is a five-line statement where your account is <strong>one signed number</strong>, so "deposit" and "pay off debt" are the same button. A Healer restores full HP and clears all limb damage. The chip installer takes two clicks per row because it spends money <em>and</em> destroys the chip.</p>
+  <p>Loot with <kbd>F</kbd> on a corpse, container, or a live NPC while sneaking. <strong>A weapon they're actually holding shows as a padlock and cannot be lifted.</strong></p>
+  <p>Saving: <kbd>F5</kbd> quicksaves, <kbd>F9</kbd> quickloads, and there are 3 manual slots in Settings → Save / Load. One autosave acts as the run's checkpoint and is what "Continue" resumes.</p>
+  <div class="note warn">
+    <span class="lbl">The autosave is a profile checkpoint, not a world snapshot</span>
+    <p>It does <strong>not</strong> restore looted containers, dead NPCs, dropped loot, spawned enemies or NPC positions — and every gun comes back with a full magazine. Only the quicksave and the 3 manual slots carry the exact-world layer. If you want to resume a situation, use <kbd>F5</kbd>.</p>
+  </div>
+</section>
+
+<!-- ============ 6 PROGRESSION ============ -->
+<section id="progression">
+  <h2><span class="n">06</span> Progression &amp; Implants</h2>
+  <div class="h2rule"></div>
+
+  <div class="note">
+    <span class="lbl">Two currencies — don't confuse them</span>
+    <p><strong>Skill points, earned from XP levels, buy perks. Zorkmids buy stats.</strong> They are not interchangeable.</p>
+  </div>
+
+  <p>XP comes from three places: <strong>kills at 25 XP flat</strong>, but only for someone you personally damaged — a companion's kill or a death you merely engineered pays zero; <strong>quest completion</strong>; and the <strong>first read</strong> of a note or terminal. Silent takedowns do pay. There is no way to lose XP. Level 1 is 100 XP and each level costs 50 more than the last, so four kills is level 1 and ten kills is level 2. Every level hands you one skill point.</p>
+
+  <h3>The six stats</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Stat</th><th>Per point above 0</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Strength</strong></td><td>+2.0 carry, +1.5 max HP (stamped at spawn), +5% melee damage</td></tr>
+      <tr><td><strong>Endurance</strong></td><td>+10 max stamina, +10% out-of-combat HP regen</td></tr>
+      <tr><td><strong>Gunplay</strong></td><td>+5% ranged damage, +5% headshot damage, aim sway 8% steadier</td></tr>
+      <tr><td><strong>Agility</strong></td><td>+5% move speed, +5% jump velocity, +5% stamina regen (endurance sizes the pool, agility refills it), melee swings 5% quicker, reloads 5% quicker</td></tr>
+      <tr><td><strong>Streetwise</strong></td><td>Buy 4% cheaper / sell 4% dearer, rep gains +8% and losses −8%, gates dialogue skill checks</td></tr>
+      <tr><td><strong>Larceny</strong></td><td>Enemy detection 5% slower, takedown wind-up 5% quicker, pickpocket odds and value ceiling</td></tr>
+    </tbody>
+  </table></div>
+  <p>All linear, no cap and no diminishing returns until a value physically bottoms out — aim sway reaches perfectly still around Gunplay 13, and the enemy detection meter stops filling entirely around Larceny 20. Agility&rsquo;s two combat effects bottom out on a safety floor rather than at zero: the knife stops getting faster around Agility 13 and the fists around 15, and reloads stop shortening around Agility 16 (the sniper, with the longest reload in the game, keeps improving to 19).</p>
+
+  <div class="note warn">
+    <span class="lbl">A stat raise is refused while your account is in the red</span>
+    <p>Paid stat raises can never be funded on credit. If the trainer won't sell you a point despite visible cash, settle your ledger at an ATM first. This is the single most likely "the game is broken" report.</p>
+  </div>
+
+  <h3>Implants: installed vs active</h3>
+  <p>Implants come as <strong>microchips</strong>. Holding a chip does nothing — carry it to a mechanic and pay to have it fitted. Fitting a chip you found costs <strong>half its value</strong>; buying one from the mechanic costs 1.25× value plus the install fee, so <strong>exploring pays roughly 3.5× better than shopping</strong>.</p>
+  <p>Press <kbd>I</kbd>. <em>Installed</em> means it's in your head and paid for, permanently. <em>Active</em> is a per-row toggle — switch an implant off and gameplay stops using it, but you still own it, and the off state survives quitting. The tab also lists chips sitting in your backpack that aren't installed yet.</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Implant</th><th class="num">Chip value</th><th>Implant</th><th class="num">Chip value</th></tr></thead>
+    <tbody>
+      <tr><td>Slide</td><td class="num">200</td><td>Bio-Scanner (22 m)</td><td class="num">350</td></tr>
+      <tr><td>Fall Immunity</td><td class="num">300</td><td>Silent Takedown</td><td class="num">400</td></tr>
+      <tr><td>Wall Climb</td><td class="num">300</td><td>Chess Visualizer</td><td class="num">400</td></tr>
+      <tr><td>Bunny Hop</td><td class="num">300</td><td>Grapple</td><td class="num">500</td></tr>
+      <tr><td>Air Dash</td><td class="num">350</td><td>Deep Scanner (55 m)</td><td class="num">900</td></tr>
+      <tr><td>Laser Sight</td><td class="num">200</td><td></td><td></td></tr>
+    </tbody>
+  </table></div>
+
+  <p><strong>Laser Sight is the only thing in the game whose price reads your stat sheet.</strong> It is 200 to anyone, <strong>100 to anyone holding a single point of Gunplay</strong> — and the discount is a cliff, not a curve, so the first point buys the whole of it. It has no key and no cooldown: own the chip, leave the row switched on, and the gun paints a red dot on the spot the next shot actually lands while the crosshair stays nailed to screen centre. The sway you have always felt becomes something you can read.</p>
+</section>
+
+<!-- ============ 7 WORLD ============ -->
+<section id="world">
+  <h2><span class="n">07</span> The World</h2>
+  <div class="h2rule"></div>
+
+  <h3>Zorkmids and the ledger</h3>
+  <p>Kills pay 1 zorkmid base — <strong>2 if the killing blow was a headshot, 4 if every point of damage you did was a headshot.</strong> Past 30 m you get 2 plus 0.1 per extra metre, capped at 8. Collateral and trick shots pay too. NPCs bank their own bounties, so <strong>a raider who has been winning fights is a richer corpse.</strong></p>
+  <p><strong>Cash pays first, then bank savings, then credit</strong> — and paying from the bank or on credit adds a 3% service charge, so carrying cash is always cheapest. Your bank account is one signed number: positive is savings, negative is what you owe. You can never withdraw into credit, and every deposit is eaten by debt first. <strong>Banked money survives death; pocket cash does not.</strong></p>
+
+  <div class="note warn">
+    <span class="lbl">Rent is due at dawn</span>
+    <p>The Ledger charges <strong>20 zorkmids per in-game day</strong>. At your first dawn you get a notice serving the terms and one day of grace, then the charge lands every dawn. You start with <strong>zero zorkmids</strong> and the first dawn arrives about seven and a half minutes into a fresh run. Rent can never push you into debt — it takes what you have down to zero and logs the shortfall against your record. <strong>Waiting through several dawns pays several rents.</strong> Bank interest posts at dawn too: savings grow 0.5% a day, debt compounds at 2%.</p>
+  </div>
+
+  <h3>Time</h3>
+  <p>A full in-game day is <strong>600 real seconds</strong>. A new game opens at noon; day runs 06:00–20:00. NPC schedules, streetlights and the sky all key off it. <kbd>T</kbd> opens the Wait panel (1–24 hours), which heals 2 HP per hour but does <strong>not</strong> mend limbs — and it is not free, since the hours genuinely pass and rent falls due exactly as if you'd lived them. Waiting is refused while a hostile is aware of you.</p>
+
+  <h3>Reputation</h3>
+  <p>Every faction scores −100 to +100, starting at 0. <strong>Provoking a member costs 30 points; killing one costs 12 — even a hostile one.</strong> Saving someone by killing their attacker pays 15. <strong>At −25 a faction turns hostile and attacks on sight; at +25 it can turn friendly.</strong> Standing also bends merchant prices and can unlock stock a low-rep player never sees. A kill penalty is never reversed; a provoke can be, once, via the holster pardon. Press <kbd>V</kbd> for a live bar per faction.</p>
+
+  <h3>Stealth</h3>
+  <p>A typical enemy has <strong>25 m of sight in a 110° cone</strong>, needs line of sight, and takes about a second of continuous sight to lock on. It's a <strong>meter, not a switch</strong> — a glimpse is not an instant alert, and it drains when they lose you. Snipers are the exception at 150 m and four seconds. <strong>Crouching halves the range you can be spotted at</strong> and silences your footsteps.</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>What you're doing</th><th class="num">How far it's heard</th></tr></thead>
+    <tbody>
+      <tr><td>Gunshot</td><td class="num">28 m</td></tr>
+      <tr><td>Sprinting</td><td class="num">~15 m</td></tr>
+      <tr><td>Walking</td><td class="num">~10.5 m</td></tr>
+      <tr><td>Jump push-off</td><td class="num">8 m</td></tr>
+      <tr><td>Landing</td><td class="num">7 m + up to 18 m by fall distance</td></tr>
+      <tr><td><strong>Crouch-walking</strong></td><td class="num"><strong>0 — silent</strong></td></tr>
+      <tr><td>Standing still</td><td class="num">0</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="note warn">
+    <span class="lbl">Crouching does not silence a jump or a landing</span>
+    <p>Crouch buys silent <em>walking</em>. A rooftop drop is nearly as loud as a gunshot.</p>
+  </div>
+
+  <p><strong>Light matters both ways.</strong> Standing in shadow makes the detection meter fill up to four times slower. <strong>Carrying a lit flashlight is the opposite trade — you're spotted 60% further out and locked on twice as fast.</strong></p>
+
+  <p>A badge sits top-centre: <strong>HIDDEN</strong> nobody has you · <strong>DETECTED</strong> a meter is filling · <strong>CAUTION</strong> someone lost you and is searching · <strong>DANGER</strong> someone has locked on. You always see the worst state in the level. When someone first notices you, a white "!" pops over their head with a sting, and it reads through walls.</p>
+
+  <p><strong>Breaking line of sight is not instant escape.</strong> An alerted enemy coasts after your <em>actual</em> position for two more seconds — so when it starts searching it heads where you went, not where it lost you. Then it hunts for four seconds before forgetting you.</p>
+
+  <p><strong>Silent takedown:</strong> with the chip installed, crouch behind an <em>unaware</em> enemy, get within 1.5 m inside a 120° rear arc, and hold <kbd>Q</kbd> for three seconds. The kill credits you fully and the witness shout is suppressed — but <strong>the body is still discoverable later.</strong> Larceny shortens the hold.</p>
+
+  <h3>Pets</h3>
+  <p>Aim at a stray dog and <strong>tap <kbd>B</kbd></strong> to adopt it — you name it and it follows you. Hold <kbd>B</kbd> on a claimed pet to release it. Hold <kbd>Q</kbd> aimed at a friendly animal to pet it. Companions can be told "Follow me" or "Wait here" in conversation.</p>
+</section>
+
+<!-- ============ 8 SETTINGS ============ -->
+<section id="settings">
+  <h2><span class="n">08</span> Settings &amp; Comfort</h2>
+  <div class="h2rule"></div>
+
+  <div class="note warn">
+    <span class="lbl">Nothing applies until you press Apply</span>
+    <p>Every slider, toggle and cycler is <strong>staged</strong>. Revert — or just closing and reopening — throws your edits away. Two exceptions apply instantly: key rebinds, and the Audio music-folder picker. Note that dragging a volume slider doesn't move the bus until Apply, so its audible tick auditions the volume you're <em>leaving</em>.</p>
+  </div>
+
+  <h3>If the retro look makes you ill</h3>
+  <p>This game renders itself deliberately degraded. Under <strong>Accessibility</strong>, every one of these is genuinely free to turn off — the shader early-outs rather than running an identity pass:</p>
+  <div class="tw"><table>
+    <thead><tr><th>Row</th><th>What turning it off does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Lens Curve</strong></td><td>Removes the fisheye bend of the whole world — <strong>the strongest one, start here</strong></td></tr>
+      <tr><td>World Ghosting</td><td>Removes the full-screen motion trail</td></tr>
+      <tr><td>Vertex Warp (PS1)</td><td>Stops world geometry wobbling — <em>already off by default</em>; raising the slider is how you opt in</td></tr>
+      <tr><td>View Bobbing</td><td>No head bob</td></tr>
+      <tr><td>Camera Tilt</td><td>No strafe roll, and no lean roll</td></tr>
+      <tr><td>FOV Effects</td><td>No zoom kicks when you fall, sprint or dash</td></tr>
+      <tr><td>Screen Shake</td><td>Scales 0–200% (this one needs Apply)</td></tr>
+      <tr><td>HUD Ghosting / Curve / Sway</td><td>The same effects on the HUD</td></tr>
+    </tbody>
+  </table></div>
+  <p>Under <strong>Video</strong>, Presentation flips between <em>Crisp</em> (real resolution) and <em>Retro</em> (a ~792×444 buffer blown up — the chunky pixel look). Dithering to 0%, Color Depth to "24-bit (Off)", Ink Outline to 0% and Muzzle Smoke to 0% each remove a distinct layer of the effect.</p>
+
+  <h4>Photosensitivity</h4>
+  <p><strong>Screen Flashes</strong> off kills <em>every</em> full-screen flash at once — hurt, dash, kill, sky pop, muzzle. <strong>Hit Stop</strong> off removes the micro-freeze on impacts. <strong>Low-HP Heartbeat</strong> off silences just the heartbeat without touching any volume slider.</p>
+
+  <h4>Everyone speaks out loud</h4>
+  <p><strong>Text-to-Speech is on by default.</strong> Every dialogue line and every combat shout is read aloud by an offline synthesiser — a flat robot voice yelling at you across a street is the game working, not a glitch. It rides the Audio tab's <em>Voice</em> slider, so you can turn it down without turning it off; Accessibility → Text-to-Speech is the switch that leaves you with silent text.</p>
+
+  <h4>Colourblind</h4>
+  <p>Two independent rows. <em>Colorblind Filter</em> recolours the whole screen (Protanopia / Deuteranopia / Tritanopia). <em>Colorblind-Safe Cues</em> changes the <strong>gameplay</strong> cue colours — hostiles red→orange, friendlies green→cyan. <strong>Turn the second one on even if you leave the first off:</strong> it reaches NPC outlines, hover names, the enemy health bar, minimap dots and the hostile lock-on ring, so you're never reading the red/green axis.</p>
+
+  <h4>Difficulty</h4>
+  <div class="tw"><table>
+    <thead><tr><th>Level</th><th class="num">Damage taken</th><th class="num">Damage dealt</th><th class="num">Enemies</th><th class="num">Loot / money</th><th class="num">XP</th></tr></thead>
+    <tbody>
+      <tr><td>Easy</td><td class="num">×0.5</td><td class="num">×1.5</td><td class="num">×0.7</td><td class="num">×1.25</td><td class="num">×1.0</td></tr>
+      <tr><td>Normal</td><td class="num">×1.0</td><td class="num">×1.0</td><td class="num">×1.0</td><td class="num">×1.0</td><td class="num">×1.0</td></tr>
+      <tr><td>Hard</td><td class="num">×1.75</td><td class="num">×0.85</td><td class="num">×1.35</td><td class="num">×1.0</td><td class="num">×1.25</td></tr>
+    </tbody>
+  </table></div>
+  <p>Difficulty applies immediately, mid-run. Two rows on the Game tab are prefixed <strong>"Debug:"</strong> — leave those alone.</p>
+
+  <h4>Where your files live</h4>
+  <p><code>%APPDATA%\Godot\app_userdata\CYBERSUNDAY</code> — holding <code>settings.cfg</code>, <code>gamestate.cfg</code> (the autosave), <code>quicksave.cfg</code>, three save slots and a <code>screenshots</code> folder. There is no "Reset to Defaults" button; deleting <code>settings.cfg</code> resets every option, but also clears your Terms acceptance so the first-launch gate returns.</p>
+</section>
+
+<!-- ============ 9 TROUBLE ============ -->
+<section id="trouble">
+  <h2><span class="n">09</span> Troubleshooting</h2>
+  <div class="h2rule"></div>
+  <p class="lede">Most of these are intended behaviour that reads as a bug. Check here before you write a report.</p>
+
+  <div class="faq">
+    <details><summary>I press Space at a wall and nothing happens. G does nothing. I can't slide.</summary>
+      <div class="a"><p>Correct behaviour on a fresh save. Those are implants you have to install. Check the Implants tab (<kbd>I</kbd>) — the chip must be both <em>installed</em> and <em>active</em>.</p></div></details>
+
+    <details><summary>No enemies show on my map.</summary>
+      <div class="a"><p>You need a scanner implant. Without one the body channel is completely blank at any zoom on both maps. Also check Accessibility → NPCs On Minimap.</p></div></details>
+
+    <details><summary>My gun won't come out.</summary>
+      <div class="a"><p>You're carrying a physics prop. Weapon draw is locked while your hands are full — set it down first.</p></div></details>
+
+    <details><summary>The first click doesn't shoot.</summary>
+      <div class="a"><p>Your weapon was holstered; that click drew it. Release and click again.</p></div></details>
+
+    <details><summary>I got shot while in a menu.</summary>
+      <div class="a"><p>Intended. Nothing but a conversation pauses the world.</p></div></details>
+
+    <details><summary>The trainer won't sell me a stat point even though I have cash.</summary>
+      <div class="a"><p>A paid stat raise is refused while your ledger is negative, and can never be funded on credit. Settle up at an ATM first.</p></div></details>
+
+    <details><summary>My run stopped working.</summary>
+      <div class="a"><p>You emptied the stamina bar. Sprint is locked out for three seconds. Jump comes back much sooner.</p></div></details>
+
+    <details><summary>My reload wasted ammo.</summary>
+      <div class="a"><p>By design. Ammo is counted in whole magazines, so reloading a partial mag discards it. Reload when empty.</p></div></details>
+
+    <details><summary>The level restarted itself.</summary>
+      <div class="a"><p>Did you hit <kbd>End</kbd>? It reloads the current level and is not gated out of this build. Avoid it.</p></div></details>
+
+    <details><summary>I got shot through a fence.</summary>
+      <div class="a"><p>Mesh, wire, glass and foliage stop bullets from neither side. Not a bug — find solid cover.</p></div></details>
+
+    <details><summary>The screen went grey.</summary>
+      <div class="a"><p>Either you're falling toward a lethal landing (full grey means the next impact kills you at your current HP), or you're low on health — that's a separate vignette that starts almost as soon as you're hurt.</p></div></details>
+
+    <details><summary>My mouse feels sluggish when I'm moving fast.</summary>
+      <div class="a"><p>Deliberate. Look sensitivity scales down above 6.5 m/s, reaching half at 12 m/s, so hop-runs stay controllable.</p></div></details>
+
+    <details><summary>I changed a setting and nothing happened.</summary>
+      <div class="a"><p>Did you press <strong>Apply</strong>? Everything except key rebinds and the music folder is staged until you do.</p></div></details>
+
+    <details><summary>I loaded my autosave and the world was reset.</summary>
+      <div class="a"><p>The autosave is a <em>profile</em> checkpoint. It doesn't restore looted containers, dead NPCs, dropped loot, spawned enemies or NPC positions, and all guns come back full. Only <kbd>F5</kbd> and the three manual slots carry the exact-world layer.</p></div></details>
+
+    <details><summary>All the item names say [PH].</summary>
+      <div class="a"><p>Placeholder copy. Chips, weapon mods, quests and perks all currently ship with <code>[PH]</code>-prefixed names, and chip descriptions are empty. Not worth reporting.</p></div></details>
+
+    <details><summary>Everything says the game is connected to the internet.</summary>
+      <div class="a"><p>That's the first-launch warning card and the joke Terms screen. You can't skip them on a first launch; later launches let any key through.</p></div></details>
+  </div>
+</section>
+
+<!-- ============ 10 BUILD ============ -->
+<section id="build">
+  <h2><span class="n">10</span> About This Build</h2>
+  <div class="h2rule"></div>
+
+  <div class="note warn">
+    <span class="lbl">Some systems may not be reachable yet</span>
+    <p>This manual documents every system that <strong>exists</strong> in the game. In a playtest build, not all of them necessarily have a place in the level you're playing. If you can't find a trainer, a merchant, a healer or a quest-giver anywhere, that's the build you were given — not something you missed. Report what you couldn't find; don't spend an hour hunting for it.</p>
+  </div>
+
+  <h4>Known placeholder copy</h4>
+  <p>Implant chips, weapon mods, quest titles and perks all display a <code>[PH]</code> prefix, and chip descriptions are blank. The Controls tab has one placeholder hint row. These are known.</p>
+
+  <h4>Worth reporting</h4>
+  <ul>
+    <li>Anything that reads as a crash, a freeze, or a hard softlock.</li>
+    <li>A setting that appears to save but has no effect after a restart — name the exact row.</li>
+    <li>The window disappearing after leaving fullscreen.</li>
+    <li>The left-handed weapon option looking wrong.</li>
+    <li>Anywhere the manual above disagrees with what the game actually did.</li>
+  </ul>
+
+  <p style="color:var(--ink-3);font-size:15px;margin-top:30px">Everything in this manual was read from the game's source rather than observed in play, so treat specific numbers as the intended tuning rather than a measurement.</p>
+</section>
+
+<footer>CYBERSUNDAY · Playtest field manual · Godot 4.7.1</footer>
+</main>
+</div>
+
+<script>
+(function(){
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.rail a'));
+  var secs  = links.map(function(a){ return document.querySelector(a.getAttribute('href')); }).filter(Boolean);
+  if (!('IntersectionObserver' in window) || !secs.length) return;
+  var visible = new Map();
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if (e.isIntersecting) visible.set(e.target.id, e.intersectionRatio);
+      else visible.delete(e.target.id);
+    });
+    var best = null, bestTop = Infinity;
+    secs.forEach(function(s){
+      if (!visible.has(s.id)) return;
+      var t = s.getBoundingClientRect().top;
+      if (t < bestTop) { bestTop = t; best = s.id; }
+    });
+    if (!best) return;
+    links.forEach(function(a){
+      a.classList.toggle('on', a.getAttribute('href') === '#' + best);
+    });
+  }, { rootMargin: '-10% 0px -70% 0px', threshold: [0, 0.25, 1] });
+  secs.forEach(function(s){ io.observe(s); });
+})();
+</script>
+
+</body>
+</html>

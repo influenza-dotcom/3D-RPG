@@ -31,8 +31,21 @@ thin forwarding facades for all of those.
 
 ### Test Noise
 
-The GUT suite is green, but headless runs still print known orphan/resource and
-dummy-renderer noise. That does not currently fail the suite, but it makes real
+**The GUT suite is NOT green** (measured 2026-09-02): **8 failing tests** out of
+5,231 in 426 scripts, in six files — `test_fp_body_arms`, `test_fp_torso`,
+`test_global_node_added_listeners`, `test_groups`, `test_lean` (3) and
+`test_weapon_bench`. **Six** are real behavioural assertions (a lean claim
+surviving the posture gate, a bench refusal reason coming back `slot_taken`
+instead of `bag_full`), not harness noise. The other **two are source-SCAN
+architecture guards** that never exercise runtime behaviour: `test_groups` greps
+production source for raw group literals (tripped by
+`scripts/tools/view_model_tonemap_qa_shots.gd`) and
+`test_global_node_added_listeners` counts `node_added.connect` sites (tripped by
+the leftover probe `scripts/tools/__first_kill_hitch_probe.gd`). Both are debug
+scaffolding under `scripts/tools/`, not gameplay — so do not read them as a
+behaviour regression, but fix the source either way; do not re-baseline the
+tests. Separately, headless runs still print known orphan/resource and
+dummy-renderer noise. That noise does not fail the suite, but it makes real
 regressions harder to notice. Quiet tests are worth treating as engineering
 polish, especially around UI lifecycle and smoke-test cleanup.
 
@@ -208,9 +221,9 @@ drop-in world terminal; and the DEBIT/CREDIT choice is available **at every poin
 of sale** that honours both rails, not just at an ATM.
 
 That last piece is `PaymentRailButton` (`scripts/ui/payment_rail_button.gd`) — one
-drop-in authored into all five paid screens (shop, heal, level-up, chip-install,
-respec). It owns the toggle, the caption, and the persist-on-flip; the host screen
-connects `rail_changed` to its own repaint.
+drop-in authored into all six paid screens (shop, heal, level-up, chip-install,
+respec, gunsmith bench). It owns the toggle, the caption, and the
+persist-on-flip; the host screen connects `rail_changed` to its own repaint.
 
 > ⭐ **One till refuses the credit rail on purpose: `LevelUp` (`accepts_credit`,
 > default off).** It is the only counter that sells entries on the permanent stat
@@ -242,10 +255,10 @@ connects `rail_changed` to its own repaint.
 > total *on the same card*. A screen that carried the button but ignored
 > `rail_changed` would flip the rail and leave a row greyed out that the till would
 > now serve — exactly the divergence the payment seam exists to prevent.
-> `tests/test_payment_rail_selector.gd` pins the connection in all five screens by
+> `tests/test_payment_rail_selector.gd` pins the connection in all six screens by
 > source-grep, because it is made at runtime in `_bind_ui`.
 
-That asymmetry is CLOSED (2026-08-11): all five paid cards now paint the **all-in**
+That asymmetry is CLOSED (2026-08-11): all six paid cards now paint the **all-in**
 total through `charge_total`, and the heal / respec / level-up funds readouts paint
 `spendable()` rather than raw `money`. The gate still runs on the RAW sticker —
 `can_pay` / `charge` fold the service charge in themselves, so wrapping the gate's
@@ -275,18 +288,18 @@ check each once, then delete this section.
 > **Play the game to close these.** Where a sub-check IS covered, it is annotated inline below.
 
 - [ ] New Game → NO abilities beyond implants bought on credit. **Inputs pinned, outcome not:**
-  `test_new_game_contract.gd:25-26` and `test_implant_choice.gd:261-262` assert
+  `test_new_game_contract.gd:25-26` and `test_implant_choice.gd:390-391` assert
   `starting_unlocks` and `GameState.unlocks` are empty, but ⚠ **`starting_unlocks` is not the
   only grant surface** — `ability_manager.gd:6` says an editor-placed `Ability` child of the
   Player is itself the grant ("presence + `enabled` IS the grant"), and nothing pins that none
   exists. `Player.tscn` has none today; a designer dropping one in leaves every assertion green
   while the run boots with a free ability. ~~since 2026-08-05 creation's Begin leads to the
-  purchase screen~~ **covered** (`test_implant_choice.gd:209-216`, on a real StartMenu instance);
+  purchase screen~~ **covered** (`test_implant_choice.gd:338-342`, on a real StartMenu instance);
   ~~the bill starts the wallet NEGATIVE~~ **STALE — do not look for this.** The ledger
   refactor moved the bill off `money` onto the one signed `GameState.account`;
-  `test_implant_choice.gd:249-252` pins that the wallet is untouched and stays ≥ 0.
+  `test_implant_choice.gd:378-379` pins that the wallet is untouched and stays ≥ 0.
   **Still needs a human:** check the HUD's OWED row actually paints a signed balance
-  (`ui.gd:1175-1187 _stamp_owed_row` has zero test coverage). ~~install a chip → it
+  (`ui.gd:1724 _stamp_owed_row` has zero test coverage). ~~install a chip → it
   grants~~ **covered** (`test_chip_install.gd:119-129`). Die under
   RELOAD_CHECKPOINT_FRESH → respawn keeps the run (stats/unlocks/money, debt included).
 - [ ] Loot a corpse whose coin tile overflows a full grid → coin shows in the

@@ -324,10 +324,13 @@ approach.
 
 ## 13. Make Quest Completion Toasts Visible
 
-Quest-complete toasts are already emitted by the HUD when `GameState` emits
-`quest_completed`. Terminal turn-ins happen from dialogue, and dialogue hides
-the notices layer, so the HUD queues quest transition toasts during dialogue and
-flushes them when the conversation closes.
+Quest-complete toasts are already emitted by the HUD when `QuestTracker` emits
+`quest_completed` — since the M1 split the four quest **signals** live on the
+`QuestTracker` autoload, and only the quest *function* API
+(`GameState.complete_quest`, `GameState.notify_pickup`, used in §7 and §10) is
+still forwarded from `GameState`. Terminal turn-ins happen from dialogue, and
+dialogue hides the notices layer, so the HUD queues quest transition toasts
+during dialogue and flushes them when the conversation closes.
 
 The relevant script is `res://scripts/ui/ui.gd`:
 
