@@ -3,7 +3,8 @@ extends Resource
 
 ## Audio tuning, grouped below: the global per-play pitch variation for WORLD sound, landing thump,
 ## falling/fast-move wind swell, bullet/muzzle whiz pitch, impact pitch (incl. enemy-hit-by-HP), and the
-## ammo-driven fire pitch. Consumed by AudioManager, player.gd, attack.gd, projectile.gd, and muzzle_whiz.gd.
+## ammo-driven fire pitch, and the retrigger voice cap. Consumed by AudioManager, player.gd, attack.gd,
+## weapon_audio.gd, projectile.gd, and muzzle_whiz.gd.
 
 @export_group("Pitch Variation")
 ## ⭐THE ONE "no world sound plays at the same pitch twice" knob. Every sound the GAME WORLD makes — footsteps,
@@ -118,3 +119,16 @@ extends Resource
 @export var fire_pitch_full_ammo: float = 1.0
 ## Fire-sound pitch on the LAST round before empty — the deep/strained end. Set below full_ammo so the gun sags as it runs dry.
 @export var fire_pitch_empty_ammo: float = 0.7
+
+@export_group("Retrigger Voices")
+## How many voices of ONE retriggered weapon sound (the gunshot, the shell tink) may ring at once before the
+## OLDEST is cut. This is what stops a full-auto weapon from chopping its own sample: at the SMG's 0.125 s
+## cadence a shot used to be cut 125 ms into a 3.55 s report — right in the loudest part of the decay, which
+## reads as a click rather than as gunfire. Each trigger pull now rings on its own voice (WeaponAudio
+## `_play_voice`), so the cut only ever lands on a tail this many shots old.
+##
+## ⭐SIZE IT IN SECONDS, NOT IN SHOTS: `limit x attack_speed` is how much tail survives — 8 is one full second
+## at SMG rate, by which point that shot is ~27 dB under its own peak and buried beneath seven newer ones, so
+## the cut is inaudible. Drop it toward 2-3 and the chop comes back; the ceiling is node count and mix mud,
+## not volume (eight stacked tails only sum to about +3 dB over the newest alone).
+@export_range(1, 32, 1) var retrigger_voice_limit: int = 8

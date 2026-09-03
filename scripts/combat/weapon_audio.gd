@@ -8,6 +8,10 @@ extends Node3D
 ## stream as the per-weapon fallback. Attack still decides WHEN to play (a shot fired, a clip emptied,
 ## an enemy hit); this owns the per-weapon stream swap + pitch feel.
 ##
+## ⭐The two sounds a weapon can RETRIGGER faster than they finish — the gunshot and the shell tink — do NOT
+## restart their shared node; each play rings on its own throwaway clone of it (see _play_voice), so a burst
+## stops chopping its own samples. Everything else (dry-fire click, reload, impacts) plays the node directly.
+##
 ## Built code-side and added in Attack._ready, so off-tree (a unit-test Attack via .new() with no
 ## add_child) it never exists and Attack's fire path — which already needs a live clip + timers it
 ## doesn't have off-tree — is never reached; every play call is null-guarded on Attack's side.
@@ -25,6 +29,13 @@ var _default_reload_sfx: AudioStream
 var _default_impact: AudioStream
 var _default_impact_enemy: AudioStream
 
+## The throwaway voices currently ringing for the two sounds a weapon RETRIGGERS faster than they finish —
+## the gunshot and the shell tink. See _play_voice: each trigger pull rings on its own clone rather than
+## restarting the one shared player, and these lists are what let the OLDEST be cut once the cap is reached.
+## Per-WeaponAudio (one per wielder), so a firefight's NPCs each get their own budget instead of a shared one.
+var _fire_voices: Array[AudioStreamPlayer3D] = []
+var _shell_voices: Array[AudioStreamPlayer3D] = []
+
 ## Wire the scene's audio players in (Attack's @export node slots) and snapshot their authored streams
 ## as the per-weapon fallbacks. Called once from Attack._ready, right after this is added.
 func setup(p_attack_audio: AudioStreamPlayer3D, p_reload_sfx: AudioStreamPlayer3D, p_impact: AudioStreamPlayer3D, p_impact_enemy_hit: AudioStreamPlayer3D, p_empty_clip: AudioStreamPlayer3D, p_shell_impact: AudioStreamPlayer3D) -> void:
@@ -41,13 +52,6 @@ func setup(p_attack_audio: AudioStreamPlayer3D, p_reload_sfx: AudioStreamPlayer3
 	if impact_enemy_hit:
 		_default_impact_enemy = impact_enemy_hit.stream
 
-## Play the fire sound for this shot. Cruelty-Squad-style: the fire sound deepens as the magazine
-## empties, using `ammo_before` (the count BEFORE this shot) so a full mag fires at full pitch.
-## Infinite-ammo weapons (melee, fists) keep normal pitch.
-##
-## The ammo pitch is the BASE handed to AudioManager.play_varied, which multiplies the global per-play
-## variation onto it — the mag-empties sag still reads exactly as authored, it just stops firing the
-## byte-identical sample on every trigger pull (most audible on a full-auto burst).
 ## Which bus this weapon's trigger sound belongs on. Real GUNFIRE under open sky routes to `gunshots` (the
 ## distant city-billow chain in default_bus_layout.tres). Everything else is `world`, the diegetic bus every
 ## footstep/foley sound rides: a melee swing whoosh and the spray can's hiss are world ACTIONS (never the
@@ -74,22 +78,92 @@ func listener_indoors() -> bool:
 	var p := Groups.human_player(get_tree())
 	return p != null and p.get(&"is_indoors") == true
 
+## Play the fire sound for this shot. Cruelty-Squad-style: the fire sound deepens as the magazine
+## empties, using `ammo_before` (the count BEFORE this shot) so a full mag fires at full pitch.
+## Infinite-ammo weapons (melee, fists) keep normal pitch.
+##
+## The ammo pitch is the BASE the voice is rolled around, so the global per-play variation multiplies onto it —
+## the mag-empties sag still reads exactly as authored, it just stops firing the byte-identical sample on every
+## trigger pull (most audible on a full-auto burst).
+##
+## ⭐Rings on its OWN voice (see _play_voice) instead of restarting the shared `Attack Audio` node, because a
+## full-auto weapon pulls the trigger again long before its report has finished: the SMG's 0.125 s cadence used
+## to cut a 3.55 s gunshot 125 ms in, at the loudest point of the decay, so held fire read as a stuttering click
+## rather than as a burst. That also means the ammo sag + variation rolled here stay THIS shot's — a node-level
+## `max_polyphony` would have retuned every still-ringing tail to the newest roll on every pull.
 func play_fire(weapon: WeaponData, ammo_before: int) -> void:
-	attack_audio.stream = weapon.audio
-	attack_audio.bus = fire_bus_for(weapon, listener_indoors())
 	var base_pitch := 1.0
 	if not weapon.is_infinite_ammo:
 		var ammo_frac := clampf(float(ammo_before) / float(weapon.max_ammo), 0.0, 1.0)
 		base_pitch = lerpf(GameSettings.audio.fire_pitch_empty_ammo, GameSettings.audio.fire_pitch_full_ammo, ammo_frac)
-	AudioManager.play_varied(attack_audio, base_pitch)
+	_play_voice(attack_audio, _fire_voices, weapon.audio, fire_bus_for(weapon, listener_indoors()), base_pitch)
+
+## Retrigger `source` WITHOUT cutting the play before it: this trigger pull rings on its own throwaway CLONE
+## of the node (added as its sibling, so it carries the authored transform and follows the wielder), while the
+## previous one is left alone to finish. `voices` is that sound's live-voice list — the oldest is cut once
+## GameSettings.audio.retrigger_voice_limit is reached, so a held trigger costs a bounded number of nodes and
+## the cut only ever lands on a tail several shots deep, where it is inaudible.
+##
+## ⭐⭐WHY A CLONE AND NOT `max_polyphony`. AudioStreamPlayer3D's own polyphony would be the one-liner, but
+## `pitch_scale` is a NODE property that the 3D mixer re-applies to every live playback each panning update —
+## so the next shot's ammo sag + per-play variation would yank every still-ringing tail with it, ±15% every
+## 125 ms. Assigning `stream` is worse still: it calls stop() internally, killing the voices outright. A clone
+## per play is the only shape where each shot keeps the pitch it was fired at.
+##
+## ⭐It is a `duplicate()` rather than a hand-copied field list on purpose. These nodes carry an authored mix
+## (volume_db, the ceiling that is actually audible at this project's volumes, attenuation model, unit_size,
+## max_distance) and a copy-N-fields helper silently drifts the moment anyone tunes a field it does not know
+## about — see _emit_positional_impact, which pays exactly that maintenance cost. `stream` and `bus` are the
+## two the CALLER owns (one shared node serves every weapon), so they are passed in and overwritten.
+##
+## Carries ONE_SHOT_META so AudioManager.stop_sfx() can both cut AND free it; without the meta a menu/death cut
+## would stop the voice and strand the node. `base_pitch` is the pitch the site MEANS and takes the global
+## per-play variation on top, exactly as AudioManager.play_varied would have.
+func _play_voice(source: AudioStreamPlayer3D, voices: Array[AudioStreamPlayer3D], stream: AudioStream, bus: StringName, base_pitch: float = 1.0) -> void:
+	if stream == null or not is_instance_valid(source):
+		return
+	var parent := source.get_parent()
+	if parent == null:
+		return
+	# Forget the voices that already finished and freed themselves, then cut the oldest survivors until this
+	# play fits under the cap. Rebuilt rather than erased in place: a freed voice leaves a dangling entry, and
+	# `is` on one of those hard-crashes (see the validity-first idiom used across this project).
+	var live: Array[AudioStreamPlayer3D] = []
+	for v in voices:
+		if is_instance_valid(v):
+			live.append(v)
+	voices.assign(live)
+	while voices.size() >= maxi(1, GameSettings.audio.retrigger_voice_limit):
+		var oldest: AudioStreamPlayer3D = voices.pop_front()
+		if is_instance_valid(oldest):
+			oldest.queue_free()
+	var voice := source.duplicate() as AudioStreamPlayer3D
+	if voice == null:
+		return
+	voice.name = "%sVoice" % source.name
+	voice.stream = stream
+	voice.bus = bus
+	voice.autoplay = false
+	voice.pitch_scale = AudioManager.vary_pitch(base_pitch)
+	voice.set_meta(AudioManager.ONE_SHOT_META, true)
+	voices.append(voice)
+	# force_readable_name: without it a colliding name becomes the internal `@Attack AudioVoice@7`, and these
+	# are exactly the nodes you go looking for in the remote scene tree when a burst sounds wrong.
+	parent.add_child(voice, true)
+	voice.finished.connect(voice.queue_free)
+	voice.play()
 
 ## The dry-fire click (empty clip / last round chambered).
 func play_empty() -> void:
 	AudioManager.play_varied(empty_clip)
 
-## The ejected casing hitting the ground.
+## The ejected casing hitting the ground. Its own voice too, and for the same reason as the shot it rides with:
+## the tink is a 1.9 s bounce fired once per round, so on the shared node an SMG burst clipped every casing
+## after the first 125 ms of it. Keeps the node's authored `world` bus — a shell is foley, never a gunshot.
 func play_shell() -> void:
-	AudioManager.play_varied(shell_impact)
+	if not is_instance_valid(shell_impact):
+		return
+	_play_voice(shell_impact, _shell_voices, shell_impact.stream, shell_impact.bus)
 
 ## Play the reload sound — per-weapon if it defines one, else the node's authored default.
 func play_reload(weapon: WeaponData) -> void:
