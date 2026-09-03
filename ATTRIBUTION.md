@@ -28,10 +28,10 @@ a folder scan when `track` is null and would shuffle whatever is left.
 | ⚠ | `res://` path | Size | Apparent origin | Wired at | Action |
 | --- | --- | --- | --- | --- | --- |
 | ⚠ | `resources/weapons/Secret Shop.flac` | 19,387,561 | Dota 2 OST (lossless) | nothing — orphan | DELETE. Read `tests/test_devtools_browser.gd:91` first; it references this file as a non-resource that must be filtered out. |
-| ⚠ | `assets/audio/music/Secret Shop.mp3` | 2,724,237 | Dota 2 OST | `scenes/game.tscn:9,51` (autoplay), `resources/levels/TestLevel.tres:4` | DELETE + rewire both |
+| ⚠ | `assets/audio/music/Secret Shop.mp3` | 2,724,237 | Dota 2 OST | `scenes/game.tscn:9,59` (the `Music` node at `:57`, `autoplay = true` at `:61`), `resources/levels/TestLevel.tres:4` | DELETE + rewire both |
 | ⚠ | `assets/audio/music/Secret Shop v3.mp3` | 4,122,178 | Dota 2 OST | nothing — orphan | DELETE, no rewire |
 | ⚠ | `assets/audio/music/Jakub's Ladder.mp3` | 3,094,625 | commercial track | nothing — orphan | DELETE, no rewire |
-| ⚠ | `assets/audio/sfx/hotline_miami_lr.mp3` | 128,517 | Hotline Miami OST | `resources/tuning/PlayerFeedbackSettings.tres:8` (`death_sting`) | DELETE. Set `death_sting = null`; `death_mix.gd:275-281` documents null as inert and `tests/test_death_mix.gd:157-165` covers it. |
+| ⚠ | `assets/audio/sfx/hotline_miami_lr.mp3` | 128,517 | Hotline Miami OST | `resources/tuning/PlayerFeedbackSettings.tres:8` (`death_sting`) | DELETE. Set `death_sting = null`; `death_mix.gd:37-38` documents null as inert, `_sting_will_play()` enforces it (`death_mix.gd:302-308`, null check at `:304`) and `tests/test_death_mix.gd:153-165` covers it. |
 | ⚠ | `assets/audio/music/RIP Granny 😔🙏.mp3` | 1,436,596 | unknown, non-original | `scenes/throwable/radiothrowable.tscn:6,37` (`track`) | DELETE **last**, and **repoint** `track` — do not merely unset it (see the warning below). |
 | ⚠ | `assets/audio/music/station/Shop Radio 1.mp3` | 1,543,923 | Spelunky OST (Eirik Suhrke) — **knowing placeholder**, added 2026-08-22 | `resources/tuning/StationMusicSettings.tres` (`tracks`) | REPLACE with a licensed or original shop loop, then DELETE. Clearing `tracks` makes the whole station-radio layer inert BY DESIGN, so the purge is a pure resource edit — no code change, no broken build. |
 | ⚠ | `assets/audio/music/station/Shop Radio 2.mp3` | 2,252,335 | Spelunky OST (Eirik Suhrke) — **knowing placeholder**, added 2026-08-22 | `resources/tuning/StationMusicSettings.tres` (`tracks`) | REPLACE, then DELETE — as above. |
@@ -99,7 +99,7 @@ ever find them, and replacing them means re-authoring mesh data inside the scene
 | ⚠ | `scenes/player/view_model.tscn` | **the player's default gun rig** — inherits `silenced.tscn` |
 
 > **Do not rename the `Sketchfab_Scene` node in `view_model.tscn`.** It is a hardcoded NodePath in
-> `gun_mesh.gd:56,128`, `muzzle_rig.gd:28,36` and `weapon_model_swapper.gd:71-72`. The mesh may be swapped;
+> `gun_mesh.gd:56,128`, `muzzle_rig.gd:28,36` and `weapon_model_swapper.gd:78-79`. The mesh may be swapped;
 > the node name must survive. (The identically-named node in `grenade_launcher.tscn` is unrelated — those
 > paths resolve against the gun rig, not against an equipped view-model.)
 
@@ -124,21 +124,40 @@ ever find them, and replacing them means re-authoring mesh data inside the scene
 
 ## E. Orphans that still ship
 
-`export_presets.cfg` uses `export_filter="all_resources"` with empty `include_filter` and `exclude_filter`
-(`:8-10`), so **every file above lands in the `.pck` verbatim whether or not anything references it.**
-Until `exclude_filter` is populated, deleting a reference is not the same as removing the asset.
+`export_presets.cfg` uses `export_filter="all_resources"` with an empty `include_filter`, and an
+`exclude_filter` that names only build-time paths — `tests/*,tests_soak/*,docs/*,maps/autosave/*,addons/text_to_speech/example*,addons/text_to_speech/README.md` (`:11-13`). Not one of those globs is an asset
+path, so **every file above lands in the `.pck` verbatim whether or not anything references it.**
+Until an asset path is added to `exclude_filter`, deleting a reference is not the same as removing the asset.
 
-The worst offenders are not even third-party problems — they are size problems:
+The rows below are not even third-party problems — they are size problems. (`assets/models/dog.glb` — 409 MB
+smudged, no authored reference — used to lead this table. It is gone from the working tree, so it no longer
+ships, but the deletion is **uncommitted**: it is still tracked at `HEAD` as a 134-byte Git LFS pointer, and it
+is still in the repository until that deletion is committed.)
 
 | `res://` path | Size | Referenced? |
 | --- | --- | --- |
-| `assets/models/dog.glb` | 409,580,280 (409 MB) | no authored reference found |
-| `assets/models/weirdlittleclayguy.obj` | ~452 MB | gitignored (`.gitignore:39`), still on disk |
+| `assets/models/weirdlittleclayguy.obj` | 14,177,243 (13.5 MB — re-measured 2026-09-01; it was ~452 MB until the file was rewritten in place 2026-08-28) | **yes** — it is the dog's mesh (`scenes/characters/dog.tscn:10`, an `ArrayMesh` `ext_resource`). Not an orphan; it is here purely for size. Note it is gitignored (`.gitignore:39`) while the scene that needs it is tracked, so a fresh clone is missing this mesh. |
 | the 16 Call of Duty PNG sidecars (`assets/models/` + `assets/textures/`, duplicated sets) | ~11.7 MB | none — pure orphans |
 
-## Vendored addons (already licensed, no action)
+## Vendored addons
 
-| Path | License file |
-| --- | --- |
-| `addons/gut/` | `addons/gut/LICENSE.md` |
-| `addons/func_godot/` | `addons/func_godot/LICENSE` |
+| ⚠ | Path | License file |
+| --- | --- | --- |
+| | `addons/gut/` | `addons/gut/LICENSE.md` |
+| | `addons/func_godot/` | `addons/func_godot/LICENSE` |
+| ⚠ | `addons/text_to_speech/` | **NONE — UNKNOWN.** No `LICENSE`/`COPYING`/`COPYRIGHT` file anywhere under the vendored copy, and no licence header in any of its files. |
+
+> **`addons/text_to_speech/` is the one vendored addon that cannot ship as it stands.** It is upstream
+> [kdik/godot-text-to-speech](https://github.com/kdik/godot-text-to-speech) (`addons/text_to_speech/REBUILD_WINDOWS.md:3-5`), and its
+> Windows DLL is a local patched `template_release` rebuild that statically links **flite** — CMU's synthesiser,
+> pinned at `6c9f20dc915b` (`REBUILD_WINDOWS.md:63-72`) — alongside seven CMU Arctic voice databases shipped as
+> `voices/*.flitevox.res`. That is **three** separate upstream licences to resolve (the addon, flite, the voice
+> data) and not one of them is recorded anywhere in this repo — each `.flitevox.res` even carries an embedded
+> `copyright` feature, and all seven read literally `unknown`. And it **ships**: `export_presets.cfg:13` excludes
+> only `addons/text_to_speech/example*` and its `README.md`, so all seven voices land in the `.pck` — and the DLL
+> ships *beside* the `.exe` as a GDExtension shared object, which `exclude_filter` cannot touch at all (the export
+> dir carries `libgodot_text_to_speech.dll` next to `CYBERSUNDAY.exe`) —
+> the addon's own README notes every `.flitevox.res` in that folder is shipped and extracted to `user://` at
+> runtime. This is not a dormant dependency either: TTS is **ON by default** as of 2026-09-01
+> (`managers/Settings.gd:182`, `var tts_enabled: bool = true`). Fill all three licences in before any build leaves
+> this machine.
