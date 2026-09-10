@@ -117,6 +117,15 @@ extends Node
 ## ...and FULLY visible by this angle. The band between eases it in with the look itself, so there is no pop.
 ## Applies to the whole body — torso, arms AND legs — so they can never disagree about whether you are looking.
 @export_range(0.0, 89.0, 0.5, "degrees") var fp_body_reveal_full_deg: float = 70.0
+## Hide your whole first-person body — torso, arms AND legs — for the length of a CONVERSATION, over whatever
+## the look-down reveal was saying. A talk swings the camera onto the speaker and holsters your weapon, and the
+## focus pitch is frequently DOWN (a shorter speaker, a dog, a seated shopkeeper, standing on a step), which is
+## exactly the look that reveals your chest — so the framed dialogue shot got a torso in the bottom of it.
+##
+## ⭐It SNAPS rather than dissolving, and that is not laziness: DialogueManager pauses the tree once the box
+## opens and this component is PAUSABLE, so anything eased across frames would freeze wherever it had reached
+## and hold a half-dithered chest for the whole conversation. The letterbox bars slide in over the snap.
+@export var fp_body_hide_in_dialogue: bool = true
 ## Show your own ARMS on your own BODY — the pair every character in the cast wears, hanging off the FP torso at
 ## REAL world depth on the main camera, so looking down shows arms attached to your chest and world geometry
 ## occludes them correctly. Body AWARENESS, and a completely separate rig from the view-model hands below
@@ -541,9 +550,10 @@ func _configure_fp_torso(rig: BodyModelSwap) -> void:
 ## inspector tunable) and sunk by the head's CURRENT drop below its standing height — so chest-to-eye spacing
 ## stays constant while the camera lowers. Crouching ALSO fades them out entirely (dithered, riding the
 ## already-eased crouch_t) and back in on stand: crouched, your chest would fill the whole lowered view, so it
-## hides for your ease of viewing; the resting state keeps fp_torso_transparency's see-through. The arms take
-## BOTH the sink and the fade off the same values as the chest — they hang off it, so they must never outlive
-## it. Runs for whichever parts exist (torso-only, arms-only, both). Epsilon-skipped writes throughout.
+## hides for your ease of viewing; the resting state keeps fp_torso_transparency's see-through. A CONVERSATION
+## hides them outright for its whole length (fp_body_hide_in_dialogue). The arms take BOTH the sink and the fade
+## off the same values as the chest — they hang off it, so they must never outlive it. Runs for whichever parts
+## exist (torso-only, arms-only, both). Epsilon-skipped writes throughout.
 func _update_fp_torso(delta: float) -> void:
 	if host == null or not is_instance_valid(_fp_legs):
 		return
@@ -581,9 +591,16 @@ func _update_fp_torso(delta: float) -> void:
 		inverse_lerp(fp_body_reveal_start_deg, maxf(fp_body_reveal_full_deg, fp_body_reveal_start_deg + 0.1), down_deg),
 		0.0, 1.0)
 	var crouch_t := (host.crouch.crouch_t if host.crouch != null else 0.0)
+	# ...and a CONVERSATION hides the lot outright, whatever the look and the crouch worked out to (see
+	# fp_body_hide_in_dialogue for why this is a hard set and not another eased term). Asked of is_engaged()
+	# rather than is_active() on purpose: a suspending sub-menu (shop / level-up / heal / ATM) reads INACTIVE so
+	# that menu is allowed to open, and your chest must stay gone behind it — the conversation is still up.
+	var talking := fp_body_hide_in_dialogue and DialogueManager.is_engaged()
 	# 1 = fully invisible, so an un-revealed body is 1 and the reveal eases DOWN to its resting see-through.
 	var see := lerpf(1.0, fp_torso_transparency, reveal)
 	see = lerpf(see, 1.0, crouch_t)
+	if talking:
+		see = 1.0
 	if has_torso and absf(_fp_legs.body_transparency - see) > 0.002:
 		_fp_legs.body_transparency = see
 	# ⭐The LEGS ride the SAME reveal, on their own channel (BodyModelSwap.leg_transparency, which they gained for
@@ -593,6 +610,8 @@ func _update_fp_torso(delta: float) -> void:
 	if has_legs:
 		var leg_see := lerpf(1.0, 0.0, reveal)
 		leg_see = lerpf(leg_see, 1.0, crouch_t)
+		if talking:
+			leg_see = 1.0
 		if absf(_fp_legs.leg_transparency - leg_see) > 0.002:
 			_fp_legs.leg_transparency = leg_see
 	# ⭐The arms dissolve on the SAME curve as the chest they hang off. Without this the crouch hide (and the
@@ -603,7 +622,8 @@ func _update_fp_torso(delta: float) -> void:
 	# your hands (see _fp_body_arms_hidden), so you never see two pairs of arms at once. Eased here rather than
 	# in the predicate because the holster is a binary flip, unlike the crouch and look-down terms which arrive
 	# already smooth. Composed with lerpf toward fully-invisible, exactly like the crouch term above, so whichever
-	# reason is strongest wins and they can't fight.
+	# reason is strongest wins and they can't fight. (The dialogue hide needs no term of its own here: it already
+	# pinned `see` to a hard 1.0 above, and this lerp only ever pulls FURTHER toward invisible.)
 	if has_arms:
 		var hide_target := 1.0 if (fp_body_arms_hide_when_drawn and _fp_body_arms_hidden()) else 0.0
 		_fp_body_arm_hide_t = lerpf(_fp_body_arm_hide_t, hide_target, 1.0 - exp(-fp_body_arms_hide_fade * delta))

@@ -97,3 +97,26 @@ func test_the_torso_crouch_follow_tracks_the_heads_live_drop() -> void:
 	var src := FileAccess.get_file_as_string(FP_BODY_SOURCE)
 	assert_true(src.contains("_fp_head_standing_y - host.head.position.y"),
 		"the sink must be measured off the Head's LIVE position, not a duplicated crouch constant")
+
+func test_a_conversation_hides_the_whole_fp_body() -> void:
+	# A talk swings the camera onto the speaker, and that focus pitch is often DOWN (a shorter speaker, a dog,
+	# a step) — precisely the look that reveals your chest — so the framed dialogue shot used to have a torso in
+	# the bottom of it. Three facts are load-bearing and each fails silently:
+	#   • it is asked of is_ENGAGED, not is_active: a suspending sub-menu (shop / level-up / ATM) reads inactive
+	#     so that menu can open, and the body must stay gone behind it.
+	#   • it is a HARD SET, not another eased term: DialogueManager pauses the tree once the box opens and this
+	#     component is PAUSABLE, so an eased term would freeze mid-dither and hold a half-chest all conversation.
+	#   • the LEGS take the same term — the "one gate, every part" rule, or a talk leaves thighs on screen.
+	var src := FileAccess.get_file_as_string(FP_BODY_SOURCE)
+	assert_true(src.contains("fp_body_hide_in_dialogue and DialogueManager.is_engaged()"),
+		"a conversation must hide the FP body, and must ask is_ENGAGED (is_active reads false behind a sub-menu)")
+	assert_true(src.contains("if talking:
+		see = 1.0"),
+		"the dialogue hide must be a hard 1.0, not an eased term — the tree is PAUSED for the conversation and an ease would freeze half-dithered")
+	assert_true(src.contains("if talking:
+			leg_see = 1.0"),
+		"the legs must take the same dialogue term as the chest, or a conversation frames a pair of disembodied thighs")
+	var p = load(FP_BODY_SOURCE).new()
+	assert_true(p.fp_body_hide_in_dialogue,
+		"and it must default ON — the hide is the shipped dialogue framing, not an opt-in")
+	p.free()
