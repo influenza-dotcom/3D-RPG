@@ -534,7 +534,7 @@ const STUCK_HOP_TIME := Locomotor.STUCK_HOP_TIME
 var _locomotor: Locomotor = null  ## the nav brain (built DRIVEN in _ready, after _build_nav); owns pathing/hop/anti-stuck
 var _stranded_cycles: int = 0    ## consecutive give-ups in the SAME spot — a run of these = stranded on a bad-bake island
 var _last_giveup_pos: Vector3 = Vector3.ZERO  ## where we last gave up, to tell "same spot" from "moved on"
-var _stranded_warned: bool = false  ## one stranded-warning per episode (cleared when we make real progress)
+var _stranded_warned: bool = false  ## one stranded-warning per stuck BOUT (cleared by _reset_stranded on real progress, so a body that escapes and re-wedges warns again — repeats at one spot mean repeated bouts, not one continuous strand)
 var _retarget_timer: float = 0.0
 ## The leader this NPC is escorting, or null when not following. Set by start_following() (the dialogue
 ## "join me" option calls it), cleared by stop_following(). CANONICAL state kept on the root because
@@ -3008,8 +3008,11 @@ func apply_velocity() -> void:
 	# Anti-stuck bookkeeping LAST — after move_and_slide (fresh slide-collision normals + is_on_floor) and after the
 	# blast decay (so a still-live blast bails). Now on the Locomotor; it writes _unstick_t/_unstick_dir for next frame
 	# and calls back into _note_stranded / _reset_stranded (which own our _stranded_cycles). No-op off-tree / pre-build.
+	# Pass OUR steering: _desired_velocity is re-zeroed every think (and deliberately held across an LOD think-skip),
+	# so it is the honest "is this body trying to move?" answer. Locomotor.desired_velocity is not — it freezes at the
+	# last pursuit vector whenever a behaviour stops calling _move_toward, which reported standing NPCs as STRANDED.
 	if _locomotor != null:
-		_locomotor.update_stuck(self, get_physics_process_delta_time())
+		_locomotor.update_stuck(self, get_physics_process_delta_time(), _desired_velocity)
 	# Cosmetic: ease the visual model over any riser step-up the body just snapped (only try_step_up snaps set last_step_rise,
 	# and only when can_step_up ran this frame). Runs every frame so the offset also DECAYS when no step occurred.
 	_smooth_stair_step(_locomotor.last_step_rise if (can_step_up and _locomotor != null) else 0.0, delta)
@@ -3046,17 +3049,36 @@ func _smooth_stair_step(rise: float, delta: float) -> void:
 static func wall_slide_dir(wall_normal: Vector3, want: Vector3) -> Vector3:
 	return Locomotor.wall_slide_dir(wall_normal, want)
 
-## Diagnostic only (NO behaviour change): when we keep hitting the give-up hold in the SAME spot, we're probably
-## STRANDED on an unreachable navmesh island — a prop/car roof the bake shouldn't have made walkable. Warn ONCE,
-## with the NPC name + position, so a playtest pinpoints which prop to carve. In-tree only (global_position).
-## Called by Locomotor.update_stuck at the give-up point (body.call(&"_note_stranded")).
+## Diagnostic only (NO behaviour change): when we keep hitting the give-up hold in the SAME spot, the body WANTS to
+## move and can't — it is wedged. Warn ONCE per bout, naming the body and the spot so a playtest can pinpoint it.
+## In-tree only (global_position). Called by Locomotor.update_stuck at the give-up point.
+##
+## The cause is NOT always the bake. Ranked by what has actually turned up here: (1) a generated NavLink the body
+## physically cannot traverse — a WALK-mode link whose rise exceeds step_up_height offers no ballistic ascent, so
+## A* keeps routing through a wall/ledge the body can only press into; (2) a genuinely disconnected navmesh island;
+## (3) walkable navmesh baked onto a prop roof. Naming only (3) sent a real investigation hunting props that were
+## not there, so the text now names all three and points at the tool that can tell them apart.
 func _note_stranded() -> void:
 	if not is_inside_tree():
 		return
 	var pos := global_position
 	if _tick_stranded(pos) and not _stranded_warned:
 		_stranded_warned = true
-		push_warning("NPC '%s' looks STRANDED at (%.1f, %.1f, %.1f) — repeatedly stuck in one spot. Likely an unreachable navmesh island (a prop/car roof the bake made walkable). Carve that prop with a NavBlocker(CARVE) + re-bake, or File -> Run audit_navmesh.gd to locate it." % [display_name, pos.x, pos.y, pos.z])
+		push_warning("NPC %s looks STRANDED at (%.1f, %.1f, %.1f) — repeatedly wedged in one spot while trying to move. Check, in order: an untraversable generated NavLink near that point (a WALK-mode link rising more than step_up_height is a permanent trap), a disconnected navmesh island, or navmesh baked onto a prop (carve it with a NavBlocker(CARVE) + re-bake). File -> Run audit_navmesh.gd reports islands and link reachability." % [_strand_label(), pos.x, pos.y, pos.z])
+
+## The most specific identifier this body actually has, for a diagnostic that has to be traceable back to ONE NPC in
+## the scene. display_name is an optional cosmetic @export and identity_key() falls back to it, so BOTH are empty for
+## a profile-less extra — and those wandering extras are exactly the bodies that find bad geometry, which is why the
+## warning used to read `NPC ''` and pinpoint nothing. The node path always resolves, so it anchors the chain;
+## faction_id rides along when set because it usually says which spawner placed the body.
+func _strand_label() -> String:
+	var who := display_name
+	if who.is_empty():
+		who = String(identity_key())
+	if who.is_empty():
+		who = "unnamed"
+	var faction_tag := "" if faction_id.is_empty() else ", faction " + faction_id
+	return "'%s' (%s%s)" % [who, get_path(), faction_tag]
 
 ## Made real progress -> not stranded; re-arm the one-shot warning for a future episode. Called by Locomotor.update_stuck
 ## on the progress path (body.call(&"_reset_stranded")); replaces the inline `_stranded_cycles = 0; _stranded_warned = false`.

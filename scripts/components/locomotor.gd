@@ -723,7 +723,16 @@ func _host_jump_velocity(body: Node) -> float:
 ## and is_on_floor reflect this frame's contacts. Lifted verbatim from npc._update_stuck; every host.<x> is annotated.
 ## Writes _unstick_t / _unstick_dir that the host's apply_velocity consumes NEXT frame, and calls host._tick_stranded
 ## (which owns _stranded_cycles — soak_harness reads host._stranded_cycles).
-func update_stuck(body: CharacterBody3D, delta: float) -> void:
+##
+## `host_intent` is THIS FRAME'S steering, passed in by a host that has it (NPC passes _desired_velocity). Pass it.
+## Our own `desired_velocity` is NOT a safe "is the body trying to move?" signal here: it is written ONLY by
+## drive_move_to() and stop(), and stop() has no callers — so the instant a brain stops calling _move_toward while
+## still holding a destination (a shooter that halts to fire, a "stand still and listen" distraction, a sitter that
+## reaches its post), it FREEZES at the last full-speed pursuit vector while the body deliberately stands still.
+## The gate below then reads max intent + zero travel and gives up every PROGRESS_WINDOW, reporting a perfectly
+## healthy stationary NPC as STRANDED. The host's own steering is re-zeroed every think, so it can't go stale.
+## Omitting it keeps the legacy read for a bare mob / test that has no per-frame intent of its own.
+func update_stuck(body: CharacterBody3D, delta: float, host_intent: Variant = null) -> void:
 	if _unstick_t > 0.0:
 		_unstick_t -= delta
 	if _jump_cd > 0.0:
@@ -732,7 +741,10 @@ func update_stuck(body: CharacterBody3D, delta: float) -> void:
 		_stuck_hold_t -= delta
 	if body.is_on_floor():
 		_hopping = false
-	var intended := Vector2(desired_velocity.x, desired_velocity.z).length()
+	var intent: Vector3 = desired_velocity
+	if host_intent is Vector3:
+		intent = host_intent
+	var intended := Vector2(intent.x, intent.z).length()
 	var blast_len: float = _host_blast_len(body)  # explosion_velocity.length() on Character, else 0 for a bare mob
 	if intended < 0.1 or (not body.is_on_floor() and not _hopping) or blast_len > 1.0:
 		_stuck_t = 0.0
