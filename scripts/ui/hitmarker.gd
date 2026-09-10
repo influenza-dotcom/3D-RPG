@@ -14,6 +14,9 @@ var _t: float = 0.0
 var _headshot: bool = false
 ## > 0 = the next _draw paints ONE near-invisible marker at this strength and clears it (see warm_draw).
 var _warm_alpha: float = 0.0
+## A warm paint is sitting on the canvas and nothing else will ever redraw it away — the next processed
+## frame spends this on one empty redraw. See warm_draw's "ONE PAINT IS NOT ONE FRAME".
+var _warm_painted: bool = false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -24,15 +27,33 @@ func flash(headshot := false) -> void:
 	_headshot = headshot
 	queue_redraw()
 
-## Draw the marker ONCE at `alpha` strength (the in-level EffectPrewarmer's 2D pass, on the black fade-in after a
+## Draw the marker ONCE at `alpha` strength (the in-level EffectPrewarmer's 2D pass, behind its black cover after a
 ## level loads) so its canvas draw is issued before the first real hit — 2D pipelines have no precompilation, and a
 ## near-transparent draw is the only warm there is. Never touches _t / _headshot, so a live flash is unaffected: the
-## one warm paint happens on the next _draw and the flag clears itself.
+## one warm paint happens on the next _draw, which spends `_warm_alpha` there (that is the STAGED strength clearing
+## itself — not the canvas; read on).
+##
+## ⭐ONE PAINT IS NOT ONE FRAME, AND THAT WAS A SHIPPED BUG (fixed 2026-09-08, user: "there's always a transparent
+## X on my crosshair"). A CanvasItem KEEPS its draw list until something calls queue_redraw() again, and this node
+## only redraws while a flash is fading (_process early-outs at _t <= 0) — so the warm ticks stayed on the canvas
+## at the crosshair from the level load until the first landed hit cleared them. Worse, the hitmarker IS captured
+## by the HUD ghost (hud_ghost.gd's ghost rule keeps the aim CLUSTER out, not this), so a permanently-lit source
+## fed the phosphor accumulator every frame and came back several times brighter than it was drawn. Measured with
+## scripts/tools/__hitmarker_warm_probe.tscn on the ticks' own footprint: the live 0.01 paint alone is 0.006 of
+## screen brightness, the ghost takes it to 0.05 mean / 0.12 peak — ~35x this instrument's noise floor, i.e. a
+## faint but real X. So _draw ARMS _warm_painted and the next processed frame spends it on one redraw with
+## nothing left to paint; THAT frame is what empties the draw list. The warm is on screen for one frame, as its
+## caller (EffectPrewarmer._warm_2d) has always claimed.
 func warm_draw(alpha: float) -> void:
 	_warm_alpha = alpha
 	queue_redraw()
 
 func _process(delta: float) -> void:
+	# The warm paint's own clean-up, BEFORE the fade early-out below (that early-out is exactly why nothing
+	# else would ever take it back). Costs one redraw, once, per warm.
+	if _warm_painted:
+		_warm_painted = false
+		queue_redraw()
 	if _t <= 0.0:
 		return
 	_t -= delta
@@ -43,6 +64,7 @@ func _draw() -> void:
 		var warm := _warm_alpha
 		_warm_alpha = 0.0
 		if _t <= 0.0:  # a live flash already paints this frame at full strength — that draw warms the same pipeline
+			_warm_painted = true  # armed ONLY when the warm actually reaches the canvas; a live flash clears its own
 			_draw_marker(warm)
 			return
 	if _t <= 0.0:

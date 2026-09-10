@@ -672,6 +672,30 @@ func test_hitmarker_flash_arms_timer_and_records_headshot() -> void:
 	h.free()
 
 
+func test_hitmarker_warm_paint_is_taken_back_after_one_frame() -> void:
+	# ⭐THE "always a transparent X on my crosshair" REGRESSION GUARD (2026-09-08). EffectPrewarmer._warm_2d hands
+	# the marker ONE near-invisible paint on the black fade-in to compile the canvas pipeline. A CanvasItem KEEPS
+	# its draw list until something calls queue_redraw() again, and _process early-outs while _t <= 0 — so nothing
+	# ever did, and the warm ticks sat on the crosshair for the whole level (the HUD ghost, which captures the
+	# hitmarker, then accumulated that static source into a plainly visible X). _draw arms _warm_painted the frame
+	# the ticks reach the canvas; the next PROCESSED frame must spend it on one empty redraw.
+	# Off-tree by design: queue_redraw() is a no-op outside the tree, so _process can be driven by hand.
+	var h := Hitmarker.new()
+	h.warm_draw(0.01)
+	assert_almost_eq(h._warm_alpha, 0.01, 0.0001,
+		"warm_draw() must stage exactly the requested near-invisible strength for the next _draw")
+	assert_eq(h._t, 0.0,
+		"warm_draw() must never touch the fade timer: a live flash outranks the warm and paints at full strength")
+	h._warm_painted = true  # stands in for the draw pass — _draw sets this when the warm actually reaches the canvas
+	h._process(0.016)
+	assert_false(h._warm_painted,
+		"the processed frame after a warm paint must SPEND the latch on one redraw with nothing left to paint — that redraw is the only thing that clears the retained draw list")
+	h._process(0.016)
+	assert_false(h._warm_painted,
+		"the clear is one-shot: a spent latch must not re-arm itself and queue a redraw every frame for the life of the HUD")
+	h.free()
+
+
 # ---------------------------------------------------------------------------
 # DamageIndicators  (.new() WITHOUT add_child; _process/_draw never touch camera here)
 # ---------------------------------------------------------------------------

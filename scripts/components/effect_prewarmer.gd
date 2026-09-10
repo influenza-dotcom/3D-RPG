@@ -412,7 +412,14 @@ func _warm_code_built(camera: Camera3D, first_slot: int) -> int:
 ## Draw the 2D hit feedback once at WARM_2D_ALPHA. The hurt flash + hitmarker live on the PlayerHud the Player
 ## builds as its own child; the on-camera splatter is the UI layer's `blood_splatter` export. Both are reached
 ## DUCK-TYPED (get / has_method) so this component names no Player-side type, and a level with no Player (a bare
-## test tree) simply skips the pass. Each target's warm_draw restores itself after one drawn frame.
+## test tree) simply skips the pass.
+##
+## ⭐EACH TARGET IS RESPONSIBLE FOR TAKING ITS OWN WARM PAINT BACK AFTER ONE DRAWN FRAME, AND "one draw call" is
+## NOT the same thing as "one frame": a CanvasItem keeps its draw list until it is asked to redraw. The hurt flash
+## writes its `color.a` back a frame later, the splatter blob tweens itself out and frees, and Hitmarker.warm_draw
+## arms a latch its next processed frame spends on an empty redraw — that last one was ADDED 2026-09-08 after the
+## warm ticks were found parked on the crosshair for the whole level ("always a transparent X on my crosshair").
+## A NEW warm target must do the same, or it ships a permanent artefact at WARM_2D_ALPHA.
 func _warm_2d() -> void:
 	var player := Groups.human_player(get_tree())
 	if player == null:

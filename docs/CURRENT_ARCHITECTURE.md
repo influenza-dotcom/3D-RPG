@@ -57,7 +57,14 @@ dust / muzzle / shell / spark particles, both decals, the projectiles and casing
 `gore_gib` / `body_part_gib` / `loot_bag`) once in the REAL `World3D`, frozen, muted and collision-less,
 in front of the live camera for a few frames, then frees them; the code-built billboard feedback is
 exposed through statics (`DamageNumberPopup.build_label`, `NpcBarkUi.build_icon`) so the same pass draws
-exactly what gameplay builds, since 2D/canvas pipelines have no precompilation at all. `Player.add_xp` no
+exactly what gameplay builds, since 2D/canvas pipelines have no precompilation at all. The same pass also
+draws the on-screen hit feedback once at `WARM_2D_ALPHA` (`_warm_2d` → `PlayerHud.warm_draw` for the hurt
+flash + `Hitmarker`, and the UI layer's `BloodSplatter`): **each of those targets must take its own warm
+paint back after one drawn frame**, because a `CanvasItem` keeps its draw list until something calls
+`queue_redraw()` again — the hitmarker shipped without that take-back and left a near-invisible X parked on
+the crosshair for the whole level, amplified into visibility by the HUD ghost's accumulator (fixed
+2026-09-08; the acceptance instrument is `scripts/tools/__hitmarker_warm_probe.tscn`, windowed).
+`Player.add_xp` no
 longer writes the profile synchronously on the kill frame — it rides the wallet's coalesced
 `_queue_autosave()`. Ratchets: `tests/test_preload_prewarm.gd` (every `GPUParticles3D` scene is in
 `PARTICLE_WARM_PATHS`) and `tests/test_effect_prewarm.gd` (every particle-list entry and every drawable
