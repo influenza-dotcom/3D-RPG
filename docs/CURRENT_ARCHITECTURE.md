@@ -1124,6 +1124,30 @@ black, so nothing is seen to vanish), gated on `GameSettings.effects.clear_playe
 `MoneyBag`, which is the wallet you must walk back and reclaim. Pinned by
 `tests/test_player_death_gore_cleanup.gd`.
 
+**That same tag is now the answer to "your corpse doesn't fight on."** Gibs are `Throwable`s, so they dealt
+impact damage to any `Character` they touched, and `ThrowableData.damages_player = false` spared only the player
+— so the player's own death burst damaged, and routinely **killed**, the enemy standing over the body. The
+numbers were not marginal: meat chunks launch at `gib_vel_min..max` (7–14 m/s) against a 6.0 m/s damage floor,
+the player's first-person body parts additionally inherit `0.6 ×` the killing blow's `velocity +
+explosion_velocity` (so a rocket or a long fall throws them far harder than the authored 3.5–8.0), and each of
+the ~8 pieces arrives with its **own** damage cooldown against enemies that run 6–14 `max_hp`. Worse, the kill
+was illegible but not free: no damage number (the popup needs a `Player` attacker), no hitmarker, no kill cue,
+no aggro — yet `Character._resolve_killer` falls back to the last real attacker inside
+`GameSettings.economy.kill_credit_window_ms`, so an enemy the player had shot moments earlier still paid its
+bounty, its XP and its faction `kill_penalty`, into a `CHECKPOINT_RESPAWN` world that revives **nobody**. A
+failed attempt silently thinned the fight it failed. `Throwable._is_inert_player_gore` closes it with two terms
+and no new plumbing: **tagged `Groups.PLAYER_GORE`** *and* **no credited attacker**. The second term is what
+keeps the deliberate verb — pick a severed head up and hurl it and `PickupRay._release` → `mark_thrown_by` makes
+`_credited_attacker()` the player, so the limb hits like any other thrown prop. Only gore still coasting on the
+burst is inert; it still thuds, bleeds, tumbles, blocks nothing and can still be shot out of the air for
+confetti, so the burst *looks* identical. The policy is the pure static `Throwable.gore_spares_characters`
+(the `loyal_scale` idiom), the designer override is
+`GameSettings.effects.player_gore_damages_characters` (ships **off**), and it is pinned by
+`tests/test_throwable_inert_gore.gd` — both as policy and live against a real `Character`. **Scope, stated
+because it is narrower than it sounds:** NPC gore is untouched (an NPC tags nothing, so the gate can never fire
+on it), and the burst can still shove *untagged* things into people — the death purse `MoneyBag` carries no
+`ThrowableData` and is not gore, and a crate the limbs bowl into an enemy is still a crate.
+
 **The gib despawn fade is an overridable seam, and it depends on `mesh_instance` being wired.**
 `Throwable.begin_gib_lifetime` awaits `_fade_out_for_despawn(fade)` before `queue_free`; the base tweens
 `mesh_instance.transparency`, so a chassis that leaves that export unwired fades nothing and the gib POPS

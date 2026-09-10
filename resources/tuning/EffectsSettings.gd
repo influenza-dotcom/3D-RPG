@@ -91,6 +91,15 @@ extends Resource
 ## leaves the whole burst lying where you died. Only the player's gore is ever tagged, so NPC gore is untouched
 ## either way, and the RELOAD_* death modes rebuild the world regardless. See Character.death_gore_group().
 @export var clear_player_gore_on_respawn: bool = true
+## Let the PLAYER'S OWN death burst hurt characters. OFF (the default) is the shipped rule: the chunks and
+## body parts your corpse flings are scenery -- they still thud, bleed, tumble and can be shot out of the air,
+## but they deal NO impact damage to anyone. They used to, and at 7-14 m/s against a 6-14 HP enemy the player's
+## corpse regularly killed whoever had just killed it -- silently (no damage number, no kill cue, no aggro) yet
+## still paying the bounty and the faction penalty, and a checkpoint revive never brought that enemy back. ON
+## restores the old behaviour for a designer who wants a corpse that takes people with it. NOT a gib's whole
+## damage switch: a chunk you PICK UP AND THROW is credited to you and hits normally either way, and an NPC's
+## gore is never governed by this. Read by Throwable._is_inert_player_gore via the pure gore_spares_characters.
+@export var player_gore_damages_characters: bool = false
 
 @export_group("Body-part gibs")
 ## Master switch: on death a character comes apart into its OWN head / torso / arms / legs (the LEGO / Roblox

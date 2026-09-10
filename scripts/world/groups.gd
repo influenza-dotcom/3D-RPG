@@ -47,9 +47,16 @@ const SKY_TITLE := &"sky_title"
 const AMBIENT_DUST := &"ambient_dust"
 const GIB := &"gib"
 ## World gore the PLAYER'S OWN death spawned — its meat chunks / body parts, the floor splat, the corpse, and the
-## secondary splatter those gibs bleed when they pop. Stamped by GoreSpawner off Character.death_gore_group() and
-## swept by the in-place checkpoint revive (Player._respawn_at_checkpoint), so you are never brought back standing
-## over your own remains. NPC gore is deliberately never tagged: it is world dressing and stays where it fell.
+## secondary splatter those gibs bleed when they pop. Stamped by GoreSpawner off Character.death_gore_group().
+## NPC gore is deliberately never tagged: it is world dressing and stays where it fell.
+##
+## TWO readers, both asking the same question ("what did the player's death throw into the world?"):
+##   * the in-place checkpoint revive (Player._respawn_at_checkpoint) SWEEPS it, so you are never brought back
+##     standing over your own remains;
+##   * Throwable._is_inert_player_gore treats a tagged prop nobody threw as scenery, so your corpse's chunks
+##     can't damage the enemy standing over you.
+## Anything newly tagged therefore becomes harmless-until-thrown as well as sweepable — which is the intent, but
+## tag only what the player's death actually flung.
 const PLAYER_GORE := &"player_gore"
 const PAINT_DECAL := &"paint_decal"
 const CORPSE := &"corpse"                       ## discoverable death markers (Corpse) scanned by NPC._nearest_visible_corpse (Corpse.GROUP aliases this)

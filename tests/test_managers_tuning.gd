@@ -627,6 +627,8 @@ func test_effects_settings_gore_defaults() -> void:
 		"blood_drop_scatter must be > 0 so wound droplets spread around the death origin instead of stacking on one point")
 	assert_true(s.blood_drop_vel_min < s.blood_drop_vel_max,
 		"blood_drop_vel_min must be < max so the droplet launch-speed randf_range is a valid ascending range")
+	assert_false(s.player_gore_damages_characters,
+		"player_gore_damages_characters must default OFF — the shipped rule is that your own corpse's chunks are scenery; ON is the pre-fix behaviour where the player's death burst finished off the enemy standing over the body (silently, but still paying its bounty and faction penalty, in a world the checkpoint revive puts back untouched). The knob exists so a designer can want that back without touching code — the policy itself is pinned in tests/test_throwable_inert_gore.gd")
 	s = null
 
 

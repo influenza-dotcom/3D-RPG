@@ -89,7 +89,10 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 ## Breathing sine rate; 1.6 is the same calm idle cadence used by NPC torsos.
 @export var breathe_rate: float = 1.6
 ## Whether a high-speed impact from this prop hurts the PLAYER. Gore gibs set this false so being pelted
-## by your own kill's flying chunks can't chip your health. Other characters still take it.
+## by your own kill's flying chunks can't chip your health. VICTIM-side: it spares the player and its recruited
+## companions (Groups.PLAYER) and nobody else. Whether the PLAYER'S OWN corpse debris may hurt anyone is a
+## separate, provenance-side rule that this flag does not govern — see Throwable._is_inert_player_gore and the
+## GameSettings.effects.player_gore_damages_characters knob behind it.
 @export var damages_player: bool = true
 ## Whether props of this type can be DAMAGED/DESTROYED at all. ON by default (crates/barrels/gibs break). Set OFF on an
 ## ITEM resource (dropped weapons, pickups) so every instance is indestructible in one place — a stray shot/impact

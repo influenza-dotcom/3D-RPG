@@ -638,7 +638,9 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 		return
 	var character := body as Character
 	# Gore gibs (data.damages_player = false) don't hurt the PLAYER — being pelted by your own kill's
-	# flying chunks shouldn't chip your health. Other characters still take impact damage.
+	# flying chunks shouldn't chip your health. This gate is VICTIM-side and spares only the player and its
+	# recruited companions (both are Groups.PLAYER); an NPC hit by a gib is governed by the PROVENANCE gate
+	# further down (_is_inert_player_gore), not by this flag.
 	if character.is_in_group(Groups.PLAYER) and data and not data.damages_player:
 		return
 	# A throwable the player is grappling (or just released) must not hurt the grappler: reeling a crate
@@ -660,6 +662,12 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 	# Credit the thrower (or grappler) as the attacker so beaning an NPC with a thrown prop counts as the
 	# player attacking it — the NPC provokes and rounds on you, same as a gunshot.
 	var attacker := _credited_attacker()
+	# YOUR OWN CORPSE DOES NOT FIGHT ON. A chunk the player's death flung is scenery, not a weapon — see
+	# _is_inert_player_gore. Placed here (rather than beside the damages_player gate above) because it needs
+	# `attacker`, and before the cooldown is burned at the end, so an inert chunk resting against an NPC
+	# leaves the prop exactly as it found it — the loyal gate's "no damage, no blood, no cooldown" contract.
+	if _is_inert_player_gore(attacker):
+		return
 	var was_crit := false
 	# Vector3.INF is take_damage's "un-located hit" sentinel: a tumbling crate rolls no limb/zone damage. The WEAPON
 	# path below replaces it with a real contact point, so a thrown blade wounds a limb exactly as a swing would.
@@ -1163,6 +1171,49 @@ func _credited_attacker() -> Node:
 	if is_instance_valid(_grapple_owner) and _grapple_grace > 0.0:
 		return _grapple_owner
 	return null
+
+## Is this prop a piece of the PLAYER'S OWN CORPSE, still coasting on the death burst that flung it?
+##
+## THE BUG THIS CLOSES. A death runs the full gore burst (GoreSpawner) whoever dies, and the player's own is
+## no exception: meat chunks at gib_vel_min..max (7-14 m/s) plus its first-person body parts, which additionally
+## inherit 0.6x the killing blow's velocity + explosion_velocity — so a rocket or a long fall throws them far
+## harder than the authored 3.5-8.0 m/s. The impact-damage floor is 6.0 m/s, so those chunks cleared it easily,
+## and the enemy standing over the body took roundf((speed - 6.0) * 0.4) per hit from each of eight-odd pieces.
+## Enemies here run 6-14 max_hp, so the player's corpse routinely finished off whoever had just killed it.
+##
+## WHY IT READ SO WRONG. Nothing about that hit was legible as combat: no damage number (the popup needs a
+## Player attacker), no hitmarker, no kill cue, no aggro — but it was NOT free. Character._resolve_killer falls
+## back to the last real attacker inside GameSettings.economy.kill_credit_window_ms, so an enemy the player had
+## shot moments earlier still paid its bounty, its XP and its faction kill_penalty — and a CHECKPOINT_RESPAWN
+## revives the player into an otherwise UNTOUCHED world, so the enemy your corpse deleted stays deleted. A
+## failed attempt silently thinned the fight it failed.
+##
+## THE TWO TERMS, and why each is the whole rule:
+##   * Groups.PLAYER_GORE — stamped by GoreSpawner._tag on every world node the PLAYER's death spawns, and only
+##     the player's (Character.death_gore_group() answers &"" for every NPC). Stamped right after add_child and
+##     before any velocity is written, so it is never read late. Reusing the cleanup tag as the provenance mark
+##     is deliberate: "the things the player's death threw into the world" is exactly one set, and this asks the
+##     same question the checkpoint sweep asks.
+##   * attacker == null — nobody threw it. This is the term that keeps the deliberate verb intact: pick a
+##     severed head up and hurl it and PickupRay._release calls mark_thrown_by, so _credited_attacker() is the
+##     player for thrown_credit_grace and the limb hits like any other thrown prop. Only gore still coasting on
+##     the burst (or long since gone cold) is inert.
+##
+## SCOPE, stated so nobody reads this as more than it is: it spares CHARACTERS from the player's own gore. The
+## death purse MoneyBag is not gore, carries no ThrowableData and is not tagged, so it still hits; the burst can
+## still shove an untagged crate into someone; and an NPC's gore is untouched by design (see the knob below).
+func _is_inert_player_gore(attacker: Node) -> bool:
+	return gore_spares_characters(
+		is_in_group(Groups.PLAYER_GORE), attacker != null, GameSettings.effects.player_gore_damages_characters)
+
+## Pure provenance policy (static + literal-arg so GUT can pin every combination with no tree and no Character —
+## the loyal_scale idiom, same file). True = spare the victim entirely. `gore_damages` is the designer
+## override (GameSettings.effects.player_gore_damages_characters): ON restores the pre-fix behaviour wholesale,
+## which is why it is tested first — a designer who wants a corpse that takes people with it gets exactly that.
+static func gore_spares_characters(is_player_gore: bool, has_attacker: bool, gore_damages: bool) -> bool:
+	if gore_damages:
+		return false
+	return is_player_gore and not has_attacker
 
 ## Stealth "thrown decoy": on the FIRST strike after a deliberate throw, drop a one-shot NoiseSource at that
 ## spot so NPCs that hear it (GameSettings.npc_ai.hearing_initiates) come investigate -- "lob a rock to lure a
