@@ -115,13 +115,19 @@ static func stagger_seed(instance_id: int) -> float:
 ## ⭐ The handle is CACHED on purpose. This runs per NPC per physics tick — 4800 calls/second at 40 NPCs and
 ## 120 Hz — and a group scan ALLOCATES a fresh Array every call. Re-scanning here would pay for the LOD's
 ## savings with new allocation churn in the very hot path it exists to thin. The cache self-heals: the scan
-## only re-runs once the handle goes invalid (player death/respawn frees and rebuilds it).
+## only re-runs once the handle stops being USABLE (freed, or merely detached — see Groups.is_usable), which
+## covers player death/respawn and the scene-reload frame where the old Player is out of the tree but still alive.
 func player_distance(from_position: Vector3) -> float:
-	if not is_instance_valid(_player):
+	# Groups.is_usable, NOT is_instance_valid: the is_inside_tree() below guards OUR get_tree() call, not the
+	# global_position READ on the next line. A player that has left the tree but is not yet freed still passes
+	# is_instance_valid (quickload detaches the scene a whole frame before it frees it), and reading a transform
+	# off it is an engine error — from a path that runs once per NPC per physics tick.
+	if not Groups.is_usable(_player):
 		_player = null
 		if is_inside_tree():
 			_player = Groups.human_player(get_tree())
-	if _player == null:
+	if not Groups.is_usable(_player):
+		_player = null
 		return INF
 	return from_position.distance_to(_player.global_position)
 

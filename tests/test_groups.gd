@@ -94,3 +94,30 @@ func _collect_group_literal_offenders(dir: String, allowed: Dictionary, const_na
 					offenders.append("%s — %s" % [full, f["message"]])
 		entry = d.get_next()
 	d.list_dir_end()
+
+
+## Groups.is_usable — the "safe to read a TRANSFORM off this cached handle?" gate. The bug it exists for: a node
+## REMOVED from the tree but not yet freed still passes is_instance_valid, and Node3D.get_global_transform() then
+## hard-fails ("Condition \"!is_inside_tree()\" is true. Returning: Transform3D()") once per read. Two live paths
+## produce exactly that node — reload_current_scene detaching the current scene (Player included) a frame before it
+## frees it, and NpcPool.reclaim parking a dead body off-tree — so the detached case below is the whole point.
+## NOTE: these deliberately never READ a transform off the off-tree node; doing so would emit the engine error and
+## GUT's error tracker fails any test that crosses one.
+func test_is_usable_true_only_while_in_tree() -> void:
+	var n := Node3D.new()
+	add_child_autofree(n)
+	assert_true(Groups.is_usable(n), "a node inside the tree is usable")
+
+func test_is_usable_false_for_detached_but_still_valid_node() -> void:
+	var n := Node3D.new()
+	add_child(n)
+	remove_child(n)
+	assert_true(is_instance_valid(n), "precondition: a detached node is still a VALID instance (this is the trap)")
+	assert_false(Groups.is_usable(n), "a detached-but-valid node is NOT safe to read a transform off")
+	n.free()
+
+func test_is_usable_false_for_freed_and_null() -> void:
+	var n := Node3D.new()
+	n.free()
+	assert_false(Groups.is_usable(n), "a freed handle is not usable (and the untyped param must not crash on it)")
+	assert_false(Groups.is_usable(null), "null is not usable")

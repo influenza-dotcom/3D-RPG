@@ -101,3 +101,19 @@ static func human_player(tree: SceneTree) -> Node3D:
 		if p is Player:
 			return p as Player
 	return null
+
+## Is a CACHED node handle safe to read a TRANSFORM off? The ONE home for the "valid AND still in the tree" rule.
+## is_instance_valid() ALONE is NOT enough: Node3D.get_global_transform() hard-fails with
+## `Condition "!is_inside_tree()" is true. Returning: Transform3D()` on an off-tree node and degrades to identity,
+## so a stale handle spams one engine error per frame (and GUT's error tracker FAILS any test that crosses one).
+## Two live paths park a still-VALID node OUT of the tree, both reachable while gameplay keeps running:
+## GameState.quickload -> reload_current_scene() detaches the whole current scene (with the Player in it) on the
+## spot and only frees it at end of frame, and NpcPool.reclaim parks a dead body off-tree WITHOUT freeing it.
+## Anything holding a CROSS-SUBTREE handle across frames (the player, a target, a yanked body) must gate on this,
+## not on validity alone — a handle into your OWN subtree can't go stale independently, so it doesn't need it.
+## Validity MUST be tested FIRST: `is` and property reads CRASH on a freed instance.
+## ⭐ The parameter is UNTYPED on purpose (the debug_inspector._usable / NpcTargeting._is_live idiom): a
+## `node: Node` signature makes the VM type-check the argument BEFORE the body runs, and a previously-freed handle
+## FAILS that check ("Invalid type in function ... (previously freed)"), so the guard inside never gets to answer.
+static func is_usable(node) -> bool:
+	return node != null and is_instance_valid(node) and node.is_inside_tree()
