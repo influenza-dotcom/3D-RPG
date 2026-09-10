@@ -130,11 +130,15 @@ func _input_is_ours() -> bool:
 ## SOFT gate — may we be leaning right now, given the body's posture? A wall climb rides the wall and a slide is
 ## its own pose, so neither composes with a peek. Airborne is a designer choice (allow_airborne, off by default)
 ## softened by a coyote-style grace window, so a weapon's recoil hop or a stair seam doesn't even dip the lean.
+##
+## ⭐The climb/slide reads are the only part that needs a real Player; the airborne term deliberately sits
+## OUTSIDE that null check rather than behind an early `return true`. _airborne_t is this component's own state
+## and _track_airborne already pins it at 0 for a bare/AI body, so "no Player reads as grounded" holds either
+## way — but with the early-out the grace comparison was unreachable to an off-tree rig, which is to say the
+## regression this gate exists for (ground_grace absorbing a shot's self-knockback) could not be pinned at all.
 func _posture_allows(s: PlayerLeanSettings) -> bool:
 	var p := player as Player
-	if p == null:
-		return true
-	if p.is_climbing() or p.is_sliding():
+	if p != null and (p.is_climbing() or p.is_sliding()):
 		return false
 	return s.allow_airborne or _airborne_t <= maxf(0.0, s.ground_grace)
 

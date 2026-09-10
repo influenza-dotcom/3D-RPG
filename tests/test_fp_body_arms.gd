@@ -345,7 +345,11 @@ func test_the_rig_mount_is_derived_from_its_scale() -> void:
 	# in a bare unit test before anyone has to notice it on screen. Pinned as a clearance BAND, not a number, so a
 	# deliberate re-frame that moves both together still passes.
 	var body = load(FP_BODY_SOURCE).new()
-	var clearance: float = body.fp_leg_offset.y + 0.984 * body.fp_body_scale + 1.0
+	# Read the export's own formula back to front: the mount that puts the feet exactly ON the floor is
+	# `-1.0 + 0.984 x fp_body_scale`, so the clearance an authored fp_leg_offset.y buys is how far ABOVE that it
+	# sits. The scaled foot drop is SUBTRACTED here — adding it measured the mount against a floor 2 x 0.984 x
+	# scale too low and read the shipped, correct 2 cm as 1.20 m of float.
+	var clearance: float = body.fp_leg_offset.y - (-1.0 + 0.984 * body.fp_body_scale)
 	assert_gte(clearance, 0.0,
 		"at fp_body_scale %.2f the mount fp_leg_offset.y %.3f buries the feet %.3f m through the floor" % [body.fp_body_scale, body.fp_leg_offset.y, -clearance])
 	assert_lte(clearance, 0.06,

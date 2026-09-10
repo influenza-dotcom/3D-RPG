@@ -19,6 +19,25 @@ const SMG = preload("res://resources/weapons/smg.tres")
 const MELEE = preload("res://resources/weapons/melee.tres")
 
 
+## ⭐NO TEST IN THIS FILE MAY LEAK Engine.time_scale INTO THE NEXT SCRIPT, and only this file can leak it: it is
+## the one place the house rule against running Player._ready() is deliberately broken (the on_nearby_death
+## trauma/freeze contract needs a REAL Player), and a real Player in a headless tree falls through the void,
+## takes fall damage and dies inside the test that made it. The hurt fires FreezeFrame.freeze(.., 0.15, ..),
+## which stamps time_scale synchronously and only eases back on the far side of an await — and the death then
+## calls FreezeFrame.cancel(), which by design does NOT restore it (in the game the death ramp re-stamps it
+## every frame; here the instance is autofreed before any ramp runs). So the dip is stranded at 0.15 for the
+## REST OF THE SUITE, and every later script that steps a component by hand reads a tenfold delta: measured
+## 2026-09-03 as three failures with no shared cause on their face — tests/test_throw_trail.gd (a ribbon that
+## ages 6.7x too slowly never decays) and two tests/test_wander_music.gd calm-clock waits (which divide their
+## delta by time_scale, so half of resume_delay arrived as three times it).
+##
+## In after_each rather than at the end of each test, and cancel() BEFORE the write: GUT runs after_each even
+## when a test fails its assert, and an in-flight recovery tween would otherwise animate over the reset.
+func after_each() -> void:
+	FreezeFrame.cancel()
+	Engine.time_scale = 1.0
+
+
 func test_player_scene_loads() -> void:
 	assert_not_null(PLAYER_SCENE, "Player.tscn must preload")
 	assert_true(PLAYER_SCENE is PackedScene, "Player.tscn must be a PackedScene")

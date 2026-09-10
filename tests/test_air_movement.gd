@@ -85,7 +85,12 @@ func test_a_blast_from_a_standstill_still_damps_to_rest() -> void:
 	# walk tier and leave every knockback in the game coasting at ~2.1 m/s forever.
 	var v := _run(Vector2(9.0, 0.0), Vector2.ZERO, 0.0, FRAMES, BLEED, 0.0)
 	var old_model := 9.0 * pow(1.0 - BLEED, FRAMES)  # the two-lerp model with current_speed frozen at 0
-	assert_almost_eq(v.length(), old_model, 0.000001,
+	# ⭐The tolerance is float32's, not the contract's. `old_model` is a DOUBLE closed form; the run above is 48
+	# rounded float32 steps through Vector2 (whose components are real_t), and (1.0 - BLEED) alone is 2.5e-8 high
+	# once narrowed — 48 multiplies of that bias land ~7e-6 above the closed form, permanently and on every
+	# machine. 1e-4 still pins the contract four orders tighter than any real regression: latching the walk tier
+	# here instead of the banked 0 would leave this coasting at ~1.2 rather than damping to 4.687.
+	assert_almost_eq(v.length(), old_model, 0.0001,
 		"a blast that launched a standing player must damp EXACTLY as it always has — apply_velocity re-adds ~10.7% of a live blast every frame and this settle is the only thing that ever removed it")
 
 

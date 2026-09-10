@@ -9,6 +9,12 @@ extends GutTest
 ## since GameRoot owns the level-load seam — so the PS1 warp costs zero per-node tax. Keep 2 as the ceiling.)
 
 const ROOTS := ["res://scripts", "res://managers"]
+## scripts/tools/ is out of scope, the same explicit exclusion tests/test_player_text.gd and
+## tests/test_menu_sound_coverage.gd carry for the same reason: those are File→Run editor tools and
+## throwaway `__` probes that the SHIPPED game never loads, so a listener in one taxes nothing. The tax this
+## guard exists to price is per-node instantiation IN THE GAME (a probe deliberately connects node_added to
+## name what was born on a compile frame — scripts/tools/__first_kill_hitch_probe.gd does exactly that).
+const EXCLUDED_DIRS := ["res://scripts/tools"]
 
 
 func test_exactly_two_global_node_added_listeners() -> void:
@@ -25,7 +31,8 @@ func test_exactly_two_global_node_added_listeners() -> void:
 
 
 ## Every .gd under ROOTS whose text contains `needle`. Iterative dir walk (no recursion depth worries); skips the
-## navigational entries. addons/ (GUT's own node_added use) is excluded by only scanning the game roots.
+## navigational entries. addons/ (GUT's own node_added use) is excluded by only scanning the game roots;
+## EXCLUDED_DIRS drops the one directory under those roots that ships nothing.
 func _scan_for(needle: String) -> Array:
 	var found: Array = []
 	var dirs: Array = ROOTS.duplicate()
@@ -40,7 +47,8 @@ func _scan_for(needle: String) -> Array:
 			if entry != "." and entry != "..":
 				var path := d.path_join(entry)
 				if da.current_is_dir():
-					dirs.append(path)
+					if not EXCLUDED_DIRS.has(path):
+						dirs.append(path)
 				elif entry.ends_with(".gd"):
 					if FileAccess.get_file_as_string(path).contains(needle):
 						found.append(path)

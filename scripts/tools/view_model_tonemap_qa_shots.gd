@@ -124,7 +124,7 @@ func _run() -> void:
 	# ahead: a grade change is invisible on one flat surface filling the frame — it needs depth and a range of world
 	# values behind the gun. Teleporting first is what makes the run REPRODUCIBLE: booting through game.tscn honours
 	# a saved position, so back-to-back runs otherwise start metres apart and the shots stop being comparable.
-	var spawn := get_first_node_in_group(&"player_spawn") as Node3D
+	var spawn := get_first_node_in_group(Groups.PLAYER_SPAWN) as Node3D
 	if spawn != null:
 		player.global_position = spawn.global_position + Vector3(0.0, 0.2, 0.0)
 		await _frames(10)
@@ -324,7 +324,7 @@ func _save(img: Image, name: String) -> void:
 ## The level's WorldEnvironment Environment — the same group lookup ViewModelCamera itself copies from, so this
 ## probe reads the exact source the fix reads and cannot drift from it.
 func _world_environment() -> Environment:
-	var we := get_first_node_in_group(&"world_environment") as WorldEnvironment
+	var we := get_first_node_in_group(Groups.WORLD_ENVIRONMENT) as WorldEnvironment
 	return we.environment if we != null else null
 
 

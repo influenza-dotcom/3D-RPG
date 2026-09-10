@@ -155,12 +155,20 @@ func test_claiming_the_left_key_stands_down_the_takedown_but_not_interact() -> v
 		"...and must NOT own Interact — a left peek can't disable the E verb on the other side of the keyboard")
 	_free_rig(rig)
 
-func test_claiming_the_right_key_owns_interact() -> void:
+func test_claiming_the_right_key_owns_nothing_now_interact_lives_on_f() -> void:
+	# The OTHER shape of the contextual rule, and the one the shipped bindings are actually in: E is the lean's
+	# alone since Interact moved to F, so a right-side claim has no verb to stand down. Pinned through the
+	# arbiter rather than as a constant — owns_action reads the LIVE InputMap, so rebinding Interact back onto E
+	# must make this claim bite again, and the precondition below is what would say so.
 	var rig := _rig()
 	var lean: Lean = rig[0]
 	lean._set_claim(false, true)
-	assert_true(lean.owns_action(InputManager.action_pickup), "a claimed Lean Right owns the Interact key")
-	assert_false(lean.owns_action(InputManager.action_takedown), "...but not the Takedown key")
+	assert_false(InputManager.actions_share_binding(InputManager.action_lean_right, InputManager.action_pickup),
+		"precondition: Lean Right (E) and Interact (F) are separate keys now — if this flips, so must the claim below")
+	assert_true(lean.owns_action(InputManager.action_lean_right),
+		"the claim is still REAL — a side always owns its own key (an action shares a binding with itself)")
+	assert_false(lean.owns_action(InputManager.action_pickup), "...it simply has no Interact key to stand down any more")
+	assert_false(lean.owns_action(InputManager.action_takedown), "...and never the Takedown key on the other side")
 	_free_rig(rig)
 
 func test_reset_drops_the_claims_and_snaps_the_pose() -> void:
@@ -191,11 +199,13 @@ func test_reset_drops_the_claims_and_snaps_the_pose() -> void:
 func test_posture_gate_zeroes_the_lean_but_keeps_the_claim() -> void:
 	var rig := _rig()
 	var lean: Lean = rig[0]
-	lean._set_claim(false, true)      # a right lean already claimed and held
+	# The LEFT side on purpose: Q is the side that still shares a key with a verb, so owns_action is the honest
+	# read of "is the claim still standing the takedown down" (E shares nothing now — see the right-side test).
+	lean._set_claim(true, true)       # a left lean already claimed and held
 	lean._airborne_t = 10.0           # ...and now a recoil hop (or a jump) has us off the floor
 	var s := _settings()
 	assert_false(lean._posture_allows(s), "off the floor past the grace window, the posture gate must refuse")
-	assert_true(lean.owns_action(InputManager.action_pickup),
+	assert_true(lean.owns_action(InputManager.action_takedown),
 		"the claim MUST survive a posture refusal — dropping it strands a HELD key, since only a fresh press re-arms it")
 	_free_rig(rig)
 

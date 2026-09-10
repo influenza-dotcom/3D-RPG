@@ -415,7 +415,10 @@ func test_remove_gates_on_bag_space_BEFORE_charging() -> void:
 	assert_false(b.remove_mod(gun, WeaponData.ModSlot.BARREL, p), "a full pack refuses the removal")
 	assert_eq(p.money, purse, "⭐the removal fee never left the wallet")
 	assert_eq(gun.weapon.mod_id(WeaponData.ModSlot.BARREL), P_BARREL, "and the part is still on the gun, not destroyed")
-	assert_eq(b.refusal_reason(gun, barrel, p), &"bag_full", "the row can say why")
+	# ⭐`removing` is PASSED, never inferred (see refusal_reason's own header, and the spare-copy regression test
+	# above): this is a REMOVE row's question, so the direction has to come with it. Asked without the flag it is
+	# the FIT question about a part already in that slot, and the honest answer to THAT is &"slot_taken".
+	assert_eq(b.refusal_reason(gun, barrel, p, true), &"bag_full", "the row can say why")
 	_teardown(b, p)
 	gun = null
 	barrel = null

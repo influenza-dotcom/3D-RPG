@@ -52,7 +52,11 @@ func test_the_torso_is_dither_see_through_and_hides_on_crouch() -> void:
 	# rest transparency. Every load-bearing fact is still pinned — the driver is host.crouch.crouch_t, the
 	# endpoint is a true 1.0 (fully out, not a partial ghost), and it rides the already-eased value unsmoothed —
 	# plus the new one: crouch stacks over the dissolve rather than replacing it.
-	assert_true(src.contains("lerpf(see, 1.0, host.crouch.crouch_t"),
+	# (The driver was hoisted into a `crouch_t` local when the legs gained their own channel — it is the same
+	# host.crouch.crouch_t, read once and spent on both parts. Pin both halves so neither can drift alone.)
+	assert_true(src.contains("var crouch_t := (host.crouch.crouch_t"),
+		"the crouch fade must be driven by host.crouch.crouch_t itself — never a duplicated crouch curve of its own")
+	assert_true(src.contains("see = lerpf(see, 1.0, crouch_t)"),
 		"crouching must fade the torso fully out (and back in on stand) over the look-down dissolve, riding the already-eased crouch_t")
 	var swap_src := FileAccess.get_file_as_string("res://scripts/components/body_model_swap.gd")
 	assert_true(swap_src.contains("TRANSPARENCY_ALPHA_HASH"),
