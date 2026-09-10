@@ -10,7 +10,9 @@ extends Node3D
 ## alert; losing an ALERTED target drops the enemy into INVESTIGATING (wary at the last-known
 ## spot) before it finally forgets. As a child of the enemy it inherits the enemy's transform,
 ## so the cone points along the enemy's facing automatically. (Hearing is OR-ed into the
-## perceived test: a heard noise raises INVESTIGATING via can_hear().)
+## perceived test: a heard noise raises INVESTIGATING via can_hear() -- but NOT on the frame it lands. A cold
+## enemy that hears something BANKS a reaction and turns a beat later; see the hearing reaction buffer below
+## (hear_noise / _tick_hearing, GameSettings.npc_ai.hearing_reaction_time).)
 ##
 ## Two target-side stealth modifiers ride on top, both read duck-typed off the target so an NPC target is
 ## unaffected: CROUCHING shrinks the sight RANGE (crouch_sight_mult), and CARRYING A LIT LAMP — the player's
@@ -23,9 +25,10 @@ enum State { UNAWARE, DETECTING, ALERTED, INVESTIGATING }
 ## state + the detection meter via suspicion(); CALM (oblivious) -> WARY -> SUSPICIOUS -> ALERTED (locked on).
 enum SuspicionTier { CALM, WARY, SUSPICIOUS, ALERTED }
 
-## Emitted the instant the enemy FIRST becomes aware of SOMETHING by ANY sense (sight -> DETECTING, sound ->
-## INVESTIGATING, a hit / a caught thief -> ALERTED, a heard noise / scripted point -> INVESTIGATING), before the
-## meter fills. Drives the MGS "!" alert sting. Carries no args (AiEventLog binds onto it); WHAT was noticed is
+## Emitted when the enemy FIRST becomes aware of SOMETHING by ANY sense (sight -> DETECTING, a hit / a caught
+## thief -> ALERTED, a heard noise / scripted point -> INVESTIGATING), before the meter fills. Instant for every
+## sense EXCEPT a cold heard noise, which fires this one hearing_reaction_time later -- the "!" IS the reaction,
+## so nothing at all is emitted at the stimulus (see hear_noise). Drives the MGS "!" alert sting. Carries no args (AiEventLog binds onto it); WHAT was noticed is
 ## published in `noticed` immediately before each emit — read it from the handler.
 signal just_spotted
 ## Emitted when the enemy locks on / becomes ALERTED (about to fire). Drives the sniper charge sfx.
@@ -122,6 +125,25 @@ var _investigate_t: float = 0.0
 ## state, so forget() / reset_for_reuse zero it — a reused (pooled) NPC must never inherit a prior life's coast.
 var _pursuit_grace_t: float = 0.0
 
+## HEARING REACTION BUFFER (GameSettings.npc_ai.hearing_reaction_time): the beat between a noise ARRIVING and this
+## enemy actually turning toward it. Sight has always had latency (time_to_detect fills a meter through DETECTING);
+## hearing escalated on the very frame the sound landed, so a guard snapped around mid-footstep. A heard noise now
+## ARMS this countdown instead of escalating; _tick_hearing drains it at the bottom of sense() and, on expiry, fires
+## the reaction through investigate_point().
+## _hear_t is a NEGATIVE-SENTINEL countdown (the NPC._aim_sfx_delay idiom): >= 0.0 = a reaction is committed and
+## counting down, < 0.0 = nothing pending. Per-life, so forget() (and reset_for_reuse through it) clears all four —
+## a stale latch on a POOLED body would fire a phantom "!" from a prior life's noise on its first think.
+var _hear_t: float = -1.0
+## WHERE we'll look, snapshotted as a plain Vector3 at arm time. ⭐NEVER re-read off the source at fire time: a
+## one-shot NoiseSource decays and self-frees mid-buffer (noise_source.gd), and a pooled emitter can be DETACHED but
+## unfreed — a transform read on either is an error (is_instance_valid alone is not enough; see Groups.is_usable).
+var _hear_point: Vector3 = Vector3.ZERO
+## The search-ring seed (how LOUD it was), latched as a float for the same reason — NoiseSource.radius is decaying.
+var _hear_seed: float = 0.0
+## WHO made it, for `noticed` / the "!" sting split. Loose Node, re-sanitized with is_instance_valid at FIRE time
+## (investigate_point's `source` is a TYPED Node param and rejects a freed handle); null = nobody in particular.
+var _hear_source: Node = null
+
 ## Per-NPC breadcrumb-search scratch (stealth Slice 8): the uncertainty ring + search-age clock layered ON TOP of
 ## last_known_position. INERT at the SearchSettings defaults (a single point AT the spot). Reset by forget(). The
 ## motion that consumes it lives in GoapActionSearch; sense() only seeds it + ages it.
@@ -142,14 +164,28 @@ func sense(delta: float) -> void:
 	var heard := can_hear()
 	if seen or heard:
 		last_known_position = _target_point()
+	# HEARING REACTION BUFFER — the ARM. A cold (UNAWARE) enemy that hears something no longer escalates here; it
+	# banks a countdown and reacts a beat later (_tick_hearing, at the BOTTOM of this function). Placed BEFORE
+	# `prev_state` is captured on purpose: at hearing_reaction_time 0 hear_noise fires straight through to
+	# investigate_point on this line, so prev_state then reads INVESTIGATING and the edge block below can't emit a
+	# SECOND just_spotted on top of the one investigate_point just fired (a double "!" sting + double bark), nor can
+	# the search tail re-run begin_search and clobber the noise-sized ring investigate_point just seeded.
+	# ⭐Captured BEFORE the arm: a latch armed on THIS think must not be drained by THIS think's delta. Under AI-LOD
+	# `delta` is the whole banked think interval (up to lod_far_interval), and every second of it elapsed BEFORE the
+	# noise was ever heard -- charging the countdown with it would make the dial mean less the further away the NPC
+	# is, and collapse the buffer to a same-frame snap outright whenever the interval reaches the delay.
+	var hear_was_pending := _hear_t >= 0.0
+	if heard and state == State.UNAWARE:
+		hear_noise(_target_point(), GameSettings.search.seed_radius, target)
 	var prev_state := state
 	match state:
 		State.UNAWARE:
 			if seen:
 				state = State.DETECTING
-			elif heard:
-				state = State.INVESTIGATING
-				_investigate_t = forget_time
+			# NO `elif heard:` here any more — hearing's escalation moved OUT of the match to the hear_noise() arm
+			# above, so it can be BUFFERED (GameSettings.npc_ai.hearing_reaction_time). ⭐Do NOT "restore" it: it
+			# would escalate on the same frame the arm banked the countdown and silently disable the whole feature.
+			# sense()'s only hearing escalation is hear_noise() — that single front door is what the buffer rests on.
 		State.DETECTING:
 			var rate := delta / maxf(time_to_detect, 0.01)
 			# LARCENY skill: the TARGET's larceny stat slows how fast their meter fills — a sneaky target buys time
@@ -178,6 +214,10 @@ func sense(delta: float) -> void:
 				state = State.ALERTED
 			elif detection <= 0.0:
 				if heard:
+					# ⭐UNBUFFERED, deliberately — the asymmetry with the UNAWARE arm above is the design, not an
+					# oversight. The reaction buffer is for a COLD stimulus. This enemy was already partway aware
+					# (it had you in the cone and the meter only just drained), so making it go fully oblivious for
+					# a beat while it can still hear you would be a regression dressed as realism.
 					state = State.INVESTIGATING
 					_investigate_t = forget_time
 				else:
@@ -210,6 +250,9 @@ func sense(delta: float) -> void:
 				state = State.DETECTING
 			else:
 				detection = maxf(0.0, detection - delta / maxf(forget_time, 0.01))
+				# ⭐ALSO UNBUFFERED, and for a different reason: this is not an escalation, it's the give-up-clock
+				# REFRESH on a search that is already running. Routing it through the reaction buffer would let an
+				# ACTIVE investigation expire EARLY while the noise is still audible — the opposite of the request.
 				_investigate_t = forget_time if heard else _investigate_t - delta
 				if _investigate_t <= 0.0:
 					state = State.UNAWARE
@@ -228,6 +271,11 @@ func sense(delta: float) -> void:
 		_search.elapsed += delta
 		if prev_state != State.INVESTIGATING:
 			begin_search(GameSettings.search.seed_radius)  # combat lost-LOS: no noise source, so seed from the tuning base
+	# HEARING REACTION BUFFER — the DRAIN. Dead LAST in sense(), after the "!" edge block AND after the search tail,
+	# so a reaction that fires HERE emits exactly one just_spotted (its own, from investigate_point) and seeds
+	# exactly one search ring (the noise-sized one, never clobbered by the generic begin_search above). `seen` is
+	# handed in so sight can pre-empt a pending hunch on the very tick it lands. No-op when nothing is armed.
+	_tick_hearing(delta, seen, hear_was_pending)
 
 ## A graded suspicion tier from the state + detection meter — for HUD feedback and a (read-only) planner fact.
 ## ALERTED state reads ALERTED; otherwise the meter buckets it: CALM below wary_threshold, WARY up to
@@ -250,6 +298,135 @@ func suspicion() -> SuspicionTier:
 func refresh_investigation() -> void:
 	if state == State.INVESTIGATING:
 		_investigate_t = forget_time
+
+## --- Hearing reaction buffer -----------------------------------------------------------------------------------
+## THE FRONT DOOR for every heard noise -- the buffered counterpart to alert_to() (instant, "I was shot") and
+## investigate_point() (instant, "go look here"). Both hearing paths call THIS instead of escalating on the spot:
+## sense()'s UNAWARE arm for the target's own noise (footsteps, gunfire), and NpcDistraction.scan_distractions for
+## the shared &"noise" channel (a thrown decoy, an NPC's gunfire pulse, a beeping machine).
+##
+## Branches on state:
+##  - NOT UNAWARE -> straight through to investigate_point(), exactly as before. An enemy that has ALREADY reacted
+##    is TRACKING, not reacting, so a moving decoy still re-points a live search on the very scan it moved, and a
+##    seen/alerted target still swallows the hunch via investigate_point's own early return.
+##  - UNAWARE + a zero delay -> straight through to investigate_point() too. This is the PARITY path, and it is a
+##    visible, greppable line on purpose: "0 = the old same-frame reaction" is a promise the reader must be able to
+##    check in ONE place.
+##  - UNAWARE + a real delay -> ARM the latch.
+##
+## ⭐ARM vs ACCUMULATE is the load-bearing split. The clock is set ONLY when it is cold (_hear_t < 0.0); every
+## later call refreshes WHAT we will react to and never the clock. Without that guard a persisting noise -- the
+## player simply walking (Path A, every think) or a decoy that has not decayed yet (Path B, every scan) -- would
+## restart its own countdown forever and the enemy would NEVER react. The freshest stimulus DOES win the snapshot,
+## which is correct and matches how NpcSenses.loudest_noise re-picks the loudest source each scan: latching the
+## FIRST point would send a guard to where a rolling can was, not where it is.
+##
+## Pure Vector3/float in, no transform reads -> off-tree unit-testable on a bare Perception (unlike can_hear(),
+## which reads global_position). `source` = WHO made it (a NoiseSource.emitter, or the target itself); null = the
+## noise is nobody in particular, so the reaction is aimed at a POINT and the "!" stays positional.
+func hear_noise(pos: Vector3, seed_radius: float = 0.0, source: Node = null) -> void:
+	if state != State.UNAWARE:
+		investigate_point(pos, true, seed_radius, NAN, source)  # already reacted: this is TRACKING, not reacting
+		return
+	if _hear_t < 0.0:  # COLD -> commit to a reaction and start the clock, ONCE
+		var d := reaction_delay(GameSettings.npc_ai.hearing_reaction_time,
+				GameSettings.npc_ai.hearing_reaction_jitter, get_instance_id())
+		if d <= 0.0:
+			investigate_point(pos, true, seed_radius, NAN, source)  # parity: same frame, same call, exactly as before
+			return
+		_hear_t = d
+	# ARMED -> refresh the SNAPSHOT (never the clock). Latched BY VALUE: see the _hear_point / _hear_seed field docs.
+	_hear_point = pos
+	_hear_seed = seed_radius
+	_hear_source = source
+
+
+## This enemy's own reaction time in seconds: the species-wide base plus a STABLE per-NPC offset within +/- `jitter`.
+##
+## ⭐A HASH OF THE INSTANCE ID, NOT randf(). Three reasons, all of which AiLod already argued for its think
+## stagger: the answer is a per-NPC CONSTANT, so it can be re-derived at any time and needs no fifth latch field to
+## store it (and therefore no fifth reset obligation); a run stays reproducible for the soak / QA harness; and
+## get_instance_id() is stable across NpcPool reuse, so a respawned wave stays fanned out instead of coming back a
+## convoy. Uses AiLod.stagger_seed's HASHED form and never a modulo -- Godot hands CONSECUTIVE instance ids to a
+## wave spawned together, which a modulo maps straight to consecutive slots (tests/test_ai_lod.gd caught 40 NPCs
+## sharing one bucket the first time that was tried).
+##
+## Pure + static, so the spread is unit-testable off-tree. maxf floors it at 0 so a jitter authored WIDER than the
+## base can never produce a negative delay.
+static func reaction_delay(base: float, jitter: float, instance_id: int) -> float:
+	if base <= 0.0 and jitter <= 0.0:
+		return 0.0
+	return maxf(0.0, base + jitter * (AiLod.stagger_seed(instance_id) * 2.0 - 1.0))
+
+
+## Drain the reaction buffer by one think and, on expiry, DO the reaction. Called as the last statement of sense().
+##
+## The fire routes through investigate_point() rather than writing `state =` directly, which buys the whole reaction
+## atomically and for free: the UNAWARE -> INVESTIGATING flip, _investigate_t = forget_time, the noise-sized search
+## ring, `noticed`, and the "!" just_spotted edge -- one call, already correct, already tested.
+## `was_pending` = did this latch already exist when the think began? Only an OLDER latch may be drained by this
+## think's delta (see the sense() capture site) -- one armed a few lines ago has not aged by a single second yet.
+func _tick_hearing(delta: float, seen: bool, was_pending: bool = true) -> void:
+	if _hear_t < 0.0:
+		return  # nothing pending -- overwhelmingly the common case, so it is the first line
+	# SIGHT AND EVERY HIGHER-AUTHORITY STIMULUS PRE-EMPT THE HUNCH. `seen` covers the target becoming visible on this
+	# very tick (the match then runs the normal UNAWARE -> DETECTING escalation, unchanged); the state test covers
+	# everything else in ONE comparison -- DETECTING, ALERTED (alert_to: shot, or caught pickpocketing), and
+	# INVESTIGATING (a scripted NPC.investigate(), an InvestigatePoint marker, a GA-1 ally alert, a discovered
+	# corpse). Dropping it also keeps attribution honest: a latch expiring on the frame we FIRST see the target would
+	# publish `noticed` = the noise emitter and mislabel the "!" as "I heard a can rattle".
+	# The PRE-EMPT stays unconditional, even for a latch armed this very think: sight and hearing can land on the
+	# same tick (the arm runs while still UNAWARE, then the match flips us to DETECTING), and that hunch must die now.
+	if seen or state != State.UNAWARE:
+		_clear_hearing()
+		return
+	if not was_pending:
+		return  # armed a few lines ago -- it starts aging on the NEXT think, not retroactively on this one
+	# Decrement-then-check (the _pursuit_grace_t precedent) so one big-delta frame cannot grant a free extra tick.
+	# ⭐The countdown is in SECONDS off the accumulated delta, NEVER in think TICKS: AiLod throttles a distant
+	# UNAWARE NPC to 4 Hz, so a tick count would mean 0.4 s up close and 2.5 s across the map. Together with the
+	# was_pending guard above and NPC._ai_force_full_think's hearing_pending() exemption (which un-throttles the NPC
+	# for the whole window from the next think on), the dial means the same thing at 5 m and at 50 m.
+	_hear_t -= delta
+	if _hear_t > 0.0:
+		return
+	var pos := _hear_point
+	var seed := _hear_seed
+	# Re-sanitize at FIRE time, not at latch time: the buffer is exactly a window in which a one-shot NoiseSource
+	# self-frees or an emitter NPC dies, and investigate_point's `source` is a TYPED Node param that rejects a freed
+	# handle. Null simply means "a point, not a person".
+	var who: Node = _hear_source if is_instance_valid(_hear_source) else null
+	# Clear BEFORE the fire, never after: just_spotted is synchronous and its handler chain reaches NpcVoice.emit,
+	# which awaits -- clearing first makes a re-entrant double-fire impossible by construction rather than by
+	# reasoning about the handler chain.
+	_clear_hearing()
+	investigate_point(pos, true, seed, NAN, who)
+
+
+## Drop any pending reaction. A pending reaction is a HUNCH, so anything that means "we are not acting on a hunch"
+## must clear it -- forget() (and reset_for_reuse through it), sight, and every higher-authority stimulus.
+## ⭐The _hear_source drop is the pooling-critical one: NpcPool PARKS a dead body off-tree instead of freeing it,
+## so a countdown simply FREEZES at its death value, and NPC.reset_for_reuse re-acquires a target on its LAST line
+## -- a surviving latch would fire a phantom "!" from last life's noise on the reused body's very first think.
+func _clear_hearing() -> void:
+	_hear_t = -1.0
+	_hear_point = Vector3.ZERO
+	_hear_seed = 0.0
+	_hear_source = null
+
+
+## True while a heard noise has been COMMITTED to but not yet reacted to -- the enemy is mid-reaction, still
+## outwardly UNAWARE. Read by NpcDistraction (a noise outranks a body for the whole window), NPC._ai_force_full_think
+## (stay un-throttled while reacting), NpcHomeReturn (never blink an NPC that is about to turn around) and the debug
+## readouts, so the buffer is never invisible to a system that keys on "is it engaged".
+func hearing_pending() -> bool:
+	return _hear_t >= 0.0
+
+
+## Seconds left on that reaction, or -1.0 when none is pending. The debug-readout seam (F4 / the AI event log).
+func hearing_pending_time() -> float:
+	return _hear_t
+
 
 ## Force full alert toward a known position — e.g. the enemy just got shot, so it instantly
 ## knows roughly where you are. sense() takes over next tick: it stays ALERTED while it can
@@ -311,6 +488,10 @@ func forget() -> void:
 	noticed = null  # the last "!" is over; a stale (possibly freed) stimulus must not leak into the next edge / pooled life
 	_search.clear()  # a stale widened ring/breadcrumbs must not leak into the next investigation
 	_sector_phase_override = NAN  # GA-4: drop a coordinated sector so the next search reverts to the per-NPC default
+	# Forgetting means we are not acting on any hunch, so an in-flight hearing reaction dies with the rest. THE one
+	# required reset for the buffer: reset_for_reuse (NpcPool), NPC.stand_down and NpcDistraction's hard-forget all
+	# reach it through here, so there is no central hand-list to drift out of sync.
+	_clear_hearing()
 
 ## NPC-pooling reuse reset (NpcPool): return this perception to its pristine post-_build_perception state so a
 ## reused NPC re-detects from scratch. forget() alone is NOT enough — it's tuned for a LIVE NPC that still holds

@@ -404,6 +404,11 @@ func _engaged() -> bool:
 	var perception: Variant = host.get(&"_perception")
 	if is_instance_valid(perception) and perception is Object and int(perception.state) != Perception.State.UNAWARE:
 		return true
+	# A COMMITTED-but-not-yet-fired hearing reaction counts as engaged too: the NPC reads UNAWARE for the whole
+	# GameSettings.npc_ai.hearing_reaction_time window, and teleporting a body that is one beat from spinning
+	# around is exactly the blink this predicate exists to forbid. Duck-typed like the state read above.
+	if is_instance_valid(perception) and perception is Object and perception.has_method(&"hearing_pending") 			and bool(perception.call(&"hearing_pending")):
+		return true
 	var target: Variant = host.get(&"_target")
 	return is_instance_valid(target) and target is Object
 

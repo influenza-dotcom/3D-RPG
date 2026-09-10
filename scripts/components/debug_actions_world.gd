@@ -1870,7 +1870,7 @@ static func _cmd_notarget(ctx: Dictionary, args: PackedStringArray) -> PackedStr
 	if banked.is_empty():
 		out.append("noise exports: %s" % ("already zeroed by an earlier `notarget on`" if state.has(STATE_NOTARGET_NOISE_MOVE) else "NOT found on this Player (noise_move_per_speed / noise_gunfire_radius) — footsteps and gunfire may still pull hostiles into INVESTIGATING"))
 	else:
-		out.append("footsteps + gunfire silenced (%s) so the &\"noise\" scan cannot pull hostiles into INVESTIGATING either; a spike already in flight decays out over its usual ~0.6 s" % ", ".join(banked))
+		out.append("footsteps + gunfire silenced (%s) so the &\"noise\" scan cannot pull hostiles into INVESTIGATING either; a spike already in flight decays out over its usual ~0.6 s, and a hearing reaction ALREADY COMMITTED to (npc_ai.hearing_reaction_time) still fires — one guard may turn toward where you were" % ", ".join(banked))
 	# The damage hook (npc.gd _on_damaged_by) locks the attacker by is_hostile_to — NOT _treats_as_enemy — and
 	# alert_to()s its position. But the retarget check runs BEFORE the has-target branch every tick, so that lock is
 	# dropped (same-frame re-acquire) before the body ever acts on it: the no-target tick then forget()s the stale

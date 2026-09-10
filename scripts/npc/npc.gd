@@ -2734,7 +2734,11 @@ func _physics_process(delta: float) -> void:
 ## The cost of being wrong here is bounded and small: an unaware NPC in the far band notices the player up to
 ## `lod_far_interval` (0.25 s) later than before, and only ever beyond `lod_far_distance` (45 m).
 func _ai_force_full_think() -> bool:
-	if _perception != null and _perception.state != Perception.State.UNAWARE:
+	# hearing_pending(): a heard noise this NPC has COMMITTED to but not yet reacted to. It is still outwardly
+	# UNAWARE, so the state test above misses it -- and a throttled countdown is the one way the reaction-time dial
+	# stops meaning the same thing at 5 m and at 50 m (beyond lod_far_distance the buffer would round up to the
+	# 0.25 s far interval, and ai_lod's bank DROP on closing into near range would silently eat part of it).
+	if _perception != null and (_perception.state != Perception.State.UNAWARE or _perception.hearing_pending()):
 		return true
 	if _scripted_investigating:
 		return true

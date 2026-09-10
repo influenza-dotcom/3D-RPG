@@ -276,8 +276,8 @@ func test_player_noise_and_distraction_scan_carry_the_emitter() -> void:
 	var scan_src := FileAccess.get_file_as_string("res://scripts/npc/npc_distraction.gd")
 	assert_true(scan_src.contains("is_instance_valid(src.emitter)"),
 		"the distraction scan reads the source's emitter, sanitized (a one-shot source can outlive its emitter; a typed Node param rejects a freed handle)")
-	assert_true(scan_src.contains(", NAN, who)"),
-		"…and hands it to Perception.investigate_point as `source` (5th arg) so the '!' handler can tell 'I heard YOU' from 'I heard a can rattle'")
+	assert_true(scan_src.contains("hear_noise(") and scan_src.contains(", who)"),
+		"…and hands it to Perception.hear_noise as `source` (3rd arg) so the '!' handler can tell 'I heard YOU' from 'I heard a can rattle' (hear_noise, not investigate_point: the noise ARMS the reaction buffer)")
 
 
 # --- tuning ------------------------------------------------------------------------------------------------------------

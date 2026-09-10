@@ -110,6 +110,13 @@ func test_the_landing_gate_shares_the_land_sfx_cutoff() -> void:
 ## window can expire UNHEARD by every not-yet-targeting NPC — while a hostile already holding the player as a
 ## target still hears it, because Perception.can_hear() runs every frame. So the feature keeps looking half-alive
 ## instead of breaking outright. The full-radius hold is what makes the guarantee independent of the radii.
+##
+## ⭐The bound is distraction_scan_interval ALONE and does NOT widen to include the hearing reaction buffer
+## (GameSettings.npc_ai.hearing_reaction_time). Perception.hear_noise snapshots the noise's POSITION and SEED by
+## value the moment the spike is heard, so a spike that decays away — or a source that self-frees — mid-buffer
+## still delivers its reaction from the latched data. Only being HEARD has to land inside a scan window; reacting
+## does not. Do not "fix" this inequality into `interval + reaction_time`: the shipped noise_impact_hold (0.35)
+## would fail it, and the guarantee it protects would be over-constrained for no reason.
 func test_the_impact_hold_outlasts_an_npcs_noise_scan_window() -> void:
 	var p = load(PLAYER_SCRIPT_PATH).new()
 	assert_gt(p.noise_impact_hold, GameSettings.npc_ai.distraction_scan_interval,

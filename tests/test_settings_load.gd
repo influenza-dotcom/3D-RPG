@@ -168,6 +168,12 @@ func test_npc_ai_settings() -> void:
 	# head_look is deliberately NOT pinned here: it ships ON in the .tres, but its head-aim axis/sign can need a
 	# per-rig tweak (see NpcAiSettings.gd), so it stays free to flip OFF during a rig playtest without breaking a test.
 	assert_gte(r.distraction_scan_interval, 0.0, "npc_ai.distraction_scan_interval must be >= 0 (0 = scan every frame)")
+	# Bounds, not exact values, so re-tuning the feel in playtest doesn't fight a test.
+	assert_gt(r.hearing_reaction_time, 0.0,
+		"npc_ai.hearing_reaction_time ships ON — a guard turns a beat AFTER a noise lands, never on the same frame")
+	assert_lt(r.hearing_reaction_time, 1.0,
+		"...and stays well under Perception.time_to_detect (1.0) — hearing is the FAST sense that points, sight the slow one that locks")
+	assert_gte(r.hearing_reaction_jitter, 0.0, "npc_ai.hearing_reaction_jitter must be >= 0 (a +/- spread in seconds)")
 
 func test_silent_takedown_settings() -> void:
 	# The shipped SilentTakedownSettings.tres is the project's ON baseline (the class @export still defaults

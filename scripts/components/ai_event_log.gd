@@ -348,6 +348,12 @@ func _snapshot_of(npc) -> Dictionary:
 	var perception: Variant = npc.get(&"_perception")
 	if is_instance_valid(perception):
 		perception_name = state_name(_int_of(perception.get(&"state"), -1))
+		# Trailing "*" = a heard noise this NPC has committed to but not yet reacted to (the hearing reaction
+		# buffer). It reads UNAWARE for that whole window, so without the mark the log shows nothing happening
+		# right up to the turn -- and ORDER is this tool's entire warrant. A suffix, not a new channel: the
+		# channel list is mirrored in four places plus an @export_flags string, and state_name's mapping is pinned.
+		if perception.has_method(&"hearing_pending") and bool(perception.call(&"hearing_pending")):
+			perception_name += "*"
 	snap[CH_PERCEPTION] = perception_name
 
 	# Having a _target is NOT "engaged" (NpcTargeting acquires by proximity with sight_range 500) — the perception

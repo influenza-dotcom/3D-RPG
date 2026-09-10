@@ -222,6 +222,37 @@ extends Resource
 ## matters once an NPC already has you as a target (today's behaviour), so the no-target idle path is
 ## byte-identical. Pairs with body_discovery: both share the no-enemy "investigate a point" path.
 @export var hearing_initiates: bool = false
+## REACTION TIME (seconds): the beat between a noise ARRIVING and the NPC actually turning toward it. A cold
+## (perception-UNAWARE) enemy that hears something now BANKS the reaction and fires it this many seconds later --
+## the state flip, the head turn, the "!" sting, the GOAP replan and the CAUTION music all move together as one
+## beat, so what the player reads is "he heard that... and now he's turning", not a snap.
+## Why it exists: SIGHT already had latency and hearing had none. A seen target has to fill a whole
+## Perception.time_to_detect (1.0 s) meter through DETECTING before the enemy locks on, but a heard one escalated
+## on the very frame the sound landed -- so a guard spun around mid-footstep, and a thrown decoy got a reaction
+## before the can had finished bouncing. For scale: raw human auditory reaction is ~0.15-0.25 s, and actually
+## LOCALISING a sound and turning to it is longer, so the shipped 0.35 s sits at the fast end of plausible.
+## SCOPE -- this buffers a COLD stimulus ONLY, and the carve-outs are deliberate:
+##  - an enemy already INVESTIGATING re-points at a moving/persisting noise INSTANTLY (that is tracking, not
+##    reacting), and one that is DETECTING or ALERTED ignores noise as it always did;
+##  - an enemy whose detection meter just drained to zero while it can still hear you re-escalates INSTANTLY --
+##    it was already partway aware, and going oblivious for a beat there would be a regression, not realism;
+##  - a scripted NPC.investigate(), an InvestigatePoint marker, a squad ally's alert, a discovered body and being
+##    SHOT (Perception.alert_to) are all unbuffered -- none of them is "I heard something".
+## ⭐Keep it well UNDER Perception.time_to_detect (1.0 s). Hearing must stay the FAST sense that POINTS you at
+## something and sight the slow one that LOCKS -- invert that and a noise stops being worth making.
+## Documented extension point: the search-ring seed is already latched per reaction, so scaling the delay by how
+## LOUD the noise was (a shotgun startles faster than a footstep) is a one-line change inside Perception.hear_noise.
+## 0 = the old same-frame reaction, byte-identical to before this existed.
+@export var hearing_reaction_time: float = 0.0
+## The +/- spread (seconds) around hearing_reaction_time, so a squad that hears one gunshot turns on slightly
+## different beats instead of snapping around in robotic unison. Resolved from a STABLE HASH of each NPC's instance
+## id (Perception.reaction_delay -> AiLod.stagger_seed), never randf: the value is therefore a per-NPC constant, a
+## run stays reproducible for the soak harness, and a pooled body keeps its slot across reuse so a respawned wave
+## stays fanned out instead of coming back a convoy. Floored at 0, so authoring it wider than the base is safe.
+## It cannot fragment the alert audio: NpcBarkSettings.alert_cooldown_ms is 3000 and that cooldown is SHARED across
+## every NPC, so any spread under 3 s still collapses a squad to exactly ONE "!" sting.
+## 0 = every NPC reacts on exactly hearing_reaction_time.
+@export var hearing_reaction_jitter: float = 0.0
 ## Seconds between a no-target NPC's noise + corpse group scans (the &"noise" / &"corpse" walk + LOS rays),
 ## throttled like scavenging so an idle crowd doesn't rescan every frame. The walk-to-the-spot motion still
 ## runs every frame off the last result; only the (re)scan is paced. 0 = scan every frame. Only matters when

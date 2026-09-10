@@ -6,6 +6,8 @@
 script = ExtResource("1")
 body_discovery = true
 hearing_initiates = true
+hearing_reaction_time = 0.35
+hearing_reaction_jitter = 0.15
 hearing_occlusion = true
 music_reactions = true
 head_look = true

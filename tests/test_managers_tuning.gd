@@ -1232,6 +1232,10 @@ func test_npc_ai_settings_defaults() -> void:
 		"hearing_initiates must default OFF — noise only matters once an NPC has a target, so idle stays byte-identical")
 	assert_gte(s.distraction_scan_interval, 0.0,
 		"distraction_scan_interval must be >= 0 (0 = scan the noise/corpse groups every frame)")
+	assert_eq(s.hearing_reaction_time, 0.0,
+		"hearing_reaction_time must default to 0 -- a bare NpcAiSettings reacts to a noise on the same frame it lands, byte-identical to before the reaction buffer existed")
+	assert_eq(s.hearing_reaction_jitter, 0.0,
+		"hearing_reaction_jitter must default to 0 -- with no spread authored every NPC reacts on exactly hearing_reaction_time")
 	assert_false(s.hearing_occlusion,
 		"hearing_occlusion must default OFF -> sound rounds corners exactly as before (behaviour-preserving)")
 	assert_gte(s.hearing_wall_attenuation, 0.0, "hearing_wall_attenuation must be >= 0 (a fraction of the radius cut by a wall)")

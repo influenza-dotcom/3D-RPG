@@ -120,14 +120,24 @@ func scan_distractions(delta: float, noise_on: bool, corpse_on: bool) -> void:
 				# heard a can rattle" (positional) — it must not read that off host._target, a mere proximity lock.
 				# Sanitized: a one-shot source can outlive its emitter, and a typed Node param rejects a freed handle.
 				var who: Node = src.emitter if is_instance_valid(src.emitter) else null
-				host._perception.investigate_point(src.global_position, true, src.radius * GameSettings.search.noise_radius_scale, NAN, who)
+				# hear_noise, NOT investigate_point: a heard noise ARMS a reaction (GameSettings.npc_ai.
+				# hearing_reaction_time) rather than escalating on this very scan, so the guard turns a beat AFTER
+				# the crash instead of snapping around inside it. Perception drains that countdown in sense() --
+				# which runs EVERY think and always BEFORE this scan -- so the buffer runs CONCURRENTLY with the
+				# scan throttle instead of stacking on it: total latency stays (0..distraction_scan_interval, the
+				# discovery lag that already existed) + reaction_time. Once the NPC has reacted, hear_noise falls
+				# straight through to investigate_point, so a persisting/moving decoy still re-points every scan.
+				host._perception.hear_noise(src.global_position, src.radius * GameSettings.search.noise_radius_scale, who)
 		# Corpse discovery is PERSISTED (discover_corpse -> GameState.mark_corpse_discovered) — so gate it on a
 		# GENUINELY idle NPC (UNAWARE), not merely "not INVESTIGATING": a stale DETECTING/ALERTED beat from a
 		# just-lost target must NOT permanently mark a body discovered with zero real investigation. sense() (called
 		# by both callers this frame) decays that stale state toward UNAWARE, so discovery is DEFERRED (not lost)
-		# until the NPC truly stands down. Noise (above) also outranks a body: if it set INVESTIGATING this scan,
-		# state != UNAWARE, so the body waits for the noise to wind down. (C7)
-		if host._perception.state == Perception.State.UNAWARE and corpse_on:
+		# until the NPC truly stands down. Noise (above) also outranks a body -- but since hear_noise ARMS a buffered
+		# reaction instead of writing the state, "noise won this scan" is now `hearing_pending()`, NOT `state !=
+		# UNAWARE`. ⭐That term is MANDATORY, not defensive: without it a noise and a body found on the same scan
+		# both pass, and the body wins outright for the whole reaction window -- and discovery is IRREVERSIBLE
+		# (GameState.mark_corpse_discovered persists it), so the inversion could not be walked back. (C7)
+		if host._perception.state == Perception.State.UNAWARE and not host._perception.hearing_pending() and corpse_on:
 			var corpse: Corpse = host._nearest_visible_corpse()
 			if corpse != null:
 				discover_corpse(corpse)

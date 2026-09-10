@@ -512,7 +512,10 @@ func _npc_facts(npc: Node) -> PackedStringArray:
 		var tier := -1
 		if perception.has_method(&"suspicion"):
 			tier = int(perception.call(&"suspicion"))
-		out.append(perception_text(state, _num_of(perception, &"detection", 0.0), tier))
+		var hear_left := -1.0  # duck-typed: a half-built / stubbed perception may predate the hearing buffer
+		if perception.has_method(&"hearing_pending_time"):
+			hear_left = float(perception.call(&"hearing_pending_time"))
+		out.append(perception_text(state, _num_of(perception, &"detection", 0.0), tier, hear_left))
 	else:
 		out.append("sees -   (no Perception built)")
 
@@ -634,9 +637,13 @@ func _faction_text(npc: Node) -> String:
 # --- pure helpers (no tree, no autoloads — unit-testable off-tree) ----------------------------------------
 
 ## "sees ALERTED  det 100%  susp alerted". Detection is a 0..1 meter; it is PINNED at 1.0 while ALERTED.
-static func perception_text(state: int, detection: float, tier: int) -> String:
+## `hear_left` is the hearing reaction buffer's countdown (Perception.hearing_pending_time): >= 0 appends
+## "  hear 0.24s". Without it this line reads a flat "sees UNAWARE  det 0%  susp calm" for an NPC that has already
+## COMMITTED to turning around, i.e. it is actively misleading in the one frame before the guard spins.
+static func perception_text(state: int, detection: float, tier: int, hear_left: float = -1.0) -> String:
 	var pct := int(round(clampf(detection, 0.0, 1.0) * 100.0))
-	return "sees %s  det %d%%  susp %s" % [state_name(state), pct, suspicion_name(tier)]
+	var line := "sees %s  det %d%%  susp %s" % [state_name(state), pct, suspicion_name(tier)]
+	return line + ("  hear %.2fs" % hear_left if hear_left >= 0.0 else "")
 
 
 static func state_name(state: int) -> String:
