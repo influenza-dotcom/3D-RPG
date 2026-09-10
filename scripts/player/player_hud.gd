@@ -480,7 +480,7 @@ func flash_hurt() -> void:
 		_hurt_flash_tween = create_tween().set_ignore_time_scale(true)
 		_hurt_flash_tween.tween_property(_hurt_flash, "color:a", 0.0, GameSettings.player_feedback.hurt_flash_time)
 
-## The in-level EffectPrewarmer's 2D pass (on the black fade-in after a level loads): show the hurt-flash rect at
+## The in-level EffectPrewarmer's 2D pass (behind its own black cover after a level loads): show the hurt-flash rect at
 ## a near-invisible `alpha` for ONE drawn frame and hand the hitmarker its one warm paint, so both hit-feedback
 ## draws are issued before the first hit lands — 2D pipelines have no precompilation. Honest expectation: the
 ## ColorRect is drawn every frame at alpha 0 already (its `color`, not its modulate, so the canvas culler never

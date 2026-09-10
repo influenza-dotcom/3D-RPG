@@ -26,7 +26,7 @@ func splash(intensity: float = 1.0) -> void:
 	for i in blob_count:
 		_spawn_blob(viewport_size, intensity)
 
-## Spray ONE blob at a near-invisible `alpha` (the in-level EffectPrewarmer's 2D pass, on the black fade-in after a
+## Spray ONE blob at a near-invisible `alpha` (the in-level EffectPrewarmer's 2D pass, behind its black cover after a
 ## level loads) so the overlay's canvas draw + the blob texture are issued before the first nearby kill — 2D
 ## pipelines have no precompilation, and a near-transparent draw is the only warm there is. The blob is a
 ## full-strength splash blob with only its modulate alpha overridden (the fade tween then runs it to 0 and frees

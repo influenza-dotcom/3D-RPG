@@ -4,15 +4,24 @@ extends Node3D
 ## In-level warm-up of every combat spawnable — stage TWO of the first-kill / first-hit hitch fix (stage one is the
 ## boot-time PreloadManager._prewarm_gpu_particles SubViewport pass, which stays: it front-loads the particle
 ## PROCESS-shader DXC compiles during the boot screen, which no later pass can hide). GameRoot.load_level drives
-## this one right after a level enters the tree, while the start-menu -> game swap is still on black: warm(camera)
-## instances every WARM_PATHS scene ONCE inside the live World3D — frozen, muted, collision-less — parks the lot
-## ~spawn_distance m in front of the live camera (a few per frame — scenes_per_frame) for frames_visible frames
-## after the last one entered, then hides them and KEEPS them, hidden and process-disabled, for its own lifetime
-## (never freed under a possibly in-flight compile). It also draws the code-built feedback nothing else can
-## precompile: the damage number
+## this one right after a level enters the tree: warm(camera) instances every WARM_PATHS scene ONCE inside the live
+## World3D — frozen, muted, collision-less — parks the lot ~spawn_distance m in front of the live camera (a few per
+## frame — scenes_per_frame) for frames_visible frames after the last one entered, then hides them and KEEPS them,
+## hidden and process-disabled, for its own lifetime (never freed under a possibly in-flight compile). It also draws
+## the code-built feedback nothing else can precompile: the damage number
 ## (DamageNumberPopup.build_label), the "!" alert icon (NpcBarkUi.build_icon), the confetti burst
 ## (Throwable.build_confetti_burst) and, for one frame, the 2D hit feedback (hurt flash, on-camera blood splatter,
 ## crosshair hitmarker) at a near-invisible alpha.
+##
+## ⭐THE PASS RAISES ITS OWN BLACK COVER over all of that (_raise_cover / cover_screen). It is a real,
+## full-brightness draw of two dozen effects two metres from the player's face — muzzle smoke, blood, an explosion
+## flash, confetti — and it MUST be, or it compiles nothing. This component used to assume the Player's spawn
+## fade-from-black was still up ("every hold is inside the fade"); it is not. That fade is a Tween with
+## set_ignore_time_scale(true), so it steps on the WALL CLOCK, and the frame that loads game.tscn hands it a
+## multi-second delta: a measured boot (2026-09-03) ran the fade to completion — all 2.5 s of spawn_fade_in_time —
+## in ONE step on that load frame, before the first warm instance existed, and the grid then played out at 100%
+## screen brightness for ~800 ms in plain sight. Counting the holds in FRAMES while the cover ran on SECONDS was the
+## whole bug. So the pass no longer depends on anyone else's cover: it owns one, sized to its own holds.
 ##
 ## WHY IN-LEVEL AND NOT THE BOOT SubViewport (the 2026-09-01 investigation; a real-renderer probe measured the
 ## first-kill frame at ~+45 ms and the first hit at ~+20 ms over a warm repeat in the same process, with `surface` /
@@ -98,6 +107,14 @@ const MUTE_DB: float = -80.0
 ## Warm instances are laid out in a grid this many columns wide, centred on the camera's forward axis.
 const GRID_COLUMNS: int = 6
 
+## The pass's own full-screen black cover (see the class doc). A CHILD of this node, so a reload mid-warm frees it
+## with us and can never leave the screen stuck black.
+const COVER_NODE := &"WarmCover"
+## Above the HUD, the modal screens (120/121) and the pause menu (128), below the debug console (150) — the layer
+## vocabulary the rest of the UI already uses. Nothing but this pass is on screen during a level load anyway; staying
+## under the console means a dev who opens it mid-warm can still read it.
+const COVER_LAYER: int = 130
+
 ## How many WARM_PATHS scenes enter the tree per frame. ⭐Spread on purpose, never one burst: every first-drawn
 ## material queues its pipeline compiles on the WorkerThreadPool, and on THIS dev machine's NVIDIA D3D12 driver a
 ## burst of concurrent first-time compiles is the known heap-corruption crash class (WorkerThread N, ~90 KB stack of
@@ -123,6 +140,10 @@ const GRID_COLUMNS: int = 6
 @export_range(0.05, 2.0, 0.05) var spawn_spread: float = 0.35
 ## Also draw the 2D hit feedback (hurt flash, on-camera blood splatter, hitmarker) once at WARM_2D_ALPHA.
 @export var warm_2d: bool = true
+## Raise the opaque black cover over the whole draw pass. ⭐Turn this OFF only to WATCH the pass (the warm grid then
+## plays out in front of the camera on load — the very thing this exists to hide); it is not a performance knob, and
+## a covered pass compiles exactly what an uncovered one does.
+@export var cover_screen: bool = true
 
 ## Process-lifetime latch (see the class doc): the draw pass runs once per process, not once per game.tscn.
 static var _warmed: bool = false
@@ -146,6 +167,8 @@ func warm(camera: Camera3D) -> void:
 	_warmed = true
 	if camera == null and OS.is_debug_build():
 		push_warning("EffectPrewarmer: no active Camera3D — warm instances are parked at the node's own transform (may fall outside the frustum)")
+	# Up BEFORE the first instance enters the tree — the very next frame this node draws is already the warm grid.
+	var cover := _raise_cover()
 	var surface_before := int(Performance.get_monitor(Performance.PIPELINE_COMPILATIONS_SURFACE))
 	var draw_before := int(Performance.get_monitor(Performance.PIPELINE_COMPILATIONS_DRAW))
 	var canvas_before := int(Performance.get_monitor(Performance.PIPELINE_COMPILATIONS_CANVAS))
@@ -171,6 +194,7 @@ func warm(camera: Camera3D) -> void:
 			# Spread: let this frame draw (and queue its compiles) before the next batch enters — see scenes_per_frame.
 			in_frame = 0
 			if not await _hold_frames(1):
+				_drop_cover(cover)
 				return
 	var built := _warm_code_built(camera, slot)
 	if warm_2d:
@@ -179,15 +203,20 @@ func warm(camera: Camera3D) -> void:
 	# instances (and their surface caches) outlive the background specialization compiles they queued — and stay
 	# alive, hidden, from here on (see frames_hidden: nothing is freed while a compile could still be in flight).
 	if not await _hold_frames(frames_visible):
+		_drop_cover(cover)
 		return
 	visible = false
 	if not await _hold_frames(frames_hidden):
+		_drop_cover(cover)
 		return
 	var surface_delta := int(Performance.get_monitor(Performance.PIPELINE_COMPILATIONS_SURFACE)) - surface_before
 	var draw_delta := int(Performance.get_monitor(Performance.PIPELINE_COMPILATIONS_DRAW)) - draw_before
 	var canvas_delta := int(Performance.get_monitor(Performance.PIPELINE_COMPILATIONS_CANVAS)) - canvas_before
 	_park_warm_nodes()
 	visible = true  # the parked instances stay hidden on their own flags; the node itself returns to its resting state
+	# Down only AFTER the park: every warm instance is hidden on its own flag by now, so the first frame the cover
+	# stops covering is already a clean one.
+	_drop_cover(cover)
 	if OS.is_debug_build():
 		# The one dev read-out: `surface` is what this pass exists to move off the first kill; a non-zero `draw`
 		# AFTER this pass (on the first real kill / hit) is a pipeline the warm missed — F3's Pipelines line shows it.
@@ -203,6 +232,35 @@ func _hold_frames(count: int) -> bool:
 			return false
 		await get_tree().process_frame
 	return is_inside_tree()
+
+
+## Raise the black cover over the draw pass (see the class doc + COVER_NODE). Its own CanvasLayer above the HUD,
+## input-transparent, parented HERE so a mid-warm reload frees it with us. ⭐It hides the pass from the PLAYER, not
+## from the RENDERER: the 3D grid still renders into the viewport underneath it, and 2D has no occlusion culling, so
+## _warm_2d's near-invisible hurt flash / splatter / hitmarker still rasterise and still compile behind it. Returns
+## null when cover_screen is off — _drop_cover takes that null.
+func _raise_cover() -> CanvasLayer:
+	if not cover_screen:
+		return null
+	var layer := CanvasLayer.new()
+	layer.name = COVER_NODE
+	layer.layer = COVER_LAYER
+	var rect := ColorRect.new()
+	rect.color = Color.BLACK
+	# A Control directly under a CanvasLayer anchors to the VIEWPORT, so the full-rect preset (anchors AND offsets —
+	# the anchors alone would leave a zero-size rect) covers the screen and tracks a resize for the pass's lifetime.
+	rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE  # never eats a click, short-lived though it is
+	layer.add_child(rect)
+	add_child(layer)
+	return layer
+
+
+## Take the cover down. Null-safe (cover_screen off) and validity-safe (a pass cut short by a reload was freed with
+## us): every exit from warm() routes through here, so no path can leave the screen stuck black.
+func _drop_cover(cover: CanvasLayer) -> void:
+	if cover != null and is_instance_valid(cover):
+		cover.queue_free()
 
 
 ## Instance one warm scene: neutralise it BEFORE it enters the tree (autoplay audio and physics bodies act on

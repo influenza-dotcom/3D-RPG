@@ -136,7 +136,7 @@ func clear() -> void:
 ## Build the head-icon Sprite3D, UN-parented and un-animated: `tex` the cue art, `world_height` the metres it is
 ## scaled to (any texture). Every flag here shapes the sprite's MATERIAL VARIANT (billboard, not fixed-size,
 ## no_depth_test, unshaded) — which is why it lives in one static: show_icon and the in-level EffectPrewarmer
-## (which draws one "!" near-invisibly on the black fade-in after a level loads, so the first alert doesn't
+## (which draws one "!" near-invisibly behind its own black cover after a level loads, so the first alert doesn't
 ## compile it mid-firefight) must build the identical object. tests/test_effect_prewarm.gd pins the routing.
 static func build_icon(tex: Texture2D, world_height: float) -> Sprite3D:
 	var icon := Sprite3D.new()

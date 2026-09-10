@@ -11,7 +11,7 @@ class_name DamageNumberPopup
 ## (test_damage_number_popup.gd pins the mirror).
 ##
 ## The Label3D itself is CONSTRUCTED in one static, build_label — show() parents and animates what it
-## returns, and the in-level EffectPrewarmer draws one (every digit, near-invisibly, on the black fade-in
+## returns, and the in-level EffectPrewarmer draws one (every digit, near-invisibly, behind its own black cover
 ## after a level loads) so its material variant + glyph raster are built before the first hit instead of
 ## on it. tests/test_effect_prewarm.gd pins that show() routes through it: an inline Label3D.new() here
 ## would ship a label the prewarm never drew.

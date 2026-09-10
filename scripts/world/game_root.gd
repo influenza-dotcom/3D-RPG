@@ -281,7 +281,9 @@ func _apply_ps1_warp(level_root: Node) -> void:
 ## path) the EffectPrewarmer child of the host, waits TWO process frames — so the level's WorldEnvironment /
 ## DirectionalLight, the Player rig and its InkOutline have all rendered once and the renderer-global requirement
 ## set has flipped to its in-game values (a warm before that compiles pipelines against the wrong keys) — then
-## resolves the live camera and fires warm(). Every hold is inside the fade-from-black. Headless / editor / off-tree
+## resolves the live camera and fires warm(). The pass raises its OWN black cover over its holds (EffectPrewarmer
+## _raise_cover) — it deliberately does NOT ride the Player's spawn fade, which the load frame's multi-second delta
+## runs to completion in one step. Headless / editor / off-tree
 ## = no-op (nothing renders, so nothing compiles; the boot warm skips the same way), and a load_level that swapped
 ## the level again meanwhile is harmless: the prewarmer's own once-per-process latch decides whether it draws.
 func _prewarm_effects() -> void:

@@ -8,8 +8,8 @@ extends GutTest
 ## normal-roughness prepass, the 16-bit shadow atlases, cubemap shadows) that only exists once the level
 ## and the player rig are live. EffectPrewarmer (scripts/components/effect_prewarmer.gd) closes that gap:
 ## GameRoot.load_level runs it right after the level enters the tree, and it draws every combat spawnable
-## in EffectPrewarmer.WARM_PATHS once, in the REAL World3D, in front of the live camera, on the black
-## fade-in — plus the code-built 2D/billboard feedback (damage numbers, bark icons) that has no
+## in EffectPrewarmer.WARM_PATHS once, in the REAL World3D, in front of the live camera, behind a black
+## cover it raises itself — plus the code-built 2D/billboard feedback (damage numbers, bark icons) that has no
 ## precompilation at all. A real-renderer probe measured the first kill at ~+45 ms and the first hit at
 ## ~+20 ms over a warm repeat, with surface/specialization pipeline compiles appearing ONLY in first-use
 ## phases; scripts/tools/__first_kill_hitch_probe.gd is that probe.
@@ -25,7 +25,10 @@ extends GutTest
 ##   (d) source pins on the seams the warm relies on: DamageNumberPopup.show / NpcBarkUi.show_icon route
 ##       through their static builders (so the warm draws the SAME object gameplay builds), load_level
 ##       invokes the prewarmer after _apply_ps1_warp, and Player.add_xp queues its autosave instead of
-##       writing the profile synchronously on the kill frame.
+##       writing the profile synchronously on the kill frame,
+##   (e) warm() raises its own black cover and no exit from it leaves that cover up (the pass is a real,
+##       full-brightness draw two metres from the player's face; it was visible for ~800 ms on every first
+##       load while it relied on the Player's spawn fade — see test_warm_pass_covers_itself).
 ## ⭐A NEGATIVE source pin matches CALL text ("GameState.autosave(self)"), never a bare name: this
 ## project's headers are explanatory, and a comment naming the thing a function deliberately avoids would
 ## turn a bare-name guard red (memory: source-text-assert-matches-its-own-disclaimer). GUT traps honoured:
@@ -161,6 +164,44 @@ func test_prewarmer_declares_the_contract_surface() -> void:
 			"effect_prewarmer.gd must expose func warm(camera: Camera3D) — the entry point load_level calls once the level and the live camera are in the tree")
 	assert_gt(_warm_paths.size(), 0,
 			"EffectPrewarmer.WARM_PATHS is empty (or not an Array) — the in-level warm draws nothing, so every combat spawnable first-compiles its pipelines mid-fight again")
+
+
+## Lines in `text` that are a bare `return` — the exits from a function body. Explanatory ## prose (this
+## project's headers are dense with it) can never match, so this stays a pin on CODE.
+func _bare_returns(text: String) -> int:
+	var n := 0
+	for line in text.split("\n"):
+		if line.strip_edges() == "return":
+			n += 1
+	return n
+
+
+func test_warm_pass_covers_itself() -> void:
+	# Ratchet (e). The warm grid is a REAL draw — two dozen effects at full brightness, spawn_distance metres
+	# in front of the live camera — and it has to be, or it compiles nothing. It used to assume the Player's
+	# spawn fade-from-black was still up. It is not: that fade is a Tween with set_ignore_time_scale(true), so
+	# it steps on the wall clock, and the frame that loads game.tscn hands it a multi-second delta. A measured
+	# boot (2026-09-03, scripts/tools/__prewarm_visibility_probe.gd) ran all 2.5 s of spawn_fade_in_time in ONE
+	# step on that load frame and then drew the grid at 100% screen brightness for ~800 ms in plain sight.
+	# So warm() owns its cover — and every exit from warm() has to take it back down.
+	if not FileAccess.file_exists(EFFECT_PREWARMER_PATH):
+		return  # test_prewarmer_declares_the_contract_surface already failed on the missing file
+	var src := FileAccess.get_file_as_string(EFFECT_PREWARMER_PATH)
+	var body := _func_body(src, "func warm(")
+	assert_ne(body, "",
+			"effect_prewarmer.gd no longer has func warm( — the entry point moved; repoint this pin (the cover ratchet below scans that body)")
+	if body == "":
+		return
+	assert_true(body.contains("_raise_cover("),
+			"EffectPrewarmer.warm must CALL _raise_cover( — without it the warm grid draws in plain sight two metres from the camera on every first level load; the Player's spawn fade is NOT a cover (its tween burns its whole duration on the load frame's delta)")
+	var raised := body.find("_raise_cover(")
+	if raised < 0:
+		return
+	var after := body.substr(raised)
+	# One drop per early `return`, plus the one on the success path — an exit that skips it leaves the screen
+	# stuck black. assert_gte, not assert_eq, so a single-exit restructure stays legal.
+	assert_gte(after.count("_drop_cover("), _bare_returns(after) + 1,
+			"EffectPrewarmer.warm has an exit that does not call _drop_cover( — every `return` after the cover goes up, and the fall-through at the end, must take it back down or the screen stays black for the rest of the session")
 
 
 func test_every_boot_particle_scene_is_also_warmed_in_level() -> void:
