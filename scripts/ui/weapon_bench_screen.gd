@@ -218,22 +218,40 @@ func _unhandled_input(event: InputEvent) -> void:
 ## `return false` sites to keep in sync.
 func _fit(part: Item) -> void:
 	if is_instance_valid(_bench) and is_instance_valid(_player):
-		if not _bench.fit_mod(_sel_gun, part, _player):  # the bound signals -> _rebuild refreshes the rows + wallet
-			MenuStyle.play_denied()
+		_settle(_bench.fit_mod(_sel_gun, part, _player))
 
 ## BUY one stocked part AND fit it in one payment (WeaponBench.buy_and_fit — same guards, dearer fee, and the part
 ## never enters the backpack). Refusal cued here for the same reason as _fit's; see its note.
 func _buy(part: Item) -> void:
 	if is_instance_valid(_bench) and is_instance_valid(_player):
-		if not _bench.buy_and_fit(_sel_gun, part, _player):
-			MenuStyle.play_denied()
+		_settle(_bench.buy_and_fit(_sel_gun, part, _player))
 
 ## PULL the part fitted in `slot` back out and keep it (WeaponBench.remove_mod — the one path that moves goods TO
 ## the player, so it gates on bag space BEFORE the charge). Refusal cued here; see _fit's note.
 func _remove(slot: int) -> void:
 	if is_instance_valid(_bench) and is_instance_valid(_player):
-		if not _bench.remove_mod(_sel_gun, slot, _player):
-			MenuStyle.play_denied()
+		_settle(_bench.remove_mod(_sel_gun, slot, _player))
+
+## The tail all three transactions share, and the ONE place this screen's own bool is turned into a card.
+##
+## ⭐⭐REPAINT OUR OWN SUCCESS — DO NOT TRUST THE BOUND SIGNALS. This screen used to leave the refresh entirely
+## to _bind's stream (bag `changed`, stock `changed`, the weapon-swap stream), and every one of those fires at
+## the WRONG MOMENT. fit_mod's commit order is `take_payment` -> `source.remove(part, 1)` -> `_refit(...)`: the
+## bag signal lands on the MIDDLE line, so the rebuild it triggers reads a gun that has not gained the part yet.
+## _refit re-equips — which would emit `weapon_changed` and repaint again — ONLY when the gun is DRAWN, so for
+## any gun merely sitting in the pack (every gun the cycler can reach past the one in your hands) that stale
+## paint was the LAST one: the money gone, the part gone from PARTS, and the FITTED row still reading
+## "— empty —". The removal path reads worse still, painting the part back in your pack while the slot it
+## just left still shows a live — already paid for — remove row.
+## Even on the DRAWN path the swap-stream repaint is not a guarantee: a dialogue-hosted bench runs under the
+## conversation's tree pause, where Attack's swap Timer never ticks.
+## tests/test_weapon_bench.gd pins the ordering that makes this necessary; the rebuild is idempotent, so the
+## bound signals firing as well costs nothing.
+func _settle(ok: bool) -> void:
+	if ok:
+		_rebuild()
+	else:
+		MenuStyle.play_denied()
 
 # ---------------------------------------------------------------------------------------------------
 # The gun cycler

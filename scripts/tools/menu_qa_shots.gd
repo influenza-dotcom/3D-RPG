@@ -280,6 +280,70 @@ func _run() -> void:
 	await _frames(2)
 	ci.free()
 
+	# The GUNSMITH BENCH. ⭐⭐IT WAS MISSING FROM THIS ROSTER, AND THAT IS HOW IT SHIPPED BROKEN: the newest and
+	# by far the most chrome-heavy card in the game (a gun cycler, a wallet row, a notice band, TWO sections and a
+	# five-line stat footer) had no shot here and no _report_card_rect line, so nobody saw that both of its row
+	# lists were rendering at ZERO height inside the 0.12 anchor band, or that its Panel's minimum beat that band
+	# outright. Every screen the pack photographs gets that check for free — which is the argument for the pack.
+	# Seeded so the shot has CONTENT: a gun the bench can work on (the fold needs a REGISTERED ItemDb template,
+	# which is what moddable_weapons filters on), a part in the pack for the carried FIT rows, and stock on the
+	# shelf for the BUY & FIT rows below them.
+	if inv != null:
+		for id: StringName in [&"pistol", &"smg"]:
+			var gun: Item = ItemDb.item_by_id(id)
+			if gun != null:
+				inv.add(gun, 1)
+		var carried_part: Item = load("res://resources/items/mod_long_barrel.tres")
+		if carried_part != null:
+			inv.add(carried_part, 1)
+	var wb := WeaponBench.new()
+	# ⭐IN THE TREE, and standalone OFF. The bench builds its `stock` CharacterInventory in _ready() — off-tree it
+	# never runs, `stock` stays null and stock_parts() returns nothing, so the BUY & FIT half of the card would go
+	# unphotographed (this shot's first run did exactly that). standalone=false keeps the run from spawning a
+	# talk-layer hitbox and a StationSpeaker in the middle of the level while every other shot is being taken.
+	wb.set(&"standalone", false)
+	wb.set(&"auto_fit_collider", false)
+	wb.set(&"bench_name", "QA Gunsmith")
+	var part_stock: Array[StockEntry] = []
+	for p2 in ["res://resources/items/mod_extended_mag.tres", "res://resources/items/mod_suppressor.tres",
+			"res://resources/items/mod_recon_scope.tres", "res://resources/items/mod_padded_stock.tres"]:
+		var part := load(p2)
+		if part != null:
+			var e2 := StockEntry.new()
+			e2.item = part
+			e2.count = 1
+			part_stock.append(e2)
+	wb.set(&"stock_counts", part_stock)
+	get_tree().root.add_child(wb)
+	await _frames(2)
+	print("QA_BENCH guns=", (wb.moddable_weapons(player) as Array).size(),
+		" carried_parts=", (wb.fittable_parts(wb.moddable_weapons(player)[0] if not (wb.moddable_weapons(player) as Array).is_empty() else null, player) as Array).size(),
+		" stock=", 0 if wb.get(&"stock") == null else (wb.get(&"stock").contents() as Array).size())
+	WeaponBenchScreen.open_bench(wb, player)
+	await _frames(8)
+	await _shot("18b_weapon_bench")
+	# ⭐AND ONE WITH THE FOOTER SPEAKING. At rest the before→after block is a header over blank lines, so a
+	# resting shot photographs 75px of empty parchment and tells a reviewer nothing about the surface the whole
+	# screen exists for. Focusing a PARTS row fires the same focus_entered -> _preview the pad player's navigation
+	# does, which is also the wiring most likely to rot unnoticed (the mouse path would still look fine).
+	var parts: VBoxContainer = WeaponBenchScreen._parts_list
+	if parts != null and parts.get_child_count() > 0 and parts.get_child(0) is Button:
+		(parts.get_child(0) as Button).grab_focus()
+		await _frames(6)
+		await _shot("18c_weapon_bench_preview")
+		# ⭐AND ONE AFTER THE COMMIT. PRESSING the row is the point — driving wb.buy_and_fit() directly would
+		# bypass WeaponBenchScreen._settle and photograph the bug instead of the fix. The card used to leave its
+		# refresh to the bench's incidental signals, all of which fire mid-transaction, so a paid-for fit painted
+		# an empty slot back over itself. This shot is what "the money left and the row changed" looks like.
+		(parts.get_child(0) as Button).emit_signal(&"pressed")
+		await _frames(8)
+		await _shot("18d_weapon_bench_after_fit")
+	else:
+		print("QA_SKIP 18c_weapon_bench_preview — no parts row to focus")
+	WeaponBenchScreen.close()
+	await _frames(2)
+	wb.queue_free()
+
 	# The board is the SIGHTED open: without the Board Visualizer chip the screen shows the blindfold
 	# placeholder instead, which is both a different picture and (much) less layout — and the sighted one is
 	# the one whose 8x8 grid decides whether the card fits its anchor band. Grant the chip and cover the

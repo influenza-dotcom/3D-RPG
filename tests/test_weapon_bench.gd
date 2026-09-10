@@ -23,6 +23,10 @@ extends GutTest
 const PLAYER_PATH := "res://scripts/player/player.gd"
 const BENCH_SOURCE := "res://scripts/components/weapon_bench.gd"
 const BENCH_SCENE := "res://scenes/characters/weapon_mechanic.tscn"
+## The authored bench CARD — test_a_paid_fit_shows_up_on_the_card_immediately drives the real thing.
+const SCREEN_SCENE := "res://scenes/ui/weapon_bench_screen.tscn"
+## The level the player actually plays — the one place a WeaponBench is instanced for real.
+const LEVEL_SCENE := "res://scenes/levels/trenchboom_test_level.tscn"
 ## The shipped weapon this file mods. A REAL registered template, because rebuild_weapon_mods and the bench's
 ## template gate both resolve the pristine base through ItemDb.item_by_id(gun.id).
 const GUN_ID := &"pistol"
@@ -611,3 +615,146 @@ func test_a_modded_weapon_data_never_reaches_ItemDb_by_weapon() -> void:
 	_teardown(b, p)
 	gun = null
 	barrel = null
+
+
+# --- The paint the player actually sees ------------------------------------------------------------------------
+
+## ⭐⭐A PAID-FOR FIT MUST BE ON THE CARD, and until 2026-09-08 it was not: you clicked, the money left, the part
+## left your pack — and the FITTED row still read "— empty —".
+##
+## The screen used to leave its refresh entirely to the signals WeaponBenchScreen._bind subscribes to, and every
+## one of them fires at the wrong moment. fit_mod commits in the order
+##     take_payment()  ->  source.remove(part, 1)  ->  _refit(...)
+## so the bag's `changed` lands on the MIDDLE line and the rebuild it triggers reads a gun that has not gained
+## the part yet. _refit re-equips — which would emit `weapon_changed` and repaint again — ONLY when the gun is
+## DRAWN, so for a gun merely sitting in the pack that stale paint was the LAST one. (And on the SHIPPED bench,
+## which is dialogue-hosted, even the drawn path is not safe: the conversation pauses the tree and Attack's swap
+## Timer never ticks.) The fix is WeaponBenchScreen._settle — repaint our own success instead of trusting a
+## signal that fires mid-transaction.
+##
+## ⭐This drives the REAL authored card in a SubViewport rather than asserting the component's end state, because
+## the component's end state was always correct — the defect only ever existed in what the player was LOOKING at.
+## open_bench is bypassed on purpose: it wants the live modal stack and would grab the real mouse cursor out of
+## a headless run. Everything below _rebuild is the genuine paint path.
+func test_a_paid_fit_shows_up_on_the_card_immediately() -> void:
+	var b := _bench()
+	var p := _player(500.0)
+	var gun := _gun()
+	var barrel := _part(P_BARREL, WeaponData.ModSlot.BARREL, 100.0)
+	p.inventory.add(gun, 1)
+	p.inventory.add(barrel, 1)
+
+	var vp := SubViewport.new()
+	vp.size = Vector2i(792, 445)
+	vp.disable_3d = true
+	add_child_autofree(vp)
+	var card: CanvasLayer = (load(SCREEN_SCENE) as PackedScene).instantiate()
+	vp.add_child(card)
+	await wait_process_frames(1)
+	card._bench = b
+	card._player = p
+	card._sel_gun = gun
+	card._is_open = true
+	(card.get_node("%Root") as Control).visible = true
+	card._rebuild()
+	await wait_process_frames(1)
+
+	assert_does_not_have(_fitted_names(card), barrel.label(), "the barrel slot starts EMPTY on the card")
+	assert_has(_parts_names(card), barrel.label(), "and the carried barrel starts in the PARTS section")
+
+	card._fit(barrel)
+	await wait_process_frames(1)
+	assert_has(_fitted_names(card), barrel.label(),
+		"⭐the fitted part must appear in the FITTED section the instant the fit is paid for — the card must never show an empty slot over a transaction the player has already been charged for")
+	assert_does_not_have(_parts_names(card), barrel.label(), "and it must leave the PARTS section, which no longer carries it")
+
+	card._remove(WeaponData.ModSlot.BARREL)
+	await wait_process_frames(1)
+	assert_does_not_have(_fitted_names(card), barrel.label(),
+		"⭐and a paid-for REMOVAL must clear the slot on the card — leaving it painted fitted offers a live remove row for a part that is already back in the pack")
+	assert_has(_parts_names(card), barrel.label(), "the part is back in the PARTS section, where it can be re-fitted")
+
+	card._is_open = false
+	card._bench = null
+	card._player = null
+	card._sel_gun = null
+	_teardown(b, p)
+	gun = null
+	barrel = null
+
+## The NAME column of every row currently painted in one of the card's two sections. Reaches through the row
+## Button's single HBox child (slot, name, price — the _make_row shape); a section holding only its
+## "(none)" hint Label contributes nothing, which is exactly the answer those cases want.
+func _row_names(list: VBoxContainer) -> Array:
+	var out: Array = []
+	for row in list.get_children():
+		if row is Button and row.get_child_count() > 0:
+			var hb: Node = row.get_child(0)
+			if hb.get_child_count() >= 2 and hb.get_child(1) is Label:
+				out.append((hb.get_child(1) as Label).text)
+	return out
+
+func _fitted_names(card: Node) -> Array:
+	return _row_names(card.get_node("%FittedList") as VBoxContainer)
+
+func _parts_names(card: Node) -> Array:
+	return _row_names(card.get_node("%PartsList") as VBoxContainer)
+
+
+# --- The bench the player can actually walk up to ---------------------------------------------------------------
+
+## ⭐⭐THE SHIPPED BENCH MUST HAVE SOMETHING ON THE SHELF. Every other test in this file builds its own bench with
+## a hand-seeded stock, so all of them stayed green while the bench the PLAYER meets was dead content: the only
+## WeaponBench instanced in a level carried `standalone = false` and nothing else — no `stock_counts` — and no
+## mod_*.tres appeared in any loot table or shop stock anywhere in the project. The PARTS section could only ever
+## render "(none)" and FITTED was six permanently-dim empty slots, on a screen that was otherwise working.
+## scenes/characters/weapon_mechanic.tscn DID author a shelf, which is exactly why nobody noticed — it is a
+## prefab that is never instanced in any level.
+##
+## Read out of the LEVEL's SceneState rather than by instantiating it: the level is a func_godot map with a nav
+## bake, far too heavy for a unit test, and the authored property is all this needs to see.
+func test_the_level_bench_actually_stocks_parts() -> void:
+	var st: SceneState = (load(LEVEL_SCENE) as PackedScene).get_state()
+	var benches := 0
+	for i in st.get_node_count():
+		if st.get_node_name(i) != &"WeaponBench":
+			continue
+		benches += 1
+		var stock: Array = []
+		for j in st.get_node_property_count(i):
+			if st.get_node_property_name(i, j) == &"stock_counts":
+				stock = st.get_node_property_value(i, j)
+		assert_gt(stock.size(), 0,
+			"⭐the WeaponBench at %s ships with an EMPTY shelf — a bench with no stock and no lootable parts in the world is a menu that can never do anything" % st.get_node_path(i))
+		for e in stock:
+			var part: Item = e.item
+			assert_not_null(part, "every StockEntry on the level bench carries an item")
+			assert_true(part.is_weapon_mod(), "%s is a weapon PART (it carries a WeaponMod payload)" % part.id)
+			assert_gt(part.value, 0.0,
+				"%s must be priced — _offered_parts drops a value<=0 part so the fee can never be a permanently-dead '0 zm' row" % part.id)
+			assert_gt(e.count, 0, "%s is stocked in a usable quantity" % part.id)
+	assert_gt(benches, 0, "the level still instances a WeaponBench — if it was removed, this pin is stale")
+
+## And the shelf must fit a gun the player can actually be holding, or every row dims for a different reason.
+func test_the_level_bench_stock_fits_a_weapon_the_player_can_carry() -> void:
+	var st: SceneState = (load(LEVEL_SCENE) as PackedScene).get_state()
+	var b := _bench()
+	var p := _player(5000.0)
+	var served: Array[StringName] = []
+	for i in st.get_node_count():
+		if st.get_node_name(i) != &"WeaponBench":
+			continue
+		for j in st.get_node_property_count(i):
+			if st.get_node_property_name(i, j) != &"stock_counts":
+				continue
+			for e in (st.get_node_property_value(i, j) as Array):
+				b.stock.add(e.item, e.count)
+	for gun_id: StringName in [&"pistol", &"smg", &"shotgun", &"sniper"]:
+		var tmpl := ItemDb.item_by_id(gun_id)
+		if tmpl == null or not tmpl.is_weapon():
+			continue
+		if not (b.stock_parts(tmpl.clone_unique(), p) as Array).is_empty():
+			served.append(gun_id)
+	assert_gt(served.size(), 0,
+		"⭐the level bench's shelf must fit at least one shipped weapon — a shelf of parts that fit nothing renders the same empty card as no shelf at all. Served: %s" % str(served))
+	_teardown(b, p)
