@@ -209,10 +209,10 @@ func _bind_ui() -> void:
 	# Budget = MenuSkin.footer_hint_lines.
 	_detail = %Detail
 	MenuStyle.style_hint(_detail)  # dim wrap-friendly footnote styling from the skin
-	var line_h: float = _detail.get_line_height()
-	if line_h <= 0.0:
-		line_h = float(MenuStyle.skin.hint_size + 4)  # font not resolvable yet — the pre-measurement estimate
-	(%Footer as Control).custom_minimum_size.y = float(maxi(MenuStyle.skin.footer_hint_lines, 1)) * line_h
+	# ⭐The height maths and the grow direction both live in MenuStyle now. This screen carried its own copy of
+	# `lines * get_line_height()`, which UNDER-reserves by the theme's line_spacing on every gap — see
+	# MenuStyle.hint_block_height for the measurement, and what the missing pixels did to the first line.
+	MenuStyle.size_hint_footer(%Footer as Control, _detail)
 
 ## The grid's scroll slot changed size (first layout, window resize, panel reflow) — hand the grid its exact
 ## height budget so _recompute_cell can fit cells by HEIGHT as well as width, then refresh so the new cell size

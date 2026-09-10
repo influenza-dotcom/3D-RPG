@@ -1341,12 +1341,6 @@ const BENCH_SCREEN_TITLE := "Weapon Bench"
 ## actions on rows that look identical (the shop's buy/sell heading pair is the same shape).
 const BENCH_FITTED_HEADING := "[PH] Fitted  (click to remove)"
 const BENCH_PARTS_HEADING := "[PH] Parts  (click to fit)"
-## The GUN CYCLER row's heading, left of the cycling Button. A third heading in the same voice as the two above,
-## but with no parenthetical: the button beside it carries its own caption (bench_gun — the weapon's name and
-## filled-slot count), so the heading only has to name what the row is ABOUT. It exists because the card's rows
-## all describe ONE weapon and a player arriving at a bench with four guns in the pack needs the row that
-## chooses between them labelled, not merely captioned.
-const BENCH_GUN_HEADING := "[PH] Weapon"
 ## The empty-section line in the PARTS list (you carry no fitting part and the bench stocks none). Deliberately
 ## the install screen's "(none)" rather than the shop's EMPTY_LIST "(empty)" — the two service screens read
 ## alike today, and unifying the three wordings is a copy call, not a refactor.

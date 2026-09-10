@@ -1,10 +1,12 @@
 extends GutTest
 
 ## AUTHORED-SCENE wiring contract for WeaponBenchScreen (scenes/ui/weapon_bench_screen.tscn +
-## weapon_bench_screen.gd), cast from the test_chip_install_screen_scene.gd exemplar — the two screens are the
-## same silhouette (a PANEL_MARGIN band, two stacked sections whose scrolls share the leftover height 50/50, a
-## right-aligned wallet readout and a rail selector), so the pins are the same shape and drift between them is
-## visible at a glance.
+## weapon_bench_screen.gd), cast from the test_chip_install_screen_scene.gd exemplar — a PANEL_MARGIN band, a
+## right-aligned wallet readout and a rail selector, so the pins are the same shape and drift between the two
+## screens is visible at a glance. It DIVERGES from that exemplar in one place, deliberately: this card carries a
+## notice band and a five-line stat footer the install screen does not, and it pays for them with a SINGLE
+## scrolling list instead of the install screen's two — see test_the_card_actually_fits_on_the_screen below,
+## which is the pin that matters most in this file.
 ##
 ## Prefab WIRING tests — the silent-when-broken seams: the autoload points at the SCENE (not the bare script, or
 ## the authored layout never loads and _bind_ui null-derefs at BOOT), every %node the script binds exists, no
@@ -28,10 +30,16 @@ const SCREEN_SOURCE := "res://scripts/ui/weapon_bench_screen.gd"
 
 ## Every unique name weapon_bench_screen.gd binds in _bind_ui (plus the two the layout test reaches for) — a
 ## rename in the editor breaks the bind at boot, so pin the roster here where it fails loudly instead.
-const BOUND := ["Root", "Dim", "Content", "Title", "MoneyInset", "MoneyPlayer", "RailButton",
-	"GunInset", "GunHeading", "GunButton", "NoticeInset", "Notice",
-	"FittedInset", "FittedHeading", "FittedScroll", "FittedList",
-	"PartsInset", "PartsHeading", "PartsScroll", "PartsList", "Footer", "Detail"]
+const BOUND := ["Root", "Dim", "Content", "Title", "MoneyInset", "GunButton", "MoneyPlayer", "RailButton",
+	"NoticeInset", "Notice", "ListScroll", "ListBox",
+	"FittedInset", "FittedHeading", "FittedList",
+	"PartsInset", "PartsHeading", "PartsList", "Footer", "Detail"]
+
+## The real UI canvas. project.godot ships 396×216 at stretch scale 0.5, which is a 792×432 base that
+## aspect="expand" grows to about 792×445 on a 16:9 display. 432 is the SHORT case (an ultrawide, where expand
+## adds width instead) and is therefore the one the budget must survive — see test_the_card_actually_fits.
+const CANVAS_SHORT := Vector2i(792, 432)
+const CANVAS_16_9 := Vector2i(792, 445)
 
 
 func test_autoload_is_the_authored_scene() -> void:
@@ -88,16 +96,26 @@ func test_authored_chrome_keeps_the_layout_contracts() -> void:
 	assert_almost_eq(panel.anchor_top, margin, 0.0001, "Panel's top anchor is the shared PANEL_MARGIN inset")
 	assert_almost_eq(panel.anchor_right, 1.0 - margin, 0.0001, "Panel's right anchor mirrors PANEL_MARGIN")
 	assert_almost_eq(panel.anchor_bottom, 1.0 - margin, 0.0001, "Panel's bottom anchor mirrors PANEL_MARGIN")
-	# Twin sections: each row list lives in a ScrollContainer that expands BOTH ways (the 50/50 height split)
-	# with horizontal scrolling disabled (rows shrink to the panel width, never scroll sideways).
+	# ⭐ONE scroll, shared by BOTH sections — the constraint the card shipped broken on (see
+	# test_the_card_actually_fits_on_the_screen). Each list must sit INSIDE it, so a well-meant editor rearrange
+	# that gives either section its own expanding scroll again is caught here rather than in a playtest.
+	var scroll := inst.get_node("%ListScroll") as ScrollContainer
+	assert_eq(scroll.size_flags_vertical, Control.SIZE_EXPAND_FILL, "the list scroll expands vertically — it takes ALL the leftover panel height")
+	assert_eq(scroll.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "the list scroll expands horizontally")
+	assert_eq(scroll.horizontal_scroll_mode, ScrollContainer.SCROLL_MODE_DISABLED, "rows shrink to the panel width, never scroll sideways")
+	assert_true(scroll.follow_focus,
+		"the scroll must FOLLOW FOCUS — with two viewports each list scrolled its own focused row into view for free; sharing one, a pad navigating below the fold would carry the highlight off-screen")
 	for list_name in ["FittedList", "PartsList"]:
 		var list := inst.get_node("%" + list_name) as VBoxContainer
 		assert_eq(list.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "%s rows fill the section width" % list_name)
-		var scroll := list.get_parent() as ScrollContainer
-		assert_not_null(scroll, "%s lives in its section ScrollContainer" % list_name)
-		assert_eq(scroll.size_flags_vertical, Control.SIZE_EXPAND_FILL, "%s's scroll expands vertically (50/50 height share)" % list_name)
-		assert_eq(scroll.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "%s's scroll expands horizontally" % list_name)
-		assert_eq(scroll.horizontal_scroll_mode, ScrollContainer.SCROLL_MODE_DISABLED, "%s's scroll never scrolls sideways" % list_name)
+		assert_true(scroll.is_ancestor_of(list), "%s lives inside the ONE shared scroll" % list_name)
+	var expanding := 0
+	for c in (inst.get_node("%Content") as VBoxContainer).get_children():
+		var ct := c as Control
+		if ct != null and ct.size_flags_vertical == Control.SIZE_EXPAND_FILL:
+			expanding += 1
+	assert_eq(expanding, 1,
+		"exactly ONE child of %Content may expand vertically — a second one halves the list, and this card has no height to halve")
 	# Wallet readout: right-aligned and EXPAND_FILL so the money phrase lands on the price column's edge, with
 	# the rail selector sharing its row.
 	var money := inst.get_node("%MoneyPlayer") as Label
@@ -209,3 +227,61 @@ func test_the_notice_band_is_never_hidden_and_the_rows_are_muted() -> void:
 		"the REFUSAL half of the sound pair lives here, at the one place each of the bench's bools comes back")
 	assert_false(src.contains("get_tree().paused"),
 		"a station screen is REAL-TIME — it must never touch get_tree().paused (the atm_screen.gd header carries the argument)")
+
+
+## ⭐⭐THE PIN THIS FILE EXISTS FOR. Every other assertion here is a wiring check — it reads a flag and says the
+## flag is set. Not one of them could see the bug this screen SHIPPED with: the card was authored exactly as
+## designed, every unique name resolved, every focus_mode was right, and BOTH row lists rendered at ZERO HEIGHT
+## on the real canvas. The whole clickable content of the menu was invisible and unclickable, and the Panel
+## overflowed its own anchor band on top of it (minimum 340px inside a 338px band).
+##
+## Nothing catches that but ARITHMETIC, so this test does the arithmetic the only way that cannot drift: it lays
+## the real scene out in a real viewport at the real canvas size and measures what the player would get. The
+## chrome is what starved it — title, wallet row, gun row, notice band, two section headings and a five-line stat
+## footer, plus eight separations, came to 264px inside a 262px box — so the FLOOR below is deliberately stated in
+## ROWS, not pixels: it survives a font change, a skin retune or a new chrome element, and it fails the moment
+## someone spends the list's height again.
+##
+## The floor is ONE row per shipped sibling (chip_install gets 2.0, shop 3.5) — but two is the honest minimum for
+## a card whose FITTED section alone is six slots, and the short 792×432 canvas is the case that must clear it.
+func test_the_card_actually_fits_on_the_screen() -> void:
+	var row_probe := MenuStyle.size_row_button(Button.new())
+	var row_h: float = row_probe.custom_minimum_size.y
+	row_probe.free()   # size_row_button hands back an OFF-tree Button; unfreed it lands in GUT's orphan report
+	assert_gt(row_h, 0.0, "a row button reports a real height (the probe measured under the live theme)")
+	for canvas in [CANVAS_SHORT, CANVAS_16_9]:
+		var vp := SubViewport.new()
+		vp.size = canvas
+		vp.disable_3d = true
+		add_child_autofree(vp)
+		var card: Node = (load(SCENE) as PackedScene).instantiate()
+		vp.add_child(card)
+		await wait_process_frames(1)
+		var root_c := card.get_node("Root") as Control
+		root_c.visible = true
+		# The captions _rebuild would paint. An EMPTY Button measures a shorter line box than a captioned one, so
+		# a card measured blank flatters itself by ~11px per button row — exactly the margin this bug hid in.
+		(card.get_node("%Title") as Label).text = PlayerText.bench_title("")
+		(card.get_node("%GunButton") as Button).text = PlayerText.bench_gun("Pistol", 2, 6)
+		(card.get_node("%MoneyPlayer") as Label).text = PlayerText.wallet_you(1240)
+		(card.get_node("%RailButton") as Button).text = "DEBIT"
+		(card.get_node("%FittedHeading") as Label).text = PlayerText.BENCH_FITTED_HEADING
+		(card.get_node("%PartsHeading") as Label).text = PlayerText.BENCH_PARTS_HEADING
+		await wait_process_frames(4)
+		var panel := root_c.get_node("Panel") as Control
+		var band: float = (panel.anchor_bottom - panel.anchor_top) * float(canvas.y)
+		assert_lte(panel.get_combined_minimum_size().y, band,
+			"at %dx%d the card's chrome must FIT the PANEL_MARGIN band (%.0fpx) — a bigger minimum makes the Panel overflow its own anchors and hang off the bottom of the screen" % [canvas.x, canvas.y, band])
+		var scroll := card.get_node("%ListScroll") as ScrollContainer
+		assert_gte(scroll.size.y, row_h * 2.0,
+			"at %dx%d the row list must show at least TWO %.0fpx rows (it got %.0fpx = %.2f rows) — the FITTED section alone is six slots, and a list too short to hold one row is a menu with no content at all" % [canvas.x, canvas.y, row_h, scroll.size.y, scroll.size.y / row_h])
+		# ⭐The gun cycler shipped 20px wide — its whole caption clipped away — because cap_button sets clip_text,
+		# and in Godot 4 clip_text (like any text_overrun_behavior) zeroes a Button's minimum WIDTH outright. Beside
+		# an EXPAND_FILL sibling that collapses it to its stylebox margins. It is the one control that exists in
+		# every state and the pad's focus-seed fallback, so a nameless sliver is not a cosmetic loss.
+		var gun := card.get_node("%GunButton") as Button
+		assert_gte(gun.size.x, float(MenuStyle.skin.cycler_value_width),
+			"at %dx%d the gun cycler must be at least its skin width budget (%dpx), not the %.0fpx of bare stylebox margin clip_text leaves it" % [canvas.x, canvas.y, MenuStyle.skin.cycler_value_width, gun.size.x])
+		card.free()
+		vp.queue_free()
+		await wait_process_frames(1)

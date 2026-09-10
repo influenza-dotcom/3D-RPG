@@ -409,16 +409,48 @@ func make_hint(s: String) -> Label:
 ##     resolvable yet. Line COUNT is a designer knob (MenuSkin.footer_hint_lines).
 func make_hint_footer(hint: Label) -> Control:
 	var footer := Control.new()
-	footer.clip_contents = true
 	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(hint)
 	hint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	hint.vertical_alignment = VERTICAL_ALIGNMENT_TOP  # short text leaves dead space BELOW, never re-centres
+	size_hint_footer(footer, hint)
+	return footer
+
+## The height a hint Label needs to render EXACTLY `lines` of its own lines under the theme it is wearing.
+##
+## ⭐⭐get_line_height() IS NOT THE PITCH, and every copy of this maths in the tree had that wrong. Measured on
+## 4.7.1 against the shipped skin: get_line_height() answers 15 (ascent 12 + descent 3) while the Label actually
+## lays its lines out on an 18px pitch, because the menu Theme sets Label/line_spacing = 3 and the DRAW adds it
+## between lines while get_line_height() does not report it. So a five-line budget reserved 5×15 = 75px for a
+## Label whose own minimum is 5×18 − 3 = 87px — and the anchored Label, which grows BOTH ways by default, took
+## that missing 12px half above the host and half below, where clip_contents sliced the top of the FIRST line
+## clean off. The header of every hover preview in the game was rendering decapitated.
+##
+## N lines span N pitches MINUS one spacing: the gap goes BETWEEN lines, and there is no gap after the last.
+## At lines = 1 that is exactly get_line_height() again, so single-line bands (the bench's notice) are unmoved.
+func hint_block_height(hint: Label, lines: int) -> float:
 	var line_h: float = hint.get_line_height()
 	if line_h <= 0.0:
 		line_h = float(skin.hint_size + 4)  # font not resolvable yet — the pre-measurement estimate
-	footer.custom_minimum_size.y = float(maxi(skin.footer_hint_lines, 1)) * line_h
-	return footer
+	var spacing := float(hint.get_theme_constant(&"line_spacing"))
+	return float(maxi(lines, 1)) * (line_h + spacing) - spacing
+
+## Adopt an AUTHORED fixed-height hint footer (a plain Control clip host with `hint` anchored full-rect inside
+## it) — the .tscn twin of make_hint_footer, and the one place the three screens that author this construct
+## (inventory / loot / weapon bench) may size it. Owning all three halves here is the point: the clip, the TOP
+## alignment, and — the half they all shipped wrong — the grow DIRECTION.
+##
+## ⭐grow_vertical must be END, not BOTH. A Control's size is clamped up to its combined minimum, and a Label's
+## minimum is its full wrapped height; with GROW_DIRECTION_BOTH the overflow is split half ABOVE the host, so an
+## over-long preview does not clip at the bottom the way this construct's whole contract says it does — it
+## slices the FIRST line's glyphs instead. Growing END-only sends every overflow downward, which is where the
+## clip is supposed to land.
+## `lines` ≤ 0 takes the shared designer knob (MenuSkin.footer_hint_lines); the shop passes its own smaller
+## budget because its footer sits under two item GRIDS rather than a row list and was authored shorter.
+func size_hint_footer(footer: Control, hint: Label, lines: int = 0) -> void:
+	footer.clip_contents = true
+	hint.vertical_alignment = VERTICAL_ALIGNMENT_TOP  # short text leaves dead space BELOW, never re-centres
+	hint.grow_vertical = Control.GROW_DIRECTION_END
+	footer.custom_minimum_size.y = hint_block_height(hint, lines if lines > 0 else skin.footer_hint_lines)
 
 ## A thin full-width hairline separator (HSeparator styled by the theme).
 func make_separator() -> HSeparator:

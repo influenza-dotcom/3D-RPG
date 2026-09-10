@@ -5,16 +5,29 @@ extends CanvasLayer
 ## a dialogue-hosted open ("Modify" on a gunsmith NPC) runs under the CONVERSATION's tree pause — without it the
 ## card would stop painting and its buttons would stop answering the moment it appeared.
 ##
-## THE SHAPE: one gun CYCLER on top, then two full-width sections stacked vertically (the ChipInstallScreen
-## silhouette) — FITTED (one row per slot this bench works on, click to pull a part back out and keep it) and
-## PARTS (parts you carry, then parts the bench stocks; click to fit / buy & fit). Under them, the always-present
-## NOTICE band says WHY a dim row would refuse, and the fixed-height footer previews the before→after stat block
-## of whatever row you are hovering OR focused on.
+## THE SHAPE: a header row carrying the gun CYCLER, your wallet and the rail selector; the always-present NOTICE
+## band; ONE scrolling list holding both sections — FITTED (one row per slot this bench works on, click to pull a
+## part back out and keep it) then PARTS (parts you carry, then parts the bench stocks; click to fit / buy & fit);
+## and under them the fixed-height footer, previewing the before→after stat block of whatever row you are
+## hovering OR focused on.
 ##
-## ⭐WHY A CYCLER AND NOT A THIRD LIST: (a) a third list blows the vertical budget inside the 0.12 anchor band at
-## the real 792×444 canvas with two scrolls already expanding; (b) it is ONE focusable control that exists in
-## EVERY state — including an empty bag — so it is always a valid focus-seed fallback; (c) it is a sideways VIEW
-## swap, so it wears the &"tab" cue (the sort-button / rail-button precedent), never a commit cue.
+## ⭐⭐ONE SCROLL, NOT TWO — AND IT IS AN ARITHMETIC CONSTRAINT, NOT A TASTE. This card shipped with the two
+## sections in two vertically-EXPANDING ScrollContainers (the ChipInstallScreen silhouette) and BOTH RENDERED AT
+## ZERO HEIGHT: the whole clickable content of the menu was invisible and unclickable. The 0.12 anchor band on the
+## real 792×445 canvas gives the Panel 338px; the art panel's own content margins (36 top + 40 bottom) leave 262px
+## of VBox; and the chrome — title 20, wallet row 28, gun row 28, notice 15, two headings 17+17, the 5-line footer
+## 75, and 8×8 of separation — already needed 264. The two scrolls got what was left, which was less than nothing,
+## so the Panel ALSO overflowed its own band (min 340 > 338). Two stacked scrolls cannot reach even ONE 28px row in
+## this box at any panel margin — the sums are in tests/test_weapon_bench_screen_scene.gd, which now pins the
+## measurement. Folding both sections into ONE ScrollContainer and merging the cycler into the wallet row buys the
+## list ~92px (≈3 rows, between chip_install's 2 and shop's 3.5). The section HEADINGS ride inside the scroll and
+## scroll away with their rows; `follow_focus` keeps a pad-navigated row in view now that both lists share one
+## viewport.
+##
+## ⭐WHY A CYCLER AND NOT A THIRD LIST: (a) a third list blows the vertical budget that two already blew;
+## (b) it is ONE focusable control that exists in EVERY state — including an empty bag — so it is always a valid
+## focus-seed fallback; (c) it is a sideways VIEW swap, so it wears the &"tab" cue (the sort-button / rail-button
+## precedent), never a commit cue.
 ##
 ## AUTHORED SCENE: the layout lives in scenes/ui/weapon_bench_screen.tscn (this autoload IS that scene — see
 ## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
@@ -63,9 +76,9 @@ var _money: Label                 ## your wallet — the header readout (spendab
 var _notice: Label                ## the always-present refusal band; NEVER hidden with `visible`
 var _detail: Label                ## the fixed-height footer: the hovered/focused row's before→after preview
 var _footer: Control              ## _detail's clip host — its height is pinned to whole rendered lines
-var _gun_heading: Label
-var _gun_btn: Button              ## the CYCLER: captions the selected gun, advances to the next on press
+var _gun_btn: Button              ## the CYCLER: captions the selected gun, advances to the next on press (rides the wallet row)
 var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; rail_changed drives _rebuild (every row re-prices)
+var _list_scroll: ScrollContainer  ## the ONE viewport both sections share — see the header's arithmetic
 var _fitted_list: VBoxContainer
 var _parts_list: VBoxContainer
 var _first_focus: Button = null   ## first row built by the LAST _rebuild = the pad landing spot open_bench seeds (never stale — the fills re-record it and the old rows are freed)
@@ -131,6 +144,13 @@ func open_bench(bench: Node, player: Node) -> void:
 		_gun_btn.grab_focus()
 	elif is_instance_valid(_rail_btn) and _rail_btn.visible:
 		_rail_btn.grab_focus()
+	# ⭐AND THEN PUT THE LIST BACK AT THE TOP. Seeding focus on the first row makes the follow_focus scroll
+	# bring that row into view — which it does by scrolling the FITTED heading above it off the top, so the card
+	# opens on unlabelled rows and never says they are the ones you click to REMOVE a part. Deferred because
+	# follow_focus does its scroll from the focus signal we just fired. Open-time ONLY: _rebuild must never yank
+	# the list back to the top under a player who scrolled down to a part and fitted it.
+	if is_instance_valid(_list_scroll):
+		_list_scroll.set_deferred(&"scroll_vertical", 0)
 	opened.emit()
 
 ## Guard failed: we never opened, but a dialogue-hosted open (DialogueManager._suspend_for_menu) suspended the
@@ -528,8 +548,9 @@ func _footer_lines() -> int:
 ## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. What each piece
 ## guarantees:
 ##  * the panel is the PANEL_MARGIN anchor band (authored; the scene test pins the fractions against the const).
-##  * the two stacked full-width sections both EXPAND vertically (authored), so they share the leftover panel
-##    height 50/50 — the ChipInstallScreen shape.
+##  * ONE ScrollContainer expands vertically (authored) and takes ALL the leftover panel height; both sections
+##    and both headings live inside it. Two expanding scrolls is what shipped, and it rendered both at ZERO
+##    height — the arithmetic is in the header.
 ##  * the wallet readout, the gun row, the notice band and both section headings are row-inset
 ##    (_style_row_inset) so their edges land on the rows' slot/name/price columns instead of overhanging them.
 ##  * the NOTICE band reserves ONE rendered line and the FOOTER reserves footer_hint_lines of them, measured off
@@ -562,25 +583,40 @@ func _bind_ui() -> void:
 	_rail_btn.rail_changed.connect(_rebuild)
 	_style_row_inset(%MoneyInset)
 
-	# The gun CYCLER row: a heading on the left, the cycling Button on the right. &"tab", never a commit cue —
-	# pressing it changes what you are LOOKING at, not what you own.
-	_gun_heading = %GunHeading
+	# The gun CYCLER, LEADING the same row as the wallet (it used to own a row plus a "Weapon" heading; the row
+	# cost 36px this card does not have, and the heading only repeated what the caption already says). &"tab",
+	# never a commit cue — pressing it changes what you are LOOKING at, not what you own.
+	#
+	# ⭐⭐THE WIDTH PIN IS NOT OPTIONAL. cap_button sets clip_text, and in Godot 4 a Button with clip_text (or any
+	# text_overrun_behavior) reports minimum WIDTH ZERO — Button::_get_minimum_size_for_text_and_icon zeroes it
+	# outright. Beside an EXPAND_FILL sibling (the wallet readout) that collapsed the cycler to the 20px of its own
+	# stylebox margins: the caption naming the gun you are modding was clipped to nothing, on the one control that
+	# exists in EVERY state and is the pad's focus-seed fallback. clip_text still EARNS its keep (a long weapon name
+	# must trim, not shove the wallet off the row) — it just needs a floor under it, and the skin already budgets
+	# one for cycler captions. It also EXPANDS (authored) so it takes its share of the row's slack instead of
+	# sitting at the floor while the wallet hoards it — a long weapon name gets the room before it trims.
 	_gun_btn = %GunButton
 	MenuStyle.cap_button(_gun_btn)
+	_gun_btn.custom_minimum_size.x = float(MenuStyle.skin.cycler_value_width)
 	MenuStyle.set_button_sound(_gun_btn, &"tab")
 	_gun_btn.pressed.connect(_cycle_gun)
-	_bind_section_heading(_gun_heading, %GunInset, PlayerText.BENCH_GUN_HEADING)
 
 	# The NOTICE band. Hint-styled and pinned to exactly ONE rendered line: it is ALWAYS present and says nothing
 	# when there is nothing to say (bench_notice returns "" for the no-reason key), so the card's height never
 	# moves as reasons come and go.
 	_notice = %Notice
 	MenuStyle.style_hint(_notice)
-	_notice.custom_minimum_size.y = _line_height(_notice)
+	_notice.custom_minimum_size.y = MenuStyle.hint_block_height(_notice, 1)
 	_style_row_inset(%NoticeInset)
 
+	# BOTH sections ride ONE ScrollContainer (see the header): the headings are inside it and scroll away with
+	# their own rows. follow_focus is what makes that safe for a pad — with two viewports each list scrolled its
+	# own focus into view for free, and with one shared viewport a row navigated to below the fold would otherwise
+	# take the highlight off-screen with it.
 	_bind_section_heading(%FittedHeading, %FittedInset, PlayerText.BENCH_FITTED_HEADING)
 	_bind_section_heading(%PartsHeading, %PartsInset, PlayerText.BENCH_PARTS_HEADING)
+	_list_scroll = %ListScroll
+	_list_scroll.follow_focus = true
 	_fitted_list = %FittedList
 	_parts_list = %PartsList
 
@@ -592,14 +628,7 @@ func _bind_ui() -> void:
 	_footer = %Footer
 	_detail = %Detail
 	MenuStyle.style_hint(_detail)  # dim wrap-friendly footnote styling from the skin
-	_footer.custom_minimum_size.y = float(_footer_lines()) * _line_height(_detail)
-
-## One Label's real rendered line height (get_line_height folds the theme's line_spacing), with the shared
-## pre-measurement estimate for the boot frame where the font is not resolvable yet — the inventory_screen
-## fallback, verbatim, because a 0 here would collapse the band or the footer to nothing.
-func _line_height(l: Label) -> float:
-	var h: float = l.get_line_height()
-	return h if h > 0.0 else float(MenuStyle.skin.hint_size + 4)
+	MenuStyle.size_hint_footer(_footer, _detail)  # clip + TOP align + grow END + the true N-line height
 
 ## Adopt one authored section heading: PlayerText string through the single casing seam (headings case with their
 ## shop/loot/install siblings) + header size, and row-inset its Margin wrapper so the heading's left edge sits

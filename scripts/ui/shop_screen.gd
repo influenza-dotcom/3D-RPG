@@ -395,10 +395,14 @@ func _bind_ui() -> void:
 	# its price, which is where prices live now that rows became tiles (a grid cell has no room for a price
 	# column). Fixed-height clip host so a long tooltip can't grow the footer and squeeze the grids above it
 	# (the InventoryScreen / LootScreen construct); the height budget is skin-derived, so it's stamped here.
-	var footer: Control = %Footer
-	footer.custom_minimum_size.y = 4 * (MenuStyle.skin.hint_size + 4)  # same 4-line clip host as the loot screen's
+	# ⭐Four lines, but MEASURED ones. This screen was still on the original `lines * (hint_size + 4)` guess the
+	# other footers were migrated off — 15px per line against a real 18px pitch, so the anchored Label overhung
+	# its 60px host by 27px, half of it ABOVE, and the first line of every price tooltip was sliced through the
+	# glyphs. MenuStyle.hint_block_height carries the measurement; size_hint_footer also pins the grow direction,
+	# which is the half that decides WHICH end an overflow is clipped at.
 	_detail = %Detail
 	MenuStyle.style_hint(_detail)  # dim wrap-friendly footnote styling from the skin
+	MenuStyle.size_hint_footer(%Footer as Control, _detail, 4)
 	_detail.text = _DEFAULT_HINT
 
 ## Adopt one authored grid COLUMN — `column` (wallet heading + scroll slot, authored in the scene) gets the
