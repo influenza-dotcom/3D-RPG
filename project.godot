@@ -93,7 +93,7 @@ navmesh=""
 
 [gui]
 
-theme/custom_font="res://resources/ui/futura_system_font.tres"
+theme/custom_font="res://assets/fonts/tex_gyre_adventor/texgyreadventor-regular.otf"
 
 [input]
 

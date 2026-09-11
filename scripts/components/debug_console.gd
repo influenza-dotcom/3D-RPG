@@ -1364,8 +1364,10 @@ func _field_box() -> StyleBoxFlat:
 	return box
 
 
-## A fixed-pitch face by family name, the same idiom as resources/ui/futura_system_font.tres: ask the OS for the
-## first family it actually has, ending on the generic "monospace" so a non-Windows box still lands on one.
+## A fixed-pitch face by family name: ask the OS for the first family it actually has, ending on the generic
+## "monospace" so a non-Windows box still lands on one. Fine for this DEV-ONLY console. Player-facing text must NOT
+## use this idiom — the game's UI font is a bundled FontFile (project.godot `gui/theme/custom_font`), because a
+## face asked of the OS by name renders differently on every machine and breaks the pixel-measured layout budgets.
 func _system_mono() -> Font:
 	var system := SystemFont.new()
 	system.font_names = mono_families

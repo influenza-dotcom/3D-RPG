@@ -1,7 +1,7 @@
 [gd_resource type="Resource" script_class="MenuSkin" format=3 uid="uid://0fc60wjnbt5h"]
 
 [ext_resource type="Script" uid="uid://0abao0xpythw" path="res://scripts/ui/menu_skin.gd" id="1"]
-[ext_resource type="SystemFont" path="res://resources/ui/futura_system_font.tres" id="2_futura"]
+[ext_resource type="FontFile" path="res://assets/fonts/tex_gyre_adventor/texgyreadventor-regular.otf" id="2_ui_font"]
 [ext_resource type="AudioStream" uid="uid://bff0ut888hxsn" path="res://assets/audio/sfx/ui/menu_ver.wav" id="3_hover"]
 [ext_resource type="AudioStream" uid="uid://c3xmnjx6nqjnm" path="res://assets/audio/sfx/ui/menu_selection.wav" id="4_click"]
 [ext_resource type="AudioStream" uid="uid://c3i16jn6it8gx" path="res://assets/audio/sfx/ui/menu_enter.wav" id="5_open"]
@@ -131,8 +131,8 @@ panel_style = SubResource("sb_panel")
 text_color = Color(0.278431, 0.207843, 0.254902, 1)
 text_dim_color = Color(0.278431, 0.207843, 0.254902, 0.72)
 disabled_text_color = Color(0.278431, 0.207843, 0.254902, 0.32)
-body_font = ExtResource("2_futura")
-title_font = ExtResource("2_futura")
+body_font = ExtResource("2_ui_font")
+title_font = ExtResource("2_ui_font")
 text_shadow_color = Color(0.043137, 0.035294, 0.015686, 0.8)
 button_normal = SubResource("sb_btn_normal")
 button_hover = SubResource("sb_btn_hover")

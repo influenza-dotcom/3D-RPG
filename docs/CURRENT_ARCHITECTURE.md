@@ -2767,10 +2767,15 @@ guarded, and what is deliberately deferred.
   English piece letters only; the boot level's sign texture
   (`tb_textures/textures/sign.png`) is Swedish-language art; the TOS prose ships
   from `resources/ui/terms_of_service.gd`'s baked-in default (no authored
-  `.tres` exists); and **no bundled font has CJK coverage** — the only game font
-  (`resources/ui/futura_system_font.tres`) is a `SystemFont` listing Latin-only
-  face names, so the in-scope CJK SKU needs a real `FontFile` shipped before the
-  `MenuSkin` remap above can even be evaluated.
+  `.tres` exists); and **no bundled font has CJK coverage** — the game font is
+  TeX Gyre Adventor (`assets/fonts/tex_gyre_adventor/`, a bundled `FontFile`,
+  Latin + symbols, ~1,200 code points), so the in-scope CJK SKU needs a CJK
+  `FontFile` added as a fallback before the `MenuSkin` remap above can even be
+  evaluated. (Until 2026-09-11 the font was a `SystemFont` asking the OS for
+  Futura → Century Gothic → Segoe UI → Arial — unshippable faces, and absent on
+  Linux/Deck, where the fallback overflowed the Options card by 8.4 px. Adventor
+  is a free clone of ITC Avant Garde, which Century Gothic was designed to
+  match, so the layout budgets tuned against Century Gothic mostly carry over.)
   CLOSED 2026-07-27, and extended since: right-click context menus (engine-provided
   English) are disabled on every text field we build but one — the three authored
   fields (name entry, character creation, the chess move box) alongside their existing

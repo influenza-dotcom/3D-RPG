@@ -139,6 +139,18 @@ is still in the repository until that deletion is committed.)
 | `assets/models/weirdlittleclayguy.obj` | 14,177,243 (13.5 MB — re-measured 2026-09-01; it was ~452 MB until the file was rewritten in place 2026-08-28) | **yes** — it is the dog's mesh (`scenes/characters/dog.tscn:10`, an `ArrayMesh` `ext_resource`). Not an orphan; it is here purely for size. Note it is gitignored (`.gitignore:39`) while the scene that needs it is tracked, so a fresh clone is missing this mesh. |
 | the 16 Call of Duty PNG sidecars (`assets/models/` + `assets/textures/`, duplicated sets) | ~11.7 MB | none — pure orphans |
 
+## F. Fonts
+
+| ⚠ | `res://` path | Origin | Wired at | Author | License | URL | Checked |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| | `assets/fonts/tex_gyre_adventor/texgyreadventor-regular.otf` (170,364 B) | TeX Gyre Adventor, regular — CTAN `fonts/tex-gyre/opentype/`, downloaded 2026-09-11 | `project.godot` `gui/theme/custom_font` (the project-wide UI font) and `resources/ui/menu_skin.tres` (`body_font` / `title_font`) | GUST e-foundry (B. Jackowski, J. M. Nowacki), derived from URW Gothic L | GUST Font License (LPPL 1.3c-based): free to use and redistribute with its licence text; a *modified* font must be renamed. Text: `assets/fonts/tex_gyre_adventor/GUST-FONT-LICENSE.txt` | `https://www.gust.org.pl/projects/e-foundry/tex-gyre/adventor` | 2026-09-11 |
+
+> **The licence text has to travel with the font.** It is a `.txt`, which `export_filter="all_resources"` does
+> NOT put in the `.pck` — add `assets/fonts/*.txt` to `include_filter` in `export_presets.cfg` (local and
+> gitignored, so it is one machine's setting) and name the font on the Credits screen once one exists.
+> Replaced the old `SystemFont` (Futura → Century Gothic → Segoe UI → Arial): those faces are not redistributable,
+> and none of them exists on Linux / Steam Deck.
+
 ## Vendored addons
 
 | ⚠ | Path | License file |
