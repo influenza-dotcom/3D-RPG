@@ -23,6 +23,8 @@ each content type lives.
 
 ## Current Documentation
 
+- [Contributing](CONTRIBUTING.md) - **start here if you are new**: setup in the right order,
+  branch-and-pull-request workflow, what to commit, house rules, and how to run the tests.
 - [Design](DESIGN.md) - **what the game is and what to work on next.** The premise, the
   three pillars, the core loop, the first ten minutes, and the scope fence. For the question
   "what should I build?" this file outranks every other doc here.
