@@ -46,6 +46,15 @@ Locomotor owns the path-stepping, combat nav-hop, off-mesh recovery, and the ant
 `external_nav` so `host._nav` (CompanionFollow) still resolves to the single agent. The facade methods are UNCHANGED —
 components still call `host._move_toward(...)`; only the body moved. See [`../components/README.md`](../components/README.md).
 
+**Doors (bump-to-open).** `apply_velocity` calls `_open_bumped_doors()` right after `move_and_slide` /
+`_push_interactables`: a wall-like slide contact that the NPC's own steering (`_desired_velocity`) presses INTO, whose
+collider resolves via `Door.of_collider`, gets `Door.npc_try_open(self)`. It works only because levels keep every
+`Door` OUT of the `navmesh` bake source — the bake runs through the doorway, so A* already routes NPCs through it and
+the closed panel's `StaticBody3D` is the sole blocker (a Door inside the bake source raises a config warning). The
+Door owns the rules (unlocked + `npc_can_open`, swing away from the NPC via `npc_swing_away`); a refused door stays a
+wall and the Locomotor's give-up hold takes over. Per-NPC opt-out: `opens_doors`. No per-life state, so
+`reset_for_reuse` has nothing to clear.
+
 ## Retarget-throttle read seam (NpcTargeting)
 
 `npc.gd`'s `_physics_process` drives target acquisition through NpcTargeting via two thin host facades, so the

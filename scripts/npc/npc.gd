@@ -335,6 +335,11 @@ var _pre_panic_threat_response: int = -1
 ## THREATENING-pursuit NPC hops (chasing/searching/escorting, not a passing civilian), only AT the step, on the
 ## floor, and behind a cooldown, so it chases you up a ledge without jump-spamming while it is still running in.
 @export var jump_velocity: float = 4.5
+## Walks through closed DOORS: bumping a closed, unlocked `Door` panel on the way somewhere swings it open (away from
+## this body) instead of pressing against it. Doors never bake into the navmesh, so paths already run through doorways
+## — the panel was the only thing in the way (see _open_bumped_doors). A LOCKED door, or one with `npc_can_open` off,
+## stays a wall. Turn OFF for a body that shouldn't work a handle.
+@export var opens_doors: bool = true
 ## Combat dodge (Feature #5): while ALERTED on a live target, every dodge_interval seconds the enemy
 ## rolls dodge_chance to break into a brief lateral STRAFE (left or right relative to the target) for
 ## dodge_duration, instead of standing still — so it's a harder target without constant jittering. The
@@ -3003,6 +3008,7 @@ func apply_velocity() -> void:
 		if is_on_floor() and not was_grounded:
 			_apply_fall_damage(-pre_move_velocity.y)
 		_push_interactables(pre_move_velocity)
+		_open_bumped_doors()  # a closed Door panel we just walked into swings open (same fresh slide contacts)
 		# Post-slide: a riser reached DURING the slide gets one more step-up try; failing that, catch a descending tread
 		# so the body walks DOWN stairs instead of launching off each nosing.
 		var stepped_after_slide := can_step_up and _locomotor.try_step_up(self, global_transform, pre_move_velocity, delta)
@@ -3020,6 +3026,37 @@ func apply_velocity() -> void:
 	# Cosmetic: ease the visual model over any riser step-up the body just snapped (only try_step_up snaps set last_step_rise,
 	# and only when can_step_up ran this frame). Runs every frame so the offset also DECAYS when no step occurred.
 	_smooth_stair_step(_locomotor.last_step_rise if (can_step_up and _locomotor != null) else 0.0, delta)
+
+# --- Bump-to-open doors (see _open_bumped_doors). Contact-geometry gates, not gameplay tuning. ---
+const DOOR_BUMP_MAX_NORMAL_Y := 0.5  ## a contact normal steeper than this is floor/ceiling, never a panel in our way
+const DOOR_BUMP_MIN_INTO := 0.3      ## min dot(steering dir, into the contact): pressing INTO the panel, not grazing along it
+
+## BUMP-TO-OPEN DOORS. A Door never bakes into the navmesh (levels keep it outside the `navmesh` bake source, and the
+## Door warns when it isn't), so A* already routes us THROUGH doorways and the closed panel's StaticBody3D is the only
+## thing in the way. Walking into that panel opens it. Reads THIS frame's slide contacts (no extra ray or shape query),
+## and only a WALL-like contact our own steering presses INTO — so brushing a door frame, standing beside a door, or
+## being blasted into one never fires it. _desired_velocity is the honest intent (re-zeroed every think; see the
+## update_stuck note in apply_velocity); while the anti-stuck side-step owns it, it runs ALONG the blocker and reads as
+## grazing. Door.npc_try_open owns the rules (unlocked + npc_can_open, swing away from us); a refused door stays a wall
+## and the Locomotor's give-up hold takes over exactly as before. No per-life state, so reset_for_reuse is untouched.
+func _open_bumped_doors() -> void:
+	if not opens_doors:
+		return
+	var want := Vector3(_desired_velocity.x, 0.0, _desired_velocity.z)
+	if want.length_squared() < 0.01:
+		return  # not trying to go anywhere: leaning on a door is not a request to open it
+	want = want.normalized()
+	for i in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		var n := c.get_normal()
+		if absf(n.y) > DOOR_BUMP_MAX_NORMAL_Y or want.dot(-n) < DOOR_BUMP_MIN_INTO:
+			continue
+		var collider: Object = c.get_collider()
+		if not is_instance_valid(collider):
+			continue  # validity FIRST, before any `as` (a freed collider errors on the cast)
+		var door := Door.of_collider(collider as Node)
+		if door != null:
+			door.npc_try_open(self)
 
 ## Cosmetic stair step-smoothing — the NPC counterpart of the Player's CameraEffects.step_smooth. The Locomotor's
 ## step-up SNAPS the body up a riser instantly (nav + collision must be exact), so without this the visual `mesh`
