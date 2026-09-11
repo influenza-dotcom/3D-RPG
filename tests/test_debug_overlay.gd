@@ -54,14 +54,17 @@ func test_player_state_text_formats_known_facts() -> void:
 		"hp": 3.0, "max_hp": 4.0,
 		"stamina": 80.0, "max_stamina": 100.0,
 		"money": 250.0, "account": -40.0,
-		"pos": Vector3(1.25, 2.0, -3.75),
+		# NOT exact binary ties like 1.25 / -3.75: "%.1f" breaks a tie with the platform C library, and Windows (msvcrt,
+		# half away from zero -> 1.3) and Linux (glibc, half to even -> 1.2) disagree — this test used to pass only on
+		# Windows and failed CI. Same idiom as test_text_format.gd's "2.26, not 2.25".
+		"pos": Vector3(1.26, 2.0, -3.74),
 		"time": 0.5, "level": "trenchboom",
 	})
 	assert_string_contains(txt, "HP 3/4")
 	assert_string_contains(txt, "Stam 80/100")
 	assert_string_contains(txt, "z 250")
 	assert_string_contains(txt, "bank -40")
-	assert_string_contains(txt, "@ 1.3 2.0 -3.8")  # %.1f rounds half away from zero: 1.25 -> 1.3
+	assert_string_contains(txt, "@ 1.3 2.0 -3.7")
 	assert_string_contains(txt, "12:00")
 	assert_string_contains(txt, "trenchboom")
 
