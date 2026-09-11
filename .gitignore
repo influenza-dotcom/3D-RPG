@@ -27,21 +27,10 @@ mono_crash.*.json
 Thumbs.db
 .DS_Store
 
-# Large source art that is deliberately NOT tracked. These were root-anchored while the files sat loose at
-# the project root; the 2026-07-27 tree cleanup filed them under assets/, so the rules follow them there.
-# They are LIVE (scenes/dog.tscn and scenes/dogcrate.tscn reference them), so a fresh clone still boots with
-# those two prefabs unresolved -- a pre-existing gap this move did not create and did not fix.
-# Do NOT simply un-ignore them: weirdlittleclayguy.obj alone is 432 MB and .gitattributes' LFS rules cover
-# *.glb/*.png/*.jpg/*.ogg/*.wav but NOT *.obj/*.mp3/*.blend, so it would land as a raw blob (and GitHub
-# rejects >100 MB). Tracking them means adding LFS rules for those extensions FIRST.
-assets/audio/sfx/aww.mp3
-assets/audio/sfx/aww.mp3.import
-assets/models/weirdlittleclayguy.obj
-assets/models/weirdlittleclayguy.obj.import
-assets/models/dogcrate/dogcrate.glb
-assets/models/dogcrate/dogcrate.glb.import
-# NOT renamed to snake_case: dogcrate.glb embeds this texture and imports with
-# gltf/embedded_image_handling=1 (Extract Textures), so Godot RE-EXTRACTS it under this exact name on every
-# reimport. Renaming it just leaves a stale orphan beside the regenerated original.
-assets/models/dogcrate/dogcrate_Material Base Color.png
-assets/models/dogcrate/dogcrate_Material Base Color.png.import
+# The dog's source art (assets/models/weirdlittleclayguy.obj, assets/models/dogcrate/*,
+# assets/audio/sfx/aww.mp3) used to be ignored here while the mesh was 432 MB. It was slimmed to 14 MB and has
+# been TRACKED since 2026-09-10 (the .obj through LFS — see .gitattributes), because scenes/characters/dog.tscn
+# and scenes/props/dogcrate.tscn are live and a clone without them fails four content tests in CI.
+# Do not re-ignore them. `dogcrate_Material Base Color.png` keeps its non-snake_case name on purpose:
+# dogcrate.glb embeds that texture and imports with gltf/embedded_image_handling=1 (Extract Textures), so Godot
+# re-extracts it under that exact name on every reimport; renaming it just leaves a stale orphan.

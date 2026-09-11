@@ -347,6 +347,14 @@ change what the plan said:
   referenced by nothing, so a naive fetch burns the LFS bandwidth quota on every push. The fix is ordered —
   drop the unreferenced giants and populate `exclude_filter` (**2.6**) *first*, then enable LFS here. Because
   of this, the boot gate landed **`continue-on-error: true`**; flip it to blocking after one green CI run.
+  **RESOLVED 2026-09-10 — and "the unit suite never noticed" was wrong: it is why CI was red on every push.**
+  Tuning resources hard-reference assets (`DialogueSettings.tres` → a `.wav`), so on pointers that `.tres`
+  fails to parse, `AudioManager` fails to compile and the `GameSettings` groups go Nil: 1,631 of 5,020 tests
+  failed at `fa8b275f`, versus 5 of 5,331 with the real files. dog.glb left the tree on 09-03, so the ordering
+  above no longer blocks: both CI jobs now `git lfs pull` through an `actions/cache` keyed on the LFS object-id
+  list (no `lfs: true` — that bypasses the cache). The 5 were the then-gitignored dog art (now tracked) and a
+  `test_start_menu` assert that pinned `get_child(0)` (ContinueButton, hidden without a save). Flip the boot
+  gate to blocking once the first green run lands.
 - **A bug the plan never saw.** `tests/run.cmd`, `tests_soak/run_soak.cmd` and
   `scripts/tools/validate.cmd` all ended with a bare `popd`. A `.cmd` exits with the status of its **last**
   command, so every one of them **reported success for a failing run** — including `validate.cmd`, which

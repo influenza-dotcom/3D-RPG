@@ -180,14 +180,23 @@ func test_internet_warning_skip_shields_menu_buttons() -> void:
 			assert_false((child as BaseButton).disabled, "buttons stay enabled after the shield releases")
 	# MOUSE-FIRST: release must leave NOTHING focused — an auto-focused button read as pre-highlighted and its
 	# focus ring fought the mouse hover. Keyboard users opt in: the first ui_down with nothing focused seeds
-	# focus on the first button (_seed_focus_on_keyboard_intent), and only navigation keys seed — a bare
+	# focus on the first VISIBLE button (_seed_focus_on_keyboard_intent), and only navigation keys seed — a bare
 	# confirm press at an unfocused menu activates nothing.
 	assert_null(inst.get_viewport().gui_get_focus_owner(), "release leaves nothing focused (mouse-first; no pre-highlighted button)")
 	var nav := InputEventAction.new()
 	nav.action = &"ui_down"
 	nav.pressed = true
 	inst._input(nav)
-	assert_true((inst._buttons.get_child(0) as Control).has_focus(), "the first keyboard navigation press seeds focus on demand")
+	# Resolve the expected button the way the menu does — never get_child(0). Child 0 is ContinueButton, which is
+	# HIDDEN when user:// holds no save, so pinning it made this test pass only on a machine that had played the
+	# game (the dev box) and fail on every clean checkout (CI).
+	var first_visible: Control = null
+	for child in inst._buttons.get_children():
+		if child is Control and (child as Control).visible:
+			first_visible = child as Control
+			break
+	assert_not_null(first_visible, "the menu shows at least one button")
+	assert_true(first_visible != null and first_visible.has_focus(), "the first keyboard navigation press seeds focus on the first VISIBLE button")
 
 func test_intro_quote_skips_on_click_or_key_press() -> void:
 	var scene := load("res://scenes/start_menu.tscn") as PackedScene

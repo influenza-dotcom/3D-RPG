@@ -52,10 +52,16 @@ doc in the same change.
 
 ## Running
 
-1. Open `project.godot` in **Godot 4.7**.
-2. Press **F5** (Run Project). The main scene is `scenes/computerroom.tscn` — the
+1. **Install Git LFS before you clone** (`git lfs install`, then `git clone`). Textures, models
+   and sounds live in LFS; without it they arrive as ~130-byte pointer files. **Do not open the
+   project until the real files are there:** Godot's import over a pointer rewrites every tracked
+   `.import` file to `valid=false`, and pulling LFS afterwards does NOT undo that. Recovery:
+   `git lfs pull`, then `git checkout -- '*.import'`, then reopen — and never commit those
+   rewritten `.import` files.
+2. Open `project.godot` in **Godot 4.7**.
+3. Press **F5** (Run Project). The main scene is `scenes/computerroom.tscn` — the
    computer-room intro that hosts the start menu.
-3. Let the editor finish any first-launch imports before judging missing assets.
+4. Let the editor finish any first-launch imports before judging missing assets.
 
 Running `scenes/game.tscn` directly is a level-authoring shortcut, not the way in.
 The internet-warning card, the TOS gate, character creation and the implant
