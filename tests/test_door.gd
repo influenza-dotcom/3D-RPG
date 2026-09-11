@@ -62,6 +62,10 @@ func test_look_name_reflects_state() -> void:
 
 func test_config_warning_without_pivot() -> void:
 	var door := Door.new()
+	# This pins the MISSING-PIVOT warning only. Doors are destructible by default, and a bare Node3D pivot has no
+	# damage-taking blocker, so the durability warning (its own test: test_config_warning_when_the_blocker_cannot_take_damage)
+	# would fire here too and fail "no warning once a pivot is assigned" — switch durability off to isolate this one.
+	door.destructible = false
 	assert_false(door._get_configuration_warnings().is_empty(), "warns when pivot is unassigned")
 	var pivot := Node3D.new()
 	door.pivot = pivot
