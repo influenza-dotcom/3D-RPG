@@ -209,24 +209,39 @@ func test_a_bare_instance_staggers_without_ever_entering_the_tree() -> void:
 	b.free()
 
 
-func test_two_npcs_entering_a_band_together_do_not_fire_on_the_same_tick() -> void:
-	# The convoy case the stagger exists for: a cohort that walks out of near range together. Drive two
-	# instances with identical inputs and assert their FIRST thinks land on different ticks.
-	var a: Node = AiLodScript.new()
-	var b: Node = AiLodScript.new()
-	var first_a := -1
-	var first_b := -1
-	for i in 30:
-		if a.think_delta(1.0 / 120.0, 100.0, false) > 0.0 and first_a < 0:
-			first_a = i
-		if b.think_delta(1.0 / 120.0, 100.0, false) > 0.0 and first_b < 0:
-			first_b = i
-	assert_true(first_a >= 0 and first_b >= 0, "both must think within one far-band window")
-	assert_ne(first_a, first_b,
-			"two NPCs entering the far band on the same tick must not think on the same tick — that is "
-			+ "exactly the periodic spike the stagger exists to prevent")
-	a.free()
-	b.free()
+func test_a_cohort_entering_a_band_together_fans_out_across_ticks() -> void:
+	# The convoy case the stagger exists for: a cohort that walks out of near range together. Drive a cohort with
+	# identical inputs and assert their FIRST thinks fan out across the window instead of landing on one tick.
+	#
+	# ⭐ Asserted as a SPREAD over a cohort, never as "these two differ". A phase is a hash of the instance id and
+	# the first think quantises it to one of FAR_INTERVAL / dt = 30 ticks, so ANY two instances share a tick about
+	# 1 time in 30 by plain coincidence — and which ids a test receives depends on how many objects every earlier
+	# test allocated. The old two-instance form therefore failed ~3% of FULL-suite runs while passing every
+	# isolated run (it turned CI red on 2026-09-10). A working stagger puts 20 NPCs on ~15 distinct ticks; a broken
+	# one (a shared phase) puts all 20 on ONE. The floor of 8 sits far below the first and far above the second.
+	const COHORT := 20
+	const DT := 1.0 / 120.0
+	# +2: thirty sums of 1/120 can land a hair under 0.25, so a phase near 0 may first think one tick late.
+	var ticks := roundi(FAR_INTERVAL / DT) + 2
+	var cohort: Array[Node] = []
+	for n in COHORT:
+		cohort.append(AiLodScript.new())
+	var on_tick := {}  # tick index -> how many of the cohort first thought on it
+	for lod in cohort:
+		for i in ticks:
+			if lod.think_delta(DT, 100.0, false) > 0.0:
+				on_tick[i] = int(on_tick.get(i, 0)) + 1
+				break
+	var thought := 0
+	for k in on_tick:
+		thought += int(on_tick[k])
+	assert_eq(thought, COHORT, "every NPC in the cohort must think within one far-band window")
+	assert_gte(on_tick.size(), 8,
+			"a cohort entering the far band together must fan out across the window — %d NPCs on only %d "
+			% [COHORT, on_tick.size()]
+			+ "distinct ticks is the periodic spike the stagger exists to prevent")
+	for lod in cohort:
+		lod.free()
 
 
 func test_re_entering_a_throttled_band_re_staggers() -> void:
