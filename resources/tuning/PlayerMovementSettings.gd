@@ -130,8 +130,13 @@ extends Resource
 ## dash, grapple, and the per-frame sprint / wall-climb drains); a SHOT holds regen for the longer
 ## stamina_regen_delay_after_shot below instead. Every spend re-FLOORS this countdown rather than adding to it,
 ## so holding a drain down keeps regen frozen for as long as it lasts plus this tail.
+## ⭐ This is the BUFFER the ring reads as "I spent that". At 0.35s it was below the threshold a player can
+## see: let go of Run and the arc started climbing on the very next frame, so sprinting felt free and the pool
+## read as a soft speed cap rather than a resource. At 1.0s there is an unmistakable beat of nothing before
+## recovery starts, which is what makes a spend cost something and rewards not spending again immediately.
 ## ⚠ Raising this is felt hardest by BUNNYHOPPING, where a chain of jumps re-arms it on every launch.
-@export var stamina_regen_delay_after_spend: float = 0.35
+## ⚠ Must stay BELOW stamina_regen_delay_after_shot (tests/test_settings_load.gd asserts the ordering).
+@export var stamina_regen_delay_after_spend: float = 1.0
 ## Seconds a RANGED SHOT holds off recovery — deliberately much longer than the movement delay above, and the
 ## knob that decides whether shooting can deplete you at all.
 ##

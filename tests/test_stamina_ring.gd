@@ -5,10 +5,16 @@ extends GutTest
 ## the idle fade target, the shipped HudSettings defaults, the Settings toggle, and the mode routing on
 ## a bare UI (no _ready, no scene tree). The on-screen look (the ring hugging the live crosshair, the
 ## annulus fit against the combat arcs) is playtest territory.
+##
+## ALSO the SPEND CHIP (scripts/ui/stamina_chip.gd) — the white shard left behind by stamina you just
+## spent, which BOTH readouts paint from one shared tracker: the tracker's hold/slide state machine, and the
+## two pure geometry helpers that place it (RING.chip_span for the arc, UI.stamina_chip_band for
+## the corner bar's rect).
 
 ## Loaded BY PATH (not the class_name) so the suite parses even before the editor registers the new
 ## global class — the same cache-cascade guard the runtime wiring uses.
 const RING := preload("res://scripts/ui/stamina_ring.gd")
+const CHIP := preload("res://scripts/ui/stamina_chip.gd")
 
 var _prev_loaded: bool
 var _prev_ring_enabled: bool
@@ -284,3 +290,120 @@ func test_an_adopted_full_pool_does_not_linger() -> void:
 	assert_almost_eq(ring._alpha_mult, _idle_alpha(), 0.001,
 		"an adopted full pool skips the hold entirely — it never lingers lit over a revive/level load")
 	ring.free()
+
+# --- the SPEND CHIP: geometry ------------------------------------------------------------------------
+
+func test_chip_span_covers_the_arc_between_the_fill_tip_and_the_head() -> void:
+	# Default gauge (start 180, sweep -180): fill 0.5 ends at the bottom (90 deg), a head of 0.8 ends at
+	# 36 deg. The band is exactly the arc between them — it starts where the coloured fill STOPS.
+	var s: Vector2 = RING.chip_span(0.5, 0.8, 180.0, -180.0)
+	assert_almost_eq(s.x, deg_to_rad(90.0), 0.0001, "the band starts at the live fill's tip")
+	assert_almost_eq(s.y, deg_to_rad(36.0), 0.0001, "…and ends where the fill WAS before the spend")
+
+func test_chip_span_collapses_when_nothing_is_owed() -> void:
+	var same: Vector2 = RING.chip_span(0.6, 0.6, 180.0, -180.0)
+	assert_almost_eq(same.y, same.x, 0.0001, "a head level with the fill spans zero degrees — a rested pool paints no band")
+	var stale: Vector2 = RING.chip_span(0.6, 0.2, 180.0, -180.0)
+	assert_almost_eq(stale.y, stale.x, 0.0001,
+		"a head BELOW the fill (a stale or unstamped value) also collapses — it can never paint a backwards arc")
+
+func test_stamina_chip_band_tiles_the_track_with_the_fill() -> void:
+	# The corner bar's half of the same geometry: (x, width) inside a track of the given width.
+	var band: Vector2 = UI.stamina_chip_band(100.0, 0.4, 0.9)
+	assert_almost_eq(band.x, 40.0, 0.001, "the band starts exactly at the fill's right edge — no gap, no overlap")
+	assert_almost_eq(band.y, 50.0, 0.001, "…and is as wide as the spend it represents")
+	assert_almost_eq(band.x + band.y, 90.0, 0.001, "fill + band together end at the pre-spend level")
+
+func test_stamina_chip_band_is_empty_when_nothing_is_owed_and_never_overhangs() -> void:
+	assert_almost_eq(UI.stamina_chip_band(100.0, 0.5, 0.5).y, 0.0, 0.001, "a rested pool has no band (the hide test)")
+	assert_almost_eq(UI.stamina_chip_band(100.0, 0.5, 0.2).y, 0.0, 0.001, "a head below the fill is clamped away, never negative")
+	var over: Vector2 = UI.stamina_chip_band(100.0, 0.9, 3.0)
+	assert_almost_eq(over.x + over.y, 100.0, 0.001, "an over-unity head is clamped to the track — the band can never overhang it")
+
+# --- the SPEND CHIP: the hold/slide tracker -------------------------------------------------------------
+
+## Shipped-knob driven, at a fixed 60 fps, so a designer retuning the knobs retunes these tests with them.
+func _frames(seconds: float) -> int:
+	return int(round(seconds * 60.0))
+
+func test_the_shard_holds_at_the_spend_then_slides_down_to_the_live_fill() -> void:
+	var t = CHIP.new()
+	t.sync(1.0)
+	var head: float = t.advance(0.7, 1.0 / 60.0)
+	assert_almost_eq(head, 1.0, 0.001,
+		"the frame you spend, the head STAYS where the fill was — the shard's length IS what that verb cost")
+	assert_true(t.has_chip(0.7), "…so there is a shard to paint")
+	for _i in maxi(1, _frames(GameSettings.hud.stamina_chip_delay) - 2):
+		t.advance(0.7, 1.0 / 60.0)
+	assert_almost_eq(t.value, 1.0, 0.001, "inside the hold the shard does not move — it is a receipt, not an animation")
+	# Let the hold expire and the slide run well past the distance it actually has to cover.
+	var slide_frames := _frames(1.0 / maxf(GameSettings.hud.stamina_chip_speed, 0.001)) + 10
+	for _i in slide_frames:
+		t.advance(0.7, 1.0 / 60.0)
+	assert_almost_eq(t.value, 0.7, 0.001, "the slide lands EXACTLY on the live fill and stops — never below it, never short of it")
+	assert_false(t.has_chip(0.7), "…and there is nothing left to paint")
+	t = null
+
+func test_a_continuous_drain_parks_one_shard_instead_of_a_dozen_slivers() -> void:
+	# Sprinting drops the pool every frame. Each drop RESTARTS the hold clock (never stacks it), so the head
+	# stays at the level the sprint STARTED from and the band grows across the whole run — one block that
+	# reads "this is what the sprint cost", rather than 60 slivers each sliding on their own clock.
+	var t = CHIP.new()
+	t.sync(1.0)
+	var f := 1.0
+	for _i in 30:
+		f -= 0.02
+		t.advance(f, 1.0 / 60.0)
+	assert_almost_eq(t.value, 1.0, 0.001, "the head is still at the pre-sprint level half a second into the drain")
+	assert_almost_eq(t.value - f, 0.6, 0.001, "and the band spans the whole of what the sprint has burned so far")
+	t = null
+
+func test_a_refill_swallows_the_shard_from_the_left() -> void:
+	# Recovery needs no animation of its own: the fill climbs back INTO the shard and eats it. The moment
+	# they meet the chip is over — no leftover white sitting on top of a full pool.
+	var t = CHIP.new()
+	t.sync(1.0)
+	t.advance(0.5, 1.0 / 60.0)
+	assert_true(t.has_chip(0.5), "the spend leaves a band")
+	assert_almost_eq(t.advance(0.8, 1.0 / 60.0), 1.0, 0.001, "a partial refill shrinks the shard from the left, head unmoved")
+	assert_almost_eq(t.advance(1.0, 1.0 / 60.0), 1.0, 0.001, "a full refill meets the head…")
+	assert_false(t.has_chip(1.0), "…and ends the chip")
+	t = null
+
+func test_sync_adopts_a_pool_that_moved_off_screen() -> void:
+	# The same "never animate a change nobody watched" contract as the ring's _fade_primed latch: ui.gd
+	# syncs instead of stepping on every frame the readout is hidden (dialogue, the death cinematic), so a
+	# drain the player never saw doesn't come back owing a white shard over the fade-up.
+	var t = CHIP.new()
+	t.sync(1.0)
+	t.advance(0.4, 1.0 / 60.0)
+	assert_true(t.has_chip(0.4), "a watched spend owes a shard")
+	t.sync(0.4)
+	assert_almost_eq(t.value, 0.4, 0.001, "sync adopts the live pool outright")
+	assert_false(t.has_chip(0.4), "…owing nothing")
+	t.advance(0.4, 1.0 / 60.0)
+	assert_false(t.has_chip(0.4), "and the frame after a sync is not a DROP — the adoption itself arms nothing")
+	t = null
+
+func test_hud_settings_chip_defaults_clear_before_the_pool_starts_refilling() -> void:
+	var h := HudSettings.new()
+	assert_eq(Color(h.stamina_chip_color, 1.0), Color(1.0, 1.0, 1.0, 1.0),
+		"the just-spent shard is WHITE (user call) — it must read as absence, not as another level on the fill gradient")
+	assert_gt(h.stamina_chip_delay, 0.0, "the shard must HOLD long enough to be seen at all")
+	assert_gt(h.stamina_chip_speed, 0.0, "…and must actually slide away, or it is a permanent second gauge")
+	assert_lt(h.stamina_chip_delay, GameSettings.player_movement.stamina_regen_delay_after_spend,
+		"the hold ends BEFORE the post-spend regen freeze does, so the shard is already sliding when the pool starts climbing back — two motions in sequence, not fighting each other")
+	h = null
+
+func test_a_fresh_tracker_adopts_its_first_frame_instead_of_reading_it_as_a_spend() -> void:
+	# The same "1.0 is a don't-care initialiser, not a level anyone had" argument as the ring's
+	# _fade_primed latch — and the same failure it prevents: a HUD built over a pool that ISN'T full (a
+	# save loaded half-spent, a level load mid-run) used to paint a phantom shard from full down to the
+	# real level on its very first frame, for a spend that never happened.
+	var c = CHIP.new()
+	assert_almost_eq(c.advance(0.35, 1.0 / 60.0), 0.35, 0.001, "the first live frame lands ON the pool, wherever it is")
+	assert_false(c.has_chip(0.35), "…owing nothing")
+	# …and the frame after is a normal step again, so a REAL spend still registers.
+	assert_almost_eq(c.advance(0.2, 1.0 / 60.0), 0.35, 0.001, "the next drop is a real spend and does leave a shard")
+	assert_true(c.has_chip(0.2), "…which is there to paint")
+	c = null

@@ -134,6 +134,7 @@ var _quest_tracker: Label  ## top-right active-objective line, refreshed off the
 ## before the editor registers the new class_names in its global cache (the SniperGlints idiom in
 ## player_hud.gd — "Could not find type X" cascade guard).
 const STAMINA_RING_SCRIPT := preload("res://scripts/ui/stamina_ring.gd")
+const STAMINA_CHIP_SCRIPT := preload("res://scripts/ui/stamina_chip.gd")
 const HUD_SWAY_SCRIPT := preload("res://scripts/ui/hud_sway.gd")
 const HUD_CLOCK_SCRIPT := preload("res://scripts/ui/hud_clock.gd")
 const HUD_COMPASS_SCRIPT := preload("res://scripts/ui/hud_compass.gd")
@@ -208,6 +209,13 @@ var _hp_seg_w: float = GameSettings.hud.hp_seg_size.x  ## current segment width;
 var _stamina_bar: Control
 var _stamina_bg: ColorRect      ## the stamina track — its WIDTH follows the HP bar's rendered width (see _update_hp_bar)
 var _stamina_fill: ColorRect
+## The white SPEND CHIP rect, drawn in the track between the fill's right edge and where the fill was.
+var _stamina_chip_rect: ColorRect
+## The shard's tracker (StaminaChip) — ONE instance feeding BOTH readouts, so the ring and the corner bar
+## always owe the same band and a mid-life Options mode swap doesn't restart the animation. Untyped +
+## preloaded by path (the STAMINA_RING_SCRIPT cache guard); built at var-init so a bare UI.new() in a test
+## — which never runs _ready — can step it straight away.
+var _stamina_chip = STAMINA_CHIP_SCRIPT.new()
 ## The radial stamina gauge around the crosshair (StaminaRing) — the SHIPPED default readout; the corner
 ## bar above is its accessibility fallback. Exactly ONE of the two is visible (_apply_stamina_mode,
 ## polled live off Settings.stamina_ring_enabled). Untyped: built from STAMINA_RING_SCRIPT (cache guard).
@@ -867,6 +875,17 @@ func _build_stamina_bar() -> void:
 	_stamina_fill.color = STAMINA_FILL
 	_stamina_fill.size = STAMINA_BAR_SIZE
 	bg.add_child(_stamina_fill)
+	# The SPEND CHIP rect: a third rect in the same track, sitting immediately right of the fill and
+	# running back to where the fill WAS (see stamina_chip.gd). It is a SIBLING of the fill rather than
+	# a widened fill because the two carry different colours and only ever abut — the fill's right edge
+	# is the boundary — so neither has to know how the other is drawn. Added AFTER the fill so the fill's
+	# edge stays on top if rounding ever overlaps them by a pixel.
+	_stamina_chip_rect = ColorRect.new()
+	_stamina_chip_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stamina_chip_rect.color = GameSettings.hud.stamina_chip_color
+	_stamina_chip_rect.size = Vector2(0.0, STAMINA_BAR_SIZE.y)
+	_stamina_chip_rect.visible = false
+	bg.add_child(_stamina_chip_rect)
 
 ## Show/hide gameplay readouts that should not sit over focused dialogue. The stamina readout routes
 ## through _apply_stamina_mode (which composes this flag with the ring/bar mode choice) so dialogue
@@ -1291,6 +1310,16 @@ static func stamina_bar_fill(cur_stamina: float, max_stamina: float) -> float:
 		return 1.0
 	return clampf(cur_stamina / max_stamina, 0.0, 1.0)
 
+## Pure: the white SPEND CHIP band inside a track `track_w` px wide, as (x, width) — it starts at the
+## fill's right edge and runs to the shard's head. Static for the same reason stamina_bar_fill is: "the
+## band tiles the track with the fill and never overhangs it" is a layout INVARIANT, and the track's width
+## is not a constant (it follows the HP bar's rendered width, which shrinks with max_hp). A head at or
+## below the fill returns a zero width, which is the caller's hide test.
+static func stamina_chip_band(track_w: float, fill_frac: float, chip_frac: float) -> Vector2:
+	var f := clampf(fill_frac, 0.0, 1.0)
+	var head := clampf(maxf(chip_frac, f), 0.0, 1.0)
+	return Vector2(track_w * f, track_w * (head - f))
+
 ## The player's live stamina fraction — the ONE source both readout modes draw from (a hostless /
 ## stamina-less Character degrades to a full pool, which the ring idle-fades to near-invisible).
 func _stamina_frac() -> float:
@@ -1302,25 +1331,49 @@ func _stamina_frac() -> float:
 ## centre is re-stamped from the CROSSHAIR'S LIVE RECT every frame — never from the viewport centre —
 ## because Player._update_crosshair repositions the reticle each frame (today to screen centre; the
 ## moment that policy sways, a viewport-anchored ring would visibly detach from the reticle it annotates).
-func _update_stamina_readout() -> void:
+func _update_stamina_readout(delta: float) -> void:
 	_apply_stamina_mode()
+	var f := _stamina_frac()
+	# THE SPEND CHIP is stepped ONCE per frame, here, whichever readout is up — one tracker, one band, so
+	# swapping modes in the Options mid-drain hands the other widget the animation already in progress.
+	# It must never animate a spend nobody watched (the ring's _fade_primed rule, and the same
+	# _death_hidden_hud bail _apply_stamina_mode takes): on an off-screen frame ADOPT the pool instead of
+	# stepping, so a drain during dialogue or under the death fade doesn't come back owing a white band.
+	# Explicitly TYPED (not `:=`): advance() comes back off an untyped script instance, and the house rule is
+	# never to infer a local from a Variant — the same reason GameSettings reads are typed at the seam.
+	var g: float = f
+	if _gameplay_hud_visible and _death_hidden_hud.is_empty():
+		g = _stamina_chip.advance(f, delta)
+	else:
+		_stamina_chip.sync(f)
 	if _stamina_ring != null and Settings.stamina_ring_enabled:
 		if crosshair != null:
 			_stamina_ring.centre = crosshair.position + crosshair.size * 0.5
-		_stamina_ring.fill = _stamina_frac()
+		_stamina_ring.fill = f
+		_stamina_ring.chip = g
 	elif _stamina_bar != null:
-		_update_stamina_bar()
+		_update_stamina_bar(f, g)
 
-func _update_stamina_bar() -> void:
+func _update_stamina_bar(f: float, chip: float) -> void:
 	if _stamina_fill == null or not player.has_method(&"stamina_max"):
 		return
-	var f := _stamina_frac()
 	_stamina_fill.size.x = _stamina_w * f
 	_stamina_fill.visible = f > 0.001
 	# Same CONTINUOUS blue->yellow blend as the crosshair ring (StaminaRing.ring_color, user call) — the
 	# colour IS the level in both modes, no threshold snap. One blend function drives both readouts, so
 	# the two stamina dialects can never drift apart again.
 	_stamina_fill.color = STAMINA_RING_SCRIPT.ring_color(f, STAMINA_FILL, STAMINA_LOW)
+	if _stamina_chip_rect == null:
+		return
+	# The white shard picks up exactly where the fill ends and runs to its head, so the two rects
+	# tile the track's USED length between them and the dark stamina_empty backing shows only what is
+	# genuinely gone for now. Widths come off the same _stamina_w the fill uses (the shared HP-bar width),
+	# so the band can never overhang the track when max_hp shrinks it.
+	var band := stamina_chip_band(_stamina_w, f, chip)
+	_stamina_chip_rect.visible = band.y > 0.001
+	_stamina_chip_rect.position.x = band.x
+	_stamina_chip_rect.size = Vector2(band.y, STAMINA_BAR_SIZE.y)
+	_stamina_chip_rect.color = GameSettings.hud.stamina_chip_color  # live-read, like every other HUD knob
 
 ## Impact kick — the DISCRETE channel into the HUD-weight spring (see HudSway's header for the two-channel
 ## model). Any camera-impacting event whose motion is POSITIONAL (invisible to the rotational basis
@@ -1846,7 +1899,7 @@ func _process(delta: float) -> void:
 	if is_instance_valid(player) and _hp_bar != null:
 		_update_hp_bar()
 	if is_instance_valid(player):
-		_update_stamina_readout()
+		_update_stamina_readout(delta)
 	# Deliberately NOT gated on a live player: the Options toggle has to work on any frame, including the
 	# ones around a death/respawn where `player` is briefly invalid.
 	_apply_minimap_visibility()

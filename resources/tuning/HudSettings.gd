@@ -76,6 +76,30 @@ extends Resource
 ## Fill colour once stamina is nearly exhausted.
 @export var stamina_low: Color = Color(0.95, 0.78, 0.25, 1.0)
 
+# THE SPEND CHIP (scripts/ui/stamina_chip.gd) — the white shard left behind by stamina you JUST spent,
+# painted between the live fill and where the fill WAS, so a spend is something you SEE rather than a
+# gauge that is silently shorter next frame. Shared by BOTH readouts (the corner bar paints a rect past
+# the fill's right edge, the ring an arc past the fill's tip) off ONE tracker, so the two stamina dialects
+# can't drift apart. White on purpose: blue reads as "have", yellow as "low", white as "just gone" — a
+# fourth hue would turn the gauge into a colour puzzle.
+# ⭐ DELIBERATELY the same three knobs, the same names and the same law as the enemy health bar's damage
+# chip below (enemy_hp_chip_color / _delay / _speed — StaminaChip calls EnemyHealthBar.chip_step). One
+# white-shard language for "what a moment ago took away", whether it is their health or your stamina;
+# retune one pair and you should be asking whether the other wants the same.
+## Colour of the just-spent shard. It must read as absence-of-fill rather than as another level, so it is
+## deliberately NOT on the fill->low gradient.
+@export var stamina_chip_color: Color = Color(1.0, 1.0, 1.0, 0.95)
+## Seconds the shard HOLDS at full length before it starts sliding down to the live fill. The clock restarts
+## on every frame the pool drops (never stacks), so one continuous drain — a sprint, a wall climb — leaves
+## ONE block that only begins sliding once the drain ends.
+## ⭐ Read this against player_movement.stamina_regen_delay_after_spend (1.0 s): the hold must END inside
+## that freeze, so the shard is already sliding when the pool starts climbing back and the beats read in
+## sequence ("spent -> it sits there -> it comes back") instead of fighting each other.
+@export var stamina_chip_delay: float = 0.35
+## How fast the shard slides once the hold expires, in FRACTIONS OF THE FULL POOL per second (0.9 = a shard
+## spanning the whole gauge clears in ~1.1 s). Constant-rate, not an ease: the slide must visibly END.
+@export var stamina_chip_speed: float = 0.9
+
 @export_group("Stamina ring")
 # The SHIPPED stamina readout: an arc around the crosshair (scripts/ui/stamina_ring.gd), so stamina is
 # readable without leaving the aim point. The corner bar above stays the accessibility fallback

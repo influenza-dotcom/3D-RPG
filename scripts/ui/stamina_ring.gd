@@ -34,12 +34,23 @@ extends Control
 ## colour ENDPOINTS (stamina_fill / stamina_low) are SHARED with the corner bar so both modes speak the
 ## same stamina dialect — but the ring BLENDS between them continuously with the fill level (see
 ## ring_color) — the corner BAR blends with the same function (one dialect); the ring draws NO track (fill arc only —
-## an empty pool renders nothing; see _draw).
+## a rested empty pool renders nothing; see _draw).
+## - THE SPEND CHIP: `chip` is the head of the white just-spent shard (ui.gd stamps it from the shared
+##   StaminaChip tracker; it is always >= `fill`, and EQUALS fill when nothing is owed). It paints as a
+##   white arc PAST the fill's tip, so the gauge's lit length still reads "what you had a moment ago"
+##   while the coloured part reads "what you have" — the same white-shard language the enemy health bar
+##   uses for the damage a hit just did. It is the one exception to the no-track rule and it pays for
+##   itself: a fully drained pool is the moment the ring most needs to say something, and the shard is
+##   the only thing on screen at that instant.
 
 ## Ring centre in absolute screen px — the CROSSHAIR's live centre, stamped by ui.gd each frame.
 var centre: Vector2 = Vector2.ZERO
 ## Stamina fraction 0..1 (ui.gd stamps it from Player.stamina / stamina_max each frame).
 var fill: float = 1.0
+## Head of the SPEND CHIP as a fraction 0..1 — where the fill was before the recent spend, stamped by
+## ui.gd from the shared StaminaChip tracker. Never less than `fill` in practice (the tracker guarantees
+## it), and _draw takes maxf of the two anyway so a stale or unstamped value can only ever paint less.
+var chip: float = 0.0
 ## Idle-fade multiplier on the whole ring's alpha: eases toward stamina_ring_idle_alpha while the pool
 ## is full (a full ring is zero-information — fade it so the crosshair area stays clean), snaps back
 ## toward 1.0 the moment any stamina is spent, and LINGERS lit for stamina_ring_full_hold seconds after a
@@ -119,6 +130,14 @@ static func arc_angles(fill_frac: float, start_deg: float, sweep_deg: float) -> 
 	var from := deg_to_rad(start_deg)
 	return Vector2(from, from + deg_to_rad(sweep_deg) * clampf(fill_frac, 0.0, 1.0))
 
+## Pure: the [from, to] angles of the white SPEND CHIP shard — the arc between the live fill's tip and the
+## shard's head. Collapses to a zero-length span (from == to) whenever nothing is owed, which is the same
+## "draw nothing" shape arc_angles returns for an empty pool, so callers need no second emptiness test.
+## A `chip_frac` below `fill` is clamped up to it (a stale stamp can only ever paint less, never a backwards arc).
+static func chip_span(fill_frac: float, chip_frac: float, start_deg: float, sweep_deg: float) -> Vector2:
+	var head := maxf(clampf(fill_frac, 0.0, 1.0), clampf(chip_frac, 0.0, 1.0))
+	return Vector2(arc_angles(fill_frac, start_deg, sweep_deg).y, arc_angles(head, start_deg, sweep_deg).y)
+
 ## Pure colour blend: a CONTINUOUS gradient from the full colour (blue) toward the low colour (yellow)
 ## as the pool drains — the colour IS the fill level, with no threshold snap. Shared by BOTH stamina
 ## modes (the ring here; the corner bar via ui.gd _update_stamina_bar — user call), so the
@@ -153,21 +172,35 @@ func _draw() -> void:
 	# Point density scales with the sweep so a designer widening the gauge keeps a smooth curve.
 	var points := maxi(8, int(ceilf(absf(hud.stamina_ring_sweep_deg) / 6.0)))
 	# FILL ARC ONLY — no track/backing behind it (user call): the arc's LENGTH is the gauge, and a dark
-	# full-sweep backing read as a black ring stamped around the crosshair. Consequences owned on purpose:
-	# a fully-drained pool renders NOTHING (the moment of maximum "you have no stamina" shows an empty
-	# reticle — the colour gradient warns well before that), and the gauge's extent is only visible while
-	# draining, which is exactly the ambient read the ring is for.
+	# full-sweep backing read as a black ring stamped around the crosshair. Consequence owned on purpose:
+	# the gauge's extent is only visible while there is something to show, which is exactly the ambient
+	# read the ring is for. A drained pool used to render literally nothing at the moment of maximum "you
+	# have no stamina"; the SPEND CHIP below now covers that instant — it paints the white shard you just
+	# burned through and slides it away — and once the shard has gone, an empty rested pool is bare again.
+	# The painted arc runs start -> `head`: the live fill, PLUS the spend chip still owed past its tip.
+	var head := maxf(fill, chip)
+	if head <= 0.001:
+		return  # rested and empty — nothing had, nothing owed, nothing drawn
+	var span := arc_angles(fill, hud.stamina_ring_start_deg, hud.stamina_ring_sweep_deg)
+	var band := chip_span(fill, chip, hud.stamina_ring_start_deg, hud.stamina_ring_sweep_deg)
+	# Contrast outline UNDER everything painted: a wider dark arc, angular span padded so the tips are
+	# capped too (outline_span). It spans fill AND chip — white over a bright wall needs the backing at
+	# least as much as the fill does — but never past the shard's head, so the no-track contract holds.
+	if hud.stamina_ring_outline_width > 0.0:
+		var oc := hud.stamina_ring_outline_color
+		oc.a *= _alpha_mult * hud.stamina_ring_alpha
+		var pad := hud.stamina_ring_outline_width / maxf(hud.stamina_ring_radius, 1.0)
+		var ospan := outline_span(Vector2(span.x, band.y), pad)
+		draw_arc(centre, hud.stamina_ring_radius, ospan.x, ospan.y, points,
+				oc, hud.stamina_ring_thickness + hud.stamina_ring_outline_width * 2.0, true)
+	# THE SPEND CHIP, painted BEFORE the fill: the two spans meet at span.y and never overlap, so the
+	# order is only about which tip wins if a designer ever gives one of them a wider stroke — and the
+	# answer should be the fill, which is the live reading.
+	if head > fill + 0.001:
+		var tc := hud.stamina_chip_color
+		tc.a *= _alpha_mult * hud.stamina_ring_alpha
+		draw_arc(centre, hud.stamina_ring_radius, band.x, band.y, points, tc, hud.stamina_ring_thickness, true)
 	if fill > 0.001:
-		var span := arc_angles(fill, hud.stamina_ring_start_deg, hud.stamina_ring_sweep_deg)
 		var col := ring_color(fill, hud.stamina_fill, hud.stamina_low)
 		col.a *= _alpha_mult * hud.stamina_ring_alpha
-		# Contrast outline UNDER the fill: a wider dark arc, angular span padded so the tips are capped
-		# too (outline_span). Only ever drawn beneath the LIVE fill span — the no-track contract holds.
-		if hud.stamina_ring_outline_width > 0.0:
-			var oc := hud.stamina_ring_outline_color
-			oc.a *= _alpha_mult * hud.stamina_ring_alpha
-			var pad := hud.stamina_ring_outline_width / maxf(hud.stamina_ring_radius, 1.0)
-			var ospan := outline_span(span, pad)
-			draw_arc(centre, hud.stamina_ring_radius, ospan.x, ospan.y, points,
-					oc, hud.stamina_ring_thickness + hud.stamina_ring_outline_width * 2.0, true)
 		draw_arc(centre, hud.stamina_ring_radius, span.x, span.y, points, col, hud.stamina_ring_thickness, true)
