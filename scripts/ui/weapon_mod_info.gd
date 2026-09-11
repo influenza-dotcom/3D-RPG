@@ -94,22 +94,6 @@ const PERCENT_STATS: Array[StringName] = [
 	&"recoil_recovery",
 ]
 
-## Props where DOWN is an improvement, so the bench footer inks a decrease with MenuStyle.accent() and an
-## increase with MenuStyle.danger(). attack_speed is the one that catches everybody: it is SECONDS PER SHOT,
-## so a smaller number is a FASTER gun (WeaponData authors it that way and ItemInfo prints its reciprocal).
-## recoil_kick_deg / bloom_* are NOT listed even though lower is obviously better there: they are 0.0 on every
-## shipped weapon, so no part can move them today — add them here the day one is authored non-zero, rather
-## than carrying rows nothing exercises.
-const LOWER_IS_BETTER: Array[StringName] = [
-	&"attack_speed",
-	&"pellet_spread",
-	&"reload_time",
-	&"noise_radius_mult",
-	&"hip_sway_mult",
-	&"screen_shake_amount",
-	&"stamina_cost_mult",
-]
-
 ## The separator between labeled parts — ItemInfo's exact glyph (U+00B7 with two spaces each side), which is
 ## also what compare_block folds overflow rows together with.
 const JOIN := "  ·  "
@@ -294,11 +278,6 @@ static func stat_label(prop: StringName) -> String:
 ## Does this property's CHANGE read as a signed percent rather than a signed absolute delta? See PERCENT_STATS.
 static func is_percent_stat(prop: StringName) -> bool:
 	return PERCENT_STATS.has(prop)
-
-
-## Is DOWN an improvement for this property? See LOWER_IS_BETTER — and note attack_speed is seconds per shot.
-static func is_lower_better(prop: StringName) -> bool:
-	return LOWER_IS_BETTER.has(prop)
 
 
 # --- Internals ------------------------------------------------------------------------------------------------

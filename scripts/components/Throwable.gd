@@ -20,7 +20,6 @@ const DESTROY_DECAL_PARALLEL_THRESHOLD: float = 0.99
 ## white = highlight_hover via TINT_ID_HOVER, claimed blue = highlight_companion via TINT_ID_PROP_CLAIMED).
 ## Props stay EXCLUDED from the world ink via the ACTOR_INK_MASK_LAYER stamp in _setup_overlay_chain, so the
 ## ring is a prop's only line at every distance.
-const OUTLINE_HIDDEN_COLOR: Color = Color(0.0, 0.0, 0.0, 1.0)
 const OUTLINE_VISIBLE_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
 const FLASH_PEAK_STRENGTH: float = 2.0
 const FLASH_UP_TIME: float = 0.08

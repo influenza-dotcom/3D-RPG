@@ -225,12 +225,7 @@ const IMPLANT_CREDIT_REASON_DELINQUENT := "Filed reason: unsatisfactory payment 
 const NAME_DIALOG_TITLE := "Name"
 
 const SHOP_TITLE := "TRADE"
-## The trade screen's two column headings. The parenthetical says what a CLICK does, because the two grids
-## take OPPOSITE actions on tiles that look identical — the same shape as the INSTALL_* and BENCH_* heading
-## pairs. Two spaces before it: this file's column breath, not padding.
-const SHOP_FOR_SALE_HEADING := "For sale  (click to buy)"
-const SHOP_YOUR_ITEMS_HEADING := "Your items  (click to sell)"
-## The wallet readouts over those columns.
+## The wallet readouts over the two trade columns.
 ## ⭐PLAYER_WALLET IS SHARED — the shop, the chip installer and the gunsmith bench all paint it through
 ## wallet_you() — so it must stay SIDE-NEUTRAL. Folding the shop's verb in ("You · sell") would read as a
 ## lie on the two tills that only ever take money; giving the shop its verb back is a shop-side template.
@@ -262,7 +257,7 @@ const AMOUNT_HALF := "Half"
 const AMOUNT_AVAILABLE := "You have {money}"
 
 const INSTALL_TITLE := "INSTALL"
-## The two section headings, in the SHOP_FOR_SALE_HEADING mold: the heading names whose chips they are, the
+## The two section headings: the heading names whose chips they are, the
 ## parenthetical says what a click does. ⭐ONE VERB across both — "install" — and the parentheticals differ
 ## only by the PAYMENT. They used to read "(click to install)" and "(click to fit)", which made a player work
 ## out whether fitting and installing were two different operations on one screen. They are not.
@@ -294,7 +289,6 @@ const LEVEL_UP_TITLE := "Level Up"
 ## INSTALL_TITLE idiom (a station's fallback title); the headings are title-case like LOOT_YOU_HEADING.
 const LOOT_TITLE := "LOOTING"
 const LOOT_CORPSE_HEADING := "Corpse"
-const LOOT_PICKPOCKET_TITLE := "PICKPOCKETING"
 const LOOT_POCKETS_HEADING := "Pockets"
 const LOOT_EXCHANGE_TITLE := "EXCHANGING GEAR"
 const LOOT_THEIR_GEAR_HEADING := "Their Gear"
@@ -488,14 +482,6 @@ const QUEST_JOURNAL_EMPTY := "No quests yet.\nAccept a job from someone in the c
 ## must never silently re-word the other.
 const QUEST_JOURNAL_TITLE := "Journal"
 const REPUTATION_EMPTY := "[PH] No factions defined."
-## The Reputation screen's own heading. Deliberately NOT MENU_TAB_REPUTATION even though the English
-## matches: that one labels the tab-strip BUTTON (PlayerMenus.TAB_LABELS) and a locale may want a shorter
-## word on a tab than on the heading.
-const REPUTATION_TITLE := "Reputation"
-## The Stats screen's panel TITLE (MenuStyle.make_title cases it per skin.uppercase_titles). Deliberately
-## its OWN const rather than reusing MENU_TAB_STATS / CHARACTER_CREATE_STATS_TAB: those label the tab-strip
-## button and the creation tab, and a locale may want a different word for a heading than for a tab chip.
-const STATS_SCREEN_TITLE := "Stats"
 ## The Stats screen's portrait-column button — hands off to the fullscreen CharacterInspectScreen
 ## (full body + the equipped weapon, drag to rotate).
 const STATS_INSPECT_BUTTON := "Inspect"
@@ -721,10 +707,6 @@ static func trade_prompt(name: String) -> String:
 	return TextFormat.subst("Trade: {name}", {"name": name}) if not name.is_empty() else DEFAULT_MERCHANT_LABEL
 
 
-static func enter_prompt(name: String) -> String:
-	return enter_level(name) if not name.is_empty() else ENTER
-
-
 static func unlock(name: String) -> String:
 	return TextFormat.subst("[PH] Unlock {name}", {"name": name})
 
@@ -883,11 +865,6 @@ static func radio_off(name: String) -> String:
 
 static func radio_prompt(name: String, playing: bool) -> String:
 	return TextFormat.subst("[PH] Turn off {name}" if playing else "[PH] Turn on {name}", {"name": name})
-
-
-static func container_prompt(container_name: String, locked: bool) -> String:
-	var name := container_name if not container_name.is_empty() else "Container"
-	return unlock(name) if locked else loot(container_name)
 
 
 static func money_pickup(amount: float) -> String:
@@ -1442,12 +1419,6 @@ static func bench_notice(reason_key: StringName, n: int = 0) -> String:
 		&"afford": return "[PH] You can't afford that."
 		&"unfit": return "[PH] That part doesn't fit this weapon."
 	return ""
-
-
-## The weapon row's right-hand column ("2/6 fitted") — the same two numbers bench_gun paints in the cycler,
-## worded for a surface that has no header explaining what the fraction counts.
-static func mod_slots_fitted(n: int, total: int) -> String:
-	return TextFormat.subst("[PH] {n}/{total} fitted", {"n": n, "total": total})
 
 
 static func respec_title(name: String) -> String:

@@ -82,15 +82,6 @@ func enable_grid(cols: int, rows: int) -> void:
 		else:
 			push_warning("CharacterInventory: '%s' didn't fit when enabling the %d×%d grid — left unplaced" % [it.label(), cols, rows])
 
-## Turn the spatial cap back OFF — the bag returns to the unlimited v1 model (placements dropped, stacks kept).
-## The clean inverse of enable_grid, kept as part of the grid API. Currently no caller un-bounds a bag at
-## runtime: the player and NPCs stay bounded for life, and corpses/containers keep whatever grid they were
-## opened with. (Older builds un-gridded a LIVE pickpocket / exchange source on close, back when only the
-## player's bag was bounded; NPCs now carry the same permanent cap, so that call was removed.)
-func disable_grid() -> void:
-	_grid_enabled = false
-	_grid.configure(0, 0)  # drop all placements; the grid is inert while disabled
-
 ## Is the spatial cap on? (false = the unlimited v1 backpack — a fresh corpse-copy or container before the loot
 ## screen grids it, or a merchant's shelf before ShopScreen does. The player and live NPCs are bounded, so this
 ## reads true for them.)

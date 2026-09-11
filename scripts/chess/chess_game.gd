@@ -678,15 +678,6 @@ func move_to_coord(m: Dictionary) -> String:
 		s += _piece_letter(int(m.promo)).to_lower()
 	return s
 
-## The Unicode glyph for a piece int (♙♘♗♖♕♔ / ♟♞♝♜♛♚), or " " for empty — used by the visualiser board when the
-## font has the glyphs. ChessScreen falls back to letters if not.
-static func piece_glyph(piece: int) -> String:
-	var white := {PAWN: "♙", KNIGHT: "♘", BISHOP: "♗", ROOK: "♖", QUEEN: "♕", KING: "♔"}
-	var black := {PAWN: "♟", KNIGHT: "♞", BISHOP: "♝", ROOK: "♜", QUEEN: "♛", KING: "♚"}
-	if piece == EMPTY:
-		return " "
-	return white[type_of(piece)] if color_of(piece) == WHITE else black[type_of(piece)]
-
 ## The letter for a piece int (uppercase = white, lowercase = black), the glyph-free fallback for the board.
 static func piece_letter_cased(piece: int) -> String:
 	if piece == EMPTY:

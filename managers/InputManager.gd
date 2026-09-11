@@ -71,10 +71,6 @@ var action_weapon_slot_3: StringName = &"Weapon Slot 3"
 var action_weapon_slot_4: StringName = &"Weapon Slot 4"
 var action_weapon_slot_5: StringName = &"Weapon Slot 5"
 var action_weapon_slot_6: StringName = &"Weapon Slot 6"
-var action_weapon_slot_7: StringName = &"Weapon Slot 7"
-var action_weapon_slot_8: StringName = &"Weapon Slot 8"
-var action_weapon_slot_9: StringName = &"Weapon Slot 9"
-var action_weapon_slot_10: StringName = &"Weapon Slot 10"
 ## The ten hotbar actions in slot order (index 0 = key "1" … index 9 = key "0") — the Hotbar iterates this.
 var hotbar_actions: Array[StringName] = [
 	&"Weapon Slot 1", &"Weapon Slot 2", &"Weapon Slot 3", &"Weapon Slot 4", &"Weapon Slot 5",
@@ -163,10 +159,6 @@ var action_minimap_zoom: StringName = &"MinimapZoom"
 ##
 ## Rebindable; no controller default (the obvious pads are taken — matches Throw/Takedown/Claim/Wait/MinimapZoom).
 var action_mark_waypoint: StringName = &"MarkWaypoint"
-## Quicksave / quickload (F5 / F9) — the immersive-sim save loop (ML-1). Polled by the Player; quickload reloads
-## the scene. Rebindable; no controller default (a pad shouldn't fat-finger a save/load).
-var action_quicksave: StringName = &"Quicksave"
-var action_quickload: StringName = &"Quickload"
 
 
 func is_action_pressed(action: StringName) -> bool:

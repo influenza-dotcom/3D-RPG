@@ -964,15 +964,6 @@ func bhop_blocked_by_stance() -> bool:
 func bhop_chain_allowed() -> bool:
 	return has_mechanic(&"bunnyhop") and not bhop_blocked_by_stance()
 
-## How far the player is currently peeking: -1 = full left lean, 0 = upright, +1 = full right (see Lean).
-## Cosmetic to the BODY — the capsule never moves — but the camera, and therefore the aim origin, does.
-func lean_amount() -> float:
-	return lean.lean_t if lean != null else 0.0
-
-## True while the player is leaning at all (past a hair off centre, so a lean easing back out stops counting).
-func is_leaning() -> bool:
-	return absf(lean_amount()) > 0.01
-
 ## Every input ACTION a CONTEXTUAL VERB DRIVER is holding a live target for right now. A "verb driver" is any
 ## child that answers `pending_verb_action()` — today SilentTakedown and PetInteraction (both on `Takedown`)
 ## plus the camera rig's PickupRay (on `PickUp`); a future one is picked up automatically by being a child that

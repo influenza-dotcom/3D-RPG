@@ -22,7 +22,6 @@ const DEFAULT_3D_MAX_DISTANCE: float = 30.0
 ## AudioStreamPlayer3D's OWN default ceiling, mirrored here so the spawned one-shot keeps behaving exactly as it
 ## did before `max_db` became a parameter. NOT a tuning knob — a caller that wants a different ceiling passes one.
 const DEFAULT_MAX_DB: float = 3.0
-const SFX_BUS: StringName = &"sfx"
 ## The DIEGETIC bus — every sound the game world physically makes (footsteps, foley, impacts, doors, gore).
 ## It sends into `sfx` (so the Effects slider, the death duck and the Distortion crunch all still apply) and
 ## carries the authored-DISABLED indoor room chain that IndoorAmbienceDucker switches on under a roof. Plain

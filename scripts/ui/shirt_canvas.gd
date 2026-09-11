@@ -379,10 +379,6 @@ func set_brush_size(n: int) -> void:
 	brush_size = clampi(n, 1, edit_res)
 	queue_redraw()
 
-## Compat alias for the old two-state API (pre-tools): erase ON = the ERASE tool, OFF = back to PAINT.
-func set_erase(on: bool) -> void:
-	tool = TOOL_ERASE if on else TOOL_PAINT
-
 func is_erasing() -> bool:
 	return tool == TOOL_ERASE
 

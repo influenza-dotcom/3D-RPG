@@ -70,16 +70,6 @@ static func is_empty_map(ids: Dictionary) -> bool:
 			return false
 	return true
 
-## The fitted part ids in SLOT ORDER, blanks omitted — for callers that want to enumerate what is on a gun
-## (the screen's "Fitted" section, a tooltip) without re-deriving the enum walk. Order is stable by construction.
-static func ids_of(ids: Dictionary) -> Array[StringName]:
-	var out: Array[StringName] = []
-	for slot in WeaponData.MOD_SLOT_PROPS.size():
-		var id := StringName(str(ids.get(slot, &"")))
-		if id != &"":
-			out.append(id)
-	return out
-
 
 # --- Fitment ----------------------------------------------------------------------------------------------
 

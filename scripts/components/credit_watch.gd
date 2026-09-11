@@ -65,10 +65,3 @@ func _check() -> void:
 		# reputation and quest toasts follow for gain/loss.
 		player.notify_toast(PlayerText.credit_score_toast(score, moved, band, band_changed),
 			CBPalette.gain() if moved > 0 else CBPalette.loss())
-
-
-## Forget the primed score, so the NEXT check adopts silently instead of announcing. Call after anything that
-## legitimately jumps the rating without the player doing something worth narrating (a load, a respawn).
-func reprime() -> void:
-	_last_score = -1
-	_last_band = &""

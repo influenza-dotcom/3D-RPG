@@ -62,10 +62,6 @@ func _physics_process(delta: float) -> void:
 static func audible(radius_m: float, source_pos: Vector3, listener_pos: Vector3) -> bool:
 	return radius_m > 0.0 and source_pos.distance_to(listener_pos) <= radius_m
 
-## Can a listener at `listener_pos` hear THIS source right now (at its current radius + position)?
-func heard_by(listener_pos: Vector3) -> bool:
-	return audible(radius, global_position, listener_pos)
-
 ## Editor warning: a NoiseSource does nothing unless NPCs are listening to the distraction channel, which
 ## isn't visible in the scene tree. Surfaces WHY a placed noise has no effect. (Reads the saved flag straight
 ## from NpcAiSettings.tres -- see _NPC_AI -- so it's accurate without the runtime autoload.)

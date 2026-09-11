@@ -73,8 +73,6 @@ const STAT_NAMES: Array[StringName] = CharacterStats.STAT_NAMES
 ## "Perks" section (level_up_screen.gd `_rebuild_perks`) where the player spends an XP-earned skill point on one
 ## (see `unlock_perk` below). A PerkStation is the other, station-only path — a free grant that costs no skill point.
 @export var available_perks: Array[Perk] = []
-## Perk picks granted per level-up, when available_perks is non-empty.
-@export var perk_points_per_level: int = 1
 
 ## Editor warning: a standalone LevelUp on a dialogue NPC steals the interaction ray from the NPC's Talkable.
 func _get_configuration_warnings() -> PackedStringArray:
