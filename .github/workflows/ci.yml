@@ -28,6 +28,13 @@ name: CI
 # `Character` fails to resolve, and the GUT step SEGFAULTED on a hollow test stub (exit 134 — the "Linux-only"
 # crash was really "no Blender"). So both jobs install BLENDER_VERSION (cached) and write the editor setting Godot
 # reads the path from (~/.config/godot/editor_settings-<major.minor>.tres) before importing.
+#
+# Two conventions every job below follows:
+#   - Caches are SAVED right after they are filled (actions/cache/restore + actions/cache/save), never by the
+#     combined actions/cache post-job hook — that hook skips the save when ANY later step fails, so a red run
+#     would re-download ~1.2 GB of LFS objects and a 384 MB Blender on every push until the suite went green.
+#   - A failing GUT step names its failures as ANNOTATIONS (the first 10, plus the GDScript frame of an engine
+#     crash). Job logs need a GitHub login to read; annotations show on the run page and through the public API.
 
 on:
   push:
@@ -62,7 +69,8 @@ jobs:
         run: echo "hash=$(git lfs ls-files --long | cut -d' ' -f1 | sort | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Restore LFS object cache
-        uses: actions/cache@v4
+        id: lfs-cache
+        uses: actions/cache/restore@v4
         with:
           path: .git/lfs
           key: lfs-${{ steps.lfs-key.outputs.hash }}
@@ -71,10 +79,17 @@ jobs:
       - name: Pull LFS assets
         run: git lfs pull
 
+      - name: Save LFS object cache
+        if: steps.lfs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .git/lfs
+          key: lfs-${{ steps.lfs-key.outputs.hash }}
+
       # Blender for the .blend imports — see the header. Cached per version; a miss downloads ~384 MB once.
       - name: Restore Blender cache
         id: blender-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/blender
           key: blender-${{ env.BLENDER_VERSION }}-linux-x64
@@ -86,6 +101,13 @@ jobs:
           mkdir -p ~/blender
           curl -fsSL "https://download.blender.org/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
             | tar -xJ -C ~/blender --strip-components=1
+
+      - name: Save Blender cache
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/blender
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
 
       - name: Point Godot at Blender
         run: |
@@ -134,8 +156,25 @@ jobs:
 
       - name: Run GUT fast suite (res://tests)
         # -gexit makes GUT return a non-zero exit code on any test failure. The opt-in soak suite lives in
-        # res://tests_soak (outside res://tests) so it is NOT picked up here.
-        run: godot --headless -s addons/gut/gut_cmdln.gd -gdir=res://tests -gexit
+        # res://tests_soak (outside res://tests) so it is NOT picked up here. On failure, the first 10 failing
+        # tests (and an engine crash's GDScript frame) become annotations — see the header.
+        run: |
+          set +e
+          godot --headless -s addons/gut/gut_cmdln.gd -gdir=res://tests -gexit 2>&1 | tee gut.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            sed -E 's/\x1b\[[0-9;]*m//g' gut.log | awk '
+              /failing tests ----/ { exit }
+              /^res:\/\/tests\/.*\.gd$/ { script = $0; test = "" }
+              /^\* test_/ { test = substr($0, 3) }
+              /\[Failed\]/ && test != "" { msg = $0; sub(/^[[:space:]]*\[Failed\]:[[:space:]]*/, "", msg); print script " :: " test " :: " msg }
+            ' | awk '!seen[$0]++' | head -n 10 | while IFS= read -r line; do echo "::error title=GUT failure::${line:0:900}"; done
+            if grep -q "handle_crash" gut.log; then
+              frame="$(awk '/END OF C\+\+ BACKTRACE/ { f = 1 } f && /\[0\]/ { print; exit }' gut.log)"
+              echo "::error title=Engine crash::$(grep -m1 'handle_crash' gut.log) — last GDScript frame:${frame}"
+            fi
+          fi
+          exit "$status"
 
       - name: Validate content / wiring / navmesh
         # Exits 1 on any ERROR finding or content problem. WARNs + navmesh issues are reported but
@@ -154,7 +193,8 @@ jobs:
         run: echo "hash=$(git lfs ls-files --long | cut -d' ' -f1 | sort | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Restore LFS object cache
-        uses: actions/cache@v4
+        id: lfs-cache
+        uses: actions/cache/restore@v4
         with:
           path: .git/lfs
           key: lfs-${{ steps.lfs-key.outputs.hash }}
@@ -163,10 +203,18 @@ jobs:
       - name: Pull LFS assets
         run: git lfs pull
 
+      # Both jobs may race to save the same key on a miss; the loser only logs "unable to reserve cache".
+      - name: Save LFS object cache
+        if: steps.lfs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .git/lfs
+          key: lfs-${{ steps.lfs-key.outputs.hash }}
+
       # Same Blender cache and setup as the test job — the import below quits early without it.
       - name: Restore Blender cache
         id: blender-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/blender
           key: blender-${{ env.BLENDER_VERSION }}-linux-x64
@@ -178,6 +226,13 @@ jobs:
           mkdir -p ~/blender
           curl -fsSL "https://download.blender.org/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
             | tar -xJ -C ~/blender --strip-components=1
+
+      - name: Save Blender cache
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/blender
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
 
       - name: Point Godot at Blender
         run: |
@@ -205,8 +260,26 @@ jobs:
 
       - name: Run soak suite (real wandering NPCs)
         # -gconfig points at the soak-only config so the default res://.gutconfig.json (res://tests) is NOT
-        # loaded — only res://tests_soak runs.
-        run: godot --headless -s addons/gut/gut_cmdln.gd -gconfig=res://tests_soak/soak.gutconfig.json -gexit
+        # loaded — only res://tests_soak runs. Failures become annotations, exactly as in the fast suite.
+        run: |
+          set +e
+          godot --headless -s addons/gut/gut_cmdln.gd -gconfig=res://tests_soak/soak.gutconfig.json -gexit 2>&1 | tee soak.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            sed -E 's/\x1b\[[0-9;]*m//g' soak.log | awk '
+              /failing tests ----/ { exit }
+              /^res:\/\/tests_soak\/.*\.gd$/ { script = $0; test = "" }
+              /^\* test_/ { test = substr($0, 3) }
+              /\[Failed\]/ && test != "" { msg = $0; sub(/^[[:space:]]*\[Failed\]:[[:space:]]*/, "", msg); print script " :: " test " :: " msg }
+            ' | awk '!seen[$0]++' | head -n 10 | while IFS= read -r line; do echo "::error title=Soak failure::${line:0:900}"; done
+            if grep -q "handle_crash" soak.log; then
+              frame="$(awk '/END OF C\+\+ BACKTRACE/ { f = 1 } f && /\[0\]/ { print; exit }' soak.log)"
+              echo "::error title=Engine crash::$(grep -m1 'handle_crash' soak.log) — last GDScript frame:${frame}"
+            fi
+            # A soak that fails before any test runs (a config or parse problem) has no [Failed] line — show the tail.
+            grep -q "\[Failed\]" soak.log || tail -n 5 soak.log | sed -E 's/\x1b\[[0-9;]*m//g' | while IFS= read -r line; do echo "::error title=Soak tail::${line:0:900}"; done
+          fi
+          exit "$status"
 
       - name: Boot gate (game.tscn raises no script errors)
         # NON-BLOCKING ON ITS FIRST LANDING. Remove this line once one real CI run has gone green. It was
