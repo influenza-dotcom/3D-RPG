@@ -58,10 +58,17 @@ doc in the same change.
    `.import` file to `valid=false`, and pulling LFS afterwards does NOT undo that. Recovery:
    `git lfs pull`, then `git checkout -- '*.import'`, then reopen — and never commit those
    rewritten `.import` files.
-2. Open `project.godot` in **Godot 4.7**.
-3. Press **F5** (Run Project). The main scene is `scenes/computerroom.tscn` — the
+2. **Install Blender 5.2 and point Godot at it BEFORE the first import** — Editor → Editor
+   Settings → FileSystem → Import → Blender → *Blender Path*. Four models are `.blend` files
+   (`assets/models/arm.blend`, `leg.blend`, `femalehead.blend`, `stupidbody/stupidbody.blend`),
+   and Godot imports a `.blend` by running Blender. Without it the first import fails on them and
+   **quits early** — about 126 of ~1,480 files imported, no uid cache — so every `uid://` preload
+   fails and the project will not run or test. CI does the same setup (see
+   `.github/workflows/ci.yml`).
+3. Open `project.godot` in **Godot 4.7**.
+4. Press **F5** (Run Project). The main scene is `scenes/computerroom.tscn` — the
    computer-room intro that hosts the start menu.
-4. Let the editor finish any first-launch imports before judging missing assets.
+5. Let the editor finish any first-launch imports before judging missing assets.
 
 Running `scenes/game.tscn` directly is a level-authoring shortcut, not the way in.
 The internet-warning card, the TOS gate, character creation and the implant

@@ -20,6 +20,14 @@ name: CI
 # unchanged asset set costs no LFS bandwidth at all and a changed one fetches only the new objects (restore-keys
 # seeds the previous set). The HEAD asset set is ~1.2 GB — do NOT swap this for `lfs: true` on the checkout,
 # which bypasses the cache and re-downloads all of it on every push, for every job.
+#
+# ⚠ CI NEEDS BLENDER TOO. Four models are .blend files (assets/models/arm, leg, femalehead and
+# stupidbody/stupidbody), and Godot imports a .blend by RUNNING Blender. With no Blender the import does not just
+# skip them — it QUITS EARLY. Measured 2026-09-11 with the official 4.7.1 Linux build: ~126 of ~1,480 files
+# imported and no .godot/uid_cache.bin, so every uid:// preload fails, AudioManager/InputManager fail to compile,
+# `Character` fails to resolve, and the GUT step SEGFAULTED on a hollow test stub (exit 134 — the "Linux-only"
+# crash was really "no Blender"). So both jobs install BLENDER_VERSION (cached) and write the editor setting Godot
+# reads the path from (~/.config/godot/editor_settings-<major.minor>.tres) before importing.
 
 on:
   push:
@@ -37,6 +45,9 @@ env:
   # project.godot" step below fails the build if they drift, because a CI that silently tests a different
   # engine than the game ships on reports engine breakage as a code bug.
   GODOT_VERSION: "4.7.1"
+  # The Blender that imports the .blend models. Match the dev machine's (Steam's Blender, 5.2.1 LTS as of
+  # 2026-09-11): the .blend files are saved by it, and an older Blender is not guaranteed to open them.
+  BLENDER_VERSION: "5.2.1"
 
 jobs:
   test-and-validate:
@@ -59,6 +70,33 @@ jobs:
 
       - name: Pull LFS assets
         run: git lfs pull
+
+      # Blender for the .blend imports — see the header. Cached per version; a miss downloads ~384 MB once.
+      - name: Restore Blender cache
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/blender
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
+
+      - name: Download Blender ${{ env.BLENDER_VERSION }}
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/blender
+          curl -fsSL "https://download.blender.org/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
+            | tar -xJ -C ~/blender --strip-components=1
+
+      - name: Point Godot at Blender
+        run: |
+          set -euo pipefail
+          # Blender links X11/GL libraries even in --background mode, and the runner image does not ship all of them.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libegl1 libxkbcommon0 libsm6 libice6 libx11-6
+          ~/blender/blender --version | head -n 1
+          mkdir -p ~/.config/godot
+          printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nfilesystem/import/blender/blender_path = "%s"\n' \
+            "$HOME/blender/blender" > ~/.config/godot/editor_settings-${GODOT_VERSION%.*}.tres
 
       - name: Engine pin matches project.godot
         # config/features carries the engine major.minor the project is authored against. If the CI pin
@@ -124,6 +162,32 @@ jobs:
 
       - name: Pull LFS assets
         run: git lfs pull
+
+      # Same Blender cache and setup as the test job — the import below quits early without it.
+      - name: Restore Blender cache
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/blender
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
+
+      - name: Download Blender ${{ env.BLENDER_VERSION }}
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/blender
+          curl -fsSL "https://download.blender.org/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
+            | tar -xJ -C ~/blender --strip-components=1
+
+      - name: Point Godot at Blender
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libegl1 libxkbcommon0 libsm6 libice6 libx11-6
+          ~/blender/blender --version | head -n 1
+          mkdir -p ~/.config/godot
+          printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nfilesystem/import/blender/blender_path = "%s"\n' \
+            "$HOME/blender/blender" > ~/.config/godot/editor_settings-${GODOT_VERSION%.*}.tres
 
       - name: Install Godot ${{ env.GODOT_VERSION }} (headless)
         run: |
