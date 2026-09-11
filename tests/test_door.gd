@@ -237,6 +237,147 @@ func test_door_opened_on_the_mirror_side_closes_back_to_rest() -> void:
 	pivot.free()
 	door.free()
 
+# --- Durability: shoot the door down (Door.take_damage, forwarded from door_panel.gd on the blocker) ---
+# Off-tree: no _ready (hp is seeded from max_hp's default by the initialiser; tests set both explicitly), no FX / SFX /
+# noise (all gated on is_inside_tree), no ledger (_persist no-ops off-tree). The pivot is add_child'd to the door so
+# the break's queue_free of it is owned by the door's own free.
+
+## Stands in for the Player: records the on_damaged_target push the door makes (the enemy-health-bar seam).
+class _Attacker extends Node:
+	var pushes: Array = []
+	func on_damaged_target(target: Node, hp: float, max_hp: float, hp_before: float = -1.0) -> void:
+		pushes.append([target, hp, max_hp, hp_before])
+
+func _durable_door(hp: float) -> Door:
+	var door := Door.new()
+	var pivot := Node3D.new()
+	door.add_child(pivot)
+	door.pivot = pivot
+	door.max_hp = hp
+	door.hp = hp
+	return door
+
+func test_a_hit_chips_the_door_and_pushes_the_attackers_health_readout() -> void:
+	var door := _durable_door(50.0)
+	var shooter := _Attacker.new()
+	watch_signals(door)
+	door.take_damage(12.0, false, shooter)
+	assert_almost_eq(door.hp, 38.0, 0.001, "damage drains hp")
+	assert_false(door.is_destroyed(), "still standing above 0")
+	assert_signal_emitted(door, "damaged", "damaged fires per hit")
+	assert_eq(shooter.pushes.size(), 1, "the attacker is told once per hit (Player.on_damaged_target -> the enemy health bar)")
+	if shooter.pushes.size() == 1:
+		assert_eq(shooter.pushes[0][0], door, "the push names the DOOR as the target")
+		assert_almost_eq(float(shooter.pushes[0][1]), 38.0, 0.001, "with its hp AFTER the hit")
+		assert_almost_eq(float(shooter.pushes[0][2]), 50.0, 0.001, "and its max_hp")
+		assert_almost_eq(float(shooter.pushes[0][3]), 50.0, 0.001, "and the PRE-hit hp, so the bar draws its chip shard")
+	shooter.free()
+	door.free()
+
+func test_non_positive_damage_and_an_indestructible_door_are_ignored() -> void:
+	var door := _durable_door(20.0)
+	var shooter := _Attacker.new()
+	door.take_damage(0.0, false, shooter)
+	door.take_damage(-5.0, false, shooter)
+	assert_almost_eq(door.hp, 20.0, 0.001, "zero / negative damage changes nothing")
+	assert_eq(shooter.pushes.size(), 0, "and never raises the attacker's readout")
+	door.destructible = false
+	door.take_damage(999.0, false, shooter)
+	assert_almost_eq(door.hp, 20.0, 0.001, "destructible OFF: a blast door shrugs off any hit")
+	assert_false(door.is_destroyed(), "and never breaks")
+	shooter.free()
+	door.free()
+
+func test_lethal_damage_breaks_the_door_once() -> void:
+	var door := _durable_door(10.0)
+	door.locked = true  # a lock is no defence against a shotgun
+	var shooter := _Attacker.new()
+	watch_signals(door)
+	door.take_damage(6.0, false, shooter)
+	door.take_damage(6.0, false, shooter)
+	assert_true(door.is_destroyed(), "hp reached 0: the door is broken")
+	assert_almost_eq(door.hp, 0.0, 0.001, "hp floors at 0 (never negative — the bar reads it by value)")
+	assert_signal_emit_count(door, "destroyed", 1, "destroyed fires exactly once")
+	assert_null(door.pivot, "the pivot (panel + blocker) is dropped: the doorway is physically clear")
+	assert_false(door.can_be_talked_to(), "no interaction on a broken frame")
+	assert_eq(door.collision_layer, 0, "and its look-at hitbox leaves the talk layer, so the ray never finds it")
+	assert_eq(shooter.pushes.size(), 2, "both hits pushed the readout")
+	if shooter.pushes.size() == 2:
+		assert_almost_eq(float(shooter.pushes[1][1]), 0.0, 0.001, "the killing hit pushes the final 0 before the break")
+	# A further hit is swallowed: no second break, no push.
+	door.take_damage(6.0, false, shooter)
+	assert_signal_emit_count(door, "destroyed", 1, "a hit on rubble does not re-break it")
+	assert_eq(shooter.pushes.size(), 2, "nor push the readout")
+	shooter.free()
+	door.free()
+
+func test_a_broken_door_is_open_to_npcs_and_ignores_open_close() -> void:
+	var door := _durable_door(5.0)
+	door.locked = true
+	door.take_damage(5.0)
+	var npc := Node3D.new()
+	assert_true(door.npc_try_open(npc), "a broken door is no wall to an NPC, locked or not — there is no panel")
+	assert_false(door.is_open(), "it is not 'open' either: open/close are meaningless on rubble")
+	door.open()
+	assert_false(door.is_open(), "open() on a broken door is a no-op (it must not overwrite the destroyed ledger bit)")
+	npc.free()
+	door.free()
+
+func test_config_warning_when_the_blocker_cannot_take_damage() -> void:
+	var door := Door.new()
+	var pivot := Node3D.new()
+	var bare := StaticBody3D.new()  # a blocker WITHOUT door_panel.gd: shots have no take_damage to call
+	door.add_child(pivot)
+	pivot.add_child(bare)
+	door.pivot = pivot
+	assert_false(door._get_configuration_warnings().is_empty(), "destructible ON + a bare blocker body warns: the door can never be hurt")
+	door.destructible = false
+	assert_true(door._get_configuration_warnings().is_empty(), "destructible OFF: a bare blocker is fine")
+	door.destructible = true
+	var panel := load("res://scripts/components/door_panel.gd").new() as StaticBody3D
+	pivot.add_child(panel)
+	assert_true(door._get_configuration_warnings().is_empty(), "a door_panel.gd body under the pivot satisfies it")
+	door.free()
+
+func test_panel_script_forwards_hits_and_answers_the_melee_gate() -> void:
+	var door := _durable_door(30.0)
+	var panel := load("res://scripts/components/door_panel.gd").new() as StaticBody3D
+	door.pivot.add_child(panel)
+	panel.call(&"take_damage", 10.0, false, null)
+	assert_almost_eq(door.hp, 20.0, 0.001, "the blocker forwards take_damage to its Door (of_collider)")
+	assert_true(DamageApplier.blocks_melee(panel), "default: a melee swing is refused at the panel")
+	door.melee_can_damage = true
+	assert_false(DamageApplier.blocks_melee(panel), "melee_can_damage ON: swings land")
+	var wall := StaticBody3D.new()
+	assert_false(DamageApplier.blocks_melee(wall), "a body without the gate method never blocks (swings behave as before)")
+	assert_false(DamageApplier.blocks_melee(null), "null-safe")
+	var loose := load("res://scripts/components/door_panel.gd").new() as StaticBody3D
+	assert_false(DamageApplier.blocks_melee(loose), "a panel with no Door above it neither blocks nor forwards")
+	loose.call(&"take_damage", 5.0, false, null)  # swallowed, no error
+	loose.free()
+	wall.free()
+	door.free()
+
+func test_texture_skins_the_panel_meshes_and_clears_back_to_the_authored_material() -> void:
+	var door := _durable_door(1.0)
+	var mesh := MeshInstance3D.new()
+	var authored := StandardMaterial3D.new()
+	mesh.material_override = authored
+	door.pivot.add_child(mesh)
+	var tex := PlaceholderTexture2D.new()
+	door.texture = tex
+	var mat := mesh.material_override as StandardMaterial3D
+	assert_not_null(mat, "setting `texture` puts a StandardMaterial3D override on the panel mesh")
+	if mat != null:
+		assert_eq(mat.albedo_texture, tex, "with the texture as its albedo")
+		assert_true(mat.has_meta(Door.TEXTURE_MAT_META), "tagged as door-generated")
+		door.texture_tint = Color.RED
+		assert_eq((mesh.material_override as StandardMaterial3D).albedo_color, Color.RED, "the tint re-applies IN PLACE")
+		assert_eq(mesh.material_override, mat, "(no new material per edit)")
+	door.texture = null
+	assert_eq(mesh.material_override, authored, "clearing the texture restores the authored override")
+	door.free()
+
 func test_of_collider_finds_the_owning_door() -> void:
 	# The prefab's shape: Door / DoorPivot / DoorBody — an NPC's slide contact reports the DoorBody.
 	var door := Door.new()

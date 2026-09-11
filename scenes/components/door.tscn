@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://bddsyyleveaul"]
 
 [ext_resource type="Script" uid="uid://hmij2ogmc8vw" path="res://scripts/components/door.gd" id="1_door"]
+[ext_resource type="Script" path="res://scripts/components/door_panel.gd" id="2_panel"]
 
 [sub_resource type="BoxShape3D" id="hit"]
 size = Vector3(1, 2, 0.3)
@@ -31,6 +32,7 @@ material_override = SubResource("placeholder_mat")
 mesh = SubResource("mesh")
 
 [node name="DoorBody" type="StaticBody3D" parent="DoorPivot" unique_id=559397887]
+script = ExtResource("2_panel")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="DoorPivot/DoorBody" unique_id=187143316]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1, 0)

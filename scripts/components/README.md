@@ -89,7 +89,7 @@ LookAtInteractable            look_at_interactable.gd   (extends Area3D)
 ├─ WeaponBench                weapon_bench.gd       — F / dialogue "Modify": pay to fit / buy & fit / remove a WeaponMod part in a gun's slot
 ├─ ChessMatch                 chess_match.gd        — F / dialogue "Play Chess": blindfold-chess minigame vs a ChessAi
 ├─ Atm                        atm.gd                — F / dialogue "Bank": deposit / withdraw on the signed ledger account (GameState.account)
-├─ Door                       door.gd               — F: swing a door open/closed (lockable: built-in key/lockpick gate, or a child Lock)
+├─ Door                       door.gd               — F: swing a door open/closed (lockable: built-in key/lockpick gate, or a child Lock); shootable — HP on the Door, hits forwarded by door_panel.gd on the blocker body, breaks with SFX/VFX + a &"noise" pulse (melee thuds off unless melee_can_damage); `texture` skins the panel
 ├─ LevelDoor                  level_door.gd         — F: travel to another level (GameRoot.load_level → matching PlayerSpawn)
 ├─ Radio                      radio.gd              — F: play / cycle a folder of music tracks (takes precedence over the score)
 ├─ Readable                   readable.gd           — F: read a note / sign / datapad through the dialogue UI

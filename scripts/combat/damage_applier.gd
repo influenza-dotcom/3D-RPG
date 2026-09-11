@@ -35,6 +35,14 @@ static func is_behind(attacker_pos: Vector3, victim_pos: Vector3, victim_forward
 		return false
 	return rad_to_deg(back.angle_to(to_attacker)) <= arc_degrees * 0.5
 
+## Does `collider` refuse MELEE damage? The hitscan trace asks this for a melee weapon's swing BEFORE applying
+## it: a Door panel (door_panel.gd) answers from its Door's `melee_can_damage` knob, so a knife / fist / bat thuds
+## off a door while a round or a blast still chips it. Duck-typed on `blocks_melee_damage` (compared `== true`:
+## a Variant return from a dynamic call — the house rule), so any future body can opt out of swings the same way;
+## anything without the method takes swings as before. Characters never carry it.
+static func blocks_melee(collider: Object) -> bool:
+	return collider != null and collider.has_method(&"blocks_melee_damage") and collider.call(&"blocks_melee_damage") == true
+
 ## The victim's HP before the hit lands — the base for the OVERKILL (damage beyond the kill) both paths can
 ## carry on through whoever is behind. Characters and Throwables have HP; anything else reads 0.
 static func hp_before(collider: Object) -> float:

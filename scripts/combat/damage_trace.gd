@@ -85,6 +85,13 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			GunFX.spawn_overkill_burst(fx_root, _result.position, pellet_direction)
 		var collider: Object = _result.collider
 		var continue_pierce := false
+		# MELEE vs a body that refuses swings (a Door panel unless its `melee_can_damage` is on): the blade thuds
+		# off — the spark above already fired, the generic impact sounds, and the swing stops here with no damage
+		# applied and nothing to pierce. Guns / projectiles / blasts never take this branch (is_melee is per weapon).
+		if weapon.is_melee and DamageApplier.blocks_melee(collider):
+			if audio:
+				audio.play_generic_impact(_result.position, from_ai)
+			break
 		if collider.has_method("take_damage"):
 			# Crit + sneak assessment, pre-hit HP, and the take_damage dispatch are the SHARED hit-
 			# application sequence (DamageApplier — incl. the player's immunity to NPC headshots), so a

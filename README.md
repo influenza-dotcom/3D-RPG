@@ -203,7 +203,7 @@ rpg/
 - **Profile save model.** `GameState` writes a profile/checkpoint save covering
   progression, inventory, reputation, flags/quests/perks, status, clock, level
   identity, respawn, discovered corpses, and an additive per-object ledger
-  (`Door` open/locked plus consumed hand-placed pickups / destroyed props, via
+  (`Door` open/locked/destroyed plus consumed hand-placed pickups / destroyed props, via
   `GameState.world_objects` keyed by `WorldSaveId.key_for`) — see
   [docs/CURRENT_ARCHITECTURE.md](docs/CURRENT_ARCHITECTURE.md) (Save Model) for
   the authoritative field list. It is not a full per-object world snapshot.
@@ -321,7 +321,7 @@ off-tree pure tests for planner/combat/math logic.
   tab says so in words rather than showing an empty panel.
 
 - Save/load preserves profile, active level identity, discovered corpse markers,
-  and an additive per-object ledger — `Door` open/locked plus consumed
+  and an additive per-object ledger — `Door` open/locked/destroyed plus consumed
   hand-placed `CanPickUp` / destroyed `CanDestroy` "gone" state, keyed through
   each component's `save_id` into `GameState.world_objects`. That profile tier is still not an
   exact snapshot. A manual quicksave (`F5`) / slot save (three named slots via the

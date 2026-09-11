@@ -14,12 +14,26 @@ extends LookAtInteractable
 ## of_collider() and calls npc_try_open(). That path is READ-ONLY on the lock (a locked door stays a wall to NPCs) and
 ## swings the panel AWAY from the NPC (npc_swing_away), so it never sweeps through the body that opened it.
 ##
+## It can be SHOT TO PIECES too. The panel's blocker (DoorPivot/DoorBody) carries scripts/components/door_panel.gd,
+## which forwards every take_damage() a gun round / fired projectile / blast lands on it up to take_damage() here:
+## `max_hp` drains, the player's top-centre enemy health bar shows the door's HP exactly as it shows an NPC's
+## (attacker.on_damaged_target — the same seam Character.take_damage pushes), and at 0 the panel + blocker are freed
+## (the doorway is clear for everyone, lock or no lock), a break_sound / break_effect play, and a one-shot noise
+## pulse on the &"noise" channel draws listening NPCs to investigate. MELEE swings thud off by default
+## (`melee_can_damage`); damage_trace.run_pellet consults the panel's blocks_melee_damage() before applying a swing.
+## The "destroyed" bit persists beside open/locked in the world_objects ledger; partial damage does not.
+##
 ## NOTE: extends LookAtInteractable (an Area3D), not StaticBody3D — the physical block lives on the child
 ## StaticBody3D under the pivot. That's what lets a door be both a solid blocker AND an Interact target, since
 ## the interaction ray detects the talk-layer Area, not the world-layer body.
 
 signal opened
 signal closed
+## A hit landed on the panel: its HP after the hit and its max. Mirrors Character.damaged for a HUD/quest listener.
+signal damaged(hp: float, max_hp: float)
+## The panel broke (0 HP). Same signal name CanDestroy / Throwable emit, so a child SpawnOnDestroy drops loot from a
+## door too. Emitted AFTER the destroyed pose is applied (pivot freed, prompt off) and the ledger written.
+signal destroyed
 
 ## Drives the `key_item_id` / `lockpick_item_id` dropdowns from the item ids on disk (const-preloaded — see item_ids.gd).
 const ItemIds = preload("res://scripts/items/item_ids.gd")
@@ -76,12 +90,55 @@ const SWING_TIE_EPSILON := 0.0001
 ## only swing one way (hinged against a wall, a closet door that would clip into shelving).
 @export var npc_swing_away: bool = true
 
+@export_group("Durability")
+## Can this door be shot to pieces at all? ON: every gun round, fired projectile and blast that lands on the panel
+## takes `max_hp` down, and at 0 the panel (mesh + blocker) is destroyed — the doorway is simply clear, for the player
+## AND for NPCs, whatever the lock said (no key, no pick — bring a bigger gun). OFF: shots spark off it forever (a
+## blast door). Needs the prefab's DoorPivot/DoorBody to carry door_panel.gd (a config warning says so if not).
+@export var destructible: bool = true
+## Hit points. Damage arrives already scaled (weapon damage x the shooter's stats / perks / difficulty), so read it in
+## rounds: 60 = a handful of pistol shots or a shotgun blast or two. NOT persisted — a chipped door is whole again
+## after a reload; only a BROKEN door stays broken (via `save_id` / the ledger, like a destroyed CanDestroy).
+@export var max_hp: float = 60.0
+## Let MELEE swings (a knife, fists, a bat) damage the door too? OFF by default: a swing thuds off the panel (impact
+## sound + spark, no HP lost) and only guns / projectiles / explosions break it. A THROWN knife is a projectile hit.
+@export var melee_can_damage: bool = false
+## Optional one-shot played at the panel on EVERY hit, on top of the weapon's own generic impact. Null = none.
+@export var hit_sound: AudioStream
+## One-shot played at the panel when it breaks — the crash the player hears. Null = silent to the PLAYER (NPCs still
+## hear the noise pulse below).
+@export var break_sound: AudioStream
+## Optional VFX scene spawned where the panel stood when it breaks (a splinter burst). A GPUParticles3D root is
+## started and frees itself when finished; anything else is left to clean itself up. Null = none.
+@export var break_effect: PackedScene
+## How far (m) the break is HEARD by NPCs: a one-shot NoiseSource pulse on the shared &"noise" channel at the door,
+## so an unaware guard within this radius comes to investigate (after their hearing reaction time) — the same
+## channel gunfire and a thrown decoy use. 0 = silent to NPCs. Needs NpcAiSettings.hearing_initiates (on as shipped).
+@export var break_noise_radius: float = 20.0
+## Seconds the break noise stays audible at full radius. Keep it ABOVE NpcAiSettings.distraction_scan_interval
+## (0.3 s as shipped), or an NPC's periodic scan can fall entirely between the crash and its expiry and miss it.
+@export var break_noise_lifetime: float = 0.5
+
+@export_group("Look")
+## Drop a texture here to skin the panel: every MeshInstance3D under the pivot gets a StandardMaterial3D with this
+## as its albedo (nearest-filtered, matching the TrenchBroom door materials). Previews live in the editor. Clear it
+## to put back whatever material the panel wore before (stashed on the generated material, so it survives a save).
+@export var texture: Texture2D: set = _set_texture
+## Multiplies the texture (white = as authored) — a red door from the same texture. Only read while `texture` is set.
+@export var texture_tint: Color = Color.WHITE: set = _set_texture_tint
+
 @export_group("Save")
-## OPTIONAL stable id so this door's open/locked state survives a save/load AND node renames/moves. Leave blank for
-## the level+path+position fallback (fine for a door that never moves — see WorldSaveId); set it on important
-## hand-placed doors. Only doors actually opened/closed/unlocked at least once are written to the ledger.
+## OPTIONAL stable id so this door's open/locked/destroyed state survives a save/load AND node renames/moves. Leave
+## blank for the level+path+position fallback (fine for a door that never moves — see WorldSaveId); set it on
+## important hand-placed doors. Only doors actually opened/closed/unlocked/broken at least once are written to the ledger.
 @export var save_id: StringName = &""
 
+## Live hit points. Seeded from max_hp here (so an off-tree instance is whole) and again in _ready (the authored
+## value lands after this initialiser runs). Read by value only — the HUD bar never retains us.
+var hp: float = max_hp
+var _destroyed: bool = false
+## Code-built at runtime (like an NPC's): the one-shot &"noise" burst the break pulses. Null off-tree / in-editor.
+var _noise: NoisePulser = null
 var _open: bool = false
 ## Which side the door stands open toward: +1 = the authored open_angle side, -1 = its mirror (an NPC swung it away
 ## from itself). Persisted beside open/locked as "swing", so a reload restores the panel on the side it actually stood.
@@ -93,8 +150,12 @@ var _area_hitboxes_cached: bool = false
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
+		_apply_texture()  # the one runtime thing the editor previews: the panel's texture skin
 		return  # @tool: skip the talk-layer/outline setup in-editor (only _get_configuration_warnings runs)
 	super()  # LookAtInteractable._ready: talk-layer hitbox + look-at outline
+	hp = max_hp
+	_apply_texture()
+	_build_noise()
 	if pivot != null:
 		_closed_yaw = pivot.rotation.y
 		_cache_area_hitbox_transforms()
@@ -104,6 +165,12 @@ func _ready() -> void:
 	# Restore saved open/locked state OVER the authored defaults (GameState.world_objects). Runs in _ready like the
 	# Corpse-discovery restore; current_level_path is already set by GameRoot before the level subtree's _ready.
 	var st := GameState.object_state(GameState.current_level_path, _save_key())
+	# A door broken earlier this run stays broken: apply the destroyed pose SILENTLY (no crash, no noise, no FX) and
+	# skip the lock / swing / open restore — there is no panel left for any of it to pose.
+	if GameState.as_bool(st.get("destroyed", false)):
+		_destroyed = true
+		_apply_destroyed_pose()
+		return
 	if st.has("locked"):
 		var locked_bit := GameState.as_bool(st["locked"], locked)
 		locked = locked_bit
@@ -135,7 +202,7 @@ func start_talk(player: Node) -> void:
 	toggle()
 
 func can_be_talked_to() -> bool:
-	return true
+	return not _destroyed  # a broken frame has nothing to open (its talk-layer hitbox is off too — see _apply_destroyed_pose)
 
 func look_name() -> String:
 	# Locked = the Door's own `locked` (not flag-unlocked) OR a still-locked child Lock — show 'Locked' for both.
@@ -224,6 +291,8 @@ static func of_collider(collider: Node) -> Door:
 ## Swings AWAY from `opener` when npc_swing_away is on (and the opener is in-tree to measure), else the authored side.
 ## Returns true when the door is (now) open, false when it refused.
 func npc_try_open(opener: Node3D) -> bool:
+	if _destroyed:
+		return true  # no panel left to be in anyone's way (nothing bumps it either — the blocker is gone)
 	if _open:
 		return true
 	if not npc_can_open or pivot == null or is_effectively_locked():
@@ -246,8 +315,8 @@ func open_away_from(world_pos: Vector3) -> void:
 
 ## The one open path: `side` +1 = the authored open_angle side, -1 = its mirror.
 func _open_toward(side: float) -> void:
-	if _open:
-		return
+	if _open or _destroyed:
+		return  # a broken door has no panel to swing (and must not write "open" over its "destroyed" ledger entry)
 	_open = true
 	_open_sign = side
 	_swing_to(_closed_yaw + _open_yaw_offset())
@@ -255,7 +324,7 @@ func _open_toward(side: float) -> void:
 	opened.emit()
 
 func close() -> void:
-	if not _open:
+	if not _open or _destroyed:
 		return
 	_open = false
 	_swing_to(_closed_yaw)
@@ -272,7 +341,9 @@ func _persist() -> void:
 	# stays false), so save the Lock's; _ready restores it back onto the Lock. Without a child Lock this is Door.locked.
 	var lk := Lock.of(self)
 	var locked_bit := lk.locked if lk != null else locked
-	GameState.record_object_state(GameState.current_level_path, _save_key(), {"open": _open, "locked": locked_bit, "swing": _open_sign})
+	# record_object_state REPLACES the entry, so every bit rides in every write — "destroyed" included (else any
+	# later open/close write would silently resurrect a broken door on reload).
+	GameState.record_object_state(GameState.current_level_path, _save_key(), {"open": _open, "locked": locked_bit, "swing": _open_sign, "destroyed": _destroyed})
 
 func _save_key() -> String:
 	return WorldSaveId.key_for(self, save_id)
@@ -373,8 +444,149 @@ func _sync_area_hitboxes_to_pivot() -> void:
 		var rest_transform: Transform3D = _area_hitbox_rest_transforms[cs]
 		cs.transform = pivot.transform * rest_transform
 
+# --- Durability: shoot the door down (door_panel.gd forwards the blocker's hits here) ---
+
+## A hit landed on the panel. Signature mirrors Character / CanDestroy.take_damage so DamageApplier's 3-arg dynamic
+## call, ExplosionArea's blast and a 4-arg hitscan call all land unchanged (the panel script forwards them verbatim).
+## Damage arrives already scaled by the shooter (weapon x stats x perks x difficulty — damage_trace / projectile);
+## there is no armour here, a door is not a Character. Pushes the attacker's enemy-health readout the way
+## Character.take_damage does (on_damaged_target, duck-typed: only the Player implements it, so an NPC's stray round
+## costs one has_method), with the PRE-hit HP so the bar draws its chip shard. Ignored while indestructible / broken.
+## The melee gate is NOT here: a swing never reaches take_damage — damage_trace.run_pellet stops it at the panel
+## (DamageApplier.blocks_melee), which is what keeps the swing's own impact sound and spark.
+func take_damage(amount: float, _was_crit: bool = false, attacker: Node = null, _hit_pos: Vector3 = Vector3.INF) -> void:
+	if _destroyed or not destructible or amount <= 0.0:
+		return
+	var hp_before := hp
+	hp = maxf(0.0, hp - amount)
+	damaged.emit(hp, max_hp)
+	if hit_sound != null and is_inside_tree():
+		AudioManager.play_sfx(_panel_position(), hit_sound)
+	# Validity first (house rule): a projectile's shooter can be freed mid-flight; projectile.gd collapses that to
+	# null before calling us, but a future caller might not.
+	if attacker != null and is_instance_valid(attacker) and attacker != self and attacker.has_method(&"on_damaged_target"):
+		attacker.call(&"on_damaged_target", self, hp, max_hp, hp_before)  # runs BEFORE the break so the bar shows the final 0
+	if hp <= 0.0:
+		_break()
+
+func is_destroyed() -> bool:
+	return _destroyed
+
+## The break: FX + crash SFX + the NPC-audible noise pulse (all in-tree only), then the destroyed pose, the ledger
+## write and the signal. Latched by _destroyed so a multi-pellet lethal frame (a shotgun) breaks it exactly once.
+func _break() -> void:
+	if _destroyed:
+		return
+	_destroyed = true
+	if is_inside_tree():
+		var at := _panel_position()
+		if break_effect != null:
+			var fx := break_effect.instantiate()
+			if fx != null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip, don't crash
+				get_tree().root.add_child(fx)
+				if fx is Node3D:
+					(fx as Node3D).global_position = at
+				if fx is GPUParticles3D:
+					(fx as GPUParticles3D).emitting = true
+					(fx as GPUParticles3D).finished.connect(fx.queue_free)
+		if break_sound != null:
+			AudioManager.play_sfx(at, break_sound)
+		if _noise != null:
+			_noise.lifetime = break_noise_lifetime
+			_noise.pulse(break_noise_radius)  # a one-shot NoiseSource at the door: listening NPCs come to look
+	_apply_destroyed_pose()
+	_persist()
+	destroyed.emit()
+
+## What a broken door IS, applied both on the live break and on a reload that restores the "destroyed" bit: the
+## pivot (mesh + blocker) is freed so the doorway is physically clear, the look-at hitbox leaves the talk layer so
+## the interaction ray finds nothing (no "Open door" prompt on a splintered frame), and the outline's mesh list is
+## dropped (it pointed into the freed panel). queue_free, never free: a live break runs inside a physics callback
+## (the pellet trace / a projectile's body_entered) on the very body being removed.
+func _apply_destroyed_pose() -> void:
+	if _tween != null and _tween.is_valid():
+		_tween.kill()
+	if pivot != null:
+		pivot.queue_free()
+		pivot = null
+	_area_hitbox_rest_transforms.clear()
+	_meshes.clear()
+	collision_layer = 0
+
+## Where the panel stands right now, in world space (the blocker's collision shape, else the first mesh, else the
+## hinge) — where the hit / break sounds and the splinter FX play. Falls back to our own position off-panel.
+func _panel_position() -> Vector3:
+	if pivot != null and pivot.is_inside_tree():
+		return pivot.to_global(_panel_point_in_pivot())
+	return global_position if is_inside_tree() else Vector3.ZERO
+
+## Build the noise pulser the break fires through (the NPC idiom: code-built, tuned by the host's exports). Runtime
+## only — _ready's editor branch never reaches here, and an off-tree door (a unit test) has no _ready at all.
+func _build_noise() -> void:
+	_noise = NoisePulser.new()
+	_noise.name = "BreakNoise"
+	_noise.radius = break_noise_radius
+	_noise.lifetime = break_noise_lifetime
+	add_child(_noise)
+
+# --- Look: skin the panel with a texture (editor-previewed) ---
+
+## Marks a material THIS door generated for `texture`, so a re-apply updates it in place instead of stacking a new
+## one per edit, and a clear knows it may remove it.
+const TEXTURE_MAT_META := &"door_texture_material"
+## Where the generated material stashes the override the panel wore BEFORE (the prefab's grey placeholder), so
+## clearing `texture` puts it back — even after a save/reload, since resource metadata is serialized with it.
+const AUTHORED_MAT_META := &"door_authored_material"
+
+func _set_texture(v: Texture2D) -> void:
+	texture = v
+	_apply_texture()
+
+func _set_texture_tint(v: Color) -> void:
+	texture_tint = v
+	_apply_texture()
+
+## Apply (or clear) the texture skin on every MeshInstance3D under the pivot. No-op with no pivot yet — the setter
+## fires while the scene is still instantiating (children not built), and _ready applies once they are. With no
+## texture set and no generated material present it touches nothing, so an untextured door never dirties its scene.
+func _apply_texture() -> void:
+	if pivot == null:
+		return
+	for m in pivot.find_children("*", "MeshInstance3D", true, false):
+		var mi := m as MeshInstance3D
+		var cur := mi.material_override
+		var ours := cur != null and cur.has_meta(TEXTURE_MAT_META)
+		if texture == null:
+			if ours:
+				mi.material_override = cur.get_meta(AUTHORED_MAT_META, null) as Material  # back to the authored look
+			continue
+		var mat: StandardMaterial3D = cur as StandardMaterial3D if ours else null
+		if mat == null:
+			mat = StandardMaterial3D.new()
+			mat.set_meta(TEXTURE_MAT_META, true)
+			if cur != null:
+				mat.set_meta(AUTHORED_MAT_META, cur)
+			# Match tb_materials/textures/door*.tres: crunchy nearest sampling, no specular sheen.
+			mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
+			mat.metallic_specular = 0.0
+		mat.albedo_texture = texture
+		mat.albedo_color = texture_tint
+		mi.material_override = mat
+
+## Does any body under the pivot forward hits (door_panel.gd's take_damage)? Without one a destructible door can
+## never be hurt: shots land on a bare StaticBody3D that has no take_damage to call. Edit-time safe.
+func _panel_takes_damage() -> bool:
+	if pivot == null:
+		return false
+	for b in pivot.find_children("*", "StaticBody3D", true, false):
+		if b.has_method(&"take_damage"):
+			return true
+	return false
+
 func _get_configuration_warnings() -> PackedStringArray:
 	var warnings := PackedStringArray()
+	if destructible and pivot != null and not _panel_takes_damage():
+		warnings.append("`destructible` is ON but no StaticBody3D under the pivot can take a hit, so shots can never hurt this door. The prefab's DoorPivot/DoorBody carries res://scripts/components/door_panel.gd (it forwards take_damage to this Door) — re-attach that script to the blocker body, or turn `destructible` off.")
 	if pivot == null:
 		warnings.append("Door has no `pivot` assigned — open/close will do nothing. Assign the DoorPivot child (the node holding the mesh + StaticBody3D blocker).")
 	# A child Lock takes over unlocking entirely (see _try_unlock), so the Door's OWN Lock fields become dead config —

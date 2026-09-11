@@ -439,7 +439,8 @@ teleports the first death into the level that no longer loads. A blank saved pat
 
 It now persists an ADDITIVE per-object ledger (`GameState.world_objects`, keyed by
 level + `WorldSaveId.key_for`): a `Door`'s open/locked state (plus `swing`, the
-side it stands open toward — an NPC swings a door away from itself), and a consumed
+side it stands open toward — an NPC swings a door away from itself — and `destroyed`,
+a door shot to pieces; its partial HP is deliberately not persisted), and a consumed
 `CanPickUp` / `MoneyPickUp` / `UpgradePickup` / destroyed `CanDestroy` prop's "gone"
 bit — set an authored `save_id` on hand-placed objects that must survive layout
 edits (else a level/path/position fallback is used). Code-spawned pickups (a
