@@ -1,7 +1,7 @@
 extends GutTest
 
 ## Radial stamina ring (scripts/ui/stamina_ring.gd) + the ring/bar accessibility mode switch in ui.gd.
-## Covers the PURE parts off-tree — arc/angle math, the fill->sweep mapping, the low-colour threshold,
+## Covers the PURE parts off-tree — arc/angle math, the fill->sweep mapping, the continuous fill->low colour blend (no snap threshold),
 ## the idle fade target, the shipped HudSettings defaults, the Settings toggle, and the mode routing on
 ## a bare UI (no _ready, no scene tree). The on-screen look (the ring hugging the live crosshair, the
 ## annulus fit against the combat arcs) is playtest territory.

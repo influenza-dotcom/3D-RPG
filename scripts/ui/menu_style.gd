@@ -402,10 +402,11 @@ func make_hint(s: String) -> Label:
 ##     bare Label in a VBox grows and shrinks on hover, which re-lays-out (and juddered) the EXPAND_FILL grid
 ##     columns above it. An anchored child inside a plain Control feeds nothing back, so the footer is inert.
 ##   * a height that is an EXACT INTEGER MULTIPLE of the real rendered line height, so when a long tooltip does
-##     overflow, the clip lands cleanly BETWEEN lines. The old `lines * (hint_size + 4)` guess didn't divide
-##     evenly by the true line height and sliced the last row through the middle of its glyphs — which reads as
-##     "the text is falling off the screen" rather than "there is more text". Measured off the live Label
-##     (get_line_height folds the theme's line_spacing); falls back to the old estimate if the font isn't
+##     overflow, the clip lands cleanly BETWEEN lines. The old `lines * (hint_size + 4)` guess undershot the
+##     true 18px pitch, and the anchored Label (which grows BOTH ways) spilled half the shortfall ABOVE the host,
+##     so clip_contents sliced the FIRST line through its glyphs — which reads as "the text is falling off the
+##     screen" rather than "there is more text". Measured off the live Label by hint_block_height (get_line_height
+##     PLUS the theme's line_spacing per gap — see its doc); falls back to the old estimate if the font isn't
 ##     resolvable yet. Line COUNT is a designer knob (MenuSkin.footer_hint_lines).
 func make_hint_footer(hint: Label) -> Control:
 	var footer := Control.new()

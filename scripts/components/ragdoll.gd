@@ -19,6 +19,8 @@ extends Node3D
 ##   4. Attach THIS script to the scene's root node and save it as
 ##      res://scenes/effects/skeleton_ragdoll.tscn.
 ##   5. Assign that scene to the enemy's `ragdoll_scene` (Character export).
+##   (Nothing ships this recipe today: every NPC's `ragdoll_scene` slot holds scenes/props/loot_bag.tscn by
+##   design — see loot_bag.gd — so this component is the OPTIONAL rigged-corpse path.)
 ## Tune the physical bones' collision layer/mask so the corpse hits the floor but not the player.
 
 @export_group("Lifetime & Fade")

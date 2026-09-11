@@ -103,14 +103,14 @@ extends Resource
 @export_group("Stamina ring")
 # The SHIPPED stamina readout: an arc around the crosshair (scripts/ui/stamina_ring.gd), so stamina is
 # readable without leaving the aim point. The corner bar above stays the accessibility fallback
-# (Options -> Accessibility -> "Crosshair Stamina Ring" OFF). The ring draws the FILL ARC ONLY (no
-# stamina_empty track — an empty pool renders nothing) and BLENDS stamina_fill -> stamina_low
+# (Options -> Accessibility -> "Crosshair Stamina Ring" OFF). The ring draws the FILL ARC plus the transient white
+# SPEND CHIP (no stamina_empty track — a RESTED empty pool renders nothing) and BLENDS stamina_fill -> stamina_low
 # continuously with the level — and so does the corner BAR (both call StaminaRing.ring_color; the old
 # stamina_low_frac snap threshold is deleted). Shared endpoints keep one stamina dialect.
 ## Ring radius (px) from the crosshair centre. 14 hugs the reticle (user call: the old
 ## thread-the-combat-annulus 23 read as TOO BIG): outside the ordinary hit ticks' ~11 px pop reach, so
 ## only a headshot flash (~21 px, 0.25 s) briefly sweeps across — acceptable now the ring is TRANSIENT
-## (invisible at rest, fill-arc only). Keep radius+thickness/2 under ~25 or it collides with the red
+## (invisible at rest; fill arc + spend chip only). Keep radius+thickness/2 under ~25 or it collides with the red
 ## aim-warning arcs (inner edge ~25) that share this centre.
 @export var stamina_ring_radius: float = 14.0
 ## Stroke width of the ring (px). Thin — it's ambient status, not an alarm; at radius 14 a fat stroke

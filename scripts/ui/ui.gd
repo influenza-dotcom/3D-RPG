@@ -10,9 +10,9 @@ extends CanvasLayer
 ## money, toasts, quest tracker, minimap, clock, hotbar — rides ONE full-rect carrier (`_weighted`) whose position is a
 ## damped spring trailing camera turns (HudSway, knobs in GameSettings.hud "HUD weight", scaled 0..1 by
 ## the Options -> Accessibility "HUD Sway" slider). THE MOVED-vs-PINNED RULE: anything that ANNOTATES
-## THE AIM POINT stays welded to the layer and never sways — the crosshair (already repositioned per
-## frame by Player._update_crosshair; stacking a second offset would double-sway it), the stamina ring
-## (it orbits the reticle), and the look-at name under it. PlayerHud's overlays (full-screen flashes,
+## THE AIM POINT stays welded to the layer — the crosshair (repositioned per frame by Player._update_crosshair;
+## it CAN ride the same spring at a whisper via GameSettings.hud.hud_sway_aim_scale, which SHIPS AT 0 — see
+## _update_hud_sway), the stamina ring (it orbits the reticle), and the look-at name under it. PlayerHud's overlays (full-screen flashes,
 ## the directional damage/aim arcs, hitmarker, the centre-top prompt ladder, the top-centre enemy health
 ## bar) also stay pinned: the arcs point at world directions and a lagging bearing would lie, and the
 ## centre-top column is an outline-tight stack whose rows would collide under 8 px of spring drift plus
@@ -854,7 +854,7 @@ func _build_hud() -> void:
 
 ## The classic bottom-left stamina bar — kept as the ACCESSIBILITY fallback readout (Options ->
 ## Accessibility -> "Crosshair Stamina Ring" OFF); the ring is the shipped default. Always built (it's
-## two rects) so the Options toggle can swap modes instantly with no rebuild; _apply_stamina_mode owns
+## three rects: bg, fill, spend chip) so the Options toggle can swap modes instantly with no rebuild; _apply_stamina_mode owns
 ## which of bar/ring is visible.
 func _build_stamina_bar() -> void:
 	_stamina_bar = Control.new()

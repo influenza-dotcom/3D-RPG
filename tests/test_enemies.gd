@@ -1,7 +1,7 @@
 extends GutTest
 
-## Unit tests for the "Enemies" subsystem: perception.gd, enemy.gd, ranged_enemy.gd,
-## death.gd, and damage.gd (all under res://scenes/enemies/).
+## Unit tests for the "Enemies" subsystem: perception.gd, death.gd, and damage.gd (all under
+## res://scripts/npc/; the old enemy.gd / ranged_enemy.gd pair folded into npc.gd).
 ##
 ## WHAT THIS COVERS
 ##  - Perception (class_name Perception): exported defaults + State enum shape, the

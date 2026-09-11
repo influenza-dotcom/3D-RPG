@@ -1,8 +1,9 @@
 extends GutTest
 
-## Slice 3 (Door): open/close/toggle mechanics + the pivot swing + the look-at label. Built off-tree with a
-## manually-assigned pivot, so _swing_to takes its off-tree branch (snap, no tween) — pure + tree-free. The
-## lock gate (Lock child / keyed item / unlock_flag) reuses lock.gd's proven path and is playtest-verified.
+## Slice 3 (Door): open/close/toggle mechanics + the pivot swing + the look-at label, the lock gate (Lock child /
+## keyed item / unlock_flag — unit-tested below, reusing lock.gd's path), and NPC bump-to-open (npc_try_open,
+## swing_sign_away, of_collider). Built off-tree with a manually-assigned pivot, so _swing_to takes its off-tree
+## branch (snap, no tween) — pure + tree-free.
 
 func test_open_close_toggle_swings_pivot() -> void:
 	var door := Door.new()

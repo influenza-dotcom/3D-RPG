@@ -10,8 +10,9 @@ extends EditorScript
 ## preview step to walk you up to it. For a print-only pass (prints what it WOULD create, writes nothing) you must
 ## edit the const to `false` yourself and re-run. After a real run, **Ctrl+S to save**. Regeneration is idempotent by
 ## DELETION: it FREES the whole tagged `GeneratedNavLinks` container and rebuilds it, so a NavLink you hand-placed
-## **inside** that container is DESTROYED — the live trenchboom_test_level has ten such hand-added
-## `_NavigationLink3D_492xx` links parked in there. Only links parented ELSEWHERE survive; keep hand-authored links
+## **inside** that container is DESTROYED (the live trenchboom_test_level once had ten hand-added
+## `_NavigationLink3D_492xx` links parked in there; a later re-run freed them, and today every one of its 449 links
+## is generated). Only links parented ELSEWHERE survive; keep hand-authored links
 ## out of the container. Re-run after any RE-BAKE (the islands change).
 ##
 ## NOTES / LIMITATIONS:

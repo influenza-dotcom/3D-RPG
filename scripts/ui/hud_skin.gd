@@ -14,8 +14,8 @@ extends Resource
 ## - SEMANTIC colours are deliberately NOT here: allegiance / gain-loss tints come from CBPalette
 ##   (colorblind accessibility, swaps with Settings.colorblind_safe_cues), and accessibility gates
 ##   (Settings.enemy_health_bar_enabled etc.) stay on Settings.
-## - Components that are SCENE-authored keep their per-instance @exports (compass.gd edge_margin,
-##   marker_size, max_distance) — the skin only replaces their in-code fallback literals. THE MINIMAP IS
+## - Components that are SCENE-authored keep their per-instance @exports (compass.gd's edge_margin,
+##   marker_size, max_distance — that file is retired and unwired, but the idiom stands) — the skin only replaces their in-code fallback literals. THE MINIMAP IS
 ##   THE EXCEPTION, and deliberately so: it is an authored scene with a UI artist pointed at it, so ALL of
 ##   its paint — colours AND the widths/sizes of what it draws — was consolidated here on 2026-08-19,
 ##   including two knobs that used to be @exports on the widget itself (marker_radius / arrow_size). The

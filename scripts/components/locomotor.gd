@@ -725,8 +725,9 @@ func _host_jump_velocity(body: Node) -> float:
 ## (which owns _stranded_cycles — soak_harness reads host._stranded_cycles).
 ##
 ## `host_intent` is THIS FRAME'S steering, passed in by a host that has it (NPC passes _desired_velocity). Pass it.
-## Our own `desired_velocity` is NOT a safe "is the body trying to move?" signal here: it is written ONLY by
-## drive_move_to() and stop(), and stop() has no callers — so the instant a brain stops calling _move_toward while
+## Our own `desired_velocity` is NOT a safe "is the body trying to move?" signal here: on a DRIVEN host it is written only by
+## drive_move_to() and stop() (reset_for_reuse zeroes it and the autonomous _physics_process branch overwrites it
+## every tick, but neither runs for a driven NPC), and stop() has no callers — so the instant a brain stops calling _move_toward while
 ## still holding a destination (a shooter that halts to fire, a "stand still and listen" distraction, a sitter that
 ## reaches its post), it FREEZES at the last full-speed pursuit vector while the body deliberately stands still.
 ## The gate below then reads max intent + zero travel and gives up every PROGRESS_WINDOW, reporting a perfectly

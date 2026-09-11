@@ -11,7 +11,7 @@ extends RefCounted
 ## this existed it never received ANY of these — the player's Dithering and Colour Depth rows did nothing on
 ## the first thing they see, and it quantised at its own authored `color_steps` forever. A new host that
 ## draws this shader must call apply_dials() every frame or it silently inherits that bug.
-## @test res://tests/test_retro_post.gd
+## @test res://tests/test_color_quantization.gd
 ##
 ## STATICS ONLY — no nodes, no tree access. Godot has no shared-material story here (each screen authors its
 ## own ShaderMaterial so an artist can restyle one without the other), so "one material" was never an option;

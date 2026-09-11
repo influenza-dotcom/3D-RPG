@@ -96,10 +96,10 @@ const DECAL_KEEPER_NODE := &"DecalAtlasKeeper"
 ## (the class_name<->preload cycle trap) — the same idiom PreloadManager uses for the same static.
 const THROWABLE_SCRIPT_PATH := "res://scripts/components/Throwable.gd"
 ## The digits the damage-number warm rasterises: every glyph a damage number can show, at the live size + outline.
-## Not player-facing copy — the label is drawn once, near-invisibly, on the black fade-in, then freed.
+## Not player-facing copy — the label is drawn once, near-invisibly, behind the pass's own WarmCover, then freed.
 const WARM_DIGITS := "0123456789"
 ## Alpha the 2D pass draws at. ⭐Deliberately ABOVE 0.007: the canvas culler drops any item whose effective modulate
-## alpha is below that, so a "safer" 0.004 would be culled and compile nothing. At 0.01 on the black fade-in it is
+## alpha is below that, so a "safer" 0.004 would be culled and compile nothing. At 0.01 behind the WarmCover it is
 ## invisible. (The hurt-flash ColorRect gets this on its `color`, not its modulate, so it is never culled either way.)
 const WARM_2D_ALPHA: float = 0.01
 ## Effectively silent, and a real value the audio server accepts (a negative floor, not a dead positive knob).
@@ -121,7 +121,7 @@ const COVER_LAYER: int = 130
 ## nvgpucomp frames — memory: hard-crash-is-nvidia-particle-shader-compile). A cold-cache probe run with all 19
 ## scenes instanced in ONE frame crashed twice at load, ~1 s after the compile batch; spreading them thins the
 ## concurrent compiles the driver has to survive at once. It also keeps each load frame short. The whole pass still
-## finishes inside the fade-from-black.
+## finishes under the pass's own black cover (_raise_cover / cover_screen).
 @export_range(1, 19) var scenes_per_frame: int = 2
 ## Frames the warm instances stay VISIBLE in front of the camera AFTER the last one entered. The surface caches are
 ## built and the ubershader PSOs compiled on each instance's first drawn frame; these extra frames let the background
@@ -133,7 +133,7 @@ const COVER_LAYER: int = 130
 ## compile, and a handful of hidden nodes costs nothing — plus their materials/shaders can never be evicted and
 ## recompiled mid-fight. Set to 0 only if you want the hide to happen immediately after the visible hold.
 @export_range(0, 30) var frames_hidden: int = 2
-## Metres in front of the camera the warm instances are parked — inside the frustum, on the black fade-in. If a
+## Metres in front of the camera the warm instances are parked — inside the frustum, under the pass's own black cover. If a
 ## level's spawn faces a wall the draws are still issued (depth-rejected fragments still bind the pipeline).
 @export_range(0.5, 10.0, 0.1) var spawn_distance: float = 2.0
 ## Metres between neighbouring warm instances in the grid — spread so several are in frame at once, not one pile.

@@ -1,15 +1,17 @@
 extends Node
 ## "There's always a transparent X on my crosshair" (2026-09-08) — the acceptance instrument for it.
 ##
-## THE SUSPECT. EffectPrewarmer._warm_2d hands Hitmarker.warm_draw(0.01) one near-invisible paint on the
-## black fade-in so the 2D pipeline compiles before the first real hit. Its doc claims "each target's
-## warm_draw restores itself after one drawn frame" — true of the hurt flash (it writes color.a back) and of
-## the splatter blob (it tweens itself out and frees), but a CanvasItem KEEPS ITS DRAW LIST until something
-## calls queue_redraw() again. The hitmarker paints its four ticks once and then never redraws (_process
-## early-outs while _t <= 0), so the warm X sits on the canvas at the crosshair from load until the first
-## landed hit. And the hitmarker IS captured by the HUD ghost (hud_ghost.gd's ghost rule — the aim cluster is
-## excluded, the hitmarker is not), so a static source feeds the accumulator every frame and comes back
-## amplified by the phosphor buffer.
+## THE SUSPECT (as it stood BEFORE the 2026-09-08 fix — kept as the record the BEFORE row below measured).
+## EffectPrewarmer._warm_2d handed Hitmarker.warm_draw(0.01) one near-invisible paint on the black fade-in so the
+## 2D pipeline compiled before the first real hit, and its doc claimed the target restored itself after one drawn
+## frame — true of the hurt flash (it writes color.a back) and of the splatter blob (it tweens itself out and
+## frees), but a CanvasItem KEEPS ITS DRAW LIST until something calls queue_redraw() again. The hitmarker painted
+## its four ticks once and never redrew (_process early-outed while _t <= 0), so the warm X sat on the canvas at
+## the crosshair from load until the first landed hit. And the hitmarker IS captured by the HUD ghost
+## (hud_ghost.gd's ghost rule — the aim cluster is excluded, the hitmarker is not), so a static source fed the
+## accumulator every frame and came back amplified by the phosphor buffer.
+## SHIPPED FIX: the warm paint now happens behind the prewarm's own WarmCover, and Hitmarker._draw arms
+## _warm_painted so the next processed frame spends it on one clearing redraw — the AFTER row is that state.
 ##
 ## WINDOWED ONLY — headless never draws the canvas at all, and the ghost's shaders never compile there.
 ##   godot --path <abs project> res://scripts/tools/__hitmarker_warm_probe.tscn -- --shots-dir="C:/some/dir"

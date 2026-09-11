@@ -397,7 +397,7 @@ func _bind_ui() -> void:
 	# (the InventoryScreen / LootScreen construct); the height budget is skin-derived, so it's stamped here.
 	# ⭐Four lines, but MEASURED ones. This screen was still on the original `lines * (hint_size + 4)` guess the
 	# other footers were migrated off — 15px per line against a real 18px pitch, so the anchored Label overhung
-	# its 60px host by 27px, half of it ABOVE, and the first line of every price tooltip was sliced through the
+	# its 60px host by 9px (4×18−3 = 69), half of it ABOVE, and the first line of every price tooltip was sliced through the
 	# glyphs. MenuStyle.hint_block_height carries the measurement; size_hint_footer also pins the grow direction,
 	# which is the half that decides WHICH end an overflow is clipped at.
 	_detail = %Detail

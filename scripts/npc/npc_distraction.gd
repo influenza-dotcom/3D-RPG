@@ -49,7 +49,8 @@ func reset_for_reuse() -> void:
 
 ## No-enemy environmental SENSING (the stealth distraction + body-discovery feeler): with NO acquired target,
 ## scan the &"noise" channel (if hearing_initiates) and bodies (if body_discovery) and, on a stimulus, point
-## Perception at it (-> INVESTIGATING) + age/expire the give-up clock. It does NOT walk: the GOAP executor's
+## Perception at it (-> INVESTIGATING; a COLD noise first ARMS a buffered reaction via Perception.hear_noise and
+## the NPC stays UNAWARE for npc_ai.hearing_reaction_time — see scan_distractions) + age/expire the give-up clock. It does NOT walk: the GOAP executor's
 ## Investigate action drives the move+search off the INVESTIGATING state this sets, so stealth investigation is a
 ## planner decision. When NO sensing applies (both features off, or we're
 ## dead / fleeing / a follower / have no Perception) it FORGETs any stale alert from a just-lost target, so the
@@ -102,8 +103,8 @@ func react_unaware(delta: float) -> void:
 
 
 ## The throttled &"noise"/body-discovery scan: (re)point Perception at the strongest LIVE stimulus. Noise first (an
-## ongoing sound outranks a static body); a heard source re-points each scan it persists (investigate_point refreshes
-## the clock) so we track a moving decoy. Shared by react_unaware (no-target) and react_distraction (has-target,
+## ongoing sound outranks a static body); a heard source re-points each scan it persists ONCE the NPC has reacted (the first
+## hearing only arms the buffered reaction; after that investigate_point refreshes the clock) so we track a moving decoy. Shared by react_unaware (no-target) and react_distraction (has-target,
 ## UNAWARE) so a thrown decoy / hidden body registers in BOTH branches. Assumes host._perception != null (both
 ## callers gate).
 func scan_distractions(delta: float, noise_on: bool, corpse_on: bool) -> void:

@@ -25,7 +25,8 @@ var _air_exit_speed: float = -1.0
 ## No input this airtime = no latch = the historical decay toward zero, bit for bit.
 var _air_ceiling: float = 0.0
 # (The wallet — money / money_changed / add_money / reward_kill — was HOISTED to Character so every NPC
-# carries one too. The player's fresh-game 100 zm default is set in _ready, before the loadout override.)
+# carries one too. The player's fresh-game money is set in _ready from GameSettings.economy.player_starting_money
+# (ships 0.0 — the player starts broke), before the loadout override.)
 
 ## --- Unlockable mechanics: each gateable ability (grapple, wall climb, air dash, slide, bunny hop, ...) is a
 ## drag-drop Ability CHILD NODE -- its presence (+ `enabled`) IS the grant, discovered in _ready. To choose what
