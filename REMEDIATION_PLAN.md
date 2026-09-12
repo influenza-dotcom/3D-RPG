@@ -296,7 +296,7 @@ and the bare-`popd` `.cmd` exit-code bug); the CI-red-on-LFS-pointers finding it
   **Free win available now:** deleting the CoD asset (2.1) removes a 7.27 MB GLB + 8 textures from
   the boot path. Measure after Phase 2, before costing this at all.
 
-- [ ] **5.2 — Docs.** **189 occurrences of a bogus `rpg/` path prefix** in `docs/AUTHORING_GUIDE.md`
+- [x] **5.2 — Docs.** DONE 2026-09-12 with exactly the segment-anchored pass below (186 rewritten, the 3 prose mentions left). ~~**189 occurrences of a bogus `rpg/` path prefix** in `docs/AUTHORING_GUIDE.md`~~
   (re-counted 2026-09-11 with `rg -o 'rpg/' | wc -l`, on 95 lines; the guide is live and its line numbers
   drift weekly — re-derive these rather than trusting them).
   ⚠ **"One sed pass" is the bug — 186 are bogus, 3 are legitimate prose** about the
