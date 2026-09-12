@@ -26,12 +26,24 @@ extends Node
 const PLACEHOLDER_TRANSLATION_PATH := "res://scripts/ui/placeholder_translation.gd"
 
 var skin: MenuSkin = preload("res://resources/ui/menu_skin.tres")
+var _ph_translation: Translation = null  ## the registered scrub; removed again in _exit_tree (see there)
 
 func _init() -> void:
 	# _init, not _ready: the scrub must be in the TranslationServer before the first Control shapes its text
 	# (MenuStyle is the first UI autoload; nothing paints before it). Autoloads never run in the editor, so
 	# every @tool preview and the Text tab still show "[PH]" as authored — it vanishes only in a running game.
-	TranslationServer.add_translation(load(PLACEHOLDER_TRANSLATION_PATH).new())
+	_ph_translation = load(PLACEHOLDER_TRANSLATION_PATH).new()
+	TranslationServer.add_translation(_ph_translation)
+
+## ⭐The scrub must LEAVE the TranslationServer before the script system shuts down. The server is a core
+## singleton torn down after GDScript is; a script-backed Translation still registered there is destroyed with
+## no script language to run its destructor and the process ABORTS on exit (SIGABRT / exit 134 on Linux, exit
+## 5 on Windows) — after every test passed, which is how CI went red on 2026-09-12. Autoloads leave the tree
+## while GDScript is alive, so this is the last safe moment to unregister and drop the reference.
+func _exit_tree() -> void:
+	if _ph_translation != null:
+		TranslationServer.remove_translation(_ph_translation)
+		_ph_translation = null
 ## The IN-GAME HUD's artist skin (the MenuSkin twin for gameplay-time paint: combat indicators,
 ## compass/minimap tints, crosshair art, HUD label chrome). Consumers read MenuStyle.hud.<field>;
 ## swap it at runtime via set_hud_skin. Gameplay-TUNING numbers stay on GameSettings.hud — this is
