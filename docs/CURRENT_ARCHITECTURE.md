@@ -281,7 +281,7 @@ table.** That structural property is the fix for the model this replaced: the cr
 budget is zero-sum, so a flat per-dump penalty was algebraically a tax on spending the
 budget — the all-zero non-character rated the ceiling and took the full cap while a
 committed build was fined. The scorer normalizes against `StatBudget.STAT_MIN/STAT_MAX`
-(forwarded by the screen), which is why those bounds live on the allocator and
+(`scripts/ui/stat_budget.gd`, preloaded by path — no class_name; forwarded by the screen), which is why those bounds live on the allocator and
 `CharacterCreation` derives them: the bank reads the builder, never the reverse. An EMPTY
 sheet is the ABSENCE of an application and fails OPEN to the ceiling (the bare-scene
 default); the all-zero SIX-KEY sheet is a filed-but-empty form and is rated normally. StartMenu stamps
@@ -325,7 +325,7 @@ into a TEMPLATE `.tres` and giving every instance of that gun a permanent non-em
 `return rebuild_weapon_mods(item)` (`ItemDb.rebuild_weapon_mods` → `WeaponModKit.rebuild`), which
 throws away the restored scalars and re-derives the whole stat block from the live weapon
 template plus the live part `.tres`. That is a **deliberate, patch-note-worthy trade**: retuning
-`mod_long_barrel.tres` or `pistol.tres` reaches guns already sitting in existing save files, so a
+`resources/items/mod_long_barrel.tres` or `resources/weapons/pistol.tres` reaches guns already sitting in existing save files, so a
 balance pass changes a player's modded gun under them — and in exchange the two halves of the
 delta (the ids and the numbers they produced) can never drift apart, and the seven
 resource-valued overrides (`view_model_override`, `fire_sound_override`, `projectile_scene_override`,
@@ -353,14 +353,15 @@ Player exposes thin forwarders (`has_mechanic`, `mechanic_installed`, `unlock_me
 that every caller duck-types, and keeps only the three typed hot-path refs (`_wall_climb` /
 `_slide` / `_grapple_ability`) its physics step drives each frame — those stay on the Player
 because the movement feel depends on their exact call order. A runtime grant is rebuilt from
-the id by the shared `AbilityRegistry` snake_case naming convention (scene ↔ `ability_id()` ↔
-script), so there is no hand-maintained id→script table. The player's cosmetic first-person
+the id by the shared `AbilityRegistry` (`scripts/components/abilities/ability_registry.gd`, preloaded by
+path — no class_name) and its snake_case naming convention (scene ↔ `ability_id()` ↔ script), so there is
+no hand-maintained id→script table. The player's cosmetic first-person
 body (the FP legs+torso+arms rig, the separate carry-hands / bare-fists view-model rig, and
 their motion) is likewise a
 component, not `player.gd` code: **`FirstPersonBody`** (`scripts/player/first_person_body.gd`),
 a scene-wired Player.tscn child on the Landing `host = NodePath("..")` idiom, which also
-carries the authored `fp_*` pose overrides (see `ARCHITECTURE_REVIEW.md`, Completed
-Extractions, for the ordering invariants). The stamina/sprint economy lives in a
+carries the authored `fp_*` pose overrides (see
+[Extraction idioms](#extraction-idioms-and-their-load-bearing-invariants) under Components for the ordering invariants). The stamina/sprint economy lives in a
 **Player-owned `StaminaManager`** (`scripts/player/stamina_manager.gd`, a `RefCounted` on
 the same built-at-var-init / wired-in-`_init` idiom, preloaded by path — no class_name):
 the Player keeps the `stamina_changed` signal, a raw `stamina` property alias, and 1-line
@@ -713,6 +714,211 @@ as insurance although nothing dialogue-hosts it yet). A refuse that returns sile
 strand the conversation `_suspended` forever (box hidden, tree paused, no way to advance). On
 the standalone open path nothing listens to `closed`, so the emit is a harmless no-op there.
 
+### Extraction idioms and their load-bearing invariants
+
+
+Each completed extraction out of the Player / NPC monoliths established an idiom the next one
+should copy, and the ⭐ items are load-bearing ORDERING invariants that tests pin. (Moved here
+from the repo-root `ARCHITECTURE_REVIEW.md`, which now tracks only current rough edges.)
+
+- **QuestTracker autoload split (M1).** DONE. The tracker dicts, the four quest
+  signals, reward granting and the cfg round-trip live on `managers/QuestTracker.gd`;
+  `GameState` keeps one-line FORWARDERS for the function API (~70 authored call
+  sites use them) but the SIGNALS moved — connect to `QuestTracker.quest_started`
+  / `objective_advanced` / `quest_completed` / `quest_failed`.
+  - ⭐ The load-bearing detail is **bidirectional injection**
+    (`GameState.quest_tracker` ↔ `QuestTracker.game_state`). Quest state used to
+    live on `GameState`, so a bare `GameState.new()` gave a unit test a private
+    journal for free. Pointing every GameState at the singleton would have leaked
+    quest state between tests — `test_game_save` proved it within minutes. A bare
+    GameState now builds its OWN tracker as a *child* (freed with it, no orphan);
+    only the autoload pairs with the autoload. `tests/test_quest_tracker.gd` pins
+    all of this; copy the pattern for the next autoload split.
+  - Made public in passing: `GameState.autosave_world_state()` and
+    `GameState.live_player()` (both were already being called cross-file as
+    privates by `ledger_accrual.gd` / `player.gd`).
+- **`Landing` component (M13 residual).** DONE — `scripts/player/landing.gd`,
+  a scene-wired drop-in (`host = NodePath("..")` + the Player's `landing` export)
+  owning the touchdown burst and the footstep cadence. Both beats run AFTER
+  `apply_velocity()` and feed only presentation + fall damage, which is exactly
+  why they were safe to lift. The jump/bhop/blast/slide-jump/edge-friction
+  interleave still stays on the Player root **in order** — it is
+  byte-order-critical and must not follow. The two pure curves (`impact_for` /
+  `interval_for`) are statics so the feel math is testable without a Player, the
+  way `GroundMovement` already is; `tests/test_landing.gd` pins the wiring and
+  the curves.
+- **`FirstPersonBody` component.** DONE — `scripts/player/first_person_body.gd`,
+  a scene-wired drop-in on the Landing idiom (`host = NodePath("..")` + the
+  Player's `fp_body` back-export) owning the whole cosmetic first-person self:
+  the FP legs+torso rig, the carry-hands / bare-fists rig, the draw / stow /
+  guard / punch machinery and the fists' procedural bob. The Player KEEPS the
+  weapon-lock half of the carry dance (`_on_carry_changed`: the `_carrying`
+  latch, holster capture/restore, `draw_locked`, release bookkeeping),
+  `_rewield_in_flight`, the `FISTS` fallback const, and the death/revive ORDER
+  (die() / the revive call `set_legs_visible` + `refresh_unarmed_hands` at
+  their authored beats). Three ⭐ invariants:
+  - The 11 authored `fp_*` overrides in Player.tscn moved onto the new node
+    **byte-exact** — every historic FP bug (the stow mis-anchor, the guard
+    framing) was invisible at script defaults and only real at the authored
+    pose. `tests/test_first_person_body_wiring.gd` pins them on the child AND
+    their absence from the root (a move, not a copy).
+  - The carry relay is **ONE connection**: the Player's `_on_carry_changed`
+    tails into `fp_body.on_carry_changed`, so the synchronous holster restore
+    always precedes the fists decision reading `attack.holstered`. Splitting it
+    into two connections on `carry_changed` re-opens a connection-order
+    dependency (children connect in `_ready` before their parent — the wrong
+    side would win).
+  - `process_priority = -1` (plus authoring the node before Head) keeps the
+    component's pose ease ahead of the arms rig's strike re-pose — the
+    setter-ordering fix the monolith got free from parent-before-child ticking.
+  The four pure statics (`fp_arm_stow_target` / `bob_cadence` / `bob_lean` /
+  `advance_bob_phase`) moved whole with their contract comments;
+  `tests/test_fists_view_model.gd` and `tests/test_fp_torso.gd` re-pin against
+  the component. One deliberate non-shipped-config behavior change: the
+  `carry_changed` connect is now unconditional (made in `Player._ready`, not
+  inside the arms build), so `first_person_arms = false` still holsters + locks
+  the gun mid-carry — the intent the relay's comment always documented; shipped
+  Player.tscn has arms ON, so shipped behavior is identical.
+- **NpcVoice bark EMISSION (`emit`).** DONE — the awaited `_emit_bark` body
+  (empty-line skip → no-overlap latch stamp → reaction-delay await → dead/hp/
+  in-tree bail → bubble → earshot-gated TTS) moved onto
+  `scripts/npc/npc_voice.gd` as `emit()`, with `_speak()` private beside it
+  (the old `NPC._speak_bark`, which had no other consumer); `NPC._emit_bark` is
+  now the null-guarded 1-line facade.
+  - ⭐ The NpcVoice triggers must KEEP routing `host._emit_bark(...)` — never
+    `self.emit()`. `tests/test_bark_gates.gd`'s stub hosts implement
+    `_emit_bark` to count emissions and `tests/test_npc.gd` pins `_emit_bark`
+    as the single bark emitter — a future "simplification" of the round-trip
+    breaks ~6 stub tests and the seam.
+  - ⭐ `_speak` passes the HOST as the SpeechTts source. `NPC._on_died` stops
+    our bark via `SpeechTts.stop_bark_from(self)` keyed on the NPC node — pass
+    the child instead and the stop silently never matches (dead NPCs keep
+    talking).
+  - ⭐ The latch (`host._bark_until_msec` — still host-owned and bare-NPC
+    test-poked) is stamped BEFORE the reaction-delay await, so two same-beat
+    bark requests can't both pass (stacked bubbles). The post-await
+    dead/hp/in-tree guard order covers the POOLED host (reused in place); a
+    non-pooled host frees the child (and the coroutine) with itself.
+    `tests/test_npc_facade_contract.gd` pins the facade + the source identity
+    by source-grep.
+- **`NpcDistraction` (unaware/distraction reactions).** DONE —
+  `scripts/npc/npc_distraction.gd` owns the `_react_unaware` /
+  `_scan_distractions` / `_react_distraction` / `_react_music` bodies plus
+  corpse discovery, with the scan throttles and the once-per-attend
+  music-comment latch as component state (its own `reset_for_reuse` joins the
+  pool cascade). Built BY SCRIPT PATH into a Node-typed `_distraction`
+  (the CrippleCallout / NpcHomeReturn @tool-parse idiom).
+  - ⭐ The `_physics_process` call sites stayed put in byte order:
+    `_react_unaware` BEFORE the no-target `_executor.tick` (the executor reads
+    the Perception state it sets/decays), `_react_distraction` / `_react_music`
+    AFTER the tick (the face overrides the idle facing) — the facades must not
+    shift position, and `_react_unaware`'s first line
+    (`host._alerted_allies = false`, the GA-1 re-arm) travels with the body.
+  - ⭐ Host-owned vs component-owned state split: `_alerted_allies` /
+    `_was_distracted` / `_scripted_investigating` / `_attending_radio` /
+    `_desired_velocity` stay on the host (cross-consumed by the settle-barks
+    helper, the has-target branch, `investigate()`, the head-look, and bare-NPC
+    test pokes); only `_distraction_scan_t` / `_music_scan_t` /
+    `_music_commented_radio` moved. `tests/test_npc_pool.gd` pins the component
+    reset; `tests/test_npc_facade_contract.gd` pins the path build and the
+    facade surface.
+- **`StaminaManager` (stamina/sprint economy).** DONE —
+  `scripts/player/stamina_manager.gd`, a `RefCounted` on the AbilityManager
+  idiom (built at the Player's var-init, host + signal relay wired in
+  `Player._init`, so bare-`Player.new()` tests drive it with no `_ready`). The
+  pool, spend/drain, the regen curve + post-spend delay, and the sprint lockout
+  moved; the Player keeps the `stamina_changed` signal (the manager's same-shape
+  signal is relayed by `_on_stamina_changed`), a RAW `stamina` property alias
+  (no clamp/emit — ui.gd's `player.get(&"stamina")` poll and the tests' raw
+  overdraw writes keep bare-var semantics), `is_sprinting()`'s verbatim one-line
+  body (it reads the host's `input_dir`), and 1-line forwarders for the whole
+  old surface — public and private names unchanged, so every duck-typed caller
+  and white-box test line survived. One pure static, `recovery_rate_for` (the
+  Landing `impact_for` precedent), carries the regen tier pick hostlessly.
+  - ⭐ The drive beats stayed in `Player._physics_process` **byte-identical at
+    their positions**: `_update_sprint_lockout` before the dialogue gate, and
+    `_update_stamina_recovery` in BOTH branches — the dialogue-frozen early-out
+    AND the live tail (the NPC idle/UNAWARE both-branches rule, player
+    edition). Do not "simplify" them into a manager-side tick: `die()`'s
+    `set_physics_process(false)` must freeze regen and the lockout countdown.
+    `die()` writes no stamina state; the revive beats (the `_set_stamina`
+    refill at its authored position — it EMITS for the HUD ring — then
+    `clear_sprint_lockout()`, the one rewritten beat line) stay in
+    `_respawn_at_checkpoint`.
+  - ⭐ `host: Character`, never `Player` — a preload-by-path script naming the
+    Player class is the class_name↔preload parse-cycle trap. Character covers
+    the hot path typed; the Player-script-only surface (`input_dir`, `crouch`,
+    `_is_scoped`, the climb/slide/grapple predicates) is read dynamically with
+    null-guards, so a bare manager degrades to bare-Player defaults instead of
+    crashing (`tests/test_player_core.gd` pins the table).
+  - ⭐ NO `class_name`, by choice: player.gd is the sole runtime consumer and
+    preloads it by path (`StaminaManagerRef`, the StatBudget idiom) — a fresh
+    class_name is the stale-class-cache cascade in the next headless run. All
+    tuning stays on `GameSettings.player_movement` / `weapon_general` — bar the
+    RANGED SHOT price, which is derived per weapon from `WeaponData.stamina_effort()`
+    and trimmed by `stamina_cost_mult`; the manager holds zero knobs.
+  - Two `tests/test_player_core.gd` migrations only: the `_sprint_lockout_left`
+    white-box read now goes through `p._stamina_mgr`, and the
+    `"if sprint_blocked_by_scope():"` source pin greps the manager file (the
+    fragment is unchanged). Every other stamina pin — including
+    `is_sprinting()`'s body grep against player.gd — survived untouched.
+
+### Payment rails — the point-of-sale contract
+
+
+The ledger's point-of-sale surface is closed. `Character.quote()` / `Player.quote()`
+expose the two-part quote (base + service charge) that ShopScreen paints as an
+all-in total; `Merchant.accepts_ledger` gives cash-only vendors a single
+`can_afford` / `take_payment` / `quoted_total` predicate trio the till and the UI
+dim share; the HUD carries an OWED row; `scenes/components/atm.tscn` is the
+drop-in world terminal; and the DEBIT/CREDIT choice is available **at every point
+of sale** that honours both rails, not just at an ATM.
+
+That last piece is `PaymentRailButton` (`scripts/ui/payment_rail_button.gd`) — one
+drop-in authored into all six paid screens (shop, heal, level-up, chip-install,
+respec, gunsmith bench). It owns the toggle, the caption, and the
+persist-on-flip; the host screen connects `rail_changed` to its own repaint.
+
+> ⭐ **One till refuses the credit rail on purpose: `LevelUp` (`accepts_credit`,
+> default off).** It is the only counter that sells entries on the permanent stat
+> sheet, and `Player.credit_limit()` re-rates that sheet live — so a stat point
+> bought on credit raises the line that funded it (1 zm buys 100 zm of new line at
+> the shipped knobs; the ladder ends at total level 51 / 2022 zm owed for every
+> build), erasing the creation choice. The refusal rides a new `allow_credit`
+> parameter on the payment seam (`can_pay` / `charge` / `charge_total` / `quote` /
+> `spendable`, defaulted true so every other caller is unchanged), NOT a UI change —
+> hiding the selector alone would be cosmetic, since the rail is global persisted
+> state.
+>
+> ⭐ **And the rail refusal alone is not enough**, which is why `LevelUp` also ships
+> `requires_settled_account = true`. The credit line is fungible into CASH at any
+> ledger vendor — `Merchant.take_payment` funds the buy on the armed rail while
+> `Merchant.sell` pays out in cash, and `sell_price` is clamped to one coin under
+> `buy_price` — so a buy/sell round trip converts the line at ~97% and walks the
+> proceeds to a cash-taking till. The Medicine Person prefab (placed only in
+> TestLevel, not in Headshot City) carries both components. Refusing a PAID raise
+> while the account is negative closes that
+> arithmetically. **That credit-to-cash conversion is itself an open defect against
+> `Atm.withdraw`'s stated invariant** and is not fixed here.
+>
+> Not a die-and-keep-it loop, despite an earlier framing: the debt is death-safe
+> too (`GameState.account` — "you cannot die your way out of the Ledger").
+> `tests/test_level_up_credit.gd` pins both gates.
+
+> ⭐ **The signal is the contract, not garnish.** The armed rail changes what
+> `Player._split` may draw on, so it changes the affordability dim and the quoted
+> total *on the same card*. A screen that carried the button but ignored
+> `rail_changed` would flip the rail and leave a row greyed out that the till would
+> now serve — exactly the divergence the payment seam exists to prevent.
+> `tests/test_payment_rail_selector.gd` pins the connection in all six screens by
+> source-grep, because it is made at runtime in `_bind_ui`.
+
+That asymmetry is CLOSED (2026-08-11): all six paid cards now paint the **all-in**
+total through `charge_total`, and the heal / respec / level-up funds readouts paint
+`spendable()` rather than raw `money`. The gate still runs on the RAW sticker —
+`can_pay` / `charge` fold the service charge in themselves, so wrapping the gate's
+argument in `charge_total` would double-apply it.
+
 ## Effect And Audio Seams
 
 `AudioManager` (autoload) is the one-shot SFX seam: `play_sfx` / `play_2d_sfx`
@@ -1006,11 +1212,11 @@ not registered yet. Feel numbers: the `body_part_gib_*` group on `EffectsSetting
 `&"gib"` group, its oldest-first world cap (`gib_max_active`), and `gore_gib_data.tres`.
 
 **The PIN kill — a lethal thrown blade staples the struck limb to the wall.** A thrown weapon that opts in
-(`WeaponData.thrown_pins_body_part` → `Throwable.pins_body_part`, shipped ON for `melee.tres` only) does not add a
+(`WeaponData.thrown_pins_body_part` → `Throwable.pins_body_part`, shipped ON for `resources/weapons/melee.tres` only) does not add a
 new object to the death: it **re-routes one of the six limbs that already fly**. The decision cannot be passed as
 an argument — `Throwable._try_damage_character` → `Character.take_damage` → `_begin_death` → *(a SceneTree timer,
 for the NPC death-freeze beat)* → `_complete_death` → `gore()` → `GoreSpawner` is a dozen signatures across a timer
-boundary — so it is **stashed**, the `NPC.mark_silent_takedown` idiom: `Character.mark_pin_hit(contact, dir, blade)`
+boundary — so it is **stashed**, the `NPC.mark_silent_takedown` idiom: `Character.mark_pin_hit(contact, travel_dir, blade, surface)`
 immediately before the lethal hit, `take_pin_hit()` consuming it in `GoreSpawner._resolve_pin`. ⚠️ **The marker
 carries an ALREADY-PROBED wall**, found by `Throwable._probe_pin_surface` inside `body_entered`, and that split is
 mandatory rather than tidy: `PhysicsDirectSpaceState3D` is only valid to query *during a physics frame*, and the
@@ -1040,8 +1246,8 @@ because that classifier has no left/right and desyncs by ~0.28 m on a seated act
 reads if it is the only thing moving. Not persisted in either save tier, like all gore.
 
 **The STUCK blade — a SURVIVED thrown hit leaves the knife in the body, riding the part it struck.** The far side
-of the same kill line (`WeaponData.thrown_sticks_in_body` → `Throwable.sticks_in_body`, shipped ON for `melee.tres`
-only). `_try_damage_character` marks the pin intent *blind*, immediately **before** `take_damage` (armour,
+of the same kill line (`WeaponData.thrown_sticks_in_body` → `Throwable.sticks_in_body`, shipped ON for the same
+`resources/weapons/melee.tres` only). `_try_damage_character` marks the pin intent *blind*, immediately **before** `take_damage` (armour,
 difficulty and DR all move the number after we hand it over), then reads `Character.is_alive()` immediately
 **after** it — the first moment the answer exists. A survivor keeps the blade; a corpse leaves it for the death
 burst. **One hit can never do both**, and that single gate is why neither effect needs to know about the other.
@@ -2405,7 +2611,7 @@ purpose, because a shop riding a dialogue NPC is two different facts about one b
   `MenuStyle.set_hud_skin` assigns and calls `rebuild()` but emits nothing and touches no HUD widget).
   Three terms in `Minimap._needs_repaint` exist purely to
   close that: `_painted` (did the two channels `_has_live_markers()` probes put art on the canvas last
-  paint), the drawn-options stamps (`_drawn_zoom` / `_rotates` / `_show_npcs` / `_show_stations`,
+  paint), the drawn-options stamps (`_drawn_zoom` / `_drawn_rotates` / `_drawn_show_npcs` / `_drawn_show_stations`,
   re-stamped inside `_draw`), and the drawn-SKIN stamp (`_drawn_skin_id`, an instance-id compare so the
   per-frame check never allocates). The skin has a second half the id compare cannot see — an artist
   editing a slot on the SAME `.tres` through Godot's Remote inspector against a running game — so
@@ -2571,10 +2777,12 @@ caret, plus a chevron for every `Groups.COMPASS` marker at its bearing.
   from the COLUMN's top: the reflow is common-mode, so the 2 px clearances inside the ladder survive it.
   The carrier's `z_index = 1` is load-bearing — it is born in `UI._ready` while the full-screen flashes it
   must composite over are added later from `PlayerHud.build`, so tree order alone would bury the column.
-- **One marker channel, two surfaces.** The tape reads `Groups.COMPASS` — the same group the screen-edge
-  `Compass` component draws chevrons for and the same one `QuestMarkerSync` feeds. The two answer different
-  questions about one set of markers ("where on screen is it" vs "what bearing is it on"), and a second
-  registry would let them disagree; a `WorldMarker`'s authored `color` drives both.
+- **One marker channel, one shipped surface.** The tape reads `Groups.COMPASS` — the same group `QuestMarkerSync`
+  feeds, and the one the screen-edge `Compass` component (`scripts/ui/compass.gd`) was built to draw chevrons
+  for. That edge overlay is RETIRED and deliberately left unwired — nothing instantiates it; `ui.gd` builds only
+  `HudCompass` — so in a shipped run the tape is the channel's only live consumer. The group still holds ONE set
+  of markers rather than two: a second registry would let a hand-added overlay and the tape disagree about where
+  a marker is, and a `WorldMarker`'s authored `color` drives whichever surface reads it.
 - **The bearing basis is shared, not re-derived.** World north is `-Z`, east is `+X`, and the yaw convention
   (`camera_yaw`) is `Minimap._camera_yaw`'s verbatim — so the tape and the floorplan's north tick cannot
   disagree. That basis is the thing `tests/test_hud_compass.gd` spends most of its asserts on: a sign flip
@@ -2653,7 +2861,7 @@ guarded, and what is deliberately deferred.
   has been moved into `PlayerText`: `tests/test_player_text.gd`'s per-file
   `BASELINE` is empty and `BASELINE_HIGH_WATER` is `0`, so a new literal at a
   paint site (`label.text = "…"`, `notify_toast("…")`,
-  `MenuStyle.make_title("…")`, …) fails the suite outright — there is no
+  `MenuStyle.make_hint("…")`, …) fails the suite outright — there is no
   allowance left to hide behind. The guard runs the paint-site scanner
   (`addons/cybersunday_tools/panel_audit/scan_text.gd` — the same scanner the
   CYBER SUNDAY Audit tab runs live as its Text domain, and which
@@ -2832,3 +3040,84 @@ current paths, and current field names.
   refit mutate in place.
 - Docs drift quickly when review notes are kept around. Prefer current risk
   lists and delete artifacts that no longer match the code.
+
+### Shipping-level content reachability and unverified manual claims
+
+Source: a 2026-08-28 source audit (formerly `docs/PLAYTEST_GAPS.md`, folded in here 2026-09-11 with its
+NPC census refreshed). **Nothing in this block was verified by running the game** — every item is read from
+source or resource files. Companion to the player manual `docs/MANUAL.html`, which documents these systems
+as *implemented*, not as *reachable*. The shipped default level is "Headshot City"
+(`resources/levels/trenchboom.tres` → `scenes/levels/trenchboom_test_level.tscn`, set on `scenes/game.tscn`).
+
+**Fix before the next playtest build**
+
+- `End` reloads the current level (`PlayerDebug`, bound to `ui_end`) with no development-build gate. Every
+  other debug key (`F1` menu, `F2` noclip, `F4` inspector, `` ` `` console) is gated; this one is live in any
+  build, sits beside the arrow cluster, and loses unsaved progress instantly.
+- Confirm what is actually reachable in Headshot City (next list) — it decides whether a playtest can say
+  anything about progression, economy or quests.
+- `[PH]` copy is everywhere player-facing: chips, weapon mods, quest titles and perks carry the prefix; chip
+  descriptions are empty; the Controls tab has one `[PH]` hint row (`SettingsCatalog.tres`).
+
+**Content reachability in Headshot City**
+
+- The level instances one **ChipInstaller** (dialogue-driven, **no authored stock**, so install-only), one
+  standalone **ATM**, one armed **RentCollector**, and one dialogue-driven **Merchant** — the NPC "Big Dog"
+  (`NpcData` profile *Murray Chent*, `Merchant.standalone = false`, so it answers the **Trade** option, not a
+  walk-up Interact). She stocks nothing, but an empty-stock merchant is deliberately open for business, so loot
+  **can** be sold (default `sell_mult` 0.5 out of a default 1000 zm till). There is **no LevelUp, PerkStation,
+  RespecStation, Healer, Bonfire or QuestStarter** in the scene — no in-world way to raise a stat, spend a skill
+  point, respec, or receive a quest. **Needs a designer's answer before playtesters are pointed at them.**
+- Of the two authored quests, `recover_the_package.tres` is referenced only by `SliceTestLevel.tscn` and
+  `clear_the_block.tres` by no scene at all — neither reaches the main level.
+- `PerkStation` is instanced in **zero scenes**; the two perks on disk (Deadeye, Tough Hide) have no station
+  offering them, so skill points have nowhere to be spent.
+- The only placed `LevelUp` (on the Medicine Person in `TestLevel.tscn`) has `standalone = false` (dialogue-only)
+  and no `available_perks`, so its Perks section is hidden.
+- Chips exist and can be bought on credit at New Game or installed at a mechanic, but no shipped
+  `ChipInstaller` is confirmed to **stock** any chip and none are placed as world loot — a playtester's first
+  route to any implant is unconfirmed.
+- Spray paint is fully wired, but whether the can is obtainable in normal play is unconfirmed (left out of the
+  manual's weapon roster for that reason). Hotbar key routing is verified; how items get **assigned** to slots
+  initially is not.
+
+**NPC perception and disposition in the shipped level.** `NPC.tscn` ships 500 m sight / 0.1 s detect / 1.0 s
+forget; an `NpcData` profile overwrites those with 25 m / 1.0 s / 4.0 s *only* when `profile_fills_blanks_only`
+is off. Headshot City instances seven `NPC.tscn` nodes. Two keep the 500 m / 0.1 s numbers: the
+profile-fills-blanks NPC (Talkable "Person" — the additive merge treats the scene's 500 m as an inline override)
+and the no-profile NPC carrying the ChipInstaller. Jim Gunn-Smith's node authors the same 500 / 0.1 / 1.0
+inline, but with `profile_fills_blanks_only` off his profile clobbers them back at `_ready`. Four of seven end up
+neutral (those two, Big Dog and Jim); the **three Bastard raiders are hostile** — they set `disposition = 1` on
+the node but `_stamp_profile_full` overwrites it with `npc_data.gd`'s `HOSTILE` default, and their
+`faction_id = "raiders"` resolves to `raiders.tres` (`default_disposition = 0`) besides. **Inline node values
+do not survive `_ready`** — never read a scene's inline `disposition` or perception numbers as what ships.
+
+**Numbers and behaviour not verified live**
+
+- `project.godot` never redefines `ui_cancel` / `ui_accept` / `ui_end`, so their keys are Godot 4.7 engine
+  defaults not readable from the repo (Escape is confirmed only by a source comment; Enter/Space and End are
+  not stated anywhere in-repo). The controller default for `ui_cancel` is likewise unnamed. `KEY_CTRL` left-only
+  vs either-Ctrl is unconfirmed.
+- Night vision (N) runs after the dialogue early-return but before the gameplay-suppression gate: blocked
+  mid-conversation, **not verified blocked with a menu open**. The Q double-binding (Lean vs Takedown)
+  arbitrates once on the press; the winner for a simultaneously valid takedown+lean was not traced.
+  `NavDebugOverlay`'s five optional action exports default empty and no scene sets them.
+- Per-shot stamina costs (pistol 1.8, SMG 1.19, sniper 2.25, shotgun 7.2, grenade 14.4) are arithmetic from
+  `WeaponData.stamina_effort()`, not literals. The grenade launcher's screen-shake value `124312342.0` reads
+  like debug data; its blast damage falls back to a global sentinel, and a direct hit + blast against a 4 HP
+  player was not traced. NPC miss chance defaults to 0 per profile; the shipped profiles were not audited.
+- Fall figures in the manual are **m/s of impact speed** (no default gravity is set in `project.godot`) — do
+  not translate 16 / 24 m/s into metres of drop without checking live gravity. Rent timing (7m30s, noon → dawn
+  = 0.75 of a 600 s day, then one grace day) matches a source comment but was not observed live.
+- Nearly every tuning `.tres` is near-empty, so the manual's numbers are the `@export` defaults in the
+  matching `.gd` — the live value today, but a designer editing a `.tres` would override it invisibly.
+- Known rough edges from source annotations, none observed live: the "Left-Handed Weapon" branch negates the
+  view-model's baked 90° yaw and by the file's own helper maths would point the barrel behind the camera
+  (verify by eye first); view-model mouse sway (~14 mm) sits outside every accessibility gate; a setting can
+  persist without ever taking effect (most rows have no apply step); the windowed-mode vanish already has a
+  runtime fix and is not a live bug.
+- Not audited at all: the `user://` Windows folder literal, the Options tab order (derived from catalog order,
+  raw key strings as titles), Escape priority across every stacking combination, the pickpocket formulas, the
+  Bonfire checkpoint/heal loop, the Healer price formula, chess move-entry syntax, the Wait screen's hour
+  control, the blast/rocket-jump impulse system, weapon self-knockback, level-specific prompts, and the
+  colourblind shader's daltonization fidelity (including whether mode 0 is a true bypass).

@@ -51,7 +51,7 @@ components still call `host._move_toward(...)`; only the body moved. See [`../co
 collider resolves via `Door.of_collider`, gets `Door.npc_try_open(self)`. It works only because levels keep every
 `Door` OUT of the `navmesh` bake source — the bake runs through the doorway, so A* already routes NPCs through it and
 the closed panel's `StaticBody3D` is the sole blocker (a Door inside the bake source raises a config warning). The
-Door owns the rules (unlocked + `npc_can_open`, swing away from the NPC via `npc_swing_away`); a refused door stays a
+Door owns the rules (`npc_can_open`; unlocked, OR the NPC carries its key and `npc_key_unlock` is on — a key, never a pick; swing away from the NPC via `npc_swing_away`); a refused door stays a
 wall and the Locomotor's give-up hold takes over. Per-NPC opt-out: `opens_doors`. No per-life state, so
 `reset_for_reuse` has nothing to clear.
 
@@ -97,7 +97,7 @@ these are the `npc.gd`-owned members (the renameable ones a rename would break).
 | `npc_combat.gd` (NpcCombat) | `_aim_point`, `_engage_range`, `_move_toward`, `_face_point`, `_target`, `_target_body`, `_weapon`, `_shot_interval`, `_aim_laser_at`, `_current_weapon_uses_ranged_attack_telegraphs`, `_on_aim`, `_report_aim`, `_emit_gunfire_noise`, `_try_reload_bark`, `_hide_laser`, `_find_body_swap`, `_scavenge`, `_audio_cues`, `_aim_sfx_delay`, `_fire_timer`, `_charging`, `_warned`, `_shot_miss`, `_desired_velocity`, `engage_range_fraction`, `miss_chance`, `move_speed`, `dodge_chance`, `dodge_interval`, `dodge_duration`, `dodge_speed_fraction` |
 | `npc_bark_ui.gd` (NpcBarkUi) | (none — the host calls INTO it; it holds no host reads) |
 | `npc_mortality.gd` (NpcMortality) | `ragdoll_scene`, `inventory`, `money`, `display_name`, `_body_discovery_on`, `_real_player`, `global_position` (death world-spawns; `_on_died` calls its `drop_loot` / `award_kill_xp` / `spawn_corpse_marker` via the `_drop_loot` / `_award_kill_xp` / `_spawn_corpse_marker` facades) |
-| `npc_home_return.gd` (NpcHomeReturn) | `stand_down`, `is_following`, `_spawn_position`, `_spawn_yaw`, `_snap_to_navmesh`, `_height_above_floor`, `_dead`, `hp`, `_cutscene_control`, `_guarding`, `_talk`, `_perception`, `_target`, `_nav`, `_locomotor`, `_locomotion`, `wanders`, `wander_radius`, `global_position`, `rotation`, `velocity` (the "go home" leash — player death / off-screen reset; the host calls INTO it via the `send_home` facade) |
+| `npc_home_return.gd` (NpcHomeReturn) | `stand_down`, `restore_spent_ammo` (via `host.call` — the spent-ammo ledger refill on the player-death reset), `is_following`, `_spawn_position`, `_spawn_yaw`, `_snap_to_navmesh`, `_height_above_floor`, `_dead`, `hp`, `_cutscene_control`, `_guarding`, `_talk`, `_perception`, `_target`, `_nav`, `_locomotor`, `_locomotion`, `wanders`, `wander_radius`, `global_position`, `rotation`, `velocity` (the "go home" leash — player death / off-screen reset; the host calls INTO it via the `send_home` facade) |
 | `npc_senses.gd` (NpcSenses) | `_perception`, `_body_discovery_on`, `_dead`, `hp`, `is_fleeing`, `global_position`, `get_world_3d` (distraction/body scans — pure queries; the stateful reaction bodies that consume them are NpcDistraction's (no-target `react_unaware` / `react_music` AND has-target-while-UNAWARE `react_distraction` / `scan_distractions` — a hostile holds the player by proximity before noticing them), reaching `loudest_noise` / `nearest_audible_radio` / `nearest_visible_corpse` through the npc.gd `_loudest_noise` / `_nearest_audible_radio` / `_nearest_visible_corpse` facades) |
 | `npc_distraction.gd` (NpcDistraction) | `_perception`, `_noise_initiates_on`, `_body_discovery_on`, `_loudest_noise`, `_nearest_audible_radio`, `_nearest_visible_corpse`, `_try_search_bark`, `_try_lost_interest_bark`, `_try_check_body_bark`, `react_music`, `_face_point`, `_on_directed_route`, `_desired_velocity` (write), `_attending_radio` (write), `_was_distracted` (write), `_scripted_investigating` (write), `_alerted_allies` (write), `is_fleeing`, `is_following`, `_dead`, `hp` (the stateful no-target/UNAWARE reaction bodies — `_react_unaware` / `_react_music` / `_react_distraction` / `_scan_distractions` moved here behind npc.gd's 1-line facades, which must keep their `_physics_process` positions; the scan throttles + music-comment latch are component-owned, reset by its own `reset_for_reuse`. Built by SCRIPT PATH into the Node-typed `_distraction` — the @tool new-classname idiom) |
 
@@ -175,7 +175,9 @@ and a chain-link fence, a wire grille or a shop window stops hiding you from a g
 Current callers: `Perception.can_see`, `Perception.can_see_node`, `Perception._wall_between` (hearing occlusion),
 `NpcSenses._corpse_occluded`, `NpcHomeReturn._occluded` (the "can the player see this NPC blink?" gate), and
 `NPC._aim_laser_at` — the AIM ray, which feeds `NpcCombat.act_alerted`'s clear-shot test and the laser beam's
-endpoint. **Add new perception rays here too.**
+endpoint. One caller lives outside this folder: the Player's aim-remark ray in `scripts/player/player.gd` (the
+`SightRay.cast` under the ADS remark timer) — aiming at a guard through a fence is aiming AT the guard. **Add new
+perception rays here too.**
 
 **Gunfire passes through the same geometry**, which is why the aim ray is on that list: an NPC that can see you
 through a fence can also shoot you through it, so it should stand and fire instead of running around looking for
@@ -183,7 +185,8 @@ a gap. The other two fire paths reach the same rule by their own routes — `Dam
 calls `SightRay.is_see_through_hit` inside its pierce walk, and `Projectile._ready` adds a physics collision
 exception with every body in `Groups.SEE_THROUGH`.
 
-Deliberately NOT routed through it: the player's look-at interaction ray (no looting through the wire), the
+Deliberately NOT routed through it: the player's look-at interaction ray (no looting through the wire — only the
+player's aim-REMARK ray above goes through), the
 grapple hook, `SilentTakedown`'s reach ray, and anything that asks about the FLOOR. A fence is still a solid you
 cannot walk through, props still bounce off it, and the navmesh still carves around it.
 

@@ -125,7 +125,7 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
 - **`Talkable`** / **`DialogueNPC`** (`talkable.gd` / `dialogue_npc.gd`) — the conversation surface. They
   DUCK-TYPE the same four talk-handler methods so `PickupRay` treats them identically, but they extend
   `Area3D` / their own root, not `LookAtInteractable`.
-- **`Pettable`** / **`Claimable`** (`pettable.gd` / `claimable.gd`, `extends Area3D`) — HOLD-Q pet and TAP-T
+- **`Pettable`** / **`Claimable`** (`pettable.gd` / `claimable.gd`, `extends Area3D`) — HOLD-Q pet and TAP-B
   befriend verbs on their OWN physics layers, deliberately off the talk layer so they never show an "[F]"
   prompt.
 - **`PickupBeacon`** (`pickup_beacon.gd`, `extends Node3D`) — the colour-coded pickup item light. The class keeps
@@ -334,7 +334,7 @@ to break floor contact if the capsule catches the lip. **It is deliberately deco
 `allow_hop` gate** — an authored link is an explicit "traverse here", so *idle* NPCs climb/drop too, not just
 combatants. Two invariants: (1) traversal state is zeroed in `reset_for_reuse` (`_jump_cd` / `_hopping` /
 `_hopped_this_frame` plus the down-link `_link_descent_t` / `_link_descent_dir`), so `NpcPool` reuse is covered; a *new*
-Locomotor per-life field still MUST be added to `reset_for_reuse`. (2) Godot 4.6's `link_reached` payload is
+Locomotor per-life field still MUST be added to `reset_for_reuse`. (2) Godot 4.7's `link_reached` payload is
 `{position(=entry), type, rid, owner}` — there is **no** exit key; the exit is derived by reading the link's endpoints
 from its RID (`_link_exit_position`; the climb is derived at the call site as `exit.y - entry.y`).
 
@@ -535,9 +535,20 @@ ratcheted by `tests/test_effect_prewarm.gd` (every particle scene and every draw
 must be on it — the test names the missing path); stage one, the boot `SubViewport` particle pass, lives in
 `managers/PreloadManager.gd`. `docs/CURRENT_ARCHITECTURE.md` (Effect prewarm — two stages) has the full contract.
 
-**New drop-in components go here.** Internal helpers composed in code with `.new()` under the
-Player/NPC (HurtFeedback, NpcVoice, NpcDistraction, AimSway, PassiveItemBuffs, …) are NOT editor-attached and stay
-with their owning subsystem — this folder is only for things a designer drags onto a node.
+**New drop-in components go here.** The drag-onto-a-node rule is for the Node/Area3D components: internal helpers
+composed in code with `.new()` under the Player/NPC (HurtFeedback, NpcVoice, NpcDistraction, AimSway, …) are NOT
+editor-attached and stay with their owning subsystem. The folder does also carry a handful of code-built helpers
+and Resources that back those components rather than being dragged on themselves — `PassiveItemBuffs`
+(`.new()`-built in `Character`), `lock_rules.gd`, `money_bag.gd`, `stock_entry.gd`, `music_playlist.gd` /
+`music_quality.gd` / `radio_playback_state.gd`, `model_resource.gd` / `part_library.gd`, `wire_shapes.gd`,
+`host_method_helper.gd`, and the `debug_commands.gd` / `debug_actions_player.gd` / `debug_actions_world.gd` trio —
+the world half's command bodies live by family in `debug_actions_world_npc.gd` / `_story.gd` / `_view.gd` with the
+shared helpers in `debug_actions_world_common.gd` (the main file keeps every `match` arm and the test-pinned
+`notarget` / `quantize` / `screenshot` commands).
+The `abilities/` subfolder is the one nested family: `Ability` (base, `ability.gd`), the `AbilityManager` /
+`AbilityRegistry` pair that rebuilds a granted ability from its snake_case id, and one script per grant (`air_dash`,
+`bio_scanner`, `bunnyhop`, `chess_visualizer`, `deep_scanner`, `fall_immunity`, `grapple`, `laser_sight`,
+`silent_takedown`, `slide`, `wall_climb`) — an `Ability` child of the Player IS the grant, so those are drop-ins too.
 
 > The drop-in component family was moved here from `scripts/world/` + `scripts/combat/`. Because some
 > scenes referenced these scripts **by path** (e.g. `merchant.tscn`, `container.tscn` had no UID

@@ -77,7 +77,7 @@ The Options menu is **data-driven**: every row is a `SettingSpec` in `resources/
 
 ## Player-facing text and identity
 - Player-facing strings go through `PlayerText` (`scripts/ui/player_text.gd`) or an authored resource field —
-  never a raw literal at a paint site (`label.text = "…"`, `notify_toast(...)`, `MenuStyle.make_title(...)`).
+  never a raw literal at a paint site (`label.text = "…"`, `notify_toast(...)`, `MenuStyle.make_hint(...)`).
   `tests/test_player_text.gd` ratchets this over the audit panel's paint-site scanner, and **the debt is now
   ZERO** (empty `BASELINE`, `BASELINE_HIGH_WATER = 0`) — so any new raw literal at a paint site fails the
   suite outright. Put the string in `PlayerText`; never re-open a baseline entry to admit one. Measure with
@@ -137,7 +137,8 @@ NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in pla
   **Closing the scene WITHOUT saving is the only recovery.** Edit the const to `false`
   for a print-only pass; Ctrl+S to keep a real run. Idempotent by DELETION — it FREES the whole `GeneratedNavLinks` container
   and rebuilds it, so **a hand-placed link parked INSIDE that container is DESTROYED** (the live
-  `trenchboom_test_level` has ten such `_NavigationLink3D_492xx` links in there); only links parented ELSEWHERE
+  `trenchboom_test_level` once had ten hand-placed `_NavigationLink3D_492xx` links parked in there and a re-run
+  destroyed them; today every link in the container is generated); only links parented ELSEWHERE
   survive — keep hand-authored links out of the container. **Re-run after every re-bake**. It auto-classifies each
   gap: bare ledge→`LAUNCH`, cliff→`ONE_WAY_DOWN`,
   and — via a physics raycast probe (a self-built `PhysicsServer3D` space over the scene's colliders, so it works in
@@ -221,6 +222,6 @@ NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in pla
 
 ## Git
 - Commit only the paths you explicitly changed — never sweep the working tree (the user is actively
-  authoring scenes like `Level.tscn`).
-- End commit messages with: `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`
+  authoring scenes like `scenes/levels/trenchboom_test_level.tscn`).
+- End commit messages with: `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`
 - Do **not** push without an explicit request. The user works on `main`.

@@ -10,7 +10,7 @@ Chess"** option that opens the board.
 | File | Role |
 |------|------|
 | `scripts/chess/chess_game.gd` (`class_name ChessGame`) | The rules engine. **Pure logic** — no tree/UI/autoload deps, so it unit-tests off-tree and the AI searches on a `clone()`. Board = a 64-int `Array` (a1=0…h8=63; piece = type×colour). Full legality: castling (incl. through-check), en passant, promotion, check/checkmate/stalemate, plus 50-move & insufficient-material draws. `make_move`/`undo_move` are the search primitive. Parses SAN **and** coordinate input; formats SAN for the log. |
-| `scripts/chess/chess_ai.gd` (`class_name ChessAi`) | The opponent. Negamax + alpha-beta over a material + piece-square eval. Two difficulty knobs: `depth` (plies) and `blunder_chance` (0..1 — probability of playing a random legal move, which is what makes a weak NPC feel human/beatable). |
+| `scripts/chess/chess_ai.gd` (`class_name ChessAi`) | The opponent. Negamax + alpha-beta over a material + piece-square eval. Two difficulty knobs, both parameters of `choose_move(game, depth := 2, blunder_chance := 0.0)` rather than fields: `depth` (plies) and `blunder_chance` (0..1 — probability of playing a random legal move, which is what makes a weak NPC feel human/beatable). |
 | `scripts/ui/chess_screen.gd` (autoload `ChessScreen`) | The play overlay. Mirrors `ChipInstallScreen` (layer 121, `PROCESS_MODE_ALWAYS`, and — since 2026-08-09 — **real-time**: the world keeps running through a match, which can last minutes, so a board in a hostile street is a place you get shot). Typed move input; a rendered 8×8 board **only** when `Player.has_mechanic(&"chess_visualizer")`, else a "BLINDFOLD" placeholder. Runs the turn loop and settles the wager. |
 | `scripts/components/chess_match.gd` (`class_name ChessMatch`) | The drop-in NPC/table component (`extends LookAtInteractable`). Standalone (aim+interact) or dialogue-hosted (`standalone = false`). Exports the opponent's name, `ai_depth`, `ai_blunder_chance`, `player_plays_white`, and a `wager`. |
 | `scripts/components/abilities/chess_visualizer.gd` (`class_name ChessVisualizer`) | The Board Visualizer as a flag `Ability` (`ability_id()` → `&"chess_visualizer"`). No behaviour — its presence IS the grant. Rides the normal chip pipeline. |
@@ -26,8 +26,9 @@ The `ChessScreen` is the only consumer — it reads `has_mechanic` at open time 
 ## Authoring an opponent
 
 **On a dialogue NPC** (adds a "Play Chess" option): add a `ChessMatch` child, set `standalone = false`, fill in
-`opponent_name` + difficulty. Nothing else — the dialogue finds it by duck-type (`ai_search_depth` +
-`display_opponent_name`).
+`opponent_name` + difficulty. Nothing else — `DialogueManager` finds it by `has_method` of the
+`dialogue_station_option` + `open_dialogue_station` pair (the dialogue-station contract below); `ChessScreen` then
+duck-reads `ai_search_depth` + `display_opponent_name` off it.
 
 **As a standalone table**: add a `ChessMatch` (leave `standalone = true`), size its `CollisionShape3D` (or set
 `auto_fit_collider`). Aim + Interact opens the match.

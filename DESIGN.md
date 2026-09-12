@@ -25,7 +25,7 @@ the Ledger" — the always-online apparatus that claims to record every act, omi
 you have ever made (`resources/ui/terms_of_service.gd:35`). It finances the chrome in your body, and
 it remembers what you do with it. The code already states this as a rule:
 *"the entity financing your body-mods is the entity that remembers what you do with them"*
-(`scripts/ui/player_text.gd:200-201`).
+(`scripts/ui/player_text.gd`, the comment heading the `IMPLANT_CREDIT_BAND_*` block).
 
 The Ledger does not judge you morally. It judges you **actuarially**. It reads your character sheet
 as a loan application and files a verdict: *"Preferred debtor — 780. We like your odds of living
@@ -34,8 +34,8 @@ under the repayment term."* *"Filed reason: no visible means of support."* *"Fil
 allocation left undrawn — see 'Notable Cowardice'."* — a callback to the standing heading the Terms
 gate files your declined choices under.
 
-> **Note on those lines:** they live at `scripts/ui/player_text.gd:202-207` (the six bands) and
-> `:212-220` (the eight filed reasons), and their `[PH]` markers have already been cleared. They are
+> **Note on those lines:** they are the six `IMPLANT_CREDIT_BAND_*` and eight `IMPLANT_CREDIT_REASON_*`
+> constants in `scripts/ui/player_text.gd`, and their `[PH]` markers have already been cleared. They are
 > plainly *written* — they are among the best copy in the project — and the marker is still
 > over-applied elsewhere. Before treating a raw `[PH]` count as a work estimate, audit which are
 > genuinely empty and which are just unblessed. The real backlog is smaller than the count suggests.
@@ -116,14 +116,16 @@ once the game admits it is making one.
 
 **⚠ OPEN — the cadence is still argued against the wrong unit.** The paragraph above prices 20 zm
 against a *day*, but a day here is **10 real minutes**: that is 120 zm/hour of play, against an
-income of 1–4 zm per kill on a level with six NPCs, three of them armed raiders. "One good score
+income of 1–4 zm per kill on a level with seven NPCs, five of them armed (three "Bastard" raiders
+with pistols, plus Murray Chent's SMG and Jim Gunn-Smith's shotgun). "One good score
 buys several days" is not currently true at any score the level can actually pay out. Either
 `period_days` goes up, `rent_amount` comes down, or `day_length_seconds` does — but the number needs
 re-deriving against real minutes, not in-game days.
 
 **What is still missing: a reason to stop.** There is no fail state. Rent that cannot be paid takes
-what you have, toasts the shortfall, and fires `payment_missed` — **and nothing is listening to that
-signal.** An unpayable debt still just compounds forever.
+what you have, toasts the shortfall, and fires `payment_missed` — **and no gameplay is listening to
+that signal.** Its only subscriber is the debug event ticker (`scripts/components/debug_event_ticker.gd`),
+which just displays it. An unpayable debt still just compounds forever.
 
 **⚠ MY CALL, and the most important open item in this document:** wire something to
 `payment_missed`. That signal is now the single highest-leverage hook in the game — it is the one
@@ -153,17 +155,20 @@ Nothing in the source text supports either.
 
 A real sequence, so the numbering means something. Nothing here needs a new system.
 
-1. **The gauntlet.** Warning card → Terms of Service → the sky reveals **CYBERSUNDAY** 168 seconds
-   into the intro, hung 1 km out so the skyline occludes it (`scenes/game.tscn:24-37` — the title is
-   authored there as an override; the component's own default is the two-word "CYBER SUNDAY"). This
-   already works and is the best-executed thing in the game. Leave it alone.
+1. **The gauntlet.** Warning card → Terms of Service → the sky reveals **CYBERSUNDAY**, hung 1 km out
+   so the skyline occludes it (the `SkyTitle` node in `scenes/game.tscn` — the title is authored there as
+   an override; the component's own default is the two-word "CYBER SUNDAY"). The 168-second cue
+   (`cue_seconds` in `scripts/components/sky_title.gd`) is authored, but the shipped scene also sets
+   `test_show_immediately = true`, so today the title shows at once; turning that flag off restores the
+   cue. Otherwise this already works and is the best-executed thing in the game. Leave it alone.
 2. **The Ledger prices you.** Character creation, then the implant screen: it reads your build,
    files a verdict and a reason, and sets your line. You buy chrome on credit. **You are now in
    debt and the clock is running.** This also already works.
 3. **You spawn on the street with nothing but fists — and your first gun is on a corpse.** There is
    no weapon *pickup* in the district, but there is an armed raider: **"Bastard"**, 3 HP, faction
-   `raiders`, carrying a pistol (`scenes/levels/trenchboom_test_level.tscn:2637-2643`, whose
-   `weapon_data` resolves to `resources/weapons/pistol.tres`). **⚠ MY CALL:** keep it
+   `raiders`, carrying a pistol (the `Resource_qg7fm` profile in `scenes/levels/trenchboom_test_level.tscn`,
+   shared by three NPC instances, whose `weapon_data` resolves to `resources/weapons/pistol.tres`).
+   **⚠ MY CALL:** keep it
    that way. A city that sells you a body on credit should not hand you a gun; you take your first
    one off someone who no longer needs it, and the cha-ching that follows is the tutorial. What is
    missing is not the weapon — it is *placing Bastard where a new player will meet him within about
@@ -193,8 +198,9 @@ A scope fence. Every line here is a thing the systems could tempt you into and s
 - **Not a crime game.** There is no law, no wanted level, no police, and there should not be.
   Enforcement is private, priced and personal — which is exactly what the raider's contract and the
   Red Dot District's collectors already imply.
-- **Not a chess game.** `scripts/chess/` is 886 lines of complete rules engine and AI, placed
-  nowhere. Either a chess table goes in the district this month as a Ledger-adjacent gag about
+- **Not a chess game.** `scripts/chess/` is 877 lines of complete rules engine and AI, placed only
+  in `scenes/levels/TestLevel.tscn` (a `ChessMatch` against "Ms. Vile") — absent from the shipping level
+  and `alive.map`. Either a chess table goes in the district this month as a Ledger-adjacent gag about
   opaque scoring, or it gets deleted.
 
 ---
@@ -225,7 +231,7 @@ Read this as your inventory, not your backlog. Everything marked ✅ is implemen
 | Bounty economy | `EconomySettings` kill/headshot/collateral/confetti/long-range | ✅ armed |
 | Death moves money | wallet → killer, or a physics money bag | ✅ armed |
 | Rent | `scripts/components/rent_collector.gd`, 20 zm/day on the level root | ✅ **armed** |
-| Fail state | `payment_missed` fires with the shortfall | ⛔ **signal has no listener** |
+| Fail state | `payment_missed` fires with the shortfall | ⛔ **no gameplay listener — only the debug event ticker displays it** |
 | Vertical district | `alive.map`, 15,600 m² over five altitude bands | ✅ built, **barely populated** |
 | Sniper enemy | `resources/characters/sniper.tres`, 150 m sight | ⛔ **placed nowhere — no scene in the project references the archetype** |
 | Six stats | no soft cap, straight-line effects, all six have real read sites | ✅ armed |
@@ -250,7 +256,7 @@ comic resource — the severed Head speaks at rate 10.0, pitch 2.0.
    *Note:* the old example lines in `scripts/npc/bark_set.gd`'s doc comments are scrubbed AI placeholder text —
    do not paste them back.
 2. **The two existing offers, wired into two real quests.** The systems are done; this is authoring.
-3. **Audit the ~196 `[PH]` strings in `scripts/ui/player_text.gd` — 90 constants plus ~106 inline
+3. **Audit the ~202 `[PH]` strings in `scripts/ui/player_text.gd` — 89 constants plus ~113 inline
    templates — and the further 71 marked literals in `.tres` and scene files, then write the ones
    that are genuinely empty.** Many are already written and merely unblessed, and the whole Ledger
    band-and-reason set has already had its markers cleared — that five-minute pass is done. The
@@ -264,7 +270,7 @@ comic resource — the severed Head speaks at rate 10.0, pitch 2.0.
    collateral, and the bank has an opinion about their resale value.
 6. **The music critic.** Four tiers × a handful of lines turns the radio into a running gag about
    arbitrary aesthetic authority — thematically the same joke as the Ledger scoring *you*.
-7. **Normalise the character-name register.** Right now it runs Murray Chen / Kyle alongside
+7. **Normalise the character-name register.** Right now it runs Murray Chent / Kyle alongside
    Ms. Vile / Von Lime alongside Bastard / the Yard Guard. Three different games. **⚠ MY CALL:**
    lean on the epithet register — it matches "the Perpetually Observed", and nobody has a name until
    they give you one.

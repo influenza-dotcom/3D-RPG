@@ -52,7 +52,8 @@ Treat with care:
 - `CLAUDE.md` is written for AI coding agents, not people. The house rules in it are repeated below.
 - `REMEDIATION_PLAN.md` and `ARCHITECTURE_REVIEW.md` are working plans. Sections marked as history are
   history. Do not pick up a task from them without checking with the owner.
-- `docs/PLAYTEST_GAPS.md` says in its own header that nothing in it was verified by running the game.
+- The "Shipping-level content reachability" block at the end of `docs/CURRENT_ARCHITECTURE.md` is a source
+  audit; nothing in it was verified by running the game.
 - `docs/SYSTEM_MAP.md` is generated. Do not edit it by hand.
 
 ## 3. How changes get in

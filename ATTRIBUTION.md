@@ -27,8 +27,8 @@ a folder scan when `track` is null and would shuffle whatever is left.
 
 | ⚠ | `res://` path | Size | Apparent origin | Wired at | Action |
 | --- | --- | --- | --- | --- | --- |
-| ⚠ | `resources/weapons/Secret Shop.flac` | 19,387,561 | Dota 2 OST (lossless) | nothing — orphan | DELETE. Read `tests/test_devtools_browser.gd:91` first; it references this file as a non-resource that must be filtered out. |
-| ⚠ | `assets/audio/music/Secret Shop.mp3` | 2,724,237 | Dota 2 OST | `scenes/game.tscn:9,59` (the `Music` node at `:57`, `autoplay = true` at `:61`), `resources/levels/TestLevel.tres:4` | DELETE + rewire both |
+| ⚠ | `resources/weapons/Secret Shop.flac` | 19,387,561 | Dota 2 OST (lossless) | nothing — orphan | DELETE. Read the comment naming this file in `tests/test_devtools_browser.gd` first; it treats it as a non-resource that must be filtered out. |
+| ⚠ | `assets/audio/music/Secret Shop.mp3` | 3,429,832 | Dota 2 OST | `scenes/game.tscn:9,59` (the `Music` node at `:57`, `autoplay = true` at `:61`), `resources/levels/TestLevel.tres:4` | DELETE + rewire both |
 | ⚠ | `assets/audio/music/Secret Shop v3.mp3` | 4,122,178 | Dota 2 OST | nothing — orphan | DELETE, no rewire |
 | ⚠ | `assets/audio/music/Jakub's Ladder.mp3` | 3,094,625 | commercial track | nothing — orphan | DELETE, no rewire |
 | ⚠ | `assets/audio/sfx/hotline_miami_lr.mp3` | 128,517 | Hotline Miami OST | `resources/tuning/PlayerFeedbackSettings.tres:8` (`death_sting`) | DELETE. Set `death_sting = null`; `death_mix.gd:37-38` documents null as inert, `_sting_will_play()` enforces it (`death_mix.gd:302-308`, null check at `:304`) and `tests/test_death_mix.gd:153-165` covers it. |
@@ -96,10 +96,10 @@ ever find them, and replacing them means re-authoring mesh data inside the scene
 | --- | --- | --- |
 | ⚠ | `scenes/weapons/silenced.tscn` | 30 `Sketchfab` strings, 0 GLB refs |
 | ⚠ | `scenes/weapons/spraycan.tscn` | 7 `Sketchfab` strings, 0 GLB refs |
-| ⚠ | `scenes/player/view_model.tscn` | **the player's default gun rig** — inherits `silenced.tscn` |
+| ⚠ | `scenes/player/view_model.tscn` | **the player's default gun rig** — instances `silenced.tscn` as its `Sketchfab_Scene` child |
 
 > **Do not rename the `Sketchfab_Scene` node in `view_model.tscn`.** It is a hardcoded NodePath in
-> `gun_mesh.gd:56,128`, `muzzle_rig.gd:28,36` and `weapon_model_swapper.gd:78-79`. The mesh may be swapped;
+> `gun_mesh.gd:56,133`, `muzzle_rig.gd:28,36` and `weapon_model_swapper.gd:78-79`. The mesh may be swapped;
 > the node name must survive. (The identically-named node in `grenade_launcher.tscn` is unrelated — those
 > paths resolve against the gun rig, not against an equipped view-model.)
 
@@ -112,8 +112,8 @@ ever find them, and replacing them means re-authoring mesh data inside the scene
 | ⚠ | `assets/audio/sfx/kai_audio-computer-hum-440742.mp3` | Pixabay (id 440742) | `scenes/computerroom.tscn` — **the first thing a player ever hears** | TODO | TODO | TODO | |
 | ⚠ | `assets/audio/sfx/crt_monitor_startup.mp3` | unknown | `scenes/computerroom.tscn` | TODO | UNKNOWN | TODO | |
 | ⚠ | `assets/audio/sfx/crt_static_noise.mp3` | unknown | `scenes/computerroom.tscn` | TODO | UNKNOWN | TODO | |
-| ⚠ | `assets/audio/sfx/NpcHurtCry.wav` | unknown — added 2026-08-18 from `Downloads/sndInspectorHurtF.wav`. Marker: the RIFF `LIST/INFO` chunk carries `ITCH: Pro Tools` and `ICRD: 2014-04-23`, and `snd<Name><State><M|F>` is GameMaker asset naming — assume a game rip until proven otherwise | `scenes/characters/enemy.tscn` → `Damage.stream` (inherited by civilian / chip_mechanic / medicine_person), `scenes/levels/SliceTestLevel.tscn` → `Damage2.stream` | TODO | UNKNOWN | TODO | |
-| ⚠ | `assets/audio/sfx/NpcDeathCry.wav` | same set, from `Downloads/sndInspectorDeadF.wav` — identical RIFF markers | `scenes/characters/enemy.tscn` → `Death.death_cry` (same inheritance), `scenes/levels/SliceTestLevel.tscn` → `Death2.death_cry` | TODO | UNKNOWN | TODO | |
+| ⚠ | `assets/audio/sfx/NpcHurtCry.wav` | unknown — added 2026-08-18 from `Downloads/sndInspectorHurtF.wav`. Marker: the RIFF `LIST/INFO` chunk carries `ITCH: Pro Tools` and `ICRD: 2014-04-23`, and `snd<Name><State><M|F>` is GameMaker asset naming — assume a game rip until proven otherwise | `scenes/characters/enemy.tscn` → `Damage.stream` (`:55`; inherited by civilian / chip_mechanic / medicine_person). `scenes/levels/SliceTestLevel.tscn` declares it as an ext_resource but never uses it — there is no `Damage2` node | TODO | UNKNOWN | TODO | |
+| ⚠ | `assets/audio/sfx/NpcDeathCry.wav` | same set, from `Downloads/sndInspectorDeadF.wav` — identical RIFF markers | `scenes/characters/enemy.tscn` → `Death.death_cry` (`:52`; same inheritance). `scenes/levels/SliceTestLevel.tscn` declares it as an ext_resource but never uses it — there is no `Death2` node | TODO | UNKNOWN | TODO | |
 
 ## D. Textures
 
@@ -130,14 +130,14 @@ path, so **every file above lands in the `.pck` verbatim whether or not anything
 Until an asset path is added to `exclude_filter`, deleting a reference is not the same as removing the asset.
 
 The rows below are not even third-party problems — they are size problems. (`assets/models/dog.glb` — 409 MB
-smudged, no authored reference — used to lead this table. It is gone from the working tree, so it no longer
-ships, but the deletion is **uncommitted**: it is still tracked at `HEAD` as a 134-byte Git LFS pointer, and it
-is still in the repository until that deletion is committed.)
+smudged, no authored reference — used to lead this table. It is gone from the working tree and the deletion is
+**committed** (`05a7057b`, "The 409 MB dog leaves the tree"): `git ls-tree HEAD assets/models/dog.glb` is empty, so
+it neither ships nor sits at `HEAD` any more — only history still carries it.)
 
 | `res://` path | Size | Referenced? |
 | --- | --- | --- |
-| `assets/models/weirdlittleclayguy.obj` | 14,177,243 (13.5 MB — re-measured 2026-09-01; it was ~452 MB until the file was rewritten in place 2026-08-28) | **yes** — it is the dog's mesh (`scenes/characters/dog.tscn:10`, an `ArrayMesh` `ext_resource`). Not an orphan; it is here purely for size. Note it is gitignored (`.gitignore:39`) while the scene that needs it is tracked, so a fresh clone is missing this mesh. |
-| the 16 Call of Duty PNG sidecars (`assets/models/` + `assets/textures/`, duplicated sets) | ~11.7 MB | none — pure orphans |
+| `assets/models/weirdlittleclayguy.obj` | 14,177,243 (13.5 MB — re-measured 2026-09-01; it was ~452 MB until the file was rewritten in place 2026-08-28) | **yes** — it is the dog's mesh (`scenes/characters/dog.tscn:10`, an `ArrayMesh` `ext_resource`). Not an orphan; it is here purely for size. It is tracked through Git LFS (`.gitattributes` filter; tracked since 2026-09-10, per the `.gitignore` comment that used to ignore it), so a fresh LFS clone gets the mesh along with the scene that needs it. |
+| the 16 Call of Duty PNG sidecars (`assets/models/` + `assets/textures/`, duplicated sets) | 8,869,554 (~8.5 MB) | none — pure orphans |
 
 ## F. Fonts
 
@@ -168,7 +168,8 @@ is still in the repository until that deletion is committed.)
 > `copyright` feature, and all seven read literally `unknown`. And it **ships**: `export_presets.cfg:13` excludes
 > only `addons/text_to_speech/example*` and its `README.md`, so all seven voices land in the `.pck` — and the DLL
 > ships *beside* the `.exe` as a GDExtension shared object, which `exclude_filter` cannot touch at all (the export
-> dir carries `libgodot_text_to_speech.dll` next to `CYBERSUNDAY.exe`) —
+> will place `libgodot_text_to_speech.dll` next to `CYBERSUNDAY.exe` in `export_presets.cfg`'s `export_path`,
+> `../../Desktop/cybersunday-export/`, which exists but is empty today — no build present) —
 > the addon's own README notes every `.flitevox.res` in that folder is shipped and extracted to `user://` at
 > runtime. This is not a dormant dependency either: TTS is **ON by default** as of 2026-09-01
 > (`managers/Settings.gd:182`, `var tts_enabled: bool = true`). Fill all three licences in before any build leaves

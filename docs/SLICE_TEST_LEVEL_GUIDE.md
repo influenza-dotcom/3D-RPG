@@ -34,13 +34,16 @@ The built slice uses these authored files:
 3. Keep the root node named `Level` and keep the `LevelRoot` script on it.
 4. Keep the standard child buckets:
    - `NavigationRegion3D`
+   - `AmbientDust`
    - `WorldEnvironment`
    - `DirectionalLight3D`
    - `Characters`
    - `Lights`
-   - `Geometry`
+   - `Geometry` (with its `Blockout` child for CSG blockout brushes)
    - `Objects`
    - `Graffitti`
+   - `QuestMarkerSync`
+   - `SeeThroughBrushes`
    - `PlayerSpawn`
 
 The buckets are not magic except for their groups and scripts, but they keep the
@@ -174,9 +177,11 @@ Why `auto_complete = false`: picking up the package completes the objective, but
 the quest itself should stay active until the player returns to the relay
 terminal.
 
-Marker note: `show_marker` only authors the objective's marker data. To actually
-spawn compass/minimap markers in a level, add one `QuestMarkerSync` node anywhere
-in the scene.
+Marker note: `show_marker` only authors the objective's marker data; a
+`QuestMarkerSync` node in the scene is what actually spawns the compass/minimap
+markers. A fresh duplicate of `LevelTemplate.tscn` already ships one — do not add a
+second. The shipped `SliceTestLevel.tscn` predates that template node and has none,
+so add one there, and only there.
 
 ## 7. Author the Relay Terminal Dialogue
 
@@ -387,8 +392,10 @@ Check:
   on the dialogue choice.
 - If NPCs do not move, check that the floor is baked into the navmesh and that
   `agent_max_climb` is still around `0.4`.
-- If a quest marker does not appear, add one `QuestMarkerSync` node to the level
-  and confirm the objective has `show_marker = true`.
+- If a quest marker does not appear, confirm the level has exactly one
+  `QuestMarkerSync` node (a template duplicate already ships one; the shipped
+  `SliceTestLevel.tscn` has none, so add one there) and that the objective has
+  `show_marker = true`.
 - If the player can run the package mission repeatedly in one save, remember
   that `QuestStarter` refuses active/completed quests, and — since world-object
   save v1 — a consumed `CanPickUp` (like the package) records a "gone" bit in

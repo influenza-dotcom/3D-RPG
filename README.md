@@ -6,7 +6,7 @@ a selectable colour depth (24-bit down to 3-bit, with the PlayStation's own
 grain, night vision, a Borderlands-style black ink outline over every surface,
 and PS1-style material warping — rides on a dense first-person movement and
 combat sandbox. It **presents at native resolution by default** (Options ->
-Video -> Presentation: *Crisp* — crisp text, native-res world, the
+Video -> Presentation: *Crisp*, the HIGH FIDELITY mode in code and the other docs — crisp text, native-res world, the
 retro effects scale-compensated), with the original chunky low-internal-
 resolution pipeline preserved as the *Retro* option
 (see `docs/CURRENT_ARCHITECTURE.md` -> "Presentation").

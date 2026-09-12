@@ -452,7 +452,8 @@ that are the single source of truth — a faster surface, never a second store.
 
 Acceptance:
 
-- Read-only until the user clicks **Save Changed**; nothing is written on edit or
+- Read-only until the user clicks **Save Changed Text** (the button reads
+  **Save Changed Text (N)** once N fields are dirty); nothing is written on edit or
   tab-switch.
 - Save writes back ONLY the resources actually edited — non-dirty entries are
   skipped.
@@ -518,7 +519,7 @@ Acceptance:
 
 - Templates list every resource and scene node they will create — Blueprints
   shows a live "Will create:" file list as the name is typed, marking any
-  path that already `(exists!)`.
+  path that is on disk with a red `already exists`.
 - Instantiation refuses to overwrite existing content unless the user chooses a
   new name/path — **Scaffold Enemy Pack** aborts before writing anything if ANY
   planned path exists.
@@ -584,7 +585,7 @@ Acceptance:
 
 The Palette tab lists every drop-in component from `core/catalog.gd`
 (searchable, grouped by category) and adds the selected one under the selected
-node via **Add to selected node** (double-click also adds).
+node via **Add to Selected Node** (double-click also adds).
 
 Acceptance:
 
@@ -597,11 +598,12 @@ Acceptance:
   Place tab does: adding a second component to the same node must put it BESIDE
   the first, not INSIDE it. Its `_parent_for` mirrors `scene_placer`'s, and the
   status says "beside X, under Y" whenever the rule redirects.
-- No scene open refuses with "Open a scene first, then add." and frees the
+- No scene open refuses with "Open a scene first, then Add." and frees the
   built node — no leak, no editor error.
 - `add_mode` "instance" instantiates the prefab; "child" builds the script's
   native base type and attaches the script; a missing scene/script reports
-  "Couldn't build …" instead of throwing.
+  "Couldn't add %s: its scene or script file is missing." (with the component's
+  class name) instead of throwing.
 - The list is driven by `Catalog.COMPONENTS` — add a row there to expose a new
   component; the dock keeps no hardcoded twin list.
 - Constructs off-tree — pinned by `tests/test_devtools_docks.gd`.
@@ -994,10 +996,11 @@ Acceptance:
 - Rows and statuses name files by their FILE NAME with the full path on the row
   tooltip. The two path FIELDS do show a path, because that is the field's value —
   the designer fills them from the FileSystem dock, never by typing.
-- The deciding is pure (`dock_scenediff/scene_diff.gd`), including the refusal
-  wording and the row labels (`plan_selection` / `field_problem` /
-  `compare_refusal` / `node_label`), so what the designer reads is unit-tested
-  without an editor.
+- The deciding is pure statics: the parse and the diff in
+  `dock_scenediff/scene_diff.gd` (`parse_scene` / `diff_scenes`), and the refusal
+  wording and row labels in `dock_scenediff/scene_diff_view.gd` (`plan_selection` /
+  `field_problem` / `compare_refusal` / `node_label`), so what the designer reads is
+  unit-tested without an editor.
 
 ## Editor Toolbar (Play From Spawn)
 

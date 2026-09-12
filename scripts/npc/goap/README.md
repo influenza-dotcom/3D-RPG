@@ -45,6 +45,16 @@ sensed stealth stimulus, `Investigate`.
   String or StringName keys. The `goals` allow-list is enforced (empty = pursue
   all; a subset restricts the NPC, but `Idle` is always kept so the brain can't
   idle to a null goal). `validate()` runs at spawn + in the content validator.
+- **GoapGoalPriority / GoapActionCost** - the dropdown ROW Resources a
+  `GoapProfile` holds (`goal_priorities`, `action_cost_overrides`): pick the goal
+  or action from a list and `priority` / `cost` REPLACES the authored base for
+  that archetype (cost clamped >= 0). They replaced free-text Dictionary keys.
+- **GoapLibrary** (`goap_library.gd`, preloaded by path - no class_name) - the
+  canonical goal + action NAME lists those dropdowns populate from;
+  `tests/test_npc_goap_library.gd` asserts they match the library a bare NPC builds.
+- **SearchState** - per-NPC scratch Resource for the enriched INVESTIGATING
+  search (breadcrumb ring, seed point, give-up clock). Owned by `Perception`,
+  read every frame by `GoapActionSearch`; pure data + math, testable via `.new()`.
 - **GoapExecutor** - drives the brain. Pure methods: `decide`,
   `current_action`, and `advance`. In-tree methods: `tick` and
   `_build_world_state`.
