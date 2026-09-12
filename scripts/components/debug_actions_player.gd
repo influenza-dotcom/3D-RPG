@@ -2116,7 +2116,7 @@ static func _reps() -> PackedStringArray:
 ## Unwind every SHARED-TUNING override this module banked in `ctx[&"state"]`, restoring the authored values onto
 ## GameSettings. Called by the console's `_exit_tree` (and by the world module's reload/load path), because the
 ## state dictionary dies with the console — and the console dies on EVERY reload_current_scene: a death reload
-## (player.gd death modes), F9 quickload, PlayerDebug's End key. Without this, `speed 3` + one death leaves
+## (player.gd death modes), F9 quickload. Without this, `speed 3` + one death leaves
 ## `GameSettings.player_movement.max_speed` at 3x for the session with the fresh console calling that "authored",
 ## and `god`'s zeroed fall-death timer stays zero with no record left to restore it from. ⭐Only the SHARED .tres
 ## knobs are unwound: `armor_flat` lives on the Player and is freed with it, so it needs nothing here.

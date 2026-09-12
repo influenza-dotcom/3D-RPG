@@ -177,7 +177,7 @@ var _suspended_player: Node = null
 var _suspend_snapshot: Dictionary = {}
 
 ## ⭐PER-PROCESS LATCH — `static`, so it lives on the SCRIPT, not the node. This node is rebuilt by every
-## reload_current_scene (a death, `reload`, `load`/F9 quickload, PlayerDebug's End key), and each rebuild would
+## reload_current_scene (a death, `reload`, `load`/F9 quickload), and each rebuild would
 ## otherwise re-run the autoexec: `spawn raider 5` per death, `money 1000` per quickload. Set the moment the poll
 ## FIRES (not when it is armed), so a reload that lands before the level does still gets exactly one run.
 static var _autoexec_ran: bool = false
@@ -354,7 +354,7 @@ func _restore_world() -> void:
 ## (1) SHARED TUNING. `_state` is the ONLY record of every authored value a command banked before overriding a
 ## shared GameSettings .tres field (`speed`'s max_speed, `god`'s continuous-fall timer, `timescale`'s
 ## allow_timescale_changes). This console dies on EVERY reload_current_scene — not just `reload`/`load` but a
-## death reload (player.gd death modes), F9 quickload and PlayerDebug's End key — and the .tres outlives it. So
+## death reload (player.gd death modes), F9 quickload — and the .tres outlives it. So
 ## without this unwind, `speed 3` + one death leaves the whole session at 3x with the fresh console calling that
 ## "authored". Both action modules expose an idempotent release; the menu shares this dict and never owns it.
 ## Runs UNCONDITIONALLY (open or closed) — the overrides do not care whether the panel was up.
@@ -1034,7 +1034,7 @@ func _input(event: InputEvent) -> void:
 		# BINDS fire only while this console is CLOSED (and no other surface / text field is up — see
 		# _binds_can_fire). Same raw-keycode compare as the toggle above, and consumed for the same reason: a bound
 		# `g` must not ALSO reach the EVENT-driven consumers behind us (hotbar, Pip-Boy tabs, PlayerDebug's
-		# End/Home, an autoload's `_unhandled_input`). Consuming does NOT hide the key from POLLED actions —
+		# Home audit, an autoload's `_unhandled_input`). Consuming does NOT hide the key from POLLED actions —
 		# `Input.is_action_pressed` still sees the physical key, exactly as with the toggle — so binding a movement
 		# or fire key runs the line AND the verb. Pick a free key (F5..F12, the keypad).
 		if not _binds.is_empty() and _binds.has(key.keycode) and _binds_can_fire():

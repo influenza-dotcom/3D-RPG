@@ -30,7 +30,7 @@ extends GutTest
 ##    We assert these exist, never run them. (One carve-out: _compose_fall_death_message is pure
 ##    string composition over GameSettings.player_feedback — safe to call off-tree, and pinned below.)
 ##  - Head.setup()/_on_mouse_input_rotate, GrappleHook._ready/_try_attach/apply_pull/_update_rope,
-##    PlayerDebug.reset()/_unhandled_input: all need a live tree/rig/Input or reload the scene.
+##    PlayerDebug._unhandled_input: all need a live tree/rig/Input or reload the scene.
 ##  - Player._physics_process and its slide/climb/ram/bounce/thump/noise/falling-air helpers:
 ##    require live Input + a full physics scene; their EXISTENCE is source-grepped in test_smoke.gd.
 ##
@@ -1043,11 +1043,13 @@ func test_grapple_action_bound() -> void:
 
 # --- player_debug.gd -------------------------------------------------------
 
-func test_player_debug_extends_node3d_and_reset_api() -> void:
-	# PlayerDebug has no _ready, so .new() is safe; never call reset() (it reloads the scene).
+func test_player_debug_extends_node3d_and_has_no_reload_key() -> void:
+	# PlayerDebug has no _ready, so .new() is safe. The End-key hard reload was REMOVED 2026-09-12: it shipped
+	# UNGATED in every build and lost unsaved progress on one press. The console's `reload` is the dev reload.
 	var d = load(PLAYER_DEBUG_SCRIPT_PATH).new()
-	assert_true(d is Node3D,
-		"PlayerDebug must extend Node3D so it can sit in the scene and catch the ui_end action")
-	assert_true(d.has_method("reset"),
-		"PlayerDebug.reset must exist — the End-key dev reload routes to it")
+	assert_true(d is Node3D, "PlayerDebug must extend Node3D so it can sit in the Player scene")
+	assert_false(d.has_method("reset"),
+		"PlayerDebug.reset is gone — no ungated hard-reload key may ship (it lost unsaved progress in release builds)")
+	assert_true(d.has_method("audit_null_material_meshes"),
+		"the Home-key null-material mesh audit stays (its listener is gated on OS.is_debug_build)")
 	d.free()

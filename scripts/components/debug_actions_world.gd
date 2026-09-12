@@ -2126,7 +2126,7 @@ static func _has_state(ctx: Dictionary, key: StringName) -> bool:
 ## The freezeai latch is dropped for a different reason: the reload builds a FRESH cast that is not under cutscene
 ## control, so a stale "ON" would make the next bare `freezeai` resolve to OFF and look like a no-op.
 ## PUBLIC (no underscore) on purpose: the console's `_exit_tree` calls this too, because a death reload / F9
-## quickload / the End key all free the console WITHOUT passing through `reload`/`load` — and this dictionary is
+## quickload all free the console WITHOUT passing through `reload`/`load` — and this dictionary is
 ## the only record of the banked authored value. Idempotent (keys erased after restore).
 ##
 ## `notarget` needs NO unwind here, only hygiene: its meta AND the two zeroed noise exports live on the PLAYER

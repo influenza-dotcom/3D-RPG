@@ -89,7 +89,7 @@ func _ready() -> void:
 
 ## Teardown scrub. The attributes are a SHARED sub-resource of the cached camera_rig.tscn (not
 ## resource_local_to_scene), so whatever is live when this camera is freed SURVIVES into the next camera the
-## scene instantiates — and an F9 quickload (or the dev End-key scene reset) can tear the player down
+## scene instantiates — and an F9 quickload can tear the player down
 ## MID-SCOPE, with the far blur pushed to the scoped state. Without this, the fresh camera's _ready() would
 ## snapshot scoped-ADS blur (enabled @ dof_scoped_far_distance) as the "authored" resting pair, and far blur
 ## would be stuck ON at rest for the whole process. Restore the resting pair on the way out; near/amount are

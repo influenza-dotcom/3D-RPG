@@ -1,23 +1,22 @@
 class_name PlayerDebug
 extends Node3D
 
-## Dev-only helper: press End (ui_end) to hard-reload the current scene. Not shipping
-## gameplay — a quick manual reset while iterating.
+## Dev-only helper: press Home to run the null-material shadow-mesh audit below. Gated on OS.is_debug_build(),
+## so an exported release never listens. The End-key hard reload that used to live here was REMOVED 2026-09-12:
+## it shipped UNGATED (live in any build, beside the arrow cluster) and lost unsaved progress on one press.
+## The debug console's `reload` is the dev reload now.
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("ui_end"):
-		reset()
-	elif event is InputEventKey and event.pressed and (event as InputEventKey).keycode == KEY_HOME:
+	if not OS.is_debug_build():
+		return
+	if event is InputEventKey and event.pressed and (event as InputEventKey).keycode == KEY_HOME:
 		audit_null_material_meshes()
-
-func reset() -> void:
-	get_tree().reload_current_scene()
 
 ## Dev audit (press Home): walks every MeshInstance3D under the root and reports any that casts
 ## shadows yet has no material on a surface — the cause of the "material_*: Parameter material is
 ## null" RenderingServer spam. Prints each offender's node path so it can be fixed (assign a
 ## material, or set its cast_shadow to OFF). If it reports 0, the spam is just a transient during
-## the End hard-reload's teardown and is safe to ignore.
+## a scene reload's teardown and is safe to ignore.
 func audit_null_material_meshes() -> void:
 	var offenders := 0
 	var stack: Array[Node] = [get_tree().root]

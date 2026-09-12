@@ -3051,9 +3051,9 @@ as *implemented*, not as *reachable*. The shipped default level is "Headshot Cit
 
 **Fix before the next playtest build**
 
-- `End` reloads the current level (`PlayerDebug`, bound to `ui_end`) with no development-build gate. Every
-  other debug key (`F1` menu, `F2` noclip, `F4` inspector, `` ` `` console) is gated; this one is live in any
-  build, sits beside the arrow cluster, and loses unsaved progress instantly.
+- ~~`End` reloads the current level with no development-build gate~~ — REMOVED 2026-09-12. `PlayerDebug`
+  now carries only the `Home` null-material mesh audit, gated on `OS.is_debug_build()` like every other debug
+  key (`F1` menu, `F2` noclip, `F4` inspector, `` ` `` console); the console's `reload` is the dev reload.
 - Confirm what is actually reachable in Headshot City (next list) — it decides whether a playtest can say
   anything about progression, economy or quests.
 - `[PH]` copy is everywhere player-facing: chips, weapon mods, quest titles and perks carry the prefix; chip
