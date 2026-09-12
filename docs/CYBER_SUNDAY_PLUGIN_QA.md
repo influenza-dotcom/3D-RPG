@@ -953,7 +953,7 @@ Acceptance:
 - **It never materialises the project.** `closure()` takes a `text_of` Callable
   and pulls text only for the paths its BFS pops. A `{path: text}` map of the
   tree is a memory bomb — `RefScan.SCANNED_EXTS` includes `"res"` and
-  `addons/text_to_speech/voices/` alone is ~59 MB of `.flitevox.res`, and Godot
+  `addons/text_to_speech/voices/` alone is ~59 MB of `.flitevox` (formerly `.flitevox.res`), and Godot
   Strings are UTF-32 internally. This tab drops `"res"` from its ext list: a
   binary voice blob carries no `res://` edges.
 - **It must NOT call `ScanCache.begin()` / `end()`.** That singleton has ONE

@@ -26,7 +26,7 @@ func _initialize() -> void:
 		quit(1)
 		return
 	for v in VOICES:
-		var path := ProjectSettings.globalize_path("res://addons/text_to_speech/voices/%s.flitevox.res" % v)
+		var path := ProjectSettings.globalize_path("res://addons/text_to_speech/voices/%s.flitevox" % v)
 		var err: int = tts.set_voice_path(path)
 		if err != OK:
 			printerr("PROBE FAIL: set_voice_path(%s) -> %d" % [v, err])
@@ -43,7 +43,7 @@ func _initialize() -> void:
 	# a 6-12 MB voice per switch. 60 switches; any heap fault fail-fasts the process.
 	for i in 60:
 		var v: String = VOICES[i % VOICES.size()]
-		tts.set_voice_path(ProjectSettings.globalize_path("res://addons/text_to_speech/voices/%s.flitevox.res" % v))
+		tts.set_voice_path(ProjectSettings.globalize_path("res://addons/text_to_speech/voices/%s.flitevox" % v))
 		var buf: PackedByteArray = tts.speak_to_buffer("Switch %d." % i)
 		if buf.is_empty():
 			printerr("PROBE FAIL: churn synth %d empty" % i)

@@ -124,13 +124,14 @@ func test_size_cap_clears_the_biggest_authored_scene_and_still_refuses_the_voice
 	assert_gte(RefScan.MAX_FILE_BYTES, 2 * 1024 * 1024,
 		"the cap must clear the biggest authored .tscn (1.59 MB today) -- below it, a resource used only by the live level reads as safe to delete")
 	assert_lt(RefScan.MAX_FILE_BYTES, 5 * 1024 * 1024,
-		"and stay under the smallest *.flitevox.res voice blob (5.8 MB), which is the editor freeze the cap exists to stop")
+		"and stay under the smallest *.flitevox voice blob (5.8 MB), which is the editor freeze the cap exists to stop")
 
 
 func test_find_referencers_skips_files_over_the_size_cap_unread() -> void:
-	# The freeze: ~59 MB of *.flitevox.res voice blobs were read as text on every Find. The guard is BY SIZE, before
-	# the read -- so a .res under the cap that mentions the target is still found (the extension IS scanned), while a
-	# .res over MAX_FILE_BYTES is skipped even though the target's path sits in its very first line.
+	# The freeze: ~59 MB of *.flitevox.res voice blobs (since renamed *.flitevox) were read as text on every
+	# Find. The guard is BY SIZE, before the read -- so a .res under the cap that mentions the target is still
+	# found (the extension IS scanned), while a .res over MAX_FILE_BYTES is skipped even though the target's path
+	# sits in its very first line.
 	DirAccess.make_dir_recursive_absolute(TMP)
 	var target := TMP + "/target.tres"
 	_write(target, "[gd_resource type=\"Resource\" uid=\"uid://fixtureuid78\"]\n")

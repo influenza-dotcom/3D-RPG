@@ -51,7 +51,7 @@ extends RefCounted
 ## ------------------------------------------------------------------------------------------------------------
 ## PERFORMANCE IS A CORRECTNESS CONSTRAINT HERE, not a nicety. The obvious shape — closure(roots, files, uid_index)
 ## with files = {path: text} — is a memory bomb that fires on a tab CLICK: addons/text_to_speech/voices/ alone is
-## 59 MB of .flitevox.res, ref_scan.gd:14 deliberately does not skip addons/, and Godot Strings are UTF-32
+## 59 MB of .flitevox voice data, ref_scan.gd:14 deliberately does not skip addons/, and Godot Strings are UTF-32
 ## internally (so that is a multi-hundred-MB spike to answer a question about ~40 content files). So closure()
 ## takes text_of as an injected Callable and pulls text ONLY for the paths it POPS — a few hundred, not 1380.
 ## GUT injects `func(p): return fixture[p]` over a five-entry dict; the glue injects ScanCache.text_of directly.
@@ -60,15 +60,16 @@ const Stats := preload("res://addons/cybersunday_tools/dock_stats/content_stats.
 const ScanWiring := preload("res://addons/cybersunday_tools/panel_audit/scan_wiring.gd")
 
 ## Extensions whose text carries res:// EDGES. Deliberately NOT ref_scan.gd:16's list: "res" is DROPPED here.
-## Verified on this tree: EVERY .res file is addons/text_to_speech/voices/*.flitevox.res — 59 MB of binary voice
-## data with no res:// edges in it. Reading them would cost the entire budget of this scan for exactly zero edges.
+## Verified on this tree: there are NO .res files at all. The 59 MB of Flite voice data under
+## addons/text_to_speech/voices/ is plain *.flitevox (formerly *.flitevox.res) and carries no res:// edges. Reading
+## such blobs would cost the entire budget of this scan for exactly zero edges.
 ##
 ## What dropping "res" COSTS, with the sign stated the right way round: a .res that IS a serialized resource still
 ## gets marked REACHED when something points at it, but we never walk THROUGH it, so anything reachable ONLY via
 ## that .res becomes a false orphan — this LENGTHENS the problem list, it does not shorten it. That is the direction
 ## to err in here (see the two-failures block above: a false orphan is loud and checkable, a false green is silent),
-## and today it costs literally nothing because the only .res in the tree are binary voice blobs. The day a real
-## serialized .res ships, put "res" back.
+## and today it costs literally nothing because the tree ships no .res at all (the voices are plain .flitevox).
+## The day a real serialized .res ships, put "res" back.
 const SCANNED_EXTS: Array[String] = ["tscn", "tres", "gd"]
 
 ## The three fields that START a quest, read off the live scripts. Each holds a Quest REFERENCE (an ExtResource in

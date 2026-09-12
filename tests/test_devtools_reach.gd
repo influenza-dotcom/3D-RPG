@@ -9,7 +9,7 @@ extends GutTest
 ##  1. PURE unit tests on fixture strings + an INJECTED file map. reach_scan.gd is a plain RefCounted with statics
 ##     only (no EditorInterface, no scene tree, no DirAccess), so every rule below is driven off-tree. The closure
 ##     takes text_of as a Callable precisely so a test can hand it a six-entry dictionary instead of a project —
-##     the same seam that keeps the shipped tab from materialising a {path: text} map of res:// (the .flitevox.res
+##     the same seam that keeps the shipped tab from materialising a {path: text} map of res:// (the .flitevox
 ##     voices alone are 59 MB, and Godot Strings are UTF-32 internally).
 ##
 ##  2. ONE ACCEPTANCE pass that runs the SHIPPED pipeline over the REAL project and pins hand-verified rows. This
@@ -291,7 +291,7 @@ func test_closure_marks_folder_scan_members_reached_and_names_who_declared_the_r
 
 
 func test_closure_never_reads_a_binary_res_file() -> void:
-	# PERFORMANCE IS A CORRECTNESS CONSTRAINT: addons/text_to_speech/voices/ alone is 59 MB of .flitevox.res with
+	# PERFORMANCE IS A CORRECTNESS CONSTRAINT: addons/text_to_speech/voices/ alone is 59 MB of .flitevox voice data with
 	# no res:// edges in it, and Godot Strings are UTF-32 internally. Dropping "res" from this tab's ext list is
 	# what keeps a tab CLICK from spiking hundreds of MB. It is still marked reached — we just never read it.
 	assert_false(Reach.SCANNED_EXTS.has("res"), "\"res\" is deliberately NOT scanned (the 59 MB voice blobs)")

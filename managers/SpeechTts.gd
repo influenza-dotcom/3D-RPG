@@ -29,7 +29,7 @@ const BARK_VOLUME_DB := -4.0
 const MAX_BARK_PLAYERS := 8
 ## A bundled voice file is `<voice_name>` + this suffix (the addon's own naming; VoiceManager.get_voice_path
 ## appends the same). bundled_voice_names() strips it to recover the names the pools speak in.
-const VOICE_FILE_SUFFIX := ".flitevox.res"
+const VOICE_FILE_SUFFIX := ".flitevox"
 ## The throwaway line prewarm synthesises into a DISCARDED buffer to run flite's first-utterance init at boot.
 ## Never played, never painted — developer plumbing, not player-facing copy (so not PlayerText).
 const PREWARM_UTTERANCE := "ok"
@@ -101,7 +101,7 @@ func _prewarm_voice_cache(vm: VoiceManager) -> void:
 	if engine is Object and not (engine is RefCounted):
 		engine.free()
 
-## The bundled Flite voice names — every `<name>.flitevox.res` under VoiceManager.VOICE_DIR_RES, sorted. The same
+## The bundled Flite voice names — every `<name>.flitevox` under VoiceManager.VOICE_DIR_RES, sorted. The same
 ## directory walk ensure_voices_installed extracts from, so the warm set can never drift from the shipped set
 ## (VoiceData's @export_enum is the designer-facing copy of this list). Empty when the folder is missing.
 static func bundled_voice_names() -> PackedStringArray:

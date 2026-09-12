@@ -18,7 +18,7 @@ extends RefCounted
 ##
 ## WHAT THE WALK READS, AND WHY THAT IS BOUNDED. Every scanned file is pulled whole into a Godot String (UTF-32, so
 ## four times its byte size) and substring-searched. A .res IS scanned, because a resource saved in binary form still
-## carries its ext_resource paths as plain text — but the tree also holds ~59 MB of *.flitevox.res under
+## carries its ext_resource paths as plain text — but the tree also holds ~59 MB of *.flitevox voice blobs under
 ## addons/text_to_speech/voices/ (raw voice data, not a res:// in it), and reading those on every Find froze the
 ## editor for seconds. Two guards, both load-bearing (a temp-dir test pins each):
 ##   * SKIP_DIRS names `text_to_speech` — _walk compares the BARE entry name, never the full path — so the voice
@@ -38,7 +38,8 @@ const SCANNED_EXTS: Array[String] = ["tscn", "tres", "gd", "res"]
 ## Files larger than this (bytes) are skipped unread. The line has to clear the biggest AUTHORED file in the project
 ## and still refuse the voice blobs, and those two are far apart, so 4 MB sits between them with room either side:
 ## the largest authored files today are scenes/props/skeleton.tscn (1.59 MB) and scenes/levels/trenchboom_test_level
-## .tscn (1.52 MB — the level the game actually boots into), while the SMALLEST *.flitevox.res voice blob is 5.8 MB.
+## .tscn (1.52 MB — the level the game actually boots into), while the SMALLEST *.flitevox voice blob is 5.8 MB
+## (they were *.flitevox.res, a SCANNED extension, when this cap was added; the cap still has to clear them).
 ## This was 512 KB, which is BELOW those three scenes: a resource used only by the live level read as "nothing points
 ## at it", i.e. "safe to delete", which is the one answer this tab must never get wrong. Raise it again if an
 ## authored scene ever approaches 4 MB; never lower it below the biggest .tscn on disk.

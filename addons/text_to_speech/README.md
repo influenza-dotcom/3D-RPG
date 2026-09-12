@@ -18,8 +18,8 @@ func _ready():
 ## Keep in mind
 
 - The current implementation is intended to have a small number of **TextToSpeech1D/2D/3D** nodes as the dynamic library and the voice file is loaded for each instance
-- Voices for this text to speech plugin are located under **addons/text_to_speech/voices/**. The voices are .flitevox voices renamed to .flitevox.res to be treated by Godot as resources. Additional voices can be added to this directory and used with this plugin.
-- It is a good practice to only keep the voices you use in the game, as all .flitevox.res files in the directory are shipped with the game and extracted to **user://** at runtime.
+- Voices for this text to speech plugin are located under **addons/text_to_speech/voices/**. The voices are plain `.flitevox` files (Flite voice databases). They are deliberately NOT named `.res`: Godot treats `.res` as its own binary-resource format and its editor scan / exporter open every `.res` to read dependencies, which fails on a Flite header with "Unrecognized binary resource file". An unknown extension is still packed into the .pck on export. Additional voices can be added to this directory and used with this plugin.
+- It is a good practice to only keep the voices you use in the game, as all .flitevox files in the directory are shipped with the game and extracted to **user://** at runtime.
 
 ## Voices included
 
