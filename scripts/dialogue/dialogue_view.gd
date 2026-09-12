@@ -274,13 +274,7 @@ func _player() -> Node:
 
 ## The player's PerkManager child (the BuildGate idiom), or null when there's no player / no manager yet.
 func _player_perk_manager() -> PerkManager:
-	var p := _player()
-	if p == null:
-		return null
-	for c in p.get_children():
-		if c is PerkManager:
-			return c
-	return null
+	return PerkManager.find_on(_player())
 
 ## How many of `item_id` the live player carries (0 with no player / no inventory).
 func _player_item_count(item_id: StringName) -> int:

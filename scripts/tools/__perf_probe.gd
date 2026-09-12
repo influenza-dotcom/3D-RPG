@@ -1,6 +1,6 @@
 extends Node
 
-## THROWAWAY perf probe (the `__` prefix marks it disposable, like `__shirt_qa.gd`). It boots the REAL
+## THROWAWAY perf probe (the `__` prefix marks it disposable). It boots the REAL
 ## game.tscn as `current_scene` — autoloads and all — parks a measurement node beside it, sweeps the player's
 ## yaw so every view direction in the level gets sampled, and dumps a frame-time breakdown per VIEWPORT.
 ##

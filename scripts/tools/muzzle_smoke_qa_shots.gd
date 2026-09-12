@@ -19,6 +19,8 @@ extends Node
 
 ## The gun the NPC section puts in an unarmed NPC's hand — the same .tres the player half equips above, so
 ## both halves of the run photograph the SAME weapon and any difference between them is the RIG, not the gun.
+const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+
 const NPC_PISTOL_PATH := "res://resources/weapons/pistol.tres"
 
 var _dir := "user://muzzle_smoke_qa_shots"
@@ -584,14 +586,7 @@ func _shot(name: String) -> void:
 ## Hide everything painted OVER the 3D frame — the boot sky title, the HUD, the debug tickers — so the shots
 ## read the barrel and not the reticle sitting on it. The last pass turns the post-process layer back on.
 func _strip_overlays() -> void:
-	var stack: Array[Node] = [get_tree().root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n is CanvasLayer:
-			(n as CanvasLayer).visible = false
-		elif n.name == "SkyTitle" and n is Node3D:
-			(n as Node3D).visible = false
-		stack.append_array(n.get_children())
+	QaShots.strip_overlays(get_tree().root)
 
 
 ## Turn the POST-PROCESS layer back on and nothing else — found by walking for the shader rather than by node
@@ -621,17 +616,4 @@ func _restore_view_model() -> bool:
 
 
 func _restore_post_process() -> bool:
-	var stack: Array[Node] = [get_tree().root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n is CanvasItem:
-			var mat := (n as CanvasItem).material as ShaderMaterial
-			if mat != null and mat.shader != null and String(mat.shader.resource_path).contains("post_process"):
-				var layer: Node = n
-				while layer != null and not (layer is CanvasLayer):
-					layer = layer.get_parent()
-				if layer != null:
-					(layer as CanvasLayer).visible = true
-					return true
-		stack.append_array(n.get_children())
-	return false
+	return QaShots.restore_post_process(get_tree().root)

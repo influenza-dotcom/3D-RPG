@@ -493,17 +493,10 @@ func _is_menu_reveal_input(event: InputEvent) -> bool:
 	return event.is_action_pressed(&"ui_accept") or event.is_action_pressed(&"Attack")
 
 ## True for the "press anything to skip" inputs shared by both intro sequences: any key-down (no echo), the Attack
-## action, or a left-click. Each caller adds its own visibility/state gate before consulting this.
+## action, or a left-click (InputManager.is_skip_press — the computer room shares it). Each caller adds its own
+## visibility/state gate before consulting this.
 func _is_skip_press(event: InputEvent) -> bool:
-	if event is InputEventKey:
-		var key := event as InputEventKey
-		return key.pressed and not key.echo
-	if event.is_action_pressed(&"Attack"):
-		return true
-	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		return mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT
-	return false
+	return InputManager.is_skip_press(event)
 
 ## Continue: keep the profile loaded at boot (loaded = true) and start — the Player applies the saved build and
 ## resumes at the saved respawn point. (_start_game hides the cursor for the black boot intro.)

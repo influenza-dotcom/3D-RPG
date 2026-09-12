@@ -2353,26 +2353,15 @@ static func _clip_line(p: Player, ws: Weapon, ammo: Ammo) -> String:
 ## GameState._perk_manager_of). Every listing command uses this so printing `stats` or `perks` never mutates the
 ## scene tree as a side effect.
 static func _find_perk_manager(p: Player) -> PerkManager:
-	if p == null:
-		return null
-	for c in p.get_children():
-		if is_instance_valid(c) and c is PerkManager:  # ⭐is_instance_valid FIRST — `is` crashes on a freed instance
-			return c as PerkManager
-	return null
+	return PerkManager.find_on(p)
 
 
-## Find-or-CREATE the player's PerkManager child, mirroring Player._perk_manager (player.gd:1366) and the three
-## other hand-rolled copies (LevelUp / RespecStation / PerkStation). ⭐PerkManager.host is set in its _ready from
-## get_parent(), so the node MUST be add_child'd: a manager created but never parented has a null host and
-## unlock_perk silently skips every stat bonus and ability grant.
+## Find-or-CREATE the player's PerkManager child — PerkManager.ensure_on, the ONE find-or-create every consumer
+## (Player / LevelUp / RespecStation / PerkStation) shares. ⭐PerkManager.host is set in its _ready from get_parent(),
+## so the node MUST be add_child'd: a manager created but never parented has a null host and unlock_perk silently
+## skips every stat bonus and ability grant — ensure_on parents it on the spot.
 static func _perk_manager(p: Player) -> PerkManager:
-	var found := _find_perk_manager(p)
-	if found != null:
-		return found
-	var pm := PerkManager.new()
-	pm.name = &"Perks"
-	p.add_child(pm)
-	return pm
+	return PerkManager.ensure_on(p)
 
 
 static func _missing_prereqs(pm: PerkManager, perk: Perk) -> PackedStringArray:

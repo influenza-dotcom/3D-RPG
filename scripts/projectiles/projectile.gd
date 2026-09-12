@@ -264,7 +264,10 @@ func _on_body_entered(body: Node) -> void:
 func _on_queued_for_deletion(_last_pos: Vector3) -> void:
 	on_deletion()
 
-func _orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
+## Stand a decal on a surface: `normal` becomes the decal's UP (a Decal projects along -Y) and the forward axis is
+## whichever world axis is NOT near-parallel to it, so a floor hit and a wall hit both get a stable basis. Static so
+## the blood-drop splat (blood_drop.gd) shares it instead of carrying a copy — the ONE decal-orientation rule.
+static func orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
 	var up := normal
 	var z: Vector3
 	if absf(up.dot(Vector3.UP)) > NORMAL_PARALLEL_THRESHOLD:
@@ -273,6 +276,10 @@ func _orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
 		z = Vector3.UP.slide(up).normalized()
 	var x := up.cross(z).normalized()
 	decal.global_transform.basis = Basis(x, up, z)
+
+## Instance seam Bullet / RockProjectile call (tests pin it by name); the rule itself is the static above.
+func _orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
+	orient_decal_to_normal(decal, normal)
 
 func on_deletion() -> void:
 	pass

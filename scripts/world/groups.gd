@@ -117,3 +117,26 @@ static func human_player(tree: SceneTree) -> Node3D:
 ## FAILS that check ("Invalid type in function ... (previously freed)"), so the guard inside never gets to answer.
 static func is_usable(node) -> bool:
 	return node != null and is_instance_valid(node) and node.is_inside_tree()
+
+## The live level subtree ("Level"). GameRoot works in TWO layouts — script on the scene root, or a drop-in child
+## with Player/Level as SIBLINGS (scenes/game.tscn — the level lands at Game/Level, NOT GameRoot/Level) — so check
+## the GameRoot's own child first, then its sibling, then the current scene's; never hardcode one layout. THE one
+## home for this walk: the debug console, the world action module, the event ticker and the round-trip harness each
+## used to carry a copy. Null-safe for a null / absent tree and a GameRoot mid-free (validity FIRST — a node freed with
+## the old level can still be a group member for a frame).
+static func level_node(tree: SceneTree) -> Node:
+	if tree == null:
+		return null
+	var gr := tree.get_first_node_in_group(GAME_ROOT)
+	if gr != null and is_instance_valid(gr):
+		var own := gr.get_node_or_null(^"Level")
+		if own != null:
+			return own
+		var parent := gr.get_parent()
+		if parent != null:
+			var sibling := parent.get_node_or_null(^"Level")
+			if sibling != null:
+				return sibling
+	if tree.current_scene != null:
+		return tree.current_scene.get_node_or_null(^"Level")
+	return null

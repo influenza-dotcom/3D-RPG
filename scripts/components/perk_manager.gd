@@ -180,3 +180,31 @@ func _revoke_ability(perk_id: StringName) -> void:
 		return
 	if host != null and host.has_method(&"revoke_ability"):
 		host.revoke_ability(_granted_abilities[perk_id])
+
+# ---------------------------------------------------------------------------------------------------
+# lookup — THE child scan every consumer shares
+# ---------------------------------------------------------------------------------------------------
+
+## The player's PerkManager child, or null when none has been created yet. The ONE lookup GameState, the stations,
+## the screens, the debug actions and Player itself share (each used to carry its own child scan). Validity FIRST:
+## a child freed with the old body can still sit in get_children() for a frame, and `is` crashes on a freed instance.
+## Null-safe for a null / freed player, so callers holding a cached handle need no guard of their own.
+static func find_on(player: Node) -> PerkManager:
+	if player == null or not is_instance_valid(player):
+		return null
+	for c in player.get_children():
+		if is_instance_valid(c) and c is PerkManager:
+			return c as PerkManager
+	return null
+
+## Find-or-CREATE the player's PerkManager, named "Perks" and add_child'd on the spot — `host` is resolved from the
+## parent in _ready, so a manager built but never parented has a null host and unlock_perk silently skips every stat
+## bonus and ability grant. Callers that must never mutate the tree (listings, save writes) use find_on instead.
+static func ensure_on(player: Node) -> PerkManager:
+	var found := find_on(player)
+	if found != null:
+		return found
+	var mgr := PerkManager.new()
+	mgr.name = &"Perks"
+	player.add_child(mgr)
+	return mgr

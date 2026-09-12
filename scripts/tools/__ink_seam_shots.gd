@@ -30,6 +30,8 @@ extends SceneTree
 ##
 ## ⭐ A `-s` script compiles BEFORE autoloads register, so ink_outline.gd is load()ed at RUNTIME.
 
+const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+
 const INK_PATH := "res://scripts/effects/ink_outline.gd"
 
 const SETTLE := 60  ## frames before the first shot: shader compiles + the deferred mask build
@@ -88,15 +90,7 @@ func _process(_delta: float) -> bool:
 	return false
 
 func _box(pos: Vector3, size: Vector3, col: Color) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size
-	mi.mesh = bm
-	var m := StandardMaterial3D.new()
-	m.albedo_color = col
-	mi.material_override = m
-	mi.position = pos
-	return mi
+	return QaShots.box(pos, size, col)
 
 ## One L-shaped pair centred on `cx`. `dx` shifts the second box along X (0 = flush, negative =
 ## interpenetrating, positive = a gap); `dy` raises its top.

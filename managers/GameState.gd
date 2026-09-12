@@ -1384,10 +1384,7 @@ func make_stats() -> CharacterStats:
 
 ## The PerkManager child of `player` (named "Perks"), or null if none has been created yet.
 func _perk_manager_of(player: Node) -> PerkManager:
-	for c in player.get_children():
-		if c is PerkManager:
-			return c
-	return null
+	return PerkManager.find_on(player)
 
 ## Write the perk ledger + quest tracker to `cfg`, keyed by resource_path (a code-built quest/perk with no path
 ## can't round-trip and is skipped — the quest-side skip warns, see QuestTracker.save_into). Active quests carry

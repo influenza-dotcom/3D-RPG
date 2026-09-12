@@ -27,6 +27,8 @@ extends Node
 ## Run windowed from the project root:
 ##   godot --path . res://scripts/tools/__stamina_ring_probe.tscn -- --shots-dir="C:/some/dir"
 
+const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+
 const TURN_RATE := 2.2
 const FILL := 0.55  ## pool fraction to pin: a half-ring is the most legible amount of arc to judge
 
@@ -211,28 +213,12 @@ func _delta(a: Image, b: Image, mask: Array[Vector2i] = []) -> float:
 ## Every pixel the ring actually paints, found from the reference (alpha 0.6) pair rather than from the
 ## ring's geometry — so the mask can never claim coverage the renderer did not produce.
 func _footprint(base: Image, lit: Image, threshold: float = 0.06) -> Array[Vector2i]:
-	var out: Array[Vector2i] = []
-	for y in base.get_height():
-		for x in base.get_width():
-			var ca := base.get_pixel(x, y)
-			var cb := lit.get_pixel(x, y)
-			if (absf(ca.r - cb.r) + absf(ca.g - cb.g) + absf(ca.b - cb.b)) / 3.0 >= threshold:
-				out.append(Vector2i(x, y))
-	return out
+	return QaShots.footprint(base, lit, threshold)
 
 
 ## The difference between two crops, multiplied 8x into visible range — the shape of what changed.
 func _amplify(a: Image, b: Image, gain: float = 8.0) -> Image:
-	var out := Image.create_empty(a.get_width(), a.get_height(), false, Image.FORMAT_RGB8)
-	for y in a.get_height():
-		for x in a.get_width():
-			var ca := a.get_pixel(x, y)
-			var cb := b.get_pixel(x, y)
-			out.set_pixel(x, y, Color(
-					minf(absf(ca.r - cb.r) * gain, 1.0),
-					minf(absf(ca.g - cb.g) * gain, 1.0),
-					minf(absf(ca.b - cb.b) * gain, 1.0)))
-	return out
+	return QaShots.amplify(a, b, gain)
 
 
 ## Film grain is per-frame NOISE and it is the difference between this probe measuring the ring and this
@@ -241,17 +227,7 @@ func _amplify(a: Image, b: Image, gain: float = 8.0) -> Image:
 ## ⭐`get_shader_parameter` returns Nil for a uniform the material has never had assigned — the shader-side
 ## default is not in the param cache — so the null branch is load-bearing, not defensive.
 func _set_grain(amount: float) -> float:
-	var stack: Array[Node] = [get_tree().root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n is CanvasItem:
-			var mat := (n as CanvasItem).material as ShaderMaterial
-			if mat != null and mat.shader != null and String(mat.shader.resource_path).contains("post_process"):
-				var was: Variant = mat.get_shader_parameter(&"grain_amount")
-				mat.set_shader_parameter(&"grain_amount", amount)
-				return float(was) if was != null else 0.05
-		stack.append_array(n.get_children())
-	return 0.05
+	return QaShots.set_grain(get_tree().root, amount)
 
 
 func _zoom(region: Image) -> Image:

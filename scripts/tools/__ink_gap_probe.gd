@@ -11,6 +11,8 @@ extends SceneTree
 ##
 ## Run: godot --path <abs project> -s scripts/tools/__ink_gap_probe.gd -- --shots-dir=<dir>
 
+const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+
 const INK_PATH := "res://scripts/effects/ink_outline.gd"
 const GAPS := [0.02, 0.05, 0.10, 0.20, 0.40]  ## CLEAR AIR between the wall's back face and the actor's front face
 const SLOTS := [-6.0, -3.0, 0.0, 3.0, 6.0] ## world x for each gap's actor + rib
@@ -60,15 +62,7 @@ func _process(_delta: float) -> bool:
 	return false
 
 func _box(pos: Vector3, size: Vector3, col: Color) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size
-	mi.mesh = bm
-	var m := StandardMaterial3D.new()
-	m.albedo_color = col
-	mi.material_override = m
-	mi.position = pos
-	return mi
+	return QaShots.box(pos, size, col)
 
 ## An actor dressed exactly as the game dresses one since the inverted hull was deleted (2026-08-27):
 ## an opaque body on render layer 1 PLUS the ink-mask layer, wearing InkOutline's screen-space ring at

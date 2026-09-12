@@ -72,15 +72,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 func _is_boot_skip_event(event: InputEvent) -> bool:
-	if event is InputEventKey:
-		var key := event as InputEventKey
-		return key.pressed and not key.echo
-	if event.is_action_pressed(&"Attack"):
-		return true
-	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		return mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT
-	return false
+	return InputManager.is_skip_press(event)
 
 func _on_turn_on_finished() -> void:
 	# Reached from BOTH the player skip in _input and the TurnOn "finished" connection authored in computerroom.tscn.

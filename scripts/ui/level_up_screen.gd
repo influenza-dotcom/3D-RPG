@@ -75,7 +75,7 @@ func open_level_up(station: Node, player: Node) -> void:
 	var station_name_v: Variant = station.get(&"station_name")  # duck-typed: only is_instance_valid was checked, not the type
 	var station_nm: String = station_name_v if station_name_v is String else ""
 	# Route the re-title through title_text so the skin's uppercase_titles casing applies to RUNTIME titles
-	# too, not just make_title's constructor argument.
+	# too, not just the authored scene title.
 	_title.text = MenuStyle.title_text(PlayerText.level_up_title(station_nm))
 	_rebuild()
 	_root.visible = true
@@ -338,12 +338,7 @@ func _on_pick_perk(perk: Perk) -> void:
 
 ## The player's PerkManager child, or null — for reading skill_points / has_perk in the picker.
 func _player_perk_manager() -> PerkManager:
-	if not is_instance_valid(_player):
-		return null
-	for c in _player.get_children():
-		if c is PerkManager:
-			return c as PerkManager
-	return null
+	return PerkManager.find_on(_player)
 
 # ---------------------------------------------------------------------------------------------------
 # UI binding (the layout is AUTHORED in scenes/ui/level_up_screen.tscn — this adopts it)

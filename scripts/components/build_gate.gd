@@ -82,10 +82,7 @@ func deny_reason(opener: Node) -> String:
 	return "Locked"
 
 func _perk_manager(opener: Node) -> PerkManager:
-	for c in opener.get_children():
-		if c is PerkManager:
-			return c
-	return null
+	return PerkManager.find_on(opener)
 
 ## Self-populate the required_stat dropdown from the CharacterStats attribute names (SUGGESTION; blank stays valid).
 func _validate_property(property: Dictionary) -> void:

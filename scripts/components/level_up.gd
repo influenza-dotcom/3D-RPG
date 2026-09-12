@@ -188,15 +188,9 @@ func unlock_perk(player_node: Node, perk: Perk) -> bool:
 	GameState.autosave(player)
 	return true
 
-## Find or create the player's PerkManager child (mirrors PerkStation / Player._perk_manager).
+## Find or create the player's PerkManager child (PerkManager.ensure_on — the shared find-or-create).
 func _perk_manager(player: Node) -> PerkManager:
-	for c in player.get_children():
-		if c is PerkManager:
-			return c as PerkManager
-	var mgr := PerkManager.new()
-	mgr.name = &"Perks"
-	player.add_child(mgr)
-	return mgr
+	return PerkManager.ensure_on(player)
 
 # ---------------------------------------------------------------------------
 # Behaviour (talk-handler surface — used only when standalone, a direct-interact station)

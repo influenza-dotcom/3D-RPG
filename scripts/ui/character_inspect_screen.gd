@@ -140,7 +140,7 @@ func _bind_ui() -> void:
 
 	(%VBox as VBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared per-screen rhythm (skin Layout group)
 	var title: Label = %Title
-	MenuStyle.style_title(title)  # title font/size/colour + ellipsis (the make_title twin); centring is authored
+	MenuStyle.style_title(title)  # title font/size/colour + ellipsis on an authored Label; centring is authored
 	title.text = MenuStyle.title_text(PlayerText.CHARACTER_INSPECT_TITLE)
 
 	# Body: the big hero view on the LEFT (most of the width), the read-only summary on the RIGHT.
@@ -235,12 +235,8 @@ func _refresh_summary() -> void:
 ## Unspent perk points on the player's PerkManager child (0 if none) — the same child lookup the Stats screen
 ## and the level-up screen use.
 func _unspent_points() -> int:
-	if not is_instance_valid(_player):
-		return 0
-	for c in _player.get_children():
-		if c is PerkManager:
-			return (c as PerkManager).skill_points
-	return 0
+	var pm := PerkManager.find_on(_player)
+	return pm.skill_points if pm != null else 0
 
 ## The six stat lines, "Title   value" (with any live status modifier folded into the number).
 func _refresh_stats() -> void:

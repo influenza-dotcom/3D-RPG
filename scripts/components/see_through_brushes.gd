@@ -68,7 +68,7 @@ func _ready() -> void:
 	# Snapshot the body list BEFORE splitting: _harvest_body adds a sibling StaticBody3D, and walking the live
 	# tree while doing that would hand us our own output to re-scan (it has no mesh child, so it would be a
 	# harmless no-op — but relying on that is a trap waiting for the day the skip rule changes).
-	for body in _bodies(root):
+	for body in SeeThrough.collect_bodies(root):
 		if _harvest_body(body):
 			split_bodies += 1
 	if verbose:
@@ -238,13 +238,3 @@ static func _mesh_child(body: CollisionObject3D) -> MeshInstance3D:
 		if child is MeshInstance3D:
 			return child as MeshInstance3D
 	return null
-
-
-## Every CollisionObject3D at or under `root`.
-static func _bodies(root: Node) -> Array[CollisionObject3D]:
-	var found: Array[CollisionObject3D] = []
-	if root is CollisionObject3D:
-		found.append(root as CollisionObject3D)
-	for child in root.get_children():
-		found.append_array(_bodies(child))
-	return found

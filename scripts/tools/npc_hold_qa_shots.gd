@@ -25,6 +25,8 @@ extends Node
 
 ## The weapons photographed, in order. Each is handed to the SAME NPC through the one seam that equips AND
 ## rebuilds the hand model (`_on_equip_weapon_requested`), so every frame differs only by the weapon.
+const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+
 const WEAPONS := [
 	"res://resources/weapons/pistol.tres",
 	"res://resources/weapons/smg.tres",
@@ -656,11 +658,4 @@ func _shot(name: String) -> void:
 ## Hide everything painted OVER the 3D frame — the boot sky title, the HUD, the debug tickers — so the shots
 ## read the NPC and not the reticle sitting on it.
 func _strip_overlays() -> void:
-	var stack: Array[Node] = [get_tree().root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n is CanvasLayer:
-			(n as CanvasLayer).visible = false
-		elif n.name == "SkyTitle" and n is Node3D:
-			(n as Node3D).visible = false
-		stack.append_array(n.get_children())
+	QaShots.strip_overlays(get_tree().root)

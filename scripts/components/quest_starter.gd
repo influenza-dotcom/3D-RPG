@@ -14,16 +14,6 @@ extends LookAtInteractable
 @export var prompt_label: String = ""      ## hover label; blank -> "Accept: <title>"
 @export var consume_on_use: bool = true    ## free the node after starting (a one-time board)
 
-func _ready() -> void:
-	if Engine.is_editor_hint():
-		_editor_fit_hitbox()
-		return
-	collision_layer = TalkHelpers.TALK_LAYER
-	collision_mask = 0
-	_build_outline()
-	if auto_fit_collider:
-		_fit_hitbox_to_host()
-
 func start_talk(player: Node) -> void:
 	if quest == null:
 		return

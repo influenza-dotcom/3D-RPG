@@ -204,12 +204,8 @@ func _refresh_summary() -> void:
 ## Unspent perk points on the player's PerkManager child (0 if none) — so the "spend points at a Level-Up station"
 ## hint isn't shown without telling you how many you actually have. Mirrors the level-up screen's child lookup.
 func _unspent_points() -> int:
-	if not is_instance_valid(_player):
-		return 0
-	for c in _player.get_children():
-		if c is PerkManager:
-			return (c as PerkManager).skill_points
-	return 0
+	var pm := PerkManager.find_on(_player)
+	return pm.skill_points if pm != null else 0
 
 func _stat_modifier(stat: StringName) -> float:
 	if is_instance_valid(_player) and _player.has_method(&"status_stat_modifier"):

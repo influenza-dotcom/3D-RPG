@@ -33,7 +33,7 @@ extends CanvasLayer
 ## tracker stack (ui.gd builds those at x 484..784, y 8..~180 on the 792x444 canvas — the tracker word-wraps DOWN,
 ## so `margin.y` is the knob if a long objective ever collides). The rows are `visible_lines` FIXED-HEIGHT Labels
 ## placed by hand inside a clip_contents Control sized to N x the RENDERED line height, so a growing log can never
-## pump the layer off-screen (a bare Label reports its wrapped height as its minimum — the make_hint_footer trap).
+## pump the layer off-screen (a bare Label reports its wrapped height as its minimum — the fixed-height footer trap).
 ## Every Control is MOUSE_FILTER_IGNORE: a read-only overlay must never eat clicks. No MenuStyle, no theme reaches a
 ## CanvasLayer under a non-Control, so every look is an explicit override. WHOLE-PIXEL metrics only (the ~2.4x
 ## nearest upscale combs any fraction).
@@ -194,7 +194,7 @@ func _build_ui() -> void:
 		_rows.append(row)
 	# Row height = the RENDERED line height (folds the theme's line spacing), whole pixels, so the clip lands
 	# BETWEEN rows. Measured off a real row after its overrides; falls back to the pre-measurement estimate the
-	# make_hint_footer idiom uses when the font is not resolvable yet.
+	# MenuStyle.hint_block_height fallback uses when the font is not resolvable yet.
 	var lh := 0.0
 	if not _rows.is_empty():
 		lh = _rows[0].get_line_height()
@@ -731,25 +731,11 @@ static func _now() -> float:
 	return float(Time.get_ticks_msec()) / 1000.0
 
 
-## The live level subtree, mirroring debug_actions_world.gd _level_node: GameRoot's own "Level" child, else its
+## The live level subtree (Groups.level_node, the ONE walk): GameRoot's own "Level" child, else its
 ## SIBLING (scenes/game.tscn parents GameRoot beside Player, so the level lands at Game/Level), else the current
 ## scene's "Level". Never hardcode one layout.
 static func _find_level_node(tree: SceneTree) -> Node:
-	if tree == null:
-		return null
-	var gr := tree.get_first_node_in_group(GroupsScript.GAME_ROOT)
-	if gr != null and is_instance_valid(gr):
-		var own := gr.get_node_or_null(^"Level")
-		if own != null:
-			return own
-		var parent := gr.get_parent()
-		if parent != null:
-			var sibling := parent.get_node_or_null(^"Level")
-			if sibling != null:
-				return sibling
-	if tree.current_scene != null:
-		return tree.current_scene.get_node_or_null(^"Level")
-	return null
+	return GroupsScript.level_node(tree)
 
 
 ## Depth-first search for the first node under `root` whose script FILE is `file` (basename match — the

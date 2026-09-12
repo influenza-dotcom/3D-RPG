@@ -38,7 +38,7 @@ extends CanvasLayer
 ##
 ## THE PANEL never eats clicks and never pumps the layer: every Control is MOUSE_FILTER_IGNORE (read-only overlay
 ## convention, cf. debug_overlay.gd), and the Label sits inside a clip_contents Control whose height is pinned to
-## `panel_lines` x the RENDERED line height (the make_hint_footer idiom, menu_style.gd) — a bare Label reports its
+## `panel_lines` x the RENDERED line height (the MenuStyle.size_hint_footer idiom) — a bare Label reports its
 ## wrapped height as its minimum and would grow the panel off-screen as lines arrive. Two details keep the NEWEST
 ## line on screen (the whole point of a tail): the Label's `line_spacing` is pinned (Label draws N lines as
 ## sum(line_h) + (N-1) x line_spacing, and get_line_height() does NOT fold the spacing — with the default theme's
@@ -63,7 +63,7 @@ const LAYER := 140
 const DEFAULT_MAX_LINES := 400
 ## Drawing details, not tuning: the text drop shadow (1 px, whole pixels — the 792x444 canvas is nearest-upscaled
 ## ~2.4x, so a fractional metric rasterizes into a ragged comb), the pre-measurement line-height estimate used
-## only when the font is not resolvable yet (the same fallback make_hint_footer uses), the text inset from the
+## only when the font is not resolvable yet (the same fallback MenuStyle.hint_block_height uses), the text inset from the
 ## backing's edges, and the PINNED inter-line spacing (an explicit theme override so the line pitch is exactly
 ## get_line_height() + this — see the class doc on why the default theme's 3 px would hide the newest lines).
 const SHADOW_OFFSET_PX := 1
@@ -542,19 +542,12 @@ static func diff_snapshot(prev: Dictionary, cur: Dictionary) -> Array[Dictionary
 	return out
 
 
-## Perception.State -> its enum word. if/elif rather than match: the enum comes through the preloaded script const
-## (PerceptionScript.State.X is a subscript the analyzer need not fold as a match pattern — a comparison always
-## works). "?" for anything else, including the -1 an NPC with no Perception reports.
+## Perception.State -> its enum word, via the enum's own find_key (an enum reached through a preloaded script const
+## is a Dictionary at runtime, so no comparison chain or `match` is needed). "?" for anything else, including the -1
+## an NPC with no Perception reports. DebugActionsWorld._perception_state_text is the same two lines.
 static func state_name(state: int) -> String:
-	if state == PerceptionScript.State.UNAWARE:
-		return "UNAWARE"
-	if state == PerceptionScript.State.DETECTING:
-		return "DETECTING"
-	if state == PerceptionScript.State.ALERTED:
-		return "ALERTED"
-	if state == PerceptionScript.State.INVESTIGATING:
-		return "INVESTIGATING"
-	return "?"
+	var key: Variant = PerceptionScript.State.find_key(state)
+	return String(key) if key != null else "?"
 
 
 static func yes_no(v: bool) -> String:

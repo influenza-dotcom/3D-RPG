@@ -553,3 +553,17 @@ func _warn_on_action_drift() -> void:
 		push_warning("InputManager audit: an action var resolves to '%s', which is not in the InputMap — gameplay polls a dead action name." % a)
 	for a in drift["code_missing_in_catalog"]:
 		push_warning("InputManager audit: code action '%s' has no rebindable ActionCatalog row — the player can't rebind it (add an ActionSpec, or list it in _CONTROLLER_ONLY)." % a)
+
+## True for the "press anything to skip" inputs the boot intros share (the computer-room title and the start menu's
+## black intro): any key-down (no echo), the Attack action, or a left-click. A pure event sniff — each caller adds its
+## own visibility / state gate before consulting this. THE one definition; both screens used to carry a copy.
+func is_skip_press(event: InputEvent) -> bool:
+	if event is InputEventKey:
+		var key := event as InputEventKey
+		return key.pressed and not key.echo
+	if event.is_action_pressed(&"Attack"):
+		return true
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		return mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT
+	return false

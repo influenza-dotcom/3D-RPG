@@ -50,15 +50,9 @@ func _perk_label() -> String:
 		return PlayerText.DEFAULT_PERK_LABEL
 	return perk.display_name if perk.display_name != "" else String(perk.id)
 
-## Find (or create) the player's PerkManager child so perks work without pre-placing one.
+## Find (or create) the player's PerkManager child so perks work without pre-placing one (PerkManager.ensure_on).
 func _perk_manager(player: Node) -> PerkManager:
-	for c in player.get_children():
-		if c is PerkManager:
-			return c
-	var mgr := PerkManager.new()
-	mgr.name = &"Perks"
-	player.add_child(mgr)
-	return mgr
+	return PerkManager.ensure_on(player)
 
 func _get_configuration_warnings() -> PackedStringArray:
 	if perk == null:

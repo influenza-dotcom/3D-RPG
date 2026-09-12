@@ -16,6 +16,8 @@ extends SceneTree
 ## GameSettings — an autoload that ISN'T registered yet when a `-s` script's compile chain runs at boot
 ## ("Identifier not found: GameSettings"). By the first process frame the autoloads are up. Same reasoning
 ## validate_all.gd documents for ContentValidator / ScanDisk.
+const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+
 const SCAN_TEXT_PATH := "res://addons/cybersunday_tools/panel_audit/scan_text.gd"
 
 const PRODUCTION_ROOTS := ["res://scripts", "res://managers", "res://scenes", "res://resources"]
@@ -81,24 +83,7 @@ func _run() -> int:
 
 
 func _walk(dir: String, offenders: Array) -> void:
-	if EXCLUDED_DIRS.has(dir):
-		return
-	var d := DirAccess.open(dir)
-	if d == null:
-		return
-	d.list_dir_begin()
-	var entry := d.get_next()
-	while entry != "":
-		if entry.begins_with("."):
-			entry = d.get_next()
-			continue
-		var full: String = dir.path_join(entry)
-		if d.current_is_dir():
-			_walk(full, offenders)
-		elif entry.get_extension() == "gd":
-			_scan_file(full, offenders)
-		entry = d.get_next()
-	d.list_dir_end()
+	QaShots.walk_gd_files(dir, EXCLUDED_DIRS, _scan_file.bind(offenders))
 
 
 func _scan_file(path: String, offenders: Array) -> void:

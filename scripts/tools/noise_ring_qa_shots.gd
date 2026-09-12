@@ -12,6 +12,8 @@ extends Node
 ##
 ## Driver-copy pattern, copied verbatim from minimap_qa_shots.gd — see that file's header for why.
 
+const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+
 var _dir := "user://qa_shots"
 
 func _ready() -> void:
@@ -100,13 +102,7 @@ func _find_player() -> Node:
 
 
 func _find_by_script(path: String) -> Node:
-	var stack: Array[Node] = [get_tree().root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n.get_script() != null and String(n.get_script().resource_path) == path:
-			return n
-		stack.append_array(n.get_children())
-	return null
+	return QaShots.find_by_script(get_tree().root, path)
 
 
 func _frames(n: int) -> void:

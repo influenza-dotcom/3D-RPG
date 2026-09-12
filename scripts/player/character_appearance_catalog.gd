@@ -202,7 +202,7 @@ static func shirt_texture(appearance: Dictionary) -> Texture2D:
 		img = (v as Image).duplicate()  # never mutate a caller's Image (we convert + upscale below)
 	elif v is PackedByteArray:
 		var bytes := v as PackedByteArray
-		if not _looks_like_png(bytes):
+		if not looks_like_png(bytes):
 			return null
 		img = Image.new()
 		if img.load_png_from_buffer(bytes) != OK:
@@ -228,7 +228,10 @@ static func _to_combined_shirt(img: Image) -> Image:
 		c.resize(SHIRT_APPLY_RES, SHIRT_APPLY_RES * 2, Image.INTERPOLATE_NEAREST)
 	return c
 
-static func _looks_like_png(bytes: PackedByteArray) -> bool:
+## Strict PNG sniff — signature, IHDR first (13-byte payload), at least one IDAT, IEND last and flush with the end of
+## the bytes, every chunk length consistent. Public: the ONE check this catalog's shirt decode and ShirtCanvas's
+## import share, so a truncated or mislabelled file is refused the same way on both paths.
+static func looks_like_png(bytes: PackedByteArray) -> bool:
 	if bytes.size() < 45:
 		return false
 	if bytes[0] != 0x89 or bytes[1] != 0x50 or bytes[2] != 0x4e or bytes[3] != 0x47:

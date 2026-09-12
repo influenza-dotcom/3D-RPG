@@ -17,6 +17,8 @@ extends Node
 ## current_scene to game.tscn (change_scene_to_file frees the current scene), so _ready re-attaches a COPY of
 ## this script on a bare Node parented to root, which survives the scene change and drives.
 
+const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+
 var _dir := "user://qa_shots"
 var _probe_wall: MeshInstance3D = null
 var _probe_box: MeshInstance3D = null
@@ -279,14 +281,7 @@ func _nearest_npc(player: Node3D) -> Node3D:
 ## these shots answer is what the renderer draws on the WALL, and a full-screen "CYBERSUNDAY" sits right on it.
 ## Pass 4 turns the post-process layer back on by itself (_restore_post_process) for the shipped-chain shot.
 func _strip_overlays() -> void:
-	var stack: Array[Node] = [get_tree().root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n is CanvasLayer:
-			(n as CanvasLayer).visible = false
-		elif n.name == "SkyTitle" and n is Node3D:
-			(n as Node3D).visible = false
-		stack.append_array(n.get_children())
+	QaShots.strip_overlays(get_tree().root)
 
 
 ## Turn the POST-PROCESS layer back on and nothing else. ui.tscn's root CanvasLayer holds a full-rect
@@ -295,20 +290,7 @@ func _strip_overlays() -> void:
 ## for that shader rather than by node name, so renaming the HUD cannot silently turn the check back off.
 ## Returns false if it is not there, so the shot is labelled honestly instead of quietly reverting to a raw grab.
 func _restore_post_process() -> bool:
-	var stack: Array[Node] = [get_tree().root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n is CanvasItem:
-			var mat := (n as CanvasItem).material as ShaderMaterial
-			if mat != null and mat.shader != null and String(mat.shader.resource_path).contains("post_process"):
-				var layer: Node = n
-				while layer != null and not (layer is CanvasLayer):
-					layer = layer.get_parent()
-				if layer != null:
-					(layer as CanvasLayer).visible = true
-					return true
-		stack.append_array(n.get_children())
-	return false
+	return QaShots.restore_post_process(get_tree().root)
 
 
 func _frames(n: int) -> void:

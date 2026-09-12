@@ -439,7 +439,7 @@ func png_bytes() -> PackedByteArray:
 ## PNG (pre-front/back saves), which is put on BOTH sides so an older character keeps its symmetric look. No-op on
 ## empty / bad bytes. A restore is a load, not an edit — both undo stacks start fresh from it.
 func load_png(bytes: PackedByteArray) -> void:
-	if not _looks_like_png(bytes):
+	if not CharacterAppearanceCatalog.looks_like_png(bytes):
 		return
 	var img := Image.new()
 	if img.load_png_from_buffer(bytes) != OK:
@@ -473,38 +473,6 @@ func load_png(bytes: PackedByteArray) -> void:
 	else:
 		_tex = ImageTexture.create_from_image(_combined_upscaled())
 	queue_redraw()
-
-static func _looks_like_png(bytes: PackedByteArray) -> bool:
-	if bytes.size() < 45:
-		return false
-	if bytes[0] != 0x89 or bytes[1] != 0x50 or bytes[2] != 0x4e or bytes[3] != 0x47:
-		return false
-	if bytes[4] != 0x0d or bytes[5] != 0x0a or bytes[6] != 0x1a or bytes[7] != 0x0a:
-		return false
-	var pos := 8
-	var saw_ihdr := false
-	var saw_idat := false
-	while pos + 12 <= bytes.size():
-		var chunk_len := _png_u32(bytes, pos)
-		var next := pos + 8 + chunk_len + 4
-		if next > bytes.size():
-			return false
-		if not saw_ihdr:
-			if not _png_chunk_is(bytes, pos, 0x49, 0x48, 0x44, 0x52) or chunk_len != 13:
-				return false
-			saw_ihdr = true
-		if _png_chunk_is(bytes, pos, 0x49, 0x44, 0x41, 0x54):
-			saw_idat = true
-		if _png_chunk_is(bytes, pos, 0x49, 0x45, 0x4e, 0x44):
-			return saw_ihdr and saw_idat and chunk_len == 0 and next == bytes.size()
-		pos = next
-	return false
-
-static func _png_u32(bytes: PackedByteArray, offset: int) -> int:
-	return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]
-
-static func _png_chunk_is(bytes: PackedByteArray, offset: int, a: int, b: int, c: int, d: int) -> bool:
-	return bytes[offset + 4] == a and bytes[offset + 5] == b and bytes[offset + 6] == c and bytes[offset + 7] == d
 
 # --- drawing ----------------------------------------------------------------------------------------------------
 

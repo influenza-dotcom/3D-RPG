@@ -41,16 +41,17 @@ func _ready() -> void:
 	host.add_to_group(Groups.SEE_THROUGH)
 	# Mark the bodies too. `host` is usually the prop root with a StaticBody3D/Area3D under it, and it is the
 	# COLLIDER a ray reports and a round collides with — marking only the root would tag a node nothing ever hits.
-	for body in _bodies(host):
+	for body in collect_bodies(host):
 		body.add_to_group(Groups.SEE_THROUGH)
 
 
 ## Every CollisionObject3D at or under `root`. Nested prop scenes are included: `owned` filtering would drop the
-## bodies inside an instanced panel, which is exactly the multi-part case this walk exists for.
-static func _bodies(root: Node) -> Array[CollisionObject3D]:
+## bodies inside an instanced panel, which is exactly the multi-part case this walk exists for. Public: the ONE
+## walk — SeeThroughBrushes shares it.
+static func collect_bodies(root: Node) -> Array[CollisionObject3D]:
 	var found: Array[CollisionObject3D] = []
 	if root is CollisionObject3D:
 		found.append(root as CollisionObject3D)
 	for child in root.get_children():
-		found.append_array(_bodies(child))
+		found.append_array(collect_bodies(child))
 	return found

@@ -45,6 +45,8 @@ extends Node
 ## ⭐ IT MUST NEVER CALL Settings.set_*(): every one of those setters calls save_settings(), and a QA probe has
 ## already clobbered the user's real settings.cfg once. Fields are written DIRECTLY here and restored at the end.
 
+const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+
 const TURN_RATE := 2.2      ## rad/s of yaw while "turning" — a brisk look, not a flick
 const TURN_FRAMES := 26     ## frames of turning before a turning shot, so the lag has fully built
 const SETTLE_FRAMES := 40   ## frames of standing still before a "still" shot, so any tail has expired
@@ -258,17 +260,7 @@ func _apply_world(scale: float, overrides: Dictionary) -> void:
 ## grain_amount; returns the previous value so _restore can put it back. Found by shader name, not node path,
 ## so a HUD reshuffle cannot silently turn the control off.
 func _set_grain(amount: float) -> float:
-	var stack: Array[Node] = [get_tree().root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n is CanvasItem:
-			var mat := (n as CanvasItem).material as ShaderMaterial
-			if mat != null and mat.shader != null and String(mat.shader.resource_path).contains("post_process"):
-				var was: Variant = mat.get_shader_parameter(&"grain_amount")
-				mat.set_shader_parameter(&"grain_amount", amount)
-				return float(was) if was != null else 0.05
-		stack.append_array(n.get_children())
-	return 0.05
+	return QaShots.set_grain(get_tree().root, amount)
 
 
 ## Mean and max absolute channel difference between two saved shots — the measured half of "identical at

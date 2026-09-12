@@ -27,6 +27,8 @@ extends Node
 ## would touch are written by hand — apply_video itself is avoided because it would also re-assert the SAVED
 ## window mode (fullscreen on most dev machines) over this harness's windowed placement.
 
+const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+
 var _dir := "user://presentation_qa_shots"
 
 func _ready() -> void:
@@ -427,13 +429,7 @@ func _viewport_size_of(holder: Node, fields: Array) -> String:
 
 
 func _find_by_script(path: String) -> Node:
-	var stack: Array[Node] = [get_tree().root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n.get_script() != null and String(n.get_script().resource_path) == path:
-			return n
-		stack.append_array(n.get_children())
-	return null
+	return QaShots.find_by_script(get_tree().root, path)
 
 
 func _frames(n: int) -> void:

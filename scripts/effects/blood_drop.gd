@@ -16,7 +16,6 @@ const PITCH_MAX: float = 1.4
 const DECAL_SIZE_MIN: float = 0.4
 const DECAL_SIZE_MAX: float = 1.2
 const DECAL_CULL_MASK: int = 2
-const NORMAL_PARALLEL_THRESHOLD: float = 0.99
 const RAYCAST_BACKOFF: float = 0.1
 const RAYCAST_FORWARD: float = 0.4
 
@@ -101,11 +100,4 @@ func _spawn_impact_decal() -> void:
 	_orient_to_normal(decal, result["normal"])
 
 func _orient_to_normal(decal: Decal, normal: Vector3) -> void:
-	var up := normal
-	var z: Vector3
-	if absf(up.dot(Vector3.UP)) > NORMAL_PARALLEL_THRESHOLD:
-		z = Vector3.FORWARD.slide(up).normalized()
-	else:
-		z = Vector3.UP.slide(up).normalized()
-	var x := up.cross(z).normalized()
-	decal.global_transform.basis = Basis(x, up, z)
+	Projectile.orient_decal_to_normal(decal, normal)

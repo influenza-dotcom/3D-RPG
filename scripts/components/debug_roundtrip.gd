@@ -407,24 +407,10 @@ func _sink_lines() -> PackedStringArray:
 
 
 ## The live level subtree ("Level"): GameRoot works in TWO layouts — script on the scene root, or a drop-in child
-## with Player/Level as SIBLINGS (scenes/game.tscn — the level lands at Game/Level, NOT GameRoot/Level). Same walk as
-## debug_actions_world.gd's, kept local so this harness has no dependency on the action module that mounts it.
+## with Player/Level as SIBLINGS (scenes/game.tscn — the level lands at Game/Level, NOT GameRoot/Level). Groups.level_node
+## is the ONE walk; kept as a local name so this harness has no dependency on the action module that mounts it.
 static func _level_node(tree: SceneTree) -> Node:
-	if tree == null:
-		return null
-	var gr := tree.get_first_node_in_group(GroupsScript.GAME_ROOT)
-	if gr != null and is_instance_valid(gr):
-		var own := gr.get_node_or_null(^"Level")
-		if own != null:
-			return own
-		var parent := gr.get_parent()
-		if parent != null:
-			var sibling := parent.get_node_or_null(^"Level")
-			if sibling != null:
-				return sibling
-	if tree.current_scene != null:
-		return tree.current_scene.get_node_or_null(^"Level")
-	return null
+	return GroupsScript.level_node(tree)
 
 
 # =============================================================================================================

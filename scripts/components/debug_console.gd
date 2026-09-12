@@ -706,21 +706,10 @@ func _fire_autoexec() -> void:
 
 ## The live level subtree ("Level"). GameRoot works in TWO layouts — script on the scene root, or a drop-in child
 ## with Player/Level as siblings (scenes/game.tscn uses the latter, so the level lands at Game/Level, NOT
-## GameRoot/Level; game_root.gd _host). Mirrors DebugActionsWorld._level_node rather than reaching into it.
+## GameRoot/Level; game_root.gd _host). Groups.level_node is the ONE walk; kept as a local name so nothing here
+## reaches into DebugActionsWorld.
 func _level_node(tree: SceneTree) -> Node:
-	var gr := tree.get_first_node_in_group(GroupsScript.GAME_ROOT)
-	if gr != null:
-		var own := gr.get_node_or_null(^"Level")
-		if own != null:
-			return own
-		var parent := gr.get_parent()
-		if parent != null:
-			var sibling := parent.get_node_or_null(^"Level")
-			if sibling != null:
-				return sibling
-	if tree.current_scene != null:
-		return tree.current_scene.get_node_or_null(^"Level")
-	return null
+	return GroupsScript.level_node(tree)
 
 
 # ---------------------------------------------------------------------------------------------------

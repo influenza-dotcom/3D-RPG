@@ -93,12 +93,6 @@ func can_be_talked_to() -> bool:
 func look_name() -> String:
 	return PlayerText.respec_prompt(station_name)
 
-## Find or create the player's PerkManager (mirrors PerkStation / LevelUp._perk_manager).
+## Find or create the player's PerkManager (PerkManager.ensure_on — the shared find-or-create).
 func _perk_manager(player: Node) -> PerkManager:
-	for c in player.get_children():
-		if c is PerkManager:
-			return c as PerkManager
-	var mgr := PerkManager.new()
-	mgr.name = &"Perks"
-	player.add_child(mgr)
-	return mgr
+	return PerkManager.ensure_on(player)

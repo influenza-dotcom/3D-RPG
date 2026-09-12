@@ -30,6 +30,8 @@ extends Node
 ## current_scene to game.tscn (change_scene_to_file frees the current scene), so _ready re-attaches a COPY of
 ## this script on a bare Node parented to root, which survives the scene change and drives.
 
+const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+
 const SettingsScript := preload("res://managers/Settings.gd")
 
 var _dir := "user://qa_shots"
@@ -168,32 +170,11 @@ func _shot(name: String) -> Image:
 ## so it draws on top and is NOT quantised. Left visible, its labels and minimap would contribute their own
 ## un-quantised colours to every count and the coarse depths would read far richer than they are.
 func _strip_overlays() -> void:
-	var stack: Array[Node] = [get_tree().root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n is CanvasLayer:
-			(n as CanvasLayer).visible = false
-		elif n.name == "SkyTitle" and n is Node3D:
-			(n as Node3D).visible = false
-		stack.append_array(n.get_children())
+	QaShots.strip_overlays(get_tree().root)
 
 
 ## Turn the POST-PROCESS layer back on and nothing else, and remember its material — this harness measures what
 ## that shader produces, so without it every shot is a raw grab and every count is meaningless. Found by walking
 ## for the shader rather than by node name, so renaming the HUD cannot silently turn the measurement off.
 func _restore_post_process() -> bool:
-	var stack: Array[Node] = [get_tree().root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n is CanvasItem:
-			var mat := (n as CanvasItem).material as ShaderMaterial
-			if mat != null and mat.shader != null and String(mat.shader.resource_path).contains("post_process"):
-				_post_material = mat
-				var layer: Node = n
-				while layer != null and not (layer is CanvasLayer):
-					layer = layer.get_parent()
-				if layer != null:
-					(layer as CanvasLayer).visible = true
-					return true
-		stack.append_array(n.get_children())
-	return false
+	return QaShots.restore_post_process(get_tree().root)

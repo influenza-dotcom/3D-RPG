@@ -36,6 +36,8 @@ extends Node
 ##    up / bleed off" wait below runs UNFROZEN, and the freeze goes back on just for the shot.
 ##  * Never Settings.set_*() — those setters rewrite the developer's real user://settings.cfg.
 
+const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+
 const CROP := Vector2i(80, 60)   ## the annulus crop: the ticks live ~6-11 px off centre
 const SETTLE_FRAMES := 180       ## the whole warm pass (~15 frames) plus the spawn settle
 const GHOST_FRAMES := 150        ## unfrozen frames for the phosphor buffer to saturate / bleed off (~2.5 s)
@@ -211,43 +213,17 @@ func _annulus(ref: Image, r_min: float, r_max: float) -> Array[Vector2i]:
 
 
 func _footprint(base: Image, lit: Image, threshold: float) -> Array[Vector2i]:
-	var out: Array[Vector2i] = []
-	for y in base.get_height():
-		for x in base.get_width():
-			var ca := base.get_pixel(x, y)
-			var cb := lit.get_pixel(x, y)
-			if (absf(ca.r - cb.r) + absf(ca.g - cb.g) + absf(ca.b - cb.b)) / 3.0 >= threshold:
-				out.append(Vector2i(x, y))
-	return out
+	return QaShots.footprint(base, lit, threshold)
 
 
 func _amplify(a: Image, b: Image, gain: float = 8.0) -> Image:
-	var out := Image.create_empty(a.get_width(), a.get_height(), false, Image.FORMAT_RGB8)
-	for y in a.get_height():
-		for x in a.get_width():
-			var ca := a.get_pixel(x, y)
-			var cb := b.get_pixel(x, y)
-			out.set_pixel(x, y, Color(
-					minf(absf(ca.r - cb.r) * gain, 1.0),
-					minf(absf(ca.g - cb.g) * gain, 1.0),
-					minf(absf(ca.b - cb.b) * gain, 1.0)))
-	return out
+	return QaShots.amplify(a, b, gain)
 
 
 ## Film grain is per-frame noise and it is the difference between measuring the ticks and measuring the
 ## dither. Walks the post-process material by SHADER NAME; returns the previous value for the restore.
 func _set_grain(amount: float) -> float:
-	var stack: Array[Node] = [get_tree().root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n is CanvasItem:
-			var mat := (n as CanvasItem).material as ShaderMaterial
-			if mat != null and mat.shader != null and String(mat.shader.resource_path).contains("post_process"):
-				var was: Variant = mat.get_shader_parameter(&"grain_amount")
-				mat.set_shader_parameter(&"grain_amount", amount)
-				return float(was) if was != null else 0.05
-		stack.append_array(n.get_children())
-	return 0.05
+	return QaShots.set_grain(get_tree().root, amount)
 
 
 func _zoom(region: Image) -> Image:

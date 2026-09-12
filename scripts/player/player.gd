@@ -1607,15 +1607,9 @@ func add_xp(amount: float) -> int:
 	_queue_autosave()
 	return gained
 
-## Find or create the player's PerkManager child (mirrors PerkStation / GameState._perk_manager_of).
+## Find or create the player's PerkManager child (PerkManager.ensure_on — the shared find-or-create).
 func _perk_manager() -> PerkManager:
-	for c in get_children():
-		if c is PerkManager:
-			return c as PerkManager
-	var pm := PerkManager.new()
-	pm.name = &"Perks"
-	add_child(pm)
-	return pm
+	return PerkManager.ensure_on(self)
 
 ## Use a CONSUMABLE from the backpack (a health pack): apply its effect and consume ONE from the stack.
 ## Returns false (and consumes nothing) if it isn't a consumable, isn't in the bag, or healing would do
