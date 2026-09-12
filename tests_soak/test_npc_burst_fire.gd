@@ -17,8 +17,10 @@ extends GutTest
 ## that happens for honest reasons (the sandbox's own geometry, a third NPC wandering through the line), so
 ## "every burst is exactly 3" is NOT a property of the feature and asserting it would be a flake generator. What
 ## IS pinned: full strings do happen, nothing ever exceeds the authored count, the rounds inside a string come at
-## the GUN's rate, the gap between strings is still the AI's breathing cadence, and the whole thing puts out
-## meaningfully more rounds than one-per-cadence ever could.
+## the GUN's rate, the gap between strings is still the AI's breathing cadence, and a trigger pull puts more than
+## one round downrange (the pistol raider's control value is exactly one). ⭐ Every one of those is a RATIO or a
+## SHAPE, never a count of rounds per second: how much of the window the raider had a clear line is a property of
+## the firefight, not of the feature, and each test samples its own.
 ##
 ## Target is NavSandbox.tscn — the clean-bake baseline (CLAUDE.md), so this stays GREEN.
 ## Nav-not-synced (a headless reimport in flight) => INCONCLUSIVE (pending), not a failure.
@@ -100,17 +102,28 @@ func test_the_gap_between_bursts_is_still_the_breathing_cadence() -> void:
 
 
 func test_bursting_puts_out_more_rounds_than_one_per_cadence() -> void:
-	# The player-visible consequence, stated as a number: the same raider with the same breathing cadence puts
-	# real volume downrange. One-per-cadence over the harness window is the pre-burst ceiling; the SMG must clear
-	# it decisively (it is the same firefight length, so this is a like-for-like comparison).
+	# The player-visible consequence, stated as a number: one trigger pull, more than one round. That is the whole
+	# difference burst fire makes to volume, and the pistol test below is its control — a weapon left at
+	# npc_burst_count 1 scores exactly 1.00 rounds per pull, so anything above 1 is the burst doing its job.
+	#
+	# ⭐ MEASURE PER PULL, NEVER PER SECOND. This used to divide the sampled window by min_shot_interval and demand
+	# 1.4x that many rounds, which quietly made the gate depend on how much of the window the raider had a CLEAR
+	# LINE. Bursts are deliberately abortable (see the header), the dummy closes to melee, and each test samples its
+	# OWN firefight — so a sample where most strings were written off fails the arithmetic while every structural
+	# property still holds. That is exactly the flake generator this file's header warns about, and it went red on
+	# CI 2026-09-11: 8 rounds over 6.8 s against a 12.1 ceiling, from a firefight with no regression in it (that
+	# same sample scores 1.33 rounds/pull and passes here). A real regression to single-shot scores 1.00 and fails.
 	var report = await _run_shooter(SMG)
 	if report == null:
 		return
-	var window: float = float(report.shot_frames[-1] - report.shot_frames[0]) / float(Engine.physics_ticks_per_second)
-	var single_shot_ceiling: float = window / GameSettings.npc_ai.min_shot_interval + 1.0
-	assert_gt(float(report.shot_frames.size()), single_shot_ceiling * 1.4,
-		"a bursting SMG must clearly out-shoot one round per cadence (%.0f over %.1fs):\n%s"
-				% [single_shot_ceiling, window, report.summary()])
+	var bursts: Array[int] = report.burst_lengths(BURST_SPLIT_FRAMES)
+	if bursts.size() < 3:
+		pending("only %d trigger pull(s) in the window — too few to average:\n%s" % [bursts.size(), report.summary()])
+		return
+	var rounds_per_pull: float = float(report.shot_frames.size()) / float(bursts.size())
+	assert_gt(rounds_per_pull, 1.2,
+		"a bursting SMG must put more than one round downrange per trigger pull — got %.2f from %s:\n%s"
+				% [rounds_per_pull, str(bursts), report.summary()])
 
 
 func test_a_pistol_raider_still_fires_one_round_at_a_time() -> void:
