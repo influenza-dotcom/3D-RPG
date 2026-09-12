@@ -177,6 +177,12 @@ jobs:
               frame="$(awk '/END OF C\+\+ BACKTRACE/ { f = 1 } f && /\[0\]/ { print; exit }' gut.log)"
               echo "::error title=Engine crash::$(grep -m1 'handle_crash' gut.log) — last GDScript frame:${frame}"
             fi
+            # A non-zero exit with NO [Failed] line is a crash or an abort outside any test (2026-09-12: exit 134
+            # after "All tests passed"). Job logs need a login; annotate the tail so the cause is public.
+            if ! grep -q "\[Failed\]" gut.log; then
+              echo "::error title=GUT exit ${status} with no failing test::see the GUT tail annotations"
+              tail -n 25 gut.log | sed -E 's/\x1b\[[0-9;]*m//g' | grep -v '^\s*$' | tail -n 12 | while IFS= read -r line; do echo "::error title=GUT tail::${line:0:900}"; done
+            fi
           fi
           exit "$status"
 

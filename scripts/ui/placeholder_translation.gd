@@ -1,6 +1,6 @@
 extends Translation
 
-## RUNTIME-ONLY "[PH]" scrub. MenuStyle._init registers ONE instance with the TranslationServer. Godot's automatic
+## RUNTIME-ONLY "[PH]" scrub. MenuStyle._enter_tree registers ONE instance with the TranslationServer (and _exit_tree / delete removes it — it must not outlive the script system). Godot's automatic
 ## Control-text translation (atr) asks the active locale's Translation for every Label / Button / tooltip / tab
 ## title / OptionButton item / Label3D string the moment it is painted; this one answers with the string minus
 ## its "[PH]" markers and stays SILENT (&"" = no entry, the engine hands back the source) for everything else —

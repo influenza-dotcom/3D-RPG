@@ -2856,7 +2856,7 @@ guarded, and what is deliberately deferred.
   an UNAUTHORED placeholder (do not extract or translate it); `PlayerText.prefixed`
   / `strip_prefix` / `display` are the only manipulators of that prefix. Since
   2026-09-12 the marker is RUNTIME-STRIPPED: `scripts/ui/placeholder_translation.gd`
-  (a `Translation` registered by `MenuStyle._init`) answers every atr lookup of a
+  (a `Translation` registered by `MenuStyle._enter_tree`, removed on exit) answers every atr lookup of a
   marked string with the scrubbed one, and the atr opt-outs + `draw_string` painters
   call `PlayerText.display` — the source keeps the marker, the player never sees it.
   `tests/test_player_text.gd` pins the const conventions (non-empty, exact

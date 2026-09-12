@@ -110,7 +110,7 @@ func test_player_text_contract() -> void:
 	assert_eq(tr(PlayerText.BACK), PlayerText.BACK,
 		"tr() must be identity for UNMARKED copy — the runtime [PH] scrub answers only marked strings, so the tr() sweep can stay deferred")
 	assert_eq(tr(PlayerText.PROMPT_PICK_UP), PlayerText.display(PlayerText.PROMPT_PICK_UP),
-		"at runtime the TranslationServer scrubs the [PH] marker from a marked const (PlaceholderTranslation, registered by MenuStyle) — the const itself keeps it")
+		"at runtime the TranslationServer scrubs the [PH] marker from a marked const (PlaceholderTranslation, registered by MenuStyle._enter_tree) — the const itself keeps it")
 	assert_true(PlayerText.PROMPT_PICK_UP.begins_with(PlayerText.PH_PREFIX_SPACE),
 		"the SOURCE const still carries the marker — the scrub is runtime-only, never an edit to the authored text")
 	assert_false(tr(PlayerText.PROMPT_PICK_UP).contains(PlayerText.PH_PREFIX), "a player never sees the marker")

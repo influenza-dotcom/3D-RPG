@@ -17,7 +17,7 @@ extends Node
 ## auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED (see _build_tip, ui.gd's look/toast labels, the name
 ## LineEdits) so typed text is never looked up as a msgid.
 ##
-## The same seam is where the RUNTIME "[PH]" scrub lives: _init registers PlaceholderTranslation (see that file)
+## The same seam is where the RUNTIME "[PH]" scrub lives: _enter_tree registers PlaceholderTranslation (see that file)
 ## with the TranslationServer, so every atr-translated string reaches the screen without its placeholder marker
 ## while the source keeps it. The opt-out labels above therefore ALSO run their text through PlayerText.display.
 
@@ -26,21 +26,31 @@ extends Node
 const PLACEHOLDER_TRANSLATION_PATH := "res://scripts/ui/placeholder_translation.gd"
 
 var skin: MenuSkin = preload("res://resources/ui/menu_skin.tres")
-var _ph_translation: Translation = null  ## the registered scrub; removed again in _exit_tree (see there)
+var _ph_translation: Translation = null  ## the registered scrub; added in _enter_tree, removed in _exit_tree / on delete
 
-func _init() -> void:
-	# _init, not _ready: the scrub must be in the TranslationServer before the first Control shapes its text
-	# (MenuStyle is the first UI autoload; nothing paints before it). Autoloads never run in the editor, so
-	# every @tool preview and the Text tab still show "[PH]" as authored — it vanishes only in a running game.
-	_ph_translation = load(PLACEHOLDER_TRANSLATION_PATH).new()
-	TranslationServer.add_translation(_ph_translation)
+## The RUNTIME "[PH]" scrub goes into the TranslationServer here — _enter_tree, NOT _init. MenuStyle is the
+## first UI autoload, so this still precedes the first Control shaping its text, and autoloads never run in
+## the editor (every @tool preview and the Text tab keep showing "[PH]" as authored). Registering in _init was
+## the 2026-09-12 CI abort: tests build MenuStyle with a bare load().new() and never add it to the tree, so
+## _exit_tree never ran for those instances and their script-backed Translation outlived the script system.
+func _enter_tree() -> void:
+	if _ph_translation == null:
+		_ph_translation = load(PLACEHOLDER_TRANSLATION_PATH).new()
+		TranslationServer.add_translation(_ph_translation)
 
 ## ⭐The scrub must LEAVE the TranslationServer before the script system shuts down. The server is a core
 ## singleton torn down after GDScript is; a script-backed Translation still registered there is destroyed with
-## no script language to run its destructor and the process ABORTS on exit (SIGABRT / exit 134 on Linux, exit
-## 5 on Windows) — after every test passed, which is how CI went red on 2026-09-12. Autoloads leave the tree
-## while GDScript is alive, so this is the last safe moment to unregister and drop the reference.
+## no script language to run its destructor and the process ABORTS on exit (SIGABRT / exit 134 on Linux, an
+## ntdll heap fault on Windows) — after every test passed. Leaving the tree (the autoload at quit) and being
+## deleted (an off-tree test instance) both unregister, so the pair is symmetric whatever the lifetime.
 func _exit_tree() -> void:
+	_unregister_scrub()
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		_unregister_scrub()
+
+func _unregister_scrub() -> void:
 	if _ph_translation != null:
 		TranslationServer.remove_translation(_ph_translation)
 		_ph_translation = null

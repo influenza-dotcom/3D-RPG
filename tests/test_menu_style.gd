@@ -29,7 +29,7 @@ func test_display_scrubs_every_placeholder_marker_and_nothing_else() -> void:
 	assert_eq(PlayerText.display("Back"), "Back", "unmarked copy is identity")
 
 func test_runtime_translation_scrubs_rendered_control_text_but_not_the_property() -> void:
-	# MenuStyle._init registered PlaceholderTranslation with the TranslationServer: every auto-translated
+	# MenuStyle._enter_tree registered PlaceholderTranslation with the TranslationServer: every auto-translated
 	# Control paints its text minus the marker, while the .text PROPERTY keeps the authored string (what every
 	# other test compares). atr() is the exact call Label/Button/Label3D shape through.
 	var l := Label.new()
