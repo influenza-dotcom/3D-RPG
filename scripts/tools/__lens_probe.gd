@@ -29,6 +29,7 @@ extends Node
 ##   godot --path . res://scripts/tools/__lens_probe.tscn -- --shots-dir="C:/some/dir"
 
 const WorldActions := preload("res://scripts/components/debug_actions_world.gd")
+const ViewActions := preload("res://scripts/components/debug_actions_world_view.gd")  ## DOF_AUTHORED / LENS_AUTHORED live in the View family file since the 2026-09-11 split
 const GroupsScript := preload("res://scripts/world/groups.gd")
 
 var _dir := "user://qa_shots/lens"
@@ -147,7 +148,7 @@ func _run() -> void:
 	if cam != null and (cam as Object).has_method(&"set_scope_dof"):
 		cam.call(&"set_scope_dof", true, false)
 		cam.call(&"set_scope_dof", false, false)
-		if attrs.dof_blur_far_enabled == bool(WorldActions.DOF_AUTHORED["far_enabled"]):
+		if attrs.dof_blur_far_enabled == bool(ViewActions.DOF_AUTHORED["far_enabled"]):
 			print("QA_PASS an aim cycle leaves the far blur in the authored state (off) -- unscope no longer forces it on")
 		else:
 			print("QA_FAIL an aim cycle left dof_blur_far_enabled=%s -- unscope is still forcing the old far blur back on" % str(attrs.dof_blur_far_enabled))
@@ -312,7 +313,7 @@ func _run() -> void:
 		cam_set.set(&"lens_chroma_amount", 1.0)
 		await _frames(6)
 		var _c: Image = await _shot("06_lens_0.20_chroma_1.0")
-		cam_set.set(&"lens_chroma_amount", _f(WorldActions.LENS_AUTHORED["chroma"]))
+		cam_set.set(&"lens_chroma_amount", _f(ViewActions.LENS_AUTHORED["chroma"]))
 
 		# And the command itself, through the same entry point the console uses.
 		_say("lens 0.18 0.5", WorldActions.run("lens", _ctx, PackedStringArray(["0.18", "0.5"])))
@@ -389,7 +390,7 @@ func _gradient(img: Image) -> float:
 ## Compare the live attributes against the const the command's `reset` restores from. Called once at boot (does
 ## DOF_AUTHORED actually mirror camera_rig.tscn plus the engine defaults?) and once after `dof reset`.
 func _check_authored_const(attrs: CameraAttributesPractical, when: String = "as shipped") -> bool:
-	var want: Dictionary = WorldActions.DOF_AUTHORED
+	var want: Dictionary = ViewActions.DOF_AUTHORED
 	var bad := PackedStringArray()
 	if attrs.dof_blur_near_enabled != bool(want["near_enabled"]):
 		bad.append("near_enabled")
