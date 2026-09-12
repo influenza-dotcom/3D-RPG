@@ -23,7 +23,6 @@ extends GutTest
 ##     and the real cursor is never captured.
 ##   InputManager (managers/InputManager.gd, live autoload)
 ##     - every action-name constant (test_autoload_order only checks action_forward).
-##     - get_movement_vector() returns Vector2.ZERO with no keys held (axis wiring).
 ##   FreezeFrame (scenes/player/freeze_frame.gd, live autoload)
 ##     - freeze() exists. The active time_scale path is NOT invoked (it writes
 ##       Engine.time_scale + awaits a real timer); the disabled no-op is already in
@@ -612,13 +611,6 @@ func test_input_manager_action_name_constants() -> void:
 		"action_weapon_slot_5 must be 'Weapon Slot 5' to match the InputMap")
 	assert_eq(InputManager.action_weapon_slot_6, &"Weapon Slot 6",
 		"action_weapon_slot_6 must be 'Weapon Slot 6' to match the InputMap")
-
-
-func test_input_manager_movement_vector_zero_with_no_input() -> void:
-	# Read-only Input query; in a headless GUT run no keys are held.
-	var v := InputManager.get_movement_vector()
-	assert_eq(v, Vector2.ZERO,
-		"get_movement_vector() must return ZERO with no keys held; this also pins the get_vector arg order (left,right,forward,backward) — a swapped pair would invert strafing")
 
 
 # ---------------------------------------------------------------------------

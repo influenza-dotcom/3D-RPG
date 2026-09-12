@@ -151,10 +151,6 @@ func is_ammo() -> bool:
 func is_consumable() -> bool:
 	return category == Category.CONSUMABLE
 
-## True when more than one fits in a stack.
-func is_stackable() -> bool:
-	return max_stack > 1
-
 ## True when this item is a MICROCHIP UPGRADE — carrying it grants nothing, but a ChipInstaller can consume it to
 ## install `installs_ability` on the player. The mechanic + ChipInstallScreen key on this.
 ## THE price of this item for a buyer scoring `stat_value` in `discount_stat` — the ONE formula every surface

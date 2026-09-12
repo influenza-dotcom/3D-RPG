@@ -360,21 +360,6 @@ static func visible_indices(stamps: PackedFloat32Array, now: float, max_age: flo
 	return out
 
 
-## The fade/window logic as pure data: the lines the column would show right now (oldest first). `ring` and
-## `stamps` are aligned from the TAIL when their sizes disagree (they only ever grow together, so a mismatch can
-## only be a stale head) — the extra head entries are ignored rather than mis-paired. Pure.
-static func visible_slice(ring: PackedStringArray, stamps: PackedFloat32Array, now: float, max_age: float, count: int) -> PackedStringArray:
-	var out := PackedStringArray()
-	var n := mini(ring.size(), stamps.size())
-	if n <= 0:
-		return out
-	var ring_off := ring.size() - n
-	var st_off := stamps.size() - n
-	var window := stamps if st_off == 0 else stamps.slice(st_off)
-	for idx in visible_indices(window, now, max_age, count):
-		out.append(ring[ring_off + idx])
-	return out
-
 
 ## Row alpha for a line `age` seconds old: 1 while younger than `max_age - fade`, ramping linearly to 0 at
 ## `max_age`; `max_age` <= 0 never fades; `fade` <= 0 is a hard cut at `max_age`. A `fade` longer than `max_age`

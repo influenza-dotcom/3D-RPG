@@ -956,8 +956,8 @@ var _stuck_prior_priority: int = 0        ## authored process_physics_priority, 
 ## copies is this frame's and not last frame's. Ordering, not a feel knob — hence a const rather than a tuning field.
 const STUCK_PHYSICS_PRIORITY: int = 10
 
-## True while this prop is embedded in a living body. Read by PickupRay so a grab releases it first, and by
-## _on_body_entered so an embedded blade can't re-strike the body carrying it.
+## True while this prop is embedded in a living body — the query tests/test_stuck_blade.gd asserts on. The live
+## paths (the grab release, the re-strike guard in _on_body_entered) read `_stuck_part` directly.
 func is_stuck_in_body() -> bool:
 	return _stuck_part != null
 

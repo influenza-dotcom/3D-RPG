@@ -173,9 +173,6 @@ func is_action_just_released(action: StringName) -> bool:
 func get_vector(neg_x: StringName, pos_x: StringName, neg_y: StringName, pos_y: StringName) -> Vector2:
 	return Input.get_vector(neg_x, pos_x, neg_y, pos_y)
 
-func get_movement_vector() -> Vector2:
-	return Input.get_vector(action_left, action_right, action_forward, action_backward)
-
 ## THE single modal registry (M5 / T1). Every player-facing modal screen appears in ONE authored list, and all five
 ## surfaces derive from it: gameplay_suppressed (per-frame control gate), any_modal_open (don't-stack-a-menu guard),
 ## any_tab_blocking_open (Pip-Boy-tab refusal), any_station_music_open (the station-radio gate the StationMusic

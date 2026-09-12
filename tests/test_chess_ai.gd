@@ -6,6 +6,16 @@ extends GutTest
 const ChessGameScript := preload("res://scripts/chess/chess_game.gd")
 const ChessAiScript := preload("res://scripts/chess/chess_ai.gd")
 
+
+## "e2e4" / "e7e8q" for a move dict — the coordinate spelling parse_move accepts, composed here since the engine
+## no longer carries a coordinate printer of its own.
+static func _coord(m: Dictionary) -> String:
+	var s: String = ChessGameScript.sq_name(int(m.from)) + ChessGameScript.sq_name(int(m.to))
+	var promo := int(m.get("promo", 0))
+	if promo != 0:
+		s += {ChessGameScript.QUEEN: "q", ChessGameScript.ROOK: "r", ChessGameScript.BISHOP: "b", ChessGameScript.KNIGHT: "n"}.get(promo, "")
+	return s
+
 func test_ai_returns_a_legal_move() -> void:
 	var g = ChessGameScript.new()
 	var ai = ChessAiScript.new()
@@ -56,6 +66,6 @@ func test_blunder_still_returns_legal_move() -> void:
 	for _i in 20:
 		var chosen = ai.choose_move(g, 2, 1.0)
 		assert_false(chosen.is_empty(), "a blunder move is still a real move")
-		assert_false(g.parse_move(g.move_to_coord(chosen)).is_empty(), "a blunder move is still legal")
+		assert_false(g.parse_move(_coord(chosen)).is_empty(), "a blunder move is still legal")
 	g = null
 	ai = null

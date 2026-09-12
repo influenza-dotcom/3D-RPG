@@ -4,11 +4,10 @@ extends GutTest
 ##
 ## COVERS:
 ##   - Item SOURCE defaults via Item.new() (NOT a .tres): category MISC, max_stack 1,
-##     empty id/display_name, null weapon, is_weapon()/is_stackable() false, generic label().
+##     empty id/display_name, null weapon, is_weapon() false, generic label().
 ##   - Item.is_weapon(): true ONLY when category==WEAPON AND weapon!=null (a WEAPON item
 ##     with no WeaponData, and a non-WEAPON item carrying one, are both non-weapons).
 ##   - Item.label() priority ladder: display_name > id > "Item".
-##   - Item.is_stackable(): keyed off max_stack > 1.
 ##   - pistol_item.tres wiring: loads as an Item, WEAPON category, wraps the SAME pistol
 ##     WeaponData the rig uses (cached by path), equippable, labelled "Pistol".
 ##   - ItemDb autoload: all 7 weapon-items registered; weapon_item_for() round-trips a
@@ -45,8 +44,8 @@ func test_item_defaults() -> void:
 		"weapon defaults null — only WEAPON-category items carry a WeaponData")
 	assert_false(it.is_weapon(),
 		"A default MISC item with no weapon is not equippable")
-	assert_false(it.is_stackable(),
-		"max_stack 1 means not stackable")
+	assert_eq(it.max_stack, 1,
+		"max_stack defaults to 1 (a single, unstackable item)")
 	it = null
 
 
@@ -76,13 +75,6 @@ func test_item_is_weapon_requires_category_and_weapon() -> void:
 		"WEAPON category with no WeaponData is not equippable — nothing to equip")
 	it = null
 
-
-func test_item_is_stackable_tracks_max_stack() -> void:
-	var it := Item.new()
-	it.max_stack = 20
-	assert_true(it.is_stackable(),
-		"max_stack > 1 makes the item stackable (ammo/consumables)")
-	it = null
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +167,7 @@ func test_item_db_ammo_item_for_caliber() -> void:
 		"it carries the pistol caliber")
 	assert_false(clip.is_weapon(),
 		"ammo is not a weapon")
-	assert_true(clip.is_stackable(),
+	assert_true(clip.max_stack > 1,
 		"ammo stacks (max_stack > 1) — spare clips pile up")
 	assert_true(ItemDb.ammo_item_for(&"") == null,
 		"ammo_item_for('') is null")

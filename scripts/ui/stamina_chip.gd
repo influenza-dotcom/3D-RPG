@@ -74,7 +74,7 @@ func advance(fill: float, delta: float) -> float:
 	value = EnemyHealthBar.chip_step(value, f, _since_drop, hud.stamina_chip_delay, hud.stamina_chip_speed, dt)
 	return value
 
-## Is there a shard to paint at all? Both readouts skip their white pass on false, so a rested pool costs
-## nothing to draw (and the ring keeps its no-track contract: nothing owing = nothing painted).
+## Is there a shard to paint at all? (`value` sits above the clamped fill only while something is owed.) No
+## readout calls this — it is the seam tests/test_stamina_ring.gd asserts on.
 func has_chip(fill: float) -> bool:
 	return value > clampf(fill, 0.0, 1.0) + EPS

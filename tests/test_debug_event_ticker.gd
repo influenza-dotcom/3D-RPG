@@ -15,6 +15,14 @@ extends GutTest
 
 const TickerScript := preload("res://scripts/components/debug_event_ticker.gd")
 
+## The column's view of the ring as pure data — the lines visible_indices would show, oldest first. The drop-in
+## paints straight from the indices (_paint), so this composition lives with the tests that read it.
+static func _slice(ring: PackedStringArray, stamps: PackedFloat32Array, now: float, max_age: float, count: int) -> PackedStringArray:
+	var out := PackedStringArray()
+	for idx in TickerScript.visible_indices(stamps, now, max_age, count):
+		out.append(ring[idx])
+	return out
+
 
 func before_each() -> void:
 	TickerScript.clear()
@@ -73,36 +81,36 @@ func test_push_capped_stamps_stays_in_lockstep_with_the_lines() -> void:
 	assert_eq(stamps[3], 6.0, "newest stamp last")
 
 
-# --- visible_indices / visible_slice (the fade + window as pure data) -----------------------------------------------
+# --- visible_indices (the fade + window as pure data, read through _slice) -----------------------------------------------
 
 func test_visible_slice_hides_lines_older_than_max_age() -> void:
 	var ring := PackedStringArray(["old", "mid", "new"])
 	var stamps := PackedFloat32Array([0.0, 5.0, 9.0])
-	var shown := TickerScript.visible_slice(ring, stamps, 10.0, 6.0, 6)
+	var shown := _slice(ring, stamps, 10.0, 6.0, 6)
 	assert_eq(shown.size(), 2, "at now=10 with a 6 s window, the 0 s line (age 10) is hidden")
 	assert_eq(shown[0], "mid", "oldest visible first")
 	assert_eq(shown[1], "new", "newest last")
 	# The hidden line is a DISPLAY choice — the ring passed in is untouched.
-	assert_eq(ring.size(), 3, "visible_slice never mutates the ring (the ring is the log; the column is a view)")
+	assert_eq(ring.size(), 3, "the slice never mutates the ring (the ring is the log; the column is a view)")
 
 
 func test_visible_slice_windows_to_the_newest_count() -> void:
 	var ring := PackedStringArray(["a", "b", "c", "d", "e"])
 	var stamps := PackedFloat32Array([1.0, 2.0, 3.0, 4.0, 5.0])
-	var shown := TickerScript.visible_slice(ring, stamps, 5.0, 0.0, 3)
+	var shown := _slice(ring, stamps, 5.0, 0.0, 3)
 	assert_eq(shown, PackedStringArray(["c", "d", "e"]), "count 3 -> the three newest, oldest first")
-	assert_eq(TickerScript.visible_slice(ring, stamps, 5.0, 0.0, 0).size(), 0, "count 0 -> nothing")
+	assert_eq(_slice(ring, stamps, 5.0, 0.0, 0).size(), 0, "count 0 -> nothing")
 
 
 func test_visible_slice_max_age_zero_never_hides() -> void:
 	var ring := PackedStringArray(["ancient", "new"])
 	var stamps := PackedFloat32Array([0.0, 1000.0])
-	var shown := TickerScript.visible_slice(ring, stamps, 1000.0, 0.0, 6)
+	var shown := _slice(ring, stamps, 1000.0, 0.0, 6)
 	assert_eq(shown.size(), 2, "max_age <= 0 means no age limit (the `line_seconds` = 0 knob)")
 
 
 func test_visible_slice_age_exactly_max_age_is_still_shown() -> void:
-	var shown := TickerScript.visible_slice(PackedStringArray(["edge"]), PackedFloat32Array([4.0]), 10.0, 6.0, 6)
+	var shown := _slice(PackedStringArray(["edge"]), PackedFloat32Array([4.0]), 10.0, 6.0, 6)
 	assert_eq(shown.size(), 1, "age == max_age is inclusive (hidden only once OLDER than the window)")
 
 
@@ -111,18 +119,8 @@ func test_visible_slice_does_not_let_an_old_entry_hide_a_younger_one_behind_it()
 	# stamp it meets from the tail, or a younger line further back would vanish.
 	var ring := PackedStringArray(["young-a", "stale", "young-b"])
 	var stamps := PackedFloat32Array([9.0, 1.0, 9.5])
-	var shown := TickerScript.visible_slice(ring, stamps, 10.0, 6.0, 6)
+	var shown := _slice(ring, stamps, 10.0, 6.0, 6)
 	assert_eq(shown, PackedStringArray(["young-a", "young-b"]), "the stale middle entry is skipped, both young ones survive")
-
-
-func test_visible_slice_empty_and_mismatched_inputs() -> void:
-	assert_eq(TickerScript.visible_slice(PackedStringArray(), PackedFloat32Array(), 1.0, 6.0, 6).size(), 0,
-		"empty ring -> empty slice")
-	# Sizes can only disagree by a stale HEAD (the arrays only ever grow together), so they align from the tail.
-	var ring := PackedStringArray(["orphan", "x", "y"])
-	var stamps := PackedFloat32Array([5.0, 6.0])
-	var shown := TickerScript.visible_slice(ring, stamps, 6.0, 0.0, 6)
-	assert_eq(shown, PackedStringArray(["x", "y"]), "tail-aligned: the extra head line is ignored, never mis-paired")
 
 
 func test_visible_indices_are_oldest_first_and_bounded_by_count() -> void:
@@ -143,7 +141,7 @@ func test_line_alpha_ramps_out_over_the_fade_tail() -> void:
 
 
 func test_line_alpha_no_fade_and_hard_cut_modes() -> void:
-	assert_eq(TickerScript.line_alpha(999.0, 0.0, 1.5), 1.0, "max_age <= 0 never fades (matches visible_slice's no-limit rule)")
+	assert_eq(TickerScript.line_alpha(999.0, 0.0, 1.5), 1.0, "max_age <= 0 never fades (matches visible_indices' no-limit rule)")
 	assert_eq(TickerScript.line_alpha(5.9, 6.0, 0.0), 1.0, "fade 0 = hard cut: opaque until max_age…")
 	assert_eq(TickerScript.line_alpha(6.0, 6.0, 0.0), 0.0, "…then off")
 	assert_eq(TickerScript.line_alpha(-1.0, 6.0, 1.5), 1.0, "a future stamp (negative age) clamps to exactly 1, never over")
@@ -203,7 +201,7 @@ func test_clear_wipes_the_ring() -> void:
 	TickerScript.clear()
 	assert_eq(TickerScript.lines().size(), 0, "clear() empties it")
 	# And the slice over the statics agrees (the two parallel arrays were wiped together).
-	assert_eq(TickerScript.visible_slice(TickerScript._ring, TickerScript._stamps, 1.0, 0.0, 6).size(), 0,
+	assert_eq(_slice(TickerScript._ring, TickerScript._stamps, 1.0, 0.0, 6).size(), 0,
 		"both parallel arrays are cleared — a stamp without a line (or vice versa) would mis-pair every later row")
 
 

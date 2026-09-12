@@ -1,11 +1,9 @@
 extends GutTest
 
-## Consumables (use-from-inventory health packs) + the shared ItemRow row formatter.
+## Consumables (use-from-inventory health packs).
 ## - Item.is_consumable gates on the CONSUMABLE category; healthpack.tres is the authored archetype.
 ## - Player.use_consumable heals + consumes one, refuses at full HP (no wasted packs), refuses non-
 ##   consumables / missing items. Off-tree: heal() is pure hp math, ui is null so toasts are skipped.
-## - ItemRow.stack_text is the ONE labeled row language the LIST-shaped item readouts share (the inventory,
-##   loot and shop screens are grids now; ItemInfo's tooltip body is its remaining runtime consumer).
 
 const PLAYER_PATH := "res://scripts/player/player.gd"
 
@@ -72,12 +70,3 @@ func test_use_consumable_refuses_at_full_hp_and_for_non_consumables() -> void:
 	p.free()
 	pack = null
 	junk = null
-
-
-func test_item_row_labels_every_value() -> void:
-	var pack := _healthpack()
-	assert_eq(ItemRow.stack_text(pack, 3), "Medkit  x3  ·  wt 1.5",
-		"the shared row text labels the count and the stack weight (no bare numbers)")
-	assert_eq(ItemRow.stack_text(pack, 1), "Medkit  ·  wt 0.5",
-		"a single item shows no count, just the labeled weight")
-	pack = null

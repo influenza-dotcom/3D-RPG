@@ -671,13 +671,6 @@ static func _piece_letter(pt: int) -> String:
 # Convenience for the UI
 # ---------------------------------------------------------------------------------------------------
 
-## Coordinate string for a move ("e2e4", "e7e8q") — the compact form the blindfold prompt echoes back.
-func move_to_coord(m: Dictionary) -> String:
-	var s := sq_name(m.from) + sq_name(m.to)
-	if _is_promotion(m):
-		s += _piece_letter(int(m.promo)).to_lower()
-	return s
-
 ## The letter for a piece int (uppercase = white, lowercase = black), the glyph-free fallback for the board.
 static func piece_letter_cased(piece: int) -> String:
 	if piece == EMPTY:

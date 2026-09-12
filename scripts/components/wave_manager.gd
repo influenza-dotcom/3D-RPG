@@ -42,24 +42,6 @@ func start() -> void:
 func is_running() -> bool:
 	return _running
 
-## Await until every NPC the spawner has produced across all waves is dead (the spawner's `cleared`). Resolves
-## immediately if nothing is alive and no run is in progress. A clear during an inter-wave lull doesn't end it —
-## the loop keeps waiting while _running. Best awaited after / alongside start(): e.g. a quest step or an exit
-## Door that unlocks once the arena is clear. No-op (returns) if there's no spawner.
-func wait_for_clear() -> void:
-	var spawner := _spawner()
-	if spawner == null:
-		return
-	# Await `cleared` only while NPCs are actually alive (it fires once when the last one dies). Between waves
-	# (running, none spawned yet) poll briefly instead — re-awaiting an already-fired `cleared` would hang.
-	while _running or spawner.alive_count() > 0:
-		if spawner.alive_count() > 0:
-			await spawner.cleared
-		elif is_inside_tree():
-			await get_tree().create_timer(0.1).timeout
-		else:
-			return
-
 func _spawner() -> EncounterSpawner:
 	if spawner_path.is_empty():
 		return null

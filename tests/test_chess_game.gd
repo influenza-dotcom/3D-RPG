@@ -9,6 +9,16 @@ extends GutTest
 
 const ChessGameScript := preload("res://scripts/chess/chess_game.gd")
 
+
+## "e2e4" / "e7e8q" for a move dict — the coordinate spelling parse_move accepts, composed here since the engine
+## no longer carries a coordinate printer of its own.
+static func _coord(m: Dictionary) -> String:
+	var s: String = ChessGameScript.sq_name(int(m.from)) + ChessGameScript.sq_name(int(m.to))
+	var promo := int(m.get("promo", 0))
+	if promo != 0:
+		s += {ChessGameScript.QUEEN: "q", ChessGameScript.ROOK: "r", ChessGameScript.BISHOP: "b", ChessGameScript.KNIGHT: "n"}.get(promo, "")
+	return s
+
 # Kiwipete — the classic perft catch-all: castling both sides for both colours, en passant, checks, pins, promotion.
 const KIWIPETE := "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
 
@@ -47,7 +57,7 @@ func test_make_undo_restores_start() -> void:
 	for m in g.legal_moves():
 		g.make_move(m)
 		g.undo_move()
-		assert_eq(g.board, before, "board must be identical after make+undo of %s" % g.move_to_coord(m))
+		assert_eq(g.board, before, "board must be identical after make+undo of %s" % _coord(m))
 		assert_eq(g.side, ChessGameScript.WHITE, "side to move restored after undo")
 	g = null
 

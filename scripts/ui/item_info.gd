@@ -6,8 +6,8 @@ extends RefCounted
 ## inventory / shop / loot / chip-install tooltips so hovering ANY item communicates its function: a weapon's combat
 ## line (+ melee / laser / move-speed / on-hit), a consumable's heal + applied effect, ammo's caliber, a carried
 ## trinket's passive buff, a chip's installed ability, and a prop's hold/throw. Item `description`s ship blank (the
-## Steam AI-text scrub — no authored prose), so these GENERATED, purely-mechanical lines are what speak. Mirrors
-## ItemRow's "labeled language" (functional labels, unmarked) so the two never drift.
+## Steam AI-text scrub — no authored prose), so these GENERATED, purely-mechanical lines are what speak. Functional
+## labels, unmarked — the "labeled language" the retired ItemRow row formatter once shared with this composer.
 ## LOCALIZATION NOTE: the composer still joins English-shaped fragments ("  ·  ", labeled parts) — a recorded
 ## deferred gap (CURRENT_ARCHITECTURE → Localization Readiness) pending a target language. What IS wired: numbers
 ## through TextFormat.num, money through Zorkmids.money_text, ability names through AbilityRegistry.

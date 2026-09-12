@@ -1,10 +1,9 @@
 extends GutTest
 
-## Rank 9 (encounter clearing): EncounterSpawner._alive tracking → cleared / alive_count_changed, and
-## WaveManager.wait_for_clear's null-spawner short-circuit. Driven with stub nodes (no real NPC _ready).
+## Rank 9 (encounter clearing): EncounterSpawner._alive tracking → cleared / alive_count_changed.
+## Driven with stub nodes (no real NPC _ready).
 
 const EncounterSpawnerScript = preload("res://scripts/components/encounter_spawner.gd")
-const WaveManagerScript = preload("res://scripts/components/wave_manager.gd")
 
 func test_clear_fires_when_last_spawn_gone() -> void:
 	var spawner = EncounterSpawnerScript.new()
@@ -62,10 +61,3 @@ func test_cleared_suppressed_while_a_wave_is_still_spawning() -> void:
 	spawner._on_spawn_gone(second)  # now the last spawn dies -> wave done + empty -> cleared
 	assert_signal_emitted(spawner, "cleared", "once the wave finished and the last spawn died, cleared fires")
 	spawner.free()
-
-func test_wait_for_clear_null_spawner_returns() -> void:
-	var wm = WaveManagerScript.new()
-	# no spawner_path assigned → wait_for_clear must return immediately, not hang
-	await wm.wait_for_clear()
-	assert_true(true, "wait_for_clear returned with no spawner")
-	wm.free()
