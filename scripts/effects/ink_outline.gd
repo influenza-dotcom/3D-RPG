@@ -746,7 +746,7 @@ static func tint_material() -> ShaderMaterial:
 ## per pixel against the scene, so it never shows through a wall. 0 disables the ring (and the taps).
 @export_range(0.0, 8.0, 0.5) var highlight_width_px: float = 2.0
 ## The id -> color LUT for ink_tint.gdshader's disposition ids (1/2/3), NORMAL-palette half. ⭐ KEEP IN
-## STEP with NPC.OUTLINE_HOSTILE / OUTLINE_FRIENDLY / OUTLINE_FOLLOWING (= CBPalette's NORMAL_* pair) —
+## STEP with NPC._outline_color_for_disposition() (CBPalette hostile/friendly + NPC.OUTLINE_FOLLOWING) —
 ## NpcOutline maps its disposition to the ID, and these decide what that ID paints. Duplicated as
 ## exports rather than read off NPC so the ring is tunable per level/scene without touching combat code
 ## (and so this file has no NPC dependency).

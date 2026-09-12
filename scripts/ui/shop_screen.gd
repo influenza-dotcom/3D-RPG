@@ -106,7 +106,7 @@ func open_shop(merchant: Node, player: Node) -> void:
 	_prev_mouse_mode = ModalMenu.grab_mouse(not StationSpeaker.chirp(merchant))
 	var name_v: Variant = merchant.get(&"shop_name")
 	var nm: String = name_v if name_v is String else ""
-	# Runtime re-title MUST route through title_text: make_title only cased its constructor argument, so a
+	# Runtime re-title MUST route through title_text: only text handed to title_text is cased, so a
 	# lowercase merchant name would otherwise break the skin's tracked-uppercase title look.
 	_title.text = MenuStyle.title_text(PlayerText.shop_title(nm))
 	_rebuild()

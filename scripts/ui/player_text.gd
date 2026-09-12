@@ -272,7 +272,7 @@ const CHIP_INSTALL_CONFIRM := "Confirm — {cost}"
 ## Deliberately NOT the shop's EMPTY_LIST "(empty)" — the install sections read "(none)" today and this is a pure
 ## move of that literal; unifying the two wordings is a copy call, not a refactor.
 const INSTALL_NONE := "(none)"
-## The install panel's CONSTRUCTION-time title, cased by make_title/title_text ("INSTALL" under the default
+## The install panel's CONSTRUCTION-time title, cased by title_text ("INSTALL" under the default
 ## skin); open_install re-titles with install_title(mechanic) before the panel is ever shown. Kept in natural
 ## casing — unlike the all-caps INSTALL_TITLE above — because title_text owns casing, and an
 ## uppercase_titles = false skin must still get the authored wording.
@@ -316,7 +316,7 @@ const CHESS_INPUT_HINT := "[PH] Type a move (e2e4 or Nf3) · Enter to play · Es
 const CHESS_BLINDFOLD_HINT := "[PH] Blindfold: track the board from the move log · type e2e4 or Nf3 · Esc to leave"
 const CHESS_BLINDFOLD_BADGE := "[ BLINDFOLD ]"
 const CHESS_NO_BOARD_HINT := "[PH] No board — play it in your head.\nInstall the Board Visualizer chip to see the position."
-## The chess panel's CONSTRUCTION-time title. MenuStyle.make_title cases it through title_text (so it paints
+## The chess panel's CONSTRUCTION-time title. MenuStyle.title_text cases it (so it paints
 ## "CHESS" under the default skin), and open_match re-titles with chess_title(opponent) before the panel is ever
 ## shown — this is only the pre-match placeholder. Natural casing on purpose: casing is title_text's job (the one
 ## chokepoint skin.uppercase_titles flips), never baked into the copy.
@@ -330,13 +330,13 @@ const HEAL_STATUS := "[PH] HP  {hp} / {max_hp}\nYour zorkmids: {amount}"
 const HEAL_STATUS_LIMB := "[PH] HP  {hp} / {max_hp}\n— limb damage\nYour zorkmids: {amount}"
 const HEAL_STATUS_CANT_AFFORD := "[PH] HP  {hp} / {max_hp}\nYour zorkmids: {amount}\n— can't afford"
 const HEAL_STATUS_LIMB_CANT_AFFORD := "[PH] HP  {hp} / {max_hp}\n— limb damage\nYour zorkmids: {amount}\n— can't afford"
-## The heal card's CONSTRUCTION-time title, cased by make_title/title_text ("HEAL" under the default skin);
+## The heal card's CONSTRUCTION-time title, cased by title_text ("HEAL" under the default skin);
 ## open_heal re-titles with heal_title(healer) before the card is ever shown, so this is only the placeholder.
 ## Natural casing on purpose — title_text is the single casing chokepoint (skin.uppercase_titles).
 const HEAL_SCREEN_TITLE := "Heal"
 const RESPEC_NO_PERKS := "[PH] (no perks unlocked)"
 const RESPEC_NOTHING := "[PH] Nothing to respec"
-## The respec card's title as BUILT — make_title's constructor argument, title-case because
+## The respec card's title as BUILT — the text handed to title_text, title-case because
 ## MenuStyle.title_text applies the skin's casing. Distinct from respec_title(), which RE-titles the
 ## same Label with the station's name when the modal opens; only that runtime path carries the
 ## already-cased "RESPEC" fallback.
@@ -429,9 +429,9 @@ const START_MENU_QUIT := "Quit Game"
 const START_MENU_LOAD_GAME := "Load Game"
 
 ## The manual Save / Load slot screen (scripts/ui/save_load_screen.gd) — its own surface family, one const per
-## painted element (the OPTIONS_* idiom). SAVE_LOAD_TITLE is the panel title (make_title cases it per skin);
+## painted element (the OPTIONS_* idiom). SAVE_LOAD_TITLE is the panel title (title_text cases it per skin);
 ## deliberately NOT shared with OPTIONS_SAVE_LOAD below — that one labels the Options BUTTON that opens this
-## screen, an independent surface a locale may word differently (the QUEST_JOURNAL_TITLE / MENU_TAB_JOURNAL rule).
+## screen, an independent surface a locale may word differently (the tab-chip-versus-heading rule).
 const SAVE_LOAD_TITLE := "Save / Load"
 ## The quicksave row's name — a LOAD-only row (F5 owns writing it); the Slot rows use the SAVE_LOAD_SLOT template.
 const SAVE_LOAD_QUICKSAVE_ROW := "Quicksave"
@@ -452,7 +452,7 @@ const SAVE_LOAD_SAVE_FAILED := "Save failed"
 const SAVE_LOAD_LOAD_FAILED := "Load failed"
 ## An existing slot's metadata caption — TWO whole templates SELECTED on whether the save carries a resolvable
 ## authored level name (save_slot_caption): level display name + modified time, or the time alone. The
-## separator is a MIDDLE DOT (U+00B7) with three spaces each side — the character_inspect_summary idiom.
+## separator is a MIDDLE DOT (U+00B7) with three spaces each side — the middle-dot idiom.
 ## Both tokens are VALUES (an authored LevelData.display_name and a formatted timestamp), never msgids of ours.
 const SAVE_SLOT_CAPTION := "{level}   ·   {time}"
 const SAVE_SLOT_CAPTION_NO_LEVEL := "{time}"
@@ -468,7 +468,7 @@ const MENU_TAB_REPUTATION := "Reputation"
 const MENU_TAB_JOURNAL := "Journal"
 ## The MAP tab (map_screen.gd — the sixth sibling, default M). Deliberately NOT shared with the Options ->
 ## Accessibility "Minimap" / "Map Zoom" row labels: those name SETTINGS rows and a locale may word a settings
-## row differently from a tab chip (the MENU_TAB_JOURNAL / QUEST_JOURNAL_TITLE rule).
+## row differently from a tab chip (the tab-chip-versus-heading rule).
 const MENU_TAB_MAP := "Map"
 ## The Journal's EMPTY STATE — the whole screen when nothing is tracked, so it is the one line that has to
 ## teach where quests come from. TWO LINES, the MAP_HINT shape: the state, then the action that ends it. A
@@ -476,11 +476,6 @@ const MENU_TAB_MAP := "Map"
 ## The line break is authored (make_hint also autowraps, so a narrower panel simply reflows the second line —
 ## it never widens the tab).
 const QUEST_JOURNAL_EMPTY := "No quests yet.\nAccept a job from someone in the city and its objectives are tracked here."
-## The Journal panel's own title, painted by QuestJournal via MenuStyle.make_title (which routes it through
-## title_text, so the SKIN owns the casing — keep this title-case). Deliberately NOT a reuse of
-## MENU_TAB_JOURNAL: that const is the tab STRIP button's label, an independent surface, and re-wording one
-## must never silently re-word the other.
-const QUEST_JOURNAL_TITLE := "Journal"
 const REPUTATION_EMPTY := "[PH] No factions defined."
 ## The Stats screen's portrait-column button — hands off to the fullscreen CharacterInspectScreen
 ## (full body + the equipped weapon, drag to rotate).
@@ -1365,7 +1360,7 @@ static func bench_prompt(name: String) -> String:
 
 ## The gun cycler's caption: the selected weapon's authored label beside its filled-slot count ("Pistol   2/6").
 ## Both halves are VALUES — the name is the Item's own display_name and the counts are numbers — so the whole
-## line is prose-free and carries no marker (the character_inspect_summary precedent). THREE spaces separate
+## line is prose-free and carries no marker (the middle-dot precedent). THREE spaces separate
 ## the columns; keep them when re-wording.
 static func bench_gun(name: String, fitted: int, total: int) -> String:
 	return TextFormat.subst("{name}   {fitted}/{total}", {"name": name, "fitted": fitted, "total": total})
@@ -1539,13 +1534,6 @@ static func chess_to_move(name: String) -> String:
 # SELECTED by bool/enum — never a prose fragment passed in or glued on.
 
 
-## The Character inspect showcase's summary line — character level + the live wallet in ONE whole template;
-## the level number and the Zorkmids-formatted purse ride in as VALUE tokens, never concatenated. The
-## separator is a MIDDLE DOT (U+00B7) with three spaces each side.
-static func character_inspect_summary(level: int, money: float) -> String:
-	return TextFormat.subst("Level {level}   ·   {amount} zorkmids", {"level": level, "amount": Zorkmids.fmt(money)})
-
-
 ## One compact "Title   value" row on the Character inspect showcase. TWO whole templates selected on whether
 ## a live status modifier applies — the "(+2)" delta is authored INSIDE its variant, never appended as a
 ## fragment. Callers pass the raw stat ID (the requires_stat idiom) so the authored StatText title resolves
@@ -1608,7 +1596,7 @@ static func stat_now(effect_text: String) -> String:
 
 ## The Stats screen's top summary line — level + wallet, with the unspent-perk-point tail as a real
 ## singular/plural template PAIR when any points are spare (never a "(s)" or a fragment append). The
-## separators are MIDDLE DOTS (U+00B7) with THREE spaces each side — the character_inspect_summary idiom;
+## separators are MIDDLE DOTS (U+00B7) with THREE spaces each side — the middle-dot idiom;
 ## keep the spacing when re-wording. The wallet rides in as raw Zorkmids.fmt (a bare number before the
 ## authored word "zorkmids"), matching the historic readout byte-for-byte.
 static func stats_summary(level: int, money: float, points: int) -> String:

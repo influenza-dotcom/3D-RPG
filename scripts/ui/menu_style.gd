@@ -3,7 +3,8 @@ extends Node
 ## MenuStyle (autoload) — turns the active MenuSkin resource into the live Theme every menu uses, plus
 ## helpers for backdrops, titles, hints and the palette. Reskin the WHOLE UI by editing
 ## resources/ui/menu_skin.tres (or MenuStyle.set_skin(other_skin)) — no menu code changes. A menu calls
-## MenuStyle.apply(root) once, builds its tree with normal Controls, and uses make_title/make_hint/make_panel
+## MenuStyle.apply(root) once, builds its tree with normal Controls, and uses make_hint / make_dim / the style_*
+## adopters
 ## + the palette accessors; the shared Theme handles button hover/focus/disabled, panels, sliders, tabs and
 ## tooltips so every screen matches automatically.
 ##
@@ -164,10 +165,6 @@ func make_dim() -> ColorRect:
 	cr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	cr.mouse_filter = Control.MOUSE_FILTER_STOP
 	return cr
-
-## A styled menu panel (PanelContainer using the theme's sleek panel stylebox). Put your content inside it.
-func make_panel() -> PanelContainer:
-	return PanelContainer.new()  # picks up the theme's "panel" stylebox automatically
 
 ## A centered, FIXED-WIDTH dialog scaffold for the floating transaction / prompt modals (heal / respec /
 ## name-entry). Adds a full-rect CenterContainer (vertical + horizontal centering at ANY canvas — the reason
@@ -339,7 +336,7 @@ func style_compact_card(card: VBoxContainer, extra_sep: int = 0) -> void:
 		panel.add_theme_stylebox_override(&"panel", make_plain_panel_style())
 	style_dialog_card(card, extra_sep)
 
-## Adopt an authored title Label (the make_title twin): title font/size/colour + ellipsis. Does NOT touch
+## Adopt an authored title Label: title font/size/colour + ellipsis. Does NOT touch
 ## the text — the screen sets it (through title_text) from PlayerText, never the scene (l10n owns strings).
 func style_title(l: Label) -> void:
 	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -359,22 +356,9 @@ func style_button_row(row: BoxContainer) -> void:
 
 # --- text factories --------------------------------------------------------------------------------
 
-## A tracked title Label (uppercased per the skin), centred, in the title font/size/colour.
-## Ellipsizes instead of growing: a long runtime title (merchant/station names are designer-authored,
-## unbounded) must never drive the hosting panel wider than its anchors — it trims with "…" instead.
-func make_title(s: String) -> Label:
-	var l := Label.new()
-	l.text = title_text(s)
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	l.add_theme_font_override(&"font", _title_font)
-	l.add_theme_font_size_override(&"font_size", skin.title_size)
-	l.add_theme_color_override(&"font_color", skin.text_color)
-	return l
-
-## Apply the skin's title casing to runtime text. Screens that RE-title an existing make_title Label
+## Apply the skin's title casing to runtime text. Screens that RE-title an existing title Label
 ## (shop "TRADE — %s", heal/level-up/respec station names, name-entry prompts) must route the new text
-## through this, because make_title only cases its constructor argument.
+## through this, because only text handed to title_text is cased.
 ## This is the ONLY casing site in the UI — never write a bare .to_upper() at a screen (options_menu's
 ## section headers route here too). It consults skin.uppercase_titles so a per-locale MenuSkin remap can
 ## flip casing OFF wholesale (CJK/Turkish-style locales have no meaningful uppercase). PURE casing on
@@ -396,26 +380,6 @@ func make_hint(s: String) -> Label:
 	l.add_theme_color_override(&"font_color", skin.text_dim_color)
 	return l
 
-## A FIXED-HEIGHT clipping host for a hover-tooltip footer, with `hint` parented inside it filling the rect.
-## The shared construct behind LootScreen's and InventoryScreen's footers, which both need the same two things:
-##   * a height that CANNOT change with the text — a Label reports its full wrapped height as its minimum, so a
-##     bare Label in a VBox grows and shrinks on hover, which re-lays-out (and juddered) the EXPAND_FILL grid
-##     columns above it. An anchored child inside a plain Control feeds nothing back, so the footer is inert.
-##   * a height that is an EXACT INTEGER MULTIPLE of the real rendered line height, so when a long tooltip does
-##     overflow, the clip lands cleanly BETWEEN lines. The old `lines * (hint_size + 4)` guess undershot the
-##     true 18px pitch, and the anchored Label (which grows BOTH ways) spilled half the shortfall ABOVE the host,
-##     so clip_contents sliced the FIRST line through its glyphs — which reads as "the text is falling off the
-##     screen" rather than "there is more text". Measured off the live Label by hint_block_height (get_line_height
-##     PLUS the theme's line_spacing per gap — see its doc); falls back to the old estimate if the font isn't
-##     resolvable yet. Line COUNT is a designer knob (MenuSkin.footer_hint_lines).
-func make_hint_footer(hint: Label) -> Control:
-	var footer := Control.new()
-	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(hint)
-	hint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	size_hint_footer(footer, hint)
-	return footer
-
 ## The height a hint Label needs to render EXACTLY `lines` of its own lines under the theme it is wearing.
 ##
 ## ⭐⭐get_line_height() IS NOT THE PITCH, and every copy of this maths in the tree had that wrong. Measured on
@@ -436,7 +400,7 @@ func hint_block_height(hint: Label, lines: int) -> float:
 	return float(maxi(lines, 1)) * (line_h + spacing) - spacing
 
 ## Adopt an AUTHORED fixed-height hint footer (a plain Control clip host with `hint` anchored full-rect inside
-## it) — the .tscn twin of make_hint_footer, and the one place the four screens that author this construct
+## it) — the one place the four screens that author this construct
 ## (inventory / loot / shop / weapon bench) may size it. Owning all three halves here is the point: the clip, the TOP
 ## alignment, and — the half they all shipped wrong — the grow DIRECTION.
 ##

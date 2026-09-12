@@ -112,14 +112,12 @@ var _identity_key: StringName = &""
 ## close-range bloom (InkOutline.highlight_color_near_m/far_m) — an enemy shooting at you must read red
 ## from across the map, not only inside 8 m. 0 = snap. Driven per frame by NpcOutline._drive_engaged_mix.
 @export_range(0.0, 5.0, 0.05, "or_greater") var outline_target_fade_s: float = 0.4
-## Colour by resolved_disposition(): HOSTILE -> red, FRIENDLY -> green, NEUTRAL -> the `outline_color`
-## export (black by default). So the outline reads the NPC's attitude at a glance and re-tints live when
-## that attitude changes (provoke / reputation shift) — see _apply_outline(). ⭐ These consts are also
-## what NpcLaser tints its beam with, which is why `outline_color` is NOT dead the way `outline_width`
-## is: NpcOutline maps the disposition to a tint ID and InkOutline's LUT decides what that ID paints,
-## but the laser still reads the colour directly.
-const OUTLINE_HOSTILE := Color(0.9, 0.1, 0.1)   ## red — attacks the player on sight
-const OUTLINE_FRIENDLY := Color(0.1, 0.8, 0.2)  ## green — allied
+## Colour by resolved_disposition(): HOSTILE -> CBPalette.hostile(), FRIENDLY -> CBPalette.friendly(), NEUTRAL
+## -> the `outline_color` export (black by default) — see _outline_color_for_disposition(). So the outline
+## reads the NPC's attitude at a glance and re-tints live when that attitude changes (provoke / reputation
+## shift). ⭐ NpcLaser tints its beam with that same colour, which is why `outline_color` is NOT dead the
+## way `outline_width` is: NpcOutline maps the disposition to a tint ID and InkOutline's LUT decides what
+## that ID paints, but the laser still reads the colour directly.
 ## Blue rim worn ONLY while this NPC is following the player as a recruited companion (Feature I). It
 ## OVERRIDES the disposition colour in _outline_color_for_disposition() so a companion reads as "mine"
 ## at a glance regardless of its underlying FRIENDLY/NEUTRAL tint; cleared the moment it stops following.
@@ -1538,10 +1536,6 @@ var _pool: Node = null
 ## as dead would pollute the per-level death ledger and, on a reuse at the same @path, could suppress a legit enemy).
 ## Authored NPCs placed directly in a level .tscn leave this false and ARE tracked. Set by EncounterSpawner / NpcPool.
 var _dynamic_spawn: bool = false
-
-## Called once by NpcPool.adopt() to bind this instance to its pool (and disable the free-on-death path).
-func set_pool(pool: Node) -> void:
-	_pool = pool
 
 ## Whether this NPC's death plays the freeze-in-place beat (EffectsSettings.death_freeze_duration in
 ## _begin_death): a profile can opt out (freeze_on_death = false) for a trash-mob / swarm enemy that should just

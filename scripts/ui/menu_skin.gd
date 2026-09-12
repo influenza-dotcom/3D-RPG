@@ -77,7 +77,7 @@ extends Resource
 @export var body_size: int = 12
 ## Footnote / hint size (px).
 @export var hint_size: int = 11
-## How many lines tall a hover-tooltip FOOTER stands (MenuStyle.make_hint_footer — the loot/pickpocket and
+## How many lines tall a hover-tooltip FOOTER stands (MenuStyle.size_hint_footer — the loot/pickpocket and
 ## inventory screens). The footer is FIXED-height so hovering can't re-lay-out the grids above it, which makes
 ## this a genuine BUDGET: every line reserved here is stolen from the EXPAND_FILL grid columns, so raising it
 ## shrinks the item tiles. 5 = the longest real tooltip (name + effect/stat line + weight/value) at 4, plus ONE

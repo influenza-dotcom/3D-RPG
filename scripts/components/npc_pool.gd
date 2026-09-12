@@ -14,7 +14,7 @@ extends Node
 ##
 ## LIFECYCLE / CONTRACT (see docs/AUTHORING_GUIDE "NPC pooling" + the reset-surface map):
 ## - warm(def, n): instance n bodies of def's loadout, run their _ready under this pool, then remove them from the
-##   tree (truly idle — no processing) and bank them in def's bucket. Each is bound to this pool via set_pool(self),
+##   tree (truly idle — no processing) and bank them in def's bucket. Each is bound to this pool (its `_pool` is set),
 ##   so its die() returns it here instead of freeing.
 ## - acquire(def, parent, pos): pop a banked body (or null when the bucket is drained), re-parent it under `parent`,
 ##   place it at `pos`, and NPC.reset_for_reuse() it to a pristine post-_ready state. The caller (spawner) then
@@ -82,7 +82,7 @@ func _build_warm_instance(def: SpawnDefinition, attach_scenes: Array) -> Node:
 	def.apply_overrides(npc)
 	add_child(npc)  # runs NPC._ready synchronously here — the expensive build we're paying up front
 	_attach(npc, attach_scenes)  # GuardDuty / patrol / etc. — in-tree so their _ready resolves the world (once, kept across reuse)
-	npc.set(&"_pool", self)  # bind so die() returns it to us (set directly; set_pool() also fine, this avoids a call)
+	npc.set(&"_pool", self)  # bind so die() returns it to us
 	npc.set_meta(&"pool_money", npc.get(&"money"))  # authored wallet baseline, restored on every acquire
 	npc.set_meta(&"pool_sig", def.loadout_signature())
 	_all.append(npc)

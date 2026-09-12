@@ -368,14 +368,10 @@ func _release_pin() -> void:
 	freeze = false
 
 
-## True once this limb has arrived and is stapled in place (as opposed to still in flight, or never pinned).
-func is_pin_seated() -> bool:
-	return _pin_seated
-
 
 ## True if this limb is the PIN of its death — either still flying to the wall or already stapled to it. The
 ## seam an integration test asserts on (tests/test_pin_kill_integration.gd), since the flight takes real physics
-## frames and `is_pin_seated` is false for the first few of them.
+## frames and `_pin_seated` is false for the first few of them.
 func is_pin_active() -> bool:
 	return _pin_flying or _pin_seated
 

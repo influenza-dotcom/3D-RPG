@@ -58,7 +58,7 @@ func open_heal(healer: Node, player: Node) -> void:
 	_prev_mouse_mode = ModalMenu.grab_mouse(not StationSpeaker.chirp(healer))
 	var heal_name_v: Variant = healer.get(&"heal_name")  # duck-typed: only is_instance_valid was checked, not the type
 	var heal_nm: String = heal_name_v if heal_name_v is String else ""
-	# Runtime re-title MUST route through title_text() — make_title only cases its constructor argument.
+	# Runtime re-title MUST route through title_text() — only text handed to title_text is cased.
 	_title.text = MenuStyle.title_text(PlayerText.heal_title(heal_nm))
 	_refresh()
 	_root.visible = true

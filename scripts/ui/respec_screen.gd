@@ -63,7 +63,7 @@ func open_respec(station: Node, player: Node) -> void:
 	_prev_mouse_mode = ModalMenu.grab_mouse(not StationSpeaker.chirp(station))
 	var name_v: Variant = station.get(&"station_name")  # duck-typed: only is_instance_valid was checked, not the type
 	var nm: String = name_v if name_v is String else ""
-	# Runtime re-title MUST route through title_text() — make_title only cases its constructor argument.
+	# Runtime re-title MUST route through title_text() — only text handed to title_text is cased.
 	_title.text = MenuStyle.title_text(PlayerText.respec_title(nm))
 	_refresh()
 	_root.visible = true

@@ -200,7 +200,7 @@ func _bind_ui() -> void:
 
 	# Footer status line under the grid (footer + label authored in the scene): the carry weight when idle, the
 	# hovered item's breakdown on hover. (Cash is NOT here — it reads on the wallet row above the grid, and on
-	# the top-left HUD.) The detail Label lives inside a FIXED-HEIGHT clip host (the make_hint_footer
+	# the top-left HUD.) The detail Label lives inside a FIXED-HEIGHT clip host (the fixed-height footer
 	# construct, shared with LootScreen — the height math below mirrors it): reserving a min height on the Label
 	# alone was not enough — an unusually long tooltip (a weapon's full stat block) exceeds it, and because a
 	# Label reports its full wrapped height as its min size, the VBox grew the footer and SHRANK the EXPAND_FILL

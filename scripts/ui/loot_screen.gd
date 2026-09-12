@@ -221,7 +221,7 @@ func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, 
 	_bind(true)
 	_is_open = true
 	_prev_mouse_mode = ModalMenu.grab_mouse()
-	# Runtime re-titles must route through title_text — make_title only cases its constructor argument, and the
+	# Runtime re-titles must route through title_text — only text handed to title_text is cased, and the
 	# corpse/NPC names baked into `title` are designer-authored mixed case ("LOOTING Bandit" pre-fix).
 	_title.text = MenuStyle.title_text(title)
 	if _source_heading != null:
@@ -857,7 +857,7 @@ func _bind_ui() -> void:
 
 	# Detail line under both grids (footer + label authored in the scene): the hovered item's breakdown, else
 	# the click/drag hint. A fixed-height clip host so hovering can't re-lay-out the grid columns above (the
-	# make_hint_footer construct — the height math below mirrors it), sized to a whole number of rendered lines
+	# fixed-height footer construct — the height math below mirrors it), sized to a whole number of rendered lines
 	# so an over-long tooltip clips BETWEEN lines instead of slicing the last row through its glyphs. Budget =
 	# MenuSkin.footer_hint_lines; a pickpocket hover is the worst case here (the odds line rides ON TOP of a
 	# full weapon/chip tooltip).

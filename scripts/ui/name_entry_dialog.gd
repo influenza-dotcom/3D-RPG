@@ -60,7 +60,7 @@ func open(title: String, default_text: String, on_confirm: Callable) -> void:
 	# hand-wired here because this box keeps its own mouse bookkeeping (it restores a STASHED mode, not the
 	# gameplay capture ModalMenu assumes). A box that refused to open must never sting.
 	MenuStyle.play_open()
-	_title.text = MenuStyle.title_text(title)  # runtime re-title must re-apply the skin's casing (make_title only cases its ctor arg)
+	_title.text = MenuStyle.title_text(title)  # runtime re-title must re-apply the skin's casing (title_text is what cases it)
 	_line.text = default_text
 	_is_open = true
 	_root.visible = true
