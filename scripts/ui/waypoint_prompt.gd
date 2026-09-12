@@ -22,7 +22,9 @@ extends Control
 ## field, the note field and every Control that echoes them set auto_translate_mode = DISABLED (the seam
 ## menu_style.gd's header documents). The CAPTIONS around them are normal copy and come from PlayerText.
 ##
-## CONTROLLER PARITY, the atm_screen rule ("a control a pad can never land on is not a path"): the mark and
+## CONTROLLER PARITY, the atm_screen rule ("a control a pad can never land on is not a path"): on a pad
+## (InputManager.using_controller) open() HIDES the name and note fields — there is nothing to type with — and
+## seats focus on the first mark chip, so the card is purely the picker below. For the keyboard, the mark and
 ## colour rows are made of real focusable Buttons rather than a custom click-anywhere strip, so the whole card
 ## is reachable with a pad. The glyph inside each chip is drawn by the inner GlyphSwatch below — a Button's
 ## icon slot would need a Texture2D per shape per tint, which is a texture atlas for something that is a few
@@ -168,14 +170,25 @@ func open(title: String, name_seed: String, note_seed: String, icon: int, tint: 
 	_note.text = WAYPOINT_BOOK.clean_note(note_seed)
 	_syncing = false
 	_refresh_chips()
+	# PAD: nothing to type with, so the two text fields and their captions fold away and the card is the
+	# mark / colour picker a pad can actually operate. The seeds stay in the hidden fields and commit as-is.
+	# `using_controller` flips back on the first key or mouse move, so the next open shows them again.
+	var typing := not InputManager.using_controller
+	for field in [_name, _note]:
+		(field as Control).visible = typing
+		(_card.get_child((field as Control).get_index() - 1) as Control).visible = typing  # its caption
 	visible = true
 	set_process_unhandled_input(true)
 	MenuStyle.play_open()
 	# Focus + select-all so the pin's existing name is replaced by the first keystroke but survives a bare
 	# Enter — the NameEntryDialog gesture, which players already have from naming a pet. Renaming is what this
 	# card is opened FOR most of the time (the pin arrives auto-named), so typing over the seed is the fast path.
-	_name.grab_focus()
-	_name.select_all()
+	# On a pad, focus lands on the first mark chip instead.
+	if typing:
+		_name.grab_focus()
+		_name.select_all()
+	elif not _icon_chips.is_empty():
+		_icon_chips[0].grab_focus()
 	_refresh()
 
 

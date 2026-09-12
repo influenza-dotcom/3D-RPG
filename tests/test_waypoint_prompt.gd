@@ -160,3 +160,25 @@ func test_the_chip_rows_follow_their_vocabularies() -> void:
 	var palette: PackedColorArray = MenuStyle.hud.minimap_waypoint_palette
 	assert_eq(p._tint_chips.size(), maxi(1, palette.size()),
 		"one chip per palette entry — an artist adding a seventh colour grows the row with no code change")
+
+
+func test_on_a_pad_the_text_fields_fold_away_and_focus_lands_on_a_chip() -> void:
+	# A pad has nothing to type with: open() hides the name and note fields (and their captions), seats focus
+	# on the first mark chip, and the seeds still ride through to commit untouched. Keyboard opens are unchanged.
+	var prev: bool = InputManager.using_controller
+	var p = _card()
+	InputManager.using_controller = true
+	var got: Array = []
+	p.open("Title", "Seed", "a note", 1, 2, func(n: String, note: String, _i: int, _t: int) -> void:
+		got.append([n, note]))
+	assert_false(p._name.visible, "pad: the name field is hidden")
+	assert_false(p._note.visible, "pad: the note field is hidden")
+	assert_false((p._card.get_child(p._name.get_index() - 1) as Control).visible, "pad: the name caption is hidden too")
+	assert_eq(p.get_viewport().gui_get_focus_owner(), p._icon_chips[0], "pad: focus lands on the first mark chip")
+	p._on_save_pressed()
+	assert_eq(got, [["Seed", "a note"]], "the seeds commit as-is — a pad player keeps the auto-name")
+	InputManager.using_controller = false
+	p.open("Title", "Seed", "a note", 1, 2, Callable())
+	assert_true(p._name.visible and p._note.visible, "keyboard: both fields are back")
+	assert_eq(p.get_viewport().gui_get_focus_owner(), p._name, "keyboard: focus is in the name field again")
+	InputManager.using_controller = prev

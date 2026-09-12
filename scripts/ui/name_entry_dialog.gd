@@ -18,6 +18,9 @@ extends CanvasLayer
 ## event-driven, and a focused LineEdit consumes printable keys as handled, so typing digits/letters can't switch
 ## weapons or fire other verbs.)
 ##
+## PAD: when the last input was a gamepad (InputManager.using_controller) open() does not open at all — it commits
+## `default_text` straight to on_confirm, because a pad has nothing to type with. The seed is always a usable name.
+##
 ## Usage: NameEntryDialog.open(title, default_text, on_confirm) where on_confirm is a Callable(String). Enter (or the
 ## Confirm button) commits the typed name; Esc (or Cancel) closes without calling back. The caller is responsible for
 ## validating / defaulting an empty name — we pass the raw stripped text through.
@@ -52,6 +55,13 @@ func is_open() -> bool:
 ## frees the cursor and selects the seed text so a single keystroke replaces it (or Enter keeps it as-is).
 func open(title: String, default_text: String, on_confirm: Callable) -> void:
 	if _is_open or DialogueManager.is_active():
+		return
+	if InputManager.using_controller:
+		# A pad has nothing to type with: skip the box and commit the seed (the caller's default name) as if the
+		# player had pressed Enter on it. No open sting, no mouse grab — nothing opened. The keyboard path is
+		# untouched: `using_controller` flips back the moment a key or the mouse moves.
+		if on_confirm.is_valid():
+			on_confirm.call(default_text.strip_edges())
 		return
 	_on_confirm = on_confirm
 	_prev_mouse = Input.mouse_mode

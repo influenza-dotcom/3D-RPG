@@ -73,3 +73,15 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 		"Root eats clicks so nothing falls through to gameplay behind the modal")
 	assert_false((inst.get_node("%Root") as Control).visible, "the screen ships hidden until open()")
 	inst.free()
+
+
+func test_on_a_pad_open_commits_the_seed_without_opening() -> void:
+	# A pad has nothing to type with: open() hands the stripped seed straight to on_confirm and never shows the
+	# box (no open sting, no mouse grab). Keyboard behaviour is untouched once using_controller flips back.
+	var prev: bool = InputManager.using_controller
+	InputManager.using_controller = true
+	var got: Array = []
+	NameEntryDialog.open("Name your dog", "  Rex  ", func(t: String) -> void: got.append(t))
+	assert_false(NameEntryDialog.is_open(), "pad: the box never opens")
+	assert_eq(got, ["Rex"], "pad: the seed is committed, stripped, as if Enter had been pressed on it")
+	InputManager.using_controller = prev
