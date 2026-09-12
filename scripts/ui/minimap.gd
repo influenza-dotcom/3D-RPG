@@ -1,4 +1,4 @@
-﻿class_name Minimap
+class_name Minimap
 extends Control
 
 ## @system Minimap

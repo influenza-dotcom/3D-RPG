@@ -153,22 +153,34 @@ static func _is_doc_line(line: Variant) -> bool:
 
 
 ## Turn one `##` block into an entry, or {} if it carries no @system. First @system wins; @seam joins; @risk/@test list.
+## A `##` line that carries NO `@tag` directly after a @seam / @risk is a CONTINUATION of that tag (joined with a
+## space) -- long seams wrap onto indented `##` lines in the source, and dropping them published half-sentences in
+## SYSTEM_MAP.md while the drift guard still said "in sync" (it compares doc == render, not render == source). An
+## empty `##` separator line, or any other @tag, ends the continuation, so trailing prose paragraphs are not absorbed.
 static func _block_to_entry(block: Array, path: String, anchor: String) -> Dictionary:
 	var system := ""
 	var seams := PackedStringArray()
 	var risks: Array = []
 	var tests: Array = []
+	var open_tag := ""  # "seam" / "risk" while a continuation may follow; "" otherwise
 	for raw in block:
 		var after := String(raw).strip_edges()
 		while after.begins_with("#"):
 			after = after.substr(1)
 		after = after.strip_edges()
 		if not after.begins_with("@"):
+			if after == "":
+				open_tag = ""  # blank `##` separator closes the tag
+			elif open_tag == "seam" and not seams.is_empty():
+				seams[seams.size() - 1] = String(seams[seams.size() - 1]) + " " + after
+			elif open_tag == "risk" and not risks.is_empty():
+				risks[risks.size() - 1] = String(risks[risks.size() - 1]) + " " + after
 			continue
 		after = after.substr(1)  # drop the '@'
 		var ws := _first_ws(after)
 		var tag := (after if ws < 0 else after.substr(0, ws)).to_lower()
 		var val := ("" if ws < 0 else after.substr(ws)).strip_edges()
+		open_tag = ""
 		match tag:
 			"system":
 				if system == "" and val != "":
@@ -176,9 +188,11 @@ static func _block_to_entry(block: Array, path: String, anchor: String) -> Dicti
 			"seam":
 				if val != "":
 					seams.append(val)
+					open_tag = "seam"
 			"risk":
 				if val != "":
 					risks.append(val)
+					open_tag = "risk"
 			"test":
 				if val != "":
 					tests.append(val)

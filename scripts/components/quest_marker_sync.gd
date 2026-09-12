@@ -3,7 +3,8 @@ extends Node
 
 ## Drop into a level: spawns a WorldMarker for each ACTIVE quest objective that has show_marker, and removes them
 ## as objectives complete / quests finish or fail — so the Compass + Minimap point at your current objectives with
-## no per-quest wiring. Driven by GameState's quest signals; rebuilds the whole set on any quest change (cheap —
+## no per-quest wiring. Driven by QuestTracker's quest signals (GameState only forwards the quest API; the signals
+## live on QuestTracker); rebuilds the whole set on any quest change (cheap —
 ## there are few active objectives).
 
 ## Tint for the spawned objective markers.

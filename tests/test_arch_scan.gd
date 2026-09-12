@@ -69,6 +69,33 @@ func test_repeated_seam_joins_and_risks_accumulate() -> void:
 	assert_eq((e.get("risks") as Array).size(), 2, "each @risk accumulates")
 
 
+func test_wrapped_seam_and_risk_lines_join_as_continuations() -> void:
+	# Long seams wrap onto indented `##` lines in the source (hud_ghost.gd, waypoint_*.gd, retro_post.gd). The scanner
+	# once kept only the tag line, so SYSTEM_MAP.md published half-sentences while the drift guard said "in sync".
+	var text := _src([
+		"## @system HUD Rendering",
+		"## @seam The HUD canvas is attached to a SECOND viewport, so the",
+		"##       same HUD renders twice per frame.",
+		"## @risk Any element that SAMPLES THE SCREEN must be excluded",
+		"##       or it reads garbage there.",
+		"## @risk A single-line risk stays single.",
+		"## @test res://tests/test_hud_ghost.gd",
+		"##",
+		"## Trailing prose after a blank separator is NOT part of any tag.",
+		"class_name HudGhost",
+	])
+	var e: Dictionary = ArchScan.parse_file("res://scripts/ui/hud_ghost.gd", text, {})[0]
+	assert_eq(String(e.get("seam")), "The HUD canvas is attached to a SECOND viewport, so the same HUD renders twice per frame.",
+		"an indented `##` line right after @seam continues the seam, joined with one space")
+	var risks := e.get("risks") as Array
+	assert_eq(risks.size(), 2, "continuation lines extend the open risk rather than adding a new one")
+	assert_eq(String(risks[0]), "Any element that SAMPLES THE SCREEN must be excluded or it reads garbage there.", "first risk joined")
+	assert_eq(String(risks[1]), "A single-line risk stays single.", "a following @risk closes the previous continuation")
+	assert_eq((e.get("tests") as Array).size(), 1, "@test still captured after a continued risk")
+	assert_false(String(e.get("seam")).contains("Trailing prose"), "a blank `##` separator ends the continuation")
+	assert_false(String(risks[1]).contains("Trailing prose"), "trailing prose is not absorbed into the last risk")
+
+
 func test_two_blocks_in_one_file_make_two_entries() -> void:
 	var text := _src([
 		"## @system Save Model",

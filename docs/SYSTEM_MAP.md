@@ -183,10 +183,10 @@ Code-built by ui.gd at the TOP CENTRE, riding the `_weighted` HUD-weight carrier
 
 ### `class HudGhost` - `scripts/ui/hud_ghost.gd`
 
-The HUD CanvasLayer's canvas is attached to a SECOND (offscreen, never-cleared) viewport, so the
+The HUD CanvasLayer's canvas is attached to a SECOND (offscreen, never-cleared) viewport, so the same HUD renders twice per frame: once to the window as it always has, and once into an accumulator that keeps a decaying image of every previous frame.
 
-- **Risk:** Any HUD element that SAMPLES THE SCREEN (hint_screen_texture / BackBufferCopy) must be excluded
-- **Risk:** The DISPLAY rect lives on the very layer it is showing, so it MUST be excluded from the capture
+- **Risk:** Any HUD element that SAMPLES THE SCREEN (hint_screen_texture / BackBufferCopy) must be excluded from the capture — inside the accumulator the "screen" is the HUD-only buffer, so an inverting or full-frame post shader reads garbage there. See ui.gd's exclusion block.
+- **Risk:** The DISPLAY rect lives on the very layer it is showing, so it MUST be excluded from the capture or the accumulator feeds on its own output and runs away to white within a few frames.
 - **Test:** `tests/test_hud_ghost.gd`
 
 ## Ink Outline
@@ -242,10 +242,10 @@ ensure(station, kind) is the ZERO-AUTHORING seam: every station calls it once fr
 
 ### `file waypoint_marker.gd` - `scripts/player/waypoint_marker.gd`
 
-The IN-WORLD half of player waypoints: TAP the Mark Waypoint key (InputManager.action_mark_waypoint, The pin is stored through GameState.add_waypoint into the per-level ledger — the same records the Map
+The IN-WORLD half of player waypoints: TAP the Mark Waypoint key (InputManager.action_mark_waypoint, default X) to pin the spot you are LOOKING AT — or, when the ray hits nothing in reach, the spot you are STANDING ON — and to make that pin the one you are NAVIGATING to. Built by Player._ready (.new() + host) beside the takedown / pet / claim verbs and running its own _physics_process with the same dialogue / menu / death guards. The pin is stored through GameState.add_waypoint into the per-level ledger — the same records the Map tab authors and the same ones the minimap box paints — and is then handed to GameState.set_tracked_waypoint, which is what puts a pip on the top-centre heading tape (HudCompass) and a ring on the HUD corner box within the frame. Nothing is spawned into the world; a waypoint has no presence there (see Minimap._paint_waypoints).
 
-- **Risk:** THE RAY MUST STAY IN _physics_process. direct_space_state returns EMPTY, silently, off the physics
-- **Risk:** NO class_name — Player preloads it BY PATH. A new class_name is absent from the editor's global class
+- **Risk:** THE RAY MUST STAY IN _physics_process. direct_space_state returns EMPTY, silently, off the physics frame — the trap the minimap's own "never draw a sight cone" @risk records — so a _process or _input version of this would mark your feet every single time and pass every test doing it.
+- **Risk:** NO class_name — Player preloads it BY PATH. A new class_name is absent from the editor's global class cache until a rescan, and until then every file that NAMES the type fails to parse and cascades.
 - **Test:** `tests/test_waypoint_marker.gd`
 
 ### `class FloorplanSection` - `scripts/ui/floorplan_section.gd`
@@ -292,16 +292,16 @@ The PRECEDENCE and SIZING rules for every drop-in marker texture the minimap can
 
 ### `file waypoint_prompt.gd` - `scripts/ui/waypoint_prompt.gd`
 
-The editor card for ONE map pin: its name, its note, its mark and its colour. Opened by the Map tab CODE-BUILT and parented into the host's own root, the AmountPrompt / GridInventoryView idiom: this is
+The editor card for ONE map pin: its name, its note, its mark and its colour. Opened by the Map tab (scripts/ui/map_screen.gd) to RE-AUTHOR a pin that already exists — never to place one. Placement on the map tab is instant (a click drops a pin seeded with its ordinal) and the in-world Mark key pins and tracks in one press, so nothing reaches this card until the player has decided a particular pin is worth naming. That is the whole reason the card can afford four fields: it is opened rarely and deliberately, rather than standing between the player and every single mark. The caller supplies the commit Callable and owns what the answer means, so this widget never touches GameState itself. CODE-BUILT and parented into the host's own root, the AmountPrompt / GridInventoryView idiom: this is live runtime chrome bound per-open, not static layout an artist arranges, so it is instantiated into an authored scene rather than authored in one. It draws its own full-rect scrim and eats every click that misses the card, so the map underneath cannot be clicked "through" an open editor.
 
-- **Risk:** NO class_name — the consumer preloads it BY PATH. A new class_name is not in the editor's global
+- **Risk:** NO class_name — the consumer preloads it BY PATH. A new class_name is not in the editor's global script class cache until a rescan, and until then every file that NAMES the type fails to parse. See scripts/world/waypoint_book.gd, which carries the same note for the same reason.
 - **Test:** `tests/test_waypoint_prompt.gd`
 
 ### `file waypoint_book.gd` - `scripts/world/waypoint_book.gd`
 
-The pure RULES for player-placed map waypoints — the record shape, the two text clamps, the icon A record stores a PALETTE INDEX (`tint`), never a Color. Two reasons, and both are load-bearing: an
+The pure RULES for player-placed map waypoints — the record shape, the two text clamps, the icon vocabulary and the corrupt-safe load fold. GameState owns the STORAGE (its `waypoints` ledger + the [waypoints] save section), scripts/ui/minimap.gd owns the PAINT — and the CLICK hit-test lives there too (Minimap.waypoint_at_point), in SCREEN space against the exact points the paint inked, so the two can never disagree about where a pin is. This file owns everything that can be decided without a tree, an autoload or a skin. A record stores a PALETTE INDEX (`tint`), never a Color. Two reasons, and both are load-bearing: an artist who restyles minimap_waypoint_palette on hud_skin.tres restyles every pin already saved in every profile (a stored Color would freeze the old look into the save forever), and an int survives a ConfigFile round-trip with no parsing. Same argument as the icon, which stores an Icon ordinal rather than a shape.
 
-- **Risk:** NO class_name, deliberately. This is a NEW file and the user's editor is normally open, where a new
+- **Risk:** NO class_name, deliberately. This is a NEW file and the user's editor is normally open, where a new class_name is not in .godot/global_script_class_cache.cfg until a rescan — and until then every consumer that names the type fails to parse and cascades. Every consumer preloads it BY PATH instead (the FLOORPLAN_SOURCE / MINIMAP_ART idiom in minimap.gd), which needs no cache entry at all.
 - **Test:** `tests/test_waypoint_book.gd`
 
 ## NPC AI
@@ -445,17 +445,17 @@ QuestTracker OWNS the live quest tracker (active/completed/failed + objective pr
 
 ### `class WorldGhost` - `scripts/effects/world_ghost.gd`
 
-An offscreen never-cleared SubViewport keeps a running average of the FINISHED frame (it samples the
+An offscreen never-cleared SubViewport keeps a running average of the FINISHED frame (it samples the ROOT viewport's own texture, so it reads last frame), and a full-rect shader adds the difference between that average and the live frame back over the picture.
 
-- **Risk:** The display is itself part of the frame that gets averaged — a feedback loop. It is stable only
-- **Risk:** The accumulator averages the WHOLE window, including any CanvasLayer above this one. The display
+- **Risk:** The display is itself part of the frame that gets averaged — a feedback loop. It is stable only because the accumulator MIXES toward the screen instead of summing it; see the maths below before changing either the blend or the composite.
+- **Risk:** The accumulator averages the WHOLE window, including any CanvasLayer above this one. The display only sees layers below it, so while a menu / dialogue / cutscene owns the screen the two disagree and the effect must be OFF (and the buffer re-cleared on the way back in).
 - **Test:** `tests/test_world_ghost.gd`
 
 ### `file retro_post.gd` - `scripts/ui/retro_post.gd`
 
-THE PRESENTATION DIALS OF post_process.gdshader, in ONE place. Every screen that wears the retro
+THE PRESENTATION DIALS OF post_process.gdshader, in ONE place. Every screen that wears the retro overlay — the in-game one on the Player's ColorRect (scripts/player/player.gd) and the boot screen's own copy in scenes/computerroom.tscn — pushes the same six uniforms from the same player Settings through `apply_dials()`. Anything that is about the PLAYER's state rather than the presentation (low_hp, hurt, night vision, the death fades, the lens bend) stays with its owner; this file is only the part that must look identical everywhere.
 
-- **Risk:** THE BOOT SCREEN IS NOT DRIVEN BY THE PLAYER. It is a standalone scene with no Player node, so before
+- **Risk:** THE BOOT SCREEN IS NOT DRIVEN BY THE PLAYER. It is a standalone scene with no Player node, so before this existed it never received ANY of these — the player's Dithering and Colour Depth rows did nothing on the first thing they see, and it quantised at its own authored `color_steps` forever. A new host that draws this shader must call apply_dials() every frame or it silently inherits that bug.
 - **Test:** `tests/test_color_quantization.gd`
 
 ## Run And Level Flow
