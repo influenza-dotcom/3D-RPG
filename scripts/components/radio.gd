@@ -547,22 +547,37 @@ func _load_external_stream(path: String) -> AudioStream:
 		return s
 	return null
 
-## Scan `folder` for audio files (mp3/ogg/wav), returning their full paths sorted by name. The extension
-## whitelist skips Godot's `.import`/`.remap` sidecars. Returns empty for a blank/unopenable folder. NOTE: a
-## res:// scan sees the SOURCE files when running from the editor (the user's workflow); the player's own
-## folder (Slice C, user:// or an OS path) is always real files.
+## Scan `folder` for audio files (mp3/ogg/wav), returning their full paths sorted by name. Returns empty for a
+## blank/unopenable folder. NOTE: a res:// scan sees the SOURCE files plus their `.import` sidecars when
+## running from the editor (the user's workflow) but ONLY the sidecars in an exported pck — see
+## `audio_paths_in`. The player's own folder (Slice C, user:// or an OS path) is always real files.
 func _scan_audio_folder(folder: String) -> PackedStringArray:
-	var out := PackedStringArray()
 	if folder.is_empty():
-		return out
+		return PackedStringArray()
 	var dir := DirAccess.open(folder)
 	if dir == null:
-		return out
+		return PackedStringArray()
+	return audio_paths_in(folder, dir.get_files())
+
+## The loadable audio paths behind a directory listing of `folder`, sorted, each once. Inside res:// an
+## exported pck lists an imported track ONLY as `song.mp3.import` (the raw file never ships), so the sidecar
+## suffix is trimmed and the bare `song.mp3` is what `load()` resolves; the editor lists BOTH names, hence the
+## de-dupe. Filtering on the raw extension shipped an EMPTY folder playlist (08-28 build). Outside res://
+## there is no import pipeline, so entries are taken as real files by extension alone.
+static func audio_paths_in(folder: String, entries: PackedStringArray) -> PackedStringArray:
+	var out := PackedStringArray()
 	var base := folder.trim_suffix("/")
-	for f in dir.get_files():
-		var ext := f.get_extension().to_lower()
-		if ext == "mp3" or ext == "ogg" or ext == "wav":
-			out.append(base + "/" + f)
+	var in_res := folder.begins_with("res://")
+	for f in entries:
+		var name := f
+		if in_res:
+			name = name.trim_suffix(".import").trim_suffix(".remap")
+		var ext := name.get_extension().to_lower()
+		if ext != "mp3" and ext != "ogg" and ext != "wav":
+			continue
+		var path := base + "/" + name
+		if not out.has(path):
+			out.append(path)
 	out.sort()
 	return out
 

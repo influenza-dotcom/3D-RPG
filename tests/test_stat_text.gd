@@ -46,3 +46,16 @@ func test_stat_info_falls_back_cleanly_for_an_unknown_stat() -> void:
 		"an unauthored stat id degrades to a bare capitalized title — a missing/renamed .tres can't blank the sheet")
 	assert_eq(StatInfo.blurb(&"charisma"), "",
 		"…and its blurb is empty, not an error — the tooltip just loses its 'what it does' line")
+
+
+func test_scan_accepts_the_exported_remap_name() -> void:
+	# An exported pck lists packed resources as `<id>.tres.remap`, never the bare `.tres` — the 08-28 build
+	# filtered on the raw extension and shipped every stat name/blurb blank. The filter must see through the
+	# sidecar and hand `load()` the bare name (which the remap resolves), and still reject non-resources.
+	var ST = load("res://scripts/ui/stat_text.gd")
+	assert_eq(ST.tres_name("agility.tres"), "agility.tres", "an editor listing's bare .tres is loadable as-is")
+	assert_eq(ST.tres_name("agility.tres.remap"), "agility.tres",
+		"an exported pck's .tres.remap resolves to the bare .tres that load() remaps")
+	assert_eq(ST.tres_name("agility.tres.uid"), "", "a .uid sidecar is not a resource")
+	assert_eq(ST.tres_name("notes.txt"), "", "a stray non-resource file is skipped")
+	assert_eq(ST.tres_name("agility.remap"), "", "a .remap with no .tres underneath is not a resource")

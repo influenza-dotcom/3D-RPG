@@ -34,14 +34,24 @@ static func all() -> Array:
 		_scan()
 	return _by_id.values()
 
+## The loadable `.tres` name behind a directory entry, or "" for anything else. An exported pck lists packed
+## resources as `agility.tres.remap` (never the bare `.tres`), so the sidecar suffix is trimmed BEFORE the
+## extension test — filtering on the raw extension shipped every stat name and blurb blank (08-28 build).
+static func tres_name(entry: String) -> String:
+	var n := entry.trim_suffix(".remap")
+	if n.get_extension().to_lower() != "tres":
+		return ""
+	return n
+
 static func _scan() -> void:
 	_scanned = true
 	_by_id.clear()
 	if not DirAccess.dir_exists_absolute(STATS_DIR):
 		return
 	for n in DirAccess.get_files_at(STATS_DIR):
-		if n.get_extension().to_lower() != "tres":
+		var res_name := tres_name(n)
+		if res_name.is_empty():
 			continue
-		var st := load(STATS_DIR.path_join(n))
+		var st := load(STATS_DIR.path_join(res_name))
 		if st != null and st.get("id") != &"":
 			_by_id[st.get("id")] = st

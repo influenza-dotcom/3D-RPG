@@ -378,3 +378,23 @@ func test_target_grounded_is_false_off_tree() -> void:
 	assert_false(r._target_grounded(rb), "off-tree RigidBody -> not grounded (no physics world); the kick safely skips")
 	rb.free()
 	r.free()
+
+
+func test_audio_paths_see_through_exported_import_sidecars() -> void:
+	# In an exported pck an imported track is listed ONLY as `song.mp3.import` (the raw file never ships) — the
+	# 08-28 build filtered on the raw extension and every folder radio played nothing. The listing filter must
+	# hand load() the bare path, list each track ONCE when the editor shows both names, keep sidecars of
+	# non-audio out, and stay sorted.
+	var R = load(RADIO_SCRIPT)
+	var exported := PackedStringArray(["b_song.mp3.import", "a_song.ogg.import", "cover.png.import", "readme.txt"])
+	assert_eq(R.audio_paths_in("res://assets/audio/music", exported),
+		PackedStringArray(["res://assets/audio/music/a_song.ogg", "res://assets/audio/music/b_song.mp3"]),
+		"an exported listing yields the bare audio paths, sorted, no sidecars or non-audio")
+	var editor := PackedStringArray(["b_song.mp3", "b_song.mp3.import", "a_song.ogg", "a_song.ogg.import"])
+	assert_eq(R.audio_paths_in("res://assets/audio/music/", editor),
+		PackedStringArray(["res://assets/audio/music/a_song.ogg", "res://assets/audio/music/b_song.mp3"]),
+		"the editor's source+sidecar pairs collapse to one path each (trailing slash tolerated)")
+	var external := PackedStringArray(["track.mp3", "track.mp3.import", "notes.txt"])
+	assert_eq(R.audio_paths_in("user://music", external),
+		PackedStringArray(["user://music/track.mp3"]),
+		"outside res:// there is no import pipeline: only real audio files count, a stray .import is not a track")
