@@ -140,6 +140,28 @@ func test_upgrade_unlock_id_dropdown_is_dynamic() -> void:
 	u.free()
 
 
+func test_player_starting_unlocks_dropdown_covers_registry() -> void:
+	# Player.starting_unlocks is the ONE ability dropdown that is still a hand-kept @export_enum (Player is not
+	# @tool, so it cannot self-populate the way UpgradePickup.unlock_id does above). It drifted once: laser_sight
+	# shipped as an ability scene while the dropdown never offered it. Pin the hand-kept list to the scenes on
+	# disk in BOTH directions. Bare Player.new(), off-tree, no _ready (the CLAUDE.md rule); the typed-array enum
+	# hint reads "<type>/<hint>:<csv>", so the ids are everything after the first colon.
+	var player := Player.new()
+	var p := _property(player, "starting_unlocks")
+	player.free()
+	assert_false(p.is_empty(), "Player must expose a starting_unlocks property")
+	var hint := String(p.get("hint_string", ""))
+	var csv := hint.substr(hint.find(":") + 1) if hint.find(":") >= 0 else hint
+	var offered := PackedStringArray(csv.split(","))
+	offered.sort()
+	var on_disk := AbilityRegistry.ids()
+	for id in on_disk:
+		assert_true(offered.has(id),
+			"ability scene '%s' exists under scenes/components/abilities/ but Player.starting_unlocks' @export_enum does not offer it -- add it to the hand-kept list in player.gd" % id)
+	for id in offered:
+		assert_true(on_disk.has(id),
+			"Player.starting_unlocks offers '%s' but no ability scene of that name exists on disk -- a fresh game picking it would build nothing" % id)
+
 # --- Fall-immunity upgrade (review HIGH #2): the player takes fall damage unless this upgrade is granted ---
 
 func test_fall_immunity_ability_id() -> void:

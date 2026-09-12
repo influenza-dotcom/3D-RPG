@@ -336,7 +336,7 @@ var _pre_panic_threat_response: int = -1
 ## floor, and behind a cooldown, so it chases you up a ledge without jump-spamming while it is still running in.
 @export var jump_velocity: float = 4.5
 ## Walks through closed DOORS: bumping a closed, unlocked `Door` panel on the way somewhere swings it open (away from
-## this body) instead of pressing against it. Doors never bake into the navmesh, so paths already run through doorways
+## this body while the Door's `npc_swing_away` is on, else toward its authored side) instead of pressing against it. Doors never bake into the navmesh, so paths already run through doorways
 ## — the panel was the only thing in the way (see _open_bumped_doors). A LOCKED door, or one with `npc_can_open` off,
 ## stays a wall. Turn OFF for a body that shouldn't work a handle.
 @export var opens_doors: bool = true

@@ -436,8 +436,8 @@ func hint_block_height(hint: Label, lines: int) -> float:
 	return float(maxi(lines, 1)) * (line_h + spacing) - spacing
 
 ## Adopt an AUTHORED fixed-height hint footer (a plain Control clip host with `hint` anchored full-rect inside
-## it) — the .tscn twin of make_hint_footer, and the one place the three screens that author this construct
-## (inventory / loot / weapon bench) may size it. Owning all three halves here is the point: the clip, the TOP
+## it) — the .tscn twin of make_hint_footer, and the one place the four screens that author this construct
+## (inventory / loot / shop / weapon bench) may size it. Owning all three halves here is the point: the clip, the TOP
 ## alignment, and — the half they all shipped wrong — the grow DIRECTION.
 ##
 ## ⭐grow_vertical must be END, not BOTH. A Control's size is clamped up to its combined minimum, and a Label's

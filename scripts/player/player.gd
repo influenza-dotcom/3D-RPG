@@ -43,7 +43,9 @@ signal mechanic_toggled(id: StringName, active: bool)
 ## the registry). Pick each from the DROPDOWN -- no more typo'd ids. PREFER dropping the ability scenes under the
 ## Player; this stays empty by default. A loaded save replaces this whole set. Stored as plain strings (the registry
 ## keys); unlock_mechanic takes String or StringName interchangeably.
-@export_enum("grapple", "wall_climb", "air_dash", "slide", "fall_immunity", "silent_takedown", "chess_visualizer", "bunnyhop", "bio_scanner", "deep_scanner") var starting_unlocks: Array[String] = []
+## HAND-KEPT LIST (Player is not @tool, so it cannot self-populate like UpgradePickup.unlock_id does): it must name
+## every scene under scenes/components/abilities/ — tests/test_upgrades.gd pins it to AbilityRegistry.ids().
+@export_enum("grapple", "wall_climb", "air_dash", "slide", "fall_immunity", "silent_takedown", "chess_visualizer", "bunnyhop", "bio_scanner", "deep_scanner", "laser_sight") var starting_unlocks: Array[String] = []
 ## The ability SUBSYSTEM: grant / revoke / persistence bookkeeping + the live ability list live in AbilityManager
 ## (scripts/components/abilities/ability_manager.gd), not here. Built at var-init and wired in _init so the bare-
 ## Player unit tests (no _ready) can drive it. The Player keeps ONLY the three typed hot-path refs below + the
