@@ -404,6 +404,13 @@ const SPARK_FX_SCENE_PATH := "res://scenes/effects/spark_attack.tscn"
 const SHELL_FX_SCENE_PATH := "res://scenes/effects/shell_drop.tscn"
 const SMOKE_FX_SCENE_PATH := "res://scenes/effects/muzzle_smoke.tscn"
 const LASER_MAX_LENGTH := 60.0
+## Point-blank laser fade band (metres). The beam is drawn from the BARREL TIP to the target's capsule centre,
+## and that tip rides the hold boost up to ~1.8 m ahead of the grip (sniper) — so a target closer than that is
+## BESIDE or BEHIND the tip, the tip->target line swings through huge angles on a step of movement, and the beam
+## spins. The beam therefore fades with how far the aim point sits AHEAD of the tip along the barrel: full
+## brightness this far ahead, gone at zero or behind (see _point_blank_beam_fade). Presentation only — the
+## clear-shot ray in _aim_laser_at is untouched, so point-blank firing (NpcCombat.act_alerted) is unaffected.
+const LASER_POINT_BLANK_FADE: float = 0.75
 ## --- Audio-cue timing the firing CADENCE owns (the sound ASSETS + mix live on the NpcAudioCues child) ---
 ## The shared (static) cooldown so a swarm spotting you at once plays one MGS "!" sting. Kept here as the
 ## fallback + test anchor (a unit test pins NPC.ALERT_COOLDOWN_MS); the child reads the tunable
@@ -3830,10 +3837,20 @@ func _weapon_anchor_position() -> Vector3:
 ##
 ## ⭐Reads `_aim_point()`, NOT `get_aim_direction()`: that one CONSUMES the one-shot `_shot_miss` flag
 ## (npc.gd's miss roll), so calling it for a per-frame visual would silently eat every deliberate miss.
+##
+## POINT-BLANK: the elevation is measured from the grip, and inside GameSettings.npc_ai.point_blank_range the
+## flat run to the aim point shrinks toward zero while the height difference does not — a foe hugging the NPC
+## reads as +/-75 deg and the barrel whips up and down with every step. So the goal fades toward level over that
+## band (point_blank_fade on the flat run): a target 2 m out keeps its full pitch, one on top of the NPC gets
+## none, and a strafing target in between eases rather than popping. Presentation only, like the clamp.
 func _aim_pitch_goal() -> float:
 	if not weapon_aim_pitch or not is_holding_gun() or not has_sensed_foe() or not _muzzle.is_inside_tree():
 		return 0.0
-	return aim_elevation(_muzzle.global_position, _aim_point(), weapon_aim_pitch_limit)
+	var from := _muzzle.global_position
+	var target := _aim_point()
+	var flat := Vector2(target.x - from.x, target.z - from.z).length()
+	return aim_elevation(from, target, weapon_aim_pitch_limit) \
+			* point_blank_fade(flat, GameSettings.npc_ai.point_blank_range)
 
 ## Pure aim math (static, off-tree-safe -> unit-tested; never touches the tree), the twin of
 ## NpcHeadLookMount.aim_offsets: the ELEVATION in radians (+ = up) from `from` to `target`, clamped to
@@ -3983,9 +4000,45 @@ func _aim_laser_at(point: Vector3, aim_charge: float, report_aim: bool = true) -
 	if not show_laser or _laser == null or not _current_weapon_has_laser_sight():
 		_hide_laser()
 		return hit
-	var endpoint: Vector3 = hit.position if not hit.is_empty() else origin + dir * _aim_range()
-	_laser.draw_beam(origin, endpoint, aim_charge, _outline_color_for_disposition())
+	# Point-blank: a target at or behind the barrel tip fades the beam out entirely (LASER_POINT_BLANK_FADE)
+	# rather than painting the tip->target line, which spins the moment you step inside the gun's length.
+	var fade := _point_blank_beam_fade(origin, point)
+	if fade <= 0.0:
+		_hide_laser()
+		return hit
+	var endpoint: Vector3
+	if not hit.is_empty():
+		endpoint = hit.position
+	elif origin.distance_to(point) <= GameSettings.npc_ai.point_blank_range:
+		# The ray started INSIDE the target's collider, so it reported nothing (Godot rays ignore the shape they
+		# begin in — the fact the point-blank fire override in NpcCombat.act_alerted exists for). The full-reach
+		# fall-through below would then paint a beam the whole weapon range long THROUGH the body it is aimed at
+		# (500 m for the sniper). End it on the body instead.
+		endpoint = point
+	else:
+		endpoint = origin + dir * _aim_range()
+	_laser.draw_beam(origin, endpoint, aim_charge * fade, _outline_color_for_disposition())
 	return hit
+
+## How bright the point-blank fade leaves the beam (0..1): full once the aim point sits LASER_POINT_BLANK_FADE
+## metres ahead of the barrel tip along the barrel, zero at the tip or behind it. The barrel axis is the hand
+## anchor's +Z (the mounted model faces +Z and the anchor carries the aim pitch), NOT the gun's own Muzzle
+## marker basis, which each view-model authors differently. With no anchor in the tree (a civilian, an
+## off-tree unit-test NPC) there is no barrel to judge against, so the beam is left at full brightness.
+func _point_blank_beam_fade(origin: Vector3, point: Vector3) -> float:
+	if _muzzle == null or not _muzzle.is_inside_tree():
+		return 1.0
+	var forward := _muzzle.global_basis.z
+	if forward.is_zero_approx():
+		return 1.0
+	return point_blank_fade((point - origin).dot(forward.normalized()), LASER_POINT_BLANK_FADE)
+
+## Pure point-blank fade (static, off-tree-safe -> unit-tested): 0 at `distance` <= 0, 1 at `distance` >= `band`,
+## a smooth ramp between. Shared by the laser beam (distance = how far the aim point sits ahead of the barrel
+## tip) and the barrel pitch (distance = the flat run from the grip to the aim point), so both telegraphs ease
+## out over the same kind of band instead of popping at a threshold a strafing target would straddle.
+static func point_blank_fade(distance: float, band: float) -> float:
+	return smoothstep(0.0, maxf(band, 0.0001), distance)
 
 # --- WeaponHost aim contract: from the muzzle toward the target, no camera ---
 ## Shot + laser origin: the held gun's barrel marker when one resolved, else the bare hand anchor

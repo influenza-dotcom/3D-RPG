@@ -413,6 +413,29 @@ func test_aim_elevation_is_signed_clamped_and_degenerate_safe() -> void:
 	assert_almost_eq(NPC.aim_elevation(origin, origin, 75.0), 0.0, 0.0001,
 		"a target standing exactly on the muzzle is level, never a NaN written into the anchor")
 
+func test_point_blank_fade_is_zero_behind_the_barrel_and_full_past_the_band() -> void:
+	# Pure static: the fade the laser beam (distance = aim point ahead of the barrel tip) and the barrel pitch
+	# (distance = flat run from the grip) both ease out over. A target AT or BEHIND the tip must give exactly
+	# zero — that is the case that used to spin the beam — and anything past the band must be untouched.
+	assert_almost_eq(NPC.point_blank_fade(-1.0, 0.75), 0.0, 0.0001, "behind the barrel tip: no beam at all")
+	assert_almost_eq(NPC.point_blank_fade(0.0, 0.75), 0.0, 0.0001, "exactly on the tip: still nothing")
+	assert_almost_eq(NPC.point_blank_fade(0.75, 0.75), 1.0, 0.0001, "at the band edge the fade is complete")
+	assert_almost_eq(NPC.point_blank_fade(10.0, 0.75), 1.0, 0.0001, "far out the beam is at full brightness")
+	var mid := NPC.point_blank_fade(0.375, 0.75)
+	assert_true(mid > 0.0 and mid < 1.0, "mid-band is a partial fade, not a pop (got %s)" % mid)
+	assert_true(NPC.point_blank_fade(0.2, 0.75) < NPC.point_blank_fade(0.5, 0.75),
+		"the fade is monotonic across the band")
+	assert_almost_eq(NPC.point_blank_fade(1.0, 0.0), 1.0, 0.0001,
+		"a zero band never divides by zero: anything ahead is simply full")
+
+func test_point_blank_beam_fade_is_full_off_tree() -> void:
+	# A bare .new() NPC has no hand anchor in a tree, so there is no barrel to judge "ahead" against: the beam
+	# path must keep the old full-brightness behaviour rather than hide the laser on every off-tree NPC.
+	var n = load("res://scripts/npc/npc.gd").new()
+	assert_almost_eq(n._point_blank_beam_fade(Vector3.ZERO, Vector3(0.0, 0.0, 5.0)), 1.0, 0.0001,
+		"no anchor -> full brightness (the old path)")
+	n.free()
+
 func test_npc_weapon_pitch_defaults_are_sane() -> void:
 	var n = load(NPC_PATH).new()
 	assert_true(n.weapon_in_hands, "NPCs carry their weapon in their hands by default")
