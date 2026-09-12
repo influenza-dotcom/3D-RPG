@@ -84,7 +84,10 @@ The Options menu is **data-driven**: every row is a `SettingSpec` in `resources/
   `godot --headless -s scripts/tools/text_debt.gd` (`validate_all` reports it too). A genuinely non-prose
   paint (a separator, a shape glyph, a dev-only HUD) is fixed at the root — compose it in a local, make it a
   designer `@export`, or add the dev file to `ScanText.SKIP_FILES` — never by parking art in `PlayerText`.
-  `[PH] ` marks unauthored placeholder copy; only `PlayerText.prefixed`/`strip_prefix` touch the prefix.
+  `[PH] ` marks unauthored placeholder copy; only `PlayerText.prefixed`/`strip_prefix`/`display` touch the prefix.
+  The SOURCE keeps the marker; the PLAYER never sees it — `scripts/ui/placeholder_translation.gd` (registered by
+  `MenuStyle._init`) scrubs it from every auto-translated Control at run time, and the atr opt-outs + `draw_string`
+  painters call `PlayerText.display`. Judge what is still unauthored in the editor / `text_debt`, never on screen.
 - Designer-authored templates substitute **named tokens** by replace — `{amount}`, `{part}`, `[mph]` — never
   the `%` format operator (a designer's literal `%` must not error; legacy `%s`/`%d` still substitute).
 - `TextFormat` (`scripts/ui/text_format.gd`) owns substitution/plural/number formatting: whole templates with

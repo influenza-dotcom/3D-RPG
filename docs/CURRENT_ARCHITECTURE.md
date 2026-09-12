@@ -2854,7 +2854,11 @@ guarded, and what is deliberately deferred.
   player-facing strings.** UI code paints `PlayerText.<CONST>` /
   `PlayerText.<func>()`, never a raw literal. A `[PH] ` prefix marks a const as
   an UNAUTHORED placeholder (do not extract or translate it); `PlayerText.prefixed`
-  / `strip_prefix` are the only manipulators of that prefix.
+  / `strip_prefix` / `display` are the only manipulators of that prefix. Since
+  2026-09-12 the marker is RUNTIME-STRIPPED: `scripts/ui/placeholder_translation.gd`
+  (a `Translation` registered by `MenuStyle._init`) answers every atr lookup of a
+  marked string with the scrubbed one, and the atr opt-outs + `draw_string` painters
+  call `PlayerText.display` — the source keeps the marker, the player never sees it.
   `tests/test_player_text.gd` pins the const conventions (non-empty, exact
   `"[PH] "` prefix on marked consts, no `.gd` paths in player copy).
 - **The ratchet, now at ZERO (2026-07-27).** Every raw literal at a paint site
@@ -2983,7 +2987,11 @@ guarded, and what is deliberately deferred.
   Futura → Century Gothic → Segoe UI → Arial — unshippable faces, and absent on
   Linux/Deck, where the fallback overflowed the Options card by 8.4 px. Adventor
   is a free clone of ITC Avant Garde, which Century Gothic was designed to
-  match, so the layout budgets tuned against Century Gothic mostly carry over.)
+  match, so the width budgets tuned against Century Gothic carry over exactly;
+  its VERTICAL box did not — ascent 0.739 em vs Century Gothic's 1.006 em lifted
+  every label and compacted rows — so since 2026-09-12 the shipped `.otf` is a
+  derived work, "Adventor RPG", with Century Gothic's hhea/typo ascent and
+  descent written in; outlines and widths are upstream's. See ATTRIBUTION.md §F.)
   CLOSED 2026-07-27, and extended since: right-click context menus (engine-provided
   English) are disabled on every text field we build but one — the three authored
   fields (name entry, character creation, the chess move box) alongside their existing
@@ -3056,8 +3064,10 @@ as *implemented*, not as *reachable*. The shipped default level is "Headshot Cit
   key (`F1` menu, `F2` noclip, `F4` inspector, `` ` `` console); the console's `reload` is the dev reload.
 - Confirm what is actually reachable in Headshot City (next list) — it decides whether a playtest can say
   anything about progression, economy or quests.
-- `[PH]` copy is everywhere player-facing: chips, weapon mods, quest titles and perks carry the prefix; chip
-  descriptions are empty; the Controls tab has one `[PH]` hint row (`SettingsCatalog.tres`).
+- `[PH]` copy is everywhere in the SOURCE: chips, weapon mods, quest titles and perks carry the prefix; chip
+  descriptions are empty; the Controls tab has one `[PH]` hint row (`SettingsCatalog.tres`). Since 2026-09-12
+  the marker no longer reaches the screen (runtime scrub, see the PlayerText note above) — the copy is still
+  unauthored, it just reads as plain text now.
 
 **Content reachability in Headshot City**
 

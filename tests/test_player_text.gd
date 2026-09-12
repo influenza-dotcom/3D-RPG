@@ -72,12 +72,14 @@ func test_no_new_hardcoded_player_strings() -> void:
 		"total hardcoded player-facing literals (%d) exceeds BASELINE_HIGH_WATER (%d) — move strings into PlayerText; this const only moves down." % [offenders.size(), BASELINE_HIGH_WATER])
 
 
-## (4)+(5): the PlayerText contract, plus the property the whole deferred-sweep strategy licenses: with no
-## translation catalog loaded, tr() is IDENTITY on the fallback locale — so wrapping every PlayerText read in
-## tr() later is a pure no-op until real catalogs land, which is why the sweep can stay deferred. Also pins:
-## every const non-empty (an empty const paints an invisible blank); every [PH]-marked const carries the
-## marker as exactly "[PH] " (the Steam AI-text scrub greps/strips on that exact prefix — see
-## PlayerText.strip_prefix); and no const contains ".gd" — dev diagnostics parked in player copy. The old
+## (4)+(5): the PlayerText contract, plus the property the whole deferred-sweep strategy licenses: the only
+## Translation loaded at runtime is the "[PH]" scrub (placeholder_translation.gd, registered by MenuStyle), which
+## answers ONLY marked strings — so tr() is IDENTITY for unmarked copy on the fallback locale, and wrapping every
+## PlayerText read in tr() later is a pure no-op until real catalogs land, which is why the sweep can stay
+## deferred. For a MARKED const, tr() returns the const minus its marker: the player never sees "[PH]", the
+## source keeps it. Also pins: every const non-empty (an empty const paints an invisible blank); every
+## [PH]-marked const carries the marker as exactly "[PH] " (the Steam AI-text scrub greps/strips on that exact
+## prefix — see PlayerText.strip_prefix); and no const contains ".gd" — dev diagnostics parked in player copy. The old
 ## PlayerText.no_game_root() helper embedded "attach game_root.gd" into a HUD toast; the just-landed hygiene
 ## slice removed it (rg finds no no_game_root anywhere — TOAST_DOOR_STUCK + a push_error at the LevelDoor
 ## call site is the current shape), and this pin keeps that class of leak from returning.
@@ -106,7 +108,12 @@ func test_player_text_contract() -> void:
 	assert_eq(bad_ph, [], "every [PH]-marked PlayerText const must start with exactly \"[PH] \" (marker + one space) so the scrub can strip it: %s" % [bad_ph])
 	assert_eq(gd_leaks, [], "no PlayerText const may contain \".gd\" — that's a dev diagnostic leaking into player copy (the removed no_game_root class of bug): %s" % [gd_leaks])
 	assert_eq(tr(PlayerText.BACK), PlayerText.BACK,
-		"tr() must be identity with no translation catalog loaded — the fallback-locale property that lets the tr() sweep stay deferred")
+		"tr() must be identity for UNMARKED copy — the runtime [PH] scrub answers only marked strings, so the tr() sweep can stay deferred")
+	assert_eq(tr(PlayerText.PROMPT_PICK_UP), PlayerText.display(PlayerText.PROMPT_PICK_UP),
+		"at runtime the TranslationServer scrubs the [PH] marker from a marked const (PlaceholderTranslation, registered by MenuStyle) — the const itself keeps it")
+	assert_true(PlayerText.PROMPT_PICK_UP.begins_with(PlayerText.PH_PREFIX_SPACE),
+		"the SOURCE const still carries the marker — the scrub is runtime-only, never an edit to the authored text")
+	assert_false(tr(PlayerText.PROMPT_PICK_UP).contains(PlayerText.PH_PREFIX), "a player never sees the marker")
 
 
 ## (6): the TextFormat-rule refactor of PlayerText's bodies — whole-template SELECTION (bool/enum/key)

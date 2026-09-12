@@ -98,7 +98,9 @@ automatically. For any other binary type, add an LFS rule to `.gitattributes` in
   not exist, ask for it rather than editing a script.
 - Player-facing text goes in an authored resource field or in `scripts/ui/player_text.gd`, never as a
   literal in gameplay code. A test enforces this with zero tolerance.
-- Prefix unfinished copy with `[PH] ` so it can be found. It renders on screen until replaced.
+- Prefix unfinished copy with `[PH] ` so it can be found. It stays in the source until replaced, but a running
+  game strips the marker from everything the player sees (a runtime `Translation` plus `PlayerText.display`), so
+  look in the editor or run `text_debt`, not the screen, to find what is still unauthored.
 - After adding a script or a new exported field, **Project → Reload Current Project** before
   assuming the Inspector is broken.
 - Every plugin tab labels what it writes to disk in its tooltip. Read-only tabs stay read-only.

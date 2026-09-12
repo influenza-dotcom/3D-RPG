@@ -16,8 +16,22 @@ extends Node
 ## as msgids and double-translate on top of atr; and (2) any Control that paints player-typed text must set
 ## auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED (see _build_tip, ui.gd's look/toast labels, the name
 ## LineEdits) so typed text is never looked up as a msgid.
+##
+## The same seam is where the RUNTIME "[PH]" scrub lives: _init registers PlaceholderTranslation (see that file)
+## with the TranslationServer, so every atr-translated string reaches the screen without its placeholder marker
+## while the source keeps it. The opt-out labels above therefore ALSO run their text through PlayerText.display.
+
+## Runtime load(), NOT a const preload: placeholder_translation.gd names the PlayerText class, whose script names
+## this autoload — a preload here would close a class_name/preload cycle at parse time (a recurred trap).
+const PLACEHOLDER_TRANSLATION_PATH := "res://scripts/ui/placeholder_translation.gd"
 
 var skin: MenuSkin = preload("res://resources/ui/menu_skin.tres")
+
+func _init() -> void:
+	# _init, not _ready: the scrub must be in the TranslationServer before the first Control shapes its text
+	# (MenuStyle is the first UI autoload; nothing paints before it). Autoloads never run in the editor, so
+	# every @tool preview and the Text tab still show "[PH]" as authored — it vanishes only in a running game.
+	TranslationServer.add_translation(load(PLACEHOLDER_TRANSLATION_PATH).new())
 ## The IN-GAME HUD's artist skin (the MenuSkin twin for gameplay-time paint: combat indicators,
 ## compass/minimap tints, crosshair art, HUD label chrome). Consumers read MenuStyle.hud.<field>;
 ## swap it at runtime via set_hud_skin. Gameplay-TUNING numbers stay on GameSettings.hud — this is
@@ -491,7 +505,7 @@ func attach_tip(control: Control, text: String) -> void:
 		return
 	control.set_meta(&"_tip_text", text)
 	if control == _tip_target and _tip_panel != null and _tip_panel.visible:
-		_tip_label.text = text
+		_tip_label.text = PlayerText.display(text)  # atr opt-out (typed names): scrub the marker by hand
 		_tip_panel.reset_size()
 	if control.has_meta(&"_tip_wired"):
 		return
@@ -506,7 +520,7 @@ func _tip_show(control: Control) -> void:
 	if _tip_panel == null or not is_instance_valid(control):
 		return
 	_tip_target = control
-	_tip_label.text = String(control.get_meta(&"_tip_text", ""))
+	_tip_label.text = PlayerText.display(String(control.get_meta(&"_tip_text", "")))  # atr opt-out: scrub by hand
 	_tip_panel.reset_size()
 	_tip_panel.visible = true
 

@@ -1609,7 +1609,7 @@ func set_look_name(text: String, color: Color) -> void:
 	if text.is_empty():
 		_look_name.visible = false
 		return
-	_look_name.text = text
+	_look_name.text = PlayerText.display(text)  # atr opt-out (typed pet names): scrub the [PH] marker by hand
 	_look_name.add_theme_color_override(&"font_color", color)
 	_look_name.visible = true
 
@@ -1719,7 +1719,7 @@ func _push_toast(text: String, color: Color) -> void:
 	# Toasts are composed runtime strings that can carry a player-TYPED pet name (Claimable's befriend /
 	# released toasts) — typed text must never be looked up as a translation msgid (atr opt-out).
 	label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	label.text = text
+	label.text = PlayerText.display(text)  # atr opt-out: scrub the [PH] marker by hand
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.add_theme_font_size_override(&"font_size", REP_TOAST_FONT_SIZE)
 	label.add_theme_color_override(&"font_color", color)

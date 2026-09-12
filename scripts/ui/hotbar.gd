@@ -419,7 +419,7 @@ func _refresh_display() -> void:
 			_slot_counts[i].text = ""
 			_slot_names[i].add_theme_color_override(&"font_color", GameSettings.hud.hotbar_empty_color)
 			continue
-		_slot_names[i].text = it.label()  # full name — clip_text + the ellipsis trim handle overflow
+		_slot_names[i].text = PlayerText.display(it.label())  # full name, [PH] scrubbed by hand (atr opt-out) — clip_text + the ellipsis trim handle overflow
 		# Gold "in hand / drawn" tint: the equipped weapon's slot OR the holdable prop currently pulled into your hands.
 		var active := (inv != null and _is_equipped_kind(it, inv)) or (it == held)
 		_slot_names[i].add_theme_color_override(&"font_color",

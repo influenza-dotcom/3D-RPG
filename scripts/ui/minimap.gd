@@ -1326,6 +1326,7 @@ func _waypoint_label_rect(font: Font, px: int, at: Vector2, radius: float, text:
 func _paint_waypoint_label(font: Font, px: int, rect: Rect2, text: String, skin) -> void:
 	if text.is_empty():
 		return
+	text = PlayerText.display(text)  # draw_string bypasses atr: scrub the [PH] marker by hand
 	var pos := Vector2(rect.position.x, rect.position.y + font.get_ascent(px))
 	# The outline pass first (draw_string_outline paints UNDER a subsequent draw_string at the same position),
 	# because this caption crosses both the dark backing and the bright wall strokes and has to stay legible

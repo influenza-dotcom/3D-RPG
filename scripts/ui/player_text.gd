@@ -651,6 +651,17 @@ static func strip_prefix(text: String) -> String:
 	return text.substr(PH_PREFIX_SPACE.length()) if text.begins_with(PH_PREFIX_SPACE) else text
 
 
+## RUNTIME scrub — `text` with EVERY "[PH]" marker removed (leading, mid-string, marker-with-space and bare):
+## what the player sees. The source keeps the marker; it leaves on the way to the screen, twice over: the
+## PlaceholderTranslation MenuStyle registers scrubs every auto-translated Control / Label3D string through the
+## TranslationServer, and the few surfaces that bypass atr — the auto_translate opt-outs that paint player-TYPED
+## text (look readout, toasts, the tooltip, hotbar names) and the draw_string painters (GridTile's initial,
+## HudCompass, Minimap captions) — call this at their assignment. Never use it while COMPOSING a template (that is
+## strip_prefix, which keeps the outer marker countable): a scrubbed fragment can't be found by text_debt.
+static func display(text: String) -> String:
+	return text.replace(PH_PREFIX_SPACE, "").replace(PH_PREFIX, "")
+
+
 static func acquired(name: String) -> String:
 	return TextFormat.subst("[PH] {name} acquired!", {"name": name})
 
