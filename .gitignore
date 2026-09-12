@@ -17,6 +17,11 @@ maps/autosave/
 .mono/
 mono_crash.*.json
 
+# Claude Code per-machine state: the permission allowlist carries this machine's paths and pre-approvals,
+# and agent worktrees are full nested checkouts. Neither belongs in a clone.
+.claude/settings.local.json
+.claude/worktrees/
+
 # Editors / OS
 .vs/
 .vscode/
