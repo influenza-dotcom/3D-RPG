@@ -3096,8 +3096,9 @@ do not survive `_ready`** — never read a scene's inline `disposition` or perce
 
 - `project.godot` never redefines `ui_cancel` / `ui_accept` / `ui_end`, so their keys are Godot 4.7 engine
   defaults not readable from the repo (Escape is confirmed only by a source comment; Enter/Space and End are
-  not stated anywhere in-repo). The controller default for `ui_cancel` is likewise unnamed. `KEY_CTRL` left-only
-  vs either-Ctrl is unconfirmed.
+  not stated anywhere in-repo). An engine probe on 2026-09-12 found NO pad event on either built-in, so
+  `InputManager._add_default_controller_bindings` now binds A → `ui_accept` and START → `ui_cancel` in code.
+  `KEY_CTRL` left-only vs either-Ctrl is unconfirmed.
 - Night vision (N) runs after the dialogue early-return but before the gameplay-suppression gate: blocked
   mid-conversation, **not verified blocked with a menu open**. The Q double-binding (Lean vs Takedown)
   arbitrates once on the press; the winner for a simultaneously valid takedown+lean was not traced.

@@ -337,7 +337,8 @@ func _input(event: InputEvent) -> void:
 
 ## Controller defaults, added in CODE so we don't hand-author InputEvent objects in project.godot. Left
 ## stick -> movement (so Input.get_vector picks it up automatically); right stick -> a new look_* action
-## set read by MouseInput; face buttons / triggers / d-pad cover the rest. Each add is dup-guarded, so
+## set read by MouseInput; face buttons / triggers / d-pad cover the rest, and A / START give the menus their
+## ui_accept / ui_cancel (Godot's built-ins carry NO pad event for either). Each add is dup-guarded, so
 ## re-applying (or a future rebind layer) is safe.
 func _add_default_controller_bindings() -> void:
 	for a in [&"look_left", &"look_right", &"look_up", &"look_down"]:
@@ -367,6 +368,14 @@ func _add_default_controller_bindings() -> void:
 	_bind_button(action_weapon_slot_2, JOY_BUTTON_DPAD_RIGHT)
 	_bind_button(action_weapon_slot_3, JOY_BUTTON_DPAD_DOWN)
 	_bind_button(action_weapon_slot_4, JOY_BUTTON_DPAD_LEFT)
+	# MENU confirm / cancel. Godot 4.7's built-in ui_accept is Enter / KP Enter / Space and ui_cancel is Escape —
+	# NO pad event on either (engine probe 2026-09-12), while ui_up/down/left/right DO ship D-pad + left stick. So
+	# a pad could walk every menu but never pick or leave anything. A = confirm (the same clash Space has with jump
+	# on the keyboard: menus suppress gameplay, so it is the same trade). Cancel is START, NOT B: B is crouch, and
+	# OptionsMenu toggles on ui_cancel from _unhandled_input in open play — a B-bound ui_cancel would pop the
+	# pause menu on every crouch. START also matches the console habit of Start = pause / back out.
+	_bind_button(&"ui_accept", JOY_BUTTON_A)
+	_bind_button(&"ui_cancel", JOY_BUTTON_START)
 
 func _bind_button(action: StringName, button: JoyButton) -> void:
 	if not InputMap.has_action(action):

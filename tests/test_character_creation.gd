@@ -182,3 +182,40 @@ func test_begin_refuses_blank_name() -> void:
 	watch_signals(cc)
 	cc._on_begin()
 	assert_signal_not_emitted(cc, "confirmed", "Begin refuses to emit a nameless run even if pressed while blank")
+
+
+func test_keyboard_or_pad_can_reach_the_stat_steppers() -> void:
+	# The steppers used to be FOCUS_NONE ("mouse-driven"), so a keyboard / pad player could never allocate a point.
+	# They are focusable now, and the StartMenu focus-seeding idiom lands the first navigation press on the first
+	# minus stepper (enabled from the start; + waits on a spare point). Mouse-first: nothing is focused on open.
+	var cc = _make_screen()
+	for stat in cc._minus_buttons:
+		assert_eq((cc._minus_buttons[stat] as Button).focus_mode, Control.FOCUS_ALL,
+			"the %s minus stepper is keyboard/pad focusable" % stat)
+		assert_eq((cc._plus_buttons[stat] as Button).focus_mode, Control.FOCUS_ALL,
+			"the %s plus stepper is keyboard/pad focusable" % stat)
+	assert_null(cc.get_viewport().gui_get_focus_owner(), "mouse-first: nothing is focused when the screen opens")
+	cc._seed_focus_on_keyboard_intent()
+	assert_eq(cc.get_viewport().gui_get_focus_owner(), cc._minus_buttons.values()[0],
+		"the first ui_down/ui_up with nothing focused seeds focus on the Stats tab's first minus stepper")
+	cc._seed_focus_on_keyboard_intent()
+	assert_eq(cc.get_viewport().gui_get_focus_owner(), cc._minus_buttons.values()[0],
+		"seeding is a no-op once something holds focus (Godot's own navigation takes over)")
+
+
+func test_pad_keyboard_types_into_the_name_field_and_gates_begin() -> void:
+	# A pad player cannot type, and Begin is gated on a name: the on-screen keyboard writes into the field AND
+	# emits text_changed by hand (code-set .text never does), so the Begin gate follows every key.
+	var cc = _make_screen()
+	assert_not_null(cc._pad_kb, "the creation screen builds the pad keyboard")
+	assert_false(cc._pad_kb.visible, "hidden until asked for")
+	cc._pad_kb.open(cc._name_edit)
+	assert_true(cc._pad_kb.visible)
+	cc._pad_kb._type("R")
+	cc._pad_kb._type("A")
+	cc._pad_kb._type(" ")
+	cc._pad_kb._delete()
+	assert_eq(cc._name_edit.text, "RA", "keys append, Delete removes the last character")
+	assert_false(cc._begin_btn.disabled, "a typed name enables Begin (text_changed was emitted)")
+	cc._pad_kb.close()
+	assert_false(cc._pad_kb.visible, "Done / ui_cancel hides it again")

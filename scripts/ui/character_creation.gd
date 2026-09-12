@@ -72,6 +72,7 @@ const STAT_MAX := StatBudget.STAT_MAX
 const STATS: Array[StringName] = CharacterStats.STAT_NAMES
 
 var _name_edit: LineEdit
+var _pad_kb: PanelContainer = null  ## the pad on-screen keyboard (pad_keyboard.gd), built in _ready, hidden until A on the name field
 var _budget: StatBudget                ## the zero-sum allocator (pure; see stat_budget.gd) — the widgets mirror it
 var _value_labels: Dictionary = {}    ## stat -> Label (the current number)
 var _name_labels: Dictionary = {}     ## stat -> Label (the name cell; its hover tip carries the live breakdown)
@@ -176,6 +177,12 @@ func _bind_ui() -> void:
 	MenuStyle.style_hint(_name_hint)
 	_name_hint.text = PlayerText.CHARACTER_CREATE_NAME_REQUIRED
 	_name_edit.text_changed.connect(_on_name_changed)
+	# A pad has no way to type: A (ui_accept) on the focused name field opens a small on-screen keyboard. Added
+	# LAST so its _input runs before this screen's (ui_cancel closes the keyboard, not the screen). Runtime
+	# load(): pad_keyboard.gd names PlayerText, and a const preload here would be one more parse-time edge.
+	_pad_kb = load("res://scripts/ui/pad_keyboard.gd").new()
+	_pad_kb.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	add_child(_pad_kb)
 
 	# --- Tabs: Stats | Look | Shirt (authored EXPAND_FILL to fill the slack between name and the pinned
 	# buttons). The page node names are stable KEYS; the display titles are painted here from PlayerText via
@@ -838,7 +845,9 @@ func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 
 	var minus := Button.new()
 	minus.text = PlayerText.CHARACTER_CREATE_STAT_MINUS
-	minus.focus_mode = Control.FOCUS_NONE  # mouse-driven; don't steal focus from the name field
+	# FOCUS_ALL (the default) on the two steppers, unlike every cosmetic control here: they are the ONE thing a
+	# keyboard / pad player must be able to operate (see _seed_focus_on_keyboard_intent). A mouse click on a
+	# stepper therefore blurs the name field — the price of a navigable build; click the field to keep typing.
 	# Both steppers are muted because their handlers cue the DIRECTIONAL step, and only on a move the
 	# zero-sum allocator actually accepted (see _on_minus/_on_plus) — a refused allocation stays silent.
 	MenuStyle.set_button_sound(minus, &"")
@@ -855,7 +864,6 @@ func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 
 	var plus := Button.new()
 	plus.text = PlayerText.CHARACTER_CREATE_STAT_PLUS
-	plus.focus_mode = Control.FOCUS_NONE
 	MenuStyle.set_button_sound(plus, &"")
 	plus.pressed.connect(_on_plus.bind(stat))
 	_plus_buttons[stat] = plus
@@ -917,12 +925,38 @@ func _effect_for(stat: StringName, value: int) -> String:
 func _input(event: InputEvent) -> void:
 	if not visible or not is_inside_tree():
 		return
+	if _pad_kb != null and _pad_kb.visible:
+		return  # the keyboard owns input while it is up (its own _input closes it on ui_cancel)
+	if event is InputEventJoypadButton and event.is_action_pressed(&"ui_accept") and _name_edit != null \
+			and _name_edit.has_focus() and _pad_kb != null:
+		_pad_kb.open(_name_edit)
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed(&"ui_cancel"):
 		if _shirt_picker_layer != null and _shirt_picker_layer.visible:
 			_on_shirt_picker_close()  # through the shared seam so an Escape-dismiss sounds like a Done/dim one
 		else:
 			_on_back()
 		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed(&"ui_down") or event.is_action_pressed(&"ui_up"):
+		_seed_focus_on_keyboard_intent()
+
+## MOUSE-FIRST focus policy (the StartMenu idiom): nothing is focused while the mouse drives, so no focus ring
+## fights the hover highlight. The first keyboard / pad NAVIGATION press with nothing focused seeds focus on the
+## Stats tab's first − stepper (enabled from the start, unlike +, which waits on a spare point), else Back; from
+## then on Godot's own focus navigation walks the steppers, the tab bar and the Back / Begin row. Activation keys
+## deliberately do NOT seed. Only the steppers and the bottom row are focusable — the cosmetic cyclers, swatches
+## and shirt tools stay FOCUS_NONE (mouse-only) on purpose.
+func _seed_focus_on_keyboard_intent() -> void:
+	if get_viewport().gui_get_focus_owner() != null:
+		return
+	var first: Control = null
+	if _tabs != null and _tabs.get_current_tab_control() == %StatsTab and not _minus_buttons.is_empty():
+		first = _minus_buttons.values()[0]
+	if first == null or not first.is_visible_in_tree():
+		first = %BackButton
+	first.grab_focus()
+	get_viewport().set_input_as_handled()
 
 ## The implant-purchase step raises OVER this overlay: StartMenu hides us (NOT frees) so its "Back" returns here
 ## with the typed name / stat build / painted shirt intact. visible=false already silences _input's ui_cancel

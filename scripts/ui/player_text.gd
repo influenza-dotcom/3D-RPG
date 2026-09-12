@@ -20,6 +20,10 @@ const Factions := preload("res://scripts/faction/factions.gd")
 
 const BACK := "Back"
 const BEGIN := "Begin"
+## The pad on-screen keyboard's three non-letter keys (scripts/ui/pad_keyboard.gd).
+const PAD_KEY_SPACE := "Space"
+const PAD_KEY_DELETE := "Delete"
+const PAD_KEY_DONE := "Done"
 const CANCEL := "Cancel"
 const CLOSE := "Close"
 const CONFIRM := "Confirm"

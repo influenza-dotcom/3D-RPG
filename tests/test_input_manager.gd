@@ -104,6 +104,24 @@ func test_action_catalog_accessor_returns_the_cached_authored_list() -> void:
 	assert_eq(InputManager.action_catalog(), cat, "the catalog is cached — the same instance across calls")
 
 
+func test_pad_can_confirm_and_cancel_menus_after_ready() -> void:
+	# Godot 4.7's built-in ui_accept has NO pad event and ui_cancel only Escape (engine probe 2026-09-12): a pad
+	# could navigate every menu (ui_up/down ship D-pad + stick) but never confirm or back out. _ready binds
+	# A -> ui_accept and START -> ui_cancel. START, not B: B is crouch, and OptionsMenu toggles on ui_cancel in
+	# open play, so a B-bound cancel would open the pause menu on every crouch.
+	assert_true(_has_pad_button(&"ui_accept", JOY_BUTTON_A), "A confirms (ui_accept) on a pad")
+	assert_true(_has_pad_button(&"ui_cancel", JOY_BUTTON_START), "START cancels / pauses (ui_cancel) on a pad")
+	assert_false(_has_pad_button(&"ui_cancel", JOY_BUTTON_B),
+		"B stays crouch-only — a B-bound ui_cancel would pop the pause menu on every crouch")
+	assert_true(_has_pad_button(&"ui_down", JOY_BUTTON_DPAD_DOWN),
+		"the engine's own ui_down still carries the D-pad (nothing in project.godot may override it to empty)")
+
+func _has_pad_button(action: StringName, button: JoyButton) -> bool:
+	for e in InputMap.action_get_events(action):
+		if e is InputEventJoypadButton and (e as InputEventJoypadButton).button_index == button:
+			return true
+	return false
+
 func test_controller_look_axes_exist_after_ready() -> void:
 	# _add_default_controller_bindings() creates these right-stick look actions in CODE (no [input] / catalog row), so
 	# the audit must NOT flag them — it iterates the catalog + code vars, never the whole InputMap.
