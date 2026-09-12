@@ -79,9 +79,8 @@ What to commit and what not to:
 | A new row in `ATTRIBUTION.md` for any asset you brought in | `.import` files that Godot rewrote on a pointer checkout |
 | | TrenchBroom autosaves under `maps/autosave/` (ignored) |
 
-Binary assets: `.png`, `.jpg`, `.avif`, `.glb`, `.wav` and `.ogg` go through LFS automatically.
-`.mp3` and `.flac` currently do not. Ask before adding one of those, or add an LFS rule to
-`.gitattributes` in the same pull request.
+Binary assets: `.png`, `.jpg`, `.avif`, `.glb`, `.wav`, `.ogg`, `.mp3` and `.flac` go through LFS
+automatically. For any other binary type, add an LFS rule to `.gitattributes` in the same pull request.
 
 ## 4. House rules
 
