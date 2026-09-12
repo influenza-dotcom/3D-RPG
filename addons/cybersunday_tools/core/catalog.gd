@@ -124,7 +124,7 @@ const COMPONENTS: Array[Dictionary] = [
 		"category": "Player",
 		"add_mode": "instance",
 		"description": "Spend zorkmids to raise a CharacterStat and/or spend XP skill points on perks (picker on when available_perks set).",
-		"key_exports": ["station_name", "base_cost", "cost_per_level", "accepts_credit", "requires_settled_account", "available_perks", "perk_points_per_level"],
+		"key_exports": ["station_name", "base_cost", "cost_per_level", "accepts_credit", "requires_settled_account", "available_perks"],
 	},
 	{
 		"class_name": "ChipInstaller",
