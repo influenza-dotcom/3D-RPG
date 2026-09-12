@@ -398,3 +398,21 @@ func test_clock_toggles_round_trip() -> void:
 	assert_false(Settings.clock_24_hour, "the 12-hour face is reachable")
 	Settings.set_clock_24_hour(true)
 	assert_true(Settings.clock_24_hour, "...and 24-hour restores")
+
+
+func test_release_build_ignores_persisted_debug_flags() -> void:
+	# A settings.cfg written by a debug build (or hand-edited) can carry skip_menu=true / always_show_tos=true; a
+	# release export must not boot past the menu or replay the Terms gate because of it. load_settings ends by
+	# calling this with OS.is_debug_build() — a parameter because that flag is always true under GUT.
+	var prev_skip: bool = Settings.debug_skip_menu
+	var prev_tos: bool = Settings.debug_always_show_tos
+	Settings.debug_skip_menu = true
+	Settings.debug_always_show_tos = true
+	Settings._sanitize_debug_flags(true)
+	assert_true(Settings.debug_skip_menu and Settings.debug_always_show_tos,
+		"a debug build keeps both toggles exactly as persisted")
+	Settings._sanitize_debug_flags(false)
+	assert_false(Settings.debug_skip_menu, "a release build forces Skip Main Menu OFF whatever the cfg says")
+	assert_false(Settings.debug_always_show_tos, "a release build forces Always Show Terms OFF whatever the cfg says")
+	Settings.debug_skip_menu = prev_skip
+	Settings.debug_always_show_tos = prev_tos

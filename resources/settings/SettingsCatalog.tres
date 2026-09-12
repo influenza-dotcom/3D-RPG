@@ -254,6 +254,7 @@ script = ExtResource("1")
 key = &"debug_skip_menu"
 tab = &"Game"
 label = "Debug: Skip Main Menu"
+debug_only = true
 getter = &"debug_skip_menu"
 setter = &"set_debug_skip_menu"
 
@@ -262,6 +263,7 @@ script = ExtResource("1")
 key = &"debug_always_show_tos"
 tab = &"Game"
 label = "Debug: Always Show Terms on Launch"
+debug_only = true
 getter = &"debug_always_show_tos"
 setter = &"set_debug_always_show_tos"
 

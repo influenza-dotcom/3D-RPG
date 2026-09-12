@@ -277,6 +277,18 @@ func _bind_ui() -> void:
 ## the order their first spec is seen; rows stay in spec order) so each page can pick its layout from its FULL
 ## row list before emitting: a dense all-value page goes two-up (see _page_columns), the rest single-column.
 ## _first_focus = the first focusable control (for keyboard/controller).
+## The catalog rows THIS build shows, in catalog order: a `debug_only` spec (the two "Debug:" rows on the Game
+## tab) is dropped unless `debug_build`. Static and pure, taking the flag instead of reading OS.is_debug_build()
+## itself, so the release path is testable under GUT (where the engine flag is always true). Always a fresh
+## array — callers append the generated keybind rows to it.
+static func visible_specs(all: Array, debug_build: bool) -> Array:
+	var out: Array = []
+	for spec in all:
+		if spec != null and not debug_build and spec.get("debug_only") == true:
+			continue
+		out.append(spec)
+	return out
+
 func _rebuild_tabs() -> void:
 	_tab_cue_muted = true  # freeing every page snaps current_tab to 0 — that's bookkeeping, not a tab press
 	for c in _tabs.get_children():
@@ -285,7 +297,7 @@ func _rebuild_tabs() -> void:
 	_first_focus = null
 	# The Controls tab's rebind rows are GENERATED from the ActionCatalog (section headers + keybind rows) and
 	# appended after the hand-authored specs, so they land on the Controls page after its hint row.
-	var specs: Array = CATALOG.specs.duplicate()
+	var specs: Array = visible_specs(CATALOG.specs, OS.is_debug_build())
 	specs.append_array(ACTION_CATALOG.keybind_specs())
 	var by_tab: Dictionary = {}  # tab name (StringName) -> Array of its specs, in catalog order
 	for spec in specs:

@@ -149,3 +149,25 @@ func test_options_tab_page_node_names_are_the_tab_keys() -> void:
 	for expected in [&"Video", &"Audio", &"Game", &"Controls", &"Accessibility"]:
 		assert_true(names.has(String(expected)),
 			"a tab page NODE must be named by its key '%s' (display titles are set_tab_title, never the name)" % expected)
+
+
+func test_debug_rows_are_dev_only_and_nothing_else_is() -> void:
+	# The two "Debug:" rows on the Game tab shipped in the 08-28 build — persisted and read ungated. They are
+	# debug_only now (OptionsMenu drops them in a release build; Settings forces the flags OFF on load). Pinned
+	# both ways: a new debug row can't forget the flag, and a real option can't be hidden by accident.
+	var cat := _catalog()
+	if cat == null:
+		return
+	var flagged: Array = []
+	for spec in cat.specs:
+		if spec.debug_only:
+			flagged.append(spec.key)
+	assert_eq(flagged, [&"debug_skip_menu", &"debug_always_show_tos"],
+		"exactly the two Debug: rows are debug_only (catalog order)")
+	for spec in cat.specs:
+		if spec.debug_only:
+			assert_true(String(spec.label).begins_with("Debug:"),
+				"a debug_only row says so in its label: '%s'" % spec.label)
+		else:
+			assert_false(String(spec.label).begins_with("Debug:"),
+				"a row labelled 'Debug:' must be debug_only or it ships: '%s'" % spec.label)

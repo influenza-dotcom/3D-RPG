@@ -37,6 +37,11 @@ enum ValueFormat { RAW, PERCENT, INTEGER, UNCAPPED, SENSITIVITY, ONE_DECIMAL }
 @export var control: Widget = Widget.TOGGLE
 ## Row label (or the header text for SECTION, or the hint text for the Controls note).
 @export var label: String = ""
+## Dev-only row: emitted only in a debug build (OptionsMenu.visible_specs drops it otherwise), AND Settings
+## forces the backing flag OFF on load in a release build (_sanitize_debug_flags) — so neither the row nor a
+## dev-era settings.cfg value reaches a shipped export. The two "Debug:" rows on the Game tab set this; a row
+## labelled "Debug:" without it (or the reverse) fails test_settings_catalog.
+@export var debug_only: bool = false
 
 @export_group("Binding")
 ## Settings property (e.g. &"fov") or method (e.g. &"get_volume") read to seed the control's current value.

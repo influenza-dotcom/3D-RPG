@@ -157,8 +157,8 @@ var view_model_left_handed: bool = false        ## true = mirror the view model 
 var detection_meter_enabled: bool = true        ## off = hide the crouch-gated stealth detection "heat" bar (HUD declutter); read live by PlayerHud
 var loot_beacons_enabled: bool = true           ## off = hide the colour-coded item lights over world pickups / dropped loot sacks; polled live by PickupBeacon
 var enemy_health_bar_enabled: bool = true       ## off = hide the top-centre enemy HP bar that pops when you damage something (HUD declutter); polled live by EnemyHealthBar
-var debug_skip_menu: bool = false                ## DEBUG: boot straight into a new game, skipping the main menu
-var debug_always_show_tos: bool = false          ## DEBUG: replay the first-launch Terms-of-Service gate on EVERY launch — for testing the flow without wiping settings.cfg. Independent of tos_accepted (which stays recorded); StartMenu's gate check ORs this in. Surfaced as an Options row (Game tab), unlike the one-time tos_accepted flag. Defaults OFF; enable it manually only when you need to re-test the gate.
+var debug_skip_menu: bool = false                ## DEBUG: boot straight into a new game, skipping the main menu. Dev-only Options row (SettingSpec.debug_only); a release build forces it OFF on load (_sanitize_debug_flags).
+var debug_always_show_tos: bool = false          ## DEBUG: replay the first-launch Terms-of-Service gate on EVERY launch — for testing the flow without wiping settings.cfg. Independent of tos_accepted (which stays recorded); StartMenu's gate check ORs this in. Surfaced as an Options row (Game tab), unlike the one-time tos_accepted flag. Defaults OFF; enable it manually only when you need to re-test the gate. Dev-only Options row (SettingSpec.debug_only); a release build forces it OFF on load (_sanitize_debug_flags).
 var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
 var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/forward-run/sprint/air-dash); ADS zoom unaffected; read live by CameraEffects
 var ps1_warp_intensity: float = 0.0             ## 0..1 accessibility scale on the PS1 vertex-warp visual effect (motion comfort); 1 = the full authored warp, 0 = off (level renders normally — the shipped default since the 08-31 retune: the wobble is opt-IN, so a fresh install boots with PS1Applier holding no material overrides at all). Polled live by PS1Applier, which re-applies/rescales/restores without a level reload
@@ -978,7 +978,19 @@ func load_settings() -> void:
 	difficulty_level = clampi(int(cfg.get_value("gameplay", "difficulty_level", difficulty_level)), 0, 2)
 	auto_equip_pickups = _cfg_bool(cfg, "gameplay", "auto_equip_pickups", auto_equip_pickups)
 	tos_accepted = _cfg_bool(cfg, "legal", "tos_accepted", tos_accepted)
+	_sanitize_debug_flags(OS.is_debug_build())
 	_loaded = true
+
+## A release build ignores the two DEBUG toggles whatever settings.cfg says. Their Options rows are dev-only
+## (SettingSpec.debug_only), but a cfg written by a debug build — or edited by hand — could still carry
+## `skip_menu=true` / `always_show_tos=true` into an export and boot every player past the menu or replay the
+## Terms gate. Last step of load_settings; takes the build flag so the release path is testable under GUT (where
+## OS.is_debug_build() is always true). The next save_settings then writes the cleared values back.
+func _sanitize_debug_flags(debug_build: bool) -> void:
+	if debug_build:
+		return
+	debug_skip_menu = false
+	debug_always_show_tos = false
 
 ## Pure: the mouse sensitivity a settings.cfg carries, in the CURRENT unit (radians per SCREEN pixel). Unit-tested
 ## off-tree with an in-memory ConfigFile (tests/test_settings.gd), so load_settings never has to touch user:// under GUT.

@@ -112,3 +112,21 @@ func test_close_cancels_an_armed_rebind() -> void:
 	OptionsMenu.close()
 	assert_eq(OptionsMenu._rebinding_action, &"", "close() cancels the armed rebind — no lingering global capture")
 	assert_null(OptionsMenu._rebind_button, "and drops the row-button reference")
+
+
+func test_release_build_drops_debug_only_rows() -> void:
+	# OS.is_debug_build() is always true under GUT, so the filter takes the flag: the release path must drop
+	# every debug_only spec (the two "Debug:" Game-tab rows) and keep the rest in catalog order; the debug path
+	# keeps everything. This is what stops the debug toggles from shipping in an export.
+	var cat: SettingsCatalog = load("res://resources/settings/SettingsCatalog.tres")
+	var debug_rows: Array = OptionsMenu.visible_specs(cat.specs, true)
+	var release_rows: Array = OptionsMenu.visible_specs(cat.specs, false)
+	assert_eq(debug_rows.size(), cat.specs.size(), "a debug build shows every catalog row")
+	assert_eq(release_rows.size(), cat.specs.size() - 2, "a release build drops exactly the two Debug: rows")
+	var i := 0
+	for spec in release_rows:
+		assert_false(spec.debug_only, "no debug_only row survives the release filter: %s" % spec.key)
+		while cat.specs[i].debug_only:
+			i += 1
+		assert_eq(spec, cat.specs[i], "the surviving rows keep catalog order")
+		i += 1
