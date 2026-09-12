@@ -75,7 +75,8 @@ What to commit and what not to:
 | Commit | Do not commit |
 | --- | --- |
 | Your `.tscn`, `.tres`, `.map`, `.gd` changes | `.godot/` (ignored) |
-| The `.gd.uid` sidecar next to every new script | `export_presets.cfg` (ignored) |
+| The `.gd.uid` sidecar next to every new script | `build/` — your local export output (ignored; only its `.gdignore` is tracked) |
+| `export_presets.cfg` when you change the build recipe (filters, includes) | `.godot/export_credentials.cfg` (signing secrets — ignored with `.godot/`) |
 | The `.import` sidecar next to every new asset | `*.tres.bak` recovery files (ignored) |
 | A new row in `ATTRIBUTION.md` for any asset you brought in | `.import` files that Godot rewrote on a pointer checkout |
 | | TrenchBroom autosaves under `maps/autosave/` (ignored) |

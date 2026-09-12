@@ -2,8 +2,15 @@
 .godot/
 .import/
 export.cfg
-export_presets.cfg
 *.translation
+# export_presets.cfg IS TRACKED (since 2026-09-12): it is the build recipe — filters, the fonts' licence include,
+# the console wrapper, the architecture — and a build is only reproducible if every clone and CI export the same
+# one. Godot 4 keeps the secrets (script encryption key, codesign identity/password) OUT of it, in
+# .godot/export_credentials.cfg, which stays ignored with the rest of .godot/.
+# The local export lands in build/ (export_path in the preset). Only its .gdignore is tracked — that file stops
+# the editor from scanning a 1 GB .pck into the resource filesystem on every launch.
+build/*
+!build/.gdignore
 
 # TrenchBroom editor autosave backups (the committed source is maps/<name>.map)
 maps/autosave/

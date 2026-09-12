@@ -5,6 +5,9 @@ name: CI
 #   2. validate_all.gd — content/wiring/navmesh validation (exit 1 on real breakage)
 # A third gate, the SOAK job (real wandering NPCs + a game.tscn boot check), also runs on every push: it
 # is the only automated thing that drives the real runtime, and it finishes in well under a minute.
+# A fourth job, EXPORT, builds the Windows player from the tracked export_presets.cfg on every push to main
+# and on every v* tag, uploads it as a run artifact, and on a tag attaches the zip to a GitHub Release — so
+# a build is something the repo produces, not something one machine's Desktop remembers.
 #
 # This repo's root IS the Godot project (project.godot at the root), so every command runs from the
 # checkout dir with no subdir cd. Godot is pinned via GODOT_VERSION — bump it when you upgrade the engine.
@@ -39,8 +42,9 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']  # a version tag also runs the gates, and the export job turns it into a GitHub Release
   pull_request:
-  workflow_dispatch:  # enables the manual "Run workflow" button — both jobs also run on push
+  workflow_dispatch:  # enables the manual "Run workflow" button — the jobs also run on push
 
 # A newer push to the same ref cancels the in-flight run — saves Actions minutes on a solo project.
 concurrency:
@@ -303,3 +307,174 @@ jobs:
             exit 1
           fi
           echo "game.tscn booted clean."
+
+  export-windows:
+    name: Export (Windows Desktop)
+    # Only from a GREEN tree: an artifact nobody can trust is worse than none. Skipped on pull requests — a
+    # contributor's PR does not need a 1 GB build, and the preset's filters are exercised by the gates anyway.
+    needs: [test-and-validate, soak]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # gh release create/upload on a v* tag; a plain push never touches releases
+    env:
+      # Where the export lands on the runner. Mirrors the preset's local `build/` — which is .gitignored and
+      # .gdignored in the repo — but named apart so a stray local checkout can never be mistaken for it.
+      DIST_DIR: dist
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same LFS cache as the other jobs (same key): the export packs the REAL assets, never pointers.
+      - name: LFS object-id list (cache key)
+        id: lfs-key
+        run: echo "hash=$(git lfs ls-files --long | cut -d' ' -f1 | sort | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore LFS object cache
+        id: lfs-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .git/lfs
+          key: lfs-${{ steps.lfs-key.outputs.hash }}
+          restore-keys: lfs-
+
+      - name: Pull LFS assets
+        run: git lfs pull
+
+      - name: Save LFS object cache
+        if: steps.lfs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .git/lfs
+          key: lfs-${{ steps.lfs-key.outputs.hash }}
+
+      # Same Blender cache and setup as the other jobs — the export runs the import first, and the import quits
+      # early without Blender (see the header).
+      - name: Restore Blender cache
+        id: blender-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/blender
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
+
+      - name: Download Blender ${{ env.BLENDER_VERSION }}
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/blender
+          curl -fsSL "https://download.blender.org/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
+            | tar -xJ -C ~/blender --strip-components=1
+
+      - name: Save Blender cache
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/blender
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
+
+      - name: Point Godot at Blender
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libegl1 libxkbcommon0 libsm6 libice6 libx11-6
+          ~/blender/blender --version | head -n 1
+          mkdir -p ~/.config/godot
+          printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nfilesystem/import/blender/blender_path = "%s"\n' \
+            "$HOME/blender/blender" > ~/.config/godot/editor_settings-${GODOT_VERSION%.*}.tres
+
+      - name: Install Godot ${{ env.GODOT_VERSION }} (headless)
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          zip="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -fsSL "$base/$zip" -o godot.zip
+          unzip -q godot.zip
+          sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+          godot --version
+
+      # The Windows export templates. The official .tpz bundles every platform (~1 GB), so only the windows_*
+      # files are kept, in the exact directory the exporter looks in (<data dir>/export_templates/<version>.stable/).
+      # Cached per engine version; a miss downloads the bundle once.
+      - name: Restore export-template cache
+        id: templates-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.local/share/godot/export_templates
+          key: export-templates-${{ env.GODOT_VERSION }}-windows
+
+      - name: Download Godot ${{ env.GODOT_VERSION }} Windows export templates
+        if: steps.templates-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -fsSL "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz" -o templates.tpz
+          dest="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$dest"
+          unzip -j -o -q templates.tpz 'templates/windows_*' 'templates/version.txt' -d "$dest"
+          rm templates.tpz
+          ls -l "$dest"
+
+      - name: Save export-template cache
+        if: steps.templates-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/share/godot/export_templates
+          key: export-templates-${{ env.GODOT_VERSION }}-windows
+
+      - name: Import project (warm the class cache)
+        run: godot --headless --import || true
+
+      - name: Export "Windows Desktop" (release)
+        # The preset is TRACKED (export_presets.cfg): the same filters, console wrapper and font-licence include
+        # every developer exports with. Headless on purpose — the editor GUI export has crashed mid-pck on this
+        # project (heap corruption), the CLI export of the same preset never has. Godot exits 0 on a failed
+        # export more often than it should, so the gate is the four shipped files existing, not the exit code.
+        # rcedit is not installed on the runner, so the exe carries the stock Godot icon (a warning, not a failure).
+        run: |
+          set -uo pipefail
+          mkdir -p "$DIST_DIR"
+          godot --headless --export-release "Windows Desktop" "$DIST_DIR/CYBERSUNDAY.exe" 2>&1 | tee export.log
+          status=${PIPESTATUS[0]}
+          if grep -q "SCRIPT ERROR" export.log; then
+            echo "::error::the export raised script errors — see the log above"
+            exit 1
+          fi
+          missing=0
+          for f in CYBERSUNDAY.exe CYBERSUNDAY.pck CYBERSUNDAY.console.exe libgodot_text_to_speech.dll; do
+            if [ ! -s "$DIST_DIR/$f" ]; then
+              echo "::error::export did not produce $f"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          [ "$status" -eq 0 ] || { echo "::error::godot --export-release exited $status"; exit "$status"; }
+          ls -l "$DIST_DIR"
+          echo "pck size: $(du -h "$DIST_DIR/CYBERSUNDAY.pck" | cut -f1)"
+
+      - name: Zip the build
+        # One zip, all four files: the TTS GDExtension DLL ships beside the exe and the build dies on launch without it.
+        run: |
+          set -euo pipefail
+          short="${GITHUB_SHA::7}"
+          name="CYBERSUNDAY-windows-${GITHUB_REF_NAME//\//-}-${short}"
+          echo "name=$name" >> "$GITHUB_ENV"
+          (cd "$DIST_DIR" && zip -q -r "../$name.zip" .)
+          ls -l "$name.zip"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.name }}
+          path: ${{ env.name }}.zip
+          retention-days: 14
+          compression-level: 0  # already a zip
+
+      - name: Publish GitHub Release (tags only)
+        # `git tag -a v0.1.0 -m "..." && git push origin v0.1.0` is the whole release procedure: this step attaches
+        # the zip to a Release named after the tag, with auto-generated notes from the commits since the last tag.
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" "$name.zip" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

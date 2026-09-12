@@ -297,6 +297,37 @@ Prefer narrow validation while working: scene-instancing tests for prefabs,
 ConfigFile round-trips for saves, Resource validation for data catalogs, and
 off-tree pure tests for planner/combat/math logic.
 
+## Building
+
+The build recipe is `export_presets.cfg`, which is tracked: everyone exports the same preset, and CI exports
+it too. Export **headless** — the editor's GUI export has crashed mid-pack on this project; the CLI export of
+the same preset never has. Close the editor first (an export runs the import step, and a headless import
+under an open editor can leave empty scenes behind).
+
+```bash
+godot --headless --path . --export-release "Windows Desktop" build/CYBERSUNDAY.exe
+```
+
+That needs Godot 4.7.x with the **Windows export templates** installed (Editor → Manage Export Templates)
+and **Blender** on the path Godot reads from Editor Settings (four models are `.blend` files; without
+Blender the import quits early and the pack is hollow). The result is four files, and all four ship
+together: `CYBERSUNDAY.exe`, `CYBERSUNDAY.pck`, `CYBERSUNDAY.console.exe`, and
+`libgodot_text_to_speech.dll` (the text-to-speech extension; the game dies on launch without it).
+`build/` is ignored by git and by the editor (`build/.gdignore`).
+
+CI does the same export on every push to `main` once the test and soak jobs are green, and uploads the zip
+as a run artifact (kept 14 days). To cut a release:
+
+```bash
+git tag -a v0.1.0 -m "First public build"
+```
+
+```bash
+git push origin v0.1.0
+```
+
+The tag runs the gates, then the export job attaches the zip to a GitHub Release named after the tag.
+
 ## Current Rough Edges
 
 - The minimap draws **one floor — the band you are standing in**, and so does the
