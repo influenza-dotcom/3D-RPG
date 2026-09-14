@@ -392,8 +392,8 @@ func test_dialogue_settings_defaults() -> void:
 	for px in [s.panel_horizontal_margin, s.panel_vertical_margin, s.panel_inner_padding,
 			s.panel_vertical_element_spacing, s.dialogue_text_font_size,
 			s.choice_button_font_size, s.choice_button_spacing, s.dialogue_continue_hint_font_size,
-			s.speaker_name_font_size, s.speaker_name_outline_width, s.speaker_name_screen_x_offset,
-			s.speaker_name_screen_y_offset, s.choice_column_width, s.choice_column_gap]:
+			s.speaker_name_font_size, s.speaker_name_outline_width,
+			s.choice_column_width, s.choice_column_gap]:
 		assert_gt(px, 0, "every dialogue-box pixel/font size must be > 0 (got %d)" % px)
 	# The line outline is a RATIO of font size since the 08-24 box-less pass (px = round(size * em)) —
 	# load-bearing there: with MenuSkin.dialogue_panel_enabled off the text has no box under it.

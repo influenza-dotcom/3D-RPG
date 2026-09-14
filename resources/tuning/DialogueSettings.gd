@@ -185,8 +185,3 @@ extends Resource
 @export var speaker_name_font_size: int = 21
 ## Outline width (px) on the speaker name so it reads against the scrim / world. 0 = no outline.
 @export var speaker_name_outline_width: int = 6
-## LEGACY (Fallout-style free-floating top-left name): unused while the name sits in the box header, kept
-## exported so that placement can be brought back without re-authoring. Left screen offset (px).
-@export var speaker_name_screen_x_offset: int = 32
-## LEGACY twin of speaker_name_screen_x_offset — top screen offset (px). Unused in the header layout.
-@export var speaker_name_screen_y_offset: int = 60
