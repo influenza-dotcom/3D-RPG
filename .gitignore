@@ -46,3 +46,7 @@ Thumbs.db
 # Do not re-ignore them. `dogcrate_Material Base Color.png` keeps its non-snake_case name on purpose:
 # dogcrate.glb embeds that texture and imports with gltf/embedded_image_handling=1 (Extract Textures), so Godot
 # re-extracts it under that exact name on every reimport; renaming it just leaves a stale orphan.
+
+# Python bytecode from tools/mcp (a .pyc was tracked by accident until 2026-09-13)
+__pycache__/
+*.pyc
