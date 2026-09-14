@@ -6,7 +6,7 @@ extends RefCounted
 ## case lives there and calls in here — so adding a command is still ONE registry row + ONE match case, plus the
 ## `_cmd_*` static in the family file it belongs to. Shared helpers live in debug_actions_world_common.gd
 ## (`Common.`). `quantize` deliberately stays in the main file: tests/test_color_quantization.gd pins its arm and
-## its Settings poke there. The lens probe (scripts/tools/__lens_probe.gd) reads DOF_AUTHORED / LENS_AUTHORED here.
+## its Settings poke there. The lens probe (scripts/tools/probes/__lens_probe.gd) reads DOF_AUTHORED / LENS_AUTHORED here.
 ##
 ## CONTRACT (as the main file): a `_cmd_*` returns the lines to print — NEVER null, NEVER push_error.
 

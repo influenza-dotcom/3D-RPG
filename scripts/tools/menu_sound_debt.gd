@@ -16,7 +16,7 @@ extends SceneTree
 ## compile chain reaches loot_table.gd -> GameSettings, an autoload that ISN'T registered yet while a `-s`
 ## script's compile chain runs at boot ("Identifier not found: GameSettings"). By the first process frame the
 ## autoloads are up.
-const QaShots := preload("res://scripts/tools/qa_shot_helpers.gd")
+const QaShots := preload("res://scripts/tools/probes/qa_shot_helpers.gd")
 
 const SCAN_PATH := "res://addons/cybersunday_tools/panel_audit/scan_menu_sound.gd"
 

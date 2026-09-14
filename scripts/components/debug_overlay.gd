@@ -59,7 +59,7 @@ const StealthStatusScript := preload("res://scripts/player/stealth_status.gd")
 const SANDBOX_LINE := "SANDBOX SAVES ON"
 
 ## The renderer's pipeline-compilation monitors (Godot 4.4+, Performance.Monitor 34..38 — present in the 4.7 this
-## project runs on; scripts/tools/__first_kill_hitch_probe.gd reads the same five), in the order the PIPELINES
+## project runs on; scripts/tools/probes/__first_kill_hitch_probe.gd reads the same five), in the order the PIPELINES
 ## line paints them. Each is a SESSION TOTAL, so the overlay shows per-sample deltas (_sample_pipelines).
 ## What each class costs: CANVAS and DRAW are compiled SYNCHRONOUSLY at draw time — a non-zero delta there IS a
 ## frame stall (the first-hit / first-kill hitch class); MESH and SURFACE are compiled while loading meshes /

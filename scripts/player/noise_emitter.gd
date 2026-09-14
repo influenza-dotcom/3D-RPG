@@ -33,7 +33,7 @@ var _source: NoiseSource = null
 ## Register a gunshot — the loud spike that nearby enemies hear, which then decays back to silence.
 ## `mult` is the weapon's noise_radius_mult (a suppressor scales this down) — the ONE weapon-side stealth
 ## lever, and the only reason this takes an argument at all. Default 1.0 keeps every existing caller intact:
-## Player.on_weapon_fired is the only gameplay one, and scripts/tools/noise_ring_qa_shots.gd (the dev radius
+## Player.on_weapon_fired is the only gameplay one, and scripts/tools/probes/noise_ring_qa_shots.gd (the dev radius
 ## probe) deliberately stays at the default so the ring it draws is the host's authored radius, unscaled.
 ## Clamped at 0 so a negative authored mult silences the shot rather than inverting the decay in tick().
 func gunfire(mult: float = 1.0) -> void:

@@ -229,7 +229,7 @@ func _mirror_fp_rig() -> BodyModelSwap:
 
 
 ## The lowest / highest world-space Y of every mesh under `part`, as (low, high). Mirrors the frame probe's own
-## reader (scripts/tools/preview_fp_body_frame.gd::_world_aabb) — both answer "where is this limb actually".
+## reader (scripts/tools/probes/preview_fp_body_frame.gd::_world_aabb) — both answer "where is this limb actually".
 func _y_span(part: Node3D) -> Vector2:
 	var low := INF
 	var high := -INF
@@ -286,7 +286,7 @@ func test_no_limb_hangs_through_the_floor() -> void:
 		var span := _y_span(part)
 		assert_ne(span.x, INF, "%s must contain a mesh to measure" % row[0])
 		assert_gte(span.x, floor_y,
-			"%s hangs to y=%.4f but the floor is y=%.4f — a limb through the ground is visible every time you look down (re-run scripts/tools/preview_fp_body_frame.gd for the clearance report)" % [row[0], span.x, floor_y])
+			"%s hangs to y=%.4f but the floor is y=%.4f — a limb through the ground is visible every time you look down (re-run scripts/tools/probes/preview_fp_body_frame.gd for the clearance report)" % [row[0], span.x, floor_y])
 
 
 func test_the_hips_sit_under_the_chest() -> void:

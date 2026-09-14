@@ -39,7 +39,7 @@ func flash(headshot := false) -> void:
 ## at the crosshair from the level load until the first landed hit cleared them. Worse, the hitmarker IS captured
 ## by the HUD ghost (hud_ghost.gd's ghost rule keeps the aim CLUSTER out, not this), so a permanently-lit source
 ## fed the phosphor accumulator every frame and came back several times brighter than it was drawn. Measured with
-## scripts/tools/__hitmarker_warm_probe.tscn on the ticks' own footprint: the live 0.01 paint alone is 0.006 of
+## scripts/tools/probes/__hitmarker_warm_probe.tscn on the ticks' own footprint: the live 0.01 paint alone is 0.006 of
 ## screen brightness, the ghost takes it to 0.05 mean / 0.12 peak — ~35x this instrument's noise floor, i.e. a
 ## faint but real X. So _draw ARMS _warm_painted and the next processed frame spends it on one redraw with
 ## nothing left to paint; THAT frame is what empties the draw list. The warm is on screen for one frame, as its

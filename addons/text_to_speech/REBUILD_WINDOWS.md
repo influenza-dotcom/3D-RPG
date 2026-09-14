@@ -47,7 +47,7 @@ worth reporting upstream.
 - Export exit: old DLL `0xC0000374` on every `--headless --quit`; this DLL `0` ×3 plus
   a 300-frame `--quit-after` session, also `0`.
 - PCM parity: byte-identical synth output vs. the shipped DLL — 420 (voice × line)
-  checksums standalone AND the in-engine probe (`scripts/tools/__tts_dll_probe.gd`,
+  checksums standalone AND the in-engine probe (`scripts/tools/probes/__tts_dll_probe.gd`,
   22/22 lines incl. a 60-switch voice churn).
 - flite itself cleared by a 72M-allocation guarded stress (canaries + quarantine + full
   heap sweeps; all 7 voices; the game's real spoken-text corpus; the game's usage

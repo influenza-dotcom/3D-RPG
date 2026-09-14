@@ -79,7 +79,7 @@ extends GPUParticles3D
 ##
 ## ⭐⭐JUDGE THIS BY EYE, NEVER BY TEST. --headless does not compile a particle shader at all, so every
 ## property here can round-trip perfectly and still render as garbage — this effect shipped twice on green
-## tests and looked wrong both times. `scripts/tools/muzzle_smoke_qa_shots.gd` is the harness: it boots the
+## tests and looked wrong both times. `scripts/tools/probes/muzzle_smoke_qa_shots.gd` is the harness: it boots the
 ## real game, equips a gun, fires, and photographs the barrel from the eye and through a zoom lens.
 ##
 ## ⭐That authored ramp/curve/turbulence/emission-shape combination generates its OWN ParticlesShaderRD

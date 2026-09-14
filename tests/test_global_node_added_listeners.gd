@@ -13,7 +13,7 @@ const ROOTS := ["res://scripts", "res://managers"]
 ## tests/test_menu_sound_coverage.gd carry for the same reason: those are File→Run editor tools and
 ## throwaway `__` probes that the SHIPPED game never loads, so a listener in one taxes nothing. The tax this
 ## guard exists to price is per-node instantiation IN THE GAME (a probe deliberately connects node_added to
-## name what was born on a compile frame — scripts/tools/__first_kill_hitch_probe.gd does exactly that).
+## name what was born on a compile frame — scripts/tools/probes/__first_kill_hitch_probe.gd does exactly that).
 const EXCLUDED_DIRS := ["res://scripts/tools"]
 
 

@@ -459,7 +459,7 @@ func test_npc_weapon_pitch_defaults_are_sane() -> void:
 # automated can SEE particle size; and the emitter's own properties all round-trip perfectly —
 # scale_min / scale_max read identically on a working gun and a broken one, because what collapsed is the
 # transform underneath them. Never judge this one from the process material. To judge it with your eyes,
-# run scripts/tools/muzzle_smoke_qa_shots.gd (its NPC section prints QA_NPC_SCALE and shoots the barrel).
+# run scripts/tools/probes/muzzle_smoke_qa_shots.gd (its NPC section prints QA_NPC_SCALE and shoots the barrel).
 #
 # The rig below is IN-TREE (add_child_autofree) because global_transform raises an engine error on an
 # off-tree Node3D and GUT fails a test on any engine error. The NPC stays OFF-tree as usual:

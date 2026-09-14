@@ -28,7 +28,7 @@ extends SpotLight3D
 ## can be shoved through a wall the player is leaning on, and the beam would light the far side of it. ⭐The
 ## capsule is NOT the authored 0.5 m — CapsuleShape3D.height clamps radius to height/2 and never restores it, so
 ## the first crouch permanently narrows it to 0.4589 m. The test's ceiling is 0.35 to stay clear of both.
-## Measured with `scripts/tools/flashlight_qa_shots.gd` — a windowed GPU run, because no unit test can see this.
+## Measured with `scripts/tools/probes/flashlight_qa_shots.gd` — a windowed GPU run, because no unit test can see this.
 ##
 ## ⭐THE NODE'S OWN TRANSFORM IS INERT. `top_level` plus the per-frame `global_position` write below mean the
 ## FlashLight node's authored position never reaches the screen — the rig used to carry a -0.187 X offset there

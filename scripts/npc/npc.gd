@@ -3559,7 +3559,7 @@ func _build_muzzle_fx() -> void:
 ## particle shader, so nothing automated can SEE particle size; and the emitter's own properties all
 ## round-trip perfectly — `scale_min`/`scale_max` on the process material read identically on a working gun
 ## and a broken one, because what collapsed is the NODE transform underneath them. Judge it from a windowed
-## screenshot (scripts/tools/muzzle_smoke_qa_shots.gd photographs an NPC firing a pistol) or from the node's
+## screenshot (scripts/tools/probes/muzzle_smoke_qa_shots.gd photographs an NPC firing a pistol) or from the node's
 ## printed `global_transform.basis.get_scale()`, never from a green test.
 ##
 ## ⭐It matters even for the two emitters whose SIZE is scale-proof. SparkAttack and ShellDrop simulate in

@@ -12,7 +12,7 @@ extends GutTest
 ## cover it raises itself — plus the code-built 2D/billboard feedback (damage numbers, bark icons) that has no
 ## precompilation at all. A real-renderer probe measured the first kill at ~+45 ms and the first hit at
 ## ~+20 ms over a warm repeat, with surface/specialization pipeline compiles appearing ONLY in first-use
-## phases; scripts/tools/__first_kill_hitch_probe.gd is that probe.
+## phases; scripts/tools/probes/__first_kill_hitch_probe.gd is that probe.
 ##
 ## Everything here is OFF-TREE source-text scanning, the test_preload_prewarm.gd idiom (its helpers are
 ## copied, not shared — a cross-test dependency would couple two ratchets): no gameplay scene is
@@ -181,7 +181,7 @@ func test_warm_pass_covers_itself() -> void:
 	# in front of the live camera — and it has to be, or it compiles nothing. It used to assume the Player's
 	# spawn fade-from-black was still up. It is not: that fade is a Tween with set_ignore_time_scale(true), so
 	# it steps on the wall clock, and the frame that loads game.tscn hands it a multi-second delta. A measured
-	# boot (2026-09-03, scripts/tools/__prewarm_visibility_probe.gd) ran all 2.5 s of spawn_fade_in_time in ONE
+	# boot (2026-09-03, scripts/tools/probes/__prewarm_visibility_probe.gd) ran all 2.5 s of spawn_fade_in_time in ONE
 	# step on that load frame and then drew the grid at 100% screen brightness for ~800 ms in plain sight.
 	# So warm() owns its cover — and every exit from warm() has to take it back down.
 	if not FileAccess.file_exists(EFFECT_PREWARMER_PATH):

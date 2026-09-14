@@ -8,7 +8,7 @@ extends GutTest
 ##
 ## ⭐ WHAT THIS FILE CANNOT COVER: the look. Headless never compiles shaders, so both canvas shaders in the
 ## component load clean whatever they contain, and no assertion can see a trail anyway. The rendered evidence
-## is scripts/tools/hud_ghost_qa_shots.gd — a WINDOWED run that shoots the effect off / at rest / mid-turn /
+## is scripts/tools/probes/hud_ghost_qa_shots.gd — a WINDOWED run that shoots the effect off / at rest / mid-turn /
 ## with each half isolated / overdriven / after the tail should have expired. Change the feel, re-shoot it.
 
 ## Loaded BY PATH (not the class_name) — the editor class-cache cascade guard.

@@ -47,7 +47,7 @@ const SKIP_FILES: Array[String] = [
 	"res://scripts/components/debug_menu.gd",
 	"res://scripts/components/debug_event_ticker.gd",
 	"res://scripts/components/ai_event_log.gd",
-	"res://scripts/tools/dialogue_ui_qa_shots.gd",
+	"res://scripts/tools/probes/dialogue_ui_qa_shots.gd",
 ]
 
 ## The CURATED paint idioms — every entry is an ENUMERABLE call/assignment shape, NEVER a fuzzy English-word

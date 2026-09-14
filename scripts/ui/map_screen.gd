@@ -25,7 +25,7 @@ extends CanvasLayer
 ## THE MAP IS THE PAGE. %VBox holds exactly three children — the tab strip's slot, %MapHost (which EXPANDs and
 ## takes everything between them), and the footer. Nothing is ever stacked between them again: the pin bar and
 ## note row this screen used to code-insert there squeezed the plan down to a ~120 px letterboxed ribbon on the
-## 792x444 canvas (caught by scripts/tools/waypoint_qa_shots.gd, a real windowed run), which is a map you
+## 792x444 canvas (caught by scripts/tools/probes/waypoint_qa_shots.gd, a real windowed run), which is a map you
 ## cannot navigate by. Pin details FLOAT over the plan instead — see _build_pin_card.
 ##
 ## KNOWN COST, accepted: the two instances keep SEPARATE FloorplanSource gathers and deck caches, so the FIRST
@@ -515,7 +515,7 @@ func _bind_ui() -> void:
 ## over the plan, added INSIDE %MapHost so its rect IS the map's rect at any panel size.
 ##
 ## ⭐IT REPLACES A GUI_INPUT ON %Root THAT NEVER FIRED. The old path assumed a click over the plan would bubble
-## up the container stack to the screen's root; the QA harness (scripts/tools/waypoint_qa_shots.gd) drove a
+## up the container stack to the screen's root; the QA harness (scripts/tools/probes/waypoint_qa_shots.gd) drove a
 ## real injected click at the map's centre and the card never opened. Whatever the exact reason (the widget
 ## and its host are both MOUSE_FILTER_IGNORE, and Root's own rect is the whole screen including the panel
 ## margin), the fix is not to re-derive the bubbling rules — it is to put a Control on the rect that cares. A

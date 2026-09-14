@@ -13,7 +13,7 @@ extends GutTest
 ##      the HIGH FIDELITY twin (HF_SHADER_PATH) still matches this file line for line outside comments.
 ##   2. STRUCTURE — the carrier really moves into the viewport when the bend is on and really comes back out
 ##      at 0, so "off" is the pre-curve tree rather than an identity pass nobody notices they are paying for.
-## The look itself is verified by EYE through scripts/tools/hud_curve_qa_shots.gd, a real windowed GPU run.
+## The look itself is verified by EYE through scripts/tools/probes/hud_curve_qa_shots.gd, a real windowed GPU run.
 
 const SHADER_PATH := "res://resources/shaders/hud_curve.gdshader"
 ## THE TWIN. Filter hints are COMPILE-TIME, so the HIGH FIDELITY presentation (native-res curve viewport,

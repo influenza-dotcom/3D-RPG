@@ -67,7 +67,7 @@ extends Node
 ## "the parts are stacked right now" and not as "my whole body changed size". Measured at 0.60: chest top 0.245 m
 ## below the lens, feet 0.019 m above the floor, hip 0.017 m under the chest's bottom edge.
 ## Raise it and the chest climbs toward the near plane; lower it and you shrink into a doll.
-## Re-run `scripts/tools/preview_fp_body_frame.gd` after ANY change here — it prints all three of those numbers
+## Re-run `scripts/tools/probes/preview_fp_body_frame.gd` after ANY change here — it prints all three of those numbers
 ## (floor clearance, the hip-vs-chest stack, the forward reach) and renders the frame.
 @export_range(0.3, 1.2, 0.01) var fp_body_scale: float = 0.60
 ## Where the WHOLE FP body rig sits relative to the player origin (the eye) — the mount every part hangs off.
@@ -743,7 +743,7 @@ func _slide_fp_arms(into_view: bool) -> void:
 		# `fp_arm_offset - draw_rise`, which at the authored guard (fp_arm_unarmed_nudge (0, -0.705, 1.49))
 		# sits 0.355 m ABOVE the guard and 1.49 m toward the lens: holstering the fists RAISED them and threw
 		# them 1.49 m forward, so the "stow" played as the arms extending out toward the crosshair and then
-		# blinking off at peak size. Render-proven (scripts/tools/preview_fists_frame.gd idiom). Identical to
+		# blinking off at peak size. Render-proven (scripts/tools/probes/preview_fists_frame.gd idiom). Identical to
 		# the old behaviour for the carry hold, whose rest IS fp_arm_offset — only the guard was mis-anchored.
 		_fp_arm_stowing = true
 		var sink := fp_arm_stow_target(_fp_arms.position, fp_arm_draw_rise)

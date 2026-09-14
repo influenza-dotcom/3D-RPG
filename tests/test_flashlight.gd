@@ -374,7 +374,7 @@ func test_the_beam_origin_is_held_off_the_eye_so_shadows_are_visible() -> void:
 	# own -0.187 X offset was DEAD (top_level + the per-frame global_position write overwrite it every frame),
 	# so no one could see the authored intent was not reaching the screen.
 	#
-	# Verified by eye with scripts/tools/flashlight_qa_shots.gd (a real windowed GPU run — a box in front of a
+	# Verified by eye with scripts/tools/probes/flashlight_qa_shots.gd (a real windowed GPU run — a box in front of a
 	# wall, at night): on the eye the wall is blank, 0.27 m off it a hard shadow appears. No unit test can see
 	# a shadow, so what is pinned here is the SEPARATION that causes one.
 	#

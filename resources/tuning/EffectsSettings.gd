@@ -405,7 +405,7 @@ extends Resource
 ## ACCUMULATES into the visible rope. That inverts the old rule: this number is now LOW and the count is high,
 ## and the two must still move together.
 ## ⭐Every failure mode here was photographed before these numbers were picked (the harness is
-## scripts/tools/muzzle_smoke_qa_shots.gd): hundreds of near-transparent puffs fuse into a realistic
+## scripts/tools/probes/muzzle_smoke_qa_shots.gd): hundreds of near-transparent puffs fuse into a realistic
 ## connected haze, a few hundred at middling alpha saturate into a featureless solid-white ball, and a
 ## handful at low alpha vanish entirely. At the shipped 112 puffs, 0.42 accumulates to ~0.98 — a solid white
 ## cotton rope with no shape left in it — which is why this came DOWN when the smoke became a line.

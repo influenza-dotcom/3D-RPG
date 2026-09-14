@@ -63,7 +63,7 @@ flash + `Hitmarker`, and the UI layer's `BloodSplatter`): **each of those target
 paint back after one drawn frame**, because a `CanvasItem` keeps its draw list until something calls
 `queue_redraw()` again — the hitmarker shipped without that take-back and left a near-invisible X parked on
 the crosshair for the whole level, amplified into visibility by the HUD ghost's accumulator (fixed
-2026-09-08; the acceptance instrument is `scripts/tools/__hitmarker_warm_probe.tscn`, windowed).
+2026-09-08; the acceptance instrument is `scripts/tools/probes/__hitmarker_warm_probe.tscn`, windowed).
 `Player.add_xp` no
 longer writes the profile synchronously on the kill frame — it rides the wallet's coalesced
 `_queue_autosave()`. Ratchets: `tests/test_preload_prewarm.gd` (every `GPUParticles3D` scene is in
@@ -72,8 +72,8 @@ longer writes the profile synchronously on the kill frame — it rides the walle
 `load_level` invokes the prewarmer after the PS1 warp, `add_xp` queues its save). Exports set
 `shader_baker/enabled=true` (`export_presets.cfg`) so a fresh machine never DXC-compiles an authored
 material — shader *code* only; PSOs are per-process and still need stage 2. **Measure, don't guess:**
-`scripts/tools/__first_kill_hitch_probe.gd` (a `__` throwaway, run windowed as
-`godot --path <abs project> res://scripts/tools/__first_kill_hitch_probe.tscn -- --run=<tag>`) boots
+`scripts/tools/probes/__first_kill_hitch_probe.gd` (a `__` throwaway, run windowed as
+`godot --path <abs project> res://scripts/tools/probes/__first_kill_hitch_probe.tscn -- --run=<tag>`) boots
 `game.tscn`, drives the DebugConsole (`sandbox on; god on; spawn raider 1; killall 8; hurt 5`, then the
 same beat again warm), logs wall-clock frame spikes per phase with the per-frame deltas of
 `Performance.PIPELINE_COMPILATIONS_*` (`draw`/`canvas` deltas are synchronous stalls; `spec` is
@@ -1508,7 +1508,7 @@ handled a pixel at a time. Three things make it work and each is a trap if chang
   meant an NPC had to stand a full metre behind a wall at 6 m before the ink noticed, the reason hidden
   NPCs kept showing faintly indoors. That pack is only sound because the write path is exact:
   `to_target()` inverts the target transfer, so a value lands as `round(v * 255)/255`.
-  Calibrated with `scripts/tools/__ink_gap_probe.gd`, which sweeps actors at increasing clearances
+  Calibrated with `scripts/tools/probes/__ink_gap_probe.gd`, which sweeps actors at increasing clearances
   behind one wall and diffs each against a reference: **detection now holds down to 2 cm of clear air at
   6 m**, against 1.0 m before the split.
 - **Coverage without depth still has to be resolved.** Any masked pixel the resolve pass cannot place
@@ -1526,7 +1526,7 @@ handled a pixel at a time. Three things make it work and each is a trap if chang
 Every case the resolve pass cannot vouch for — a `transparency`-faded prop, a rim wider than the
 dilation, an actor past the encoding window — keeps the old unconditional suppression, so the failure
 direction is always "suppress", never a doubled outline. `occlusion_aware_mask` is the A/B switch;
-`scripts/tools/__ink_occlusion_shots.gd` shoots both states of a purpose-built scene. Two earlier
+`scripts/tools/probes/__ink_occlusion_shots.gd` shoots both states of a purpose-built scene. Two earlier
 attempts are recorded in `InkOutline`'s header and must not be rebuilt: stencil on the ink quad (a
 silent no-op — `depth_test_disabled` drops the depth-stencil attachment) and a CPU raycast cull (it
 broke the world ink outright).
@@ -1702,7 +1702,7 @@ hotbar and the corner cluster themselves draw over the weapon, so their echo doe
 out of the gun would mean sampling its coverage through the very lens warp the new seat exists to ignore.)
 
 `tests/test_hud_ghost.gd` pins the maths and the two mask bits; the look is
-`scripts/tools/hud_ghost_qa_shots.gd`, a windowed harness (headless never compiles shaders, and no assertion
+`scripts/tools/probes/hud_ghost_qa_shots.gd`, a windowed harness (headless never compiles shaders, and no assertion
 can see a trail) that shoots the effect off / at rest / mid-turn / with each half isolated / overdriven /
 after the tail should have expired.
 
@@ -1765,7 +1765,7 @@ CURVED panel.
 main window and asserts a real `Control` on the carrier heard it, with the curve both up and down, because
 no off-tree assertion can see this class of break. `tests/test_hud_curve.gd` pins the shader by source text (uniform names, the blend mode, `repeat_disable` +
 `filter_nearest`, literal defaults, the warp sign) and the structural build/teardown; the look is
-`scripts/tools/hud_curve_qa_shots.gd`, a windowed harness (headless never compiles shaders, and no assertion
+`scripts/tools/probes/hud_curve_qa_shots.gd`, a windowed harness (headless never compiles shaders, and no assertion
 can see a curve) that shoots the bend off / shipped / overdriven / cylindrical / with each trimming, plus
 the death sweep taking the panel down and the teardown restoring the flat tree.
 
@@ -1866,7 +1866,7 @@ world actor owes the same conversion.
 the old body-centre anchor), and `WeaponData.npc_held_display_scale` pushes the barrel marker further still. The
 clear-shot LOS ray starts from the same point, so the fire gate and the round agree with each other — but a weapon
 boosted well past the shipped values starts rounds past thin cover. That is why the long guns carry the smallest
-boosts. Judged by screenshot (`scripts/tools/npc_hold_qa_shots.tscn`), never by a green test.
+boosts. Judged by screenshot (`scripts/tools/probes/npc_hold_qa_shots.tscn`), never by a green test.
 
 ### AI level of detail — the tick-cadence gate (`AiLod`)
 
@@ -2304,7 +2304,7 @@ Two second-order corrections landed after the first playtest (2026-08-25):
     toggle (the old exact-color compare degraded every hostile/friendly to the
     black ring and the promotion never fired) — and the engaged band shares the
     `highlight_hostile` LUT slot, so the any-distance glow paints orange in safe
-    mode (windowed A/B: `scripts/tools/__ink_cb_ring_shots.gd`). All parts merge into ONE raster
+    mode (windowed A/B: `scripts/tools/probes/__ink_cb_ring_shots.gd`). All parts merge into ONE raster
     silhouette (confetti structurally impossible), overlapping enemies resolve
     nearest-wins by the duplicates' own z-test, and the ring depth-compares against
     the scene so it never shows through walls.
@@ -2370,7 +2370,7 @@ Two second-order corrections landed after the first playtest (2026-08-25):
 A settings.cfg from before the split migrates once via `Settings.read_presentation`:
 no `presentation` key -> High Fidelity with `render_scale` forced to 1.0 (the saved
 2.0 supersampled the retro buffer; against a native target it would be 4K-on-1080p).
-Verification is the windowed harness `scripts/tools/presentation_qa_shots.tscn`
+Verification is the windowed harness `scripts/tools/probes/presentation_qa_shots.tscn`
 (QA_CANVAS must stay logical in both modes; QA_BUFFERS must track `render_size()`;
 the PNG sizes themselves prove the split); `menu_qa_shots` / `hud_curve_qa_shots`
 pin RETRO so the artist reference packs stay deterministic.
@@ -2452,7 +2452,7 @@ itself (subtitle block + response column at the left gutter + scrim, digit selec
 riding the hotbar-slot bindings while the tree is paused, the pinned Goodbye row) lives
 in `DialogueView`/`DialogueManager` with
 its geometry on `GameSettings.dialogue`; judge changes with
-`scripts/tools/dialogue_ui_qa_shots.tscn` (a windowed QA-shot harness — no unit test
+`scripts/tools/probes/dialogue_ui_qa_shots.tscn` (a windowed QA-shot harness — no unit test
 can see a layout).
 
 The in-game HUD has the same seam: `HudSkin` (`resources/ui/hud_skin.tres`,
@@ -2795,7 +2795,7 @@ caret, plus a chevron for every `Groups.COMPASS` marker at its bearing.
   Contrast the minimap's north tick, which is a drawn spoke precisely so it owes `PlayerText` nothing.
 - **A heading gate, not a per-frame repaint**, and `_process` bails on `is_visible_in_tree()` first — the
   clock's minute-gate idiom, so OFF is a real cost win rather than a hidden node still working.
-- **`_draw` never runs headless**, so `scripts/tools/hud_compass_qa_shots.gd` is the other half of the
+- **`_draw` never runs headless**, so `scripts/tools/probes/hud_compass_qa_shots.gd` is the other half of the
   verification: a windowed run that shoots the band at five headings plus a 4x nearest crop, over a backdrop
   split dark/near-white so contrast is judged both ways at once. It is what caught the index caret cutting
   into a centred rose letter, and then the un-rimmed ticks vanishing on the bright half once the track was
@@ -2825,10 +2825,10 @@ own `_process` and the save restore — and it writes through the EMITTING seam.
 - **Waiting is not resting.** It pays only a capped trickle (`GameSettings.wait`) and never mends limbs; the
   `Bonfire` keeps sole ownership of the full heal and the respawn checkpoint.
 
-`scripts/tools/menu_qa_shots.tscn` is the menu screenshot harness: one windowed run
+`scripts/tools/probes/menu_qa_shots.tscn` is the menu screenshot harness: one windowed run
 opens every menu screen (faking merchant/healer/corpse context off-tree like the GUT
 tests do) and saves a PNG per screen —
-`godot --path . res://scripts/tools/menu_qa_shots.tscn -- --shots-dir="<dir>"`.
+`godot --path . res://scripts/tools/probes/menu_qa_shots.tscn -- --shots-dir="<dir>"`.
 Use it before/after any menu-layout change.
 
 **A menu card is a fixed frame, not a box that grows.** A Control whose combined
@@ -2840,7 +2840,7 @@ tab block reports the MAX page minimum instead of the current page's (switching 
 no longer resize the card); and each page must still fit *band − panel stylebox content
 margins (the artist frame costs 72x76px) − pinned chrome − ~24px tab bar*.
 `tests/test_menu_layout_stability.gd` measures both at 792x432 (the shortest real canvas)
-for every tabbed screen; `scripts/tools/menu_size_probe.gd` prints the per-node
+for every tabbed screen; `scripts/tools/probes/menu_size_probe.gd` prints the per-node
 minimums when it fails. The budget math lives beside the code it constrains —
 `character_creation.gd SHIRT_PAGE_HEIGHT_BUDGET`, `MenuSkin.slider_width_dense`.
 

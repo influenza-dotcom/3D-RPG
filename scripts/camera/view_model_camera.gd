@@ -195,7 +195,7 @@ func _attach_container(ui: CanvasLayer) -> void:
 	# while their InkOutline ring — tint duplicates in the 3D world, on a layer this sweep cannot reach — kept
 	# drawing, leaving a hollow outline with no weapon inside it: the whole 0.24 s keel-over, then again for
 	# the revive's 1.0 s respawn_hud_delay quiet window, with input already live. Measured 2026-09-02 by
-	# scripts/tools/__respawn_viewmodel_probe.gd, which counts exactly this disagreement per frame.
+	# scripts/tools/probes/__respawn_viewmodel_probe.gd, which counts exactly this disagreement per frame.
 	UI_SCRIPT.set_death_hide_exempt(_container, true)
 	_composited = true
 
@@ -281,7 +281,7 @@ func _sync_pass_resolution() -> void:
 ## GameRoot loads the level with `load_level.call_deferred` from its _ready, while head.setup() queues _build_pass
 ## from the Player's _enter_tree, which runs FIRST. So at build time there is no WorldEnvironment in the tree yet,
 ## `world_env` comes back null, and the whole copy is skipped — measured 2026-08-24 with
-## scripts/tools/view_model_tonemap_qa_shots.gd, which caught the gun shipping on tonemap_mode 0 (LINEAR) against
+## scripts/tools/probes/view_model_tonemap_qa_shots.gd, which caught the gun shipping on tonemap_mode 0 (LINEAR) against
 ## an AgX world. The same re-copy also re-grades the gun after a LevelDoor swap brings in a differently-graded level.
 ## Compared by identity, not by value, so this is one group lookup per frame and a designer's live inspector edit to
 ## the world env is deliberately NOT chased (nothing in the project writes tonemap_* at runtime). Skipped entirely on

@@ -508,7 +508,7 @@ extends Resource
 ## hanging from the top edge, the letter baseline (compass_label_baseline_px up from the bottom), and the
 ## marker chevrons seated on the bottom edge. At the shipped skin that budget is ticks/caret y 0..4, the
 ## letters y ~7..15, and the chevrons y 18..24 — three rows with ~3 px between them, measured from a real
-## windowed capture (scripts/tools/hud_compass_qa_shots.gd), not eyeballed. WHOLE pixels: a fractional box
+## windowed capture (scripts/tools/probes/hud_compass_qa_shots.gd), not eyeballed. WHOLE pixels: a fractional box
 ## rasterizes into a ragged comb under the 792x444 canvas's ~2.4x nearest upscale (the minimap_size /
 ## clock_size rule).
 @export var compass_size: Vector2 = Vector2(300, 24)

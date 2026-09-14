@@ -360,7 +360,7 @@ static func _stamp_tint(root: Node, id: int, blend: float) -> void:
 	# Editor guard: several callers are @tool (Throwable, BodyModelSwap). Creating duplicate nodes at
 	# EDIT time would litter authored scenes with unowned, unsaved children. ⭐ The consequence a
 	# designer will notice: the ring is not previewable in the editor viewport the way a hull material
-	# was. Judge it in-game, or with scripts/tools/__ink_cb_ring_shots.gd.
+	# was. Judge it in-game, or with scripts/tools/probes/__ink_cb_ring_shots.gd.
 	if Engine.is_editor_hint():
 		return
 	for m in TalkHelpers.collect_meshes(root, null, true):
@@ -689,7 +689,7 @@ static func tint_material() -> ShaderMaterial:
 ## depth went to two channels: at one 8-bit channel a step was ~3% of the distance, so an NPC had to stand
 ## a FULL METRE behind a wall at 6 m before anything happened, and hidden NPCs kept showing faintly
 ## indoors. With ~0.01% precision and the tight gather cancelling sampling noise, a gap sweep
-## (`scripts/tools/__ink_gap_probe.gd`) puts detection at **2 cm of clear air at 6 m** with this value.
+## (`scripts/tools/probes/__ink_gap_probe.gd`) puts detection at **2 cm of clear air at 6 m** with this value.
 ## LOWER buys nothing measurable — the sweep is flat below here. HIGHER goes back to leaving a halo
 ## around actors tucked close behind cover.
 @export_range(0.0005, 0.2, 0.0005) var mask_occlusion_bias: float = 0.003

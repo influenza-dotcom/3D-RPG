@@ -57,7 +57,7 @@ func test_build_default_environment_copies_world_tonemap_when_given() -> void:
 ## Reported 2026-09-02: "when you die and respawn, sometimes the outline for your view model is visible when
 ## the view model itself is not." UI.hide_hud_for_death() hid the composite; the ring kept drawing around
 ## nothing, for the 0.24 s keel-over and again for the revive's 1.0 s respawn_hud_delay quiet window (measured
-## by scripts/tools/__respawn_viewmodel_probe.gd, which counts the disagreement per frame — a shader-free,
+## by scripts/tools/probes/__respawn_viewmodel_probe.gd, which counts the disagreement per frame — a shader-free,
 ## headless-safe node-state check, since the pixels themselves need a real window).
 func test_the_death_hide_spares_a_flagged_child() -> void:
 	var ui := UI.new()

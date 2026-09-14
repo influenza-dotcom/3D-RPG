@@ -9,7 +9,7 @@ extends GutTest
 ## ⭐ WHAT THIS FILE CANNOT COVER: the look, and the two things that only exist on a GPU — that a SubViewport
 ## can sample the root viewport's previous frame at all, and that the weapon's coverage mask lands on the
 ## right pixels. Headless never compiles shaders. The rendered evidence is the world half of
-## scripts/tools/hud_ghost_qa_shots.gd (shots 09-12), which includes a MEASURED at-rest pair against a
+## scripts/tools/probes/hud_ghost_qa_shots.gd (shots 09-12), which includes a MEASURED at-rest pair against a
 ## matched-gap control, because "you cannot see it" is not a claim a screenshot can make on its own.
 
 ## Loaded BY PATH (not the class_name) — the editor class-cache cascade guard.

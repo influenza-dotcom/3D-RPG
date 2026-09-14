@@ -1381,7 +1381,7 @@ func test_an_invisible_highlight_never_borrows() -> void:
 # under it), and a tint duplicate SNAPSHOTS `m.mesh` when it is stamped — so the pistol's silhouette stayed
 # in the tint buffer forever and the ring pass dutifully drew it around nothing. The inverted hull this
 # replaced could not fail that way: it rode `material_overlay` ON the mesh, so a null mesh drew nothing.
-# Measured with scripts/tools/__viewmodel_ring_shot.gd (magenta view-model LUT): 127 ring px in the ghost's
+# Measured with scripts/tools/probes/__viewmodel_ring_shot.gd (magenta view-model LUT): 127 ring px in the ghost's
 # region before the fix, 11 after.
 
 func test_sync_tint_mesh_follows_a_host_that_loses_its_mesh() -> void:

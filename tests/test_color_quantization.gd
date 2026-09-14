@@ -15,7 +15,7 @@ extends GutTest
 ## the table, which is why the mode -> levels mapping is a pure static on Settings rather than a switch inside
 ## the shader: the numbers the GPU is handed are the numbers asserted here.
 ##
-## The real look check is a windowed run — see scripts/tools/color_depth_qa_shots.gd, which counts the DISTINCT
+## The real look check is a windowed run — see scripts/tools/probes/color_depth_qa_shots.gd, which counts the DISTINCT
 ## COLOURS in a captured frame per depth. That is the one claim about this feature a screenshot can settle.
 
 const SHADER_PATH := "res://resources/shaders/post_process.gdshader"
