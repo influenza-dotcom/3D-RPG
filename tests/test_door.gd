@@ -48,6 +48,48 @@ func test_area_hitbox_follows_pivot_swing() -> void:
 	assert_almost_eq(hitbox.position, Vector3(0.5, 1.0, 0.0), Vector3(0.001, 0.001, 0.001), "the closed hitbox returns to its authored offset")
 	door.free()
 
+## A designer-scaled Door (the live level's 4.1 x 1.6 gate) hands its scale DOWN to the hitbox, the hinge and the
+## pivot's parts and goes back to 1, so neither body ever carries a non-uniform scale (Jolt rejects a rotated box
+## under one) and the panel stays full width through the swing instead of shearing.
+func test_root_scale_bakes_down_to_parts() -> void:
+	var door := Door.new()
+	var pivot := Node3D.new()
+	var blocker := StaticBody3D.new()
+	var hitbox := CollisionShape3D.new()
+	door.add_child(pivot)
+	door.add_child(hitbox)
+	pivot.add_child(blocker)
+	door.pivot = pivot
+	door.open_angle = 90.0
+	door.scale = Vector3(4.0, 1.6, 1.0)
+	pivot.position = Vector3(0.25, 0.0, 0.0)
+	hitbox.position = Vector3(0.5, 1.0, 0.0)
+	blocker.position = Vector3(0.5, 1.0, 0.0)
+	door._bake_root_scale()
+	assert_almost_eq(door.scale, Vector3.ONE, Vector3(0.001, 0.001, 0.001), "the root scale is gone")
+	assert_almost_eq(pivot.position, Vector3(1.0, 0.0, 0.0), Vector3(0.001, 0.001, 0.001), "the hinge moved with the doorway")
+	assert_almost_eq(pivot.scale, Vector3.ONE, Vector3(0.001, 0.001, 0.001), "the pivot itself stays unscaled (it only yaws)")
+	assert_almost_eq(hitbox.scale, Vector3(4.0, 1.6, 1.0), Vector3(0.001, 0.001, 0.001), "the look-at hitbox took the scale")
+	assert_almost_eq(hitbox.position, Vector3(2.0, 1.6, 0.0), Vector3(0.001, 0.001, 0.001), "the hitbox offset scaled with it")
+	assert_almost_eq(blocker.scale, Vector3(4.0, 1.6, 1.0), Vector3(0.001, 0.001, 0.001), "the blocker under the pivot took the scale")
+	assert_almost_eq(blocker.position, Vector3(2.0, 1.6, 0.0), Vector3(0.001, 0.001, 0.001), "the blocker offset scaled with it")
+	door.open()
+	assert_almost_eq(hitbox.rotation.y, deg_to_rad(90.0), 0.001, "the swung hitbox rotates with the panel")
+	assert_almost_eq(hitbox.scale, Vector3(4.0, 1.6, 1.0), Vector3(0.001, 0.001, 0.001), "and keeps its own axis-aligned scale (rotate-then-scale, the shape Jolt accepts)")
+	door.free()
+
+func test_root_scale_bake_is_a_noop_at_one() -> void:
+	var door := Door.new()
+	var pivot := Node3D.new()
+	var hitbox := CollisionShape3D.new()
+	door.add_child(pivot)
+	door.add_child(hitbox)
+	door.pivot = pivot
+	hitbox.position = Vector3(0.5, 1.0, 0.0)
+	door._bake_root_scale()
+	assert_almost_eq(hitbox.position, Vector3(0.5, 1.0, 0.0), Vector3(0.001, 0.001, 0.001), "an unscaled door is left exactly as authored")
+	door.free()
+
 func test_look_name_reflects_state() -> void:
 	var door := Door.new()
 	var pivot := Node3D.new()

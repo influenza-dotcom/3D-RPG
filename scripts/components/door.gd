@@ -167,6 +167,7 @@ func _ready() -> void:
 	hp = max_hp
 	_apply_texture()
 	_build_noise()
+	_bake_root_scale()  # BEFORE the hitbox rest cache: the scale must already sit on the shapes it snapshots
 	if pivot != null:
 		_closed_yaw = pivot.rotation.y
 		_cache_area_hitbox_transforms()
@@ -459,6 +460,36 @@ func _set_pivot_yaw(yaw: float) -> void:
 func _ensure_area_hitboxes_cached() -> void:
 	if not _area_hitboxes_cached:
 		_cache_area_hitbox_transforms()
+
+## A designer sizes a doorway by SCALING the Door instance (the live level's gate is 4.1 x 1.6 x 1.0), which puts a
+## non-uniform scale on this Area3D and, through the pivot, on the blocker StaticBody3D. Physics bodies must not
+## carry one: the moment the pivot yaws, the look-at hitbox becomes a ROTATED box inside a non-uniformly scaled
+## body, which Jolt cannot represent -- it clamps the whole body to a uniform average and prints "Failed to
+## correctly scale body 'Door:<Area3D>'" EVERY frame of the swing (118 lines in one playtest). The swing itself
+## was wrong under a scaled root too: root-scale x yaw SHEARS the panel, so the 4 m-wide gate opened into a 1 m
+## panel 4x too thick. So at runtime the root scale is pushed DOWN one level: every Node3D child of the root and
+## every child of the pivot takes it as its own local scale (the hinge position scales with them), the pivot keeps
+## rotation only, and the root goes back to 1. The closed pose is identical; an open panel now stays 4 m wide on
+## every side of its swing, and both bodies present Jolt an axis-aligned box with a per-shape scale, which it
+## supports. Runtime only: the editor keeps the authored transform, so the designer's scale gizmo still works.
+func _bake_root_scale() -> void:
+	var s := scale
+	if s.is_equal_approx(Vector3.ONE):
+		return
+	var scale_only := Transform3D(Basis.from_scale(s), Vector3.ZERO)
+	for child in get_children():
+		var n := child as Node3D
+		if n == null:
+			continue
+		if n == pivot:
+			n.position = scale_only * n.position  # the hinge moves with the doorway; the pivot itself stays unscaled
+			for grandchild in n.get_children():
+				var part := grandchild as Node3D
+				if part != null:
+					part.transform = scale_only * part.transform
+		else:
+			n.transform = scale_only * n.transform
+	scale = Vector3.ONE
 
 func _cache_area_hitbox_transforms() -> void:
 	_area_hitbox_rest_transforms.clear()
