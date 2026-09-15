@@ -289,15 +289,15 @@ func test_the_shader_pass_is_a_pure_drain_to_exact_grayscale() -> void:
 ## is not. Checked by ORDER of the marker comments, since that is the only thing a text pin can see.
 func test_the_fall_pass_sits_with_the_world_grades_not_with_the_death_override() -> void:
 	var src := _read(SHADER_PATH)
-	var low_hp_at := src.find("--- 4c. Low HP")
-	var fall_at := src.find("--- 4c-2. Fall warning")
-	var cb_at := src.find("--- 4d. Colorblind correction")
+	var low_hp_at := src.find("--- 4b. Low HP")
+	var fall_at := src.find("--- 4b-2. Fall warning")
+	var cb_at := src.find("--- 4c. Colorblind correction")
 	var death_at := src.find("--- 6. Death cinematic")
 	# Named up front so a renamed marker fails as "the marker is gone", not as a baffling ordering comparison
 	# against -1. These comments are the only handle a source pin has on where a pass sits in the chain.
-	assert_gt(low_hp_at, -1, "the `4c. Low HP` step marker must still be in post_process.gdshader")
-	assert_gt(fall_at, -1, "the `4c-2. Fall warning` step marker must still be in post_process.gdshader")
-	assert_gt(cb_at, -1, "the `4d. Colorblind correction` step marker must still be in post_process.gdshader")
+	assert_gt(low_hp_at, -1, "the `4b. Low HP` step marker must still be in post_process.gdshader")
+	assert_gt(fall_at, -1, "the `4b-2. Fall warning` step marker must still be in post_process.gdshader")
+	assert_gt(cb_at, -1, "the `4c. Colorblind correction` step marker must still be in post_process.gdshader")
 	assert_gt(death_at, -1, "the `6. Death cinematic` step marker must still be in post_process.gdshader")
 	assert_gt(fall_at, low_hp_at,
 		"the fall drain must run AFTER the low-HP drain, so a wounded player's fall greys out an already-drained frame instead of the two passes fighting over the same pixels")
