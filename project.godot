@@ -24,6 +24,7 @@ general/text_to_speech=true
 
 [autoload]
 
+CrashGuard="*res://managers/CrashGuard.gd"
 AudioManager="*res://managers/AudioManager.gd"
 EffectFactory="*res://managers/EffectFactory.gd"
 InputManager="*res://managers/InputManager.gd"
@@ -62,9 +63,12 @@ SaveLoadScreen="*res://scenes/ui/save_load_screen.tscn"
 NameEntryDialog="*res://scenes/ui/name_entry_dialog.tscn"
 WaitScreen="*res://scenes/ui/wait_screen.tscn"
 StationMusic="*res://managers/StationMusic.gd"
+CrashReportScreen="*res://scenes/ui/crash_report_screen.tscn"
 
 [debug]
 
+file_logging/max_log_files=10
+settings/gdscript/always_track_call_stacks=true
 shader_language/warnings/treat_warnings_as_errors=true
 
 [display]

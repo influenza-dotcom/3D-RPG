@@ -4309,6 +4309,32 @@ CYBER SUNDAY runs a single global **day/night clock** that any system can read, 
 
 **The player can SEE the clock.** The HUD ships a time-of-day readout (`scripts/ui/hud_clock.gd`) directly under the minimap -- you author nothing, it is code-built by `ui.gd` like the map is. It renders `WorldClock.time_of_day` as digits ("14:35", or "2:35 PM" if the player prefers a 12-hour face) so the hour is a readout rather than something to infer from the lighting -- which is a poor instrument, since `DayNightSky`'s moon keeps midnight legible and interiors are lit around the clock. Its knobs follow the usual split: box/gaps/font size are author-time tuning on `GameSettings.hud` group **Clock**, the digit tint is `MenuStyle.hud.clock_color` (§27), and **On/off + 12-hour vs 24-hour belong to the PLAYER** in Options -> Accessibility (`Settings.clock_enabled` / `Settings.clock_24_hour`, polled live -- a change bites the same frame). **Setting `day_length_seconds = 0` freezes the displayed time too**, which is the right look for a level pinned to one hour but reads as a broken clock if you did not intend it.
 
+### After a crash: the crash report screen (`res://scenes/ui/crash_report_screen.tscn`)
+
+**A demo player who crashes sees a card on the next launch**, over the boot screen: "The game crashed last
+time", the report `CrashGuard` already wrote, and **Copy report** — one click puts the whole report on the
+clipboard so pasting it into a bug report is the whole job. **Open report folder** opens
+`%APPDATA%\Godot\app_userdata\CYBERSUNDAY\crash_reports\` (the last ten reports are kept) and **Report online**
+opens the tracker. You author nothing; it ships wired.
+
+**Knobs (Inspector on the `CrashReportScreen` autoload scene):**
+- `report_url` — where **Report online** sends the player (default: this repo's new-issue page). Empty = no button.
+- `auto_open` — off makes the card open only from code (`CrashReportScreen.open(text)`), for a build that should stay silent.
+
+**Breadcrumbs.** Any script can note what the game is doing with `CrashGuard.breadcrumb("loading alive.map")`;
+the last 24 lines ride along in the report with their uptime, so a crash "somewhere after the third door"
+becomes a crash "right after loading level 2". Cheap (one small file write) — use it at level loads, big
+transitions and anything a tester keeps saying "and then it crashed" about.
+
+⭐**It never opens in the editor.** The Stop button kills the game process, which the marker cannot tell
+from a crash, so under the editor the card stays closed and you get one Output line instead
+(`CrashGuard: the previous run did not exit cleanly — report written to user://crash_reports/...`). Read
+the file: it is the same report a player would send.
+
+⭐**It cannot see a crash that happens before the first autoload runs** (a missing
+`libgodot_text_to_speech.dll`, a hollow `.pck`). Tell those players to run `CYBERSUNDAY.console.exe` and copy
+the console, or to send `logs/godot.log` from the folder above.
+
 ### The look of the clock: `DayNightSky` (`res://scripts/effects/day_night_sky.gd`)
 
 **`DayNightSky`** (`class_name DayNightSky`, plain `Node`) is the clock's VISUAL half -- without one, a level's lighting is frozen at whatever you authored no matter what time it is. Drop the bare node anywhere in a level (**the main level authors one** beside its `DirectionalLight3D`).

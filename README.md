@@ -328,6 +328,22 @@ git push origin v0.1.0
 
 The tag runs the gates, then the export job attaches the zip to a GitHub Release named after the tag.
 
+## Reporting a Crash
+
+The game watches for its own crashes. `CrashGuard` (the first autoload) writes a session marker at boot and
+only a clean exit clears it; on the next launch, if the marker survived, `CrashReportScreen` opens over the
+boot screen with a report already written to `%APPDATA%\Godot\app_userdata\CYBERSUNDAY\crash_reports\`
+and three buttons: **Copy report** (to the clipboard — paste it into an issue), **Open report folder**, and
+**Report online** (the tracker URL, an `@export` on the screen). A report carries the build and GPU, the last
+scene and breadcrumbs, the last errors with their GDScript traces, the Windows Application-Error event for
+the crashed process (exception code, faulting module), and the tail of the crashed run's engine log
+(`logs/godot*.log` in the same folder). Under the editor the card never opens — the Stop button is
+indistinguishable from a crash — and you get one Output line naming the report file instead.
+
+If the game dies before it can draw anything — before the first autoload runs — no marker exists and the
+screen cannot help. Ask for the console instead: `CYBERSUNDAY.console.exe` keeps a window open with the
+engine's output, and `logs/godot.log` in the folder above holds the same text.
+
 ## Current Rough Edges
 
 - The minimap draws **one floor — the band you are standing in**, and so does the

@@ -36,7 +36,7 @@ func _init(max_recent: int = DEFAULT_MAX_RECENT) -> void:
 ## exactly or the override is ignored). Classify push_warning + engine warnings as warnings, everything else as
 ## errors. Field updates only — no logging calls (re-entrancy) and no gameplay side effects.
 func _log_error(function: String, file: String, line: int, code: String, rationale: String,
-		_editor_notify: bool, error_type: int, _script_backtraces: Array[ScriptBacktrace]) -> void:
+		_editor_notify: bool, error_type: int, script_backtraces: Array[ScriptBacktrace]) -> void:
 	var is_warning := error_type == WARNING_TYPE or function == &"push_warning"
 	_mutex.lock()
 	if is_warning:
@@ -46,10 +46,25 @@ func _log_error(function: String, file: String, line: int, code: String, rationa
 	_recent.append({
 		"type": ("WARN" if is_warning else "ERROR"),
 		"code": code, "rationale": rationale, "file": file, "function": function, "line": line,
+		"trace": trace_summary(script_backtraces),
 	})
 	if _recent.size() > _max_recent:
 		_recent = _recent.slice(_recent.size() - _max_recent)
 	_mutex.unlock()
+
+
+## The first GDScript frames of an error's backtrace as one line ("_ready (res://x.gd:12) < _process (res://y.gd:3)"),
+## "" when the engine gave none. Release builds track no call stacks unless project.godot sets
+## debug/settings/gdscript/always_track_call_stacks (it does — so a player's crash report still says WHERE).
+static func trace_summary(backtraces: Array[ScriptBacktrace], max_frames: int = 3) -> String:
+	for bt in backtraces:
+		if bt == null or bt.is_empty():
+			continue
+		var parts: PackedStringArray = []
+		for i in mini(bt.get_frame_count(), max_frames):
+			parts.append("%s (%s:%d)" % [bt.get_frame_function(i), bt.get_frame_file(i), bt.get_frame_line(i)])
+		return " < ".join(parts)
+	return ""
 
 
 # --- install / report -------------------------------------------------------------------------------------------

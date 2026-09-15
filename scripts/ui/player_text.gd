@@ -1822,6 +1822,15 @@ const WAIT_BLOCKED_FROZEN := "Time doesn't pass here."
 const WAIT_ELAPSED_ONE := "{n} hour passes."
 const WAIT_ELAPSED_MANY := "{n} hours pass."
 
+## The CRASH REPORT card (scripts/ui/crash_report_screen.gd) — shown once, on the launch after a run that never
+## exited cleanly. Plain and short: the player has just lost a session, and the card's one job is the Copy button.
+const CRASH_TITLE := "The game crashed last time"
+const CRASH_BODY := "A crash report was saved. Copy it and paste it into a bug report so the crash can be fixed."
+const CRASH_COPY := "Copy report"
+const CRASH_COPIED := "Copied to the clipboard."
+const CRASH_OPEN_FOLDER := "Open report folder"
+const CRASH_REPORT_ONLINE := "Report online"
+
 ## The selector's duration line ("1 hour" / "6 hours") — whole singular/plural templates, the tr_n() seam.
 static func wait_hours(n: int) -> String:
 	return TextFormat.subst(TextFormat.plural(n, WAIT_HOURS_ONE, WAIT_HOURS_MANY), {"n": n})

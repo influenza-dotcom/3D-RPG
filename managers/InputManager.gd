@@ -216,6 +216,7 @@ func _ensure_modal_reg() -> void:
 		{screen = CharacterInspectScreen, blocks_tabs = false, station_music = false},  # fullscreen hero-view; a tab hotkey takes over FROM it by design
 		{screen = SaveLoadScreen, blocks_tabs = false, station_music = false},          # manual save/load slot menu (the Options Dark-Souls posture)
 		{screen = WaitScreen, blocks_tabs = true, station_music = false},               # the Wait panel — real-time, and it owns the cursor while you pick hours; waiting happens on a rooftop, not at a counter
+		{screen = CrashReportScreen, blocks_tabs = true, station_music = false},        # the post-crash report card — opens over the BOOT scene before any world exists, and owns the cursor while the player copies the report
 	]
 	for e in _modal_reg:
 		_modal_screens_cache.append(e.screen)

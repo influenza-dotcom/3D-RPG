@@ -146,7 +146,7 @@ func test_self_opening_screens_all_gate_on_the_mid_death_predicate() -> void:
 func test_registry_size_and_membership() -> void:
 	# T1: pin the registry so the historically-forgotten screens force a deliberate test edit when a new screen lands.
 	var screens := InputManager._modal_screens()
-	assert_eq(screens.size(), 19, "the modal registry holds all 19 player-facing screens")
+	assert_eq(screens.size(), 20, "the modal registry holds all 20 player-facing screens")
 	assert_true(screens.has(AtmScreen), "AtmScreen is registered (the Ledger terminal; real-time, unlike its station siblings)")
 	assert_true(screens.has(ChessScreen), "ChessScreen is registered (was missed by the death sweep)")
 	assert_true(screens.has(ChipInstallScreen), "ChipInstallScreen is registered")
@@ -156,7 +156,8 @@ func test_registry_size_and_membership() -> void:
 	assert_true(screens.has(SaveLoadScreen), "SaveLoadScreen is registered (the manual save/load slot menu; non-pausing)")
 	assert_true(screens.has(ImplantsScreen), "ImplantsScreen is registered (the implants tab; non-pausing)")
 	assert_true(screens.has(WaitScreen), "WaitScreen is registered (the Wait panel; real-time, and it owns the cursor while you pick hours)")
-	assert_true(screens.has(MapScreen), "MapScreen is registered (the newest — the map tab; non-pausing, and a tab like its five siblings)")
+	assert_true(screens.has(MapScreen), "MapScreen is registered (the map tab; non-pausing, and a tab like its five siblings)")
+	assert_true(screens.has(CrashReportScreen), "CrashReportScreen is registered (the newest — the post-crash report card; it owns the cursor over the boot scene)")
 
 
 func test_gameplay_suppressed_fires_for_every_registered_modal() -> void:
@@ -184,7 +185,7 @@ func test_chess_and_chipinstall_are_registered_stations() -> void:
 ## where false belongs makes a Pip-Boy tab refuse to open with no feedback at all.
 func test_every_registry_row_declares_the_right_tab_posture() -> void:
 	var blocks := [OptionsMenu, LootScreen, ShopScreen, LevelUpScreen, RespecScreen, HealScreen, AtmScreen,
-			ChipInstallScreen, WeaponBenchScreen, ChessScreen, WaitScreen]
+			ChipInstallScreen, WeaponBenchScreen, ChessScreen, WaitScreen, CrashReportScreen]
 	var allows := [InventoryScreen, StatsScreen, ReputationScreen, QuestJournal, ImplantsScreen, MapScreen,
 			CharacterInspectScreen, SaveLoadScreen]
 	for s in blocks:

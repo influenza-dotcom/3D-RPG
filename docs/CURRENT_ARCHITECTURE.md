@@ -2844,6 +2844,40 @@ for every tabbed screen; `scripts/tools/probes/menu_size_probe.gd` prints the pe
 minimums when it fails. The budget math lives beside the code it constrains —
 `character_creation.gd SHIRT_PAGE_HEIGHT_BUDGET`, `MenuSkin.slider_width_dense`.
 
+### Crash reporting: `CrashGuard` + `CrashReportScreen`
+
+The engine cannot report its own native crash — the process is gone before any script runs — so the
+player-facing crash report is the marker-file pattern, split across two autoloads at the two ends of the
+`[autoload]` list:
+
+- **`CrashGuard`** (`managers/CrashGuard.gd`, the FIRST autoload) writes `user://crash_guard/session.cfg` in
+  its `_init` — before any other autoload's `_init` — heartbeats it every 5 s (uptime, current scene, the
+  error/warning tally and the last 30 errors from an `ErrorSink` it installs in EVERY build), rewrites it on
+  every `breadcrumb(text)` a system drops, marks it on `NOTIFICATION_CRASH` when the engine's own handler
+  fires, and sets `clean_exit = true` only in `_exit_tree`. A marker found NOT clean at the next boot means the
+  previous run died: `_ready` then composes ONE report (build + GPU + renderer, uptime, last scene, breadcrumbs,
+  errors with GDScript traces, the Windows `Application Error` event for that executable via `wevtutil`, and
+  the last 80 lines of the crashed run's rotated engine log `user://logs/godot<stamp>.log`) to
+  `user://crash_reports/crash_<start>.txt` (ten kept), prints its path to stdout, and hands it out through
+  `previous_crash()`.
+- **`CrashReportScreen`** (`scenes/ui/crash_report_screen.tscn`, the LAST autoload so its `ui_cancel` wins
+  the unhandled-input walk; a `blocks_tabs` row in `InputManager`'s modal registry) asks `previous_crash()`
+  once in `_ready` and opens over the boot scene with the report in a read-only `TextEdit` and **Copy report**
+  (`DisplayServer.clipboard_set`), **Open report folder**, **Report online** (`report_url` export) and Close.
+  It auto-opens only when `not OS.has_feature("editor")` — the editor's Stop button kills the game process,
+  which is indistinguishable from a crash, and a dev pressing Stop must not be nagged; the file and the Output
+  line still land for them.
+
+What it cannot see: a crash before `CrashGuard._init` (a GDExtension failing to load, a hollow `.pck`) leaves no
+marker — the console wrapper (`CYBERSUNDAY.console.exe`) and `user://logs/godot.log` are the only trail (README,
+"Reporting a Crash"). A heap-corruption fail-fast skips `NOTIFICATION_CRASH`, so the heartbeat BOUNDS the moment
+of death rather than pinning it. `debug/file_logging/max_log_files` is 10 (engine default 5) so a burst of test
+runs cannot rotate a crashed run's log away before it is read, and
+`debug/settings/gdscript/always_track_call_stacks` is on so the errors in a release-build report still carry a
+GDScript trace (`ErrorSink.trace_summary`). Tests: `tests/test_crash_guard.gd` (the pure report / marker /
+event-parse functions + the boot-time marker contract) and `tests/test_crash_report_screen_scene.gd` (scene
+wiring, autoload placement at both ends, registry membership, fixed-frame slots).
+
 ## Localization Readiness
 
 The game ships English-only. This section records the contracts that keep a
