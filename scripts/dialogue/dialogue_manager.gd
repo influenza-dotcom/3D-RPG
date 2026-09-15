@@ -349,10 +349,26 @@ func _reveal_menu() -> void:
 		return
 	if not line.choices.is_empty():
 		_view.set_choices(line.choices, _on_choice_pressed)
-	var follow_label := CompanionRecruiter.label_for(_speaker)
+	# ⭐VALIDITY IS THE CALLER'S JOB HERE, AND SKIPPING IT SOFT-LOCKS THE BOX. CompanionRecruiter's parameters
+	# are typed `Node`, and GDScript rejects a freed object AT THE PARAMETER BOUNDARY ("Invalid type in
+	# function ... (previously freed) is not a subclass of the expected argument class") before the callee's
+	# own `is_instance_valid` guard can run — so the recruiter cannot save a freed _speaker, only we can. That
+	# rejection ABORTS THE CALLING FUNCTION (verified in 4.7.2: the caller stops at the bad call and only ITS
+	# caller resumes), so an unguarded label_for() here would stop this menu part-built — no station options,
+	# no Exchange, and crucially no add_exit_choice — with _choices_shown already true above, which routes
+	# clicks and ui_cancel into press_exit_choice() on an exit button that was never added. A paused world
+	# behind a box with no way out. And _speaker CAN be freed under a live conversation: it is nulled only by
+	# _finish(), while the debug console is PROCESS_MODE_ALWAYS and deliberately does NOT refuse over a
+	# conversation (debug_console.open()'s doc), so its `reload` / `load` / `sandbox off` frees the whole scene
+	# — speaker included — with _active still set and this box still up (the view is autoload-owned, so it
+	# survives the scene swap). Matches the guards in _on_companion_pressed and _resume_from_menu, and degrades
+	# the same way _station_options() / _speaker_exchange_npc() already do: a freed speaker just gets no button.
+	var speaker_live := _speaker != null and is_instance_valid(_speaker)
+	var follow_label := CompanionRecruiter.label_for(_speaker) if speaker_live else ""
 	if not follow_label.is_empty():
 		# Bind the BEHAVIOUR predicate, not a comparison against the label text: the label is display-only
-		# (rewording/localizing "Wait here" must never flip recruit into dismiss).
+		# (rewording/localizing "Wait here" must never flip recruit into dismiss). A non-empty label already
+		# implies speaker_live (label_for is only called above when it is), so this second read needs no guard.
 		_view.add_extra_choice(follow_label, _on_companion_pressed.bind(CompanionRecruiter.following(_speaker)))
 	# STATION OPTIONS (Trade / Heal / Rest / Level Up / Install / Play Chess / Bank): discovered from the
 	# speaker's direct children via the two-method dialogue-station contract and painted in each component's

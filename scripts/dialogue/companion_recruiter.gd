@@ -7,6 +7,18 @@ extends RefCounted
 ## all has_method-guarded); anything that doesn't (a car, a terminal, a hostile NPC) yields no button and
 ## is wholly unaffected. The follow BEHAVIOUR lives on the NPC — these statics only read the contract and
 ## invoke it.
+##
+## ⭐THE `speaker` GUARDS BELOW CATCH null, NOT A FREED NODE — VALIDATE AT THE CALL SITE. `speaker` is a typed
+## `Node` parameter, so GDScript type-checks the argument at the CALL BOUNDARY and raises "Invalid type in
+## function '<name>' ... (previously freed) is not a subclass of the expected argument class" BEFORE the body
+## runs; an in-body `is_instance_valid` can never suppress that (the same family as a lambda's freed capture,
+## which is checked before the lambda body). It is not a cosmetic log, either: the rejection ABORTS THE
+## CALLING FUNCTION at that line — only the caller's own caller resumes — so an unguarded call site stops
+## part-way through whatever it was building. So a caller holding a possibly-freed speaker — DialogueManager
+## keeps `_speaker` until _finish(), and a scene swap under a live conversation frees the node without
+## clearing it — MUST check validity itself; _reveal_menu, _on_companion_pressed and _resume_from_menu all do.
+## The `is_instance_valid` half is KEPT rather than trimmed as dead: that boundary rejection is an engine-side
+## check we don't want these statics' safety to depend on, and it costs nothing here.
 
 ## Whether `speaker` is currently following (mid-follow companion). THE behaviour predicate for the
 ## recruit/dismiss button: DialogueManager binds this — never a comparison against the button's label text —

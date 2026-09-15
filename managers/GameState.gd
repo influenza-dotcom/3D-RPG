@@ -1165,6 +1165,15 @@ func _load_and_reload(path: String) -> bool:
 	if not load_from_disk(path):  # sets loaded = true on success so the reloaded Player applies the build
 		return false
 	if is_inside_tree() and get_tree() != null:
+		# Hard-end any live conversation FIRST. The DialogueManager autoload owns its DialogueView as its OWN child,
+		# so the box SURVIVES the scene swap: `_active` stays set, `_speaker` becomes a freed handle (only _finish()
+		# clears it) and get_tree().paused stays TRUE — the fresh level boots frozen behind a box belonging to a
+		# speaker that no longer exists, with the Goodbye row as the only way out. abort() is a no-op when nothing
+		# is active, so every ordinary quickload pays nothing.
+		# BEFORE close_all_modals, for the reason Player.die() orders it the same way: a conversation SUSPENDED
+		# behind a sub-menu holds a one-shot `closed` -> _resume_from_menu, so sweeping the menus first would
+		# re-pause the tree and re-open the box on the way out. abort() -> _finish() drops that one-shot.
+		DialogueManager.abort()
 		InputManager.close_all_modals()  # release any autoload screen bound to a soon-freed scene node before the reload (T1)
 		Engine.time_scale = 1.0
 		# Latch so a same-frame deferred autosave flush (queued BEFORE this load) can't overwrite the just-loaded profile

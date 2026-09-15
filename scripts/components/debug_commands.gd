@@ -386,7 +386,7 @@ const COMMANDS: Array[Dictionary] = [
 	{
 		"name": "reload", "mod": &"world", "category": "World",
 		"args": [], "min_args": 0, "arg_names": [], "verbs": [],
-		"help": "Hard-reload the current scene.", "danger": false,
+		"help": "Hard-reload the current scene. Any live conversation is torn down with it (the dialogue box is autoload-owned and would otherwise survive, paused, over a freed speaker).", "danger": false,
 	},
 	{
 		"name": "save", "mod": &"world", "category": "World",

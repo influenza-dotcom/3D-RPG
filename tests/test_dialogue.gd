@@ -491,6 +491,36 @@ func test_speaker_death_teardown_gates_on_engaged_not_active() -> void:
 		"_on_speaker_died must gate its teardown on is_engaged(), not is_active() -- a speaker death during a sub-menu suspension must still end the conversation (mirrors Player.die()'s is_engaged() gate)")
 
 
+func test_every_scene_teardown_path_aborts_the_conversation() -> void:
+	# Source-string contract (2026-09-14). The DialogueView is a CHILD OF THE AUTOLOAD, so it outlives any scene
+	# or level-subtree swap: whoever tears the world down must end the conversation too, or the fresh world boots
+	# with `_active` still set, `_speaker` a freed handle (only _finish() clears it) and get_tree().paused TRUE --
+	# frozen behind a box whose speaker no longer exists, with the Goodbye row as the sole way out. Reached in
+	# practice through the debug console, which is PROCESS_MODE_ALWAYS and deliberately opens over a stuck
+	# conversation. Three seams own the three ways the world goes away, and this pins all three:
+	#   * GameState._load_and_reload -- every SAVE-driven reload (quickload, a slot, the death autosave, the
+	#     console's `load`, `sandbox off`, `roundtrip`, the Save/Load screen). It already swept modals + reset
+	#     time_scale here, so the conversation belongs in the same teardown.
+	#   * debug_actions_world._cmd_reload -- the one reload that calls reload_current_scene() DIRECTLY, bypassing
+	#     the chokepoint above.
+	#   * GameRoot.load_level -- the level-SUBTREE swap (console `warp` / `resurrect`), which frees the speaker
+	#     without reloading the scene at all.
+	# abort() (not a bare _finish()) is the required call: it is the same hard teardown Player.die() uses and is
+	# a documented no-op when nothing is active, so the shipping paths pay nothing.
+	var gs := FileAccess.get_file_as_string("res://managers/GameState.gd")
+	assert_true(gs.contains("DialogueManager.abort()"),
+		"GameState._load_and_reload must abort the conversation before the scene reload -- the autoload-owned box survives the swap and would strand the fresh scene paused behind a freed speaker")
+	# Ordering is load-bearing, exactly as in Player.die(): a conversation SUSPENDED behind a sub-menu holds a
+	# one-shot `closed` -> _resume_from_menu, so sweeping the menus FIRST would re-pause the tree and re-open the
+	# box on the way out. abort() -> _finish() drops that one-shot, so the sweep is clean.
+	assert_true(gs.find("DialogueManager.abort()") < gs.find("InputManager.close_all_modals()"),
+		"the abort must come BEFORE close_all_modals() -- closing a suspended conversation's sub-menu first fires its `closed` one-shot and re-opens the box over the reload")
+	assert_true(FileAccess.get_file_as_string("res://scripts/components/debug_actions_world.gd").contains("DialogueManager.abort()"),
+		"the console's `reload` calls reload_current_scene() directly (not through GameState._load_and_reload), so it must abort the conversation itself")
+	assert_true(FileAccess.get_file_as_string("res://scripts/world/game_root.gd").contains("DialogueManager.abort()"),
+		"GameRoot.load_level frees the level subtree -- and with it the speaker -- so a `warp` mid-conversation must end it too")
+
+
 func test_quest_toast_queue_gates_on_engaged_not_active() -> void:
 	# Source-string contract -- the HUD-side member of the is_engaged()-not-is_active() family above. UI hides
 	# its notices layer for the whole dialogue_started -> dialogue_finished span (nothing listens to

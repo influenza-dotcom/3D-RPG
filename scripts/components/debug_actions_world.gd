@@ -540,8 +540,18 @@ static func _cmd_reload(ctx: Dictionary) -> PackedStringArray:
 	var err := tree.reload_current_scene()
 	if err != OK:
 		return Common._one("reload_current_scene failed (error %d)" % err)
+	# The console is PROCESS_MODE_ALWAYS and open() deliberately does NOT refuse over a conversation ("a stuck
+	# conversation is the single best reason to open a console"), so `reload` is reachable mid-dialogue — and this
+	# is the ONE reload path that does not route through GameState._load_and_reload, which aborts there. Without
+	# this the autoload-owned box rides the swap with a freed `_speaker` and get_tree().paused still TRUE: the
+	# fresh level boots frozen behind it. Aborted AFTER the err check, same rule as the state release below — a
+	# refused reload must not tear down the conversation it left running.
+	var was_talking := DialogueManager.is_engaged()
+	DialogueManager.abort()
 	var out := release_scene_scoped_state(ctx)
 	out.append("reloading the current scene — every debug overlay parented into it is destroyed and must be re-toggled.")
+	if was_talking:
+		out.append("the live conversation was torn down with it — the box is a child of the DialogueManager AUTOLOAD, so it would otherwise have survived the reload over a freed speaker with the tree still paused.")
 	return out
 
 

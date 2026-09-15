@@ -124,6 +124,13 @@ static func resolve_boot_level(exported: LevelData, loaded: bool, saved_path: St
 func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: bool = true) -> void:
 	if data == null or data.scene == null:
 		return
+	# A conversation must not outlive the level that owns its speaker. The box is a child of the DialogueManager
+	# AUTOLOAD, not of the level, so freeing the subtree below leaves `_active` set, `_speaker` freed and the tree
+	# paused — the same half-alive box a raw reload_current_scene used to leave (GameState._load_and_reload and the
+	# console's `reload` abort for the scene-swap twin of this). Unreachable from the SHIPPING callers — boot has no
+	# conversation and a LevelDoor needs an interact key the dialogue freeze eats — so this is here for the debug
+	# console's `warp` / `resurrect`, which run PROCESS_MODE_ALWAYS straight through that pause. No-op when idle.
+	DialogueManager.abort()
 	level = data
 	GameState.set_current_level(data.resource_path)  # record the active level so a save reloads THIS one, not the export
 	var host := _host()
