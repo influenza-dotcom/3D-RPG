@@ -812,7 +812,7 @@ func test_inventory_equip_new_weapon_emits() -> void:
 
 # ---------------------------------------------------------------------------
 # Per-weapon toggles, melee identity, HP/ammo audio pitch, ram, scope/dash
-# gating, slide, and night vision — the systems added in the latest pass.
+# gating, and slide — the systems added in the latest pass.
 # ---------------------------------------------------------------------------
 
 func test_weapon_data_has_behaviour_toggles() -> void:
@@ -891,11 +891,6 @@ func test_player_has_slide_and_bounce_systems() -> void:
 			"player.gd must declare the %s tuning export" % field)
 	assert_true("func _check_bounce" in content,
 		"player.gd must have the pinball _check_bounce")
-
-
-func test_night_vision_action_bound() -> void:
-	assert_true(InputMap.has_action("NightVision"),
-		"The NightVision toggle action must exist in the input map (bound to N by default)")
 
 
 func test_post_process_shader_has_contrast_uniform() -> void:
@@ -989,9 +984,3 @@ func test_dither_strength_setting_defaults_and_clamps() -> void:
 	s.set_dither_strength(-5.0)
 	assert_eq(s.dither_strength, 0.0, "dither_strength clamps to 0.0 (no dither = plain round-to-nearest banding)")
 	s.free()
-
-
-func test_post_process_shader_has_night_vision_uniform() -> void:
-	var content := _read_file("res://resources/shaders/post_process.gdshader")
-	assert_true("uniform float night_vision" in content,
-		"post_process.gdshader must declare the night_vision uniform driven by player.gd")

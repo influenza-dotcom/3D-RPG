@@ -455,7 +455,7 @@ func _pose(player: Node) -> Node:
 ## ⭐ THE OBVIOUS APPROACH IS WRONG HERE, and it cost a whole run to find out. color_depth_qa_shots.gd hides
 ## every CanvasLayer and then re-shows the one carrying the post-process shader. That works there because it only
 ## needs the shader back. It does NOT work for this probe: the post-process ColorRect is a CHILD of the player's
-## UI CanvasLayer (player.gd caches it as `_nv_rect` at "UI/ColorRect"), so the HUD and the shipped look live on
+## UI CanvasLayer (player.gd caches it as `_post_rect` at "UI/ColorRect"), so the HUD and the shipped look live on
 ## ONE layer -- re-showing it brings the minimap, clock, ammo and hotbar straight back, sharp, into every shot.
 ## `hud off` is the seam that already knows this: it hides the layer's visible CanvasItem CHILDREN and explicitly
 ## KEEPS the post-process ColorRect. Re-run before every shot -- a second call re-sweeps non-clobbering, which is

@@ -12,10 +12,6 @@ shader_parameter/bayer_order = 3
 shader_parameter/render_scale = 1584.0
 shader_parameter/grain_amount = 0.05
 shader_parameter/grain_size = 1.0
-shader_parameter/night_vision = 0.0
-shader_parameter/nv_tint = Color(0.25, 1, 0.35, 1)
-shader_parameter/nv_gain = 1.8
-shader_parameter/nv_gamma = 0.55
 
 [sub_resource type="Theme" id="Theme_hp6x6"]
 default_font_size = 100

@@ -83,7 +83,7 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 		"the name label opts out of automatic Control-text translation (player-typed text)")
 
 	# NO POST-PROCESS OVERLAY. A full-rect ColorRect over this takeover used to re-run the HUD's PS1 pass
-	# (borrowing that material), which double-processed the frame AND dragged the low_hp / hurt / night-vision
+	# (borrowing that material), which double-processed the frame AND dragged the low_hp / hurt
 	# / death uniforms across the menu — the screen got darker and less readable the worse your HP was, and it
 	# was the only menu in the game doing it. Pinned so it can't come back per-screen: a menus-wide PS1 pass,
 	# if ever wanted, belongs on the skin as one opt-in for every screen.

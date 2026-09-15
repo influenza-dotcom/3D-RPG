@@ -1036,7 +1036,7 @@ func test_grapple_hook_pending_hit_tethers_plain_world_nodes() -> void:
 
 func test_grapple_action_bound() -> void:
 	# _process/_ready gate ALL grapple behaviour on InputMap.has_action(&"Grapple").
-	# Verified registered in project.godot [input] (bound to G) — mirrors test_night_vision_action_bound.
+	# Verified registered in project.godot [input] (bound to G).
 	assert_true(InputMap.has_action("Grapple"),
 		"The Grapple action must exist in the input map (bound to G) or the grapple never arms")
 

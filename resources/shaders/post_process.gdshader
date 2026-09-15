@@ -68,12 +68,6 @@ uniform vec3 quantize_levels = vec3(0.0);
 uniform float grain_amount : hint_range(0.0, 1.0) = 0.05;
 uniform float grain_size : hint_range(0.1, 10.0) = 1.0;
 
-// --- Night vision (toggled/faded from code: 0 = off, 1 = full) ---
-uniform float night_vision = 0.0;
-uniform vec3 nv_tint : source_color = vec3(0.25, 1.0, 0.35);
-uniform float nv_gain : hint_range(0.5, 4.0) = 1.8;
-uniform float nv_gamma : hint_range(0.2, 1.0) = 0.55;
-
 // --- Hurt flash (spiked from code on taking damage: 0 = none, 1 = full): drains colour toward a
 //     darkened, red-tinted grayscale so a hit reads as the life being knocked out of you. ---
 uniform float hurt : hint_range(0.0, 1.0) = 0.0;
@@ -291,14 +285,7 @@ void fragment() {
     // greys. The channels differ only in how many levels they have to choose between.
     final_color = floor(final_color * steps + threshold) / steps;
 
-    // --- 4. Night vision: lift the darks, amplify, and tint green. Toggled from code. ---
-    if (night_vision > 0.0) {
-        float nv_lum = dot(final_color, vec3(0.299, 0.587, 0.114));
-        nv_lum = clamp(pow(nv_lum, nv_gamma) * nv_gain, 0.0, 1.0);
-        final_color = mix(final_color, nv_lum * nv_tint, night_vision);
-    }
-
-    // --- 4b. Hurt: hard drain to a dark, red-tinted desaturation + a tunnel-vision vignette, so a
+    // --- 4. Hurt: hard drain to a dark, red-tinted desaturation + a tunnel-vision vignette, so a
     //     hit reads as the wind being knocked out of you. Spiked + eased from code. ---
     if (hurt > 0.0) {
         float h_lum = dot(final_color, vec3(0.299, 0.587, 0.114));
@@ -307,7 +294,7 @@ void fragment() {
         final_color = mix(final_color, muted * 0.55, hurt) * vig;
     }
 
-    // --- 4c. Low HP: desaturate + a black vignette that closes in as health drops (sustained). ---
+    // --- 4b. Low HP: desaturate + a black vignette that closes in as health drops (sustained). ---
     if (low_hp > 0.0) {
         float lhp_lum = dot(final_color, vec3(0.299, 0.587, 0.114));
         final_color = mix(final_color, vec3(lhp_lum), low_hp * 0.8);
@@ -315,7 +302,7 @@ void fragment() {
         final_color *= lhp_vig;
     }
 
-    // --- 4c-2. Fall warning: drain the colour out of the world as the drop below you turns lethal. Sits right
+    // --- 4b-2. Fall warning: drain the colour out of the world as the drop below you turns lethal. Sits right
     //     AFTER the low-HP drain on purpose — a wounded player's fall then greys out from an already-drained
     //     frame instead of the two passes fighting over the same pixels — and BEFORE daltonization / contrast /
     //     grain, exactly like `low_hp`, because this is a world colour GRADE and not a cinematic override: the
@@ -331,12 +318,12 @@ void fragment() {
         final_color = mix(final_color, vec3(fg_lum), clamp(fall_grey, 0.0, 1.0));
     }
 
-    // --- 4d. Colorblind correction (daltonization), applied to the finished image. ---
+    // --- 4c. Colorblind correction (daltonization), applied to the finished image. ---
     if (colorblind_mode > 0) {
         final_color = daltonize(final_color, colorblind_mode);
     }
 
-    // --- 4e. Contrast (player setting): scale around mid-gray. Before grain (so grain amplitude stays
+    // --- 4d. Contrast (player setting): scale around mid-gray. Before grain (so grain amplitude stays
     //     consistent) and before the death fade (multiplicative, so black still reaches pure black). ---
     if (contrast != 1.0) {
         final_color = clamp((final_color - 0.5) * contrast + 0.5, 0.0, 1.0);

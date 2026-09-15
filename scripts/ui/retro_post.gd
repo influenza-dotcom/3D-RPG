@@ -5,7 +5,7 @@ extends RefCounted
 ## overlay — the in-game one on the Player's ColorRect (scripts/player/player.gd) and the boot screen's own
 ## copy in scenes/computerroom.tscn — pushes the same six uniforms from the same player Settings through
 ## `apply_dials()`. Anything that is about the PLAYER's state rather than the presentation (low_hp, hurt,
-## night vision, the death fades, the lens bend) stays with its owner; this file is only the part that must
+## the death fades, the lens bend) stays with its owner; this file is only the part that must
 ## look identical everywhere.
 ## @risk THE BOOT SCREEN IS NOT DRIVEN BY THE PLAYER. It is a standalone scene with no Player node, so before
 ## this existed it never received ANY of these — the player's Dithering and Colour Depth rows did nothing on

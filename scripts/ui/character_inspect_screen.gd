@@ -26,8 +26,8 @@ extends CanvasLayer
 ##   1. DOUBLE PASS. The world beneath is already processed by that HUD rect; this overlay sits at layer 121
 ##      ABOVE it and re-reads SCREEN_TEXTURE — so the whole frame (menu included) got posterized, dithered
 ##      and grained a SECOND time. That is the "static/CRT" mush.
-##   2. GAMEPLAY UNIFORMS BLED IN. Sharing the material (deliberately, so death/NV stayed in lock-step) meant
-##      the menu also wore `low_hp`'s vignette, `hurt`'s red tint, night vision's green, and the death fade —
+##   2. GAMEPLAY UNIFORMS BLED IN. Sharing the material (deliberately, so the death fade stayed in lock-step) meant
+##      the menu also wore `low_hp`'s vignette, `hurt`'s red tint, and the death fade —
 ##      i.e. the darker and less readable your character sheet got, the worse your HP was.
 ## No other menu does this: shop/inventory/stats/loot all render un-warped over the processed world, so the
 ## overlay also made this ONE screen inconsistent with the rest of the UI. If a PS1 pass over menus is ever

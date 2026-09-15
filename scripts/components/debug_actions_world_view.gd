@@ -212,8 +212,8 @@ static func _echo_to_surfaces(tree: SceneTree, lines: PackedStringArray) -> void
 ## and bars, the hotbar, the crosshair (a direct child, ui.gd:187-198), the stamina ring / bar, the minimap + clock +
 ## objective tracker, the toast stack, the blood splatter, and every PlayerHud overlay (stealth badge, prompts, enemy
 ## health bar, hit flashes — all `ui.add_child`, player_hud.gd:69-236) — is a DIRECT CHILD of that layer. Nothing HUD-
-## like lives elsewhere. Also on that layer is the post-process ColorRect (colour quantisation / dither / grain /
-## night vision, ui.tscn) — that is the game's LOOK, not the HUD, and it must survive a "clean" frame.
+## like lives elsewhere. Also on that layer is the post-process ColorRect (colour quantisation / dither / grain,
+## ui.tscn) — that is the game's LOOK, not the HUD, and it must survive a "clean" frame.
 ##
 ## Two nodes the HUD ghost (scripts/ui/hud_ghost.gd) adds are the exception that proves the rule, and both fall out
 ## correctly with no wiring here: its `HudGhost` display TextureRect IS a direct CanvasItem child (seated just above
@@ -774,7 +774,7 @@ const GRID_TO_BAYER_ORDER := {0: 0, 2: 1, 4: 2, 8: 3}
 const SHADER_DEFAULT_BAYER_ORDER := 3
 
 ## The ShaderMaterial on the player's post-process ColorRect (`UI/ColorRect` — the same node player.gd caches as
-## `_nv_rect` and drives night vision / hurt / low-HP / the death fade through). Null off-level, on the main menu,
+## `_post_rect` and drives hurt / low-HP / the death fade through). Null off-level, on the main menu,
 ## or if the ColorRect ever loses its material. Kept separate from `_hud_layer` because this is explicitly the
 ## node `hud off` REFUSES to touch: it is the LOOK, not the HUD.
 static func _post_process_material(ctx: Dictionary) -> ShaderMaterial:

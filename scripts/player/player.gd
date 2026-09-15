@@ -97,15 +97,8 @@ var xp: float = 0.0
 var level: int = 0
 
 @onready var white_flash: Sprite3D = $"Head/ScreenShake/Camera3D/white flash"
-@onready var _nv_rect: ColorRect = get_node_or_null("UI/ColorRect")
+@onready var _post_rect: ColorRect = get_node_or_null("UI/ColorRect")
 @onready var _player_emitting_light: OmniLight3D = get_node_or_null("PlayerEmittingLight") as OmniLight3D
-
-## Night vision (NightVision action, N): toggles the post-process `night_vision` look, faded in/out at this
-## rate. This drives the keybind, shader parameter, and options-row state together.
-## How fast the night-vision look fades in/out (per second) — higher = snappier toggle, lower = a slower bleed.
-@export var night_vision_fade_rate: float = 9.0
-var _nv_on: bool = false
-var _nv_t: float = 0.0
 
 @export_group("Health Light")
 ## The player-carried light keeps its scene-authored colour at full HP and blends toward this as HP falls.
@@ -1920,21 +1913,6 @@ func _check_aim_remark(delta: float) -> void:
 		npc.react_remark(AIM_LINES)
 
 
-
-## Toggle the night-vision look (NightVision action, N by default) and fade it in/out by driving the
-## post-process material's `night_vision` uniform. (Restored verbatim from the pre-reorg driver.)
-func _update_night_vision(delta: float) -> void:
-	if Input.is_action_just_pressed(InputManager.action_nightvision):
-		_nv_on = not _nv_on
-	if not _nv_rect:
-		return
-	var mat := _nv_rect.material as ShaderMaterial
-	if not mat:
-		return
-	var target := 1.0 if _nv_on else 0.0
-	_nv_t = lerpf(_nv_t, target, 1.0 - exp(-night_vision_fade_rate * delta))
-	mat.set_shader_parameter("night_vision", _nv_t)
-
 func _setup_health_light() -> void:
 	if _player_emitting_light == null:
 		return
@@ -1983,8 +1961,8 @@ func _update_low_hp(delta: float) -> void:
 	var vis_intensity := 0.0
 	if low_hp_start_frac > 0.0:
 		vis_intensity = clampf((low_hp_start_frac - frac) / low_hp_start_frac, 0.0, 1.0)
-	if _nv_rect:
-		var mat := _nv_rect.material as ShaderMaterial
+	if _post_rect:
+		var mat := _post_rect.material as ShaderMaterial
 		if mat:
 			mat.set_shader_parameter("low_hp", vis_intensity)
 			# THE PRESENTATION DIALS, pushed by the shared helper so the boot screen cannot drift from gameplay
@@ -2070,9 +2048,9 @@ func _update_fall_grey(delta: float) -> void:
 		_fall_grey = target if rate <= 0.0 else lerpf(_fall_grey, target, 1.0 - exp(-rate * delta))
 		if _fall_grey < FALL_GREY_EPSILON:
 			_fall_grey = 0.0
-	if _nv_rect == null:
+	if _post_rect == null:
 		return
-	var mat := _nv_rect.material as ShaderMaterial
+	var mat := _post_rect.material as ShaderMaterial
 	if mat:
 		mat.set_shader_parameter("fall_grey", _fall_grey)
 
@@ -2634,7 +2612,6 @@ func _physics_process(delta: float) -> void:
 			_ground_snap_frames_left = 0
 	coyote_time.tick(delta)
 	gravity(delta)
-	_update_night_vision(delta)
 	_update_save_input()
 	_update_health_regen(delta)  # LIVE branch ONLY (see the header) — and BEFORE the low-HP feedback that reads hp
 	_update_low_hp(delta)
@@ -3750,8 +3727,8 @@ func _death_step(t: float) -> void:
 	# Screen: drain to grayscale over the first 40%, and CLOSE the black vignette over the whole phase so the
 	# darkness sweeps in from the edges and covers the frame by t=1 (death_vignette 1 = full black). death_fade
 	# is left for the spawn fade-UP; the vignette owns the fade-OUT here.
-	if _nv_rect:
-		var mat := _nv_rect.material as ShaderMaterial
+	if _post_rect:
+		var mat := _post_rect.material as ShaderMaterial
 		if mat:
 			mat.set_shader_parameter("death_bw", clampf(t / 0.4, 0.0, 1.0))
 			mat.set_shader_parameter("death_vignette", clampf(t, 0.0, 1.0))
@@ -3956,8 +3933,6 @@ func _respawn_at_checkpoint() -> void:
 		head.reset_pitch()
 	if screen_shake != null:
 		screen_shake.reset()
-	_nv_on = false  # un-toggle night vision so the fresh life starts clear, not mid-fade from the frozen timer
-	_nv_t = 0.0
 	set_physics_process(true)
 	# Hand look/auto-fire input back NOW — control returns on the revive's first frame — but hold the HUD
 	# restore and the respawn receipts back respawn_hud_delay seconds (_schedule_respawn_hud_restore): all of
@@ -4083,9 +4058,9 @@ func _reset_screen_post_process() -> void:
 	# full grey (deliberately: the cinematic's death_bw takes the frame over from there). Nothing would ever write
 	# it back down, so the accumulator and the uniform are both cleared here, before the world fades back up.
 	_fall_grey = 0.0
-	if not _nv_rect:
+	if not _post_rect:
 		return
-	var mat := _nv_rect.material as ShaderMaterial
+	var mat := _post_rect.material as ShaderMaterial
 	if mat == null:
 		return
 	mat.set_shader_parameter("death_bw", 0.0)
@@ -4095,13 +4070,13 @@ func _reset_screen_post_process() -> void:
 	mat.set_shader_parameter("fall_grey", 0.0)
 
 ## Show the death card (the line composed in die() from the killer + weapon) over the now-black screen. Created
-## lazily as a child of the post-process overlay (the parent of _nv_rect = the `ui` CanvasLayer), added AFTER the
+## lazily as a child of the post-process overlay (the parent of _post_rect = the `ui` CanvasLayer), added AFTER the
 ## ColorRect so it draws ON TOP of the fade-to-black. die() hides the HUD via ui.hide_hud_for_death(), which
 ## spares this ColorRect (and anything added to the layer after, like this card) — so both the fade AND the card
 ## render. Starts transparent (the sequence fades it in); a blank line (an unattributed death with death_message
-## left "") shows nothing; off-tree (_nv_rect null) it no-ops.
+## left "") shows nothing; off-tree (_post_rect null) it no-ops.
 func _show_death_card() -> void:
-	if _death_card_text == "" or _nv_rect == null:
+	if _death_card_text == "" or _post_rect == null:
 		return
 	var fb := GameSettings.player_feedback
 	if _death_card == null:
@@ -4115,7 +4090,7 @@ func _show_death_card() -> void:
 		_death_card.offset_left = 24.0
 		_death_card.offset_right = -24.0
 		_death_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_nv_rect.get_parent().add_child(_death_card)  # same overlay as the fade -> drawn on top (added after it)
+		_post_rect.get_parent().add_child(_death_card)  # same overlay as the fade -> drawn on top (added after it)
 	_death_card.text = _death_card_text
 	_death_card.add_theme_color_override(&"font_color", fb.death_message_color)
 	_death_card.add_theme_font_size_override(&"font_size", fb.death_message_size)
@@ -4144,9 +4119,9 @@ func _fade_in_from_black() -> void:
 	if _intro_armed:
 		_intro_armed = false
 		_arm_sky_title()  # the in-sky title drop, on the game-start timeline (lines up with the spawn fade-in)
-	if _nv_rect == null:
+	if _post_rect == null:
 		return
-	var fade_mat := _nv_rect.material as ShaderMaterial
+	var fade_mat := _post_rect.material as ShaderMaterial
 	if fade_mat == null:
 		return
 	fade_mat.set_shader_parameter("death_fade", 1.0)

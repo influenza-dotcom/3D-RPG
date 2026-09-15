@@ -51,8 +51,6 @@ var action_light: StringName = &"Light"
 var action_grapple: StringName = &"Grapple"
 ## Run modifier (default Shift): HOLD to move at full speed while stamina allows. Polled by the Player movement loop.
 var action_run: StringName = &"Run"
-## Night-vision toggle (default N): flips the night-vision post-process look. Polled by the Player.
-var action_nightvision: StringName = &"NightVision"
 ## AIR DASH (default Left Alt): TAP to fling yourself where you are LOOKING — the Cruelty-Squad launch, now its
 ## own verb instead of the old "ADS with the knife and swing" gesture. Polled by the AirDash ability
 ## (scripts/components/abilities/air_dash.gd), which owns the impulse, the stamina cost and the one-per-airtime

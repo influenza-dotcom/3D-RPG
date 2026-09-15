@@ -3,7 +3,7 @@
 A single-player FPS/RPG prototype built in **Godot 4.7**. The stylised look —
 a selectable colour depth (24-bit down to 3-bit, with the PlayStation's own
 15-bit RGB555 on the list) resolved through an ordered Bayer dither, film
-grain, night vision, a Borderlands-style black ink outline over every surface,
+grain, a Borderlands-style black ink outline over every surface,
 and PS1-style material warping — rides on a dense first-person movement and
 combat sandbox. It **presents at native resolution by default** (Options ->
 Video -> Presentation: *Crisp*, the HIGH FIDELITY mode in code and the other docs — crisp text, native-res world, the
@@ -103,7 +103,6 @@ the current `LevelData` as the runtime `Level` child. Run levels through
 | Cycle the HUD minimap's zoom | `K` |
 | Mark waypoint — instantly pins what you are looking at (or where you stand) and makes it the pin you are tracking | `X` |
 | Flashlight | `L` |
-| Night vision | `N` |
 | Weapon slots | number keys |
 | Quicksave / quickload | `F5` / `F9` |
 | Manual save slots | in-game **Esc → Save / Load**; start menu **Load Game** |

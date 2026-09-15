@@ -32,8 +32,8 @@ func trigger() -> void:
 
 ## Drive both the screen-drain uniform and the master-bus duck from one 0..1 amount.
 func set_amount(amount: float) -> void:
-	if host._nv_rect:
-		var mat := host._nv_rect.material as ShaderMaterial
+	if host._post_rect:
+		var mat := host._post_rect.material as ShaderMaterial
 		if mat:
 			mat.set_shader_parameter("hurt", amount)
 	if _hurt_lpf:

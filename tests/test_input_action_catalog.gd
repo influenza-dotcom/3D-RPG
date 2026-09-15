@@ -4,8 +4,8 @@ extends GutTest
 ## InputManager `action_*` code vars, and resources/input/ActionCatalog.tres (the rebind UI + the drift source of
 ## truth). InputManager's header used to claim it was the "one place" for action names, but ActionCatalog is the
 ## canonical rebindable list. These pin: every InputManager var names a real InputMap action; every rebindable catalog
-## action is a real InputMap action; every rebindable InputManager var is covered by the catalog; and Run /
-## NightVision (once polled by bare literal with NO var) are now canonicalized.
+## action is a real InputMap action; every rebindable InputManager var is covered by the catalog; and Run
+## (once polled by bare literal with NO var) is now canonicalized.
 
 const CATALOG_PATH := "res://resources/input/ActionCatalog.tres"
 
@@ -60,12 +60,10 @@ func _keycodes_for(action: StringName) -> Array:
 	return codes
 
 
-func test_run_and_nightvision_are_canonicalized() -> void:
-	# M4: Run + NightVision are code-polled actions and must stay behind InputManager vars.
+func test_run_is_canonicalized() -> void:
+	# M4: Run is a code-polled action and must stay behind an InputManager var.
 	assert_eq(InputManager.action_run, &"Run", "action_run canonicalizes the Run action")
-	assert_eq(InputManager.action_nightvision, &"NightVision", "action_nightvision canonicalizes the NightVision action")
 	assert_true(InputMap.has_action(&"Run"), "Run is a real InputMap action")
-	assert_true(InputMap.has_action(&"NightVision"), "NightVision is a real InputMap action")
 
 
 func test_run_defaults_to_shift_and_crouch_to_ctrl() -> void:
