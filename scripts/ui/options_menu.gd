@@ -200,8 +200,8 @@ func _unhandled_input(event: InputEvent) -> void:
 ##    %Root's LAST child so it draws on top of the panel). Quit Game only ARMS it; nothing kills the
 ##    process but its Confirm, so a misclick at the end of the bottom row is no longer fatal. Cancel and
 ##    Escape (_unhandled_input) both dismiss. Both captions are static consts, so the card never reflows;
-##    style_compact_card pins %QuitCard to skin.dialog_width (the make_dialog discipline) and keeps the
-##    card on the PLAIN generated panel — it stands under the artist screen-card art's 9-patch floor.
+##    style_compact_card pins %QuitCard to skin.dialog_width (the make_dialog discipline) and dresses the
+##    card in skin.compact_panel (the small-card bake — it stands under the screen-card art's 9-patch floor).
 func _bind_ui() -> void:
 	_root = %Root
 	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/sliders/tabs/tooltips/fonts) — reskin via resources/ui/menu_skin.tres; also sound-wires the authored buttons

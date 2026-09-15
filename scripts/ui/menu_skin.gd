@@ -361,10 +361,19 @@ extends Resource
 ## The tooltip card — BOTH the custom in-viewport cursor tip and native theme tooltips (default: a
 ## near-black bordered panel).
 @export var tooltip_panel: StyleBox
+## The COMPACT utility-card panel — the quit-confirm / TOS-nag / overwrite-confirm popups, adopted through
+## MenuStyle.style_compact_card. Its OWN slot because these cards stand ~90-140px: the screen-card art in
+## panel_style is nearly all torn border at that height, so they need a SMALL bake (the shipped skin wears
+## the tooltip's tip-scale panel with card-sized content margins). null = the generated flat panel
+## (make_plain_panel_style: panel_color + border) — which is NEAR-BLACK, and since the shipped palette
+## inks text for the light parchment, a null here on an art skin puts dark ink on a dark box and the card
+## reads as having no background at all (the 2026-09-14 quit-confirm report). Fill it whenever text_color
+## is authored for a light panel.
+@export var compact_panel: StyleBox
 ## The DIALOGUE box's background (the bottom conversation panel, DialogueView). Its OWN slot rather than
 ## the theme panel on purpose: this box is short and very wide (~632x160 on the 792x444 canvas) and floats
 ## over the 3D world, so the full screen-card art in panel_style would drown it — the same reason compact
-## confirm cards take make_plain_panel_style. null = the box keeps its background-LESS look: outlined text
+## confirm cards take their own compact_panel slot. null = the box keeps its background-LESS look: outlined text
 ## straight over the world, with only the response menu backed by the plain generated panel (what it wore
 ## before any art landed, and still the fallback for an art-less skin).
 ## ⚠ Art with a TRANSPARENT cut-out (the shipped notch in the bottom-left corner) only survives 9-patching

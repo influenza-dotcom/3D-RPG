@@ -172,7 +172,7 @@ func _update_scroll_state() -> void:
 func _bind_nag() -> void:
 	_nag_root = %NagRoot
 	MenuStyle.style_dim(%NagDim)
-	MenuStyle.style_compact_card(%NagCard)  # fixed-width card + PLAIN panel (too short for the artist screen-card art)
+	MenuStyle.style_compact_card(%NagCard)  # fixed-width card + skin.compact_panel (too short for the screen-card art)
 	MenuStyle.style_button_row(%NagButtons)
 
 	var back: Button = %BackButton

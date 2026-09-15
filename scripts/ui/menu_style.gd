@@ -311,9 +311,10 @@ func style_dialog_card(vbox: VBoxContainer, extra_sep: int = 0) -> void:
 	vbox.add_theme_constant_override("separation", skin.content_separation + extra_sep)
 
 ## The GENERATED flat panel (skin.panel_color + border + panel_content_margin), built regardless of any
-## artist panel_style art. For surfaces the big screen-card art cannot serve: COMPACT utility cards, where
-## the art's heavy torn borders (~76px of a ~106px popup's height) drown the content, and solid legibility
-## backings (the dialogue choice list). Everything else wears the theme panel.
+## artist panel_style art. For surfaces the big screen-card art cannot serve: COMPACT utility cards on a
+## skin with no compact_panel art (the art's heavy torn borders — ~76px of a ~106px popup's height — would
+## drown the content), and solid legibility backings (the map pin card). Everything else wears the theme
+## panel. ⚠ NEAR-BLACK: pair it with a light ink, never the shipped parchment text_color.
 func make_plain_panel_style() -> StyleBoxFlat:
 	var m: int = skin.panel_content_margin
 	return _flat(skin.panel_color, skin.panel_border_width, skin.panel_border_color, skin.panel_corner_radius, m, m)
@@ -361,15 +362,18 @@ func _dialogue_choice_bed(bg: Color, rule: Color, gutter_px: int) -> StyleBoxFla
 	return sb
 
 ## Adopt a COMPACT confirm card (title + one button row — the quit-confirm / TOS-nag / overwrite-confirm
-## popups): style_dialog_card's width pin PLUS the plain generated panel on the card's PanelContainer
-## parent. These cards stand ~105-140px — at that scale the artist screen-card art is nearly all torn
-## border, so utility popups keep the plain look by design (and stay visually distinct from real screens).
+## popups): style_dialog_card's width pin PLUS the skin's compact_panel art on the card's PanelContainer
+## parent (the _pick rule: the artist's small-card bake when the skin carries one, else the plain generated
+## panel). These cards stand ~90-140px — at that scale the theme's screen-card art is nearly all torn
+## border, which is why they never wear panel_style. ⚠ The plain fallback is NEAR-BLACK (panel_color), so an
+## art skin whose text_color inks for light parchment MUST fill compact_panel — the shipped skin left it
+## empty until 2026-09-14 and the quit confirm's dark title on the dark box read as "no background".
 ## Structural contract: `card` is the direct VBox child of the card's PanelContainer (the authored
 ## Root/…/Panel>Card shape all three adopters share).
 func style_compact_card(card: VBoxContainer, extra_sep: int = 0) -> void:
 	var panel := card.get_parent() as PanelContainer
 	if panel != null:
-		panel.add_theme_stylebox_override(&"panel", make_plain_panel_style())
+		panel.add_theme_stylebox_override(&"panel", _pick(skin.compact_panel, make_plain_panel_style()))
 	style_dialog_card(card, extra_sep)
 
 ## Adopt an authored title Label: title font/size/colour + ellipsis. Does NOT touch

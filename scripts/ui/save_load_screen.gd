@@ -208,7 +208,7 @@ func _bind_ui() -> void:
 	# Escape (_unhandled_input) both dismiss. Both captions are static consts, so the card never reflows.
 	_confirm = %Confirm
 	MenuStyle.style_dim(%ConfirmDim)
-	MenuStyle.style_compact_card(%ConfirmCard)  # width pin + PLAIN panel (the card is shorter than the artist screen-card art's margins)
+	MenuStyle.style_compact_card(%ConfirmCard)  # width pin + skin.compact_panel (the card is shorter than the screen-card art's margins)
 	var confirm_title: Label = MenuStyle.cap_label(%ConfirmTitle)
 	MenuStyle.style_title(confirm_title)
 	confirm_title.text = MenuStyle.title_text(PlayerText.SAVE_LOAD_OVERWRITE_TITLE)

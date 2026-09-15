@@ -125,6 +125,21 @@ expand_margin_top = 3.0
 expand_margin_right = 3.0
 expand_margin_bottom = 3.0
 
+[sub_resource type="StyleBoxTexture" id="sb_compact_panel"]
+content_margin_left = 22.0
+content_margin_top = 16.0
+content_margin_right = 22.0
+content_margin_bottom = 18.0
+texture = ExtResource("15_tip")
+texture_margin_left = 12.0
+texture_margin_top = 12.0
+texture_margin_right = 12.0
+texture_margin_bottom = 14.0
+expand_margin_left = 3.0
+expand_margin_top = 3.0
+expand_margin_right = 3.0
+expand_margin_bottom = 3.0
+
 [resource]
 script = ExtResource("1")
 panel_style = SubResource("sb_panel")
@@ -144,6 +159,7 @@ button_font_pressed_color = Color(0.42, 0.28, 0.08, 1)
 button_font_focus_color = Color(0.12, 0.11, 0.08, 1)
 button_font_disabled_color = Color(0.38, 0.36, 0.3, 1)
 tooltip_panel = SubResource("sb_tooltip")
+compact_panel = SubResource("sb_compact_panel")
 dialogue_panel = SubResource("sb_dialogue")
 dialogue_panel_enabled = false
 hover_sound = ExtResource("3_hover")

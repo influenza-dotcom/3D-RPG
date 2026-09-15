@@ -2462,9 +2462,12 @@ casts nothing above its body and spills equally either side); artist workflow in
 
 Two art slots deliberately do NOT flow through the Theme, and a consumer must read them
 by name: `panel_style` does (it IS the theme `Panel`/`PanelContainer` box), but the
-COMPACT confirm cards ask for `MenuStyle.make_plain_panel_style()` instead because the
-screen-card art is nearly all torn border at popup scale — and `dialogue_panel` (the
-bottom conversation box) has no theme entry at all. `DialogueView._build_ui` reads it
+COMPACT confirm cards wear `MenuSkin.compact_panel` through `MenuStyle.style_compact_card`
+instead, because the screen-card art is nearly all torn border at popup scale (an empty
+slot falls back to the near-black `make_plain_panel_style()` — which on the shipped
+parchment-ink skin put a dark title on a dark box, the 2026-09-14 "quit game menu has no
+bg" report; the shipped skin now fills the slot with the tip-scale panel bake) — and
+`dialogue_panel` (the bottom conversation box) has no theme entry at all. `DialogueView._build_ui` reads it
 through `MenuStyle.make_dialogue_panel_style()`, which returns **null** when the slot is
 empty OR gated off by `MenuSkin.dialogue_panel_enabled` — the SHIPPED state since the
 08-24 box-less dialogue pass: the slot keeps the artist's authored art (and its tests /

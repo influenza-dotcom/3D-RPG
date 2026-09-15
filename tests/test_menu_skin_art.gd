@@ -39,7 +39,7 @@ func test_skin_exposes_every_artist_art_slot() -> void:
 			"line_edit_normal", "line_edit_focus", "meter_background", "meter_fill",
 			"tab_selected", "tab_unselected", "tab_hovered",
 			"scrollbar_track", "scrollbar_grabber", "scrollbar_width", "scrollbar_track_color",
-			"scrollbar_grabber_color", "separator_style", "tooltip_panel", "dialogue_panel"]:
+			"scrollbar_grabber_color", "separator_style", "tooltip_panel", "compact_panel", "dialogue_panel"]:
 		assert_true(field in s, "MenuSkin exposes artist slot %s" % field)
 	s = null
 
@@ -303,6 +303,16 @@ func test_shipped_skin_carries_the_button_frame_art() -> void:
 	assert_true(shipped.tooltip_panel is StyleBoxTexture, "tooltip_panel carries the tip-scale panel art")
 	if shipped.tooltip_panel is StyleBoxTexture:
 		assert_not_null((shipped.tooltip_panel as StyleBoxTexture).texture, "tip art has its PNG assigned")
+	# The COMPACT confirm cards (quit-confirm / TOS-nag / overwrite-confirm) wear that same tip-scale bake at
+	# card content margins. This slot MUST be filled on the shipped skin: its fallback is the near-black
+	# generated panel, and the shipped text_color is parchment ink — the 2026-09-14 "quit game menu has no
+	# bg" report was exactly a dark title on that dark box.
+	assert_true(shipped.compact_panel is StyleBoxTexture, "compact_panel carries the small-card panel art")
+	if shipped.compact_panel is StyleBoxTexture:
+		var compact := shipped.compact_panel as StyleBoxTexture
+		assert_not_null(compact.texture, "compact-card art has its PNG assigned")
+		assert_true(compact.content_margin_left >= 16.0 and compact.content_margin_top >= 12.0,
+			"the compact card pads its title/button row wider than a one-line tooltip does")
 	for sb in boxes:
 		if sb is StyleBoxTexture:
 			assert_eq(Vector2((sb as StyleBoxTexture).expand_margin_left, (sb as StyleBoxTexture).expand_margin_bottom),
@@ -317,6 +327,25 @@ func test_shipped_skin_carries_the_button_frame_art() -> void:
 	for state_knob in ["button_font_color", "button_font_hover_color", "button_font_pressed_color",
 			"button_font_focus_color", "button_font_disabled_color"]:
 		assert_gt((shipped.get(state_knob) as Color).a, 0.0, "%s is authored for the opaque body" % state_knob)
+
+
+func test_compact_card_wears_the_skin_art_and_falls_back_to_the_plain_panel() -> void:
+	# style_compact_card's panel rule: an authored compact_panel lands on the card's PanelContainer parent
+	# (as a DUPLICATE, the _pick rule), and an empty slot keeps the generated near-black flat panel — the
+	# pre-art look a bare skin must still produce.
+	var panel := PanelContainer.new()
+	var card := VBoxContainer.new()
+	panel.add_child(card)
+	_ms.style_compact_card(card)
+	assert_true(panel.get_theme_stylebox(&"panel") is StyleBoxFlat,
+		"an empty compact_panel slot falls back to the generated flat panel")
+	var art := StyleBoxTexture.new()
+	_ms.skin.compact_panel = art
+	_ms.style_compact_card(card)
+	var worn: StyleBox = panel.get_theme_stylebox(&"panel")
+	assert_true(worn is StyleBoxTexture, "an authored compact_panel dresses the card's PanelContainer")
+	assert_ne(worn, art, "the card wears a duplicate, never the skin's own StyleBox instance")
+	panel.free()
 
 
 func test_dialogue_panel_slot_is_null_by_default_and_hands_out_duplicates() -> void:
@@ -494,7 +523,7 @@ func test_shipped_art_bakes_its_drop_shadow_straight_down() -> void:
 	var shipped: MenuSkin = load("res://resources/ui/menu_skin.tres")
 	assert_not_null(shipped, "the shipped skin loads")
 	var cases := [
-		[shipped.panel_style, "panel"], [shipped.tooltip_panel, "tooltip"],
+		[shipped.panel_style, "panel"], [shipped.tooltip_panel, "tooltip"], [shipped.compact_panel, "compact card"],
 		[shipped.button_normal, "button normal"], [shipped.button_hover, "button hover"],
 		[shipped.button_pressed, "button pressed"], [shipped.dialogue_panel, "dialogue"],
 	]
