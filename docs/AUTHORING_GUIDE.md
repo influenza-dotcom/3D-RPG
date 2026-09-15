@@ -593,6 +593,38 @@ fine — the rule above is about **closed solids**, where the back faces are pur
 through the near side's holes" volume, so flipping it is a real look change, not a free win. Evaluate it on its
 own if tree flicker ever comes up.
 
+### Overlapping brushes that flicker (z-fighting) — `BrushZFightClean`
+
+**The symptom:** a floor or a wall strobes between two textures as you move, worst within ~20 m. **The cause:**
+two brushes interpenetrate, so two faces sit on the same plane facing the same way — a slab laid over a slab, a
+wall butted through a wall, a building sunk into the ground. Both draw at identical depth, the winner is whatever
+the rounding says that frame, and the PS1 vertex snap re-rolls it every frame the camera moves. `alive.map` had
+407 such triangle pairs (~1,500 m², the biggest a 122 m² floor-on-floor slab); most are undersides nobody sees,
+the visible ones are the up-facing floors (~180 m²) and the walls (~55 m²). (func_godot's own
+`_cull_interior_faces` worldspawn key does NOT help: it only removes opposite-facing flush caps, which back-face
+culling already hides.)
+
+**You do not have to fix them by hand, or author anything.** Every level whose root carries `LevelRoot` gets the
+fix automatically: the root's **`clean_brush_zfights`** toggle (on by default) spawns a `BrushZFightClean`
+(`scripts/components/brush_zfight_clean.gd`, a plain `Node`) at load; untick it to let that level fight again.
+Drop the `Node` under the root by hand only when you want its knobs (the root then spawns none), or in a scene
+whose root is not a `LevelRoot`. It resolves every overlap at load: it buckets the map's opaque triangles by plane, picks a stable LOSER for each overlapping pair
+and clips the overlapped region out of it, so one texture shows, steadily, in every overlap — the picture a hand
+fix would give. About a quarter of a second on `alive.map`, once, inside the load. It rebuilds the touched
+`MeshInstance3D`'s `ArrayMesh` in memory only: the saved scene, the editor, collision and the navmesh bake never
+see it, and a func_godot rebuild needs no re-authoring.
+
+**Who loses** (the one judgement it makes for you): a material named in `loser_surfaces` (default `sky`) always
+loses; otherwise the LARGER triangle loses, so a detail placed on a slab shows over the slab; two identical faces
+keep the earlier one. If one overlap comes out showing the wrong texture, that is the brush to separate in
+TrenchBroom — tick `verbose` and the Output lists the five biggest overlaps with world positions and both
+materials, or call `overlap_report(level_root, 20)` for a longer list.
+
+**It will not touch:** transparent / cutout surfaces (their flicker is the Cull Mode problem above, and
+`SeeThroughBrushes` reads them), opposite-facing flush caps (culling hides those), authored prop meshes (only
+`FuncGodotMap` output is scanned), and faces further apart than `plane_tolerance` (1 mm — a real step is never
+that thin). `enabled` off = the level fights again, without deleting the node.
+
 ### Seeing and shooting through cutout brushes (fences, grates, foliage) — `SeeThroughBrushes`
 
 Those same Alpha-Scissor brushes used to make NPCs **blind**, and used to stop rounds nothing should stop.

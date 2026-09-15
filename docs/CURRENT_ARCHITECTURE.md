@@ -1979,6 +1979,27 @@ the saved `.tscn`, the editor and the navmesh bake never see it, and a func_godo
 rebuild needs no re-authoring. Put the node under the LEVEL ROOT, never under
 `FuncGodotMap`: a rebuild deletes everything func_godot generated.
 
+**Brush z-fighting is resolved at load, not authored away — `BrushZFightClean`**
+(`scripts/components/brush_zfight_clean.gd`, a plain `Node`; `LevelRoot._ready` spawns
+one under every level at runtime while `clean_brush_zfights` is on — the default — and a
+hand-placed one under the root suppresses the spawn). Interpenetrating brushes put two same-facing faces on one plane;
+they draw at identical depth and the PS1 vertex snap re-rolls the winner every frame. The
+component harvests every opaque triangle of every `FuncGodotMap` mesh, buckets by plane,
+resolves each overlapping pair with a stable loser rule (`loser_surfaces` → the larger
+triangle → the earlier face) and clips the overlap out of the loser with a convex split,
+then assigns the touched `MeshInstance3D` a new `ArrayMesh` with the same surfaces,
+materials, names and vertex format (new corners are barycentric blends). Measured on
+`alive.map`: 407 triangle pairs / ~1,500 m² → 0 in ~230 ms; a second pass is a no-op.
+
+⭐**Contracts:** RUNTIME-ONLY like `SeeThroughBrushes` — the saved `.tscn`, the editor,
+collision shapes and the navmesh bake are untouched, and a func_godot rebuild needs no
+re-authoring (nothing keys on brush order or node names). It runs in `_ready`, so it
+precedes `Ps1Warp.cover()` (which reads `get_active_material` per surface — preserved by
+the rebuild), and it touches only OPAQUE surfaces, so `SeeThroughBrushes`'
+transparent-surface vertex harvest sees the original arrays. Pinned by
+`tests/test_brush_zfight_clean.gd` (loser rule, exact clipped area, attribute
+interpolation, winding, the skips, idempotence).
+
 ### Darkness stealth — the `light_exposure` seam
 
 Shadow-slows-detection is a one-field duck-typed contract, not a subsystem.

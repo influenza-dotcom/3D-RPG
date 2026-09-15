@@ -2,11 +2,34 @@
 class_name LevelRoot
 extends Node3D
 
-## The root script for a LEVEL scene (the Node GameRoot loads as the "Level" child). At RUNTIME it's a no-op — it
-## exists purely so the EDITOR can tell you, right in the inspector, whether the level has everything it needs to
-## actually work: a sky StarSky can repaint, a navmesh region + geometry to bake from, and at least one PlayerSpawn
-## for GameRoot to drop the player on. Start a new level by duplicating `scenes/levels/LevelTemplate.tscn` (or
-## File -> Run `scripts/tools/new_level.gd`) — it comes pre-wired, so this validator stays quiet until you break it.
+## The root script for a LEVEL scene (the Node GameRoot loads as the "Level" child). In the EDITOR it tells you,
+## right in the inspector, whether the level has everything it needs to actually work: a sky StarSky can repaint, a
+## navmesh region + geometry to bake from, and at least one PlayerSpawn for GameRoot to drop the player on. Start a
+## new level by duplicating `scenes/levels/LevelTemplate.tscn` (or File -> Run `scripts/tools/new_level.gd`) — it
+## comes pre-wired, so this validator stays quiet until you break it. At RUNTIME it does exactly ONE thing: spawn
+## the brush z-fight pass (`clean_brush_zfights`, below) so overlapping brushes never need a hand fix.
+
+## RUNTIME: spawn a `BrushZFightClean` under this level on load (see `scripts/components/brush_zfight_clean.gd`)
+## so every level gets the overlapping-brush z-fight fix without authoring a node. Untick to let this level's
+## overlapping brushes fight again. A `BrushZFightClean` you drop under the root BY HAND (for its per-level knobs)
+## suppresses the spawn — it runs itself.
+@export var clean_brush_zfights: bool = true
+
+const _ZFightClean := preload("res://scripts/components/brush_zfight_clean.gd")
+
+
+func _ready() -> void:
+	if Engine.is_editor_hint() or not clean_brush_zfights:
+		return
+	for c in get_children():
+		if c.get_script() == _ZFightClean:
+			return   # authored by hand: it already ran (children ready before their parent)
+	var cleaner: Node = _ZFightClean.new()
+	cleaner.name = "BrushZFightClean"
+	add_child(cleaner)   # its _ready scans THIS level; the brush meshes are children, so they are in-tree by now
+	var rep: Dictionary = cleaner.last_report
+	if OS.is_debug_build() and rep.get("pairs", 0) > 0:
+		print("LevelRoot: BrushZFightClean resolved %d overlapping brush face pair(s) over %.1f m² in %d ms" % [rep.pairs, rep.area_m2, rep.ms])
 
 ## EDITOR ACTION: tick to BAKE this level's NavigationRegion3D and immediately re-check it — closing the bake->audit
 ## loop in one click (instead of Bake, then File -> Run audit_navmesh.gd). Prints the island/elevated/climb verdict

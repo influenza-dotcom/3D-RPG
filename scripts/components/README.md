@@ -205,6 +205,25 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
   rebuilding the map deletes every node func_godot generated. It scans its parent's whole subtree, so one
   component covers the level. Knobs: `extra_surfaces` / `opaque_surfaces` (override the material answer per
   texture — e.g. put foliage cards back to solid cover), `vertex_tolerance`, `verbose`.
+- **`BrushZFightClean`** (`brush_zfight_clean.gd`, `extends Node`) — kills the z-fight strobe between
+  INTERPENETRATING brushes at load, so overlapping brushes need no hand fix. Two same-facing faces on one plane
+  draw at identical depth and the PS1 vertex snap re-rolls the winner every frame. It harvests every opaque
+  triangle of every `FuncGodotMap` mesh, buckets them by plane, picks a stable loser per overlapping pair (a
+  `loser_surfaces` material — default `sky` — always loses; else the LARGER triangle, so detail shows over slab;
+  identical faces keep the earlier one) and clips the overlap out of it with a convex split, then hands the
+  touched `MeshInstance3D` a NEW `ArrayMesh` — same surfaces, materials, names and vertex format; new corners are
+  barycentric blends of the original three, so UVs, normals and tangents stay exact and winding is preserved.
+  ~0.25 s on `alive.map` (407 triangle pairs, ~1,500 m² → 0), once, in `_ready`; a second pass is a no-op.
+  **Invariants:** runtime-only (not `@tool`) — the saved scene, the editor, collision shapes and the navmesh bake
+  never see it; TRANSPARENT / cutout surfaces are never touched (they render in their own pass, and
+  `SeeThroughBrushes` harvests their vertices from the original arrays); opposite-facing caps are never touched
+  (culling already hides them); only `FuncGodotMap` output is scanned, never authored props. **Nobody authors
+  it:** `LevelRoot._ready` spawns one under every level at runtime (`clean_brush_zfights`, default on); a
+  hand-placed one under the root suppresses the spawn and is how you reach the knobs. Under the LEVEL ROOT,
+  never under `FuncGodotMap`. Knobs: `loser_surfaces`, `plane_tolerance` (1 mm), `min_area`,
+  `verbose` (prints the five biggest overlaps with world positions and both materials — the list to walk in
+  TrenchBroom if you would rather separate the brushes). `overlap_report(root, top_n)` is the census,
+  `last_report` the tally. Pinned by `tests/test_brush_zfight_clean.gd`.
 
 ### Adding a new interactable type
 
