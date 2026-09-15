@@ -190,6 +190,7 @@ has to hunt through the tools that make files.
 | **Dialogue** | Edit a conversation's lines, choices, gates and consequences. |
 | **Barks** | Write the lines NPCs shout in combat and reaction — one bark per line. |
 | **Text** | Edit every player-facing name and description in one searchable list. |
+| **UI Copy** | Edit the HUD, prompt, toast and menu wording that lives in `player_text.gd` — without opening it. |
 
 Type a name into a **New** row and press its button: it writes ONE seeded `.tres` into the right folder (the id is
 the file name), refuses to overwrite anything, opens the result in the Inspector and arms **Edit**. The rows are
@@ -361,11 +362,12 @@ its own minimum small: one action bar and one status line stay put, and everythi
 | **Quests** | *Save Quest* | that one quest file. |
 | **Loot** | *Save Loot Table* | that one loot table file. |
 | **Barks** | *Save Barks* | that one bark set file. |
+| **UI Copy** | *Save UI Copy (N)* | only the changed lines, inside `scripts/ui/player_text.gd`. The one tab that edits a script. |
 | **Text** | *Save Changed Text (N)* | only the files you actually edited, and inside them only the fields you changed. |
 | **Factions** | *Save Factions (N)* | every faction whose cells you changed. **Cell edits alone write nothing** — the grid stages them. *Restore Last Backup* is the other writer: it copies each faction's `.bak` back over its file. |
 | **Audit** | *Fix (N)* | the files in the plan, after it shows you the list and you confirm. |
 
-**The `.bak` rule.** Every one of those *overwriting* saves — the five editors, Factions, and Audit's Fix — copies
+**The `.bak` rule.** Every one of those *overwriting* saves — the six editors, Factions, and Audit's Fix — copies
 the file's previous bytes to **`<file>.bak`** beside it first. That is a one-deep on-disk undo: rename the `.bak`
 back over the file and you have the previous version. A first-ever save makes no `.bak` (there was nothing to
 preserve), a second save on the same file **overwrites** the `.bak` you already had, and `.bak` files are
@@ -438,6 +440,13 @@ problems; they change nothing.
   objectives are done — untick it to author a hand-in step. A quest marker only renders in a level carrying a
   `QuestMarkerSync` node; today that is `LevelTemplate.tscn` alone, so a marker on an older level is silently
   invisible.
+- **Wording that lives in code is not in the Text tab either — it is in UI Copy.** Several hundred HUD labels,
+  prompts, toasts and menu lines are constants in `scripts/ui/player_text.gd`, and the **UI Copy** tab edits them
+  in place: pick a line, retype it, press *Save UI Copy*. It checks each changed line before writing (never empty,
+  never naming a script file, `[PH]` keeps its space, and every `{token}` survives — a dropped token renders as
+  nothing rather than erroring), keeps a `.bak`, and only ever replaces the quoted value of a constant. It also
+  lists the lines written *inside* functions, which it cannot edit: those need a programmer to lift them into
+  named constants first.
 - **Text nested in arrays is not in the Text tab.** Quest objectives, dialogue lines and bark lists stay in
   **Quests** / **Dialogue** / **Barks**; Text handles the flat, top-level fields (item names + descriptions, stat titles +
   blurbs, status-effect and perk text, quest titles/descriptions, and faction / NPC / level names). What appears

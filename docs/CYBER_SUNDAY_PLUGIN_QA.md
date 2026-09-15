@@ -470,6 +470,39 @@ Acceptance:
 - Text nested inside ARRAYS (quest objectives, dialogue lines, bark lists) is out
   of scope here — it stays in the **Quest Edit** / **Dialogue Edit** / **Bark Edit** tabs.
 
+## UI Copy Editor
+
+The ONLY tab that rewrites a `.gd` file. It edits the single-line string
+constants in `scripts/ui/player_text.gd` and nothing else.
+
+- Read-only until **Save UI Copy (N)**. The count is the number of changed lines.
+- The whole batch is VALIDATED before any of it is written, and a single bad line
+  refuses the entire save. A partial write of a batch leaves the file in a state
+  the writer did not ask for and cannot identify, and the `.bak` is one deep.
+- The five rules, each mirroring an assertion in `tests/test_player_text.gd`
+  except the last, which no test can catch: never empty; never names a `.gd`
+  file; a value starting `[PH]` keeps its space; every `{token}` in the old value
+  survives into the new one (`TextFormat.subst` is replace-based, so a dropped
+  token renders as NOTHING rather than erroring); the count of legacy `%` slots
+  is unchanged.
+- Only the quoted VALUE of a matched `const NAME := "..."` line is replaced.
+  Names are never renamed, lines are never reordered, and the rewrite is
+  LINE-INDEXED, so a line that is not a known single-line constant declaration
+  cannot be touched. `tests/test_devtools_ui_copy.gd` proves it on the real file:
+  parse it, rewrite every value back to itself, require byte equality.
+- `player_text.gd.bak` is written before the new bytes land, by hand —
+  `ResourceSaver` cannot write a script, so this follows `ContentSaveGuard`'s rule
+  the way `panel_audit/fix_ops.gd` does.
+- Prose literals written INSIDE function bodies are out of scope and must stay
+  read-only: they sit in ternaries, match arms and multi-line call expressions
+  where a line-based rewrite would corrupt code. The tab must still SHOW them
+  (**List code-only lines**) and name the function holding each, so the file's
+  real size is never misrepresented as only what the tab can edit.
+- The `[PH]` marker is shown exactly as authored and is NEVER stripped
+  automatically — deleting it is how a writer says "this line is written now".
+- A multi-line report goes to a dialog window, never the status Label, which is
+  clamped to two lines.
+
 ## Bark Editor
 
 - One bark per LINE in a plain text box, per category. Blank and whitespace-only

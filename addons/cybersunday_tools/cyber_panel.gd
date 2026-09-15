@@ -2,11 +2,11 @@
 extends TabContainer
 
 ## Single host for every CYBER SUNDAY tool Control. The tools are grouped by the JOB a designer is doing -- six
-## outer tabs, each an inner TabContainer of related tools -- instead of one flat strip of 25 titles:
+## outer tabs, each an inner TabContainer of related tools -- instead of one flat strip of 26 titles:
 ##
 ##   Build     Palette / Place / Place Item / Level                 -- put things into the open scene
 ##   Create    New / Blueprints / Browse / Quests / Loot / Graphs / Icons -- author content files
-##   Write     Dialogue / Barks / Text                              -- put words in the game
+##   Write     Dialogue / Barks / Text / UI Copy                    -- put words in the game
 ##   Tune      Tuning / Factions / Encounter                         -- global numbers + relationships
 ##   Check     Audit / Reach / Refs / Stats                          -- is it valid, can the player reach it
 ##   Advanced  Saves / Scene Diff / Architecture / AI Bridge         -- developer + AI tooling, ignorable
@@ -17,7 +17,7 @@ extends TabContainer
 ## icon baking. Dialogue and Text moved there unchanged (their Control names, the keys tests and handoffs route by,
 ## are untouched).
 ##
-## WHY groups: 25 titles need ~1800 px of tab strip, and the editor's bottom panel only spans the centre column
+## WHY groups: 26 titles need ~1800 px of tab strip, and the editor's bottom panel only spans the centre column
 ## (~1200 px on a 1920 display between the Scene and Inspector docks), so a third of the tools -- including Reach,
 ## the one that answers "why can't the player start my quest" -- sat behind scroll arrows. Five short outer titles
 ## can never overflow, and each inner strip holds at most nine. The price is one extra tab-bar row (~30 px), paid
@@ -54,6 +54,7 @@ const QuestEditor := preload("res://addons/cybersunday_tools/dock_quest/quest_ed
 const LootEditor := preload("res://addons/cybersunday_tools/dock_loot/loot_editor.gd")
 const TextEditor := preload("res://addons/cybersunday_tools/dock_text/text_editor.gd")
 const BarkEditor := preload("res://addons/cybersunday_tools/dock_bark/bark_editor.gd")
+const UiCopyEditor := preload("res://addons/cybersunday_tools/dock_uicopy/ui_copy_editor.gd")
 const ContentBrowser := preload("res://addons/cybersunday_tools/dock_browser/content_browser.gd")
 const RefViewer := preload("res://addons/cybersunday_tools/dock_refs/ref_viewer.gd")
 const EncounterView := preload("res://addons/cybersunday_tools/dock_encounter/encounter_view.gd")
@@ -103,6 +104,7 @@ func _init() -> void:
 		[DialogueEditor, "Dialogue", "Edit a conversation's lines, choices, gates and consequences. Writes: on Save only."],
 		[BarkEditor, "Barks", "Write the lines NPCs shout in combat and reaction, one bark per line. Writes: on Save only."],
 		[TextEditor, "Text", "Edit every player-facing name and description in one list. Writes: on Save only."],
+		[UiCopyEditor, "UI Copy", "Edit the HUD, prompt, toast and menu wording that lives in player_text.gd. Writes: on Save only."],
 	])
 	_group("Tune", "Global numbers and relationships: tuning groups, faction relations, encounter previews.", [
 		[TuningBrowser, "Tuning", "Open a global tuning group (economy, camera, movement...) in the Inspector. Read-only."],
