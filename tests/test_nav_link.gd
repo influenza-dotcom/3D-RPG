@@ -97,3 +97,44 @@ func test_near_vertical_walk_link_warns() -> void:
 	# A WALK link with climb > run has no shallow stair under it for step-up to climb — warn the designer.
 	var w := NavLink.warnings_for(Vector3(0, 0, 0), Vector3(1.0, 2.5, 0.0), NavLink.Direction.TWO_WAY, 3.0, NavLink.Traversal.WALK)
 	assert_gt(w.size(), 0, "a near-vertical WALK link (climb > run) has no stairs to walk — warn to lay it along the footprint")
+
+
+# --- Projection spread (2026-09-12: the load-in freeze) -------------------------------------------------------------
+# Every link in a level reaches "the map answers" on the same physics step, so the endpoint projection used to run for
+# the WHOLE link set in one step (449 links x 5 full-navmesh queries = a ~1 s physics frame a second after load). It is
+# now spread under a shared per-physics-frame budget (NavLink.PROJECT_BUDGET_USEC, _claim_budget). Off-tree: the ledger
+# is static and needs no nav map.
+
+
+func test_first_budget_claim_of_a_physics_frame_always_proceeds() -> void:
+	NavLink._budget_frame = -1  # a fresh frame from the ledger's point of view
+	NavLink._budget_spent_usec = 999_999
+	assert_true(NavLink._claim_budget(), "the first claimant of a frame resets the ledger and proceeds")
+	assert_eq(NavLink._budget_spent_usec, 0, "a new frame starts with nothing spent")
+	assert_eq(NavLink._budget_frame, Engine.get_physics_frames(), "the ledger is now stamped with this physics frame")
+
+
+func test_budget_claims_in_the_same_frame_stop_once_the_spend_reaches_the_budget() -> void:
+	NavLink._budget_frame = -1
+	assert_true(NavLink._claim_budget())
+	NavLink._budget_spent_usec = NavLink.PROJECT_BUDGET_USEC - 1
+	assert_true(NavLink._claim_budget(), "still under budget -> a later link in the same frame may project")
+	NavLink._budget_spent_usec = NavLink.PROJECT_BUDGET_USEC
+	assert_false(NavLink._claim_budget(), "at budget -> the rest of the links keep their one-shot for the next frame")
+	NavLink._budget_frame = -1  # leave the ledger clean for whatever runs next
+
+
+func test_physics_process_claims_the_budget_and_spends_two_queries_per_link() -> void:
+	# Source-text ratchet (the test_effect_prewarm idiom): the spread only exists if _physics_process gates on the
+	# ledger BEFORE it projects, projects through the single-query _project, and probes the map via the shared cache.
+	var src := FileAccess.get_file_as_string("res://scripts/components/nav_link.gd")
+	var body_start := src.find("func _physics_process(")
+	var body_end := src.find("
+func ", body_start + 1)
+	var body := src.substr(body_start, body_end - body_start)
+	var claim := body.find("_claim_budget(")
+	var project := body.find("_project(")
+	assert_true(claim >= 0, "_physics_process must claim the shared budget")
+	assert_true(project > claim, "the claim must come BEFORE the projection, or the spread gates nothing")
+	assert_true(body.find("_map_answers(") >= 0, "the map-answers probe goes through the per-frame cache, not one query per link")
+	assert_eq(src.count("map_get_closest_point("), 1, "exactly one closest-point query site: _project (the warn reads its answer)")

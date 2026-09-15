@@ -64,6 +64,26 @@ enum Traversal {
 
 var _settle_frames: int = 0  ## physics frames spent waiting for the nav map to answer queries (see _physics_process)
 
+## ⭐Per-PHYSICS-FRAME wall-clock budget (µs) for endpoint projection, SHARED by every NavLink in the tree (a static
+## ledger, reset by the first link to run each physics frame — _claim_budget). Projection is a one-shot per link, but
+## every link in a level reaches "the map answers" on the SAME physics step (the map publishes one iteration for the
+## whole region), so without a budget the whole link set projects in ONE step. Measured 2026-09-12 on the main level:
+## 449 generated links x 5 map_get_closest_point queries (each a walk of every baked polygon) = a single ~1.0 s physics
+## step, about a second after the world faded in — the "game lags when you load in". Now each link spends 2 queries
+## (_project warns from the same answer it snaps with) and only while this frame's ledger has room; a link that finds
+## the budget spent keeps its one-shot for the next physics frame. The first claimant of a frame ALWAYS proceeds, so
+## the pass makes progress however slow one query is. Meanwhile an unprojected link is still ENABLED at its authored
+## endpoints (the generator places them on the mesh already), so routing works during the spread. Not a designer
+## tunable — an engine-cost knob, sized so the spread is invisible at 144 fps; ~2 links/step -> a few seconds total.
+const PROJECT_BUDGET_USEC: int = 2000
+static var _budget_frame: int = -1
+static var _budget_spent_usec: int = 0
+## The shared "does the map answer yet?" probe: ONE map_get_closest_point per physics frame for ALL links instead of one
+## per link (449 per step while the map is "ready but lying" — see NavigationUtils.map_answers_queries). Levels run one
+## nav map per World3D, so any link's answer stands for every link that frame. See _map_answers.
+static var _answers_frame: int = -1
+static var _answers: bool = false
+
 func _ready() -> void:
 	_apply()  # authoritative pass once positions exist (after .tscn load)
 	# The nav map isn't synced at _ready (query-before-sync errors), so defer endpoint projection to a ready frame.
@@ -99,44 +119,78 @@ func walk_traversal() -> bool:
 ## "nearest" point (tens of metres), _project kept the authored value, the off-mesh warning fired for all 113 links with
 ## nonsense distances — and then set_physics_process(false) burned the only retry. auto_project has therefore never
 ## rescued an endpoint in play. We now retry until the map genuinely answers, bounded by project_settle_frames.
+##
+## Once it answers, the projection itself is SPREAD across physics frames under the shared PROJECT_BUDGET_USEC ledger
+## (see that const): a link that finds this frame's budget spent returns and tries again next frame, one-shot intact.
 func _physics_process(_delta: float) -> void:
 	var map := get_navigation_map()
 	if not NavigationUtils.is_nav_map_ready(map):
 		return
 	_settle_frames += 1
-	if not NavigationUtils.map_answers_queries(map, global_transform * start_position):
+	if not _map_answers(map, global_transform * start_position):
 		if _settle_frames < project_settle_frames:
 			return  # map is synced but not yet populated — keep the one-shot in hand
 		if OS.is_debug_build():
 			push_warning("NavLink '%s': the navigation map never returned a usable query in %d frames — endpoints left as authored, auto_project skipped." % [name, project_settle_frames])
 		set_physics_process(false)
 		return
-	start_position = _project(map, start_position)
-	end_position = _project(map, end_position)
-	# Dev backstop: if an endpoint STILL sits off the mesh after projection (drifted farther than project_radius — e.g.
-	# a re-bake shifted the floor out from under it), this link binds to NOTHING and silently won't route NPCs. The
-	# editor reachability audit (NavMeshAudit.reachability) flags it at edit time; this surfaces the SAME failure at
-	# RUNTIME so a broken link isn't invisible in play. Debug builds only; fires at most once per endpoint (one-shot).
-	if OS.is_debug_build():
-		_warn_off_mesh(map, start_position, &"start")
-		_warn_off_mesh(map, end_position, &"end")
+	if not _claim_budget():
+		return  # this physics frame's shared projection budget is spent — keep the one-shot for the next frame
+	var t0 := Time.get_ticks_usec()
+	var s := _project(map, start_position, &"start")
+	var e := _project(map, end_position, &"end")
+	# Write only a point that actually moved: every endpoint write dirties the nav map (a rebuilt iteration + every
+	# NavigationAgent3D re-pathing on map_changed), and on the main level the projection moves NOTHING — all 898
+	# generated endpoints measured 0.0000 m of drift (2026-09-12), so unguarded writes were pure map churn.
+	if not s.is_equal_approx(start_position):
+		start_position = s
+	if not e.is_equal_approx(end_position):
+		end_position = e
+	_budget_spent_usec += Time.get_ticks_usec() - t0
 	set_physics_process(false)
 
-## Warn if `local_pt` (our local space) is still farther than project_radius from the nearest baked navmesh point — i.e.
-## auto_project couldn't snap it on, so the link doesn't actually connect there. Pure query + push_warning, no state change.
-func _warn_off_mesh(map: RID, local_pt: Vector3, which: StringName) -> void:
-	var world := global_transform * local_pt
-	var drift := world.distance_to(NavigationServer3D.map_get_closest_point(map, world))
-	if drift > project_radius:
-		push_warning("NavLink '%s' %s endpoint is %.2f m off the navmesh (> project_radius %.2f) — it bridges nothing; NPCs won't route across it. Nudge the handle onto walkable floor or re-bake." % [name, String(which), drift, project_radius])
+## Claim a slice of THIS physics frame's shared projection budget (PROJECT_BUDGET_USEC). The first claimant of a frame
+## resets the ledger and always proceeds (progress is guaranteed even when one query alone exceeds the budget); later
+## claimants proceed only while the frame's recorded spend is still under budget. Static: one ledger for every link.
+static func _claim_budget() -> bool:
+	var frame := Engine.get_physics_frames()
+	if _budget_frame != frame:
+		_budget_frame = frame
+		_budget_spent_usec = 0
+		return true
+	return _budget_spent_usec < PROJECT_BUDGET_USEC
+
+## NavigationUtils.map_answers_queries, cached per physics frame for ALL links (one real query per frame, not one per
+## link). Only a REAL query is cached: the helper's near-origin shortcut (a probe within 1 m of the origin answers
+## true without asking the map) proves nothing about the map, so that call falls through uncached.
+static func _map_answers(map: RID, probe: Vector3) -> bool:
+	var frame := Engine.get_physics_frames()
+	if _answers_frame == frame:
+		return _answers
+	var ok := NavigationUtils.map_answers_queries(map, probe)
+	if probe.length_squared() >= 1.0:
+		_answers_frame = frame
+		_answers = ok
+	return ok
 
 ## Snap one endpoint (in OUR local space) onto the nearest navmesh point, but only if that's within project_radius (so a
 ## stray endpoint degrades to its authored spot rather than teleporting onto a wrong island). Nav-map queries are
-## world-space, so round-trip through our global_transform.
-func _project(map: RID, local_pt: Vector3) -> Vector3:
+## world-space, so round-trip through our global_transform. ONE query per endpoint: the off-mesh dev backstop below
+## reads the same answer (a snapped endpoint has zero drift by construction, so only the kept-authored case can warn).
+##
+## Dev backstop: an endpoint that sits farther than project_radius off the mesh (e.g. a re-bake shifted the floor out
+## from under it) binds this link to NOTHING and it silently won't route NPCs. The editor reachability audit
+## (NavMeshAudit.reachability) flags it at edit time; this surfaces the SAME failure at RUNTIME so a broken link isn't
+## invisible in play. Debug builds only; fires at most once per endpoint (the projection is a one-shot).
+func _project(map: RID, local_pt: Vector3, which: StringName) -> Vector3:
 	var world := global_transform * local_pt
 	var nearest := NavigationServer3D.map_get_closest_point(map, world)
-	return (global_transform.affine_inverse() * nearest) if world.distance_to(nearest) <= project_radius else local_pt
+	var drift := world.distance_to(nearest)
+	if drift <= project_radius:
+		return global_transform.affine_inverse() * nearest
+	if OS.is_debug_build():
+		push_warning("NavLink '%s' %s endpoint is %.2f m off the navmesh (> project_radius %.2f) — it bridges nothing; NPCs won't route across it. Nudge the handle onto walkable floor or re-bake." % [name, String(which), drift, project_radius])
+	return local_pt
 
 ## EDITOR: catch the authoring mistakes that make a link silently fail — coincident handles, a "climb" the bake already
 ## bridges (redundant), or a TWO_WAY span too tall for an NPC to jump. Delegates to a pure static so it's unit-testable.
