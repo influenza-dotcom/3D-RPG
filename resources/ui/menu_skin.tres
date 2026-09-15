@@ -1,7 +1,7 @@
 [gd_resource type="Resource" script_class="MenuSkin" format=3 uid="uid://0fc60wjnbt5h"]
 
 [ext_resource type="Script" uid="uid://0abao0xpythw" path="res://scripts/ui/menu_skin.gd" id="1"]
-[ext_resource type="FontFile" path="res://assets/fonts/tex_gyre_adventor/texgyreadventor-regular.otf" id="2_ui_font"]
+[ext_resource type="FontFile" uid="uid://c7hfyaijo6570" path="res://assets/fonts/tex_gyre_adventor/texgyreadventor-regular.otf" id="2_ui_font"]
 [ext_resource type="AudioStream" uid="uid://bff0ut888hxsn" path="res://assets/audio/sfx/ui/menu_ver.wav" id="3_hover"]
 [ext_resource type="AudioStream" uid="uid://c3xmnjx6nqjnm" path="res://assets/audio/sfx/ui/menu_selection.wav" id="4_click"]
 [ext_resource type="AudioStream" uid="uid://c3i16jn6it8gx" path="res://assets/audio/sfx/ui/menu_enter.wav" id="5_open"]

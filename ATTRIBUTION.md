@@ -143,13 +143,20 @@ it neither ships nor sits at `HEAD` any more — only history still carries it.)
 
 | ⚠ | `res://` path | Origin | Wired at | Author | License | URL | Checked |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| | `assets/fonts/tex_gyre_adventor/texgyreadventor-regular.otf` (170,364 B) | TeX Gyre Adventor, regular — CTAN `fonts/tex-gyre/opentype/`, downloaded 2026-09-11 | `project.godot` `gui/theme/custom_font` (the project-wide UI font) and `resources/ui/menu_skin.tres` (`body_font` / `title_font`) | GUST e-foundry (B. Jackowski, J. M. Nowacki), derived from URW Gothic L | GUST Font License (LPPL 1.3c-based): free to use and redistribute with its licence text; a *modified* font must be renamed. Text: `assets/fonts/tex_gyre_adventor/GUST-FONT-LICENSE.txt` | `https://www.gust.org.pl/projects/e-foundry/tex-gyre/adventor` | 2026-09-11 |
+| | `assets/fonts/tex_gyre_adventor/texgyreadventor-regular.otf` (167,924 B) | TeX Gyre Adventor, regular — CTAN `fonts/tex-gyre/opentype/`, downloaded 2026-09-11; **modified 2026-09-12** (see note) | `project.godot` `gui/theme/custom_font` (the project-wide UI font) and `resources/ui/menu_skin.tres` (`body_font` / `title_font`) | GUST e-foundry (B. Jackowski, J. M. Nowacki), derived from URW Gothic L | GUST Font License (LPPL 1.3c-based): free to use and redistribute with its licence text; a *modified* font is asked (not required) to be renamed — done, see note. Text: `assets/fonts/tex_gyre_adventor/GUST-FONT-LICENSE.txt` | `https://www.gust.org.pl/projects/e-foundry/tex-gyre/adventor` | 2026-09-11 |
 
 > **The licence text has to travel with the font.** It is a `.txt`, which `export_filter="all_resources"` does
 > NOT put in the `.pck` — add `assets/fonts/*.txt` to `include_filter` in `export_presets.cfg` (local and
 > gitignored, so it is one machine's setting) and name the font on the Credits screen once one exists.
 > Replaced the old `SystemFont` (Futura → Century Gothic → Segoe UI → Arial): those faces are not redistributable,
 > and none of them exists on Linux / Steam Deck.
+>
+> **The shipped file is a derived work, internally named "Adventor RPG".** Only the vertical metrics differ from
+> upstream: `hhea`/`OS/2 typo` ascent 0.739 em → 1.006 em, descent 0.192 em → 0.220 em (Century Gothic's box),
+> because every pixel-tuned label position and row height was authored against Century Gothic, and Adventor's
+> tighter box lifted all UI text and compacted rows. Glyph widths and outlines are untouched. Per the GUST
+> licence's rename request the name table and CFF names say "Adventor RPG"; the file name is kept so the
+> `.import` uid stays stable. Re-derive with fontTools from the CTAN original if the font is ever updated.
 
 ## Vendored addons
 
