@@ -34,8 +34,9 @@ func drop_loot() -> void:
 		return
 	var corpse := LootableCorpse.new()
 	# "Loot <name>" shows what the player KNOWS at the moment of death: their real name if they'd introduced
-	# themselves, else "Stranger" (GameState.public_name). A body you never learned the name of stays a Stranger.
-	corpse.setup(host.inventory, GameState.public_name(host.display_name), host.money)
+	# themselves, else their job title ("Loot Merchant"), else "Stranger" (GameState.public_name). A body you never
+	# learned the name of stays a Stranger.
+	corpse.setup(host.inventory, GameState.public_name(host.display_name, host), host.money)
 	world.add_child(corpse)
 	corpse.global_position = host.global_position
 

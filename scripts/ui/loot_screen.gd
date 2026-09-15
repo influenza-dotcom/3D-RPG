@@ -118,7 +118,7 @@ func pickpocket(npc: Node, player: Node) -> void:
 		return
 	var name_v: Variant = npc.get(&"display_name")
 	var nm: String = name_v if name_v is String else ""
-	var who := PlayerText.loot_title("PICKPOCKETING", GameState.public_name(nm))  # mask an un-introduced NPC's real name (Stranger seam)
+	var who := PlayerText.loot_title("PICKPOCKETING", GameState.public_name(nm, npc))  # mask an un-introduced NPC's real name (Stranger / job-title seam)
 	# The live NPC's wallet is liftable too, and PLANTING items on them respects their carry limit. The weapon in
 	# their hands (equipped_item) stays PADLOCKED unless the player's PICKPOCKET clears the equipped threshold — a
 	# master thief can pluck a drawn gun; a novice steals their ammo (or loots the corpse) to disarm instead. The
@@ -146,7 +146,7 @@ func exchange(npc: Node, player: Node) -> void:
 		return
 	var name_v: Variant = npc.get(&"display_name")
 	var nm: String = name_v if name_v is String else ""
-	var who := PlayerText.loot_exchange_title(GameState.public_name(nm))  # mask an un-introduced companion's real name (Stranger seam)
+	var who := PlayerText.loot_exchange_title(GameState.public_name(nm, npc))  # mask an un-introduced companion's real name (Stranger / job-title seam)
 	_open(inv, null, player, who, PlayerText.LOOT_THEIR_GEAR_HEADING, null, npc)
 
 ## Open a persistent CONTAINER's inventory (a crate / chest / locker). Like open_for, but the container is

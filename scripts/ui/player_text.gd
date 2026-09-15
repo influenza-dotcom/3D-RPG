@@ -72,6 +72,19 @@ const BODY_PART_LEG := "Leg"
 ## every player-facing NPC-name surface (dialogue label, look-at readout, loot/death/takedown/cripple) routes
 ## through. Quest/kill matching keys on the stable identity (NPC.identity_key), never this. Edit here to re-label ("???").
 const STRANGER := "Stranger"
+## JOB TITLES — what an un-introduced NPC reads as INSTEAD of STRANGER when they visibly hold a job (a service
+## component riding them: Merchant / Healer / WeaponBench / ChipInstaller / LevelUp / Atm). "Talk to Merchant"
+## tells the player what the person is FOR before they know who they are; a stranger with no job still reads
+## STRANGER. Each service component returns its own const from job_title(); NPC.job_title() prefers the authored
+## NPC.job override, so a designer relabels one shopkeeper "Gunsmith" without a new component. Read through
+## GameState.public_name(name, node) — the same seam as STRANGER. BARE like STRANGER / DEFAULT_MERCHANT_LABEL
+## (label context, the same fixed functional vocabulary as DIALOGUE_OPTION_*); killer_job() is the mid-sentence form.
+const JOB_MERCHANT := "Merchant"
+const JOB_HEALER := "Healer"
+const JOB_GUNSMITH := "Gunsmith"
+const JOB_MECHANIC := "Mechanic"
+const JOB_TRAINER := "Trainer"
+const JOB_BANKER := "Banker"
 
 const TOAST_ALREADY_FULL_HEALTH := "[PH] Already at full health"
 const TOAST_ALREADY_LEARNED := "[PH] Already learned"
@@ -715,6 +728,13 @@ static func talk_to(name: String) -> String:
 
 static func trade_prompt(name: String) -> String:
 	return TextFormat.subst("Trade: {name}", {"name": name}) if not name.is_empty() else DEFAULT_MERCHANT_LABEL
+
+
+## The death card's IN-SENTENCE form of a JOB_* title ("You were killed by the gunsmith."): the label-context
+## title reads wrong mid-line, exactly as STRANGER does (PlayerFeedbackSettings.death_stranger_killer swaps in
+## "a stranger" for the same reason). Lower-cased because it sits inside the sentence, never at its head.
+static func killer_job(job: String) -> String:
+	return TextFormat.subst("the {job}", {"job": job.to_lower()})
 
 
 static func unlock(name: String) -> String:

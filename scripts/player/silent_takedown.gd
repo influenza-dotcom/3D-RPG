@@ -206,7 +206,7 @@ func _cue(npc: NPC, hold: float) -> void:
 	var nm := ""
 	var raw: Variant = npc.get(&"display_name")
 	if raw is String:
-		nm = GameState.public_name(raw)  # the takedown prompt names a Stranger until they've introduced themselves
+		nm = GameState.public_name(raw, npc)  # the takedown prompt names a Stranger (or their job) until they've introduced themselves
 	var key := InputManager.get_action_binding(InputManager.action_takedown)
 	var text := PlayerText.takedown_prompt(key, nm)
 	host.set_takedown_cue(true, text, clampf(_hold_t / maxf(0.01, hold), 0.0, 1.0))

@@ -41,7 +41,7 @@ func react(host: Variant, part: int, attacker: Node = null) -> void:
 	if attacker != null and attacker.is_in_group(Groups.PLAYER) and attacker.has_method(&"notify_toast"):
 		var p: Node = host._real_player()
 		if p != null and p.has_method(&"notify_toast"):
-			var who: String = GameState.public_name(host.display_name)  # "Crippled Stranger's leg" until introduced
+			var who: String = GameState.public_name(host.display_name, host)  # "Crippled Stranger's leg" (or "...Merchant's leg") until introduced
 			if who.is_empty():
 				who = "Enemy"
 			p.notify_toast(PlayerText.crippled_target(who, part_name), toast_color)

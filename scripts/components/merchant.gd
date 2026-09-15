@@ -314,6 +314,12 @@ func can_be_talked_to() -> bool:
 func look_name() -> String:
 	return PlayerText.trade_prompt(shop_name)
 
+## The job title an UN-INTRODUCED host NPC reads as instead of "Stranger" (NPC.job_title scans its direct
+## children for this, the same way DialogueManager finds the station option) — a PlayerText.JOB_* const, never a
+## literal. Also answers for a STANDALONE station aimed at directly (GameState.job_title_of is duck-typed).
+func job_title() -> String:
+	return PlayerText.JOB_MERCHANT
+
 # ---------------------------------------------------------------------------
 # Dialogue-station contract (drives the "Trade" option when this rides a dialogue NPC)
 # ---------------------------------------------------------------------------

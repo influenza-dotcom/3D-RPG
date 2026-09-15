@@ -3602,9 +3602,16 @@ func _killer_display_name(killer: Object, fallback: String, stranger_fallback: S
 		# Mask until introduced — but ONLY for a real character killer (an NPC has resolved_disposition,
 		# the same "is a person" gate the dialogue label uses). A non-NPC named killer (a titled hazard) shows as-is.
 		if killer.has_method(&"resolved_disposition"):
+			# Name-only query ON PURPOSE (no node): this branch needs the bare STRANGER answer to detect "not yet
+			# introduced", then picks its own in-sentence form — the job title first ("the gunsmith"), the
+			# faction noun next ("a raider"), "a stranger" last. Passing the killer would hand back the label-case
+			# "Gunsmith" and skip the whole ladder.
 			var shown: String = GameState.public_name(raw)
 			# shown != raw keeps an NPC literally NAMED "Stranger" reading as-is instead of swapping.
 			if shown == PlayerText.STRANGER and shown != raw:
+				var job := GameState.job_title_of(killer)
+				if job != "":
+					return PlayerText.killer_job(job)
 				var noun := _killer_faction_noun(killer)
 				return noun if noun != "" else stranger_fallback
 			return shown

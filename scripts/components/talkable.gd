@@ -131,11 +131,12 @@ func _ensure_meshes() -> void:
 		_meshes = TalkHelpers.collect_meshes(host, self)
 
 ## The name to show on the look-at hover readout — this component's display_name, else the host NPC's. Masked to
-## "Stranger" until introduced when the host is a real NPC (GameState.public_name), so an un-met person reads
-## "Talk to Stranger" / "Pick Pocket Stranger"; an inanimate host (car / terminal / sign) is shown outright.
+## "Stranger" until introduced when the host is a real NPC (GameState.public_name) — or to their JOB TITLE when
+## they hold one ("Talk to Merchant" / "Pick Pocket Gunsmith"; the host is passed for that) — so an un-met person
+## reads by what they are, not who; an inanimate host (car / terminal / sign) is shown outright.
 func look_name() -> String:
 	var raw := TalkHelpers.speaker_name(display_name, _host())
-	return GameState.public_name(raw) if _host() is NPC else raw
+	return GameState.public_name(raw, _host()) if _host() is NPC else raw
 
 ## The look-at readout label for whoever is looking. Reads "Pick Pocket <name>" when this host can be
 ## PICKPOCKETED by `player` right now (crouched + the NPC off-guard — the SAME test start_talk uses);

@@ -621,11 +621,13 @@ func _speaker_identity(speaker: Node, speaker_name: String) -> StringName:
 			return key
 	return StringName(speaker_name)
 
-## The name to actually PAINT on the speaker label: the real name masked to "Stranger" until introduced when the
-## speaker is a character (see _speaker_is_character / GameState.public_name), else the raw resolved name (a note's
-## cosmetic title, a terminal's label — never masked). _speaker_name always holds the TRUE resolved name.
+## The name to actually PAINT on the speaker label: the real name masked to "Stranger" (or their job title — the
+## speaker node is passed for that) until introduced when the speaker is a character (see _speaker_is_character /
+## GameState.public_name), else the raw resolved name (a note's cosmetic title, a terminal's label — never masked).
+## _speaker_name always holds the TRUE resolved name. In practice start() reveals a character speaker before the
+## first label paints, so the masked form shows only on a synthesized pre-reveal surface, never mid-conversation.
 func _displayed_speaker_name() -> String:
-	return GameState.public_name(_speaker_name) if _speaker_is_character() else _speaker_name
+	return GameState.public_name(_speaker_name, _speaker) if _speaker_is_character() else _speaker_name
 
 ## Speaker-name colour (#13): a recruited COMPANION is blue (ally), else by disposition toward the player —
 ## HOSTILE red, FRIENDLY green, NEUTRAL and any non-NPC speaker white.

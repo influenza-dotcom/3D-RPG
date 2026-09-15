@@ -78,6 +78,14 @@ const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")  # canoni
 ## This NPC's display name — shown as the speaker label in dialogue (DialogueManager uses it when a
 ## DialogueLine leaves `speaker` blank). Empty => unnamed, and the dialogue name label stays hidden.
 @export var display_name: String = ""
+## What this NPC reads as BEFORE the player learns their name, when they visibly hold a job: "Gunsmith" /
+## "Merchant" / ... in place of "Stranger" on every masked surface (hover, speaker label, corpse, takedown, death
+## card). Leave BLANK to derive it from the service component riding this NPC (Merchant -> Merchant, Healer ->
+## Healer, WeaponBench -> Gunsmith, ChipInstaller -> Mechanic, LevelUp -> Trainer, Atm -> Banker; see
+## job_title()) — so a shopkeeper needs no authoring at all, and this field is only for RELABELLING one (the
+## arms dealer whose Merchant should read "Gunsmith"). Cosmetic: never an identity key, never saved.
+## Deliberately NOT NpcData-stamped (PROFILE_STAMPED_FIELDS): the job is the component, not the archetype.
+@export var job: String = ""
 
 ## Optional STABLE id for the EXACT-snapshot save tier (WorldSnapshot — manual quicksave/slots). It lets a
 ## quicksave match THIS authored NPC across a reload so it comes back at its saved position (or stays dead). Leave
@@ -666,6 +674,24 @@ func _resolve_faction() -> void:
 ## off-tree fallback (unit tests build NPCs without _ready).
 func identity_key() -> StringName:
 	return _identity_key if _identity_key != &"" else _derive_identity_key()
+
+## The job title this NPC wears while un-introduced (GameState.public_name's fallback before "Stranger"): the
+## authored `job` override, else the FIRST direct child (tree order) exposing a `job_title()` — every service
+## station (Merchant / Healer / WeaponBench / ChipInstaller / LevelUp / Atm) answers with its PlayerText.JOB_*
+## const; Bonfire / ChessMatch deliberately don't (resting by a fire and playing chess aren't jobs). Same
+## direct-children duck-typed scan as DialogueManager's station discovery (has_method, no class coupling), so an
+## NPC that carries two stations reads as whichever the designer ordered first. "" = no job -> "Stranger".
+func job_title() -> String:
+	var authored := job.strip_edges()
+	if not authored.is_empty():
+		return authored
+	for c in get_children():
+		if not c.has_method(&"job_title"):
+			continue
+		var t: Variant = c.job_title()
+		if t is String and not (t as String).strip_edges().is_empty():
+			return (t as String).strip_edges()
+	return ""
 
 ## Derivation rule: a profile with an AUTHORED NpcData.id -> that id (rename/localization-proof, routed through
 ## NpcData.identity_key — the one canonical accessor). Otherwise the EFFECTIVE authored display_name — which by

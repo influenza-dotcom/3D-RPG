@@ -277,6 +277,12 @@ func look_name() -> String:
 ## description). A const, not an @export — the order is a UI contract pinned by tests/test_dialogue_speaker_contracts.gd.
 const DIALOGUE_ORDER := 50
 
+## The job title an UN-INTRODUCED host NPC reads as instead of "Stranger" (NPC.job_title scans its direct
+## children for this, the same way DialogueManager finds the station option) — a PlayerText.JOB_* const, never a
+## literal. Also answers for a STANDALONE station aimed at directly (GameState.job_title_of is duck-typed).
+func job_title() -> String:
+	return PlayerText.JOB_MECHANIC
+
 ## Dialogue-station contract, half 1 — DialogueManager discovers this + open_dialogue_station on the speaker's
 ## direct children (both methods required) and paints the "Install" option. Unconditional, like the rest.
 func dialogue_station_option() -> Dictionary:

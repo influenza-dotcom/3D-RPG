@@ -1586,16 +1586,35 @@ func name_is_revealed(real_name: String, identity: StringName = &"") -> bool:
 	return not ik.is_empty() and known_names.has(ik)
 
 ## THE display-name seam: the name to SHOW the player for a character whose true name is `real_name` — the real
-## name once introduced (or masking off, or the name blank), else the "Stranger" placeholder. DISPLAY ONLY; every
+## name once introduced (or masking off), else their JOB TITLE when `who` (the NPC, or a service component) holds
+## one (job_title_of: "Merchant" / "Gunsmith" / ...), else the "Stranger" placeholder. A BLANK name is never
+## masked, but a nameless NPC WITH a job reads as that job (they never told you a name; the sign over the counter
+## still says what they are) — with no job it stays blank (label hidden), never "Stranger". DISPLAY ONLY; every
 ## player-facing NPC-name surface routes through this, but quest/kill/talk matching keeps the stable identity key
 ## (public masking must never leak into identity — a "kill <name>" objective matches identity_key, never this).
 ## Slice 3 deliberately does NOT change this seam: display flows keep reading public_name(<display string>)
 ## exactly as before — no player-visible behaviour changes; reveal_name's display-compat bridge keeps these
-## string-only queries resolving even for an id-authored NPC.
-func public_name(real_name: String) -> String:
-	if name_is_revealed(real_name):
+## string-only queries resolving even for an id-authored NPC. `who` is optional and duck-typed (an Object, not a
+## Node: every masked surface's host is loosely typed and test doubles are RefCounted) so a caller with only a
+## name string (the death card, which needs the bare STRANGER to branch on) keeps the two-way answer.
+func public_name(real_name: String, who: Object = null) -> String:
+	var known := name_is_revealed(real_name)
+	if known and not real_name.strip_edges().is_empty():
 		return real_name
-	return PlayerText.STRANGER
+	var job := job_title_of(who)
+	if not job.is_empty():
+		return job
+	return real_name if known else PlayerText.STRANGER
+
+## The job title `who` wears, or "" — duck-typed on a `job_title()` method so this seam couples to NO class:
+## an NPC answers with its authored `job` or the first service component riding it (NPC.job_title), and a bare
+## service component (a standalone Merchant / Healer / ... aimed at directly) answers for itself. Null, a freed
+## object, a non-String answer, and a whitespace title all read as "no job".
+func job_title_of(who: Object) -> String:
+	if who == null or not is_instance_valid(who) or not who.has_method(&"job_title"):
+		return ""
+	var t: Variant = who.job_title()
+	return (t as String).strip_edges() if t is String else ""
 
 # --- Per-object world-state ledger (doors / consumed pickups / destroyed props) ------------------------------
 ## Record `state` for the object `key` under `level_path`, and queue the coalesced world-state autosave. Keyed by

@@ -16,6 +16,11 @@ extends GutTest
 ## below therefore ALSO pins the id-less/legacy path: for an NPC with no authored id the identity key IS the name
 ## string, so these literal-name round-trips must behave byte-identically to v3 forever. The identity-arg surface,
 ## the display-compat bridge, and the v3 -> v4 lazy migration are pinned in tests/test_character_identity.gd.
+##
+## JOB TITLES (the foot of this file): an un-introduced NPC who visibly holds a job reads as the JOB ("Merchant",
+## "Gunsmith") instead of "Stranger" — public_name's optional `who` node arg, duck-typed on job_title() through
+## GameState.job_title_of; NPC.job_title() prefers the authored NPC.job override, else the first service-station
+## child; every station's answer is a PlayerText.JOB_* const and is roster-pinned here (JOB_COMPONENTS).
 
 const GAMESTATE_PATH := "res://managers/GameState.gd"
 const DIALOGUE_MANAGER_PATH := "res://scripts/dialogue/dialogue_manager.gd"
@@ -130,3 +135,101 @@ func test_speaker_is_character_gate_still_marks_only_npcs() -> void:
 	var src := FileAccess.get_file_as_string(DIALOGUE_MANAGER_PATH)
 	var expected := "func _speaker_is_character() -> bool:\n\treturn _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&\"resolved_disposition\")"
 	assert_string_contains(src, expected)
+
+# --- Job titles: an un-introduced NPC with a JOB reads as the job, not "Stranger" ------------------------------
+
+## A stand-in for anything wearing a job — the seam is duck-typed on job_title(), exactly like NPC.job_title and
+## every service component, so the seam is exercised with no NPC or station in the picture.
+class FakeWorker extends Node:
+	var title: String = "Gunsmith"
+	func job_title() -> String:
+		return title
+
+## Roster-as-spec: every service station that IS a job, and the PlayerText const it must answer with (referenced as
+## the const, never a literal — the pin is "this component paints THIS authored const"). A new station that is a
+## job adds a row here + a job_title() on the component; NOT_JOBS pins the two stations that deliberately aren't.
+const JOB_COMPONENTS := {
+	"res://scripts/components/merchant.gd": PlayerText.JOB_MERCHANT,
+	"res://scripts/components/healer.gd": PlayerText.JOB_HEALER,
+	"res://scripts/components/weapon_bench.gd": PlayerText.JOB_GUNSMITH,
+	"res://scripts/components/chip_installer.gd": PlayerText.JOB_MECHANIC,
+	"res://scripts/components/level_up.gd": PlayerText.JOB_TRAINER,
+	"res://scripts/components/atm.gd": PlayerText.JOB_BANKER,
+}
+const NOT_JOBS: Array[String] = ["res://scripts/components/bonfire.gd", "res://scripts/components/chess_match.gd"]
+
+func test_unknown_name_with_a_job_reads_the_job() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	var w := FakeWorker.new()
+	assert_eq(gs.public_name("Marcus", w), "Gunsmith", "an un-introduced NPC with a job is shown by the job")
+	assert_false(gs.name_is_revealed("Marcus"), "...and the job never counts as an introduction")
+	gs.reveal_name("Marcus")
+	assert_eq(gs.public_name("Marcus", w), "Marcus", "once introduced the real name wins over the job")
+	w.free()
+	gs.free()
+
+func test_job_title_of_is_duck_typed_and_guarded() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	assert_eq(gs.job_title_of(null), "", "null -> no job")
+	var plain := Node.new()
+	assert_eq(gs.job_title_of(plain), "", "a node with no job_title() -> no job")
+	assert_eq(gs.public_name("Marcus", plain), PlayerText.STRANGER, "...so it still reads Stranger")
+	var w := FakeWorker.new()
+	w.title = "   "
+	assert_eq(gs.public_name("Marcus", w), PlayerText.STRANGER, "a whitespace title is no job")
+	w.title = "  Merchant "
+	assert_eq(gs.public_name("Marcus", w), "Merchant", "a title is trimmed")
+	plain.free()
+	w.free()
+	gs.free()
+
+func test_nameless_npc_with_a_job_reads_the_job() -> void:
+	# A blank name is never "Stranger" (label hidden) — but a nameless shopkeeper still reads by the sign over the
+	# counter, and keeps reading that way after a talk (there was never a name to learn).
+	var gs = load(GAMESTATE_PATH).new()
+	var w := FakeWorker.new()
+	w.title = "Merchant"
+	assert_eq(gs.public_name("", w), "Merchant", "a nameless NPC with a job reads as the job")
+	gs.stranger_names_enabled = false
+	assert_eq(gs.public_name("", w), "Merchant", "...even with masking off (there is no real name to show)")
+	assert_eq(gs.public_name("", null), "", "a nameless NPC with NO job stays blank, never Stranger")
+	w.free()
+	gs.free()
+
+func test_master_switch_off_still_shows_real_name_over_job() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.stranger_names_enabled = false
+	var w := FakeWorker.new()
+	assert_eq(gs.public_name("Zeke", w), "Zeke", "masking OFF -> the real name, the job is not consulted")
+	w.free()
+	gs.free()
+
+func test_every_service_station_answers_its_pinned_job_title() -> void:
+	for path in JOB_COMPONENTS:
+		var c = load(path).new()  # off-tree (no add_child -> no _ready), like test_dialogue_speaker_contracts
+		assert_true(c.has_method(&"job_title"), "%s exposes job_title()" % path)
+		assert_eq(c.job_title(), JOB_COMPONENTS[path], "%s answers its PlayerText.JOB_* const" % path)
+		c.free()
+	for path in NOT_JOBS:
+		var c = load(path).new()
+		assert_false(c.has_method(&"job_title"), "%s is not a job (no job_title)" % path)
+		c.free()
+
+func test_npc_job_title_prefers_authored_then_first_station_child() -> void:
+	var npc: NPC = load("res://scripts/npc/npc.gd").new()
+	assert_eq(npc.job_title(), "", "no job authored, no station -> no job")
+	var bench = load("res://scripts/components/weapon_bench.gd").new()
+	var shop = load("res://scripts/components/merchant.gd").new()
+	npc.add_child(bench)
+	npc.add_child(shop)
+	assert_eq(npc.job_title(), PlayerText.JOB_GUNSMITH, "the FIRST station child (tree order) names the job")
+	npc.job = "Arms Dealer"
+	assert_eq(npc.job_title(), "Arms Dealer", "an authored NPC.job overrides the derived title")
+	var gs = load(GAMESTATE_PATH).new()
+	npc.display_name = "Vex"
+	assert_eq(gs.public_name(npc.display_name, npc), "Arms Dealer", "...and the seam reads it through the NPC")
+	gs.free()
+	npc.free()
+
+func test_killer_job_is_the_in_sentence_form() -> void:
+	assert_eq(PlayerText.killer_job(PlayerText.JOB_GUNSMITH), "the gunsmith", "the death card lower-cases the title mid-sentence")

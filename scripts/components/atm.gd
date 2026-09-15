@@ -170,6 +170,12 @@ func start_talk(player: Node) -> void:
 ## description). A const, not an @export — the order is a UI contract pinned by tests/test_dialogue_speaker_contracts.gd.
 const DIALOGUE_ORDER := 70
 
+## The job title an UN-INTRODUCED host NPC reads as instead of "Stranger" (NPC.job_title scans its direct
+## children for this, the same way DialogueManager finds the station option) — a PlayerText.JOB_* const, never a
+## literal. Also answers for a STANDALONE station aimed at directly (GameState.job_title_of is duck-typed).
+func job_title() -> String:
+	return PlayerText.JOB_BANKER
+
 ## Dialogue-station contract, half 1 — DialogueManager discovers this + open_dialogue_station on the speaker's
 ## direct children (both methods required) and paints the "Bank" option. ONE option covers both directions and
 ## both signs of the account: the terminal's own screen owns deposit / withdraw / pay-down, so a teller NPC

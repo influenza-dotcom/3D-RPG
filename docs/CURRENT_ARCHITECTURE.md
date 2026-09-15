@@ -169,11 +169,18 @@ speaker as the conversation opens (gated on `_speaker_is_character`, so a
 terminal / sign / note never enters the ledger), after which `known_names`
 carries the character across saves (wiped on New Game). `DialogueLine.reveals_name`
 still fires the same call from `_show_line` but is redundant for a character. The single display seam is
-`GameState.public_name(real_name)` — the dialogue speaker label, look-at readout
+`GameState.public_name(real_name, who)` — the dialogue speaker label, look-at readout
 (`Talkable.look_name`), corpse loot header, death card, takedown prompt, and cripple
 toast all route through it; identity/quest matching (`notify_kill` / `notify_talk`)
 keys on the stable identity (below), so masking is display-only and never breaks an
-objective.
+objective. An un-introduced NPC who holds a **job** reads as the job instead of
+"Stranger": `who` is duck-typed on `job_title()` (`GameState.job_title_of`) —
+`NPC.job_title()` answers with the authored `NPC.job` override, else the first
+direct-child service station's `PlayerText.JOB_*` const (`Merchant` / `Healer` /
+`WeaponBench` → Gunsmith / `ChipInstaller` → Mechanic / `LevelUp` → Trainer / `Atm` →
+Banker; Bonfire and ChessMatch are not jobs). The death card lower-cases it
+mid-sentence via `PlayerText.killer_job` ("killed by the gunsmith"), ahead of the
+faction noun and "a stranger". Roster-pinned in `tests/test_stranger_names.gd`.
 
 **Stable NPC identity (save v4).** Display names are no longer identity keys:
 `NpcData.id` (optional `StringName`; blank falls back to the authored

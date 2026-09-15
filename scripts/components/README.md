@@ -114,6 +114,12 @@ station = author the component (pick a free order slot; the consts are spaced by
 `tests/test_dialogue_speaker_contracts.gd`, which pins the labels, orders, reasons, and the roster itself —
 no `DialogueManager` edit.
 
+The stations that are **jobs** also expose `job_title() -> String` (a `PlayerText.JOB_*` const: Merchant / Healer /
+Gunsmith for `WeaponBench` / Mechanic for `ChipInstaller` / Trainer for `LevelUp` / Banker for `Atm`): an
+un-introduced host NPC reads as that title instead of "Stranger" on every masked surface (`NPC.job_title` scans its
+direct children the same way; the NPC's `job` export overrides it). `Bonfire` / `ChessMatch` deliberately don't —
+roster-pinned in `tests/test_stranger_names.gd`.
+
 Per-component **knobs / `@export` fields** are the designer-facing source of truth in
 `docs/AUTHORING_GUIDE.md` → *The "look-at interactable" family* — this tree does not repeat them.
 
