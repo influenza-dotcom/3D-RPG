@@ -78,6 +78,7 @@ static var _quest_scanned: bool = false
 
 ## RenderingServer.set_debug_generate_wireframes(true) is a one-shot process-wide arm; WIREFRAME renders NOTHING
 ## until it has been called. Nothing else in the project calls it, so we own the latch.
+@warning_ignore("unused_private_class_variable")  # armed by the View family (Common._wireframes_armed); per-class lint can't see it
 static var _wireframes_armed: bool = false
 
 
