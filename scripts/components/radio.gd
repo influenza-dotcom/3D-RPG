@@ -569,13 +569,13 @@ static func audio_paths_in(folder: String, entries: PackedStringArray) -> Packed
 	var base := folder.trim_suffix("/")
 	var in_res := folder.begins_with("res://")
 	for f in entries:
-		var name := f
+		var entry := f
 		if in_res:
-			name = name.trim_suffix(".import").trim_suffix(".remap")
-		var ext := name.get_extension().to_lower()
+			entry = entry.trim_suffix(".import").trim_suffix(".remap")
+		var ext := entry.get_extension().to_lower()
 		if ext != "mp3" and ext != "ogg" and ext != "wav":
 			continue
-		var path := base + "/" + name
+		var path := base + "/" + entry
 		if not out.has(path):
 			out.append(path)
 	out.sort()

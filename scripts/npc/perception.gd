@@ -391,7 +391,7 @@ func _tick_hearing(delta: float, seen: bool, was_pending: bool = true) -> void:
 	if _hear_t > 0.0:
 		return
 	var pos := _hear_point
-	var seed := _hear_seed
+	var seed_radius := _hear_seed
 	# Re-sanitize at FIRE time, not at latch time: the buffer is exactly a window in which a one-shot NoiseSource
 	# self-frees or an emitter NPC dies, and investigate_point's `source` is a TYPED Node param that rejects a freed
 	# handle. Null simply means "a point, not a person".
@@ -400,7 +400,7 @@ func _tick_hearing(delta: float, seen: bool, was_pending: bool = true) -> void:
 	# which awaits -- clearing first makes a re-entrant double-fire impossible by construction rather than by
 	# reasoning about the handler chain.
 	_clear_hearing()
-	investigate_point(pos, true, seed, NAN, who)
+	investigate_point(pos, true, seed_radius, NAN, who)
 
 
 ## Drop any pending reaction. A pending reaction is a HUNCH, so anything that means "we are not acting on a hunch"
