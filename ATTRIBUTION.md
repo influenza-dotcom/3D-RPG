@@ -19,6 +19,19 @@ Sizes are bytes on disk, measured 2026-08-13. `Marker` records why the file is s
 
 ---
 
+## 0. Cleared — the owner's own work (do NOT re-flag)
+
+Files that look third-party from the outside and are not. Each was checked with the owner. **Nothing in this
+table is a blocker**; they need no attribution row and must not be deleted.
+
+| `res://` path | What it actually is |
+| --- | --- |
+| `resources/weapons/Secret Shop.flac` | Dallas Marquis's own track. The NAME is a nod to Dota 2, which is why a metadata sweep reads it as the Dota OST — it is not. Also referenced by name in `tests/test_devtools_browser.gd`, which expects it to stay put. |
+| `assets/audio/music/Secret Shop.mp3` | The same track. Wired at `scenes/game.tscn` (the `Music` node, autoplay) and `resources/levels/TestLevel.tres`. |
+| `assets/audio/music/Secret Shop v3.mp3` | An earlier mix of the same track. |
+
+---
+
 ## A. Audio — known commercial tracks (remove, do not attribute)
 
 These are commercial releases. No attribution makes them shippable; they have to go. Order matters:
@@ -27,9 +40,6 @@ a folder scan when `track` is null and would shuffle whatever is left.
 
 | ⚠ | `res://` path | Size | Apparent origin | Wired at | Action |
 | --- | --- | --- | --- | --- | --- |
-| ⚠ | `resources/weapons/Secret Shop.flac` | 19,387,561 | Dota 2 OST (lossless) | nothing — orphan | DELETE. Read the comment naming this file in `tests/test_devtools_browser.gd` first; it treats it as a non-resource that must be filtered out. |
-| ⚠ | `assets/audio/music/Secret Shop.mp3` | 3,429,832 | Dota 2 OST | `scenes/game.tscn:9,59` (the `Music` node at `:57`, `autoplay = true` at `:61`), `resources/levels/TestLevel.tres:4` | DELETE + rewire both |
-| ⚠ | `assets/audio/music/Secret Shop v3.mp3` | 4,122,178 | Dota 2 OST | nothing — orphan | DELETE, no rewire |
 | ⚠ | `assets/audio/music/Jakub's Ladder.mp3` | 3,094,625 | commercial track | nothing — orphan | DELETE, no rewire |
 | ⚠ | `assets/audio/sfx/hotline_miami_lr.mp3` | 128,517 | Hotline Miami OST | `resources/tuning/PlayerFeedbackSettings.tres:8` (`death_sting`) | DELETE. Set `death_sting = null`; `death_mix.gd:37-38` documents null as inert, `_sting_will_play()` enforces it (`death_mix.gd:302-308`, null check at `:304`) and `tests/test_death_mix.gd:153-165` covers it. |
 | ⚠ | `assets/audio/music/RIP Granny 😔🙏.mp3` | 1,436,596 | unknown, non-original | `scenes/throwable/radiothrowable.tscn:6,37` (`track`) | DELETE **last**, and **repoint** `track` — do not merely unset it (see the warning below). |
