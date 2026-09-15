@@ -543,6 +543,14 @@ func take_damage(amount: float, _was_crit: bool = false, attacker: Node = null, 
 func is_destroyed() -> bool:
 	return _destroyed
 
+## The fill tint the top-centre enemy health bar paints for THIS target (EnemyHealthBar._color_for duck-types it,
+## ahead of its allegiance lookup). A door has no allegiance, so without this the bar falls to
+## HudSettings.enemy_hp_neutral_color — a near-white that reads as a glitch beside every NPC's red bar. Answer the
+## HOSTILE palette swatch instead: the same red a hostile NPC's bar uses, swapping to orange under Options ->
+## Accessibility -> "Colorblind-Safe Cues" in lockstep with it (CBPalette, never a literal Color here).
+func hp_bar_color() -> Color:
+	return CBPalette.hostile()
+
 ## The break: FX + crash SFX + the NPC-audible noise pulse (all in-tree only), then the destroyed pose, the ledger
 ## write and the signal. Latched by _destroyed so a multi-pellet lethal frame (a shotgun) breaks it exactly once.
 func _break() -> void:

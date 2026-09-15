@@ -472,6 +472,15 @@ func test_a_broken_door_is_open_to_npcs_and_ignores_open_close() -> void:
 	npc.free()
 	door.free()
 
+func test_hp_bar_tint_is_the_hostile_palette_red() -> void:
+	# The enemy health bar asks a target for its own tint first (EnemyHealthBar._color_for -> hp_bar_color). A door
+	# answers the HOSTILE swatch — the same red (orange under colorblind-safe cues) an NPC's bar shows — never the
+	# neutral near-white knob, which read as a glitch next to NPC bars.
+	var door := Door.new()
+	assert_eq(door.hp_bar_color(), CBPalette.hostile(), "a door's bar tint is CBPalette.hostile() (red / safe-orange)")
+	assert_ne(door.hp_bar_color(), GameSettings.hud.enemy_hp_neutral_color, "and not the neutral near-white")
+	door.free()
+
 func test_config_warning_when_the_blocker_cannot_take_damage() -> void:
 	var door := Door.new()
 	var pivot := Node3D.new()

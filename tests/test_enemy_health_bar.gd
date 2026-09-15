@@ -172,6 +172,38 @@ func test_toggle_is_an_options_row() -> void:
 			assert_eq(spec.setter, &"set_enemy_health_bar_enabled", "bound to the Settings setter")
 	assert_true(found, "SettingsCatalog.tres must carry an 'enemy_health_bar' spec — an Options row is not optional for a player-facing HUD element")
 
+# --- fill tint: a target that answers for itself -------------------------------------------------------
+
+## A non-Character target that supplies its own bar tint (the Door idiom: hp_bar_color -> CBPalette.hostile()).
+class _SelfTinted extends Node:
+	var tint := Color(0.2, 0.4, 0.6, 1.0)
+	func hp_bar_color() -> Color:
+		return tint
+
+## A target whose hp_bar_color answers junk — the bar must ignore it, not paint a non-Color.
+class _BadTint extends Node:
+	func hp_bar_color() -> String:
+		return "red"
+
+func test_color_for_prefers_the_targets_own_hp_bar_color() -> void:
+	var t := _SelfTinted.new()
+	assert_eq(BAR._color_for(t), t.tint, "a target exposing hp_bar_color() paints the bar in that colour")
+	t.free()
+
+func test_color_for_falls_to_neutral_without_a_hook_or_allegiance() -> void:
+	var plain := Node.new()
+	assert_eq(BAR._color_for(plain), GameSettings.hud.enemy_hp_neutral_color, "no hook, no disposition -> the neutral knob")
+	assert_eq(BAR._color_for(null), GameSettings.hud.enemy_hp_neutral_color, "null target -> the neutral knob")
+	var bad := _BadTint.new()
+	assert_eq(BAR._color_for(bad), GameSettings.hud.enemy_hp_neutral_color, "a non-Color answer is ignored -> neutral")
+	plain.free()
+	bad.free()
+
+func test_door_answers_the_hostile_red() -> void:
+	var door = load("res://scripts/components/door.gd").new()
+	assert_eq(BAR._color_for(door), CBPalette.hostile(), "a Door's bar is the hostile palette red, like an NPC's — not near-white")
+	door.free()
+
 # --- the push chain's method surface ------------------------------------------------------------------
 
 func test_player_exposes_the_damaged_target_hook() -> void:

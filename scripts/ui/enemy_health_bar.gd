@@ -160,7 +160,9 @@ func clear_plate() -> void:
 	_alpha = 0.0
 	visible = false
 
-## The fill tint for `target`: its ALLEGIANCE through CBPalette (companion blue > friendly / hostile), so the
+## The fill tint for `target`. A target that ANSWERS FOR ITSELF wins: `hp_bar_color()` (duck-typed, Color-checked —
+## a Door returns the hostile palette red, because the neutral near-white looked like a glitch beside NPC bars).
+## Otherwise its ALLEGIANCE through CBPalette (companion blue > friendly / hostile), so the
 ## bar recolours with Options -> Accessibility -> "Colorblind-Safe Cues" exactly like the NPC's outline rim,
 ## hover name and dialogue speaker name. Duck-typed on `resolved_disposition` rather than `is NPC` — the same
 ## "is this a person" test Throwable._loyal_damage_scale uses — so a plain Character (or any future
@@ -171,7 +173,13 @@ func clear_plate() -> void:
 ## that — the house rule is is_instance_valid first, always.
 static func _color_for(target: Node) -> Color:
 	var neutral: Color = GameSettings.hud.enemy_hp_neutral_color
-	if target == null or not is_instance_valid(target) or not target.has_method(&"resolved_disposition"):
+	if target == null or not is_instance_valid(target):
+		return neutral
+	if target.has_method(&"hp_bar_color"):
+		var own: Variant = target.call(&"hp_bar_color")  # a Variant from a dynamic call: type-check, never bool()/as-cast blindly
+		if own is Color:
+			return own
+	if not target.has_method(&"resolved_disposition"):
 		return neutral
 	# `== true` rather than bool(...): these are Variant returns from a dynamic call, and GDScript 4 has no
 	# bool(String) constructor — the house rule for duck-typed reads.
