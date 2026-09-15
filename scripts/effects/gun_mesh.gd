@@ -364,6 +364,14 @@ func _equip_view_model() -> void:
 	if _swapper:
 		_swapper.equip()
 
+## The weapon whose model is MOUNTED right now — facade onto the WeaponModelSwapper child (see its
+## mounted_weapon for why this is not the inventory's equipped_weapon during a swap). Null off-tree, and null
+## until the deferred first equip has run.
+func mounted_weapon() -> WeaponData:
+	if _swapper:
+		return _swapper.mounted_weapon()
+	return null
+
 ## Find a per-weapon anchor marker (case-insensitive) on the currently-equipped view-model — facade onto the
 ## MuzzleRig child. The laser sight reads this each frame. null off-tree (no child) OR when there's no
 ## view-model / no such marker, matching the monolith's `if not is_instance_valid(_weapon_model): return null`.

@@ -363,7 +363,8 @@ because the movement feel depends on their exact call order. A runtime grant is 
 the id by the shared `AbilityRegistry` (`scripts/components/abilities/ability_registry.gd`, preloaded by
 path — no class_name) and its snake_case naming convention (scene ↔ `ability_id()` ↔ script), so there is
 no hand-maintained id→script table. The player's cosmetic first-person
-body (the FP legs+torso+arms rig, the separate carry-hands / bare-fists view-model rig, and
+body (the FP legs+torso+arms rig, the separate view-model rig that serves all THREE hand
+poses — the carry hold, the bare fists, and the hands closed on a DRAWN WEAPON — and
 their motion) is likewise a
 component, not `player.gd` code: **`FirstPersonBody`** (`scripts/player/first_person_body.gd`),
 a scene-wired Player.tscn child on the Landing `host = NodePath("..")` idiom, which also
@@ -1859,6 +1860,26 @@ no LOS test and `NPC.tscn` ships a 500 m `sight_range`, so an ungated pitch woul
 hidden player through a wall. (3) `reset_for_reuse` clears both the eased angle and the anchor's rotation — the
 position is rewritten every frame, but the rotation is written only here, so a pooled body would otherwise return
 holding the previous life's aim.
+
+**The PLAYER runs this same seam BACKWARDS** (`FirstPersonBody.weapon_hands`, 2026-09-14 — your own hands on the
+weapon you are holding, in first person). The NPC's arms are authoritative and its weapon is moved to
+`weapon_grip_position()`; in first person the GUN is authoritative — `GunPose` owns the view model's sway / bob /
+breath / ADS / recoil / reload dip every frame, and that pose IS the feel of the weapon — so the same
+`weapon_grip_position()` is SOLVED FOR and the hands are placed instead
+(`weapon_hands_position(anchor, rig_basis, grip) == anchor - rig_basis * grip`, pure + static, pinned in
+`tests/test_weapon_hands.gd`). The invariant is identical at both ends: there is ONE pose, not two that have to
+agree, so the hands can no more drift off the player's gun than an NPC's gun can drift off its hands.
+
+Three things are worth knowing before touching it. (1) It is the THIRD pose of the one view-model arms rig
+(`_fp_arms`) that also serves the carry hold and the bare fists, and it is the only one that re-solves its
+transform per frame — so the fists' walk-bob and rest-ease, which write the SAME four properties toward a fixed
+rest, are both gated off `_weapon_hands_up`. (2) The anchor is the equipped `WeaponData.view_model_grip` (gun-local
+metres, +X down the barrel) applied FROM the gun rig's origin ROTATED by its orthonormalised basis — never pushed
+through its `global_transform`, because these view models nest under wildly scaled parents (`silenced.tscn`
+instances at 0.001 and counter-scales its own muzzle marker by 1000) and a grip run through such a frame comes out
+in the wrong unit per weapon. (3) Two of the show/hide gates — the view-model accessibility toggle and the sniper's
+scoped hide — land on `GunPose`'s per-frame `visible` write with no signal behind them, so the weapon latch is
+re-settled every frame; the FISTS latch deliberately is not, because its handoff timing is signal-driven.
 
 A fourth contract sits at the MOUNT rather than the sync. The scene being hung on the anchor is a
 **first-person view model** — authored to draw on `ViewModelCamera.VIEW_MODEL_LAYER` (stripped from the main

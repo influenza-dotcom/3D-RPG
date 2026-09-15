@@ -35,6 +35,7 @@ self_knockback = 7.0
 enemy_knockback = 0.5
 enemy_lift = 0.1
 view_model = ExtResource("3_1e5gt")
+view_model_grip = Vector3(0.22, -0.02, 0)
 npc_held_display_scale = 1.95
 has_laser_sight = true
 casing_size_scale = 3.25

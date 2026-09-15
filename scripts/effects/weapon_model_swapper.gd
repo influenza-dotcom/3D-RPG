@@ -26,12 +26,22 @@ var visuals: GunVisuals
 var muzzle_rig: MuzzleRig
 
 var _weapon_model: Node                   ## the equipped weapon's instantiated view-model
+var _mounted_weapon: WeaponData           ## the weapon whose model is on the rig RIGHT NOW (see mounted_weapon)
 var _placeholder_meshes: Dictionary = {}  ## stashed built-in rig meshes, so they can be restored
 
 ## The currently-equipped view-model (or null), so the sibling MuzzleRig can search it for per-weapon anchor
 ## markers (equipped_marker) without owning it.
 func current_model() -> Node:
 	return _weapon_model
+
+## The weapon whose model is MOUNTED on the rig right now — which is NOT `inventory.equipped_weapon` for the
+## whole down-swing of a swap. Attack equips the new weapon on the inventory the instant the swap STARTS
+## (`inventory.equip` in `_on_swap_weapons_equip_this`) and this rig only mounts its model at `swap_finished`,
+## so for `swap_time` the hub says "shotgun" while the pistol is still the thing dipping on screen. Anything
+## that dresses the VISIBLE gun — the player's hands (FirstPersonBody.weapon_hands) — must read this, not the
+## inventory, or it jumps to the next weapon's grip on the current weapon's model. Null before the first equip.
+func mounted_weapon() -> WeaponData:
+	return _mounted_weapon
 
 ## Show the equipped weapon's own view-model. Instantiates its view_model scene under the rig (freeing the
 ## previous one) so each weapon has its own mesh + material, and hides the rig's built-in placeholder gun.
@@ -43,6 +53,7 @@ func equip() -> void:
 	if is_instance_valid(_weapon_model):
 		_weapon_model.queue_free()
 		_weapon_model = null
+	_mounted_weapon = inventory.equipped_weapon  # stamped even for a weapon with no scene: "nothing" is now mounted
 	var scene: PackedScene = inventory.equipped_weapon.view_model
 	if scene:
 		_weapon_model = scene.instantiate()

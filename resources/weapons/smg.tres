@@ -29,6 +29,7 @@ explosion_radius = 0.0
 self_knockback = 0.5
 enemy_lift = 1.0
 view_model = ExtResource("6_j7mkl")
+view_model_grip = Vector3(0.21, -0.02, 0)
 npc_held_display_scale = 2.0
 muzzle_smoke_scale = 0.65
 audio = ExtResource("1_j7mkl")

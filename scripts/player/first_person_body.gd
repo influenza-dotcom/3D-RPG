@@ -316,7 +316,97 @@ var _fp_legs: BodyModelSwap = null
 @export var fp_arm_punch_alternate: bool = false
 ## How much the NON-punching hand joins in (0 = it holds its guard, 1 = both fists swing together).
 @export var fp_arm_punch_offhand: float = 0.12
+
+# --- WEAPON HANDS: the same rig, holding the drawn gun (the NPC hold, seen from behind your own eyes) --------
+## Show your hands ON THE DRAWN WEAPON — the third thing this one rig does, beside the carry hold and the bare
+## fists. A mounted view model used to float in front of the camera with nobody attached to it; every NPC in the
+## game holds its gun in two visible hands (BodyModelSwap's arm_hold_* pose) and the player was the one actor
+## who did not.
+##
+## ⭐⭐IT IS THE NPC SEAM RUN BACKWARDS, and that inversion is the whole design. An NPC's arms are authoritative
+## and the weapon is moved to `weapon_grip_position()` (npc.gd `weapon_in_hands`). In first person the GUN is
+## authoritative — GunPose owns its sway / bob / breath / ADS / recoil / reload-dip every frame, and that pose IS
+## the feel of the weapon — so here the same `weapon_grip_position()` is SOLVED FOR instead: the rig is placed so
+## that the grip its arms form lands exactly on the gun's anchor (weapon_hands_position below). The hands
+## therefore ride every term of the gun's pose for free and can never drift off it, for the same reason an NPC's
+## gun can never drift off its hands: there is one pose, not two that have to agree.
+##
+## OFF = the pre-2026-09-14 look (a floating view model). The knobs below are all LIVE-tunable from the editor's
+## Remote inspector while playing, the fp_arm_unarmed_* idiom — and they need to be: where the hands READ well is
+## a framing judgement per weapon model. Render a candidate with
+## `scripts/tools/probes/preview_weapon_hands_frame.gd` rather than nudging numbers blind.
+@export var weapon_hands: bool = true
+## A GLOBAL nudge (metres, in the GUN's own local frame — +X down the barrel) added to wherever the hands close.
+##
+## ⭐WHERE they close is per-WEAPON and is NOT authored here: it is `WeaponData.view_model_grip` on the equipped
+## weapon's .tres, because these view models share no common origin (see that field). This export moves EVERY
+## weapon's hands together — the knob for "the hold sits a shade low on all of them", not for placing one gun's
+## grip. ZERO is right once the weapons are authored; it exists so an unmarked weapon is still framable.
+##
+## Spelled as a LITERAL rather than Vector3.ZERO for the reason fp_body_arm_offset already carries: the frame
+## probe reads these defaults as .tscn-style text, and str_to_var cannot parse a constant NAME.
+@export var weapon_hands_grip_offset: Vector3 = Vector3(0.0, 0.0, 0.0)
+## Upward pitch (degrees about the CAMERA's X axis) of the whole rig while it holds a weapon — the
+## fp_arm_unarmed_tilt_deg knob for this pose, and the same load-bearing one. The solve pins the HANDS to the
+## gun whatever this says, so what this actually chooses is where the SHOULDERS end up: steeper swings them
+## further below the lens, so more forearm rises into the bottom of the frame and less arm sits behind the near
+## plane. 0 would run the arms dead level, i.e. straight back through the camera.
+@export_range(0.0, 80.0, 0.5, "degrees") var weapon_hands_tilt_deg: float = 62.0
+## YAW (degrees about the camera's Y axis) of the whole rig while it holds a weapon. As with the tilt, the hands
+## are solved onto the gun whatever this says — what it moves is the SHOULDERS, sideways. Positive swings them
+## to the RIGHT, so the forearms come in DIAGONALLY from the lower-right corner toward the weapon (the way a
+## right-handed FPS frames them) instead of rising straight up from underneath it as two parallel posts — and
+## it also pulls the trigger hand out from BEHIND the gun body, where a zero-yaw pair hides it, onto the near
+## side where you can see it.
+@export_range(-60.0, 60.0, 0.5, "degrees") var weapon_hands_yaw_deg: float = 20.0
+## Uniform scale MULTIPLIER on fp_arm_scale while holding a weapon. SMALLER than the carry/fists poses on
+## purpose: the rig is placed by its hands, so a long arm pushes its own shoulder further back — past the near
+## plane, where you see the inside of your own forearm. Shorten it until the elbow end is out of frame.
+@export_range(0.1, 2.0, 0.01) var weapon_hands_scale_mult: float = 0.20
+## Sideways spread of the pair while holding a weapon — the LEFT SHOULDER's X; the right mirrors across X.
+##
+## ⭐⭐READ THIS WITH weapon_hands_converge_deg BELOW; they are one setting in two halves, and getting that wrong
+## is what made the first pass read as a plank rather than two hands. The two arms are MIRRORS about the rig's
+## centre, so closing the hands by closing the SPREAD collapses them into a single overlapping slab — one fat
+## white wedge stabbing at the weapon. What an NPC's front view actually shows (probe it:
+## scripts/tools/probes/npc_hold_qa_shots.gd) is a **V**: shoulders WIDE, hands converging to meet on one point.
+## So this stays wide and the converge closes the hands instead.
+@export_range(0.0, 0.4, 0.005, "suffix:m") var weapon_hands_spread: float = 0.105
+## ...and the inward yaw (degrees) that brings those wide shoulders' hands back onto ONE point on the weapon —
+## BodyModelSwap.arm_hold_converge_deg's geometry, on a rig whose animation is off (it rides the static
+## `arm_converge_deg` sibling instead). The angle that closes the V exactly is `asin(spread / reach)`, and the
+## shipped 24° is that at this rig's spread and its scaled ~0.27 m reach — the SAME angle the NPC rig uses, for
+## the same reason, because the two are the same proportion. Retune it whenever you move the spread or the scale;
+## too little leaves the hands apart with the weapon floating between them, too much crosses them over.
+@export_range(0.0, 60.0, 0.5, "degrees") var weapon_hands_converge_deg: float = 24.0
+## Fore/aft STAGGER of the pair (metres): how far the support hand sits AHEAD of the trigger hand ALONG THE
+## WEAPON — a hand on the forend and a hand back at the receiver, the way a rifle is actually held, instead of
+## both closing on one spot. BodyModelSwap.arm_hold_stagger's geometry on the static rig (`arm_stagger`).
+##
+## ⭐A SHIFT, never a pitch difference. The first pass staggered the hands with an antisymmetric pitch
+## (`arm_stride_deg`), and at this rig's steep tilt a pitch moves a hand up and down its own ARM, not along the
+## barrel — the two forearms visibly crossed over each other and "it doesn't look like he's holding anything".
+## 0 = both hands at the same point (what a one-handed hold uses).
+## ⭐Small on purpose: the shift runs along the RIG's forward axis, and at this rig's steep tilt that axis is
+## mostly UP — so every centimetre of stagger is ~0.9 cm of the support hand rising over the barrel. 0.03 splits
+## the hands visibly without lifting the front one off the forend.
+@export_range(0.0, 0.2, 0.005, "suffix:m") var weapon_hands_stagger: float = 0.03
+## WHERE ALONG THE ARM the weapon sits, as a fraction of the measured shoulder->fingertip reach — the weapon
+## hold's own value for BodyModelSwap.weapon_grip_reach, which the NPC rig ships at 0.92 (the palm).
+##
+## ⭐It matters more here than on an NPC, and in the opposite direction: whatever fraction of the arm lies BEYOND
+## this point sticks out the far side of the weapon, and at arm's length under the camera that overhang is a
+## white sliver poking through a knife handle. Push it to 1 and the hand ENDS on the grip. Above 1 it stops
+## short, which reads as reaching for the weapon rather than holding it.
+@export_range(0.5, 1.2, 0.01) var weapon_hands_reach: float = 0.95
+## How fast the hands close the last of a DRAW or a HANDOFF onto the grip (per-second exponential rate; higher =
+## snappier): the rise from below the frame on a fresh draw, and the glide from the fists' guard or the carry
+## hold when those hand the rig over. It paces ONLY that residual (_weapon_hands_settle). The grip itself is a
+## HARD write every frame — see _update_weapon_hands for why an eased follow was the wrong shape.
+@export var weapon_hands_draw_rate: float = 14.0
 var _fp_arms: BodyModelSwap = null
+var _weapon_hands_settle: Vector3 = Vector3.ZERO  ## the hands' remaining offset OFF the solved grip (bob-mount metres), eased to zero at weapon_hands_draw_rate; a fresh draw seeds it fp_arm_draw_rise below
+var _weapon_hands_up: bool = false  ## latch: the hands are on a DRAWN weapon (the third pose — see weapon_hands)
 var _unarmed_hands_up: bool = false  ## latch: the fists are up as the unarmed "weapon" (NOT the carry hold — see refresh_unarmed_hands)
 var _fp_arm_tween: Tween = null  ## the in-flight hands slide (draw up / stow down); killed before starting a new one
 var _fp_arm_stowing: bool = false  ## a stow slide is running: FREEZE the pose ease (tilt/scale/spread) so the fists sink out AS fists instead of morphing into the carry reach on screen
@@ -351,6 +441,12 @@ func _ready() -> void:
 ## AFTER physics wrote it" is preserved by construction.
 func _process(delta: float) -> void:
 	_update_fp_arm_bob(delta)
+	# DEFERRED, not called: this component ticks at process_priority -1 (see _ready), which is BEFORE GunPose
+	# writes the gun's transform for this frame, so a solve run here would glue the hands to LAST frame's gun —
+	# one frame behind every recoil kick, which reads as the gun jumping out of your hands on each shot. A
+	# deferred call runs after every node's _process, GunPose's included. (After the bob for the same reason as
+	# before: in this pose the bob is parked and the grip solve owns the transform.)
+	_update_weapon_hands.call_deferred(delta)
 	_update_fp_torso(delta)
 
 
@@ -680,6 +776,7 @@ func on_carry_changed(holding: bool) -> void:
 		# Still holding after the holster beat AND not dead — don't pop hands into the death cinematic
 		# (dying mid-carry would otherwise show the FP arms over the keel-over/fade-to-black).
 		if host._carrying and not host._dying and not host._dead and is_instance_valid(_fp_arms):
+			_weapon_hands_up = false  # the CARRY hold owns the rig now — stand the grip solve down before the slide
 			_slide_fp_arms(true)  # RISE up into frame instead of popping in
 	else:
 		# Dropped: mid-death-cinematic hide INSTANTLY (a slide-down would linger over the keel-over/fade); otherwise
@@ -688,6 +785,14 @@ func on_carry_changed(holding: bool) -> void:
 			_kill_fp_arm_tween()
 			_fp_arms.visible = false
 			_unarmed_hands_up = false
+			_weapon_hands_up = false  # ...and the grip solve stops writing the transform the hide just settled
+		elif _weapon_hands_wanted():
+			# ARMED: the rewield has already put the weapon back out, so these same hands go straight from the prop
+			# onto its grip — the unarmed handoff below, for a player who was carrying with a gun holstered. Without
+			# this they stow and the holster_changed refresh immediately re-draws them: one visible bounce.
+			_unarmed_hands_up = false
+			_weapon_hands_up = true
+			_enter_weapon_hands()
 		elif _unarmed_hands_wanted():
 			# UNARMED: these are the same hands. Don't stow them — they simply stop holding a prop and become
 			# your fists, so the transition is seamless instead of a stow followed immediately by a re-draw.
@@ -695,6 +800,7 @@ func on_carry_changed(holding: bool) -> void:
 			_ease_fp_arms_to_rest()  # ...but the fists REST closer than the carry hold — pull them into the guard
 		else:
 			_unarmed_hands_up = false
+			_weapon_hands_up = false
 			_slide_fp_arms(false)
 
 
@@ -730,6 +836,13 @@ func _slide_fp_arms(into_view: bool) -> void:
 			_fp_arms.rotation_degrees.x = 0.0  # ...untilted, so the guard's pitch reads as part of the raise...
 			_fp_arms.arm_scale = fp_arm_scale  # ...and at the carry baseline, so a guard draw GROWS in (and a death mid-guard can't leak the guard scale into the next carry draw)
 			_fp_arms.arm_position = Vector3(fp_arm_spread, 0.0, 0.0)  # same for the guard's wider fist spread
+		# ⭐UNCONDITIONALLY — not inside the hidden-reset above. A carry grab holsters the weapon (the hands start
+		# their 0.22 s stow) and then draws the carry hold after only fp_arm_draw_delay 0.18 s, so this runs while
+		# the rig is STILL VISIBLE mid-stow and the hidden-only reset is skipped. Scale and spread survive that
+		# race because the per-frame pose ease pulls them back to rest; these three have no ease path, so the
+		# carry hold came up with the weapon hold's converge and its hidden off hand — one tiny converged hand
+		# holding a crate (the 2026-09-15 carry regression).
+		_open_weapon_grip()
 		_fp_arms.visible = true
 		_fp_arm_tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 		_fp_arm_tween.tween_property(_fp_arms, ^"position", rest, fp_arm_draw_time)  # ...rise to rest
@@ -794,6 +907,7 @@ func _ease_fp_arms_to_rest() -> void:
 		return
 	_kill_fp_arm_tween()
 	_fp_arm_stowing = false
+	_open_weapon_grip()  # a weapon->fists handoff keeps the rig on screen: the fists are a parallel pair, both drawn
 	_fp_arms.visible = true
 	_fp_arm_tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 	_fp_arm_tween.tween_property(_fp_arms, ^"position", _fp_arm_rest(), fp_arm_draw_time)
@@ -835,11 +949,249 @@ func _unarmed_hands_wanted() -> bool:
 func refresh_unarmed_hands() -> void:
 	if not is_instance_valid(_fp_arms):
 		return
-	var want := _unarmed_hands_wanted()
-	if want == _unarmed_hands_up:
+	# ONE rig, THREE poses it can be asked for, so the modes are settled TOGETHER and exactly one transition is
+	# run — never a fists answer followed by a weapon answer that contradicts it. A drawn weapon outranks the
+	# fists (you cannot be unarmed and holding a gun), and CARRY outranks both by answering false to each
+	# `_wanted` while `host._carrying` is up: the carry slide is on_carry_changed's, not ours.
+	var want_weapon := _weapon_hands_wanted()
+	var want_fists := (not want_weapon) and _unarmed_hands_wanted()
+	if want_weapon == _weapon_hands_up and want_fists == _unarmed_hands_up:
 		return
-	_unarmed_hands_up = want
-	_slide_fp_arms(want)
+	var was_up := _weapon_hands_up or _unarmed_hands_up  # read BEFORE the latches move: is the rig already on screen as ours?
+	_weapon_hands_up = want_weapon
+	_unarmed_hands_up = want_fists
+	if want_weapon:
+		_enter_weapon_hands()
+	elif want_fists:
+		# Coming off a weapon the hands are ALREADY on screen — ease them into the guard rather than stowing and
+		# re-drawing (the carry->fists handoff's rule, for the same reason: they are the same two hands).
+		if was_up:
+			_ease_fp_arms_to_rest()
+		else:
+			_slide_fp_arms(true)
+	elif was_up:
+		_slide_fp_arms(false)
+
+
+## True when your hands belong ON THE DRAWN WEAPON — the NPC hold, from behind your own eyes (see weapon_hands).
+## Every clause is a way there is nothing to hold: the feature off, hands already full (a carried prop — the
+## SAME rig), dead or dying, no gun rig, a view model the player cannot see (the accessibility toggle, or the
+## sniper's scoped hide — both land on GunPose's per-frame `visible` write), a weapon with no view_model scene at
+## all, or unarmed (the FISTS rig owns that pose; identity-or-path, the test _unarmed_hands_wanted uses). Last,
+## the holster: a put-away weapon takes the hands with it. Holds zero gameplay state — every read is the host's.
+func _weapon_hands_wanted() -> bool:
+	if host == null or not weapon_hands:
+		return false
+	if host._carrying or host._dying or host._dead:
+		return false
+	if not is_instance_valid(_fp_arms):
+		return false
+	var gun := host.gun_mesh
+	if gun == null or not gun.is_inside_tree() or not gun.visible:
+		return false
+	if host.weapon_system == null:
+		return false
+	# ⭐The MOUNTED weapon, never the inventory's equipped one. Attack equips the new weapon on the inventory the
+	# instant a swap STARTS, but the gun rig mounts its model only at swap_finished — so for the whole down-swing
+	# the inventory says "knife" while the pistol is still the thing on screen. Reading the inventory here leapt
+	# the hands to the knife's grip (half a metre to the right) on the pistol's model mid-dip: "when you swap to
+	# different items it messes up where your hands are" (2026-09-15). The hands dress the visible gun.
+	var wd := _mounted_weapon()
+	if wd == null or wd.view_model == null:
+		return false
+	if wd == Player.FISTS or wd.resource_path == Player.FISTS.resource_path:
+		return false
+	return host.weapon_system.attack == null or not host.weapon_system.attack.holstered
+
+
+## Take the hands onto the weapon. A DRAW (the rig hidden) parks them fp_arm_draw_rise below the solved grip
+## first, so the per-frame ease in _update_weapon_hands plays as a rise into frame — the same read _slide_fp_arms
+## buys the other two poses, without a tween that would then fight the solve for the rig's position. Hands
+## already on screen (a fists->weapon swap, or a re-draw caught mid-stow) keep their live pose and simply ease
+## onto the grip from wherever they are.
+func _enter_weapon_hands() -> void:
+	if not is_instance_valid(_fp_arms):
+		return
+	_kill_fp_arm_tween()  # the solve owns `position` from here — no slide may be left writing it
+	_fp_arm_stowing = false
+	var fresh := not _fp_arms.visible
+	var target: Variant = _solve_weapon_hands()
+	if fresh:
+		# A draw: start fp_arm_draw_rise below the grip and rise. The residual is what rises — the grip itself
+		# is written hard from the first frame, so a shot fired mid-draw still kicks the hands with the gun.
+		_weapon_hands_settle = Vector3(0.0, -fp_arm_draw_rise, 0.0)
+		_fp_arms.position = ((target as Vector3) if target != null else fp_arm_offset) + _weapon_hands_settle
+	elif target != null:
+		# Already on screen (the fists' guard, the carry hold): keep the live pose as the residual and glide
+		# in from wherever the hands are, rather than snapping onto the grip.
+		_weapon_hands_settle = _fp_arms.position - (target as Vector3)
+	_fp_arms.visible = true
+
+
+## Stamp the weapon-hold pose onto the rig and return WHERE THE RIG MUST SIT (bob-mount-local metres) for the
+## grip its arms form to land on the gun's anchor. null when any link is missing — no rig, no mount, no gun, or
+## a rig with no arms instanced yet — and the caller then leaves the transform alone.
+##
+## The pose is written FIRST and that order is load-bearing: weapon_grip_position() reads the arms' LIVE
+## transforms, which BodyModelSwap re-poses from the arm_scale / arm_position / arm_stride_deg setters, so the
+## grip must be measured at the pose we are about to place, not the one we are leaving.
+func _solve_weapon_hands() -> Variant:
+	if not (is_instance_valid(_fp_arms) and is_instance_valid(_fp_arm_bob_mount)):
+		return null
+	var anchor: Variant = _weapon_hands_anchor()
+	if anchor == null:
+		return null
+	# ⭐THE HANDS TURN WITH THE GUN. The authored tilt/yaw is the pose of the hands ON A GUN AT REST; the rig's
+	# basis is that pose rotated by however far the gun has turned OFF its rest this frame — GunPose's idle
+	# droop (18° muzzle-down + a 5 cm drop after a few quiet seconds), the recoil kick, the holster swing, the
+	# reload dip, ADS. Until 2026-09-15 only the POSITION followed the gun and the arms stayed camera-level, so
+	# a standing player — whose gun is drooped nearly all the time — watched the hands slide down with the
+	# weapon while pointing the wrong way, off the bottom of the frame: "the hands aren't on the weapon".
+	# Composed in the CAMERA's frame (gun rig and bob mount are both its children), then carried into the mount.
+	_fp_arms.transform.basis = _fp_arm_bob_mount.transform.basis.inverse() * _gun_delta_basis() \
+			* Basis.from_euler(Vector3(deg_to_rad(weapon_hands_tilt_deg), deg_to_rad(weapon_hands_yaw_deg), 0.0))
+	# The per-WEAPON size (WeaponData.view_model_hand_scale) scales the whole pair's GEOMETRY — arm, spread and
+	# stagger together — never the arm alone: the converge angle closes the V at asin(spread / reach), so
+	# shrinking the reach under a fixed spread would cross the hands over each other.
+	var hand_scale := _weapon_hands_scale()
+	var scale_target := fp_arm_scale * weapon_hands_scale_mult * hand_scale
+	if absf(_fp_arms.arm_scale - scale_target) > 0.0005:
+		_fp_arms.arm_scale = scale_target
+	if absf(_fp_arms.weapon_grip_reach - weapon_hands_reach) > 0.0005:
+		_fp_arms.weapon_grip_reach = weapon_hands_reach
+	# ONE-HANDED (a knife, a spray can) collapses the pair onto one point as well as hiding the off hand, and the
+	# two halves are inseparable: weapon_grip_position() averages BOTH hands whether or not they are drawn, so a
+	# spread pair with one hidden reports a grip halfway to a hand you cannot see — and the weapon then sits
+	# beside the visible one, which is precisely the "the hands don't line up with the knife" read.
+	var one := _weapon_hands_one_handed()
+	var spread := 0.0 if one else weapon_hands_spread * hand_scale
+	var converge := 0.0 if one else weapon_hands_converge_deg
+	var stagger := 0.0 if one else weapon_hands_stagger * hand_scale
+	if _fp_arms.hide_offhand != one:
+		_fp_arms.hide_offhand = one
+	if absf(_fp_arms.arm_position.x - spread) > 0.0005:
+		_fp_arms.arm_position = Vector3(spread, 0.0, 0.0)
+	if absf(_fp_arms.arm_converge_deg - converge) > 0.01:
+		_fp_arms.arm_converge_deg = converge
+	if absf(_fp_arms.arm_stagger - stagger) > 0.0005:
+		_fp_arms.arm_stagger = stagger
+	if absf(_fp_arms.arm_stride_deg) > 0.01:
+		_fp_arms.arm_stride_deg = 0.0  # the fists' walk-pump term — never part of this pose
+	var grip: Variant = _fp_arms.weapon_grip_position()
+	if grip == null:
+		return null
+	return weapon_hands_position(
+			_fp_arm_bob_mount.global_transform.affine_inverse() * (anchor as Vector3),
+			_fp_arms.transform.basis, grip as Vector3)
+
+
+## How far the gun rig has ROTATED off its authored rest pose this frame, in the camera's frame — identity at
+## rest, the droop when idle-lowered, the kick mid-recoil. GunMesh captures its rest euler (`base_rotation`,
+## degrees) in _ready and GunPose writes the live one every frame; this is live x rest⁻¹. Identity with no gun
+## rig, so an off-tree rig keeps the plain authored pose.
+func _gun_delta_basis() -> Basis:
+	if host == null or host.gun_mesh == null:
+		return Basis()
+	var gun: GunMesh = host.gun_mesh
+	var rest := Basis.from_euler(gun.base_rotation * (PI / 180.0))
+	return gun.transform.basis.orthonormalized() * rest.inverse()
+
+
+## The point on the DRAWN WEAPON the hands close around, in GLOBAL metres: the equipped weapon's authored
+## `WeaponData.view_model_grip` (gun-local, +X down the barrel) plus the global weapon_hands_grip_offset, both
+## carried out of the gun rig's own frame. null with no gun rig in the tree or nothing equipped.
+##
+## ⭐The grip is rotated by the gun rig's ORTHONORMALISED basis and added to its ORIGIN, rather than run through
+## its `global_transform`, and that is not fussiness — it is what makes one authored number mean the same thing on
+## every weapon. These view models nest under wildly scaled parents (silenced.tscn instances its whole model at
+## 0.001 and counter-scales its own muzzle marker by 1000); a grip pushed through such a frame would come out in
+## metres or nanometres depending on what is equipped. Direction from the rig, scale from nobody.
+func _weapon_hands_anchor() -> Variant:
+	if host == null:
+		return null
+	var gun := host.gun_mesh
+	if gun == null or not gun.is_inside_tree():
+		return null
+	var wd := _mounted_weapon()
+	var grip: Vector3 = wd.view_model_grip if wd != null else Vector3.ZERO
+	return gun.global_position + gun.global_transform.basis.orthonormalized() * (grip + weapon_hands_grip_offset)
+
+
+## The equipped weapon's hand-size multiplier (WeaponData.view_model_hand_scale); 1 with nothing equipped.
+func _weapon_hands_scale() -> float:
+	var wd := _mounted_weapon()
+	return wd.view_model_hand_scale if wd != null else 1.0
+
+
+## The weapon whose model the gun rig has MOUNTED right now (GunMesh.mounted_weapon) — the one every per-weapon
+## read in this pose keys on. Null with no host / no gun rig / before the first equip, which every caller treats
+## as "nothing to hold".
+func _mounted_weapon() -> WeaponData:
+	if host == null or host.gun_mesh == null:
+		return null
+	return host.gun_mesh.mounted_weapon()
+
+
+## Does the equipped weapon want a ONE-HANDED hold (WeaponData.view_model_one_handed)? False for anything with
+## no weapon system, which is the two-handed default and the safe answer for a rig with nothing equipped.
+func _weapon_hands_one_handed() -> bool:
+	var wd := _mounted_weapon()
+	return wd != null and wd.view_model_one_handed
+
+
+## THE INVERSION, alone and pure so it can be pinned without a rig (tests/test_weapon_hands.gd). An NPC moves its
+## WEAPON to `grip` (npc.gd weapon_in_hands); first person moves the HANDS instead, because GunPose owns the gun's
+## transform. Given the grip the arms form in rig-local metres, the rig's own basis, and where that grip must end
+## up in the parent's frame, this is the rig position that puts it there — `parent = anchor - basis * grip`, the
+## one line that makes both halves of `rig.transform * grip == anchor` agree.
+static func weapon_hands_position(anchor_local: Vector3, rig_basis: Basis, grip_local: Vector3) -> Vector3:
+	return anchor_local - rig_basis * grip_local
+
+
+## Hold the hands on the gun, every frame: re-solve the grip (it moves with every term of GunPose's sway / bob /
+## breath / ADS / recoil / reload dip) and WRITE the rig onto it. A hard write, deliberately: the hands are
+## holding the weapon, so a recoil kick that moves the gun 3 cm in one frame must move them 3 cm in that frame.
+## The first pass eased the position toward the grip instead, and a per-second rate of 14 covers ~20% of the
+## gap per frame at 60 Hz — the hands trailed every shot by several frames and slid back onto the gun
+## afterwards, which is exactly "they don't move with the weapon". The two things an ease WAS buying — the rise
+## into frame on a draw, the glide from the fists' guard on a handoff — live in _weapon_hands_settle, a
+## residual OFFSET from the grip that eases to zero on its own; the grip underneath it is never lagged.
+##
+## Runs DEFERRED from _process (see there): GunPose writes the gun's transform at priority 0 and this component
+## ticks at -1, so a direct call would read last frame's gun.
+##
+## No-op in every other mode, which is what keeps this and the fists' walk-bob off each other: the bob's own gate
+## is keyed on _unarmed_hands_up, so it is shut the whole time this is running, and the pose ease it would
+## otherwise apply is gated on this latch (see _update_fp_arm_bob).
+func _update_weapon_hands(delta: float) -> void:
+	if not is_instance_valid(_fp_arms):
+		return
+	# RECONCILE FIRST, and every frame, because two of _weapon_hands_wanted's gates move with NO SIGNAL behind
+	# them: the accessibility toggle (Settings.view_model_visible) and the sniper's scoped hide both land on
+	# GunPose's per-frame `visible` write, which nothing announces. Latching only on holster_changed /
+	# swap_finished left the hands still closed on a view model that was no longer drawn — and then unable to
+	# come back when it returned, because the latch had never moved.
+	#
+	# ⭐The FISTS latch is deliberately NOT re-asked here. Its timing is signal-driven on purpose — the mid-draw
+	# and rewield windows _unarmed_hands_wanted documents are exactly the frames where a per-frame re-ask would
+	# get a different answer than the handoff intends — so this yields entirely while the fists own the rig and
+	# leaves that transition to refresh_unarmed_hands.
+	var want := _weapon_hands_wanted()
+	if want != _weapon_hands_up and not _unarmed_hands_up:
+		_weapon_hands_up = want
+		if want:
+			_enter_weapon_hands()
+		else:
+			_slide_fp_arms(false)
+	if not _weapon_hands_up:
+		return
+	var target: Variant = _solve_weapon_hands()
+	if target == null:
+		return
+	_weapon_hands_settle = _weapon_hands_settle.lerp(Vector3.ZERO, 1.0 - exp(-weapon_hands_draw_rate * delta))
+	if _weapon_hands_settle.length_squared() < 0.000001:
+		_weapon_hands_settle = Vector3.ZERO
+	_fp_arms.position = (target as Vector3) + _weapon_hands_settle
 
 
 ## Punch: throw the fists' own strike (host-wired to Attack.play_animation). Gated on the fists actually being
@@ -860,6 +1212,31 @@ func _hide_fp_arms() -> void:
 	_fp_arm_stowing = false  # the stow finished — pose easing may resume (the next draw re-poses from hidden anyway)
 	if is_instance_valid(_fp_arms):
 		_fp_arms.visible = false
+		_open_weapon_grip()  # off screen now, so the grip can open without anyone seeing the off hand pop back
+
+
+## Undo the weapon hold's two-hand geometry on the rig — the converge, the hidden off hand, the fore/aft stagger
+## — the three pose terms the weapon solve writes that NOTHING ELSE eases back. Called on every way OUT of the
+## weapon pose that puts the rig in front of the player again (a carry draw, a fists handoff) and at the tail of
+## a stow. Idempotent, and a no-op on a rig that never held a weapon.
+func _open_weapon_grip() -> void:
+	if not is_instance_valid(_fp_arms):
+		return
+	if not is_zero_approx(_fp_arms.arm_converge_deg):
+		_fp_arms.arm_converge_deg = 0.0
+	if _fp_arms.hide_offhand:
+		_fp_arms.hide_offhand = false
+	if not is_zero_approx(_fp_arms.arm_stride_deg):
+		_fp_arms.arm_stride_deg = 0.0
+	if not is_zero_approx(_fp_arms.arm_stagger):
+		_fp_arms.arm_stagger = 0.0
+	# ...and the rig's YAW and ROLL. The weapon hold writes rotation_degrees whole (tilt, yaw, 0) every frame;
+	# every other pose only ever tweens rotation_degrees:X back to its rest tilt, so a yaw left on the rig
+	# survived a holster and twisted the carry hold and the fists 20° to the right for the rest of the life —
+	# "it permanently shifts where my hands are" (2026-09-15, the H holster toggle).
+	if not is_zero_approx(_fp_arms.rotation_degrees.y) or not is_zero_approx(_fp_arms.rotation_degrees.z):
+		_fp_arms.rotation_degrees.y = 0.0
+		_fp_arms.rotation_degrees.z = 0.0
 
 
 ## Kill any in-flight hands slide so a new draw/stow (or a death hide) doesn't get overwritten by the old tween.
@@ -895,7 +1272,11 @@ func _update_fp_arm_bob(delta: float) -> void:
 	# strike path re-pose a mid-punch arm afterwards, every frame. Rate is derived from fp_arm_draw_time
 	# (~settled in one slide), and converged scale skips the write entirely so a steady-state punch is never
 	# touched at all.
-	if is_instance_valid(_fp_arms) and not _fp_arm_stowing:
+	# ...and NOT while the hands are on a drawn weapon: that pose has no fixed rest to ease toward. Its whole
+	# transform (position, tilt, scale, spread, stagger) is re-solved onto the gun's grip every frame by
+	# _update_weapon_hands, which runs right after this — leaving this block on would have the two writing
+	# the same four properties in opposite directions, and the rest would win every other frame.
+	if is_instance_valid(_fp_arms) and not _fp_arm_stowing and not _weapon_hands_up:
 		var pace := 1.0 - exp(-delta * 3.0 / maxf(fp_arm_draw_time, 0.01))
 		var scale_target := _fp_arm_rest_scale()
 		if absf(_fp_arms.arm_scale - scale_target) > 0.0005:
@@ -923,8 +1304,11 @@ func _update_fp_arm_bob(delta: float) -> void:
 	if _fp_bob_gate < 0.001:
 		_fp_arm_bob_mount.position = Vector3.ZERO
 		_fp_arm_bob_mount.rotation_degrees = Vector3.ZERO
-		if is_instance_valid(_fp_arms) and absf(_fp_arms.arm_stride_deg) > 0.01:
-			_fp_arms.arm_stride_deg = 0.0  # park the arm-pump too — the carry hold's hands stay planted
+		# Park the arm-pump too — the carry hold's hands stay planted. Still gated on the weapon latch from when
+		# that pose borrowed this property for its stagger (it has its own `arm_stagger` now): the weapon solve
+		# zeroes stride itself, and two writers on one property must not alternate.
+		if is_instance_valid(_fp_arms) and not _weapon_hands_up and absf(_fp_arms.arm_stride_deg) > 0.01:
+			_fp_arms.arm_stride_deg = 0.0
 		_fp_bob_amp = 0.0  # and drop the eased amplitude, so the next draw fades the pump back IN from rest
 		return
 	var horizontal_speed := Vector2(host.velocity.x, host.velocity.z).length()

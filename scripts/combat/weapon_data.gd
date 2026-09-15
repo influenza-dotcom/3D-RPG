@@ -418,6 +418,35 @@ func power_score() -> float:
 ## Leave FALSE for every gun. The knife could be flagged, but its view model is a plain Node3D with no
 ## `strike()`, so today it would only get the forward kick — decide that as a feel change, not a default.
 @export var view_model_punch: bool = false
+## WHERE YOUR OWN FIRST-PERSON HANDS CLOSE ON THIS WEAPON, in the gun rig's OWN local metres — the same frame
+## the view_model is parented into, so its axes are the project's gun convention: **+X runs down the BARREL**,
+## +Y is up out of the receiver, +Z is the shooter's right. ZERO (the default) puts them on the rig's origin.
+##
+## Read by `FirstPersonBody._weapon_hands_anchor` (the player's weapon-hold hands — see that component's
+## `weapon_hands`), which solves the arm pair's own grip onto this point every frame. It is per-WEAPON because
+## these view models share no common origin: measured in this frame the shipped set ranges from a spray can
+## 12 cm down the axis to a knife whose mesh sits 45 cm off the rig's own Z — one global number cannot put a
+## hand on all of them. The `npc_hold_*` group below is the same idea for the other end of the same weapon.
+##
+## ⭐TUNE IT BY SIGHT, never by arithmetic on the model's AABB: run
+## `scripts/tools/probes/preview_weapon_hands_frame.gd`, which renders this weapon at the authored gun mount with
+## the hands solved onto this point. What matters is not anatomy but FRAMING — most of these view models park
+## their true grip behind the camera's near plane, so the readable hold is the hand on whatever part of the
+## weapon is actually ON SCREEN (a rifle's handguard, a pistol's frame).
+@export var view_model_grip: Vector3 = Vector3.ZERO
+## Hold this weapon in ONE hand in first person — a knife, a spray can, anything you would not wrap two fists
+## around. Off (the default) is the braced two-handed hold every gun gets.
+##
+## It hides the off hand AND collapses the pair onto one point (`FirstPersonBody.weapon_hands_one_handed`), which
+## is not optional: the arm rig averages BOTH hands to report its grip, so a spread pair with one hand hidden
+## would report a grip halfway to a hand you cannot see, and the weapon would sit beside the visible one.
+@export var view_model_one_handed: bool = false
+## Size MULTIPLIER on the first-person hands while holding THIS weapon (1 = the rig's global size). Per weapon
+## because these view models put their grips at very different DEPTHS from the lens — the shotgun's pump sits
+## ~12 cm out, the SMG's handguard ~21 cm — and perspective makes the same hand nearly twice as big at the nearer
+## one. Scales the whole pair's geometry together (arm, shoulder spread, fore/aft stagger), so the two-handed V
+## stays closed at any value instead of the hands crossing or parting. Below ~0.5 the hands stop reading as hands.
+@export_range(0.3, 1.5, 0.05) var view_model_hand_scale: float = 1.0
 
 
 ## The view model as an OBJECT SOMEONE HOLDS — for an NPC's hand, a dropped world pickup, or an inventory

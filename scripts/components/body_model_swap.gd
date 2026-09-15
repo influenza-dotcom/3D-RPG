@@ -409,6 +409,46 @@ const SEATED_REPROBE_DISTANCE := 0.02
 ## Player eases it from its own _process — the arm_scale ordering idiom, so a mid-punch frame is still
 ## re-posed by the strike path afterwards); NPCs leave it 0. Composed into BOTH the rest re-apply and the
 ## strike path, so punching mid-walk neither pops the stride off nor doubles it.
+## STANDING, ALWAYS-ON inward yaw (degrees) of the arm pair, toward the body centreline — the same geometry as
+## arm_hold_converge_deg, but applied to the rig's REST pose instead of only while an animated host reports a
+## weapon up. It is what lets an `animate_arms`-OFF rig (the Player's view-model hands) form the two-handed V an
+## NPC forms: shoulders wide, hands meeting on one point. Without it, closing the hands means closing the
+## SHOULDERS (arm_position.x), and the two arms collapse into a single overlapping slab.
+##
+## ADDS to arm_hold_converge_deg rather than replacing it, so an animated rig that authors both opens from this
+## resting convergence to the full weapon grip. ZERO (the default) leaves every NPC exactly as it was.
+##
+## Pre-multiplied about the rig's UP axis, not folded into the euler — see _arm_pose for why (an arm_rotation.y
+## would turn every pitch term into a sideways sway).
+@export var arm_converge_deg: float = 0.0:
+	set(value):
+		arm_converge_deg = value
+		_apply_arm_transform()
+## Draw only ONE arm — hide the mirrored right one, for a ONE-HANDED hold (a knife, a spray can). The pair is
+## still BUILT, which is the whole difference from `single_arm`: that one REBUILDS the rig, which re-instances the
+## parts and so strands anything a host dressed them with from outside (the view model's GunVisuals rim + outline
+## pass is exactly that). This is a visibility toggle a host can flip per weapon, every frame if it likes.
+##
+## ⭐It is only HONEST alongside a ZERO arm_position.x and a ZERO arm_converge_deg. weapon_grip_position() averages
+## BOTH hands, visible or not, so with the pair spread apart the grip it reports sits on the centreline — between
+## a drawn hand and a hidden one — and whatever is mounted on that grip floats beside the hand you can see.
+## Collapse the pair onto one point and the average IS that point. FirstPersonBody.weapon_hands_one_handed does
+## exactly that; do the same for any other consumer.
+@export var hide_offhand: bool = false:
+	set(value):
+		hide_offhand = value
+		_apply_offhand_visibility()
+## STANDING, ALWAYS-ON fore/aft STAGGER of the pair (metres): the LEFT hand this far AHEAD of the right along the
+## body's forward axis, the right the same distance back — arm_hold_stagger's geometry on the REST pose, for an
+## `animate_arms`-off rig. It is what puts two hands at two POINTS along a rifle (a support hand on the forend,
+## a trigger hand back at the receiver) instead of both closing on one spot. An antisymmetric shift of the
+## shoulder anchors, never a pitch difference: at a steep hold a pitch moves a hand up and down the ARM, and the
+## first first-person pass used exactly that (an `arm_stride_deg` stagger) and got two arms crossing over each
+## other. ZERO (the default) leaves every NPC exactly as it was.
+@export var arm_stagger: float = 0.0:
+	set(value):
+		arm_stagger = value
+		_apply_arm_transform()
 @export var arm_stride_deg: float = 0.0:
 	set(value):
 		arm_stride_deg = value
@@ -911,7 +951,7 @@ func _animate_limbs(delta: float, sitting: bool) -> void:
 		var sway_target := (arm_fists_walk_sway if moving else arm_fists_idle_sway) if fists_out else 0.0
 		_fists_sway = lerpf(_fists_sway, sway_target, 1.0 - exp(-8.0 * delta))
 		var s := swing * _fists_sway  # left +s / right -s -> the arms alternate (same shape as the walk swing)
-		var converge := arm_hold_converge_deg * _hold_blend  # inward yaw: the hands close on the weapon
+		var converge := arm_converge_deg + arm_hold_converge_deg * _hold_blend  # inward yaw: the hands close on the weapon
 		# ...and an antisymmetric shift ALONG the barrel so one hand leads. `_reflect()` negates X only, so a +Z
 		# offset would otherwise stay +Z on both arms — the right one is negated here to make it a true stagger.
 		var stagger := Vector3(0.0, 0.0, arm_hold_stagger * _hold_blend)
@@ -933,9 +973,10 @@ func _animate_limbs(delta: float, sitting: bool) -> void:
 			var s_lead := s_amp if _strike_side >= 0.0 else s_amp * arm_strike_offhand_scale
 			var s_off := s_amp * arm_strike_offhand_scale if _strike_side >= 0.0 else s_amp
 			var s_base := arm_rotation + Vector3(_seated_arm_pitch_eff() if sitting else 0.0, 0.0, 0.0)
-			_arm_left.transform = _arm_pose(s_base + Vector3(arm_strike_pitch * s_lead + arm_stride_deg, 0.0, 0.0), arm_strike_thrust * s_lead)
+			var s_stagger := Vector3(0.0, 0.0, arm_stagger)
+			_arm_left.transform = _arm_pose(s_base + Vector3(arm_strike_pitch * s_lead + arm_stride_deg, 0.0, 0.0), arm_strike_thrust * s_lead + s_stagger, arm_converge_deg)
 			if is_instance_valid(_arm_right):
-				_arm_right.transform = _reflect() * _arm_pose(s_base + Vector3(arm_strike_pitch * s_off - arm_stride_deg, 0.0, 0.0), arm_strike_thrust * s_off)
+				_arm_right.transform = _reflect() * _arm_pose(s_base + Vector3(arm_strike_pitch * s_off - arm_stride_deg, 0.0, 0.0), arm_strike_thrust * s_off - s_stagger, arm_converge_deg)
 	# LEGS: swing forward/back -- a walk on the ground, a faster + WIDER flail in the air. Left -swing / right
 	# +swing -> opposite each other (and contralateral to the arms while walking).
 	if animate_legs and is_instance_valid(_leg_left):
@@ -979,7 +1020,7 @@ func _apply_seated_limb_pose(delta: float) -> void:
 	_fists_sway = lerpf(_fists_sway, 0.0, 1.0 - exp(-8.0 * delta))
 	_strike_t = 0.0
 	if animate_arms and is_instance_valid(_arm_left):
-		var converge := arm_hold_converge_deg * _hold_blend
+		var converge := arm_converge_deg + arm_hold_converge_deg * _hold_blend
 		var stagger := Vector3(0.0, 0.0, arm_hold_stagger * _hold_blend)
 		_arm_left.transform = _arm_pose(arm_rotation + Vector3(_mode_pitch, 0.0, 0.0), stagger, converge)
 		if is_instance_valid(_arm_right):
@@ -1426,6 +1467,7 @@ func _rebuild() -> void:
 		_arm_right = arms[1]
 		_apply_arm_transform()
 		_apply_arm_texture()
+		_apply_offhand_visibility()  # a fresh pair is built visible — re-assert a one-handed hold
 	if leg_model != null:
 		var legs := _instance_pair(leg_model)
 		_leg_left = legs[0]
@@ -1512,10 +1554,13 @@ func head_rest_position() -> Vector3:
 ## animate_arms-off rig, the editor's seated preview, and lower_arms() (a seated dialogue speaker) all land on.
 func _apply_arm_transform() -> void:
 	var rot := arm_rotation + Vector3(_seated_arm_pitch_eff() if _host_sitting() else 0.0, 0.0, 0.0)
+	# `_reflect()` negates X only, so the +Z stagger is negated here for the right arm to make it a true fore/aft
+	# split — the same rule the animated hold's `stagger` / `-stagger` follows.
+	var stagger := Vector3(0.0, 0.0, arm_stagger)
 	if is_instance_valid(_arm_left):
-		_arm_left.transform = _arm_pose(rot + Vector3(arm_stride_deg, 0.0, 0.0))
+		_arm_left.transform = _arm_pose(rot + Vector3(arm_stride_deg, 0.0, 0.0), stagger, arm_converge_deg)
 	if is_instance_valid(_arm_right):
-		_arm_right.transform = _reflect() * _arm_pose(rot + Vector3(-arm_stride_deg, 0.0, 0.0))
+		_arm_right.transform = _reflect() * _arm_pose(rot + Vector3(-arm_stride_deg, 0.0, 0.0), -stagger, arm_converge_deg)
 
 ## One arm's local transform from its rotation (degrees) at the shoulder, sized by arm_scale.
 ## `extra_pos` is an additive local translation (the strike thrust); the RIGHT arm's copy is mirrored by the
@@ -1550,6 +1595,13 @@ func _leg_pose(swing_deg: float) -> Transform3D:
 	var rest := Basis.from_euler(Vector3(deg_to_rad(leg_rotation.x), deg_to_rad(leg_rotation.y), deg_to_rad(leg_rotation.z)))
 	var swung := Basis(Vector3.RIGHT, deg_to_rad(swing_deg)) * rest
 	return Transform3D(swung.scaled(Vector3.ONE * leg_scale), leg_position + _posture_offset())
+
+## Show/hide the mirrored right arm for a one-handed hold (see hide_offhand). Null-safe: a rig with no arms
+## instanced yet simply has nothing to hide, and the next _rebuild re-asserts this.
+func _apply_offhand_visibility() -> void:
+	if is_instance_valid(_arm_right):
+		_arm_right.visible = not hide_offhand
+
 
 ## Reflection across the body's centre plane (X=0) -- turns a left-arm pose into the mirrored right arm.
 func _reflect() -> Transform3D:

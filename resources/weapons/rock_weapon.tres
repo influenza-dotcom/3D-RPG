@@ -26,6 +26,7 @@ max_explosion_force = 10.0
 self_knockback = 2.0
 enemy_lift = 5.0
 view_model = ExtResource("6_0l3eg")
+view_model_grip = Vector3(0.19, -0.03, -0.09)
 npc_held_display_scale = 2.2
 spawns_casing = false
 muzzle_smoke_scale = 2.1
