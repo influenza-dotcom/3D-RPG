@@ -10,10 +10,13 @@ This index is generated from `@system` annotations in the code, so it cannot dri
 For the deep narrative see [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md); for current rough edges
 see [ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md).
 
-_24 system(s), 51 entries - scanned scripts/, managers/ + resources/._
+_27 system(s), 54 entries - scanned scripts/, managers/ + resources/._
 
 - [Audio](#audio)
+- [Brush Z-Fight Clean](#brush-z-fight-clean)
 - [Control-Lock And Immunity](#control-lock-and-immunity)
+- [Crash Guard](#crash-guard)
+- [Crash Report Screen](#crash-report-screen)
 - [Derived Stats](#derived-stats)
 - [Economy](#economy)
 - [Effect And Audio Seams](#effect-and-audio-seams)
@@ -61,6 +64,15 @@ Reads the SHARED soundscape scan (scripts/audio/soundscape.gd) plus the two flag
 - **Risk:** PROCESS_MODE_ALWAYS is load-bearing: a conversation PAUSES THE TREE, and a pausable AudioStreamPlayer silences itself ~15 ms in with nothing logged (the trap documented on StationSpeaker). This bed must FADE out of a conversation, not vanish into one.
 - **Test:** `tests/test_wander_music.gd`
 
+## Brush Z-Fight Clean
+
+### `class BrushZFightClean` - `scripts/components/brush_zfight_clean.gd`
+
+LevelRoot._ready spawns one per level at runtime (clean_brush_zfights, default on) unless the level authored its own; it runs in _ready under the level root and assigns a NEW ArrayMesh per touched FuncGodotMap MeshInstance3D BEFORE Ps1Warp.cover() overrides materials; the rebuild preserves every surface's material / name / vertex format, and only OPAQUE surfaces are touched, so SeeThroughBrushes (which harvests TRANSPARENT surfaces in its own _ready) sees the original arrays.
+
+- **Risk:** A rebuilt surface that dropped its material or flipped winding would render a whole texture group of the map black or invisible on load; test_brush_zfight_clean.gd pins material, winding, UV interpolation and the exact clipped area.
+- **Test:** `tests/test_brush_zfight_clean.gd`
+
 ## Control-Lock And Immunity
 
 ### `autoload InputManager` - `managers/InputManager.gd`
@@ -89,6 +101,25 @@ is_engaged() (_active != null) = a conversation exists at all — the unpaused i
 - **Risk:** A suspending sub-menu (Shop/Install/Chess/Atm/Heal/LevelUp/Loot-exchange) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
 - **Risk:** Station options (Trade/Heal/Rest/Level Up/Install/Play Chess/Bank) are discovered by a has_method scan of the speaker's direct children for the dialogue_station_option + open_dialogue_station pair, and the speaker/player surfaces stay duck-typed (set_in_dialogue/note_speaking/is_following/resolved_disposition + died); a rename on either side silently drops the option/handshake with no compile error — pinned by tests/test_dialogue_speaker_contracts.gd.
 - **Test:** `tests/test_dialogue.gd` `tests/test_dialogue_suspend_closed.gd` `tests/test_dialogue_speaker_contracts.gd`
+
+## Crash Guard
+
+### `autoload CrashGuard` - `managers/CrashGuard.gd`
+
+The FIRST [autoload] row in project.godot: _init writes user://crash_guard/session.cfg before any other autoload's _init runs, and ONLY a clean quit (_exit_tree) rewrites it as clean — a marker found not-clean at the next boot means the previous run died (a crash, a hang killed from Task Manager, or the editor's Stop button). CrashReportScreen (the LAST [autoload] row) calls previous_crash() once in its _ready and shows the player the report; nothing else reads the marker, and any script may drop a breadcrumb(text) so a report says what the game was doing. Installs an ErrorSink (scripts/components/error_sink.gd) in EVERY build, so the marker carries the last errors even in a release export; the DebugOverlay's sink is a second, debug-only listener on the same OS.add_logger seam.
+
+- **Risk:** A crash BEFORE this _init (a GDExtension that fails to load, a hollow .pck) leaves no marker and is invisible here — the console wrapper (CYBERSUNDAY.console.exe) and user://logs/godot.log are the only trail, and README says so.
+- **Risk:** A heap-corruption fail-fast never delivers NOTIFICATION_CRASH, so the last heartbeat (HEARTBEAT_SECONDS) BOUNDS the moment of death; it does not pin it.
+- **Test:** `tests/test_crash_guard.gd`
+
+## Crash Report Screen
+
+### `autoload CrashReportScreen` - `scripts/ui/crash_report_screen.gd`
+
+Autoload modal and the LAST [autoload] row on purpose: unhandled input walks the tree from the last child back, so its ui_cancel wins over every other screen; registered in InputManager's modal registry as blocks_tabs so gameplay stays suppressed while it is up. Reads CrashGuard.previous_crash() ONCE in _ready and opens itself over the boot scene when the marker says the last run died — nothing else opens it, and it never auto-opens inside the editor (OS.has_feature("editor")), so the Stop button cannot nag a developer; the file and the Output line still land. Copy = DisplayServer.clipboard_set of the whole report; Open folder = OS.shell_open of CrashGuard.report_dir_global(); Report online = OS.shell_open(report_url), an @export a designer points at the tracker (empty = no button).
+
+- **Risk:** The card is a FIXED frame: the report scrolls inside a reserved TextEdit and the status line hides by ALPHA, so copying can never resize or re-centre the card under the cursor (the house rule, tests/test_menu_layout_stability.gd).
+- **Test:** `tests/test_crash_report_screen_scene.gd`
 
 ## Derived Stats
 
@@ -453,7 +484,7 @@ An offscreen never-cleared SubViewport keeps a running average of the FINISHED f
 
 ### `file retro_post.gd` - `scripts/ui/retro_post.gd`
 
-THE PRESENTATION DIALS OF post_process.gdshader, in ONE place. Every screen that wears the retro overlay — the in-game one on the Player's ColorRect (scripts/player/player.gd) and the boot screen's own copy in scenes/computerroom.tscn — pushes the same six uniforms from the same player Settings through `apply_dials()`. Anything that is about the PLAYER's state rather than the presentation (low_hp, hurt, night vision, the death fades, the lens bend) stays with its owner; this file is only the part that must look identical everywhere.
+THE PRESENTATION DIALS OF post_process.gdshader, in ONE place. Every screen that wears the retro overlay — the in-game one on the Player's ColorRect (scripts/player/player.gd) and the boot screen's own copy in scenes/computerroom.tscn — pushes the same six uniforms from the same player Settings through `apply_dials()`. Anything that is about the PLAYER's state rather than the presentation (low_hp, hurt, the death fades, the lens bend) stays with its owner; this file is only the part that must look identical everywhere.
 
 - **Risk:** THE BOOT SCREEN IS NOT DRIVEN BY THE PLAYER. It is a standalone scene with no Player node, so before this existed it never received ANY of these — the player's Dithering and Colour Depth rows did nothing on the first thing they see, and it quantised at its own authored `color_steps` forever. A new host that draws this shader must call apply_dials() every frame or it silently inherits that bug.
 - **Test:** `tests/test_color_quantization.gd`
