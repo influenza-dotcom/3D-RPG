@@ -179,6 +179,7 @@ If you are here to write, you only need one of them: **Write**.
 | **Browse** | Find any content file by name and open it in the Inspector. |
 | **Quests** | Edit a quest's objectives, rewards and flow. |
 | **Loot** | Edit a loot table's drops, with a live expected-drops readout. |
+| **Items & Weapons** | Edit an item — and the weapon it carries — in one place: names, prices, weights, damage, recoil. |
 | **Graphs** | Draw a conversation, or the whole quest chain, as a graph. |
 | **Icons** | Render an inventory picture for every item into `resources/icons/`. |
 
@@ -361,13 +362,14 @@ its own minimum small: one action bar and one status line stay put, and everythi
 | **Dialogue** | *Save Conversation* | that one conversation file. |
 | **Quests** | *Save Quest* | that one quest file. |
 | **Loot** | *Save Loot Table* | that one loot table file. |
+| **Items & Weapons** | *Save Item* | that item file, plus its weapon file when the weapon changed too. |
 | **Barks** | *Save Barks* | that one bark set file. |
 | **UI Copy** | *Save UI Copy (N)* | only the changed lines, inside `scripts/ui/player_text.gd`. The one tab that edits a script. |
 | **Text** | *Save Changed Text (N)* | only the files you actually edited, and inside them only the fields you changed. |
 | **Factions** | *Save Factions (N)* | every faction whose cells you changed. **Cell edits alone write nothing** — the grid stages them. *Restore Last Backup* is the other writer: it copies each faction's `.bak` back over its file. |
 | **Audit** | *Fix (N)* | the files in the plan, after it shows you the list and you confirm. |
 
-**The `.bak` rule.** Every one of those *overwriting* saves — the six editors, Factions, and Audit's Fix — copies
+**The `.bak` rule.** Every one of those *overwriting* saves — the seven editors, Factions, and Audit's Fix — copies
 the file's previous bytes to **`<file>.bak`** beside it first. That is a one-deep on-disk undo: rename the `.bak`
 back over the file and you have the previous version. A first-ever save makes no `.bak` (there was nothing to
 preserve), a second save on the same file **overwrites** the `.bak` you already had, and `.bak` files are

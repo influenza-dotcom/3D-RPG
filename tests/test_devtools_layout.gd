@@ -34,6 +34,7 @@ const TAB_SCRIPTS := [
 	"res://addons/cybersunday_tools/dock_browser/content_browser.gd",
 	"res://addons/cybersunday_tools/dock_quest/quest_editor.gd",
 	"res://addons/cybersunday_tools/dock_loot/loot_editor.gd",
+	"res://addons/cybersunday_tools/dock_item/item_editor.gd",
 	"res://addons/cybersunday_tools/panel_graph/dialogue_graph.gd",
 	"res://addons/cybersunday_tools/dock_icons/icon_view.gd",
 	# Write
@@ -59,9 +60,9 @@ const TAB_SCRIPTS := [
 
 const PANEL_SCRIPT := "res://addons/cybersunday_tools/cyber_panel.gd"
 
-## Build / Create / Write / Tune / Check / Advanced, and the 26 tools inside them.
+## Build / Create / Write / Tune / Check / Advanced, and the 27 tools inside them.
 const GROUP_COUNT := 6
-const TOOL_COUNT := 26
+const TOOL_COUNT := 27
 ## Anything smaller than this is squinting territory in a dock the designer lives in.
 const MIN_LABEL_FONT := 12
 ## A growing control may floor itself up to here; past it, it has to be inside the scroll.

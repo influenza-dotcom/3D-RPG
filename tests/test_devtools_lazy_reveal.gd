@@ -19,6 +19,7 @@ const LAZY_DOCKS := [
 	"res://addons/cybersunday_tools/dock_text/text_editor.gd",
 	"res://addons/cybersunday_tools/dock_bark/bark_editor.gd",
 	"res://addons/cybersunday_tools/dock_uicopy/ui_copy_editor.gd",
+	"res://addons/cybersunday_tools/dock_item/item_editor.gd",
 ]
 
 

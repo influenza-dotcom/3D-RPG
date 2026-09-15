@@ -11,7 +11,8 @@ extends VBoxContainer
 ## folder REFUSING to overwrite (the level_dock _make_level idiom), rescans the FileSystem, opens the new resource in
 ## the Inspector, clears the name box and arms the Edit button. Edit hands the file to the tab that edits it
 ## (Quest -> Quests, DialogueResource -> Dialogue, LootTable -> Loot, NpcData -> Place) through core/host.gd; a type
-## with no editor tab (Item, WeaponData, Faction, ...) opens in the Inspector instead. All the seeding logic lives in
+## with no editor tab (Faction, StatusEffect, ...) opens in the Inspector instead. BarkSet -> Barks and
+## Item / WeaponData -> Items & Weapons route there too. All the seeding logic lives in
 ## content_scaffold.gd (pure + GUT-tested); this file is editor glue.
 ##
 ## HEIGHT CONTRACT: the generator rows live INSIDE a ScrollContainer with a small height floor; only the status row
@@ -540,6 +541,8 @@ func _editor_tab_title(res: Resource) -> String:
 		return "Loot"
 	if res is BarkSet:
 		return "Barks"
+	if res is Item or res is WeaponData:
+		return "Items & Weapons"
 	if res is NpcData:
 		return "Place"
 	return ""

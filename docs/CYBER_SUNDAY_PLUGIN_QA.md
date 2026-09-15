@@ -470,6 +470,31 @@ Acceptance:
 - Text nested inside ARRAYS (quest objectives, dialogue lines, bark lists) is out
   of scope here — it stays in the **Quest Edit** / **Dialogue Edit** / **Bark Edit** tabs.
 
+## Items And Weapons Editor
+
+- The form is DERIVED from each resource's exports (`PropertyForm.fields` walks
+  `get_property_list()`), never a hand-kept field list. `WeaponData` carries ~120
+  knobs; a hand-written list would go stale on the first new `@export`, and a
+  MISSING field is invisible — the designer never learns the knob exists.
+- An item and the `WeaponData` it carries are edited TOGETHER and saved together,
+  each with its own `.bak`, and the report names both files. Balancing a gun
+  across two resources in the Inspector is the friction this removes.
+- `Item.id` is NOT editable here: it is a primary key that stock lists, loot
+  tables and save files reference by name. Same rule as `Quest.id`.
+- Resource-typed fields (icon, world model, status effects, weapon mod) are
+  LISTED read-only, naming the file they point at. A picker for each would be a
+  second, worse Inspector — but hiding them would make the tab lie about what an
+  item has.
+- Two quiet data-loss traps this tab must keep pinned:
+  a **Range clamps and snaps on the way IN**, so a SpinBox built without the
+  authored `@export_range` (and a fine step for an unranged float) rewrites an
+  authored 12.5 to 12 just by opening the tab; and an **enum's ROW index is not
+  its VALUE** (`"MISC:3,WEAPON:0"`), so reading the index back as the value
+  silently reassigns categories.
+- Push uses the no-signal setters; discard re-reads with the cache REPLACED,
+  because the staged values live on the shared cached Resource and merely
+  re-showing the old ones would not undo them.
+
 ## UI Copy Editor
 
 The ONLY tab that rewrites a `.gd` file. It edits the single-line string

@@ -2,10 +2,10 @@
 extends TabContainer
 
 ## Single host for every CYBER SUNDAY tool Control. The tools are grouped by the JOB a designer is doing -- six
-## outer tabs, each an inner TabContainer of related tools -- instead of one flat strip of 26 titles:
+## outer tabs, each an inner TabContainer of related tools -- instead of one flat strip of 27 titles:
 ##
 ##   Build     Palette / Place / Place Item / Level                 -- put things into the open scene
-##   Create    New / Blueprints / Browse / Quests / Loot / Graphs / Icons -- author content files
+##   Create    New / Blueprints / Browse / Quests / Loot / Items & Weapons / Graphs / Icons -- author content files
 ##   Write     Dialogue / Barks / Text / UI Copy                    -- put words in the game
 ##   Tune      Tuning / Factions / Encounter                         -- global numbers + relationships
 ##   Check     Audit / Reach / Refs / Stats                          -- is it valid, can the player reach it
@@ -17,7 +17,7 @@ extends TabContainer
 ## icon baking. Dialogue and Text moved there unchanged (their Control names, the keys tests and handoffs route by,
 ## are untouched).
 ##
-## WHY groups: 26 titles need ~1800 px of tab strip, and the editor's bottom panel only spans the centre column
+## WHY groups: 27 titles need ~1800 px of tab strip, and the editor's bottom panel only spans the centre column
 ## (~1200 px on a 1920 display between the Scene and Inspector docks), so a third of the tools -- including Reach,
 ## the one that answers "why can't the player start my quest" -- sat behind scroll arrows. Five short outer titles
 ## can never overflow, and each inner strip holds at most nine. The price is one extra tab-bar row (~30 px), paid
@@ -55,6 +55,7 @@ const LootEditor := preload("res://addons/cybersunday_tools/dock_loot/loot_edito
 const TextEditor := preload("res://addons/cybersunday_tools/dock_text/text_editor.gd")
 const BarkEditor := preload("res://addons/cybersunday_tools/dock_bark/bark_editor.gd")
 const UiCopyEditor := preload("res://addons/cybersunday_tools/dock_uicopy/ui_copy_editor.gd")
+const ItemEditor := preload("res://addons/cybersunday_tools/dock_item/item_editor.gd")
 const ContentBrowser := preload("res://addons/cybersunday_tools/dock_browser/content_browser.gd")
 const RefViewer := preload("res://addons/cybersunday_tools/dock_refs/ref_viewer.gd")
 const EncounterView := preload("res://addons/cybersunday_tools/dock_encounter/encounter_view.gd")
@@ -97,6 +98,7 @@ func _init() -> void:
 		[ContentBrowser, "Browse", "Find any content file by name and open it in the Inspector. Read-only."],
 		[QuestEditor, "Quests", "Edit a quest's objectives, rewards and flow. Writes: on Save only."],
 		[LootEditor, "Loot", "Edit a loot table's drops with a live expected-drops readout. Writes: on Save only."],
+		[ItemEditor, "Item Edit", "Edit an item and the weapon it carries -- names, prices, weights, damage, recoil. Writes: on Save only."],
 		[GraphsPanel, "Graphs", "Draw a conversation or the quest chain as a graph. Read-only."],
 		[IconView, "Icons", "Render inventory icons for every item into resources/icons/. Writes: PNG files only."],
 	])
@@ -171,8 +173,10 @@ func show_tab(tab_name: String) -> Control:
 	return c
 
 
-## Which tool edits a content resource in-plugin. "" for types that only the Inspector edits (Item, WeaponData,
-## Faction, ...). NpcData maps to Place because "open the archetype" for a designer means "put one in the level".
+## Which tool edits a content resource in-plugin. "" for types that only the Inspector edits (Faction, StatusEffect,
+## ...). NpcData maps to Place because "open the archetype" for a designer means "put one in the level". A
+## WeaponData routes to Item Edit, which opens it through the ITEM that carries it -- a weapon card on its own has
+## no name, icon or price, so handing a designer one alone would be handing them half a thing.
 static func editor_tab_for(res: Resource) -> String:
 	if res is Quest:
 		return "Quest Edit"
@@ -182,6 +186,8 @@ static func editor_tab_for(res: Resource) -> String:
 		return "Loot Edit"
 	if res is BarkSet:
 		return "Bark Edit"
+	if res is Item or res is WeaponData:
+		return "Item Edit"
 	if res is NpcData:
 		return "Place"
 	return ""
