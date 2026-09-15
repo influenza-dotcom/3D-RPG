@@ -29,6 +29,7 @@ table is a blocker**; they need no attribution row and must not be deleted.
 | `resources/weapons/Secret Shop.flac` | Dallas Marquis's own track. The NAME is a nod to Dota 2, which is why a metadata sweep reads it as the Dota OST — it is not. Also referenced by name in `tests/test_devtools_browser.gd`, which expects it to stay put. |
 | `assets/audio/music/Secret Shop.mp3` | The same track. Wired at `scenes/game.tscn` (the `Music` node, autoplay) and `resources/levels/TestLevel.tres`. |
 | `assets/audio/music/Secret Shop v3.mp3` | An earlier mix of the same track. |
+| `assets/audio/music/Jakub's Ladder.mp3` | Dallas Marquis's own track. Currently an orphan — nothing in the game references it — so it ships in the pack without being heard until it is wired up or removed by choice, not by licence. |
 
 ---
 
@@ -40,7 +41,6 @@ a folder scan when `track` is null and would shuffle whatever is left.
 
 | ⚠ | `res://` path | Size | Apparent origin | Wired at | Action |
 | --- | --- | --- | --- | --- | --- |
-| ⚠ | `assets/audio/music/Jakub's Ladder.mp3` | 3,094,625 | commercial track | nothing — orphan | DELETE, no rewire |
 | ⚠ | `assets/audio/sfx/hotline_miami_lr.mp3` | 128,517 | Hotline Miami OST | `resources/tuning/PlayerFeedbackSettings.tres:8` (`death_sting`) | DELETE. Set `death_sting = null`; `death_mix.gd:37-38` documents null as inert, `_sting_will_play()` enforces it (`death_mix.gd:302-308`, null check at `:304`) and `tests/test_death_mix.gd:153-165` covers it. |
 | ⚠ | `assets/audio/music/RIP Granny 😔🙏.mp3` | 1,436,596 | unknown, non-original | `scenes/throwable/radiothrowable.tscn:6,37` (`track`) | DELETE **last**, and **repoint** `track` — do not merely unset it (see the warning below). |
 | ⚠ | `assets/audio/music/station/Shop Radio 1.mp3` | 1,543,923 | Spelunky OST (Eirik Suhrke) — **knowing placeholder**, added 2026-08-22 | `resources/tuning/StationMusicSettings.tres` (`tracks`) | REPLACE with a licensed or original shop loop, then DELETE. Clearing `tracks` makes the whole station-radio layer inert BY DESIGN, so the purge is a pure resource edit — no code change, no broken build. |
