@@ -6,10 +6,11 @@ extends GutTest
 ## (SubViewport + gun camera + composite container) reads get_world_3d() / get_viewport() and mutates the main
 ## camera's cull_mask, so it's built in-tree and verified by playtest, NOT here (per the project's test policy).
 ##
-## WHY this exists: the levels run with near-zero ambient light (volumetric FOG is the scene fill) and the gun pass
-## deliberately excludes that fog — so WITHOUT its own environment the view model renders pitch black. This guards
-## the fill that fixes it: a flat COLOUR ambient at the requested energy, with fog OFF (no fogging a gun at arm's
-## length) and a CLEAR background (the pass is transparent + composited — it must never paint a sky).
+## WHY this exists: the gun pass deliberately excludes the world's fog and its environment — so it carries its own
+## small ambient FLOOR: a flat COLOUR ambient at the requested energy, with fog OFF (no fogging a gun at arm's
+## length) and a CLEAR background (the pass is transparent + composited — it must never paint a sky). The floor is
+## NOT the gun's lighting: that is the world's lights, which only reach the pass because ViewModelCamera.light_reach
+## stamps VIEW_MODEL_LAYER onto them (tests below) — Godot culls lights per camera by the light's own `layers`.
 
 func test_build_default_environment_gives_a_flat_ambient_fill() -> void:
 	var env: Environment = ViewModelCamera.build_default_environment(null, Color(0.9, 0.91, 0.95), 0.75)
@@ -43,6 +44,56 @@ func test_build_default_environment_copies_world_tonemap_when_given() -> void:
 	assert_almost_eq(env.tonemap_white, 2.0, 0.0001, "…and its tonemap white")
 	world = null
 	env = null
+
+
+## ⭐⭐ WORLD LIGHTS ONLY REACH THE GUN PASS BECAUSE THE PASS STAMPS ITS LAYER ONTO THEM.
+##
+## Godot culls LIGHTS per camera by the light's own VisualInstance3D `layers`, not by light_cull_mask. The gun camera
+## culls only VIEW_MODEL_LAYER and every level light is authored on layer 1, so without this stamp the pass has no
+## sun, no lamps, no muzzle flash — measured 2026-09-14 (scripts/tools/probes/__view_model_world_light_probe.gd):
+## gun-pass mean luminance 0.023 with the fill off, 0.363 once the lights carried the layer. The old 0.75 fill hid it.
+## The pixels need a window; these pin the pure stamp + the opt-out + the default that keeps it on.
+func test_reach_light_stamps_the_view_model_layer_onto_a_world_light() -> void:
+	var l := OmniLight3D.new()
+	assert_eq(l.layers & ViewModelCamera.VIEW_MODEL_LAYER, 0, "a fresh light ships on layer 1 only — the bug's precondition")
+	assert_true(ViewModelCamera.reach_light(l), "stamping a layer-1 light must report a change")
+	assert_ne(l.layers & ViewModelCamera.VIEW_MODEL_LAYER, 0, "…and the light now carries VIEW_MODEL_LAYER, so the gun camera's pass can see it")
+	assert_ne(l.layers & 1, 0, "…without losing layer 1 — the stamp ORs, it never assigns (the world must still be lit)")
+	assert_false(ViewModelCamera.reach_light(l), "a light that already carries the bit is left alone (the FlashLight's hand-authored layers = 5)")
+	l.free()
+
+func test_reach_light_skips_an_exempt_light() -> void:
+	var l := OmniLight3D.new()
+	l.add_to_group(Groups.VIEW_MODEL_LIGHT_EXEMPT)
+	assert_false(ViewModelCamera.reach_light(l), "a light in view_model_light_exempt is the designer's opt-out and must not be stamped")
+	assert_eq(l.layers & ViewModelCamera.VIEW_MODEL_LAYER, 0, "…so it never lights the hands")
+	assert_false(ViewModelCamera.reach_light(null), "null-safe: node_added hands over whatever entered the tree")
+	l.free()
+
+func test_reach_lights_under_walks_a_subtree_and_counts_only_changes() -> void:
+	var root := Node3D.new()
+	var lamp := OmniLight3D.new()
+	var sun := DirectionalLight3D.new()
+	var torch := SpotLight3D.new()
+	torch.layers = 1 | ViewModelCamera.VIEW_MODEL_LAYER  # already reaches, like the rig's FlashLight
+	var deep := Node3D.new()
+	root.add_child(lamp)
+	root.add_child(deep)
+	deep.add_child(sun)
+	deep.add_child(torch)
+	assert_eq(ViewModelCamera.reach_lights_under(root), 2, "the lamp and the (nested) sun are stamped; the torch already had the bit")
+	assert_ne(sun.layers & ViewModelCamera.VIEW_MODEL_LAYER, 0, "a nested DirectionalLight3D — the level's sun — is reached")
+	assert_eq(ViewModelCamera.reach_lights_under(root), 0, "a second sweep changes nothing (idempotent)")
+	root.free()
+
+func test_light_reach_ships_on() -> void:
+	# head.gd builds this node in CODE with no .tscn override, so the export's default IS the shipped value: off, the
+	# gun renders in a pass with no world light in it and only the fill keeps it visible (the 2026-09-14 report).
+	var vm := ViewModelCamera.new()
+	assert_true(vm.light_reach, "light_reach must default ON — without it no world light exists in the gun pass")
+	assert_lt(vm.view_model_ambient_energy, 0.5,
+		"the fill is a FLOOR under world light, not the light: 0.75 flattened the gun to one brightness (the reported symptom)")
+	vm.free()
 
 
 ## ⭐⭐ THE COMPOSITE IS NOT A HUD READOUT, AND THE DEATH CINEMATIC MUST NOT SWEEP IT AWAY.

@@ -17,11 +17,15 @@ extends Node3D
 ##    main camera's global transform / fov by CameraEffects + ScreenShake + ScopeIn).
 ##  - The SubViewport's texture is composited over the main view by a SubViewportContainer added
 ##    to the HUD CanvasLayer.
-##  - LIGHTING: the gun camera gets its OWN Environment (a flat ambient FILL) — REQUIRED, not optional. This world
-##    is lit almost entirely by volumetric FOG (its actual ambient is ~0), and fog is integrated over DISTANCE, so
-##    it fills far geometry but contributes ~nothing to a gun 30 cm from the lens. On the shared world the view
-##    model therefore rendered effectively BLACK wherever a direct light didn't strike it. The flat fill makes it
-##    readable everywhere while direct lights still add on top. See the view_model_* exports.
+##  - LIGHTING, part 1 — WORLD LIGHTS MUST BE STAMPED ONTO THE GUN'S LAYER. Godot culls LIGHTS per camera by the
+##    light's own VisualInstance3D `layers` (NOT its light_cull_mask): a light whose layers don't overlap a camera's
+##    cull_mask does not exist in that camera's pass. This camera culls ONLY VIEW_MODEL_LAYER and every level light
+##    is authored on layer 1, so the gun pass had NO world light at all — the sun, every lamp, the muzzle flash.
+##    `light_reach` ORs VIEW_MODEL_LAYER onto every Light3D (a sweep at build + a node_added hook), see there.
+##  - LIGHTING, part 2: the gun camera gets its OWN Environment with a SMALL flat ambient FILL so the weapon is never
+##    pitch black in an unlit corner (the world's own ambient is ~0.15 and its scene fill is volumetric fog, which is
+##    integrated over distance and contributes ~nothing 30 cm from the lens). It is a floor, not the light: world
+##    lights do the lighting. See the view_model_* exports.
 ##
 ## RUNNABILITY: `enabled` defaults to false, and that default is DEAD for the player —
 ## Head._setup_view_model_camera builds this node in code and sets `enabled = true` unconditionally, so
@@ -58,15 +62,36 @@ const VIEW_MODEL_LAYER: int = 4
 ## cannot be broken silently.
 @export var fov_offset: float = 0.0
 
+## --- World lights REACHING the view model ----------------------------------------------------------------------
+## ⭐⭐ Godot culls LIGHTS per camera by the light's own VisualInstance3D `layers` — NOT by light_cull_mask, which only
+## says which OBJECTS a light hits. A light whose layers don't overlap a camera's cull_mask is simply absent from
+## that camera's pass. The gun camera culls ONLY VIEW_MODEL_LAYER and every level light is authored on layer 1, so
+## the gun pass rendered with NO world light whatsoever. Measured 2026-09-14 by
+## scripts/tools/probes/__view_model_world_light_probe.gd (trenchboom_test_level, noon, pistol; gun-pass mean
+## luminance): fill off = 0.023 (black, only the additive rim shader); fill off + every light given layer 3 = 0.363.
+## The old 0.75 fill was HIDING this, not fixing it — "the gun ignores the world's lighting" was the symptom, and the
+## class doc's "fog-lit world, ambient ~0" explanation was a misdiagnosis. The camera rig's FlashLight is authored
+## `layers = 5` (1 + 3): the same fix, done by hand for the one light somebody noticed.
+##
+## ON: VIEW_MODEL_LAYER is ORed onto every Light3D's `layers` — a sweep of the tree when the pass builds, plus a
+## SceneTree.node_added hook so lights that arrive later get it too (a LevelDoor's next level, a spawned muzzle
+## LightFlash, a pooled NPC's laser). No per-light authoring. Adding a bit removes the light from no other camera:
+## whatever saw it through layer 1 still does. A designer opts a light OUT with the &"view_model_light_exempt"
+## group (Groups.VIEW_MODEL_LIGHT_EXEMPT) — e.g. the player's own body glow if it is not wanted on the hands.
+## ⭐LIMIT this does NOT lift: world geometry still cannot SHADOW the gun. Shadow casters are gathered by the same
+## per-camera cull, so only layer-3 objects cast onto the weapon (the probe's 30 m slab overhead halved the world and
+## moved the gun by nothing). Sun shade on the weapon needs a sun-LOS mechanism, not a layer.
+## ⭐A script that ASSIGNS `layers` on a light after it entered the tree undoes the stamp for that light; use |=.
+@export var light_reach: bool = true
+
 ## --- View-model LIGHTING ---------------------------------------------------------------------------------------
-## The gun camera gets its OWN Environment — a flat ambient FILL — because the world's own lighting can't light a gun
-## held at arm's length. The levels run with almost no ambient (the level WorldEnvironment's ambient is ~0 — see
-## SliceTestLevel's env: ambient_light_energy 0.08, sky contribution 0) and lean on volumetric FOG for the scene
-## fill, but fog is integrated over DISTANCE — it fills far geometry and contributes ~nothing 30 cm from the lens.
-## So on the shared world the view model came out effectively BLACK wherever a direct light didn't strike it. The
-## flat fill makes it readable everywhere; direct lights (sun / lamps / muzzle flash) still add on top — lit BY the
-## world, just never black. (A camera with no environment falls back to the WORLD env, so this REPLACES that
-## fallback: same near-zero fill result, now with a real ambient + a CLEAR bg so the composite can't paint the sky.)
+## The gun camera gets its OWN Environment with a SMALL flat ambient FILL: a floor under the world's lighting so the
+## weapon is never pitch black in an unlit corner (the levels run ~0.15 ambient and lean on volumetric FOG for the
+## scene fill, which is integrated over DISTANCE and contributes ~nothing 30 cm from the lens). With `light_reach`
+## on, the world's lights — sun, lamps, muzzle flash — do the actual lighting on top of it. (A camera with no
+## environment falls back to the WORLD env, so this REPLACES that fallback: a real ambient floor + a CLEAR bg so the
+## composite can't paint the sky.) It shipped at 0.75 while it was papering over the missing lights (see above);
+## that flattened the gun to one constant brightness, which is exactly the complaint.
 
 ## Explicit Environment for the gun pass. Null (default) -> one is built from the view_model_ambient_* knobs below,
 ## and its tonemap tracks the level's WorldEnvironment (_follow_world_tonemap) so the gun grades like the world.
@@ -79,9 +104,11 @@ const VIEW_MODEL_LAYER: int = 4
 @export var view_model_ambient_color: Color = Color(0.9, 0.91, 0.95)
 
 ## Flat ambient FILL energy for the built-in view-model environment (ignored when view_model_environment is set).
-## The BASE brightness the view model never drops below (direct lights add on top). ~0.75 reads as "in shadow but
-## clearly visible". Raise for a brighter always-lit gun; lower to let the world's darkness show on it more.
-@export var view_model_ambient_energy: float = 0.75
+## The FLOOR the view model never drops below; the world's lights add on top (light_reach). 0.2 measured 2026-09-14
+## as "readable in an unlit corner, world-lit everywhere else" (gun-pass mean 0.379 vs 0.363 with no fill at all).
+## Raise for a brighter always-lit gun; lower to let the world's darkness show on it more. 0.75 was the old value
+## that flattened the gun to one brightness — do not go back there to "fix" a dark gun; check the lights instead.
+@export var view_model_ambient_energy: float = 0.2
 
 ## Fraction of the fill energy left at DEEP NIGHT when a DayNightSky is driving the level (group "day_night",
 ## duck-typed current_day_factor) — the gun dims with the world instead of glowing full-fill in the dark.
@@ -154,6 +181,16 @@ func _build_pass(ui: CanvasLayer) -> void:
 	# Now that the gun camera is in the tree, give it the live pose so the first frame is correct
 	# (global_transform needs an in-tree node; _process keeps it synced thereafter).
 	_sync_gun_camera()
+
+	# Let the world's lights into this pass (see light_reach): every Light3D already in the tree now, and every
+	# one that enters later via node_added. Connected once — a second _build_pass cannot happen (head.gd guards
+	# the node by name), but the guard costs nothing and keeps the disconnect in _exit_tree honest.
+	if light_reach:
+		var n := reach_lights_under(get_tree().root)
+		if not get_tree().node_added.is_connected(_on_node_added):
+			get_tree().node_added.connect(_on_node_added)
+		if OS.is_debug_build() and n > 0:
+			print("ViewModelCamera: stamped VIEW_MODEL_LAYER onto ", n, " world lights (light_reach)")
 
 	# Atomic last step: now that the gun has its own pass, stop the MAIN camera drawing it.
 	# Doing this LAST means any failure above leaves the gun on the main camera (still visible).
@@ -378,10 +415,43 @@ static func copy_tonemap(from: Environment, to: Environment) -> void:
 	to.tonemap_agx_contrast = from.tonemap_agx_contrast
 	to.tonemap_agx_white = from.tonemap_agx_white
 
+## A node entered the tree: if it is a light, stamp the view-model layer onto it (light_reach). Fires for EVERY
+## node added anywhere — a level load is thousands of calls — so this is one type check and nothing else.
+func _on_node_added(node: Node) -> void:
+	if light_reach and node is Light3D:
+		reach_light(node as Light3D)
+
+## OR VIEW_MODEL_LAYER onto one light's `layers` so it exists in the gun camera's pass. Returns true when the light
+## was changed. Skips a light in Groups.VIEW_MODEL_LIGHT_EXEMPT (the designer's opt-out) and a light that already
+## carries the bit (the FlashLight's hand-authored layers = 5). Pure (no tree access) so it is unit-testable off-tree.
+static func reach_light(light: Light3D) -> bool:
+	if light == null or (light.layers & VIEW_MODEL_LAYER) != 0:
+		return false
+	if light.is_in_group(Groups.VIEW_MODEL_LIGHT_EXEMPT):
+		return false
+	light.layers |= VIEW_MODEL_LAYER
+	return true
+
+## reach_light over every Light3D in a subtree; returns how many were changed. Iterative walk (a level is deep).
+static func reach_lights_under(node: Node) -> int:
+	var n := 0
+	var stack: Array[Node] = [node]
+	while not stack.is_empty():
+		var cur: Node = stack.pop_back()
+		if cur is Light3D and reach_light(cur as Light3D):
+			n += 1
+		stack.append_array(cur.get_children())
+	return n
+
 ## Restore the main camera's full cull_mask if this pass is torn down (e.g. the rig is freed), so
 ## the gun never disappears just because the view-model pass went away. The composite container
 ## lives under the HUD (not under this node), so free it here too — it would otherwise outlive us.
+## The light stamps are deliberately NOT undone: an extra layer bit on a light is harmless to every other camera,
+## and a rebuilt pass would only put it back.
 func _exit_tree() -> void:
+	var tree := get_tree()
+	if tree != null and tree.node_added.is_connected(_on_node_added):
+		tree.node_added.disconnect(_on_node_added)
 	if _layer_dropped and is_instance_valid(_main_camera):
 		_main_camera.cull_mask = _main_cull_mask_backup
 		_layer_dropped = false

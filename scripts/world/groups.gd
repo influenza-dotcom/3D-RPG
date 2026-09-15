@@ -37,6 +37,11 @@ const STEALTH_LIGHT_EXEMPT := &"stealth_light_exempt" ## decorative lights Playe
 ## at RANGE: the exposure meter saturates at 1.0, so being lit can only ever cancel the darkness discount, never
 ## push you past baseline. A carried light also still feeds that meter like any other lamp.
 const CARRIED_LIGHT := &"carried_light"
+## Lights that must NOT light the first-person view model. ViewModelCamera.light_reach stamps VIEW_MODEL_LAYER onto
+## every Light3D so the world's lights reach the gun pass at all (lights are culled per camera by their own `layers`);
+## a light in this group is skipped — e.g. the player's own cyan body glow (PlayerEmittingLight sits at the hands and
+## would tint them) if that is not the look wanted. Stealth is untouched: PlayerLightLevel never reads this group.
+const VIEW_MODEL_LIGHT_EXEMPT := &"view_model_light_exempt"
 const GAME_ROOT := &"game_root"                 ## the GameRoot (level-load seam) — LevelDoor finds it here
 const PLAYER_SPAWN := &"player_spawn"
 const NAVMESH := &"navmesh"                     ## geometry + the NavigationRegion3D that feed the navmesh bake
