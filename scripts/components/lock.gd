@@ -83,6 +83,26 @@ func try_unlock(opener: Node) -> bool:
 			_toast(opener, _deny_message(int(d["outcome"])), false)
 			return false
 
+## KEY-ONLY attempt — the NPC path (Door.npc_try_open -> Door._npc_try_key_unlock). The same shared rule as
+## try_unlock with PICKING FORCED OFF, so a carried lockpick opens nothing: only this lock's `key_item_id` does
+## (NPCs never pick). On success it opens PERMANENTLY like any other unlock — locked = false, unlock_flag written,
+## `unlocked` fired, the key consumed per consume_key. Silent on failure, and mutates nothing then.
+func try_unlock_with_key(opener: Node) -> bool:
+	if not locked:
+		return true
+	var gate := BuildGate.of(self)
+	if gate != null and not gate.passes(opener):
+		return false
+	var inv: Variant = opener.get(&"inventory") if opener != null else null
+	var ci := inv as CharacterInventory  # null if inv isn't a CharacterInventory — LockRules.decide handles null
+	var d := LockRules.decide(ci, key_item_id, false, &"")  # pickable FORCED false: a key, or nothing
+	if int(d["outcome"]) != LockRules.Outcome.OPEN_KEY:
+		return false
+	if consume_key and ci != null:
+		ci.remove(d["item"], 1)
+	_open(opener, PlayerText.TOAST_UNLOCKED)  # a key turn; the toast is a no-op for a toast-less NPC
+	return true
+
 ## Flip the lock open, write the optional story flag, toast success, and fire `unlocked` (the door swings on this).
 func _open(opener: Node, toast_text: String) -> void:
 	locked = false

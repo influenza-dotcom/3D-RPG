@@ -187,3 +187,48 @@ func test_authored_lockpick_tres_loads() -> void:
 	assert_true(lp is Item, "lockpick.tres deserializes as an Item")
 	assert_eq(lp.id, &"lockpick", "its id matches the Lock default, so a bare Lock just works")
 	assert_gt(lp.max_stack, 1, "lockpicks stack")
+
+
+# ---------------------------------------------------------------------------
+# Lock.try_unlock_with_key — the NPC path: a carried KEY only, never a pick.
+# ---------------------------------------------------------------------------
+
+func test_try_unlock_with_key_opens_on_the_key_and_never_on_a_pick() -> void:
+	var lock := Lock.new()
+	lock.key_item_id = &"keycard_red"  # keyed AND pickable (the default) — the NPC path must ignore the pick
+	var picker := _opener_with([&"lockpick"])
+	assert_false(lock.try_unlock_with_key(picker), "a lockpick never opens the key-only path (NPCs do not pick)")
+	assert_true(lock.locked, "so the lock holds")
+	assert_eq(picker.inventory.count_of_id(&"lockpick"), 1, "and the pick is not spent")
+	var keyed := _opener_with([&"keycard_red"])
+	watch_signals(lock)
+	assert_true(lock.try_unlock_with_key(keyed), "the matching key turns it")
+	assert_false(lock.locked, "the lock is PERMANENTLY open, like any other unlock")
+	assert_signal_emitted(lock, "unlocked", "and `unlocked` still fires, so a wired door / quest reacts")
+	assert_eq(keyed.inventory.count_of_id(&"keycard_red"), 1, "a reusable key (consume_key off) is kept")
+	assert_true(lock.try_unlock_with_key(keyed), "an already-open lock is a free pass")
+	picker.inventory.free()
+	picker.free()
+	keyed.inventory.free()
+	keyed.free()
+	lock.free()
+
+func test_try_unlock_with_key_consumes_a_one_time_key() -> void:
+	var lock := Lock.new()
+	lock.key_item_id = &"token_key"
+	lock.consume_key = true
+	var keyed := _opener_with([&"token_key"])
+	assert_true(lock.try_unlock_with_key(keyed), "the token key turns it")
+	assert_eq(keyed.inventory.count_of_id(&"token_key"), 0, "and is spent out of the carrier's own backpack")
+	keyed.inventory.free()
+	keyed.free()
+	lock.free()
+
+func test_try_unlock_with_key_refuses_a_keyless_lock() -> void:
+	var lock := Lock.new()  # pickable-only: no key_item_id at all
+	var anyone := _opener_with([&"lockpick", &"keycard_red"])
+	assert_false(lock.try_unlock_with_key(anyone), "a lock with NO key can never open on the key path")
+	assert_true(lock.locked, "it stays locked — the player can still pick it")
+	anyone.inventory.free()
+	anyone.free()
+	lock.free()

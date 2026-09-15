@@ -242,6 +242,108 @@ func test_door_opened_on_the_mirror_side_closes_back_to_rest() -> void:
 	pivot.free()
 	door.free()
 
+## An NPC stand-in that carries a backpack: npc_try_open takes a Node3D, and the key turn reads `inventory` off the
+## opener (the same field Character declares, so a real NPC's authored item_stacks land here). Off-tree, so the swing
+## falls back to the authored side.
+class _KeyedNpc extends Node3D:
+	var inventory: CharacterInventory
+
+func _keyed_npc(ids: Array) -> _KeyedNpc:
+	var npc := _KeyedNpc.new()
+	npc.inventory = CharacterInventory.new()
+	for id in ids:
+		npc.inventory.add(_stub_item(id), 1)
+	return npc
+
+func _free_npc(npc: _KeyedNpc) -> void:
+	npc.inventory.free()
+	npc.free()
+
+func test_an_npc_carrying_the_key_unlocks_the_door_and_walks_through() -> void:
+	var door := Door.new()
+	var pivot := Node3D.new()
+	door.pivot = pivot
+	door.locked = true
+	door.key_item_id = &"keycard_red"
+	var empty_handed := _keyed_npc([])
+	assert_false(door.npc_try_open(empty_handed), "no key carried: the locked door is still a wall")
+	assert_true(door.locked, "and nothing about the lock changed")
+	var keyed := _keyed_npc([&"keycard_red"])
+	assert_true(door.npc_try_open(keyed), "carrying the key, the NPC turns it and walks through")
+	assert_true(door.is_open(), "the door swung open behind the key turn")
+	assert_false(door.locked, "the unlock is PERMANENT — the player can follow him through")
+	assert_eq(keyed.inventory.count_of_id(&"keycard_red"), 1, "a reusable key (consume_key off) stays on the body to loot")
+	_free_npc(empty_handed)
+	_free_npc(keyed)
+	pivot.free()
+	door.free()
+
+func test_an_npc_never_picks_a_lock_even_carrying_a_lockpick() -> void:
+	var door := Door.new()
+	var pivot := Node3D.new()
+	door.pivot = pivot
+	door.locked = true
+	door.pickable = true  # the PLAYER may pick this one
+	door.key_item_id = &"keycard_red"
+	var picker := _keyed_npc([&"lockpick"])
+	assert_false(door.npc_try_open(picker), "a lockpick is not a key — NPCs never pick")
+	assert_true(door.locked, "the door stays locked")
+	assert_eq(picker.inventory.count_of_id(&"lockpick"), 1, "and the pick is never spent")
+	_free_npc(picker)
+	pivot.free()
+	door.free()
+
+func test_a_one_time_key_is_spent_out_of_the_npcs_backpack() -> void:
+	var door := Door.new()
+	var pivot := Node3D.new()
+	door.pivot = pivot
+	door.locked = true
+	door.key_item_id = &"token_key"
+	door.consume_key = true  # a one-time token key, authored the same way for player and NPC
+	var keyed := _keyed_npc([&"token_key"])
+	assert_true(door.npc_try_open(keyed), "the token key turns it")
+	assert_eq(keyed.inventory.count_of_id(&"token_key"), 0, "and is spent out of the NPC's own backpack")
+	_free_npc(keyed)
+	pivot.free()
+	door.free()
+
+func test_npc_key_unlock_off_keeps_a_locked_door_shut_even_with_the_key() -> void:
+	var door := Door.new()
+	var pivot := Node3D.new()
+	door.pivot = pivot
+	door.locked = true
+	door.key_item_id = &"keycard_red"
+	door.npc_key_unlock = false  # this door's lock is the player's puzzle alone
+	var keyed := _keyed_npc([&"keycard_red"])
+	assert_false(door.npc_try_open(keyed), "npc_key_unlock OFF: even the right key opens nothing for an NPC")
+	assert_true(door.locked, "the lock is untouched")
+	assert_eq(keyed.inventory.count_of_id(&"keycard_red"), 1, "and the key is not spent")
+	_free_npc(keyed)
+	pivot.free()
+	door.free()
+
+func test_an_npc_key_turns_a_child_lock() -> void:
+	# A child Lock OWNS the decision (Lock.try_unlock_with_key), exactly as it owns the player's unlock.
+	var door := Door.new()
+	var pivot := Node3D.new()
+	door.pivot = pivot
+	var lk := Lock.new()  # locked + pickable by default
+	lk.key_item_id = &"keycard_red"  # keyed AND pickable: the NPC path must still ignore the pick
+	door.add_child(lk)
+	var picker := _keyed_npc([&"lockpick"])
+	assert_false(door.npc_try_open(picker), "the child Lock is pickable, but an NPC still never picks it")
+	assert_true(lk.locked, "so it holds")
+	var keyed := _keyed_npc([&"keycard_red"])
+	assert_true(door.npc_try_open(keyed), "the child Lock's own key opens it for the NPC")
+	assert_false(lk.locked, "the child Lock is open")
+	assert_false(door.locked, "and the Door mirrors it, exactly as the player's unlock does")
+	assert_true(door.is_open(), "the door swung open")
+	_free_npc(picker)
+	_free_npc(keyed)
+	pivot.free()
+	door.free()  # frees the child Lock too
+
+
 # --- Durability: shoot the door down (Door.take_damage, forwarded from door_panel.gd on the blocker) ---
 # Off-tree: no _ready (hp is seeded from max_hp's default by the initialiser; tests set both explicitly), no FX / SFX /
 # noise (all gated on is_inside_tree), no ledger (_persist no-ops off-tree). The pivot is add_child'd to the door so

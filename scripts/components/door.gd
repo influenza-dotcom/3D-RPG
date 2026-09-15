@@ -11,13 +11,16 @@ extends LookAtInteractable
 ## NPCs open it too, by WALKING INTO it. Levels keep every Door OUTSIDE the `navmesh` bake source, so the bake runs
 ## straight through the doorway and A* already routes NPCs through it; the closed panel's StaticBody3D is the only
 ## thing in the way. When an NPC's body presses into that panel, npc.gd `_open_bumped_doors` resolves this door with
-## of_collider() and calls npc_try_open(). That path is READ-ONLY on the lock (a locked door stays a wall to NPCs) and
-## swings the panel AWAY from the NPC (npc_swing_away), so it never sweeps through the body that opened it.
+## of_collider() and calls npc_try_open(). An NPC never PICKS a lock, but one CARRYING the key (npc_key_unlock) turns
+## it and walks through — the guard with the keycard opens his own door, permanently, exactly as the player would — so
+## a locked door only stays a wall to the NPCs that have no key for it. The panel swings AWAY from the NPC
+## (npc_swing_away), so it never sweeps through the body that opened it.
 ##
 ## It can be SHOT TO PIECES too. The panel's blocker (DoorPivot/DoorBody) carries scripts/components/door_panel.gd,
 ## which forwards every take_damage() a gun round / fired projectile / blast lands on it up to take_damage() here:
 ## `max_hp` drains, the player's top-centre enemy health bar shows the door's HP exactly as it shows an NPC's
-## (attacker.on_damaged_target — the same seam Character.take_damage pushes), and at 0 the panel + blocker are freed
+## (attacker.on_damaged_target — the same seam Character.take_damage pushes — in the hostile RED, via hp_bar_color;
+## the bar's neutral near-white read as a glitch next to every NPC's red), and at 0 the panel + blocker are freed
 ## (the doorway is clear for everyone, lock or no lock), a break_sound / break_effect play, and a one-shot noise
 ## pulse on the &"noise" channel draws listening NPCs to investigate. MELEE swings thud off by default
 ## (`melee_can_damage`); damage_trace.run_pellet consults the panel's blocks_melee_damage() before applying a swing.
@@ -61,7 +64,8 @@ const SWING_TIE_EPSILON := 0.0001
 @export_group("Lock")
 ## Starts locked? A locked door won't open on Interact until it's unlocked (by a child Lock, a key, a lockpick, or
 ## a flag). For richer locks (a keyed AND pickable safe on a container), drop a child `Lock` — it takes over and
-## these built-in fields are ignored; these cover the common inline door lock. NPCs never open a locked door.
+## these built-in fields are ignored; these cover the common inline door lock. An NPC opens a locked door ONLY
+## by carrying its key (npc_key_unlock) — never by picking it.
 @export var locked: bool = false
 ## OPTIONAL key: an inventory Item.id that unlocks this door OUTRIGHT. Empty = no key (rely on picking / a flag). A
 ## carried key TAKES PRECEDENCE over a lockpick, so a door that's keyed AND pickable never wastes a pick.
@@ -82,9 +86,16 @@ const SWING_TIE_EPSILON := 0.0001
 @export_group("NPCs")
 ## Can an NPC open this door by walking into it? ON (default): an NPC whose path runs through the doorway bumps the
 ## closed panel and it swings open (npc.gd `_open_bumped_doors` -> npc_try_open). A LOCKED door stays shut to NPCs
-## regardless — they never unlock, pick, or spend a key. OFF = a door only the player works (a player-only shortcut);
+## unless the NPC carries its key (npc_key_unlock below) — NPCs never PICK. OFF = a door only the player works;
 ## NPCs press against it and the Locomotor's give-up hold takes over, exactly as with a locked door.
 @export var npc_can_open: bool = true
+## An NPC that CARRIES this door's key — `key_item_id`, or the child Lock's — turns it and walks through: the guard
+## with the keycard opens his own door. Author the key onto the NPC with its `item_stacks` rows. The unlock is
+## PERMANENT and persisted exactly like the player's, so the door stays unlocked behind him — following a guard in,
+## or killing him and taking the key off the body, both work. `consume_key` is honoured, so a one-time token key is
+## spent out of the NPC's own backpack. NPCs still NEVER pick a lock: no key, no entry. OFF = a locked door is a wall
+## to NPCs whatever they carry.
+@export var npc_key_unlock: bool = true
 ## When an NPC opens it, swing the panel AWAY from that NPC (whichever side that is) instead of always toward the
 ## authored open_angle side, so the panel never sweeps through the body that opened it. Turn OFF for a door that can
 ## only swing one way (hinged against a wall, a closet door that would clip into shelving).
@@ -286,21 +297,50 @@ static func of_collider(collider: Node) -> Door:
 		n = n.get_parent()
 	return null
 
-## NPC entry point: open for an NPC that walked into the panel. READ-ONLY on the lock — an NPC never unlocks, picks,
-## spends a key, or toasts, so a locked door stays a wall to NPCs and its lock state belongs to the player alone.
-## Swings AWAY from `opener` when npc_swing_away is on (and the opener is in-tree to measure), else the authored side.
-## Returns true when the door is (now) open, false when it refused.
+## NPC entry point: open for an NPC that walked into the panel. A locked door refuses UNLESS the NPC carries its key
+## and npc_key_unlock is on (_npc_try_key_unlock) — an NPC never picks, and never toasts. Swings AWAY from `opener`
+## when npc_swing_away is on (and the opener is in-tree to measure), else the authored side. Returns true when the
+## door is (now) open, false when it refused.
 func npc_try_open(opener: Node3D) -> bool:
 	if _destroyed:
 		return true  # no panel left to be in anyone's way (nothing bumps it either — the blocker is gone)
 	if _open:
 		return true
-	if not npc_can_open or pivot == null or is_effectively_locked():
+	if not npc_can_open or pivot == null:
+		return false
+	# The key turn runs BEFORE the swing and flips the same `locked` / child-Lock state the player's unlock does, so
+	# the _open_toward below persists the newly-unlocked bit along with the rest of the entry.
+	if is_effectively_locked() and not (npc_key_unlock and _npc_try_key_unlock(opener)):
 		return false
 	if npc_swing_away and opener != null and opener.is_inside_tree():
 		open_away_from(opener.global_position)
 	else:
 		open()
+	return true
+
+## KEY-ONLY unlock for a bumping NPC: true when this door is now unlocked because `opener` carried its key. A child
+## Lock owns the decision when present (Lock.try_unlock_with_key — the same shared rule, including its `unlocked`
+## signal and unlock_flag write); otherwise the Door's built-in gate runs that rule with picking FORCED OFF, so a
+## lockpick in an NPC's backpack can never open anything. A BuildGate still gates it, exactly as it does the player.
+## Silent (an NPC has no toast surface) and mutates nothing on a refusal.
+func _npc_try_key_unlock(opener: Node) -> bool:
+	var gate := BuildGate.of(self)
+	if gate != null and not gate.passes(opener):
+		return false
+	var lk := Lock.of(self)
+	if lk != null:
+		if not lk.try_unlock_with_key(opener):
+			return false
+		locked = false  # mirror the Lock's state onto the Door, exactly as _try_unlock does for the player
+		return true
+	var inv: Variant = opener.get(&"inventory") if opener != null else null
+	var ci := inv as CharacterInventory  # null if it isn't one — LockRules.decide handles null
+	var d := LockRules.decide(ci, key_item_id, false, &"")  # pickable FORCED false: a key, or nothing
+	if int(d["outcome"]) != LockRules.Outcome.OPEN_KEY:
+		return false
+	if consume_key and ci != null:
+		ci.remove(d["item"], 1)
+	locked = false
 	return true
 
 # --- Drive externally (a TriggerVolume action / switch / cutscene): open() / close() / toggle() ---
