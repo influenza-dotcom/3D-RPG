@@ -152,12 +152,14 @@ collapsible bottom panel. Click the **CYBER SUNDAY** button in the editor's bott
 editor taller and Godot restores their saved sizes on relaunch, which squished the 3D viewport on short/HiDPI
 displays.)
 
-### The five job groups
+### The six job groups
 
-The 24 tools are grouped by the **job you are doing**, not by an alphabet. The panel shows five short outer tabs;
-click one and you get a short inner strip of the tools that belong to that job. (One flat strip of 24 titles needed
+The 25 tools are grouped by the **job you are doing**, not by an alphabet. The panel shows six short outer tabs;
+click one and you get a short inner strip of the tools that belong to that job. (One flat strip of 25 titles needed
 ~1800 px, and the editor's bottom panel only spans the centre column — a third of the tools, including Reach, used
 to sit behind scroll arrows.)
+
+If you are here to write, you only need one of them: **Write**.
 
 **Build — put things into the open scene.**
 
@@ -175,12 +177,19 @@ to sit behind scroll arrows.)
 | **New** | Create a new quest, conversation, item, weapon, faction… from a template. One button per content type. |
 | **Blueprints** | Scaffold a complete enemy pack (faction, weapon, item, loot table, archetype) in one press. |
 | **Browse** | Find any content file by name and open it in the Inspector. |
-| **Dialogue** | Edit a conversation's lines, choices, gates and consequences. |
 | **Quests** | Edit a quest's objectives, rewards and flow. |
 | **Loot** | Edit a loot table's drops, with a live expected-drops readout. |
-| **Text** | Edit every player-facing name and description in one searchable list. |
 | **Graphs** | Draw a conversation, or the whole quest chain, as a graph. |
 | **Icons** | Render an inventory picture for every item into `resources/icons/`. |
+
+**Write — put words in the game.** Everything that holds prose lives here, so a writer opens one group and never
+has to hunt through the tools that make files.
+
+| Tool | What it's for |
+|---|---|
+| **Dialogue** | Edit a conversation's lines, choices, gates and consequences. |
+| **Barks** | Write the lines NPCs shout in combat and reaction — one bark per line. |
+| **Text** | Edit every player-facing name and description in one searchable list. |
 
 Type a name into a **New** row and press its button: it writes ONE seeded `.tres` into the right folder (the id is
 the file name), refuses to overwrite anything, opens the result in the Inspector and arms **Edit**. The rows are
@@ -351,11 +360,12 @@ its own minimum small: one action bar and one status line stay put, and everythi
 | **Dialogue** | *Save Conversation* | that one conversation file. |
 | **Quests** | *Save Quest* | that one quest file. |
 | **Loot** | *Save Loot Table* | that one loot table file. |
+| **Barks** | *Save Barks* | that one bark set file. |
 | **Text** | *Save Changed Text (N)* | only the files you actually edited, and inside them only the fields you changed. |
 | **Factions** | *Save Factions (N)* | every faction whose cells you changed. **Cell edits alone write nothing** — the grid stages them. *Restore Last Backup* is the other writer: it copies each faction's `.bak` back over its file. |
 | **Audit** | *Fix (N)* | the files in the plan, after it shows you the list and you confirm. |
 
-**The `.bak` rule.** Every one of those *overwriting* saves — the four editors, Factions, and Audit's Fix — copies
+**The `.bak` rule.** Every one of those *overwriting* saves — the five editors, Factions, and Audit's Fix — copies
 the file's previous bytes to **`<file>.bak`** beside it first. That is a one-deep on-disk undo: rename the `.bak`
 back over the file and you have the previous version. A first-ever save makes no `.bak` (there was nothing to
 preserve), a second save on the same file **overwrites** the `.bak` you already had, and `.bak` files are
@@ -429,7 +439,7 @@ problems; they change nothing.
   `QuestMarkerSync` node; today that is `LevelTemplate.tscn` alone, so a marker on an older level is silently
   invisible.
 - **Text nested in arrays is not in the Text tab.** Quest objectives, dialogue lines and bark lists stay in
-  **Quests** / **Dialogue**; Text handles the flat, top-level fields (item names + descriptions, stat titles +
+  **Quests** / **Dialogue** / **Barks**; Text handles the flat, top-level fields (item names + descriptions, stat titles +
   blurbs, status-effect and perk text, quest titles/descriptions, and faction / NPC / level names). What appears
   there is driven by one registry — `addons/cybersunday_tools/dock_text/text_sources.gd` — which is also the seam a
   future localization export would walk. Stat wording lives in `resources/stats/<id>.tres` (`StatText`), read by
@@ -4689,7 +4699,15 @@ NPCs shout short context lines -- **barks** -- as the fight unfolds: a "Contact!
 
 ### Authoring a `BarkSet`
 
-1. In the FileSystem dock, **right-click `res://resources/` → New Resource → `BarkSet`**, save it (e.g. `raider_barks.tres`).
+**Use the Barks tab** (CYBER SUNDAY → **Write** → **Barks**). Pick a bark set in its dropdown and every category
+becomes a plain text box: **one bark per line**. Type, press **Save Barks**, done. It keeps the previous version as
+a `.bak`, tells you how many lines and categories the file now carries, and — the part worth reading — names which
+NPC archetypes actually point at that file, so a set nothing uses says so instead of failing silently in game.
+The raw Inspector array widget still works, but it is one click per line and there are 21 categories.
+
+The steps by hand, if you want them:
+
+1. In the FileSystem dock, **right-click `res://resources/barks/` → New Resource → `BarkSet`**, save it (e.g. `raider_barks.tres`). The Barks tab reads that folder, so a set saved anywhere else will not appear in its dropdown.
 2. Fill **only** the categories you want to voice. **Every category defaults to an empty array, which means "fall back to this NPC's built-in pool"** -- so a `BarkSet` overrides just the pools it fills and inherits the rest. Since the built-in pools ship empty (the scrub), an inherited category is *silent* today -- the fallback only speaks once lines exist. Each pool is a list of strings; the NPC picks one at random when the moment fires.
 3. Assign it to the archetype's **`NpcData.bark_set`** slot. (A null `bark_set` = the NPC uses every default line.)
 

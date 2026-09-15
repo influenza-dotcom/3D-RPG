@@ -529,7 +529,7 @@ func _disarm_edit() -> void:
 
 
 ## Designer-facing title of the tab that edits `res` — for PROSE only ("Press Edit to open it in Quests"). The real
-## routing is cyber_panel.editor_tab_for plus its group table's painted titles; this mirrors those four so the status
+## routing is cyber_panel.editor_tab_for plus its group table's painted titles; this mirrors those five so the status
 ## can name the destination without reaching into the panel's layout. "" = no editor tab; Edit opens the Inspector.
 func _editor_tab_title(res: Resource) -> String:
 	if res is Quest:
@@ -538,6 +538,8 @@ func _editor_tab_title(res: Resource) -> String:
 		return "Dialogue"
 	if res is LootTable:
 		return "Loot"
+	if res is BarkSet:
+		return "Barks"
 	if res is NpcData:
 		return "Place"
 	return ""

@@ -17,6 +17,7 @@ const LAZY_DOCKS := [
 	"res://addons/cybersunday_tools/panel_graph/dialogue_graph.gd",
 	"res://addons/cybersunday_tools/placer/item_placer_dock.gd",
 	"res://addons/cybersunday_tools/dock_text/text_editor.gd",
+	"res://addons/cybersunday_tools/dock_bark/bark_editor.gd",
 ]
 
 

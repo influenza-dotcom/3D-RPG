@@ -468,7 +468,29 @@ Acceptance:
 - Stat wording resolves from `resources/stats/<id>.tres` (`StatText`), not a code
   table.
 - Text nested inside ARRAYS (quest objectives, dialogue lines, bark lists) is out
-  of scope here — it stays in the **Quest Edit** / **Dialogue Edit** tabs.
+  of scope here — it stays in the **Quest Edit** / **Dialogue Edit** / **Bark Edit** tabs.
+
+## Bark Editor
+
+- One bark per LINE in a plain text box, per category. Blank and whitespace-only
+  lines are dropped on save: an empty string in the array is not “no bark” — the
+  NPC would say nothing aloud while the category counted as filled, suppressing
+  its built-in defaults.
+- The category list is READ OFF the resource (`BarkEditOps.categories` walks
+  `get_property_list()` for typed `Array[String]` exports and their
+  `@export_group`), never a hand-copied list in the plugin. A new
+  `@export var x: Array[String]` on `scripts/npc/bark_set.gd` must appear in the
+  tab with no plugin edit; `tests/test_devtools_bark_editor.gd` pins that drift.
+- Dirty compares NORMALISED lines, not raw text, so re-typing the same lines with
+  different spacing does not raise an unsaved-changes guard the writer cannot clear.
+- The written array must be TYPED `Array[String]`. An untyped array fails the
+  assignment to the export outright, and Save would report success having written
+  nothing.
+- After a successful save the tab says who points at the file (which `NpcData`
+  carries it), once per save — a bark set no archetype references is silent in
+  game with no error anywhere.
+- The tab states the empty-category rule in words on screen: an empty box means
+  “fall back to the built-in lines”, not “silence”.
 
 ## Viewport Gizmos
 

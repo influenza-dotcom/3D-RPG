@@ -32,12 +32,14 @@ const TAB_SCRIPTS := [
 	"res://addons/cybersunday_tools/dock_content/content_dock.gd",
 	"res://addons/cybersunday_tools/dock_blueprint/blueprint_view.gd",
 	"res://addons/cybersunday_tools/dock_browser/content_browser.gd",
-	"res://addons/cybersunday_tools/dock_dialogue/dialogue_editor.gd",
 	"res://addons/cybersunday_tools/dock_quest/quest_editor.gd",
 	"res://addons/cybersunday_tools/dock_loot/loot_editor.gd",
-	"res://addons/cybersunday_tools/dock_text/text_editor.gd",
 	"res://addons/cybersunday_tools/panel_graph/dialogue_graph.gd",
 	"res://addons/cybersunday_tools/dock_icons/icon_view.gd",
+	# Write
+	"res://addons/cybersunday_tools/dock_dialogue/dialogue_editor.gd",
+	"res://addons/cybersunday_tools/dock_bark/bark_editor.gd",
+	"res://addons/cybersunday_tools/dock_text/text_editor.gd",
 	# Tune
 	"res://addons/cybersunday_tools/dock_tuning/tuning_browser.gd",
 	"res://addons/cybersunday_tools/dock_faction/faction_matrix.gd",
@@ -56,9 +58,9 @@ const TAB_SCRIPTS := [
 
 const PANEL_SCRIPT := "res://addons/cybersunday_tools/cyber_panel.gd"
 
-## Build / Create / Tune / Check / Advanced, and the 24 tools inside them.
-const GROUP_COUNT := 5
-const TOOL_COUNT := 24
+## Build / Create / Write / Tune / Check / Advanced, and the 25 tools inside them.
+const GROUP_COUNT := 6
+const TOOL_COUNT := 25
 ## Anything smaller than this is squinting territory in a dock the designer lives in.
 const MIN_LABEL_FONT := 12
 ## A growing control may floor itself up to here; past it, it has to be inside the scroll.
@@ -204,7 +206,7 @@ func test_the_panel_groups_24_uniquely_named_tools_and_tips_every_tab() -> void:
 				untitled.append(String(leaf.name))
 			if String(group.get_tab_tooltip(ti)).strip_edges().is_empty():
 				untipped.append(String(leaf.name))
-	assert_eq(tools, TOOL_COUNT, "the five groups hold every tool between them")
+	assert_eq(tools, TOOL_COUNT, "the six groups hold every tool between them")
 
 	# _tabs is keyed by Control name, so its size COLLAPSES duplicates -- comparing it with the child count is the
 	# uniqueness check, and it does not depend on TabContainer's tab bookkeeping.
