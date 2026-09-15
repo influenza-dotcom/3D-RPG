@@ -61,6 +61,10 @@ const MENU_REVEAL_INPUT_SHIELD := 0.22
 ## so the world shows through. The boot cover + quote card are unaffected — they stay opaque either way.
 @export var show_background := true
 @export var wait_for_host_boot := false
+## Set by the computer-room host when this boot is a warm RETURN from in-game (Options -> Main Menu; see
+## MenuStyle.mark_warm_menu_return). The internet-warning cards are a per-LAUNCH ritual, so a return skips
+## straight to the (already-satisfied) TOS check and releases the gate; the room reveals the menu at once.
+@export var warm_return := false
 
 var _buttons: VBoxContainer
 var _black: ColorRect           ## full-screen black cover shown during load + the quote intro
@@ -340,8 +344,8 @@ func _maybe_start_internet_warning() -> void:
 func _play_internet_warning() -> void:
 	_internet_warning_pending = false
 	_internet_warning_skippable = Settings.tos_accepted
-	if INTERNET_WARNING_CARDS.is_empty():
-		_reveal_menu_after_internet_warning()
+	if warm_return or INTERNET_WARNING_CARDS.is_empty():
+		_reveal_menu_after_internet_warning()  # a return from in-game (or nothing authored): no cards, straight on
 		return
 	_internet_warning_active = true
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN  # nothing to click over the black cold open — a lingering arrow reads as a bug

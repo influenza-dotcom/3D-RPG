@@ -647,6 +647,7 @@ const SAME_BUTTON_HOVER_MS: int = 250
 
 var _quiet: bool = false       ## latch: every play_* is a no-op (the death/quickload close-everything sweep)
 var _quiet_backs: int = 0      ## pending "eat one back cue" tokens (a commit that closes its own screen)
+var _warm_menu_return: bool = false  ## one-shot: the next computer-room boot is a RETURN from in-game (see mark_warm_menu_return)
 
 func _build_sound() -> void:
 	_hover_player = AudioStreamPlayer.new()
@@ -823,6 +824,94 @@ func set_quiet(on: bool) -> void:
 ## close's back cue would step on it a frame later.
 func quiet_next_back() -> void:
 	_quiet_backs += 1
+
+## Flag the NEXT computer-room boot as a warm RETURN from in-game (Options -> Main Menu) rather than a cold
+## launch: the room comes up already lit (no CRT turn-on whine, no timer) and the menu skips the internet-warning
+## cards, which are a per-LAUNCH ritual. Consumed once by take_warm_menu_return() — a later real relaunch is cold
+## again. Lives here (the menu autoload) because the caller is one scene and the consumer is the next: nothing
+## instanced by change_scene_to_file can be handed a constructor argument.
+func mark_warm_menu_return() -> void:
+	_warm_menu_return = true
+
+## Consume the warm-return flag (true exactly once after mark_warm_menu_return; false on a cold launch).
+func take_warm_menu_return() -> bool:
+	var warm := _warm_menu_return
+	_warm_menu_return = false
+	return warm
+
+# --- scene transitions ---------------------------------------------------------------------------------
+
+## Seconds a faded scene swap spends going down to black, and coming back up on the other side. The arrival
+## is the longer leg on purpose: leaving is an answered button press (the player already knows what they
+## asked for), while ARRIVING somewhere wants room to breathe.
+const SCENE_FADE_OUT := 0.35
+const SCENE_FADE_IN := 0.6
+## Above every other layer in the game (debug console 150, OptionsMenu 128, the gameplay modals 121): a
+## transition is the one thing nothing may draw over.
+const SCENE_FADE_LAYER := 200
+
+var _fade_layer: CanvasLayer = null
+var _fade_rect: ColorRect = null
+var _scene_fade_running := false  ## re-entrancy latch — a second press mid-fade must not queue a second swap
+
+## Change scenes THROUGH BLACK instead of cutting. Used by every player-facing scene swap that isn't already
+## covered by its own card (Options -> Main Menu; the New Game load has the quote card).
+##
+## ⭐WHY THE COVER LIVES ON THIS AUTOLOAD. It is the only node that survives change_scene_to_file, so it is the
+## only one that can hold the screen black ACROSS the swap. A cover owned by the scene we are leaving is freed
+## mid-transition; one owned by the scene we are entering doesn't exist yet on the frame it is needed.
+##
+## A coroutine: callers fire and forget (`MenuStyle.change_scene_faded(path)`) — there is nothing to await, and
+## the caller's own scene is freed by the swap anyway.
+func change_scene_faded(path: String, fade_out: float = SCENE_FADE_OUT, fade_in: float = SCENE_FADE_IN) -> void:
+	var tree := get_tree()
+	if tree == null or _scene_fade_running:
+		return
+	_scene_fade_running = true
+	_ensure_fade_cover()
+	await _tween_fade_cover(1.0, fade_out)
+	if tree.change_scene_to_file(path) != OK:
+		push_error("MenuStyle: change_scene_to_file(%s) failed" % path)
+	# The swap lands at the END of the frame: right now the scene we are leaving is still the live one, so
+	# fading up here would show it again. One frame on, the new scene is built and its _ready has run.
+	await tree.process_frame
+	await _tween_fade_cover(0.0, fade_in)
+	if is_instance_valid(_fade_rect):
+		_fade_rect.visible = false  # never leave an input-eating rect parked over the screen we just arrived at
+	_scene_fade_running = false
+
+## Build the full-screen black cover once, lazily — a session that never changes scenes never pays for it.
+## PROCESS_MODE_ALWAYS so the fade still runs if the tree is paused or a FreezeFrame is holding, and a STOP
+## filter so the black eats clicks: a press landing on the menu we are still fading INTO is a ghost press.
+func _ensure_fade_cover() -> void:
+	if is_instance_valid(_fade_rect):
+		_fade_rect.visible = true
+		return
+	_fade_layer = CanvasLayer.new()
+	_fade_layer.name = "SceneFade"
+	_fade_layer.layer = SCENE_FADE_LAYER
+	_fade_layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(_fade_layer)
+	_fade_rect = ColorRect.new()
+	_fade_rect.name = "Cover"
+	_fade_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fade_rect.color = Color(0, 0, 0, 0)
+	_fade_rect.mouse_filter = Control.MOUSE_FILTER_STOP
+	_fade_layer.add_child(_fade_rect)
+
+## Tween the cover to `alpha` and await it. ignore_time_scale because a transition is real-time UI — it must
+## not stretch with a death slow-mo (or any other Engine.time_scale) that happened to be running when the
+## player pressed the button. A zero/negative time is an instant set, never a zero-length tween.
+func _tween_fade_cover(alpha: float, time: float) -> void:
+	if not is_instance_valid(_fade_rect):
+		return
+	if time <= 0.0:
+		_fade_rect.color.a = alpha
+		return
+	var tw := _fade_rect.create_tween()
+	tw.set_ignore_time_scale(true)
+	tw.tween_property(_fade_rect, "color:a", alpha, time)
+	await tw.finished
 
 # --- internals: wiring + voices ------------------------------------------------------------------------
 

@@ -33,6 +33,10 @@ const STARTUP_GATE_INPUT_SHIELD := 0.22
 var _menu: Control = null
 var _startup_gate_done := false
 var _startup_input_locked := false
+## This boot is a RETURN from in-game (Options -> Main Menu), consumed from MenuStyle in _ready. The monitor is
+## lit and the whine bed running before the menu is even built, so the whole turn-on ritual (timer, ~7s
+## turn-on whine, fog burn-off wait) is skipped and the gate's release reveals the menu with a plain fade.
+var _warm_return := false
 
 ## The retro overlay's shared presentation dials. Preloaded BY PATH and untyped — it carries no class_name,
 ## so this scene's parse never waits on the editor's global class cache.
@@ -53,6 +57,10 @@ var _post_mat: ShaderMaterial = null
 func _ready() -> void:
 	startup_timer.stop()
 	_resolve_post_material()
+	_warm_return = MenuStyle.take_warm_menu_return()
+	if _warm_return:
+		_light_monitor()
+		fan.play()  # the cold path starts the fan from the timer; a warm room hums like one that went through it
 	_build_menu()
 	canvas_layer.visible = true
 	if _menu != null:
@@ -81,14 +89,20 @@ func _on_turn_on_finished() -> void:
 	# resetting the visible menu's modulate.a to 0 and re-fading it (a split-second menu blackout at the main menu).
 	if monitor_glow.visible:
 		return
+	_light_monitor()
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_reveal_menu(true)
+
+## Power the monitor on: the lit glow (this script's boot-completed predicate + idempotence latch), the dust,
+## and the looping CRT whine bed, which starts the moment the monitor lights and plays for as long as the
+## player sits at the menu (loop is authored in crt_static_noise.mp3.import; test_boot_soundscape_loop_contract
+## pins it). Shared by the cold turn-on and the warm return. NOT the fan: on the cold path the fan is the
+## timer's (_on_timer_timeout), and a skip before the timer fires leaves it silent — unchanged here.
+func _light_monitor() -> void:
 	canvas_layer.visible = true
 	monitor_glow.visible = true
 	ambient_dust.visible = true
-	# The looping CRT whine bed: starts the moment the monitor lights and plays for as long as the player sits at
-	# the menu (loop is authored in crt_static_noise.mp3.import; test_boot_soundscape_loop_contract pins it).
 	buzz.play()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	_reveal_menu(true)
 
 ## Instance the StartMenu hidden under the CanvasLayer. add_child appends it after the post-process rect, so
 ## the menu draws on top (crisp, un-pixelated) and receives mouse events regardless of the rect's filter.
@@ -103,6 +117,7 @@ func _build_menu() -> void:
 		return
 	_menu.set(&"show_background", false)  # duck-typed: keeps this scene free of a hard StartMenu dependency
 	_menu.set(&"wait_for_host_boot", true)
+	_menu.set(&"warm_return", _warm_return)  # a return from in-game skips the menu's internet-warning cards
 	_menu.visible = false
 	canvas_layer.add_child(_menu)
 
@@ -124,7 +139,7 @@ func _on_startup_gate_finished() -> void:
 	_startup_gate_done = true
 	_arm_startup_input_lock()
 	if Settings.debug_skip_menu or monitor_glow.visible:
-		_reveal_menu(false)
+		_reveal_menu(_warm_return)  # cold: the monitor lit during a debug skip, cut straight in; warm: fade back in
 	else:
 		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 		startup_timer.start()

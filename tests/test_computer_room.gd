@@ -174,3 +174,85 @@ func test_boot_soundscape_loop_contract() -> void:
 		"the CRT whine loops: it keeps playing the whole time the player sits at the menu")
 	assert_true((inst.fan.stream as AudioStreamMP3).loop,
 		"the fan hum loops: the room bed never falls silent at the menu")
+
+## Regression: Options -> Main Menu used to change_scene to the BARE start_menu.tscn, whose only backdrop is the
+## skin's flat near-black colour — the buttons sat on a permanently black screen. The button now returns to THIS
+## room with MenuStyle's warm-return mark set, and a warm boot comes up already powered on: monitor lit, whine +
+## fan beds running, no timer, no turn-on whine, the menu's internet-warning cards skipped and the buttons revealed
+## at once. The mark is one-shot, so a later real launch is cold again.
+func test_warm_return_from_in_game_boots_the_room_already_lit() -> void:
+	var scene := load("res://scenes/computerroom.tscn") as PackedScene
+	assert_not_null(scene, "computerroom.tscn should load")
+	if scene == null:
+		return
+	var prev_skip: bool = Settings.debug_skip_menu
+	var prev_tos: bool = Settings.tos_accepted
+	var prev_debug_always_show_tos: bool = Settings.debug_always_show_tos
+	Settings.debug_skip_menu = false
+	Settings.tos_accepted = true
+	Settings.debug_always_show_tos = false
+
+	MenuStyle.mark_warm_menu_return()
+	var inst := scene.instantiate()
+	add_child_autofree(inst)
+	var menu = inst.get_node("CanvasLayer/StartMenu")
+	assert_true(inst._warm_return, "the room consumed the warm-return mark in _ready")
+	assert_false(MenuStyle.take_warm_menu_return(), "the mark is one-shot: consumed by this boot, a relaunch is cold")
+	assert_true(bool(menu.get(&"warm_return")), "the hosted menu is told this is a warm return")
+	assert_true(inst.monitor_glow.visible, "a warm room is lit before the menu is even built")
+	assert_true(inst.ambient_dust.visible, "the dust is up with the lit monitor")
+	assert_true(inst.buzz.playing, "the CRT whine bed runs from the first frame of a warm return")
+	assert_true(inst.fan.playing, "the fan hums like a room that went through the timer")
+	assert_true(inst.startup_timer.is_stopped(), "no turn-on timer on a warm return")
+	assert_false(inst.turn_on.playing, "no ~7s turn-on whine on a warm return")
+	assert_true(inst._startup_gate_done, "the menu released the gate synchronously (no internet-warning cards to wait out)")
+	assert_false(menu._internet_warning_active, "the internet-warning cards are a per-launch ritual, skipped on a return")
+	assert_false(menu._black.visible, "no black warning cover over a warm return")
+	assert_true(menu._buttons.visible, "the menu buttons are revealed at once on a warm return")
+	assert_eq(Input.mouse_mode, Input.MOUSE_MODE_VISIBLE, "the mouse is free over the returned menu")
+	Settings.debug_skip_menu = prev_skip
+	Settings.tos_accepted = prev_tos
+	Settings.debug_always_show_tos = prev_debug_always_show_tos
+
+## A cold launch must be untouched by the warm-return seam: no mark -> the room boots gated and dark exactly as before.
+func test_cold_launch_is_not_warm() -> void:
+	var scene := load("res://scenes/computerroom.tscn") as PackedScene
+	assert_not_null(scene, "computerroom.tscn should load")
+	if scene == null:
+		return
+	var prev_skip: bool = Settings.debug_skip_menu
+	var prev_tos: bool = Settings.tos_accepted
+	var prev_debug_always_show_tos: bool = Settings.debug_always_show_tos
+	Settings.debug_skip_menu = false
+	Settings.tos_accepted = true
+	Settings.debug_always_show_tos = false
+	MenuStyle.take_warm_menu_return()  # drain any stray mark
+	var inst := scene.instantiate()
+	add_child_autofree(inst)
+	var menu = inst.get_node("CanvasLayer/StartMenu")
+	assert_false(inst._warm_return, "no mark -> a cold boot")
+	assert_false(bool(menu.get(&"warm_return")), "the hosted menu boots cold")
+	assert_false(inst.monitor_glow.visible, "a cold room starts dark")
+	assert_false(inst.buzz.playing, "no whine bed before the monitor powers on")
+	assert_true(menu._internet_warning_active, "the internet-warning cards play on a cold launch")
+	Settings.debug_skip_menu = prev_skip
+	Settings.tos_accepted = prev_tos
+	Settings.debug_always_show_tos = prev_debug_always_show_tos
+
+## Source pin: the Options "Main Menu" button must target the ROOM (with the warm mark), never the bare menu scene —
+## that bare scene's flat skin backdrop is the permanently-black main menu this seam exists to prevent.
+func test_options_main_menu_returns_to_the_computer_room() -> void:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/options_menu.gd")
+	var start := src.find("func _on_main_menu()")
+	assert_true(start >= 0, "options_menu.gd defines _on_main_menu")
+	if start < 0:
+		return
+	var end := src.find("
+func ", start + 1)
+	var body := src.substr(start, (end - start) if end > start else -1)
+	assert_true(body.contains('change_scene_faded("res://scenes/computerroom.tscn")'),
+		"Main Menu changes scene to the computer room (the lit 3D backdrop), not the bare start_menu.tscn — and through the fade, never as a hard cut")
+	assert_false(body.contains("start_menu.tscn"),
+		"Main Menu must not load start_menu.tscn standalone — its flat skin backdrop is a black screen")
+	assert_true(body.contains("MenuStyle.mark_warm_menu_return()"),
+		"Main Menu marks the boot warm so the room skips the turn-on ritual and the warning cards")

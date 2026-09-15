@@ -942,11 +942,21 @@ func _on_quit() -> void:
 
 ## "Main Menu": close this overlay and return to the start screen WITHOUT closing the app. Only reachable
 ## in-game — open() hides this button at the start menu.
+## ⭐THE TARGET IS THE COMPUTER ROOM, NOT THE BARE MENU SCENE. scenes/start_menu.tscn standalone draws the
+## skin's flat backdrop (a near-black colour — no texture/scene is authored), so sending the player there
+## from in-game showed the buttons floating on a permanently black screen. The boot scene
+## (scenes/computerroom.tscn, the project main_scene) hosts that same menu over the lit 3D room; the warm
+## mark makes it come up already powered on — no internet-warning cards, no CRT turn-on — since those are
+## a per-launch ritual, not a per-visit one.
+## The swap goes THROUGH BLACK (MenuStyle.change_scene_faded): a hard cut from the world straight onto the lit
+## room reads as a glitch, and the room has no card of its own to arrive behind on a warm return. Not awaited —
+## it is a coroutine that outlives this scene, and there is nothing left here to do after it.
 func _on_main_menu() -> void:
 	MenuStyle.quiet_next_back()  # the close below is part of LEAVING, not a back-out — let the commit speak alone
 	MenuStyle.play_commit()
 	close()
-	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
+	MenuStyle.mark_warm_menu_return()
+	MenuStyle.change_scene_faded("res://scenes/computerroom.tscn")
 
 ## "Save / Load": close this overlay FIRST, then open the manual-slot screen in its in-game mode — sequential,
 ## never stacked (every screen's open() refuses over another modal via the shared registry, so closing before

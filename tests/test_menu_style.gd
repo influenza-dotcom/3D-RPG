@@ -55,3 +55,54 @@ func test_tooltip_label_is_scrubbed_by_hand() -> void:
 	MenuStyle.attach_tip(host, "[PH] A pinched muzzle.")
 	MenuStyle._tip_label.text = PlayerText.display(String(host.get_meta(&"_tip_text", "")))
 	assert_eq(MenuStyle._tip_label.text, "A pinched muzzle.", "the tip paints the blurb minus its marker")
+# --- The scene-transition fade ------------------------------------------------------------------------
+
+## Options -> Main Menu swaps scenes through black (MenuStyle.change_scene_faded). The cover is built ON THIS
+## AUTOLOAD because it is the only node that survives change_scene_to_file — the scene being left is freed
+## mid-transition and the one being entered doesn't exist yet, so neither can own the black.
+## NOTE: every test here leaves the cover the way a finished transition does — hidden, alpha 0 — because a
+## visible STOP-filter rect at layer 200 would eat the mouse for every test that runs after this file.
+func test_scene_fade_cover_is_a_full_screen_black_rect_above_every_other_layer() -> void:
+	MenuStyle._ensure_fade_cover()
+	var layer := MenuStyle._fade_layer
+	var rect := MenuStyle._fade_rect
+	assert_not_null(layer, "the cover builds its own CanvasLayer")
+	assert_not_null(rect, "the cover is a ColorRect")
+	if layer == null or rect == null:
+		return
+	assert_eq(layer.layer, MenuStyle.SCENE_FADE_LAYER, "the cover sits on the transition layer")
+	assert_true(layer.layer > OptionsMenu.layer, "a transition draws over the Options overlay (128), not under it")
+	assert_true(layer.layer > 150, "...and over the debug console (150), the highest layer in the game")
+	assert_eq(layer.process_mode, Node.PROCESS_MODE_ALWAYS,
+		"the fade must still run with the tree paused or a FreezeFrame holding")
+	assert_eq(rect.color, Color(0, 0, 0, 0), "black, and fully transparent until a transition tweens it up")
+	assert_eq(rect.mouse_filter, Control.MOUSE_FILTER_STOP,
+		"the black eats clicks — a press landing on the menu being faded INTO is a ghost press")
+	assert_eq(rect.anchor_right, 1.0, "the cover spans the screen (right anchor)")
+	assert_eq(rect.anchor_bottom, 1.0, "the cover spans the screen (bottom anchor)")
+	MenuStyle._ensure_fade_cover()
+	assert_eq(MenuStyle._fade_rect, rect, "building it again reuses the one cover, never stacks a second")
+	assert_eq(MenuStyle._fade_layer.get_child_count(), 1, "one rect on the transition layer")
+	rect.visible = false
+
+func test_scene_fade_tween_reaches_full_black_and_back() -> void:
+	MenuStyle._ensure_fade_cover()
+	await MenuStyle._tween_fade_cover(1.0, 0.05)
+	assert_almost_eq(MenuStyle._fade_rect.color.a, 1.0, 0.0001, "the fade-out ends on FULL black — a swap under a half-transparent cover is the hard cut this seam removes")
+	await MenuStyle._tween_fade_cover(0.0, 0.05)
+	assert_almost_eq(MenuStyle._fade_rect.color.a, 0.0, 0.0001, "the fade-in ends fully clear")
+	# A zero/negative time is an instant set, not a zero-length tween (the caller may dial a leg to 0).
+	await MenuStyle._tween_fade_cover(1.0, 0.0)
+	assert_eq(MenuStyle._fade_rect.color.a, 1.0, "time 0 sets the alpha on the spot")
+	await MenuStyle._tween_fade_cover(0.0, 0.0)
+	MenuStyle._fade_rect.visible = false
+
+## Source pin (the swap itself can't be run here — it would change the scene out from under the whole GUT run):
+## Main Menu must go through the faded swap, and the fade legs must stay perceptible. A sub-0.1s "fade" is the
+## instant cut with extra steps.
+func test_main_menu_swaps_through_black() -> void:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/options_menu.gd")
+	assert_true(src.contains('MenuStyle.change_scene_faded("res://scenes/computerroom.tscn")'),
+		"Options -> Main Menu changes scene through the fade, never with a bare change_scene_to_file")
+	assert_true(MenuStyle.SCENE_FADE_OUT >= 0.15, "the fade to black is long enough to read as a fade")
+	assert_true(MenuStyle.SCENE_FADE_IN >= 0.15, "so is the fade up on the other side")
