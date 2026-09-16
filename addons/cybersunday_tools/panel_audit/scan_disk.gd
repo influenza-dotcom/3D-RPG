@@ -2,9 +2,11 @@
 extends RefCounted
 
 ## Domain B of the project audit: scans res:// files for silent breakage that per-node config warnings can't see --
-## dead/typo'd group literals (vs the Groups registry), missing ext_resource files, and dead LootTable / out-of-range
-## DialogueResource entries. Returns Array[{severity, source, message, domain}]. Button-triggered (it reads every
-## file once).
+## dead/typo'd group literals (vs the Groups registry), missing ext_resource files, dead LootTable entries, and
+## broken DialogueResource wiring (a choice whose target id names no line, a duplicate line id, an out-of-range
+## legacy line number) -- for the .tres conversations AND the ones embedded inline in a .tscn (scan_wiring's pass 4
+## parses those from the scene text). Returns Array[{severity, source, message, domain}]. Button-triggered (it reads
+## every file once).
 ##
 ## `domain` is the Audit tab's row filter: the .gd group-literal rows are DOMAIN_CODE (a programmer's tidy-up the
 ## designer can hide behind the default "Scene + Content" view), the resource rows and the chained wiring rows are
@@ -79,6 +81,10 @@ static func _scan_file(path: String, out: Array, allowed: Dictionary, const_name
 			out.append_array(_loot_findings(load(path), path))
 		elif "script_class=\"DialogueResource\"" in text:
 			out.append_array(_dialogue_findings(load(path), path))
+	elif ext == "tscn" and WiringScan.DLG_SCRIPT_RESOURCE in text:
+		# An inline conversation (a Talkable's `dialogue` authored as a sub-resource in the level) is audited from
+		# the scene TEXT -- instantiating a level to read a resource would run every _ready in it.
+		out.append_array(WiringScan.dialogue_findings_in_text(text, path))
 
 
 # --- pure, unit-testable text scanners -------------------------------------------------------------------------
@@ -188,29 +194,14 @@ static func _loot_findings(res: Variant, source: String) -> Array:
 		i += 1
 	return out
 
+## A loaded DialogueResource .tres, judged by scan_wiring's pass 4 (the same predicate the inline-scene text path
+## uses): dangling / duplicate / sentinel-named ids, the legacy out-of-range line number, and the by-number nudge on
+## a conversation that has started using ids. The field names in those rows are the Dialogue Edit tab's own labels
+## ("Target" / "Fail target"), not the property identifiers: double-clicking a row opens exactly those two dropdowns.
 static func _dialogue_findings(res: Variant, source: String) -> Array:
-	var out: Array = []
 	if not (res is DialogueResource):
-		return out
-	var dr := res as DialogueResource
-	var n := dr.lines.size()
-	var li := 0
-	for line in dr.lines:
-		if line != null:
-			for c in line.choices:
-				if c != null:
-					# The field names are the Dialogue Edit tab's own labels, not the property identifiers: this row
-					# is what the designer reads, and double-clicking it opens exactly those two dropdowns.
-					_target_finding(c.target, n, source, li, "Target", out)
-					_target_finding(c.target_on_fail, n, source, li, "Fail target", out)
-		li += 1
-	return out
-
-## Dialogue targets must be a valid line index or a sentinel (-1 END, -2 CONTINUE). The message names the sentinels by
-## their dropdown labels (End / Continue) rather than the raw -1 / -2 the designer never sees.
-static func _target_finding(t: int, n: int, source: String, li: int, field: String, out: Array) -> void:
-	if t < -2 or t >= n:
-		out.append(_f("ERROR", source, "Line %d: a choice's %s points at line %d, which doesn't exist — the lines run 0 to %d (or End / Continue)." % [li, field, t, n - 1]))
+		return []
+	return WiringScan.dialogue_findings(WiringScan.dialogue_model_from_resource(res), source)
 
 
 ## The finding shape. `domain` defaults to content -- only the .gd group-literal rows pass DOMAIN_CODE.

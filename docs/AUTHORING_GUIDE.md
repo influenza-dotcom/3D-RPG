@@ -408,7 +408,7 @@ problems; they change nothing.
   new offender, and a row here means someone painted a new literal — move it into `PlayerText`.
 - **Only unambiguous findings are auto-fixable.** *Fix* handles a dead `"player"` group literal → `Groups.PLAYER`,
   a registered group name used as a raw string → its `Groups.<CONST>`, and a `LootTable` whose `max_count` is below
-  its `min_count`. Judgment calls — unregistered group names, missing files, out-of-range dialogue targets, empty
+  its `min_count`. Judgment calls — unregistered group names, missing files, dialogue targets that name no line (an unknown id or an out-of-range number), duplicate line ids, empty
   loot rows — are flagged only. Save open scripts before pressing it.
 - **Add your own Audit checks without touching the plugin:** drop a `@tool extends CyberAuditRule` script into
   `res://audit_rules/` and override `run_audit(root) -> Array`, returning findings in the same
@@ -435,6 +435,14 @@ problems; they change nothing.
   row, so an id for content you have not made *yet* is still typable — and it stays exact-match, capitals included.
   **Start quest** is the one real dropdown, because it is a reference to a quest file rather than an id string; it
   also warns you when starting it would silently do nothing (a blank `Quest.id`, or an unmet `prereq_quest_id`).
+- **Conversations are addressed by line id, and the Dialogue tab keeps them that way.** Every line the tab adds is
+  born with a unique id (`line_0`, `line_1`, …); the **Id** box above the line text renames it — press Enter or click
+  away to apply — and every choice that pointed at the old id follows (the status says how many, and warns when a
+  choice that *already* named the new id now lands on this line). The two **Target** dropdowns list lines by id and
+  write the id form on a pick; nothing else in the tab ever rewrites a target, so an old by-number choice stays by
+  number until you re-pick it or press **Migrate to Ids** (top bar), which re-addresses the whole conversation in
+  memory — a number that points past the end is kept and named for you to fix. The lines list reads `0 (greet): …`,
+  so a line can be found by the id its choices name even after it has moved.
 - **A choice's row shows a tag** when it does something — `[Q+]` starts a quest, `[Q done]` completes one, `[Q++]`
   advances one, `[item]` hands an item over, `[$]` moves money, `[rep]` moves reputation, `[aggro]` turns the
   speaker hostile — so consequences are visible without opening every choice.
@@ -1581,22 +1589,24 @@ Three nested Resource types, mirroring how the editor lets you nest sub-resource
 | Resource (`class_name`) | Script | Key fields |
 |---|---|---|
 | `DialogueResource` | `res://scripts/dialogue/dialogue_resource.gd` | `lines: Array[DialogueLine]` |
-| `DialogueLine` | `res://scripts/dialogue/dialogue_line.gd` | `text`, `reveals_name`, `choices: Array[DialogueChoice]` |
-| `DialogueChoice` | `res://scripts/dialogue/dialogue_choice.gd` | `text`, `target`, `target_on_fail`, `required_stat`/`required_value`, `required_flag`/`required_flag_value`, and the **Consequences** group (`set_flag`, `start_quest_on_choice`, `complete_quest_id`, `advance_quest_id`/`advance_objective_id`, `give_item_id`/`give_item_count`, `give_money`) |
+| `DialogueLine` | `res://scripts/dialogue/dialogue_line.gd` | `id`, `text`, `reveals_name`, `choices: Array[DialogueChoice]` |
+| `DialogueChoice` | `res://scripts/dialogue/dialogue_choice.gd` | `text`, `target_id`, `target_on_fail_id` (plus the legacy by-number `target`, `target_on_fail`), `required_stat`/`required_value`, `required_flag`/`required_flag_value`, and the **Consequences** group (`set_flag`, `start_quest_on_choice`, `complete_quest_id`, `advance_quest_id`/`advance_objective_id`, `give_item_id`/`give_item_count`, `give_money`) |
 
-**`DialogueResource`** is the whole conversation — just an ordered `lines` array. `DialogueManager` plays it top to bottom. The order is also the addressing: choices jump by **index into this array**, so line 0 is the first line, line 1 the second, and so on.
+**`DialogueResource`** is the whole conversation — an ordered `lines` array. `DialogueManager` plays it top to bottom (a linear line, and a CONTINUE choice, go to the *next* line in that order). A branching choice, though, jumps to a line by the line's **`id`**, never by its position — so inserting, deleting or reordering lines never breaks a branch.
 
-**`DialogueLine`** is one spoken beat. Fill `text` (it's `@export_multiline`, so you get a real text box in the inspector). There is **no speaker field on the line** — the speaker's name comes from the talking character (see wiring, below), so you author the same `DialogueResource` for any speaker. Leave `choices` empty and the line plays linearly: the player clicks/presses to hear the next line. Add choices and the line becomes a **branch point**.
+**`DialogueLine`** is one spoken beat. Give it an **`id`** — a short StringName like `greet` or `refuse`; the Dialogue tab assigns `line_0`, `line_1`, … automatically and lets you rename them in its Id box — that is the address a choice's `target_id` names. It must be unique within the conversation, and `END` / `CONTINUE` are reserved words. Fill `text` (it's `@export_multiline`, so you get a real text box in the inspector). There is **no speaker field on the line** — the speaker's name comes from the talking character (see wiring, below), so you author the same `DialogueResource` for any speaker. Leave `choices` empty and the line plays linearly: the player clicks/presses to hear the next line. Add choices and the line becomes a **branch point**.
 
 **`reveals_name`** is a **legacy tick**: simply *talking* to a character now ends their "Stranger" status, so you no longer have to mark the introduction line — see **"Strangers until introduced"** below.
 
-**`DialogueChoice`** is one selectable button on a branch line. Fill `text` (the button label). The important field is `target`, an int that says where picking it goes:
+**`DialogueChoice`** is one selectable button on a branch line. Fill `text` (the button label). The important field is **`target_id`**, which says where picking it goes:
 
-- **`-2` = CONTINUE (the default).** Carries on to the *next* line. A freshly-added choice you forget to point anywhere just continues the conversation rather than dead-ending it. (In the script this constant is `DialogueLine.CONTINUE`.)
-- **`-1` = END.** Finishes the conversation. (Script constant: `DialogueLine.END`.)
-- **`0` or higher = BRANCH.** Jumps to that line index in `DialogueResource.lines` and re-enters the listen-first flow there.
+- **A line's `id`** (e.g. `refuse`) = BRANCH. Jumps to that line and re-enters the listen-first flow there.
+- **`CONTINUE`** — carries on to the *next* line in order. A freshly-added choice you forget to point anywhere continues the conversation rather than dead-ending it (a blank `target_id` means CONTINUE through the legacy default below).
+- **`END`** — finishes the conversation.
 
-In the inspector `target` is a plain integer field — type `-1` to end, `-2` to continue, or the destination line's index to branch. (An out-of-range index ends the conversation cleanly rather than crashing, but double-check your indices.)
+In the inspector `target_id` is a suggestion dropdown that offers the two reserved words; type a line id to branch (a nested sub-resource cannot see its sibling lines, so the per-line dropdown lives in the Dialogue tab). A `target_id` that names no line **ends the conversation cleanly** and logs a warning naming the id — and the Audit tab / `validate_all` report it as an ERROR — so a typo never routes silently into the wrong line.
+
+**Older conversations point by number.** Before ids existed a choice carried an int **`target`** — `-2` = CONTINUE (the default; `DialogueLine.CONTINUE`), `-1` = END (`DialogueLine.END`), `0` or higher = a line *index*. Those fields still exist and still work: the one resolver (`DialogueResource.resolve_target`) uses **`target_id` when it is non-blank, else the int**, so every conversation authored before ids plays unedited, including the ones embedded inline in a level scene. The cost of a number is that inserting a line above the destination re-points it — which is why the Dialogue tab's **Migrate to Ids** button re-addresses a whole conversation in one click. Leave `target` alone in new content.
 
 ### Skill checks (`required_stat` / `required_value`)
 
@@ -1609,12 +1619,12 @@ The check is evaluated against the real human player's **effective** stat — `s
 
 A choice can also gate on **world state**, not just a stat. Set **`required_flag`** (a `GameState` flag name) and **`required_flag_value`** (a String, default `"true"`): the choice stays visible, but picking it only passes when `str(GameState.get_flag(required_flag)) == required_flag_value`. Leave `required_flag` blank for no flag gate. (Because the value is stringified, a bool flag set via `set_flag` matches the default `"true"`.)
 
-Non-stat gates use the **try-and-fail** model: the choice stays selectable, and **`target_on_fail`** says where a failed attempt leads — distinct from `target`, which is where a pass leads. Same integer space as `target`:
-- **`-1` = END (the default for `target_on_fail`)** — a blocked attempt ends the conversation.
-- **`0` or higher = BRANCH** — jump to a "that didn't work" line.
-- **`-2` = CONTINUE** — carry on regardless.
+Non-stat gates use the **try-and-fail** model: the choice stays selectable, and **`target_on_fail_id`** says where a failed attempt leads — distinct from `target_id`, which is where a pass leads. Same vocabulary:
+- **`END`** (what a blank fail target means) — a blocked attempt ends the conversation.
+- **a line `id`** — jump to a "that didn't work" line.
+- **`CONTINUE`** — carry on regardless.
 
-`target_on_fail` is ignored by a choice with no gate. (Note the asymmetry: `target`'s default is `-2` CONTINUE; `target_on_fail`'s default is `-1` END.)
+The fail target is ignored by a choice with no gate. (Its legacy number twin is `target_on_fail`, default `-1` END, consulted only while `target_on_fail_id` is blank — note the asymmetry with `target`, whose default is `-2` CONTINUE.)
 ### More gates: reputation, perk, item, quest-state (`required_faction_id` / `required_perk_id` / `required_item_id` / `required_quest_id`)
 
 Beyond a stat (`required_stat`) and a flag (`required_flag`), a `DialogueChoice` carries four more **OPTIONAL** gates — the WR-1/WR-3 set. Every one is **INERT by default** (empty/zero); fill any combination and they **stack** (the choice passes only when *all* set gates pass). These non-stat gates stay visible and use the same `target_on_fail` routing as flag gates. Stat gates are the exception: unmet stat-gated options are hidden.
@@ -1624,7 +1634,7 @@ Beyond a stat (`required_stat`) and a flag (`required_flag`), a `DialogueChoice`
 - **`required_item_id`** (StringName, an item-id dropdown) + **`required_item_count`** (int, default `1`) — item gate (WR-3): passes only while the player **CARRIES** at least that many of the item. This is a **CHECK, not a cost** — the item is *not* consumed (think flashing a keycard, not handing it over). Empty `required_item_id` = no item gate.
 - **`required_quest_id`** (StringName) + **`required_quest_state`** (enum `QuestGate { ANY, ACTIVE, COMPLETED, FAILED }`, default `ANY`) — quest-state gate (WR-3): passes only when that quest is in the named state right now. `ANY` = the player merely **KNOWS** the quest (active OR completed OR failed); `ACTIVE` / `COMPLETED` / `FAILED` = exactly that state. Empty `required_quest_id` = no quest gate. (See "Failing and expiring a quest" under §14 for how a quest reaches `FAILED`.)
 
-All four are evaluated at runtime and are **fail-closed**: an *unset* gate is skipped, but a gate that is set and can't resolve — no human player in the tree, or a `required_faction_id` that matches no file in `resources/factions/` — **fails**, so the choice routes to `target_on_fail`. (Only the stat gate reads neutrally: it falls back to `CharacterStats.BASELINE`.) A typo in a gate id therefore *locks* the option rather than disabling it; an unresolvable faction id at least pushes a `Factions: no faction resource for id '<id>' ...` warning to the Output panel at runtime. They share the **same pass/fail routing** as flag gates: a gated choice stays selectable, `target` is the pass branch, **`target_on_fail`** (default `-1` END) is where a blocked attempt goes.
+All four are evaluated at runtime and are **fail-closed**: an *unset* gate is skipped, but a gate that is set and can't resolve — no human player in the tree, or a `required_faction_id` that matches no file in `resources/factions/` — **fails**, so the choice routes to `target_on_fail`. (Only the stat gate reads neutrally: it falls back to `CharacterStats.BASELINE`.) A typo in a gate id therefore *locks* the option rather than disabling it; an unresolvable faction id at least pushes a `Factions: no faction resource for id '<id>' ...` warning to the Output panel at runtime. They share the **same pass/fail routing** as flag gates: a gated choice stays selectable, `target_id` is the pass branch, **`target_on_fail_id`** (blank = END) is where a blocked attempt goes.
 
 **Worked example — "only if they trust you, and you're carrying the data."** On one choice: `text = "Hand over the intel"`, `required_faction_id = "resistance"`, `required_reputation = 25`, `required_item_id = &"intel_chip"`, `required_item_count = 1`, `required_quest_id = &"the_handoff"`, `required_quest_state = ACTIVE`. The button stays visible, but selecting it only passes once the player is liked by the resistance, *is* carrying the chip, and has the handoff quest open. The chip is checked, not spent, so the choice itself can be the thing that turns it in via Consequences.
 
@@ -1642,9 +1652,9 @@ A `DialogueChoice` isn't only navigation — its **Consequences** group fires si
 **Worked example — a paid streetwise check that starts a quest.** On one choice: `text = "Talk them down"`, `required_stat = &"streetwise"`, `required_value = 6` (the option is hidden below 6; at 6+ it shows `[Streetwise 6] Talk them down`), `target = 3` (the "they back off" line), and under Consequences `start_quest_on_choice =` your follow-up Quest, `give_money = -25` (a bribe). One choice: a stat-gated option that only appears for the right build and then takes the player's money and opens a quest — no code.
 
 **Gotchas**
-- **`target` is the PASS branch; `target_on_fail` is the FAIL branch.** They only diverge for visible non-stat gates (flag / reputation / perk / item / quest-state). An unmet stat gate is hidden, so it has no failed click path.
-- **Different defaults.** `target` defaults to `-2` (CONTINUE) so a fresh choice doesn't dead-end; `target_on_fail` defaults to `-1` (END). Set them deliberately.
-- **Consequences fire only on pass.** The `set_flag` / `give_*` / quest side effects run when a selected choice passes its gates. If a visible non-stat gate fails, the choice routes to `target_on_fail` without applying consequences.
+- **`target_id` is the PASS branch; `target_on_fail_id` is the FAIL branch.** They only diverge for visible non-stat gates (flag / reputation / perk / item / quest-state). An unmet stat gate is hidden, so it has no failed click path.
+- **Different defaults.** A fresh choice CONTINUES (a blank `target_id` over the int default `-2`) so it doesn't dead-end; its fail branch ENDS (blank over `-1`). Set them deliberately.
+- **Consequences fire only on pass.** The `set_flag` / `give_*` / quest side effects run when a selected choice passes its gates. If a visible non-stat gate fails, the choice routes to `target_on_fail_id` without applying consequences.
 - **`advance_quest_id` needs `advance_objective_id` too.** Setting only one does nothing — both name the target.
 - **`give_money` negative = a charge.** It's the same field for rewards and costs; a positive value pays the player, a negative one bills them. There is no affordability guard and no debt clamp here, so a large negative value can push the wallet below zero.
 The **Consequences** group also carries two WR-3 *write* effects beyond the give/quest/flag ones above — a conversation can move standing and turn the speaker hostile, no script. Both are **INERT by default**:
@@ -1652,7 +1662,7 @@ The **Consequences** group also carries two WR-3 *write* effects beyond the give
 - **`reward_reputation_faction_id`** (String, a faction dropdown) + **`reward_reputation`** (float, default `0.0`) — when the choice passes, add `reward_reputation` to the player's standing with that faction (via the Factions registry → `Reputation.add_reputation`). **NEGATIVE to sour them** (a rude line costs you standing). The dropdown self-populates from `resources/factions/` (§7). Both must be set (empty id or `0.0` = no change).
 - **`aggro_speaker`** (bool, default **`false`**) — when the choice passes, the NPC you're talking to is **provoked** and attacks the player once the conversation ends (a threat / insult line that draws steel). Off by default; flip it on for a "you just made an enemy" reply. (No-op if the speaker can't be provoked — e.g. an inanimate Talkable host.) It **also costs reputation** when the speaker is factioned: `provoke()` is called with `apply_rep` left at its default, so the player's standing with the speaker's *whole faction* drops by `GameSettings.reputation.provoke_penalty` (`30.0` shipped — more than double the `12.0` `kill_penalty` a member's *death* costs), so an `aggro_speaker` line sours the group, not just the individual. (An UNALIGNED speaker just turns hostile, no rep cost.) Holstering can forgive that provoke and refund the exact delta — see §7.
 
-Like every other consequence, these fire **only on pass**. If you want a rep hit after a failed visible non-stat gate, route `target_on_fail` to a line whose choice carries the write.
+Like every other consequence, these fire **only on pass**. If you want a rep hit after a failed visible non-stat gate, route `target_on_fail_id` to a line whose choice carries the write.
 
 
 ### VoiceData — how lines are read aloud
@@ -1736,7 +1746,7 @@ The component does the rest: it sits on the talk physics layer so the interactio
 The shipped `res://resources/dialogue/old_man.tres` is a two-line shell — its line/choice **text fields ship unauthored** (empty, per the AI-text scrub), so any wording below is illustrative only; the *structure* is what the example demonstrates:
 
 - **Line 0** — a single linear line, no choices (plays straight through to the next line).
-- **Line 1** — a line with **two choices**, both left at the default `target = -2` (CONTINUE), so picking either one rolls past the end of the line list and the conversation finishes.
+- **Line 1** — a line with **two choices**, both `target_id = CONTINUE`, so picking either one rolls past the end of the line list and the conversation finishes. (Its lines carry the ids `line_0` / `line_1` — what Migrate to Ids named them.)
 
 To wire it onto a car in your level:
 
@@ -1748,7 +1758,7 @@ To wire it onto a car in your level:
 
 Aim at the car, press interact (F / PickUp), and the box opens with line 0 read aloud, then line 1 with your two reply buttons.
 
-To go further: add a third line for a real branch — point line 1's second choice at `target = 2`, and author line 2 as the follow-up. To add a skill gate, give a choice `required_stat = &"streetwise"` and `required_value = 6`; it'll show `[Streetwise 6] ...` and lock until the player's streetwise clears 6.
+To go further: add a third line for a real branch — the Dialogue tab names it `line_2` (rename it to `ask_more` in the Id box), point line 1's second choice at `target_id = ask_more` in the Target dropdown, and author the new line as the follow-up. To add a skill gate, give a choice `required_stat = &"streetwise"` and `required_value = 6`; it'll show `[Streetwise 6] ...` and lock until the player's streetwise clears 6.
 
 ### Strangers until introduced
 
@@ -1769,8 +1779,9 @@ Every NPC is shown to the player as **"Stranger"** until you have **spoken to th
 
 ### Gotchas
 
-- **Targets are line *indices*, not line objects.** If you reorder or delete lines in `DialogueResource.lines`, every `target >= 0` that pointed past the change now points somewhere else. Re-check branch targets after reordering.
-- **`-2` continues, `-1` ends.** It's easy to leave a choice at the default `-2` (CONTINUE) when you meant to end the conversation — that choice will roll into the next line instead of closing the box.
+- **Targets are line *ids*, not positions — but old conversations point by number.** An id-addressed choice survives any reorder; a choice that still carries only the int `target` moves with the array. The Dialogue tab shows each line's id beside its number, greys **Migrate to Ids** once a conversation is fully id-addressed, and the Audit warns about a by-number choice in a conversation that has started using ids. Deleting a line a choice names by id leaves that choice pointing at nothing (the conversation ends there, and the Audit reports the dangling id as an ERROR).
+- **Inline conversations are audited too.** A conversation authored as a sub-resource inside a level scene (a `Talkable`'s `dialogue` filled in the Inspector) gets the same dangling-id / duplicate-id / out-of-range-number checks from the scene text, and the finding names the node.
+- **`CONTINUE` continues, `END` ends.** It's easy to leave a choice at the default (CONTINUE) when you meant to end the conversation — that choice will roll into the next line instead of closing the box.
 - **No per-line speaker.** Don't look for a speaker/name field on `DialogueLine`; the name comes from the talk component's `display_name` (or the host NPC's). Set it on the component, once.
 - **Listen-first means an extra beat on branch lines.** Players hear the line, *then* the choices appear (once its spoken time elapses, or on the next input). That's intended, not a bug — author your branch text as something the NPC says before offering the options.
 - **Lines auto-advance by default.** With `GameSettings.dialogue.auto_advance` on (the default), a linear line continues on its own after its spoken time (New Vegas style) — you no longer click every line. A click still skips ahead and the menu still waits. Turn `auto_advance` off in `DialogueSettings.tres` to require a click per line.

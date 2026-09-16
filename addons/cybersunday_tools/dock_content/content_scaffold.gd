@@ -142,15 +142,19 @@ static func build_faction(id: StringName) -> Faction:
 
 
 ## A starter conversation: a DialogueResource seeded with a greeting line and a goodbye line (2 lines), each a
-## linear line (no choices) so it plays back top-to-bottom immediately and the designer just edits the text.
+## linear line (no choices) so it plays back top-to-bottom immediately and the designer just edits the text. Both
+## lines are BORN WITH AN ID (DialogueResource.next_line_id -- the same default the Dialogue Edit tab's Add uses),
+## so a scaffolded conversation is id-addressed from its first save and never lights Migrate to Ids.
 static func build_dialogue(id: StringName) -> DialogueResource:
 	var dr := DialogueResource.new()
 	var greeting := DialogueLine.new()
+	greeting.id = DialogueResource.next_line_id(dr.lines)
 	greeting.text = "Hello there. (TODO: write %s's greeting.)" % titleize(String(id))
+	dr.lines.append(greeting)
 	var goodbye := DialogueLine.new()
+	goodbye.id = DialogueResource.next_line_id(dr.lines)
 	goodbye.text = "Safe travels. (TODO: write the goodbye.)"
-	var lines: Array[DialogueLine] = [greeting, goodbye]
-	dr.lines = lines
+	dr.lines.append(goodbye)
 	return dr
 
 

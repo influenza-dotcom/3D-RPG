@@ -196,3 +196,217 @@ func test_finding_shape_matches_scan_disk() -> void:
 	assert_true(fnd.has("severity"), "a finding has a severity key")
 	assert_true(fnd.has("source"), "a finding has a source key")
 	assert_true(fnd.has("message"), "a finding has a message key")
+
+
+# --- PASS 4: dialogue target-id wiring (within one conversation) ------------------------------------------------
+# The model is plain Dictionaries, built either from a LOADED DialogueResource (duck-typed) or PARSED from the
+# serialized .tres / .tscn text -- the latter is how an inline conversation on a Talkable gets audited without
+# instantiating its level. Both builders are pinned to agree; the predicate is then tested on hand-built models.
+
+## A .tscn snippet in the exact shape Godot writes an inline conversation (a Talkable's `dialogue` authored as a
+## sub-resource): three dialogue scripts as ext_resources, choice / line / resource sub_resource blocks, and the
+## node that carries the conversation. Line 0 has an id and two choices: one by number (a legacy jump to line 1),
+## one gated with a typo'd target id AND a typo'd fail id. Line 1 is id-less.
+const SCENE_FIXTURE := """[gd_scene load_steps=5 format=3 uid="uid://fixture"]
+
+[ext_resource type="Script" uid="uid://cjonbsqr2gwyj" path="res://scripts/dialogue/dialogue_line.gd" id="26_loova"]
+[ext_resource type="Script" uid="uid://csb55tjjecvsy" path="res://scripts/dialogue/dialogue_choice.gd" id="27_888rm"]
+[ext_resource type="Script" uid="uid://brjt78ou6p8py" path="res://scripts/dialogue/dialogue_resource.gd" id="28_42wi0"]
+[ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="9_talk"]
+
+[sub_resource type="Resource" id="Choice_a"]
+script = ExtResource("27_888rm")
+text = "Zorkmids?"
+target = 1
+metadata/_custom_type_script = "uid://csb55tjjecvsy"
+
+[sub_resource type="Resource" id="Choice_b"]
+script = ExtResource("27_888rm")
+text = "Relax!"
+target_id = &"gret"
+target_on_fail_id = &"nope"
+required_stat = &"streetwise"
+required_value = 2
+metadata/_custom_type_script = "uid://csb55tjjecvsy"
+
+[sub_resource type="Resource" id="Line_0"]
+script = ExtResource("26_loova")
+id = &"greet"
+text = "You deaf or just dumb, kid?"
+choices = Array[ExtResource("27_888rm")]([SubResource("Choice_a"), SubResource("Choice_b")])
+metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
+
+[sub_resource type="Resource" id="Line_1"]
+script = ExtResource("26_loova")
+text = "Buzz off."
+metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
+
+[sub_resource type="Resource" id="Convo"]
+script = ExtResource("28_42wi0")
+lines = Array[ExtResource("26_loova")]([SubResource("Line_0"), SubResource("Line_1")])
+metadata/_custom_type_script = "uid://brjt78ou6p8py"
+
+[node name="Level" type="Node3D"]
+
+[node name="Talkable" parent="Characters/OldMan" instance=ExtResource("9_talk")]
+dialogue = SubResource("Convo")
+"""
+
+## The same conversation as .new() resources, so the two model builders can be compared.
+func _fixture_resource() -> DialogueResource:
+	var r := DialogueResource.new()
+	var l0 := DialogueLine.new()
+	l0.id = &"greet"
+	l0.text = "You deaf or just dumb, kid?"
+	var a := DialogueChoice.new()
+	a.text = "Zorkmids?"
+	a.target = 1
+	var b := DialogueChoice.new()
+	b.text = "Relax!"
+	b.target_id = &"gret"
+	b.target_on_fail_id = &"nope"
+	b.required_stat = &"streetwise"
+	b.required_value = 2
+	l0.choices = [a, b]
+	var l1 := DialogueLine.new()
+	l1.text = "Buzz off."
+	r.lines = [l0, l1]
+	return r
+
+
+func test_dialogue_models_from_text_parses_an_inline_conversation() -> void:
+	var models: Array = Wiring.dialogue_models_from_text(SCENE_FIXTURE)
+	assert_eq(models.size(), 1, "the scene embeds exactly one conversation")
+	assert_eq(String(models[0]["where"]), "Talkable under Characters/OldMan", "the finding can name the node that carries it")
+	var lines: Array = models[0]["model"]["lines"]
+	assert_eq(lines.size(), 2, "two lines, in the order the resource block lists them")
+	assert_eq(String(lines[0]["id"]), "greet", "line 0's id was read off its block")
+	assert_eq(String(lines[1]["id"]), "", "line 1 is id-less")
+	var choices: Array = lines[0]["choices"]
+	assert_eq(choices.size(), 2, "line 0's two choices, in choices-array order")
+	assert_eq(choices[0], {"target_id": "", "target_on_fail_id": "", "target": 1, "target_on_fail": -1, "gated": false},
+		"a by-number choice: blank ids, the serialized target, the omitted-default fail int (-1), ungated")
+	assert_eq(choices[1], {"target_id": "gret", "target_on_fail_id": "nope", "target": -2, "target_on_fail": -1, "gated": true},
+		"an id-addressed gated choice: both ids read, the omitted ints at their defaults, gated by its required_stat")
+
+
+func test_dialogue_model_from_resource_agrees_with_the_text_model() -> void:
+	var from_text: Dictionary = Wiring.dialogue_models_from_text(SCENE_FIXTURE)[0]["model"]
+	var r := _fixture_resource()
+	var from_res: Dictionary = Wiring.dialogue_model_from_resource(r)
+	assert_eq(from_res, from_text, "the loaded-resource builder and the text parser produce the SAME model, so a .tres and an inline .tscn conversation are judged identically")
+	assert_eq(Wiring.dialogue_model_from_resource(null), {"lines": []}, "a null resource is an empty model, no crash")
+	r = null
+
+
+func test_dialogue_findings_in_text_names_the_node_and_reports_the_three_problems() -> void:
+	var out: Array = Wiring.dialogue_findings_in_text(SCENE_FIXTURE, "res://scenes/levels/x.tscn")
+	assert_eq(out.size(), 3, "two dangling ids (ERROR) + one by-number nudge (WARN)")
+	var errors := 0
+	var warns := 0
+	for f in out:
+		assert_true(String(f["message"]).begins_with("Talkable under Characters/OldMan: "), "every row names the node that carries the inline conversation")
+		assert_eq(f["source"], "res://scenes/levels/x.tscn", "and the scene file")
+		assert_eq(f["domain"], "content", "a wiring slip is content, so it sits in the designer's default view")
+		if f["severity"] == "ERROR":
+			errors += 1
+		else:
+			warns += 1
+	assert_eq(errors, 2, "gret (Target) and nope (Fail target) are both ERRORs -- the fail id is checked even though it is only live when gated")
+	assert_eq(warns, 1, "the by-number jump to line 1 is a WARN because this conversation has started using ids")
+	var first_error := ""
+	for f in out:
+		if f["severity"] == "ERROR":
+			first_error = String(f["message"])
+			break
+	assert_true(first_error.contains("ids here: greet"), "a dangling-id row lists the ids that DO exist")
+
+
+func test_dialogue_findings_legacy_conversation_is_silent_and_out_of_range_is_an_error() -> void:
+	var legacy := {"lines": [
+		{"id": "", "choices": [{"target_id": "", "target_on_fail_id": "", "target": 1, "target_on_fail": -1, "gated": false}]},
+		{"id": "", "choices": [{"target_id": "", "target_on_fail_id": "", "target": -2, "target_on_fail": -1, "gated": false}]},
+	]}
+	assert_eq(Wiring.dialogue_findings(legacy, "res://a.tres").size(), 0, "a wholly by-number conversation (no id anywhere) produces NO finding -- every conversation authored before ids must stay quiet")
+	var bad := {"lines": [
+		{"id": "", "choices": [{"target_id": "", "target_on_fail_id": "", "target": 5, "target_on_fail": -3, "gated": true}]},
+	]}
+	var out: Array = Wiring.dialogue_findings(bad, "res://a.tres")
+	assert_eq(out.size(), 2, "an out-of-range number and a below-CONTINUE number are both ERRORs (the check scan_disk used to carry)")
+	assert_eq(out[0]["severity"], "ERROR", "severity")
+	assert_true(String(out[0]["message"]).contains("Line 0: a choice's Target points at line 5, which doesn't exist"), "the legacy wording is kept, with the designer's dropdown label")
+	assert_true(String(out[1]["message"]).contains("Fail target"), "the fail branch names its own dropdown")
+
+
+func test_dialogue_findings_duplicate_and_reserved_line_ids_are_errors() -> void:
+	var model := {"lines": [
+		{"id": "greet", "choices": []},
+		{"id": "greet", "choices": []},
+		{"id": "END", "choices": []},
+	]}
+	var out: Array = Wiring.dialogue_findings(model, "res://a.tres")
+	assert_eq(out.size(), 2, "one duplicate + one reserved word")
+	assert_true(String(out[0]["message"]).contains("Line 1 has id \"greet\", which line 0 already uses"), "the duplicate names both lines")
+	assert_true(String(out[1]["message"]).contains("Line 2's id is \"END\", a reserved word"), "the reserved word says why the line is unreachable")
+	for f in out:
+		assert_eq(f["severity"], "ERROR", "both are ERRORs: the resolver silently takes the first / the word")
+
+
+func test_dialogue_findings_by_number_nudge_rules() -> void:
+	# ids in use (line 0), so a by-number REAL jump warns; a sentinel int does not; the fail branch only when gated.
+	var model := {"lines": [
+		{"id": "greet", "choices": [
+			{"target_id": "", "target_on_fail_id": "", "target": 1, "target_on_fail": -1, "gated": false},  # WARN (target by number)
+			{"target_id": "CONTINUE", "target_on_fail_id": "", "target": -2, "target_on_fail": 1, "gated": false},  # silent: ungated fail branch
+			{"target_id": "CONTINUE", "target_on_fail_id": "", "target": -2, "target_on_fail": 1, "gated": true},  # WARN (gated fail by number)
+			{"target_id": "", "target_on_fail_id": "", "target": -2, "target_on_fail": -1, "gated": true},  # silent: sentinel ints are not positional
+		]},
+		{"id": "", "choices": []},
+	]}
+	var out: Array = Wiring.dialogue_findings(model, "res://a.tres")
+	assert_eq(out.size(), 2, "exactly the two positional by-number branches warn")
+	for f in out:
+		assert_eq(f["severity"], "WARN", "a nudge, not breakage -- the conversation still plays")
+		assert_true(String(f["message"]).contains("Migrate to Ids"), "and it names the fix")
+	assert_true(String(out[0]["message"]).contains("Target still points by line number (line 1)"), "the first names the Target")
+	assert_true(String(out[1]["message"]).contains("Fail target still points by line number (line 1)"), "the second names the gated Fail target")
+	# The nudge is keyed on the conversation using ids ANYWHERE -- a choice id alone (no line id) is enough.
+	var choice_only := {"lines": [
+		{"id": "", "choices": [
+			{"target_id": "END", "target_on_fail_id": "", "target": -2, "target_on_fail": -1, "gated": false},
+			{"target_id": "", "target_on_fail_id": "", "target": 0, "target_on_fail": -1, "gated": false},
+		]},
+	]}
+	assert_eq(Wiring.dialogue_findings(choice_only, "res://a.tres").size(), 1, "one choice already by id makes the by-number sibling a mixed-state WARN")
+
+
+func test_dialogue_models_from_text_reads_a_tres_main_resource_and_ignores_other_files() -> void:
+	var tres := """[gd_resource type="Resource" script_class="DialogueResource" format=3]
+
+[ext_resource type="Script" path="res://scripts/dialogue/dialogue_line.gd" id="1_line"]
+[ext_resource type="Script" path="res://scripts/dialogue/dialogue_choice.gd" id="2_choice"]
+[ext_resource type="Script" path="res://scripts/dialogue/dialogue_resource.gd" id="3_dialogue"]
+
+[sub_resource type="Resource" id="Choice_transmit"]
+script = ExtResource("2_choice")
+target_id = &"done"
+target_on_fail_id = &"END"
+
+[sub_resource type="Resource" id="Line_prompt"]
+script = ExtResource("1_line")
+id = &"prompt"
+choices = Array[ExtResource("2_choice")]([SubResource("Choice_transmit")])
+
+[sub_resource type="Resource" id="Line_done"]
+script = ExtResource("1_line")
+id = &"done"
+
+[resource]
+script = ExtResource("3_dialogue")
+lines = Array[ExtResource("1_line")]([SubResource("Line_prompt"), SubResource("Line_done")])
+"""
+	var models: Array = Wiring.dialogue_models_from_text(tres)
+	assert_eq(models.size(), 1, "the [resource] block is the conversation")
+	assert_eq(String(models[0]["where"]), "", "a .tres has no carrying node -- the source path names it")
+	assert_eq(Wiring.dialogue_findings(models[0]["model"], "res://x.tres").size(), 0, "a clean, fully id-addressed conversation has no findings")
+	assert_eq(Wiring.dialogue_models_from_text("[gd_scene format=3]\n[node name=\"X\" type=\"Node3D\"]\n").size(), 0, "a file with no dialogue scripts yields no models (and no false conversation)")

@@ -112,9 +112,14 @@ func test_build_dialogue_seeds_greeting_and_goodbye() -> void:
 	var dr := Scaffold.build_dialogue(&"old_man")
 	assert_gte(dr.lines.size(), 2, "a seeded conversation should have at least a greeting + goodbye")
 	assert_lte(dr.lines.size(), 3, "the starter conversation should stay small (2-3 lines)")
+	var seen := {}
 	for line in dr.lines:
 		assert_false(line.has_choices(), "seeded lines should be linear (no branch choices) for a clean starting point")
 		assert_false(line.text.is_empty(), "each seeded dialogue line should carry placeholder text")
+		assert_ne(line.id, &"", "each seeded line is BORN WITH AN ID, so a scaffolded conversation never lights Migrate to Ids")
+		assert_false(seen.has(line.id), "and the ids are unique within the conversation")
+		seen[line.id] = true
+	assert_true(dr.all_lines_have_ids(), "the scaffold hands the designer a fully id-addressed conversation")
 	dr = null
 
 

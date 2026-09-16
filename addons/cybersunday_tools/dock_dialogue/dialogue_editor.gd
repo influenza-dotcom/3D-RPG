@@ -2,11 +2,24 @@
 extends VBoxContainer
 
 ## "Dialogue Edit" bottom-panel tab: author a branching DialogueResource (.tres) WITHOUT the raw inspector.
-## Pick a conversation from resources/dialogue/, edit its lines top-to-bottom (the order IS the addressing --
-## choices jump to a line by INDEX), edit each line's text and its branch choices (label + target-line & fail-target
-## OptionButtons + the FULL gate set [stat / flag / faction+reputation / perk / item / quest-state] + the FULL
-## consequence set [set_flag, start/complete/advance quest, give item+count, give money, reward reputation, aggro
-## speaker]), reorder/add/remove lines and choices, then Save Conversation.
+## Pick a conversation from resources/dialogue/, edit its lines top-to-bottom, edit each line's id + text and its
+## branch choices (label + Target & Fail-target dropdowns + the FULL gate set [stat / flag / faction+reputation /
+## perk / item / quest-state] + the FULL consequence set [set_flag, start/complete/advance quest, give item+count,
+## give money, reward reputation, aggro speaker]), reorder/add/remove lines and choices, then Save Conversation.
+##
+## ADDRESSING BY ID. A choice points at a line by the line's `id` (DialogueChoice.target_id / target_on_fail_id, or
+## the words END / CONTINUE); the int `target` / `target_on_fail` is the LEGACY by-number form every conversation
+## authored before ids still carries, and DialogueResource.resolve_target is the one resolver ("id if non-blank,
+## else the int"). This tab is id-first: Add gives every new line a unique id (DialogueResource.next_line_id), the
+## Id box renames a line and carries every reference with it (committed ONCE, on Enter / focus loss -- never per
+## keystroke, so no half-typed spelling is ever written into a choice), the two Target dropdowns list lines BY ID
+## and write the id form on a pick, and **Migrate to Ids** re-addresses a whole by-number conversation in memory
+## (Ops.migrate_to_ids -- it never moves a destination: a choice whose number has no faithful id form is left by
+## number and named). The target pair is written ONLY by a pick in its dropdown (_on_target_picked), never by
+## _write_choice, so a keystroke in Label can never half-migrate a legacy choice. A line whose id is a duplicate or
+## a reserved word is offered BY NUMBER in the dropdowns (the resolver could not reach it by id) and the Audit
+## reports it; the lines list shows each line's id beside its number so a designer can find "line_3" after it has
+## moved to row 1 (the id is stable, the number is not).
 ##
 ## EVERY field DialogueManager._apply_choice_effects actually applies is authorable HERE -- the raw inspector is no
 ## longer needed to make a conversation hand out a quest, an item, money or a grudge. Two authoring rules hold that up:
@@ -107,6 +120,13 @@ const STAMP_TOOLTIP := "Puts a known id into the field on the left. You can stil
 ## DialogueLine constants without a class_name dependency in this @tool file's const space.
 const TARGET_CONTINUE := -2  # DialogueLine.CONTINUE: carry on to the NEXT line (the choice default)
 const TARGET_END := -1       # DialogueLine.END: finish the conversation
+## The item id of the transient "-> <id> (missing ...)" row _select_target adds for a DANGLING target id. A value no
+## real row can carry (line rows are >= 0, the sentinels are -1 / -2), stamped with set_item_id after add_item --
+## never through add_item's id argument, where -1 means "auto-assign" (the trap the QA doc records).
+const TARGET_DANGLING_ID := -3
+## The id-form sentinel WORDS a target row's metadata carries (mirrors DialogueLine.ID_END / ID_CONTINUE).
+const ID_END := "END"
+const ID_CONTINUE := "CONTINUE"
 
 ## How much of a line's text a list row shows (the lines list) and a target row shows (the two Target dropdowns).
 ## The dropdowns get less because they sit inside a 140 px-floored, clip_text picker: "-> line 3: " already costs
@@ -116,6 +136,8 @@ const TARGET_CHARS := 24
 
 ## The Save button's resting text; "*" is appended while `_dirty` (see _update_button_states).
 const SAVE_TEXT := "Save Conversation"
+## The one-click re-addressing of a by-number conversation (Ops.migrate_to_ids). In memory until Save Conversation.
+const MIGRATE_TEXT := "Migrate to Ids"
 ## Appended to the status line while `_dirty`, so any message -- a warning, a pick report -- still says the work is
 ## not on disk yet. Kept OUT of the individual messages so none of them doubles it.
 const DIRTY_SUFFIX := " (unsaved changes)"
@@ -124,6 +146,7 @@ const DIRTY_SUFFIX := " (unsaved changes)"
 const SAVE_TIP := "Writes the open conversation back to its file and keeps the previous version as a .bak beside it. Writes that one file."
 const REFRESH_TIP := "Re-reads the dialogue folder and the id lists the pickers offer (items, factions, stats, quests). Never touches the open conversation."
 const CHECK_REACH_TIP := "Opens the Reach tab and rescans it, to see whether a player can actually get to this conversation. Read-only."
+const MIGRATE_TIP := "Gives every line an id and re-points every choice by id instead of line number, so reordering lines can't break a branch. In memory until Save Conversation."
 
 ## Status grammar: idle = one next step; guards name what to pick; disabled tooltips name what is missing.
 const MSG_IDLE := "Pick a conversation, then a line -- its text and choices edit on the right."
@@ -133,6 +156,7 @@ const MSG_NO_CHOICE := "Pick a choice first."
 const TIP_NO_CONVERSATION := "Pick a conversation first"
 const TIP_NO_LINE := "Pick a line in the list first"
 const TIP_NO_CHOICE := "Pick a choice in the list first"
+const TIP_NOTHING_TO_MIGRATE := "Every line already has an id and every choice already points by id"
 ## The after-save verdict when NO scene references the file. Deliberately tells the designer where the wiring lives
 ## (a Talkable child's Dialogue field) instead of offering an "assign to selected" action -- assigning is the
 ## Inspector's job, and a one-click assign from here would be a scene write the designer never previewed.
@@ -145,8 +169,12 @@ const WARN_COLOR := Color(1.0, 0.82, 0.3)
 var _picker: OptionButton = null
 var _status: Label = null
 var _save_btn: Button = null
+var _migrate_btn: Button = null
 var _check_reach_btn: Button = null
 var _line_list: ItemList = null
+## The picked line's id. Committed ONCE (Enter / focus loss -> _commit_line_id), never per keystroke; pushed
+## signal-free on select, reset on a failed load / no selection, like _line_text.
+var _line_id: LineEdit = null
 var _line_text: TextEdit = null
 var _line_reveals_name: CheckBox = null
 var _choice_list: ItemList = null
@@ -347,6 +375,13 @@ func _build_top_bar() -> void:
 	_save_btn.pressed.connect(_save)
 	bar.add_child(_save_btn)
 
+	_migrate_btn = Button.new()
+	_migrate_btn.text = MIGRATE_TEXT
+	_migrate_btn.tooltip_text = MIGRATE_TIP
+	_migrate_btn.set_meta(&"tip", MIGRATE_TIP)
+	_migrate_btn.pressed.connect(_migrate)
+	bar.add_child(_migrate_btn)
+
 	_check_reach_btn = Button.new()
 	_check_reach_btn.text = "Check Reach"
 	_check_reach_btn.tooltip_text = CHECK_REACH_TIP
@@ -369,7 +404,7 @@ func _build_body() -> void:
 	var left := VBoxContainer.new()
 	left.custom_minimum_size = Vector2(150, 0)
 	var lhdr := Label.new()
-	lhdr.text = "Lines (numbered from 0 -- targets use these numbers)"
+	lhdr.text = "Lines (number, then id -- a choice points at a line by its id)"
 	lhdr.modulate = Color(1, 1, 1, 0.7)  # dim, not tiny: a 10 px override made section headers unreadable
 	# Autowrap so the heading wraps inside the 150 px column instead of widening it (an autowrapped Label reports a
 	# 1 px minimum width); the tooltip carries the full sentence in case the wrap cuts it short.
@@ -377,17 +412,17 @@ func _build_body() -> void:
 	# CAP the wrap: this heading sits OUTSIDE the scroll, so without a cap its wrapped height IS panel height, and
 	# the editor's bottom splitter keeps whatever it grows to. Two rows, full sentence in the tooltip.
 	lhdr.max_lines_visible = 2
-	lhdr.tooltip_text = "A choice's Target points at a line by this number, so moving or removing a line changes which line later choices land on."
+	lhdr.tooltip_text = "Each row is the line's number and, in brackets, its id. A choice's Target points at a line by its id, so moving lines never breaks a branch; an older choice that still points by number shifts when lines move -- Migrate to Ids fixes that."
 	left.add_child(lhdr)
 	_line_list = ItemList.new()
 	_line_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_line_list.custom_minimum_size = Vector2(150, 64)
-	_line_list.tooltip_text = "Each row: line number, the start of its text, and how many choices it offers."
+	_line_list.tooltip_text = "Each row: line number, its id in brackets (none for an old by-number line), the start of its text, and how many choices it offers."
 	_line_list.item_selected.connect(_on_line_selected)
 	left.add_child(_line_list)
 	left.add_child(_row_buttons(_line_buttons, "line",
-		" -- later lines move up one number, so re-check choices that pointed past it",
-		" -- targets go by number, so re-check choices that point at it",
+		" -- a choice that pointed at its id now points at nothing (the conversation ends there; the Audit names it), and older choices that point by number shift up one",
+		" -- choices that point at it by id follow it; older choices that point by number do not",
 		_add_line, _remove_line, _line_up, _line_down))
 	split.add_child(left)
 
@@ -410,6 +445,16 @@ func _build_body() -> void:
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right_scroll.add_child(right)
+	# The line's id: the stable address a choice's Target points at. A LineEdit committed on Enter / focus loss
+	# (_commit_line_id), NOT on text_changed: a rename carries every referencing choice with it, so committing each
+	# keystroke would write "gre", "gree", "greet" into those choices in turn and let a half-typed spelling capture a
+	# dangling reference along the way. A refusal (blank / duplicate / reserved word) repaints the box from the model.
+	_line_id = LineEdit.new()
+	_line_id.tooltip_text = "This line's id -- what a choice's Target points at. Must be unique in this conversation; END and CONTINUE are reserved. Renaming re-points every choice that used the old id. Press Enter (or click away) to apply."
+	_line_id.placeholder_text = "(no id -- reachable by number only)"
+	_line_id.text_submitted.connect(func(_t): _commit_line_id())
+	_line_id.focus_exited.connect(_commit_line_id)
+	_labelled(right, "Id", _line_id)
 	var thdr := Label.new()
 	thdr.text = "Line text"
 	thdr.modulate = Color(1, 1, 1, 0.7)  # dim, not tiny: a 10 px override made section headers unreadable
@@ -467,10 +512,14 @@ func _build_choices_block() -> Control:
 	_c_text.tooltip_text = "What the player reads on this choice's button."
 	_c_text.text_changed.connect(func(_t): _write_choice())
 
+	# The two Target dropdowns are NOT wired to _write_choice: the target pair (id + legacy int) is written by a PICK
+	# alone (_on_target_picked), so a keystroke in any other field can never re-address a choice -- an old by-number
+	# choice stays by number until the designer picks a row or presses Migrate to Ids. `.bind()` appends to the
+	# signal's own arg, so the handler is (idx, btn, is_fail).
 	_c_target = OptionButton.new()
-	_c_target.tooltip_text = "Where picking this jumps: Continue = the next line, End = finish, or a specific line."
+	_c_target.tooltip_text = "Where picking this jumps: Continue = the next line, End = finish, or a specific line (by its id)."
 	_guard_dropdown(_c_target)
-	_c_target.item_selected.connect(func(_i): _write_choice())
+	_c_target.item_selected.connect(_on_target_picked.bind(_c_target, false))
 	_labelled(_choice_box, "Target", _c_target)
 
 	# --- 2. requirements (gates) ------------------------------------------------------------------------------
@@ -546,9 +595,9 @@ func _build_choices_block() -> Control:
 	# A gated choice stays SELECTABLE (FNV-style): a FAILED check branches here. Mirrors `target` exactly
 	# (Continue / End sentinels + one entry per line index). Ignored at runtime when the choice has no gate.
 	_c_target_on_fail = OptionButton.new()
-	_c_target_on_fail.tooltip_text = "Where a failed check leads instead: End = finish, Continue = the next line, or a specific line. Ignored when the choice has no Needs."
+	_c_target_on_fail.tooltip_text = "Where a failed check leads instead: End = finish, Continue = the next line, or a specific line (by its id). Ignored when the choice has no Needs."
 	_guard_dropdown(_c_target_on_fail)
-	_c_target_on_fail.item_selected.connect(func(_i): _write_choice())
+	_c_target_on_fail.item_selected.connect(_on_target_picked.bind(_c_target_on_fail, true))
 	_labelled(_choice_box, "Fail target", _c_target_on_fail)
 
 	# --- 3. consequences (on pick) ----------------------------------------------------------------------------
@@ -1069,7 +1118,12 @@ func _load_index(idx: int) -> void:
 	_dirty = false
 	_rebuild_line_list()
 	_select_line(0 if not _res.lines.is_empty() else -1)
-	_set_status("Opened %s -- %d line(s). Pick a line to edit its text and choices." % [path.get_file(), _res.lines.size()])
+	var opened := "Opened %s -- %d line(s). Pick a line to edit its text and choices." % [path.get_file(), _res.lines.size()]
+	if Ops.needs_migration(_res):
+		# The nudge lives where the designer is looking: a conversation (or part of one) that still points by line
+		# number is one reorder away from a broken branch, and Migrate to Ids is the one-click fix.
+		opened += " Some of it still points by line number -- Migrate to Ids re-points it by id."
+	_set_status(opened)
 	_update_button_states()
 
 
@@ -1082,6 +1136,7 @@ func _clear_loaded(path: String) -> void:
 	_dirty = false
 	_syncing = true
 	_line_list.clear()
+	_line_id.text = ""
 	_line_text.text = ""
 	_line_reveals_name.set_pressed_no_signal(false)
 	_syncing = false
@@ -1120,12 +1175,21 @@ func _rebuild_line_list() -> void:
 	_line_list.clear()
 	if _res != null:
 		for i in range(_res.lines.size()):
-			var ln: DialogueLine = _res.lines[i]
-			_line_list.add_item("%d: %s" % [i, _preview(ln)])
+			_line_list.add_item(_line_row_text(i, _res.lines[i]))
 	_update_button_states()
 
 
-## A one-line preview of a DialogueLine for the list (index, trimmed text, choice count).
+## The ONE lines-list row format: "<number> (<id>): <preview>" for an id-addressed line, "<number>: <preview>" for
+## an old by-number one -- so a legacy row reads exactly as it always did, and an id-addressed line can be found by
+## the id its choices name even after it has moved (the number is its position TODAY; the id is what Targets use).
+## Every producer of a line row goes through here (rebuild, the text / id write-throughs, add / remove choice).
+func _line_row_text(i: int, ln: DialogueLine) -> String:
+	if ln != null and ln.id != &"":
+		return "%d (%s): %s" % [i, ln.id, _preview(ln)]
+	return "%d: %s" % [i, _preview(ln)]
+
+
+## A one-line preview of a DialogueLine for the list (trimmed text, choice count).
 func _preview(ln: DialogueLine) -> String:
 	if ln == null:
 		return "(missing)"
@@ -1162,6 +1226,7 @@ func _select_line(i: int) -> void:
 		_on_line_selected(i)
 	else:
 		_syncing = true
+		_line_id.text = ""
 		_line_text.text = ""
 		_line_reveals_name.set_pressed_no_signal(false)
 		_syncing = false
@@ -1172,11 +1237,58 @@ func _select_line(i: int) -> void:
 func _on_line_selected(_i: int) -> void:
 	var ln := _selected_line()
 	_syncing = true
+	_line_id.text = String(ln.id) if ln != null else ""  # `.text =` never emits; the commit is Enter / focus loss
 	_line_text.text = ln.text if ln != null else ""
 	_line_reveals_name.set_pressed_no_signal(ln.reveals_name if ln != null else false)
 	_syncing = false
 	_rebuild_choice_list()
 	_update_button_states()
+
+
+## The Id box's one commit point (Enter, or focus leaving the box): rename the picked line through
+## Ops.rename_line_id, which carries every choice that referenced the OLD id along in the same call. A refusal --
+## blank, a duplicate, a reserved word -- leaves the model untouched and repaints the box from it, with the reason
+## on the status line. A successful rename says what it did to choices the designer never opened: how many followed
+## the rename, and how many that ALREADY pointed at the new id (dangling until now) land on this line -- the one
+## effect nothing else in the tab would ever show them. In memory until Save Conversation.
+func _commit_line_id() -> void:
+	if _syncing:
+		return
+	var ln := _selected_line()
+	if ln == null:
+		return
+	var wanted := StringName(_line_id.text.strip_edges())
+	if wanted == ln.id:
+		_line_id.text = String(ln.id)  # a no-op commit: just normalise stray whitespace out of the box
+		return
+	var r: Dictionary = Ops.rename_line_id(_res, ln, wanted)
+	if not r[Ops.K_OK]:
+		_line_id.text = String(ln.id)
+		_set_status("Couldn't rename this line's id: %s" % String(r[Ops.K_REASON]), true)
+		return
+	_line_id.text = String(ln.id)
+	_mark_dirty()
+	var i := _selected_line_index()
+	if i >= 0:
+		_line_list.set_item_text(i, _line_row_text(i, ln))
+	# The open choice editor's Target rows name lines by id, so re-list them and re-point them at the (unchanged)
+	# destinations -- a signal-free push, exactly like _on_choice_selected.
+	var ch := _selected_choice()
+	if ch != null:
+		_syncing = true
+		_populate_target_options(_c_target, TARGET_CONTINUE)
+		_populate_target_options(_c_target_on_fail, TARGET_END)
+		_select_target(_c_target, ch.target, ch.target_id)
+		_select_target(_c_target_on_fail, ch.target_on_fail, ch.target_on_fail_id)
+		_syncing = false
+	var msg := "Renamed line %d's id to %s" % [i, ln.id]
+	var rewritten := int(r[Ops.K_REWRITTEN])
+	var captured := int(r[Ops.K_CAPTURED])
+	if rewritten > 0:
+		msg += " -- %d choice target(s) followed it" % rewritten
+	if captured > 0:
+		msg += " -- %d choice target(s) that already pointed at %s now land here" % [captured, ln.id]
+	_set_status(msg + ".", captured > 0)
 
 
 ## The line-text write-through. TWO guards, and the second is not redundant: a TextEdit emits text_changed DEFERRED
@@ -1195,7 +1307,7 @@ func _on_line_text_changed() -> void:
 	# Refresh just this row's preview text without losing the selection.
 	var i := _selected_line_index()
 	if i >= 0:
-		_line_list.set_item_text(i, "%d: %s" % [i, _preview(ln)])
+		_line_list.set_item_text(i, _line_row_text(i, ln))
 
 
 ## In-memory only (like the line text); the change reaches disk on Save Conversation. See DialogueLine.reveals_name.
@@ -1305,12 +1417,12 @@ func _on_choice_selected(_j: int) -> void:
 		_update_button_states()
 		return
 	_choice_box.visible = true
-	_populate_target_options(_c_target)
-	_populate_target_options(_c_target_on_fail)
+	_populate_target_options(_c_target, TARGET_CONTINUE)
+	_populate_target_options(_c_target_on_fail, TARGET_END)
 	_syncing = true
 	_c_text.text = ch.text
-	_select_target(_c_target, ch.target)
-	_select_target(_c_target_on_fail, ch.target_on_fail)
+	_select_target(_c_target, ch.target, ch.target_id)
+	_select_target(_c_target_on_fail, ch.target_on_fail, ch.target_on_fail_id)
 	_c_set_flag.text = String(ch.set_flag)
 	_c_set_flag_value.set_pressed_no_signal(ch.set_flag_value)
 	_c_req_flag.text = String(ch.required_flag)
@@ -1353,9 +1465,18 @@ func _on_choice_selected(_j: int) -> void:
 
 
 ## Fill a target OptionButton (`target` or `target_on_fail`): Continue / End sentinels, then one entry per real
-## line, "-> line 3: <its opening words>..." so the designer picks by what the line SAYS, not by a bare number.
-## Shared by both target dropdowns so the two stay identical.
-func _populate_target_options(btn: OptionButton) -> void:
+## line -- "-> greet: <its opening words>..." for an id-addressed line, "-> line 3: ..." for one with no usable id
+## -- so the designer picks by what the line SAYS, not by a bare number. Shared by both target dropdowns so the
+## two stay identical; `int_default` is the legacy int a pick of an id-form row resets the choice to (the script
+## default of that field: CONTINUE for Target, END for Fail target) so the saved .tres carries only the id.
+##
+## EVERY row carries a metadata Dictionary {"id": String, "index": int} -- the exact (target_id, target) pair a pick
+## writes (see _on_target_picked): the sentinel rows carry their word + int, an id-addressed line row its id + the
+## default int, a by-number line row "" + its index. The item ID stays what it always was (-2 / -1 / the line's
+## index) so a legacy choice still selects by it. A line whose id is a DUPLICATE or a reserved word is offered by
+## number: the resolver would not reach it by id (first match / the word wins), so writing that id would move the
+## destination; its row says why, and the Audit reports the id.
+func _populate_target_options(btn: OptionButton, int_default: int = TARGET_CONTINUE) -> void:
 	btn.clear()
 	# NEVER pass a sentinel straight to add_item's `id`: OptionButton treats id == -1 as "auto-assign", and
 	# DialogueLine.END IS -1. Passing it made the End row carry id 1 (its index) -- so picking "End conversation"
@@ -1363,12 +1484,44 @@ func _populate_target_options(btn: OptionButton) -> void:
 	# "points at line -1 (missing)" warning instead of selecting End. Add the row, then stamp the id explicitly.
 	btn.add_item("Continue (next line)")
 	btn.set_item_id(btn.item_count - 1, TARGET_CONTINUE)
+	btn.set_item_metadata(btn.item_count - 1, {"id": ID_CONTINUE, "index": TARGET_CONTINUE})
 	btn.add_item("End conversation")
 	btn.set_item_id(btn.item_count - 1, TARGET_END)
+	btn.set_item_metadata(btn.item_count - 1, {"id": ID_END, "index": TARGET_END})
 	if _res != null:
 		for i in range(_res.lines.size()):
-			btn.add_item("-> line %d: %s" % [i, _target_label(_res.lines[i])])
+			var ln: DialogueLine = _res.lines[i]
+			var addressable := _addressable_id(i)
+			if addressable != &"":
+				btn.add_item("-> %s: %s" % [addressable, _target_label(ln)])
+				btn.set_item_metadata(btn.item_count - 1, {"id": String(addressable), "index": int_default})
+			else:
+				btn.add_item("-> line %d%s: %s" % [i, _unaddressable_note(ln), _target_label(ln)])
+				btn.set_item_metadata(btn.item_count - 1, {"id": "", "index": i})
 			btn.set_item_id(btn.item_count - 1, i)
+
+
+## Line `i`'s id when a choice can actually reach the line BY that id -- non-blank, not a reserved word, and the
+## FIRST line carrying it (DialogueResource.resolve_target's order) -- else blank, meaning "offer this line by
+## number". Blank also for an out-of-range / null slot.
+func _addressable_id(i: int) -> StringName:
+	if _res == null or i < 0 or i >= _res.lines.size() or _res.lines[i] == null:
+		return &""
+	var lid: StringName = _res.lines[i].id
+	if lid == &"" or String(lid) == ID_END or String(lid) == ID_CONTINUE:
+		return &""
+	if DialogueResource.find_line(_res.lines, lid) != i:
+		return &""
+	return lid
+
+
+## Why a line with an id is still offered by number (a suffix on its Target row). "" for an id-less line.
+func _unaddressable_note(ln: DialogueLine) -> String:
+	if ln == null or ln.id == &"":
+		return ""
+	if String(ln.id) == ID_END or String(ln.id) == ID_CONTINUE:
+		return " (id %s is a reserved word)" % ln.id
+	return " (id %s is not unique)" % ln.id
 
 
 ## The text half of a target row: the line's opening words, or "(empty)" / "(missing)".
@@ -1379,18 +1532,69 @@ func _target_label(ln: DialogueLine) -> String:
 	return t if not t.is_empty() else "(empty)"
 
 
-## Select `btn`'s entry whose item-id == `target` (ids are the sentinels / line indices).
-func _select_target(btn: OptionButton, target: int) -> void:
+## Point `btn` at a choice's current destination: BY ID when `target_id` is non-blank (the row whose metadata id
+## matches -- a sentinel word selects its sentinel row), else by the legacy int `target` (the row whose item-id
+## matches: a sentinel or a line index). A destination no row represents gets ONE transient row that carries the
+## REAL pair in its metadata, so re-picking it (the only thing that writes) round-trips the values unchanged
+## instead of silently rewriting them -- a dangling id keeps its id AND its legacy int, a dangling number keeps
+## its number. Both cases say so on the status line; both are what the Audit reports.
+func _select_target(btn: OptionButton, target: int, target_id: StringName = &"") -> void:
+	if target_id != &"":
+		var want := String(target_id)
+		for idx in range(btn.item_count):
+			var meta: Variant = btn.get_item_metadata(idx)
+			if meta is Dictionary and String(meta.get("id", "")) == want:
+				btn.select(idx)
+				return
+		# The id names no line (dangling). Same add_item id trap as the sentinels: stamp the id after adding.
+		btn.add_item("-> %s (missing -- no line has that id)" % want)
+		btn.set_item_id(btn.item_count - 1, TARGET_DANGLING_ID)
+		btn.set_item_metadata(btn.item_count - 1, {"id": want, "index": target})
+		btn.select(btn.item_count - 1)
+		_set_status("A choice points at id %s, but no line has that id -- kept as it is; repoint it with Target." % want, true)
+		return
 	if _select_option_by_id(btn, target):
 		return
-	# Target points past the current line count (dangling). Add a transient item carrying the REAL id so the
-	# next _write_choice() round-trips it back unchanged instead of silently rewriting it to Continue.
+	# Target points past the current line count (dangling). Add a transient item carrying the REAL number so a
+	# re-pick round-trips it back unchanged instead of silently rewriting it to Continue.
 	var count := _res.lines.size() if _res != null else 0
-	# Same add_item id trap as above: stamp the id after adding, never through the `id` argument.
 	btn.add_item("-> line %d (missing -- only %d line(s))" % [target, count])
 	btn.set_item_id(btn.item_count - 1, target)
+	btn.set_item_metadata(btn.item_count - 1, {"id": "", "index": target})
 	btn.select(btn.item_count - 1)
 	_set_status("A choice points at line %d, but there are only %d line(s) -- kept as it is; repoint it with Target." % [target, count], true)
+
+
+## A pick in one of the two Target dropdowns -- the ONLY writer of a choice's destination pair. Reads the picked
+## row's metadata {"id", "index"} and writes BOTH fields verbatim (target_id + target, or the fail pair): an id-form
+## row writes its id and the field's default int, a by-number row writes "" and its index, a transient row writes
+## the pair it was built from (a round-trip, byte for byte). A row with no Dictionary metadata is REFUSED rather
+## than guessed at (the PickerRows "keep" intent), and a pick that changes nothing marks nothing dirty. Kept out of
+## _write_choice on purpose: that runs on every keystroke, and re-addressing a legacy choice on a keystroke in Label
+## is exactly the silent rewrite the tab's clobber rule forbids. `idx` is the signal's own arg; `btn` / `is_fail`
+## are bound.
+func _on_target_picked(idx: int, btn: OptionButton, is_fail: bool) -> void:
+	if _syncing:
+		return
+	var ch := _selected_choice()
+	if ch == null or btn == null or idx < 0 or idx >= btn.item_count:
+		return
+	var meta: Variant = btn.get_item_metadata(idx)
+	if not (meta is Dictionary):
+		return
+	var id := StringName(String(meta.get("id", "")))
+	var index := int(meta.get("index", TARGET_END if is_fail else TARGET_CONTINUE))
+	if is_fail:
+		if ch.target_on_fail_id == id and ch.target_on_fail == index:
+			return
+		ch.target_on_fail_id = id
+		ch.target_on_fail = index
+	else:
+		if ch.target_id == id and ch.target == index:
+			return
+		ch.target_id = id
+		ch.target = index
+	_mark_dirty()
 
 
 ## Select the OptionButton entry whose item-id == `id`; returns false when no entry carries that id (so the
@@ -1488,6 +1692,10 @@ func _on_start_quest_picked(idx: int) -> void:
 ##      _on_start_quest_picked, so a keystroke in any other field can never re-resolve or blank it. Do NOT "finish"
 ##      this function by adding it — reading the dropdown's selection here would reintroduce exactly that clobber
 ##      (a rebuilt/empty dropdown reads as index 0, i.e. "(none)").
+##   3. the destination pair (`target_id` + `target`, `target_on_fail_id` + `target_on_fail`) is likewise NOT
+##      written here: it is owned by _on_target_picked, the two dropdowns' own pick handler. Writing it per keystroke
+##      would re-address a legacy by-number choice (or stamp CONTINUE / END words onto it) the moment the designer
+##      typed into Label -- a half-migration nobody asked for. A destination changes on a PICK or on Migrate to Ids.
 ## It is also a write-through, so it raises _dirty -- after the null-choice guard, so a stray emit with nothing
 ## selected (the arity test emits every signal on a bare tab) never marks an empty editor dirty.
 func _write_choice() -> void:
@@ -1497,12 +1705,6 @@ func _write_choice() -> void:
 	if ch == null:
 		return
 	ch.text = _c_text.text
-	var ti := _c_target.selected
-	if ti >= 0:
-		ch.target = _c_target.get_item_id(ti)
-	var fi := _c_target_on_fail.selected
-	if fi >= 0:
-		ch.target_on_fail = _c_target_on_fail.get_item_id(fi)
 	ch.set_flag = StringName(_c_set_flag.text)
 	ch.set_flag_value = _c_set_flag_value.button_pressed
 	ch.required_flag = StringName(_c_req_flag.text)
@@ -1534,7 +1736,7 @@ func _write_choice() -> void:
 	# A line's preview shows its choice count, which is unchanged here, but a label edit is worth reflecting.
 	var li := _selected_line_index()
 	if li >= 0:
-		_line_list.set_item_text(li, "%d: %s" % [li, _preview(_selected_line())])
+		_line_list.set_item_text(li, _line_row_text(li, _selected_line()))
 
 
 func _add_choice() -> void:
@@ -1550,7 +1752,7 @@ func _add_choice() -> void:
 	# The line preview gained a choice -- refresh its row.
 	var li := _selected_line_index()
 	if li >= 0:
-		_line_list.set_item_text(li, "%d: %s" % [li, _preview(ln)])
+		_line_list.set_item_text(li, _line_row_text(li, ln))
 
 
 func _remove_choice() -> void:
@@ -1561,7 +1763,7 @@ func _remove_choice() -> void:
 		_rebuild_choice_list()
 		var li := _selected_line_index()
 		if li >= 0:
-			_line_list.set_item_text(li, "%d: %s" % [li, _preview(ln)])
+			_line_list.set_item_text(li, _line_row_text(li, ln))
 	else:
 		_set_status(MSG_NO_CHOICE, true)
 
@@ -1592,6 +1794,37 @@ func _move_choice(dir: int) -> void:
 		_set_status("Couldn't move that choice: it is already %s the list." % ("first in" if dir < 0 else "last in"), true)
 
 
+# --- migrate to ids ---------------------------------------------------------------------------------------------
+
+## Migrate to Ids: re-address the open conversation by id, in memory (Ops.migrate_to_ids), then re-list everything
+## and restore the selection so the Target rows now read by id. Reports what changed and, when a choice's number had
+## no faithful id form (it points past the end), says it was KEPT by number and where to fix it -- migration never
+## moves a destination. Nothing reaches disk until Save Conversation.
+func _migrate() -> void:
+	if _res == null:
+		_set_status(MSG_NO_CONVERSATION, true)
+		return
+	if not Ops.needs_migration(_res):
+		_set_status("Nothing to migrate in %s -- every line has an id and every choice already points by id." % _loaded_path.get_file())
+		return
+	var li := _selected_line_index()
+	var cj := _selected_choice_index()
+	var r: Dictionary = Ops.migrate_to_ids(_res)
+	_mark_dirty()
+	_rebuild_line_list()
+	if li >= 0:
+		_restore_selection(li, cj)
+	else:
+		_select_line(0 if not _res.lines.is_empty() else -1)
+	var msg := "Migrated %s -- %d line(s) given an id, %d choice(s) re-pointed by id. Save Conversation to keep it." % [
+		_loaded_path.get_file(), int(r[Ops.K_LINES]), int(r[Ops.K_CHOICES])]
+	var unresolved := int(r[Ops.K_UNRESOLVED])
+	if unresolved > 0:
+		msg += " %d target(s) kept by number: they point at a line that doesn't exist -- fix those with Target." % unresolved
+	_set_status(msg, unresolved > 0)
+	_update_button_states()
+
+
 # --- dirty state + button gates --------------------------------------------------------------------------------
 
 ## Raise the unsaved-changes flag (idempotent) and show it: "*" on Save Conversation, the suffix on the status line.
@@ -1614,6 +1847,10 @@ func _update_button_states() -> void:
 	if _save_btn != null:
 		_save_btn.text = SAVE_TEXT + ("*" if _dirty else "")
 		_gate(_save_btn, has_res, TIP_NO_CONVERSATION)
+	if _migrate_btn != null:
+		# Greyed with the reason: nothing open, or nothing left that points by number.
+		var migratable := has_res and Ops.needs_migration(_res)
+		_gate(_migrate_btn, migratable, TIP_NO_CONVERSATION if not has_res else TIP_NOTHING_TO_MIGRATE)
 	for k in _line_buttons.size():
 		# Add needs an open conversation; Remove / Up / Down need a picked line.
 		_gate(_line_buttons[k], has_res if k == 0 else has_line, TIP_NO_CONVERSATION if k == 0 else TIP_NO_LINE)

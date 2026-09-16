@@ -49,6 +49,8 @@ const NOT_A_CONVERSATION := "res://resources/dialogue/old_man_voice.tres"
 ## The Save button's resting text and the dirty marker the tab appends to it -- LITERALS, like the tags, so a renamed
 ## button fails here instead of the test agreeing with whatever the tab now says.
 const SAVE_TEXT := "Save Conversation"
+## The one-click re-addressing of a by-number conversation (Ops.migrate_to_ids), on the fixed top bar.
+const MIGRATE_TEXT := "Migrate to Ids"
 const DIRTY_SUFFIX := "(unsaved changes)"
 
 ## The consequence tags, written out as LITERALS rather than read back off Ops2's own consts: an expectation built
@@ -298,8 +300,10 @@ func test_list_rows_use_designer_sentinels() -> void:
 	d.free()
 
 
-## The two Target dropdowns name each line by number AND its opening words ("-> line 0: Halt. Who goes there, st..."),
-## with "(empty)" for a blank line, and the sentinels keep their ids (-2 Continue / -1 End / the line index).
+## The two Target dropdowns name each line by its ID and its opening words ("-> line_0: Halt. Who goes there, st..."
+## -- Ops.add_line gives every line an id), with "(empty)" for a blank line; the ITEM ids keep their legacy meaning
+## (-2 Continue / -1 End / the line index) so a by-number choice still selects by them. The metadata each row carries
+## (the pair a pick writes) is pinned by test_target_rows_carry_the_pair_a_pick_writes below.
 func test_target_rows_read_line_number_and_opening_words() -> void:
 	var d = DialogueEditor.new()
 	var r := _res_with_lines(0)
@@ -312,13 +316,14 @@ func test_target_rows_read_line_number_and_opening_words() -> void:
 	assert_eq(d._c_target.item_count, 4, "Continue + End + one row per line")
 	assert_eq(d._c_target.get_item_id(0), DialogueLine.CONTINUE, "row 0 carries the CONTINUE sentinel id")
 	assert_eq(d._c_target.get_item_id(1), DialogueLine.END, "row 1 carries the END sentinel id")
-	assert_eq(d._c_target.get_item_text(2), "-> line 0: Halt. Who goes there, st...", "a long line is cut at 24 characters with ...")
+	assert_eq(d._c_target.get_item_text(2), "-> line_0: Halt. Who goes there, st...", "an id-addressed line's row reads its id, then its text cut at 24 characters with ...")
 	assert_eq(d._c_target.get_item_id(2), 0, "the line row's id IS the line index")
-	assert_eq(d._c_target.get_item_text(3), "-> line 1: (empty)", "a whitespace-only line reads (empty)")
+	assert_eq(d._c_target.get_item_text(3), "-> line_1: (empty)", "a whitespace-only line reads (empty)")
 	# THE DANGLING ROW, and the same add_item id trap the two sentinels above carry: a target past the end of the
 	# list gets a transient row so the value ROUND-TRIPS. If that row's id were auto-assigned (its index) instead of
-	# stamped, the next _write_choice() would silently rewrite an out-of-range target to whatever the index happened
-	# to be -- the exact shape of the bug that made "End conversation" write "jump to line 1".
+	# stamped, a re-pick of it (_on_target_picked, the one writer of a destination) would silently rewrite an
+	# out-of-range target to whatever the index happened to be -- the exact shape of the bug that made "End
+	# conversation" write "jump to line 1".
 	d._select_target(d._c_target, 7)
 	assert_eq(d._c_target.item_count, 5, "the dangling target added ONE transient row")
 	assert_eq(d._c_target.get_item_id(d._c_target.selected), 7, "and that row carries the REAL target id, so the next write round-trips it unchanged")
@@ -1085,3 +1090,427 @@ func test_perks_ids_csv_matches_ids() -> void:
 	assert_eq(parts.size(), ids.size(), "one comma-separated entry per id -- no trailing separator, no dropped id")
 	for id in ids:
 		assert_true(parts.has(id), "id '%s' survives the join into the hint_string" % id)
+
+
+# ==============================================================================================================
+# ADDRESSING BY ID -- the ops (dialogue_edit_ops.gd's id half) and the tab surfaces built on them: the Id box, the
+# metadata-carrying Target rows, the pick-only destination write, and Migrate to Ids. Every mutation runs on
+# throwaway .new() resources; the tab is bare and off-tree, so every handler is DRIVEN directly (an off-tree
+# OptionButton / LineEdit emits nothing on assignment -- see the QA doc's "Two engine facts").
+# ==============================================================================================================
+
+# --- ops: add_line ids / rename / migrate ---------------------------------------------------------------------
+
+func test_add_line_is_born_with_a_unique_id() -> void:
+	var r := DialogueResource.new()
+	var a := Ops.add_line(r)
+	assert_eq(a.id, &"line_0", "the first added line is line_0 (its index at creation)")
+	var b := Ops.add_line(r)
+	assert_eq(b.id, &"line_1", "the second is line_1")
+	var taken := DialogueLine.new()
+	taken.id = &"line_2"  # a hand-authored id that collides with the next default
+	r.lines.append(taken)
+	var c := Ops.add_line(r)
+	assert_eq(c.id, &"line_3", "line_2 was already taken by a hand-authored line, so the default bumps past it -- never a duplicate")
+	assert_eq(DialogueResource.find_line(r.lines, &"line_2"), 2, "and the hand-authored line keeps its id")
+	r = null
+
+
+func test_rename_line_id_carries_every_reference_and_reports_captures() -> void:
+	var r := DialogueResource.new()
+	var a := Ops.add_line(r)  # line_0
+	var b := Ops.add_line(r)  # line_1
+	var c := Ops.add_line(r)  # line_2
+	var ch := Ops.add_choice(a)
+	ch.target_id = &"line_1"
+	ch.target_on_fail_id = &"line_1"
+	var dangling := Ops.add_choice(c)
+	dangling.target_id = &"greet"  # names no line YET -- the Audit reports it as dangling
+	var res: Dictionary = Ops.rename_line_id(r, b, &"greet")
+	assert_true(res[Ops.K_OK], "renaming line_1 to greet is allowed")
+	assert_eq(b.id, &"greet", "the line took the new id")
+	assert_eq(ch.target_id, &"greet", "the Target that named line_1 followed the rename")
+	assert_eq(ch.target_on_fail_id, &"greet", "so did the Fail target")
+	assert_eq(int(res[Ops.K_REWRITTEN]), 2, "both references are counted as rewritten")
+	assert_eq(int(res[Ops.K_CAPTURED]), 1,
+		"the choice that ALREADY pointed at greet (dangling until now) is reported as captured -- nothing else in the tab would ever show that")
+	assert_eq(DialogueResource.resolve_target(r.lines, dangling.target_id, dangling.target), 1, "and it now lands on this line")
+	r = null
+
+
+func test_rename_line_id_refuses_blank_reserved_and_duplicate_ids() -> void:
+	var r := DialogueResource.new()
+	var a := Ops.add_line(r)
+	var b := Ops.add_line(r)
+	var ch := Ops.add_choice(a)
+	ch.target_id = &"line_1"
+	for bad in [&"", &"   ", &"END", &"CONTINUE", &"line_0"]:
+		var res: Dictionary = Ops.rename_line_id(r, b, bad)
+		assert_false(res[Ops.K_OK], "'%s' is refused" % bad)
+		assert_ne(String(res[Ops.K_REASON]), "", "a refusal says why (in designer words)")
+		assert_eq(b.id, &"line_1", "the line keeps its id after a refused rename ('%s')" % bad)
+		assert_eq(ch.target_id, &"line_1", "and no reference moved")
+	assert_true(Ops.rename_line_id(r, b, &"line_1")[Ops.K_OK], "renaming to its own id is an ok no-op")
+	assert_true(Ops.rename_line_id(r, b, &"  polite  ")[Ops.K_OK], "surrounding whitespace is stripped, not refused")
+	assert_eq(b.id, &"polite", "the stripped id is what was written")
+	assert_eq(ch.target_id, &"polite", "and the reference followed the stripped id")
+	assert_false(Ops.rename_line_id(null, b, &"x")[Ops.K_OK], "a null resource is refused, no crash")
+	assert_false(Ops.rename_line_id(r, null, &"x")[Ops.K_OK], "a null line is refused, no crash")
+	r = null
+
+
+func test_rename_from_blank_is_a_plain_assignment_and_never_re_addresses_a_number() -> void:
+	var r := DialogueResource.new()
+	var legacy := DialogueLine.new()  # id-less, the pre-ids shape
+	r.lines.append(legacy)
+	var other := DialogueLine.new()
+	r.lines.append(other)
+	var ch := Ops.add_choice(other)
+	ch.target = 0  # by number
+	var res: Dictionary = Ops.rename_line_id(r, legacy, &"greet")
+	assert_true(res[Ops.K_OK], "giving an id-less line an id is allowed")
+	assert_eq(legacy.id, &"greet", "assigned")
+	assert_eq(int(res[Ops.K_REWRITTEN]), 0, "nothing can reference a blank id, so nothing was rewritten")
+	assert_eq(ch.target, 0, "the by-number choice still points at line 0")
+	assert_eq(ch.target_id, &"", "and it is NOT re-addressed by a rename -- that is Migrate to Ids' job, on request")
+	r = null
+
+
+func test_migrate_to_ids_re_addresses_by_number_choices_and_clears_the_ints() -> void:
+	# A legacy conversation: no ids anywhere, choices by number -- the shape of every .tres and inline talk
+	# authored before ids existed.
+	var r := DialogueResource.new()
+	for i in 3:
+		var ln := DialogueLine.new()
+		ln.text = "l%d" % i
+		r.lines.append(ln)
+	var c0 := Ops.add_choice(r.lines[0])
+	c0.target = 2
+	c0.target_on_fail = DialogueLine.END
+	var c1 := Ops.add_choice(r.lines[0])
+	c1.target = DialogueLine.CONTINUE
+	c1.required_flag = &"met_him"
+	c1.target_on_fail = 1
+	assert_true(Ops.needs_migration(r), "a by-number conversation has work for Migrate")
+	var report: Dictionary = Ops.migrate_to_ids(r)
+	assert_eq(int(report[Ops.K_LINES]), 3, "every id-less line got an id")
+	assert_eq(int(report[Ops.K_CHOICES]), 2, "both choices were re-pointed")
+	assert_eq(int(report[Ops.K_UNRESOLVED]), 0, "nothing was left by number")
+	assert_eq([r.lines[0].id, r.lines[1].id, r.lines[2].id], [&"line_0", &"line_1", &"line_2"], "the defaults are line_<index>")
+	assert_eq(c0.target_id, &"line_2", "target 2 became the id of line 2")
+	assert_eq(c0.target, DialogueLine.CONTINUE, "and the legacy int was reset to its default so the file carries only the id")
+	assert_eq(c0.target_on_fail_id, &"END", "the END int became the END word")
+	assert_eq(c0.target_on_fail, DialogueLine.END, "at its default")
+	assert_eq(c1.target_id, &"CONTINUE", "the CONTINUE int became the CONTINUE word")
+	assert_eq(c1.target_on_fail_id, &"line_1", "the gated fail branch's number became an id")
+	assert_eq(c1.target_on_fail, DialogueLine.END, "and its int reset")
+	# The whole point: no destination moved.
+	assert_eq(r.resolve(c0.target_id, c0.target), 2, "c0 still goes to line 2")
+	assert_eq(r.resolve(c1.target_id, c1.target), DialogueLine.CONTINUE, "c1 still continues")
+	assert_eq(r.resolve(c1.target_on_fail_id, c1.target_on_fail), 1, "c1's fail branch still goes to line 1")
+	assert_false(Ops.needs_migration(r), "nothing left to migrate")
+	var again: Dictionary = Ops.migrate_to_ids(r)
+	assert_eq([int(again[Ops.K_LINES]), int(again[Ops.K_CHOICES]), int(again[Ops.K_UNRESOLVED])], [0, 0, 0], "idempotent: a second run changes nothing")
+	r = null
+
+
+func test_migrate_keeps_an_unresolvable_number_and_never_moves_a_destination() -> void:
+	var r := DialogueResource.new()
+	var a := DialogueLine.new()
+	a.id = &"x"
+	r.lines.append(a)
+	var b := DialogueLine.new()
+	b.id = &"x"  # a DUPLICATE (hand-edited file): the resolver would take line 0 for "x"
+	r.lines.append(b)
+	var c := DialogueLine.new()
+	r.lines.append(c)
+	var to_dup := Ops.add_choice(c)
+	to_dup.target = 1
+	var out_of_range := Ops.add_choice(c)
+	out_of_range.target = 9
+	var report: Dictionary = Ops.migrate_to_ids(r)
+	assert_eq(int(report[Ops.K_LINES]), 1, "only the id-less line got an id")
+	assert_eq(c.id, &"line_2", "line 2's default")
+	assert_eq(to_dup.target_id, &"", "a number pointing at a DUPLICATE id is kept by number -- writing 'x' would resolve to line 0 and MOVE the destination")
+	assert_eq(to_dup.target, 1, "its number is untouched")
+	assert_eq(out_of_range.target_id, &"", "an out-of-range number has no id form")
+	assert_eq(out_of_range.target, 9, "kept as is for the Audit's ERROR / the Target dropdown to fix")
+	assert_eq(int(report[Ops.K_UNRESOLVED]), 2, "both targets are reported as kept by number")
+	assert_eq(int(report[Ops.K_CHOICES]), 2, "each choice still had its (ungated, END) fail branch re-pointed, so both count as touched")
+	assert_false(Ops.needs_migration(r), "no MIGRATABLE work remains -- the button must grey rather than promise a no-op")
+	assert_eq(Ops.id_form_of(r.lines, DialogueLine.END), &"END", "id_form_of: END int -> END word")
+	assert_eq(Ops.id_form_of(r.lines, 0), &"x", "line 0's id round-trips (it IS the first x)")
+	assert_eq(Ops.id_form_of(r.lines, 1), &"", "line 1's id does not (the resolver would pick line 0)")
+	r = null
+
+
+func test_migrate_never_names_a_line_after_a_reserved_word_and_leaves_a_reserved_line_by_number() -> void:
+	var r := DialogueResource.new()
+	var a := DialogueLine.new()
+	a.id = &"END"  # a hand-typed reserved word: unreachable by id (the word wins in the resolver)
+	r.lines.append(a)
+	var b := DialogueLine.new()
+	r.lines.append(b)
+	var ch := Ops.add_choice(b)
+	ch.target = 0
+	var report: Dictionary = Ops.migrate_to_ids(r)
+	assert_eq(ch.target_id, &"", "a number pointing at a line whose id is a reserved word is kept by number")
+	assert_eq(ch.target, 0, "untouched")
+	assert_eq(int(report[Ops.K_UNRESOLVED]), 1, "and reported")
+	assert_eq(b.id, &"line_1", "the id-less line still got its default")
+	r = null
+
+
+# --- the tab: metadata-carrying Target rows, select by id, pick-only writes ------------------------------------
+
+## Every Target row carries the exact (target_id, target) pair a pick writes. Sentinel rows carry their word + int;
+## an id-addressed line its id + the FIELD's default int; a line that cannot be reached by id (no id / a duplicate /
+## a reserved word) its number, and says why. The item ids stay the line index, so a by-number choice still selects.
+func test_target_rows_carry_the_pair_a_pick_writes() -> void:
+	var d = DialogueEditor.new()
+	var r := DialogueResource.new()
+	var a := Ops.add_line(r)  # line_0
+	a.text = "Halt"
+	var legacy := DialogueLine.new()  # id-less
+	legacy.text = "old"
+	r.lines.append(legacy)
+	var dup := DialogueLine.new()
+	dup.id = &"line_0"  # duplicates line 0's id
+	r.lines.append(dup)
+	var reserved := DialogueLine.new()
+	reserved.id = &"END"
+	r.lines.append(reserved)
+	d._res = r
+	var btn: OptionButton = d._c_target_on_fail
+	d._populate_target_options(btn, DialogueEditor.TARGET_END)
+	assert_eq(btn.item_count, 6, "Continue + End + one row per line")
+	assert_eq(btn.get_item_metadata(0), {"id": "CONTINUE", "index": DialogueLine.CONTINUE}, "the Continue row writes the CONTINUE word + int")
+	assert_eq(btn.get_item_metadata(1), {"id": "END", "index": DialogueLine.END}, "the End row writes the END word + int")
+	assert_eq(btn.get_item_text(2), "-> line_0: Halt", "an id-addressed line reads by id")
+	assert_eq(btn.get_item_metadata(2), {"id": "line_0", "index": DialogueLine.END},
+		"an id row writes the id and THIS FIELD's default int (END for Fail target) so the saved file carries only the id")
+	assert_eq(btn.get_item_text(3), "-> line 1: old", "an id-less line is offered by number, exactly as before ids")
+	assert_eq(btn.get_item_metadata(3), {"id": "", "index": 1}, "and writes a blank id + its number")
+	assert_eq(btn.get_item_text(4), "-> line 2 (id line_0 is not unique): (empty)", "a duplicate id is offered by number and says why")
+	assert_eq(btn.get_item_metadata(4), {"id": "", "index": 2}, "writing 'line_0' would resolve to line 0 -- so the row writes the number")
+	assert_eq(btn.get_item_text(5), "-> line 3 (id END is a reserved word): (empty)", "a reserved-word id is offered by number and says why")
+	assert_eq(btn.get_item_metadata(5), {"id": "", "index": 3}, "the word would win in the resolver -- so the row writes the number")
+	for i in 4:
+		assert_eq(btn.get_item_id(2 + i), i, "row %d's item id is still the line index (a by-number choice selects by it)" % (2 + i))
+	d._populate_target_options(d._c_target, DialogueEditor.TARGET_CONTINUE)
+	assert_eq(d._c_target.get_item_metadata(2), {"id": "line_0", "index": DialogueLine.CONTINUE}, "the Target dropdown's id rows reset to CONTINUE, its own field default")
+	d._res = null
+	r = null
+	d.free()
+
+
+func test_select_target_by_id_and_the_dangling_id_transient_row() -> void:
+	var d = DialogueEditor.new()
+	var r := DialogueResource.new()
+	Ops.add_line(r)  # line_0
+	Ops.add_line(r)  # line_1
+	d._res = r
+	d._populate_target_options(d._c_target, DialogueEditor.TARGET_CONTINUE)
+	d._select_target(d._c_target, 7, &"line_1")
+	assert_eq(d._c_target.selected, 3, "selected BY ID (line_1's row); the stale int 7 is ignored, as the resolver ignores it")
+	d._select_target(d._c_target, DialogueLine.CONTINUE, &"END")
+	assert_eq(d._c_target.selected, 1, "a sentinel WORD selects its sentinel row")
+	d._select_target(d._c_target, 3, &"gret")
+	assert_eq(d._c_target.item_count, 5, "a dangling id added ONE transient row")
+	assert_eq(d._c_target.get_item_id(d._c_target.selected), DialogueEditor.TARGET_DANGLING_ID, "with the reserved dangling item id, never a line index or -1 (the auto-assign trap)")
+	assert_eq(d._c_target.get_item_metadata(d._c_target.selected), {"id": "gret", "index": 3},
+		"the transient row carries the REAL pair, so re-picking it round-trips both fields unchanged")
+	assert_string_contains(d._status.text, "gret")
+	d._select_target(d._c_target, 9)
+	assert_eq(d._c_target.get_item_metadata(d._c_target.selected), {"id": "", "index": 9},
+		"the legacy dangling-NUMBER row carries metadata too, so a pick on it can never null-deref")
+	d._res = null
+	r = null
+	d.free()
+
+
+## THE addressing-mode rule: the destination pair is written by a PICK alone. A keystroke in Label on a legacy
+## by-number choice must not re-address it (the silent half-migration the clobber rule forbids), a pick writes the
+## id form and resets the int, a re-pick of the current row is a no-op, a row with no metadata is refused, and the
+## dangling transient row round-trips byte for byte.
+func test_a_pick_writes_the_pair_and_a_keystroke_never_does() -> void:
+	var d = DialogueEditor.new()
+	var r := DialogueResource.new()
+	var a := Ops.add_line(r)  # line_0
+	Ops.add_line(r)  # line_1
+	d._res = r
+	d._loaded_path = "res://resources/dialogue/__never_saved__.tres"
+	d._rebuild_line_list()
+	d._select_line(0)
+	d._add_choice()
+	var ch: DialogueChoice = a.choices[0]
+	ch.target = 1  # a LEGACY by-number choice inside a conversation whose lines all have ids
+	d._on_choice_selected(0)
+	assert_eq(d._c_target.selected, 3, "the by-number choice shows on line_1's row")
+	d._dirty = false
+	d._update_button_states()
+	d._c_text.text = "Yes."
+	d._write_choice()
+	assert_eq(ch.target, 1, "a keystroke in Label left the number alone")
+	assert_eq(ch.target_id, &"", "and did NOT re-address the choice by id -- it stays by number until a pick or Migrate to Ids")
+	d._on_target_picked(2, d._c_target, false)
+	assert_eq(ch.target_id, &"line_0", "a pick writes the id form")
+	assert_eq(ch.target, DialogueLine.CONTINUE, "and resets the legacy int to the field default")
+	assert_true(d._dirty, "a pick is a write-through")
+	d._on_target_picked(1, d._c_target_on_fail, true)
+	assert_eq(ch.target_on_fail_id, &"END", "the Fail target pick wrote the END word")
+	assert_eq(ch.target_on_fail, DialogueLine.END, "at its default int")
+	d._dirty = false
+	d._update_button_states()
+	d._on_target_picked(2, d._c_target, false)
+	assert_false(d._dirty, "re-picking the current row changes nothing and marks nothing dirty")
+	d._c_target.add_item("stray row with no metadata")
+	d._on_target_picked(d._c_target.item_count - 1, d._c_target, false)
+	assert_eq(ch.target_id, &"line_0", "a row without a metadata Dictionary is refused (kept), never guessed at")
+	assert_false(d._dirty, "and writes nothing")
+	# The dangling transient row: re-picking it must round-trip BOTH fields verbatim.
+	ch.target_id = &"gret"
+	ch.target = 5
+	d._on_choice_selected(0)
+	d._on_target_picked(d._c_target.selected, d._c_target, false)
+	assert_eq(ch.target_id, &"gret", "the dangling id survived a re-pick of its own row")
+	assert_eq(ch.target, 5, "and so did the legacy int beside it -- nothing rewrote a field the designer never touched")
+	d._res = null
+	r = null
+	d.free()
+
+
+func test_id_box_commits_once_and_refuses_a_duplicate() -> void:
+	var d = DialogueEditor.new()
+	var r := DialogueResource.new()
+	var a := Ops.add_line(r)  # line_0
+	var b := Ops.add_line(r)  # line_1
+	var ch := Ops.add_choice(a)
+	ch.target_id = &"line_1"
+	d._res = r
+	d._loaded_path = "res://resources/dialogue/__never_saved__.tres"
+	d._rebuild_line_list()
+	d._select_line(1)
+	assert_eq(d._line_id.text, "line_1", "selecting a line pushes its id into the Id box")
+	assert_false(d._dirty, "a push writes nothing")
+	d._line_id.text = "line_0"
+	d._commit_line_id()
+	assert_eq(b.id, &"line_1", "a duplicate is refused -- the model is untouched")
+	assert_eq(d._line_id.text, "line_1", "and the box repaints from the model")
+	assert_string_contains(d._status.text, "already line 0")
+	assert_false(d._dirty, "a refusal is not a write")
+	d._line_id.text = "  greet "
+	d._commit_line_id()
+	assert_eq(b.id, &"greet", "the stripped id was committed in one step")
+	assert_eq(ch.target_id, &"greet", "the choice that named line_1 followed the rename")
+	assert_true(d._dirty, "a rename is a write-through")
+	assert_string_contains(d._status.text, "followed")
+	assert_eq(d._line_list.get_item_text(1), "1 (greet): (empty)", "the lines list shows the id beside the number")
+	d._dirty = false
+	d._update_button_states()
+	d._line_id.text = "greet"
+	d._commit_line_id()
+	assert_false(d._dirty, "committing the id a line already has is a no-op")
+	d._select_line(-1)
+	assert_eq(d._line_id.text, "", "no selection clears the Id box, like the text box")
+	d._res = null
+	r = null
+	d.free()
+
+
+func test_failed_load_clears_the_id_box_too() -> void:
+	var d = DialogueEditor.new()
+	d.select_path(OLD_MAN)
+	d._select_line(0)
+	d._line_id.text = "whatever"  # a typed, uncommitted draft
+	d._clear_loaded("res://resources/dialogue/broken.tres")
+	assert_eq(d._line_id.text, "", "a failed load never leaves the previous conversation's id (or a draft) on screen")
+	d.free()
+
+
+func test_line_rows_read_number_then_id_and_legacy_rows_are_unchanged() -> void:
+	var d = DialogueEditor.new()
+	var legacy := DialogueLine.new()
+	legacy.text = "Halt."
+	assert_eq(d._line_row_text(0, legacy), "0: Halt.", "a by-number line's row reads exactly as it always did")
+	legacy.id = &"greet"
+	assert_eq(d._line_row_text(3, legacy), "3 (greet): Halt.", "an id-addressed line shows its id in brackets after the number")
+	assert_eq(d._line_row_text(1, null), "1: (missing)", "a null row keeps the designer sentinel")
+	legacy = null
+	d.free()
+
+
+func test_migrate_button_gates_and_reports() -> void:
+	var d = DialogueEditor.new()
+	assert_true(_button_texts(d.get_child(0)).has(MIGRATE_TEXT), "Migrate to Ids sits on the fixed top bar")
+	assert_false(_has_scroll_ancestor(d._migrate_btn), "outside the scroll, like Save Conversation")
+	assert_true(d._migrate_btn.disabled, "nothing open -> greyed")
+	assert_string_contains(d._migrate_btn.tooltip_text, "Pick a conversation")
+	var r := DialogueResource.new()
+	for i in 2:
+		r.lines.append(DialogueLine.new())  # id-less: the legacy shape
+	var ch := Ops.add_choice(r.lines[0])
+	ch.target = 1
+	d._res = r
+	d._loaded_path = "res://resources/dialogue/__never_saved__.tres"
+	d._rebuild_line_list()
+	d._select_line(0)
+	assert_false(d._migrate_btn.disabled, "a by-number conversation lights Migrate to Ids")
+	assert_eq(d._migrate_btn.tooltip_text, d.MIGRATE_TIP, "with its real tooltip")
+	d._migrate()
+	assert_true(d._dirty, "migration is an in-memory write-through (Save Conversation persists it)")
+	assert_eq(r.lines[0].id, &"line_0", "lines got ids")
+	assert_eq(ch.target_id, &"line_1", "the choice was re-pointed by id")
+	assert_eq(ch.target, DialogueLine.CONTINUE, "and its number reset")
+	assert_string_contains(d._status.text, "2 line(s) given an id")
+	assert_string_contains(d._status.text, "1 choice(s) re-pointed")
+	assert_true(d._migrate_btn.disabled, "nothing left to migrate -> greyed again")
+	assert_string_contains(d._migrate_btn.tooltip_text, "already")
+	assert_eq(d._line_list.get_item_text(0), "0 (line_0): (empty)  [1 choice(s)]", "the lines list was rebuilt with the new ids")
+	assert_eq(d._selected_line_index(), 0, "the selection survived the rebuild")
+	d._migrate()
+	assert_string_contains(d._status.text, "Nothing to migrate")
+	d._res = null
+	r = null
+	d.free()
+
+
+func test_migrate_reports_a_target_it_had_to_keep_by_number() -> void:
+	var d = DialogueEditor.new()
+	var r := DialogueResource.new()
+	r.lines.append(DialogueLine.new())
+	var ch := Ops.add_choice(r.lines[0])
+	ch.target = 9  # past the end: no id form
+	d._res = r
+	d._loaded_path = "res://resources/dialogue/__never_saved__.tres"
+	d._rebuild_line_list()
+	d._migrate()
+	assert_eq(ch.target, 9, "the out-of-range number was kept")
+	assert_eq(ch.target_id, &"", "not re-addressed")
+	assert_string_contains(d._status.text, "kept by number")
+	assert_true(d._status_warn, "and the status is amber -- something needs the designer's hand")
+	d._res = null
+	r = null
+	d.free()
+
+
+func test_opened_status_nudges_a_by_number_conversation_toward_migrate() -> void:
+	var d = DialogueEditor.new()
+	d.select_path(OLD_MAN)  # migrated on disk: fully id-addressed
+	assert_false(d._status.text.contains("Migrate to Ids"), "a fully id-addressed conversation gets no nudge on open")
+	assert_true(d._migrate_btn.disabled, "and Migrate is greyed for it")
+	d.free()
+
+
+## The new widgets' signals, ACTUALLY EMITTED on a bare tab (the arity check the construct smoke cannot be): the Id
+## box's two commit signals and the two Target dropdowns' bound pick handler. With nothing open every handler
+## returns at its guard and writes nothing.
+func test_id_and_target_widget_signals_emit_with_the_right_arity() -> void:
+	var d = DialogueEditor.new()
+	d._line_id.text_submitted.emit("greet")
+	d._line_id.focus_exited.emit()
+	d._c_target.item_selected.emit(0)
+	d._c_target_on_fail.item_selected.emit(1)
+	assert_null(d._selected_line(), "no conversation is loaded, so the Id commit hit its null-line guard")
+	assert_false(d._dirty, "a stray emit with nothing open never marks an empty editor dirty")
+	d.free()

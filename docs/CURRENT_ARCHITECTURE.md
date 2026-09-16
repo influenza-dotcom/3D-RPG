@@ -558,6 +558,21 @@ Repeated content should live in Resources:
   (`scripts/items/weapon_fields.gd`), so a designer cannot author a change the save cannot
   carry. All fold math lives in the one const-preloaded `scripts/items/weapon_mod_kit.gd`.
 - `LootTable` and `ItemStack` for random and fixed loot.
+- `DialogueResource` / `DialogueLine` / `DialogueChoice` for conversations. **Lines are addressed by id**
+  (`DialogueLine.id`, a `StringName` unique within the conversation; `DialogueChoice.target_id` /
+  `target_on_fail_id` name one, or the reserved words `END` / `CONTINUE`), and the ONE resolver —
+  `DialogueResource.resolve_target(lines, target_id, legacy_int)`, pure and unit-tested — folds that into the
+  int line space `DialogueManager._jump_to` consumes: **id if non-blank, else the legacy int** `target` /
+  `target_on_fail` (an index, `-1` END, `-2` CONTINUE). The ints are the read path for every conversation
+  authored before ids (today: every inline `.tscn` conversation) and are never removed; an unknown id ENDS the
+  conversation with a warning naming it rather than trusting a stale int. Ids come from the Dialogue Edit tab
+  (`DialogueResource.next_line_id` on Add, the New tab's scaffold, and the one-click Migrate to Ids via
+  `dialogue_edit_ops.migrate_to_ids`, which never moves a destination — a number with no faithful id form is
+  kept and reported). `ScanWiring`'s pass 4 (`dialogue_findings`, over a model built from a loaded `.tres` OR
+  parsed from a `.tscn`'s text, so inline conversations are covered without instantiating a level) makes a
+  dangling / duplicate / reserved-word id an ERROR in the Audit tab and `validate_all`, and a by-number choice
+  in a conversation that has started using ids a WARN. `tests/test_dialogue_ids.gd` pins the resolver, the
+  manager seam, and the two shipped conversations under `resources/dialogue/` (migrated to ids 2026-09-16).
 - `ActionCatalog` and `SettingsCatalog` for player-facing controls/options.
 - `BootQuotes` and `TermsOfService` for the boot intro quote and the first-launch
   Terms-of-Service gate (both under `resources/ui/`; both degrade to a baked-in

@@ -387,27 +387,38 @@ func _reveal_menu() -> void:
 	# its recap clamp to keep the column low on screen — a Label property, never a rewrite, which is what
 	# makes the _resume_from_menu re-entry (which lands here WITHOUT re-running _show_line) safe.
 	_view.reveal_recap()
-	# Header hint flips to the response-menu affordance, composed from the LIVE hotbar-slot bindings the
-	# digit selection rides (never literals — the rebind rule).
-	var count: int = _view.numbered_choice_count()
-	if count > 0:
-		_view.show_menu_hint(PlayerText.dialogue_menu_hint(
-			InputManager.get_action_binding(InputManager.hotbar_actions[0]),
-			InputManager.get_action_binding(InputManager.hotbar_actions[count - 1]),
-			InputManager.get_action_binding(InputManager.hotbar_actions[9])))
-	else:
-		_view.show_menu_hint(PlayerText.dialogue_menu_hint_exit_only(
-			InputManager.get_action_binding(InputManager.hotbar_actions[9])))
+	# The header hint goes BLANK while the menu is up: every response row already paints its own digit, so a
+	# "[1-4] [0]" legend under them restated the rows. The listen-state "[F]" comes back via show_continue_hint.
+	_view.show_menu_hint("")
 	_sync_dialogue_cursor()  # the response menu is up -> show the cursor so the player can click an option
 
-## A choice button was pressed -> apply its consequences (on a passed gate), then jump to its target (which
-## re-enters the listen-first flow for that line). `passed` is the gate result from DialogueView.set_choices.
+## A choice button was pressed -> apply its consequences (on a passed gate), then jump to its destination (which
+## re-enters the listen-first flow for that line). `passed` is the gate result from DialogueView.set_choices. The
+## destination is resolved BY ID first (target_id / target_on_fail_id) and by the legacy int only when the id is
+## blank — see _resolve_target; nothing here reads `choice.target` directly.
 func _on_choice_pressed(choice: DialogueChoice, passed: bool = true) -> void:
 	if passed:
 		_apply_choice_effects(choice)
-		_jump_to(choice.target)
+		_jump_to(_resolve_target(choice.target_id, choice.target))
 	else:
-		_jump_to(choice.target_on_fail)  # a failed gate routes to its fail branch (default END), no consequences
+		# A failed gate routes to its fail branch (default END), no consequences.
+		_jump_to(_resolve_target(choice.target_on_fail_id, choice.target_on_fail))
+
+
+## Fold a choice's (id, legacy int) destination pair into _jump_to's int space through the ONE pure resolver,
+## DialogueResource.resolve_target (id if non-blank, else the int). The only thing added here is the runtime
+## diagnostic: an id that names no line in the active conversation ENDS the conversation (the resolver's soft
+## failure, mirroring an out-of-range int) and is reported by name, so a typo'd target_id is visible in the Output
+## panel / Debugger and not just as a conversation that mysteriously stopped. No _active (a stale button firing
+## after _finish) is END too — _jump_to would have bailed on it anyway.
+func _resolve_target(target_id: StringName, legacy: int) -> int:
+	if _active == null:
+		return DialogueLine.END
+	var to := DialogueResource.resolve_target(_active.lines, target_id, legacy)
+	var unknown_id := target_id != &"" and target_id != DialogueLine.ID_END and DialogueResource.find_line(_active.lines, target_id) < 0
+	if to == DialogueLine.END and unknown_id:
+		push_warning("DialogueManager: choice target id \"%s\" names no line in %s; ending conversation" % [target_id, _active.resource_path])
+	return to
 
 ## Apply a choice's authored consequences: world flags + quest start/advance/complete go through the GameState
 ## autoload; give-item / give-money resolve the live player. All optional (each empty/null/zero field skips).
@@ -648,7 +659,8 @@ func _on_speaker_died() -> void:
 ## Jump the cursor to `target` (an index into _active.lines) and re-render, or continue/finish the convo.
 ## Symmetric with _advance(): _advance increments, _jump_to sets. CONTINUE (-2, the default) carries on to
 ## the NEXT line so an unconfigured choice doesn't dead-end; END (-1) and out-of-range map to _finish() so a
-## mis-authored target ends cleanly instead of crashing.
+## mis-authored target ends cleanly instead of crashing. Takes the RESOLVED int (see _resolve_target) — an
+## id-addressed choice has already been folded into this space before it gets here.
 func _jump_to(target: int) -> void:
 	if _active == null:
 		return  # a stale choice button firing after _finish() (deferred queue_free) would deref _active.lines below

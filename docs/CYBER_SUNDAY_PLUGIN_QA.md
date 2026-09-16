@@ -134,6 +134,7 @@ A designer reads these words, not the code. Each means one thing, panel-wide.
 | **Open** | Hand a file to the Inspector, the scene editor, or the tab that edits it. | Never writes. |
 | **Save `<Thing>`** | The ONE write, named for what it writes: "Save Quest", "Save Loot Table", "Save Factions (3)". | Never a bare "Save". |
 | **Place / Add** | Put a node into the OPEN SCENE as one undoable step. | Nothing reaches disk until the designer saves the scene. |
+| **Migrate to Ids** | Re-address the OPEN conversation by line id, in memory (the Dialogue tab). | Nothing reaches disk until Save Conversation; never moves a destination. |
 
 Status line grammar, on the one status Label:
 
@@ -198,8 +199,11 @@ of guessing.
 The Audit tab is **Scan** (read-only) / **Auto** (re-scan on save, read-only) /
 **Fix (N)** (the one writer) plus a **Show** filter. Its scan covers Domain A (the
 open scene's config warnings + typed level checks), Domain B (a `res://` file scan
-— dead group literals, missing files, dead LootTable and out-of-range dialogue
-entries), Domain C (wiring — dead story flags, dangling quest/faction ids),
+— dead group literals, missing files, dead LootTable entries, and dialogue wiring:
+a choice's target id that names no line, a duplicate or reserved-word line id, an
+out-of-range line number — for `.tres` conversations AND the ones embedded inline
+in a `.tscn`, parsed from the scene text), Domain C (wiring — dead story flags,
+dangling quest/faction ids),
 Domain D (the hardcoded player-facing text ratchet), Domain E (menu-sound
 blindspots), Domain F (**the content check** — `ContentValidator` over the shared
 `core/item_scan.gd` folder scan, the same rules the Level tab's Validate Content
@@ -328,6 +332,26 @@ Acceptance:
 - Saving an EXISTING `.tres` first copies its prior bytes to a git-ignored `<path>.tres.bak` (a one-deep on-disk undo via `ContentSaveGuard.save_with_backup` — recover by renaming the `.bak` back over the `.tres`). A first-ever save writes no `.bak`, and a failed backup warns but never blocks the save.
 - Invalid targets, dangling choices, impossible objective counts, and dead
   loot entries are visible before Save when practical.
+- **Conversations are addressed by line id (Dialogue Edit).** `Ops.add_line`
+  gives every new line a unique id (`DialogueResource.next_line_id`); the Id box
+  commits ONCE (Enter / focus loss — never `text_changed`, so no half-typed
+  spelling is ever written into a choice) through `Ops.rename_line_id`, which
+  carries every referencing choice in the same call, refuses a blank / duplicate /
+  reserved-word id by repainting the box from the model, and reports the
+  references that followed AND the *captured* ones (a choice that already named
+  the new id, dangling until now) on the status line. Every Target row carries
+  `{"id", "index"}` metadata — the exact pair a pick writes — and the two
+  dropdowns' `item_selected` handler (`_on_target_picked`) is the ONLY writer of
+  a destination: `_write_choice` never touches the target fields, so a keystroke
+  in Label can never re-address a legacy by-number choice (the clobber rule,
+  applied to addressing). A row with no Dictionary metadata is refused, never
+  guessed at. A line whose id is a duplicate or a reserved word is offered BY
+  NUMBER with the reason in its row. **Migrate to Ids** (top bar) re-addresses in
+  memory through `Ops.migrate_to_ids`, which requires every re-pointed number to
+  round-trip through `DialogueResource.resolve_target` and otherwise keeps it by
+  number and names it; the button greys with the reason once nothing migratable
+  remains. The lines list reads `0 (greet): …`. Pinned by
+  `tests/test_devtools_dialogue_editor.gd`.
 - Dropdowns are populated from current project resources, not hardcoded lists,
   unless the enum itself is the source of truth.
 - After Save, reopening the same resource shows the same data.

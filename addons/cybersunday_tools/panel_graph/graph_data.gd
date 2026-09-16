@@ -13,14 +13,25 @@ extends RefCounted
 ##
 ## Terminal sentinels (DialogueLine.END / CONTINUE) are NOT edges -- they're rendered as terminal pins by the
 ## view -- so they never appear in `edges`. Only real line->line jumps and quest prereq/next links are edges.
+##
+## A choice's destination is read the way the runtime reads it: by `target_id` / `target_on_fail_id` (a line's `id`
+## or the words END / CONTINUE) when that is non-blank, else by the legacy int `target` / `target_on_fail` -- the
+## same order DialogueResource.resolve_target fixes. Resolution is re-implemented here duck-typed (an id -> index map
+## over the lines) rather than calling the class, so this builder keeps working on a bare Dictionary-shaped fixture
+## and needs no class_name at build time; the audit (scan_wiring pass 4) applies the same rules to the same files.
 
 const END: int = -1  # mirrors DialogueLine.END (literal here to avoid a class_name dep at build time)
 const CONTINUE: int = -2  # mirrors DialogueLine.CONTINUE
+const ID_END := "END"  # mirrors DialogueLine.ID_END
+const ID_CONTINUE := "CONTINUE"  # mirrors DialogueLine.ID_CONTINUE
 
 
-## Build the graph for a DialogueResource. One node per line ("line0", "line1", ...); one edge per choice
-## whose target/target_on_fail is a real in-range line index. END/CONTINUE are skipped (terminal pins).
-## An out-of-range target (>= line count, or < -2) is recorded in `problems` and produces NO edge.
+## Build the graph for a DialogueResource. One node per line ("line0", "line1", ...; the title carries the line's
+## id when it has one); one edge per choice whose resolved target/target_on_fail is a real in-range line. END /
+## CONTINUE are skipped (terminal pins). An out-of-range int, or an id that names no line, is recorded in
+## `problems` and produces NO edge. The fail EDGE is only charted for a gated choice (the runtime ignores the fail
+## branch otherwise), but a dangling fail ID is a problem regardless -- an authored id that names nothing is wrong
+## whether or not the branch is reachable today, and the Audit reports it the same way.
 static func build_dialogue(res: Resource) -> Dictionary:
 	var nodes: Array = []
 	var edges: Array = []
@@ -32,11 +43,13 @@ static func build_dialogue(res: Resource) -> Dictionary:
 	if raw_lines is Array:
 		lines = raw_lines
 	var count: int = lines.size()
+	var index_of_id: Dictionary = _line_id_map(lines)
 	for i in count:
 		var line: Variant = lines[i]
 		var id: String = "line%d" % i
 		var body: String = ""
 		var choices: Array = []
+		var line_id: String = ""
 		if line != null:
 			var raw_text: Variant = line.get("text")
 			if raw_text != null:
@@ -44,9 +57,10 @@ static func build_dialogue(res: Resource) -> Dictionary:
 			var raw_choices: Variant = line.get("choices")
 			if raw_choices is Array:
 				choices = raw_choices
+			line_id = _as_text(line.get("id"))
 		nodes.append({
 			"id": id,
-			"title": "Line %d" % i,
+			"title": ("Line %d (%s)" % [i, line_id]) if line_id != "" else ("Line %d" % i),
 			"body": body,
 			"kind": "line",
 		})
@@ -60,16 +74,43 @@ static func build_dialogue(res: Resource) -> Dictionary:
 			if raw_ctext != null:
 				ctext = String(raw_ctext)
 			var target: int = _as_int(choice.get("target"), CONTINUE)
-			_add_target_edge(edges, problems, id, target, count, "[%d] %s" % [ci, ctext])
+			_add_target_edge(edges, problems, id, _as_text(choice.get("target_id")), target, index_of_id, count, "[%d] %s" % [ci, ctext], true)
 			var on_fail: int = _as_int(choice.get("target_on_fail"), END)
-			# Only chart a fail-branch when this choice actually has a gate (else the field is ignored at runtime).
-			if _choice_has_gate(choice) and on_fail >= 0:
-				_add_target_edge(edges, problems, id, on_fail, count, "[%d] fail" % ci)
+			# Only chart a fail-branch EDGE when this choice actually has a gate (else the field is ignored at
+			# runtime) -- but a dangling fail ID is always a problem (see the header).
+			_add_target_edge(edges, problems, id, _as_text(choice.get("target_on_fail_id")), on_fail, index_of_id, count, "[%d] fail" % ci, _choice_has_gate(choice))
 	return {"nodes": nodes, "edges": edges, "problems": problems}
 
 
-## Resolve one choice target into an edge, a skipped sentinel, or a dangling-target problem.
-static func _add_target_edge(edges: Array, problems: Array, from_id: String, target: int, line_count: int, label: String) -> void:
+## id -> index for every line with a non-blank id, FIRST occurrence winning (the resolver's rule with duplicates).
+static func _line_id_map(lines: Array) -> Dictionary:
+	var out: Dictionary = {}
+	for i in lines.size():
+		var line: Variant = lines[i]
+		if line == null:
+			continue
+		var lid: String = _as_text(line.get("id"))
+		if lid != "" and not out.has(lid):
+			out[lid] = i
+	return out
+
+
+## Resolve one choice destination (id form first, else the legacy int) into an edge, a skipped sentinel, or a
+## dangling-target problem. `chart` = whether a resolved real line becomes an EDGE (false for an ungated fail
+## branch, whose problem rows are still recorded).
+static func _add_target_edge(edges: Array, problems: Array, from_id: String, target_id: String, target: int, index_of_id: Dictionary, line_count: int, label: String, chart: bool) -> void:
+	if target_id != "":
+		if target_id == ID_END or target_id == ID_CONTINUE:
+			return  # terminal sentinel word -- a pin, never an edge
+		if not index_of_id.has(target_id):
+			problems.append({
+				"node": from_id,
+				"message": "%s -> unknown line id \"%s\"" % [label, target_id],
+			})
+			return
+		if chart:
+			edges.append({"from": from_id, "to": "line%d" % int(index_of_id[target_id]), "label": label})
+		return
 	if target == END or target == CONTINUE:
 		return  # terminal sentinel -- rendered as a pin, never an edge
 	if target < 0 or target >= line_count:
@@ -78,7 +119,16 @@ static func _add_target_edge(edges: Array, problems: Array, from_id: String, tar
 			"message": "%s -> out-of-range line index %d (lines: %d)" % [label, target, line_count],
 		})
 		return
-	edges.append({"from": from_id, "to": "line%d" % target, "label": label})
+	if chart:
+		edges.append({"from": from_id, "to": "line%d" % target, "label": label})
+
+
+## A duck-typed String / StringName as text, "" for null or anything else (String(null) is "<null>", which would
+## read as a real id).
+static func _as_text(v: Variant) -> String:
+	if v is String or v is StringName:
+		return String(v)
+	return ""
 
 
 ## True when a choice carries any of the gate fields, so target_on_fail is meaningful. Mirrors the runtime

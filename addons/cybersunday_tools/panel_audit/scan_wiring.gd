@@ -11,6 +11,13 @@ extends RefCounted
 ## it under the designer's default view. The dict may only GAIN keys: validate_all.gd, cyber_cmds.gd and
 ## tests/test_devtools_audit_wiring.gd read these rows and predate the key.
 ##
+## PASS 4 (the bottom of this file) is the one WITHIN-RESOURCE wiring pass: a conversation's choices name their
+## destination by a DialogueLine.id (target_id / target_on_fail_id), and a dangling id, a duplicate id, or a line
+## named after a sentinel word is exactly the same kind of typo as a dead flag -- just scoped to one
+## DialogueResource. It is not chained from run(): scan_disk.gd calls it per file, from the loaded .tres it already
+## has AND from the text of every .tscn that embeds a conversation (inline conversations on a Talkable were never
+## audited before ids; now they are).
+##
 ## SPLIT: every predicate below is a PURE static func (no EditorInterface / no scene tree / no autoload) so the GUT
 ## suite tests the classifier + resolver logic on small fixture strings/dicts; run() and the .tres LOADS are the
 ## thin editor glue on top. Designer-first: the rows surface in the existing Audit tab automatically.
@@ -422,6 +429,277 @@ static func _has_flag_objective(text: String) -> bool:
 	var re := RegEx.new()
 	re.compile("(?m)^\\s*type\\s*=\\s*" + str(OBJ_TYPE_FLAG) + "\\s*$")
 	return re.search(text) != null
+
+# ============================================================================================================
+# PASS 4 -- DIALOGUE TARGET-ID WIRING (within one conversation)
+# ============================================================================================================
+#
+# Both entry points build the SAME plain model, then one predicate judges it:
+#   model = { "lines": [ { "id": String, "choices": [ { "target_id": String, "target_on_fail_id": String,
+#                                                        "target": int, "target_on_fail": int, "gated": bool } ] } ] }
+# `dialogue_model_from_resource` reads a LOADED DialogueResource duck-typed (scan_disk already loads every
+# DialogueResource .tres; GUT feeds .new() resources); `dialogue_models_from_text` PARSES the serialized form, which
+# is how a conversation embedded in a .tscn (a Talkable's inline `dialogue`) gets audited without instantiating the
+# scene. The rules mirror the runtime resolver (DialogueResource.resolve_target: id if non-blank, else the int):
+#   ERROR  a target_id / target_on_fail_id that is non-blank, not END / CONTINUE, and names no line (the conversation
+#          would END there with a warning -- a typo).
+#   ERROR  two lines with the same id (the resolver silently takes the FIRST).
+#   ERROR  a line whose id is END / CONTINUE (the sentinel wins, so the line is unreachable by id).
+#   ERROR  a legacy int (consulted only while the id is blank) outside 0..n-1 and not a sentinel -- the check that
+#          used to live in scan_disk, kept with the same wording.
+#   WARN   a conversation that has STARTED using ids (any line id, any choice id) but still has a choice pointing
+#          by number at a REAL line -- the mixed state where Up / Down / Remove shift that choice but not its
+#          id-addressed neighbours. A sentinel int is not positional and stays silent; an out-of-range int is the
+#          ERROR above, not a migrate nudge; the fail branch only counts when the choice is gated (it is inert
+#          otherwise); a wholly by-number conversation (no id anywhere) produces NO warning at all.
+
+## The int sentinels, mirrored as literals like graph_data.gd does (no class_name dependency at parse time).
+const DLG_END := -1
+const DLG_CONTINUE := -2
+const DLG_ID_END := "END"
+const DLG_ID_CONTINUE := "CONTINUE"
+## The choice fields that make a choice GATED (its fail branch is live). Mirrors dialogue_view.gd's gate set.
+const DLG_GATE_FIELDS: Array[String] = [
+	"required_stat", "required_flag", "required_faction_id", "required_perk_id", "required_item_id", "required_quest_id",
+]
+## The three dialogue scripts, by the path tail a .tres / .tscn ext_resource line carries.
+const DLG_SCRIPT_LINE := "scripts/dialogue/dialogue_line.gd"
+const DLG_SCRIPT_CHOICE := "scripts/dialogue/dialogue_choice.gd"
+const DLG_SCRIPT_RESOURCE := "scripts/dialogue/dialogue_resource.gd"
+
+
+## The plain model of a LOADED DialogueResource (duck-typed: `res.get("lines")`, `line.get("id")` ...), so this pass
+## has no compile-time dependency on the dialogue class_names and a GUT test can hand it .new() resources. Null rows
+## (a deleted sub-resource in a hand-edited file) become an id-less line with no choices / are skipped as choices.
+static func dialogue_model_from_resource(res: Variant) -> Dictionary:
+	var lines_out: Array = []
+	if typeof(res) != TYPE_OBJECT or not is_instance_valid(res):
+		return {"lines": lines_out}
+	var raw_lines: Variant = res.get("lines")
+	if not (raw_lines is Array):
+		return {"lines": lines_out}
+	for line in raw_lines:
+		var entry := {"id": "", "choices": []}
+		if line != null:
+			entry["id"] = _dlg_text(line.get("id"))
+			var raw_choices: Variant = line.get("choices")
+			if raw_choices is Array:
+				for ch in raw_choices:
+					if ch == null:
+						continue
+					var gated := false
+					for f in DLG_GATE_FIELDS:
+						if _dlg_text(ch.get(f)) != "":
+							gated = true
+							break
+					entry["choices"].append({
+						"target_id": _dlg_text(ch.get("target_id")),
+						"target_on_fail_id": _dlg_text(ch.get("target_on_fail_id")),
+						"target": _dlg_int(ch.get("target"), DLG_CONTINUE),
+						"target_on_fail": _dlg_int(ch.get("target_on_fail"), DLG_END),
+						"gated": gated,
+					})
+		lines_out.append(entry)
+	return {"lines": lines_out}
+
+
+## Every conversation serialized in one .tres / .tscn text, as [{model, where}]. `where` is "" for the main
+## [resource] of a .tres and, for a .tscn, the node that carries the inline conversation ("Talkable under
+## Characters/OldMan") so the finding says WHICH talker to open. Parsing, not loading: the three dialogue scripts
+## are found by their ext_resource path, every [sub_resource] / [resource] block is classified by its `script =`,
+## a resource block's `lines = Array[...]([SubResource("a"), ...])` names its line blocks, and a line block's
+## `choices = ...` names its choice blocks. A conversation whose lines are ExtResources (a line shared from another
+## file -- nothing in this project does that) is skipped rather than guessed at. PURE.
+static func dialogue_models_from_text(text: String) -> Array:
+	var out: Array = []
+	var kinds := _dlg_ext_kinds(text)
+	if kinds.is_empty():
+		return out
+	var lines_by_id := {}      # sub_resource id -> {"id": String, "choice_refs": [sub ids]}
+	var choices_by_id := {}    # sub_resource id -> the choice model row
+	var resources := []        # [{"key": sub id or "", "line_refs": [sub ids]}]
+	var node_owner := {}       # resource sub id -> "NodeName under parent/path"
+	var re_sub := RegEx.new()
+	re_sub.compile("^\\[sub_resource [^\\]]*\\bid=\"([^\"]+)\"")
+	var re_node := RegEx.new()
+	re_node.compile("^\\[node [^\\]]*\\bname=\"([^\"]+)\"(?:[^\\]]*\\bparent=\"([^\"]*)\")?")
+	var re_script := RegEx.new()
+	re_script.compile("(?m)^\\s*script\\s*=\\s*ExtResource\\(\"([^\"]+)\"\\)")
+	var re_subref := RegEx.new()
+	re_subref.compile("SubResource\\(\"([^\"]+)\"\\)")
+	for block in _resource_blocks(text):
+		var header := String(block.split("\n", true, 1)[0])
+		var sub_m := re_sub.search(header)
+		var is_main := header.begins_with("[resource]")
+		if sub_m == null and not is_main:
+			var node_m := re_node.search(header)
+			if node_m != null:
+				# A node block: remember which inline conversation(s) it carries, for the finding's wording.
+				var label := node_m.get_string(1)
+				if node_m.get_group_count() >= 2 and node_m.get_string(2) != "":
+					label += " under " + node_m.get_string(2)
+				for rm in re_subref.search_all(block):
+					if not node_owner.has(rm.get_string(1)):
+						node_owner[rm.get_string(1)] = label
+			continue
+		var key := "" if is_main else sub_m.get_string(1)
+		var script_m := re_script.search(block)
+		if script_m == null:
+			continue
+		var kind := String(kinds.get(script_m.get_string(1), ""))
+		if kind == DLG_SCRIPT_LINE:
+			lines_by_id[key] = {"id": _dlg_first(_field_string_values(block, "id")), "choice_refs": _dlg_refs_on_field(block, "choices", re_subref)}
+		elif kind == DLG_SCRIPT_CHOICE:
+			var gated := false
+			for f in DLG_GATE_FIELDS:
+				if _dlg_first(_field_string_values(block, f)) != "":
+					gated = true
+					break
+			choices_by_id[key] = {
+				"target_id": _dlg_first(_field_string_values(block, "target_id")),
+				"target_on_fail_id": _dlg_first(_field_string_values(block, "target_on_fail_id")),
+				"target": _dlg_int_field(block, "target", DLG_CONTINUE),
+				"target_on_fail": _dlg_int_field(block, "target_on_fail", DLG_END),
+				"gated": gated,
+			}
+		elif kind == DLG_SCRIPT_RESOURCE:
+			resources.append({"key": key, "line_refs": _dlg_refs_on_field(block, "lines", re_subref)})
+	for r in resources:
+		var model_lines: Array = []
+		for lref in r["line_refs"]:
+			var line_row: Dictionary = lines_by_id.get(lref, {"id": "", "choice_refs": []})
+			var choices: Array = []
+			for cref in line_row["choice_refs"]:
+				if choices_by_id.has(cref):
+					choices.append(choices_by_id[cref])
+			model_lines.append({"id": line_row["id"], "choices": choices})
+		out.append({"model": {"lines": model_lines}, "where": String(node_owner.get(r["key"], ""))})
+	return out
+
+
+## The findings for one conversation model (see the PASS 4 header for the rules). `where` prefixes every message
+## (an inline conversation names its node); "" for a .tres, whose `source` already names the file.
+static func dialogue_findings(model: Dictionary, source: String, where: String = "") -> Array:
+	var out: Array = []
+	var lines: Array = model.get("lines", [])
+	var n := lines.size()
+	var prefix := (where + ": ") if where != "" else ""
+	# The id table + the two id-shape errors, first: a duplicate or a sentinel-named line is what makes every
+	# resolution below unreliable, so it is reported ahead of the references that depend on it.
+	var index_of_id := {}
+	var uses_ids := false
+	for i in n:
+		var lid := String(lines[i].get("id", ""))
+		if lid == "":
+			continue
+		uses_ids = true
+		if lid == DLG_ID_END or lid == DLG_ID_CONTINUE:
+			out.append(_f("ERROR", source, "%sLine %d's id is \"%s\", a reserved word (it means finish / next line) -- no choice can ever reach it by id. Rename it." % [prefix, i, lid]))
+		elif index_of_id.has(lid):
+			out.append(_f("ERROR", source, "%sLine %d has id \"%s\", which line %d already uses -- ids must be unique within a conversation." % [prefix, i, lid, int(index_of_id[lid])]))
+		else:
+			index_of_id[lid] = i
+	for i in n:
+		for ch in lines[i].get("choices", []):
+			if String(ch.get("target_id", "")) != "" or String(ch.get("target_on_fail_id", "")) != "":
+				uses_ids = true
+	var known := ", ".join(index_of_id.keys()) if not index_of_id.is_empty() else "none yet"
+	for i in n:
+		for ch in lines[i].get("choices", []):
+			var gated: bool = bool(ch.get("gated", false))
+			_dlg_target_findings(out, source, prefix, i, "Target", String(ch.get("target_id", "")), int(ch.get("target", DLG_CONTINUE)), n, index_of_id, known, uses_ids, true)
+			_dlg_target_findings(out, source, prefix, i, "Fail target", String(ch.get("target_on_fail_id", "")), int(ch.get("target_on_fail", DLG_END)), n, index_of_id, known, uses_ids, gated)
+	return out
+
+
+## One destination (id form + legacy int) of one choice. `live` = whether the branch is reachable at all (the fail
+## branch of an ungated choice is not: a dangling id there is still an ERROR -- an authored id that names nothing is
+## wrong regardless -- but the by-number WARN is skipped, since nothing positional can go wrong on a dead branch).
+static func _dlg_target_findings(out: Array, source: String, prefix: String, li: int, field: String, tid: String, t: int, n: int, index_of_id: Dictionary, known: String, uses_ids: bool, live: bool) -> void:
+	if tid != "":
+		if tid == DLG_ID_END or tid == DLG_ID_CONTINUE:
+			return
+		if not index_of_id.has(tid):
+			out.append(_f("ERROR", source, "%sLine %d: a choice's %s points at id \"%s\", which no line in this conversation has (ids here: %s)." % [prefix, li, field, tid, known]))
+		return
+	# Legacy int path (the id is blank, so the int is what the runtime consults).
+	if t < DLG_CONTINUE or t >= n:
+		out.append(_f("ERROR", source, "%sLine %d: a choice's %s points at line %d, which doesn't exist — the lines run 0 to %d (or End / Continue)." % [prefix, li, field, t, n - 1]))
+		return
+	if live and uses_ids and t >= 0:
+		out.append(_f("WARN", source, "%sLine %d: a choice's %s still points by line number (line %d) while this conversation uses ids -- reordering lines would move it. Open it in Dialogue Edit and press Migrate to Ids." % [prefix, li, field, t]))
+
+
+## The findings for every conversation in one file's text (the .tscn entry point scan_disk uses).
+static func dialogue_findings_in_text(text: String, source: String) -> Array:
+	var out: Array = []
+	for entry in dialogue_models_from_text(text):
+		out.append_array(dialogue_findings(entry["model"], source, String(entry["where"])))
+	return out
+
+
+# --- pass-4 text helpers -------------------------------------------------------------------------------------------
+
+## ext_resource id -> which dialogue script it is (one of the three DLG_SCRIPT_* tails), for every ext_resource line
+## whose path is a dialogue script. Attribute ORDER in the header is not assumed: path and id are pulled separately.
+static func _dlg_ext_kinds(text: String) -> Dictionary:
+	var out := {}
+	var re_line := RegEx.new()
+	re_line.compile("(?m)^\\[ext_resource ([^\\]]*)\\]")
+	var re_path := RegEx.new()
+	re_path.compile("\\bpath=\"([^\"]+)\"")
+	var re_id := RegEx.new()
+	re_id.compile("\\bid=\"([^\"]+)\"")
+	for m in re_line.search_all(text):
+		var attrs := m.get_string(1)
+		var pm := re_path.search(attrs)
+		var im := re_id.search(attrs)
+		if pm == null or im == null:
+			continue
+		var path := pm.get_string(1)
+		for tail in [DLG_SCRIPT_LINE, DLG_SCRIPT_CHOICE, DLG_SCRIPT_RESOURCE]:
+			if path.ends_with(tail):
+				out[im.get_string(1)] = tail
+	return out
+
+
+## The SubResource("...") ids listed on `field = Array[...]([...])` in one block, in order (empty when absent).
+static func _dlg_refs_on_field(block: String, field: String, re_subref: RegEx) -> Array:
+	var re := RegEx.new()
+	re.compile("(?m)^\\s*" + field + "\\s*=\\s*(.*)$")
+	var m := re.search(block)
+	var refs: Array = []
+	if m == null:
+		return refs
+	for rm in re_subref.search_all(m.get_string(1)):
+		refs.append(rm.get_string(1))
+	return refs
+
+
+## The int value of `field = <int>` in one block, or `fallback` when the field is absent (a .tres omits defaults).
+## Anchored on `field\\s*=` so `target_id = ...` can never satisfy a lookup for `target`.
+static func _dlg_int_field(block: String, field: String, fallback: int) -> int:
+	var re := RegEx.new()
+	re.compile("(?m)^\\s*" + field + "\\s*=\\s*(-?\\d+)\\s*$")
+	var m := re.search(block)
+	return int(m.get_string(1)) if m != null else fallback
+
+
+static func _dlg_first(values: Array) -> String:
+	return String(values[0]) if not values.is_empty() else ""
+
+
+static func _dlg_text(v: Variant) -> String:
+	if v is String or v is StringName:
+		return String(v)
+	return ""
+
+
+static func _dlg_int(v: Variant, fallback: int) -> int:
+	if v is int or v is float:
+		return int(v)
+	return fallback
+
 
 static func _src(src_of: Dictionary, name: String) -> String:
 	return str(src_of.get(name, "res:// (project-wide)"))

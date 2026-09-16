@@ -3,10 +3,15 @@ class_name DialogueChoice
 extends Resource
 
 ## One selectable option on a branching DialogueLine: a button label plus where picking it jumps.
-## `target` is an INDEX into the owning DialogueResource.lines -- the same integer space the
-## DialogueManager already addresses lines with via its _index cursor. The DEFAULT, DialogueLine.CONTINUE,
-## carries the conversation on to the NEXT line (so a freshly-authored choice doesn't dead-end the convo);
-## use DialogueLine.END (-1) to FINISH instead, or a line index >= 0 to BRANCH to a specific line.
+## The destination has TWO forms, and the resolution order is fixed: `target_id` (a DialogueLine.id, or the
+## sentinel words END / CONTINUE) when it is non-blank, else the LEGACY int `target` -- an INDEX into the owning
+## DialogueResource.lines, the same integer space DialogueManager's _index cursor uses. Ids survive inserting,
+## deleting and reordering lines; the ints do not, which is why every conversation authored from now on is
+## addressed by id (the Dialogue Edit tab's Migrate to Ids re-addresses an old one). The ints stay so every .tres
+## and inline-scene conversation written before ids keeps playing unedited. DialogueResource.resolve_target is the
+## one place the two forms are folded into a line index; nothing else may read `target` directly.
+## The int DEFAULT, DialogueLine.CONTINUE, carries the conversation on to the NEXT line (so a freshly-authored
+## choice doesn't dead-end the convo); DialogueLine.END (-1) FINISHES; a line index >= 0 BRANCHES.
 ##
 ## Authorable as a sub-resource nested in DialogueLine.choices, exactly like DialogueLine nests in
 ## DialogueResource.lines, so whole branching scripts are still .tres files.
@@ -24,12 +29,22 @@ enum QuestGate { ANY, ACTIVE, COMPLETED, FAILED }
 
 ## The button label the player sees and clicks for this option.
 @export var text: String = ""
-## Where picking this leads. DialogueLine.CONTINUE (-2, the default) advances to the NEXT line; DialogueLine.END
-## (-1) finishes the conversation; an INDEX >= 0 jumps to that specific line in DialogueResource.lines.
+## Where picking this leads, BY ID: a DialogueLine.id in the same conversation, or the word END (finish) or CONTINUE
+## (the next line). Wins over the int `target` whenever it is non-blank; an id that names no line ENDS the
+## conversation cleanly (with a warning) rather than falling back to the int, so a typo can never route into the
+## wrong line silently -- the Audit tab / validate_all report it as an ERROR. Blank = use the legacy int below.
+@export var target_id: StringName = &""
+## LEGACY int form of `target_id`, consulted only while that is blank. DialogueLine.CONTINUE (-2, the default)
+## advances to the NEXT line; DialogueLine.END (-1) finishes the conversation; an INDEX >= 0 jumps to that specific
+## line in DialogueResource.lines. Positional, so inserting a line above the destination re-points it.
 @export var target: int = -2  # -2 == DialogueLine.CONTINUE (literal to avoid a mutual class_name dep in this default): keep the convo going
-## Where a FAILED skill/flag check leads (rank 22): a gated choice stays SELECTABLE (FNV-style), so you can
-## attempt it and fail. DialogueLine.END (-1, the default) finishes the conversation; an INDEX >= 0 branches to
-## a fail line; DialogueLine.CONTINUE (-2) carries on. Ignored by a choice with no gate. (Literal -1, like `target`.)
+## Where a FAILED skill/flag check leads, BY ID (rank 22): a gated choice stays SELECTABLE (FNV-style), so you can
+## attempt it and fail. Same vocabulary as `target_id` (a line id / END / CONTINUE); wins over `target_on_fail`
+## whenever non-blank. Ignored by a choice with no gate.
+@export var target_on_fail_id: StringName = &""
+## LEGACY int form of `target_on_fail_id`, consulted only while that is blank. DialogueLine.END (-1, the default)
+## finishes the conversation; an INDEX >= 0 branches to a fail line; DialogueLine.CONTINUE (-2) carries on.
+## Ignored by a choice with no gate. (Literal -1, like `target`.)
 @export var target_on_fail: int = -1  # -1 == DialogueLine.END
 
 ## OPTIONAL skill check: when `required_stat` names a CharacterStats stat (e.g. &"streetwise"), this choice is
@@ -102,7 +117,14 @@ enum QuestGate { ANY, ACTIVE, COMPLETED, FAILED }
 ## scan there must LOAD each resources/quests/*.tres and read Quest.id, because the filename lies. Objective ids
 ## nest inside a Quest rather than sitting in a folder, and flag names have no registry to scan at all.
 func _validate_property(property: Dictionary) -> void:
-	if property.name == "required_stat":
+	if property.name == "target_id" or property.name == "target_on_fail_id":
+		# Only the two sentinel WORDS can be suggested here: a nested sub-resource has no pointer to the
+		# DialogueResource that owns it, so the line ids are unknowable from inside this script. The Dialogue Edit
+		# tab, which does own the whole conversation, offers the real per-line dropdown. A SUGGESTION so a line id
+		# stays typable.
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = "%s,%s" % [DialogueLine.ID_END, DialogueLine.ID_CONTINUE]
+	elif property.name == "required_stat":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = CharacterStats.stat_names_csv()
 	elif property.name == "give_item_id" or property.name == "required_item_id":

@@ -313,7 +313,8 @@ static func _refs(args: Dictionary) -> Dictionary:
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 ## Build the node/edge graph for dialogue or quests via the shared pure builder (panel_graph/graph_data.gd — the
-## same one the in-editor viewers render), and surface its `problems` array: an out-of-range dialogue target or a
+## same one the in-editor viewers render), and surface its `problems` array: a dialogue target that names no line (an
+## unknown id, or an out-of-range legacy number) or a
 ## prereq_quest_id naming no quest is a dead end a player can walk into, and it is invisible in the inspector.
 ##
 ## `kind` = "dialogue" (default) | "quests". For dialogue, `path` picks ONE resource, else every dialogue resource

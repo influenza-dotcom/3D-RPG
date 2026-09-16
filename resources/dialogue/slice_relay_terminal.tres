@@ -6,7 +6,8 @@
 
 [sub_resource type="Resource" id="Choice_transmit"]
 script = ExtResource("2_choice")
-target = 1
+target_id = &"line_1"
+target_on_fail_id = &"END"
 required_item_id = &"slice_package"
 required_quest_id = &"recover_package"
 required_quest_state = 1
@@ -15,11 +16,13 @@ metadata/_custom_type_script = "uid://csb55tjjecvsy"
 
 [sub_resource type="Resource" id="Line_prompt"]
 script = ExtResource("1_line")
+id = &"line_0"
 choices = Array[ExtResource("2_choice")]([SubResource("Choice_transmit")])
 metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
 
 [sub_resource type="Resource" id="Line_done"]
 script = ExtResource("1_line")
+id = &"line_1"
 metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
 
 [resource]

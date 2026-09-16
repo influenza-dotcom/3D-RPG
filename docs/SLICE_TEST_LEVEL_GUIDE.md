@@ -191,19 +191,21 @@ Create a new `DialogueResource`:
 2. Choose `New Resource`.
 3. Pick `DialogueResource`.
 4. Save it as `res://resources/dialogue/slice_relay_terminal.tres`.
-5. Add two `DialogueLine` entries.
+5. Add two `DialogueLine` entries (the Dialogue tab gives them the ids `line_0`
+   and `line_1`; in the raw Inspector set `id` yourself).
 
 Line `0`:
 
 - `text = Relay uplink online. Active jobs can be closed here.`
 - Add one `DialogueChoice` entry (the shipped `slice_relay_terminal.tres` has
-  exactly one choice; add a second `text = Leave.`, `target = -1` choice if you
-  want an explicit back-out).
+  exactly one choice; add a second `text = Leave.`, `target_id = END` choice if
+  you want an explicit back-out).
 
 Choice `0`:
 
 - `text = Transmit recovered package.`
-- `target = 1`
+- `target_id = line_1` (the done line's id — the Dialogue tab's Target dropdown
+  offers it; `target_on_fail_id` stays blank, which means END)
 - `required_item_id = slice_package`
 - `required_quest_id = recover_package`
 - `required_quest_state = ACTIVE`

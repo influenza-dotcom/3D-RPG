@@ -120,6 +120,45 @@ func test_dialogue_fail_branch_only_when_gated() -> void:
 	res2 = null
 
 
+## Id-addressed choices resolve to edges exactly as the runtime resolves them (id if non-blank, else the int); an
+## id that names no line is a problem, and a dangling FAIL id is a problem even on an ungated choice (whose fail EDGE
+## is still not charted -- the branch is inert at runtime, but the authored id is wrong regardless).
+func test_dialogue_id_targets_resolve_to_edges_and_unknown_ids_are_problems() -> void:
+	var res := DialogueResource.new()
+	var l0 := DialogueLine.new()
+	l0.id = &"greet"
+	var to_refuse := DialogueChoice.new()
+	to_refuse.target_id = &"refuse"
+	to_refuse.target = 0  # a stale int that would point back at line 0 -- the id wins
+	var typo := DialogueChoice.new()
+	typo.target_id = &"gret"
+	l0.choices = [to_refuse, typo]
+	var l1 := DialogueLine.new()
+	l1.id = &"refuse"
+	var ends := DialogueChoice.new()
+	ends.target_id = DialogueLine.ID_END
+	l1.choices = [ends]
+	var l2 := DialogueLine.new()  # id-less legacy line
+	var ungated_bad_fail := DialogueChoice.new()
+	ungated_bad_fail.target_id = DialogueLine.ID_CONTINUE
+	ungated_bad_fail.target_on_fail_id = &"nope"
+	l2.choices = [ungated_bad_fail]
+	res.lines = [l0, l1, l2]
+	var g: Dictionary = GraphData.build_dialogue(res)
+	var nodes: Array = g["nodes"]
+	assert_eq(nodes.size(), 3, "one node per line")
+	assert_eq(String(nodes[0]["title"]), "Line 0 (greet)", "an id-addressed line's box shows its id beside its number")
+	assert_eq(String(nodes[2]["title"]), "Line 2", "a legacy line's box reads as before")
+	var edges: Array = g["edges"]
+	assert_eq(edges.size(), 1, "exactly one real edge: greet -> refuse (END / CONTINUE are pins, the typo and the bad fail id chart nothing)")
+	assert_eq(String(edges[0]["to"]), "line1", "resolved by ID to line 1, not by the stale int to line 0")
+	var problems: Array = g["problems"]
+	assert_eq(problems.size(), 2, "the typo'd target id and the ungated choice's dangling fail id are both problems")
+	assert_true(String(problems[0]["message"]).contains("unknown line id \"gret\""), "the problem names the id")
+	assert_eq(String(problems[1]["node"]), "line2", "the fail-id problem points at the line that carries the choice")
+	res = null
+
+
 # --- Quest builder ----------------------------------------------------------------------------------
 
 ## Build three quests: q_b has prereq q_a; q_a.next_quest = q_b; q_c has a prereq that names NO quest in the set.
