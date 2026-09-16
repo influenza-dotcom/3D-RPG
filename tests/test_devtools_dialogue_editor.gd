@@ -59,6 +59,7 @@ const DIRTY_SUFFIX := "(unsaved changes)"
 const TAG_START_QUEST := "[Q+]"
 const TAG_COMPLETE_QUEST := "[Q done]"
 const TAG_ADVANCE_QUEST := "[Q++]"
+const TAG_SET_STAGE := "[Q>]"
 const TAG_GIVE_ITEM := "[item]"
 const TAG_GIVE_MONEY := "[$]"
 const TAG_REWARD_REP := "[rep]"
@@ -68,7 +69,7 @@ const TAG_AGGRO := "[aggro]"
 ## agree with itself even if the separator vanished, and a vanished separator is a row reading "2: Yes.[Q+]".
 const TAG_SEP := "  "
 ## What a choice with EVERY consequence set must produce: the separator above, then the tags in documented order.
-const ALL_TAGS := "  [Q+] [Q done] [Q++] [item] [$] [rep] [aggro]"
+const ALL_TAGS := "  [Q+] [Q done] [Q++] [Q>] [item] [$] [rep] [aggro]"
 
 ## Direct children of the tab's `_choice_box` after Phase 1: identity 2 (Label, Target) + gates 13 (section header
 ## + 12 rows, ending on Fail target) + consequences 13 (section header + 12 rows). Asserted as a FLOOR, not an
@@ -280,7 +281,7 @@ func test_buttons_and_gate_labels_use_designer_words() -> void:
 func test_choice_list_legend_names_every_tag() -> void:
 	var d = DialogueEditor.new()
 	var legend: String = d._choice_list.tooltip_text
-	for tag in [TAG_START_QUEST, TAG_ADVANCE_QUEST, TAG_COMPLETE_QUEST, TAG_GIVE_ITEM, TAG_GIVE_MONEY, TAG_REWARD_REP, TAG_AGGRO]:
+	for tag in [TAG_START_QUEST, TAG_ADVANCE_QUEST, TAG_SET_STAGE, TAG_COMPLETE_QUEST, TAG_GIVE_ITEM, TAG_GIVE_MONEY, TAG_REWARD_REP, TAG_AGGRO]:
 		assert_string_contains(legend, tag)
 	d.free()
 
@@ -481,6 +482,7 @@ func test_typing_in_one_field_never_clobbers_the_other_fields() -> void:
 	ch.complete_quest_id = &"clear_the_block"
 	ch.advance_quest_id = &"clear_the_block"
 	ch.advance_objective_id = &"kill_raiders"
+	ch.set_quest_stage_id = &"inside"
 	ch.give_item_id = &"medkit"
 	ch.give_item_count = 4
 	ch.give_money = -12.5
@@ -513,6 +515,7 @@ func test_typing_in_one_field_never_clobbers_the_other_fields() -> void:
 	assert_eq(ch.complete_quest_id, &"clear_the_block", "Complete quest id survived")
 	assert_eq(ch.advance_quest_id, &"clear_the_block", "Advance quest id survived")
 	assert_eq(ch.advance_objective_id, &"kill_raiders", "Advance objective id survived")
+	assert_eq(ch.set_quest_stage_id, &"inside", "Set quest stage survived")
 	assert_eq(ch.give_item_id, &"medkit", "Give item id survived")
 	assert_eq(ch.give_item_count, 4, "Give item count survived (its default is 1, not 0)")
 	assert_almost_eq(ch.give_money, -12.5, 0.001, "Give money survived -- a step-1 spin would have rounded it away")
@@ -1035,6 +1038,7 @@ func test_consequence_summary_emits_every_tag_in_order() -> void:
 	ch.complete_quest_id = &"recover_package"
 	ch.advance_quest_id = &"clear_the_block"
 	ch.advance_objective_id = &"kill_raiders"
+	ch.set_quest_stage_id = &"inside"
 	ch.give_item_id = &"medkit"
 	ch.give_money = -12.5
 	ch.reward_reputation_faction_id = "townsfolk"
@@ -1513,4 +1517,39 @@ func test_id_and_target_widget_signals_emit_with_the_right_arity() -> void:
 	d._c_target_on_fail.item_selected.emit(1)
 	assert_null(d._selected_line(), "no conversation is loaded, so the Id commit hit its null-line guard")
 	assert_false(d._dirty, "a stray emit with nothing open never marks an empty editor dirty")
+	d.free()
+
+
+## The stage jump's tag rides the SAME quest half as the objective tick: a stage id alone jumps nothing (the manager
+## needs advance_quest_id to know which quest), so it earns no tag -- the "no green gauge measuring nothing" rule.
+func test_consequence_summary_tags_a_stage_jump_only_with_its_quest() -> void:
+	var ch := DialogueChoice.new()
+	ch.set_quest_stage_id = &"inside"
+	assert_eq(Ops2.consequence_summary(ch), "", "a stage id with no quest is not a consequence")
+	ch.advance_quest_id = &"heist"
+	assert_eq(Ops2.consequence_summary(ch), TAG_SEP + TAG_SET_STAGE, "quest + stage tags [Q>], and ONLY that (no [Q++] without an objective)")
+	ch = null
+
+
+## Set quest stage is a real write-through field: pushed on select, written on a keystroke (whitespace trimmed, since
+## the tracker matches stage ids exactly), and reachable through the arity-safe text_changed wiring.
+func test_set_quest_stage_field_round_trips() -> void:
+	var d = DialogueEditor.new()
+	var r := _res_with_lines(1)
+	d._res = r
+	d._loaded_path = "res://resources/dialogue/__never_saved__.tres"
+	d._rebuild_line_list()
+	d._select_line(0)
+	d._add_choice()
+	var ch: DialogueChoice = r.lines[0].choices[0]
+	ch.set_quest_stage_id = &"bribe"
+	d._on_choice_selected(0)
+	assert_eq(d._c_set_stage.text, "bribe", "the field is pushed from the model on select")
+	d._c_set_stage.text = " inside "
+	d._write_choice()
+	assert_eq(ch.set_quest_stage_id, &"inside", "a keystroke writes it back, trimmed")
+	d._c_set_stage.text_changed.emit("inside")  # arity: the lambda takes one arg
+	d._res = null
+	r = null
+	ch = null
 	d.free()

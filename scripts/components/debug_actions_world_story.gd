@@ -194,7 +194,7 @@ static func _quest_advance(quest: Quest, qid: StringName, args: PackedStringArra
 	if not active:
 		return Common._one("%s is not ACTIVE (state: %s) — advance_objective returns before touching anything; `quest start %s` first" % [qid, Common._quest_state(qid), qid])
 
-	var obj := _find_objective(quest, oid_raw)
+	var obj := _find_objective(quest, oid_raw, qid)
 	if obj == null:
 		out.append("no objective \"%s\" on %s (matched exactly, then case-insensitively) — advance_objective would silently no-op. Objectives:" % [oid_raw, qid])
 		out.append_array(_objective_lines(quest, qid))
@@ -269,7 +269,7 @@ static func _quest_advance(quest: Quest, qid: StringName, args: PackedStringArra
 ## Read duck-typed off the Resource like _quest_report, so a partial/malformed objective degrades to a line.
 static func _objective_lines(quest: Resource, qid: StringName) -> PackedStringArray:
 	var out := PackedStringArray()
-	var objectives_v: Variant = quest.get("objectives")
+	var objectives_v: Variant = Common._live_objectives(quest, qid)
 	if not (objectives_v is Array):
 		out.append("  (no objectives array on this quest)")
 		return out
@@ -298,9 +298,11 @@ static func _objective_lines(quest: Resource, qid: StringName) -> PackedStringAr
 	return out
 
 ## The objective whose id is `wanted` — exact first, then case-insensitive (typing convenience; the RESOLVED
-## authored id is what gets sent, and the caller says so). Null when nothing matches.
-static func _find_objective(quest: Resource, wanted: String) -> Resource:
-	var objectives_v: Variant = quest.get("objectives")
+## authored id is what gets sent, and the caller says so). Null when nothing matches. Searches the objectives
+## Common._live_objectives names for `qid` (a staged quest: the stage it is in), which are the only ones
+## advance_objective can reach.
+static func _find_objective(quest: Resource, wanted: String, qid: StringName = &"") -> Resource:
+	var objectives_v: Variant = Common._live_objectives(quest, qid)
 	if not (objectives_v is Array):
 		return null
 	var objectives: Array = objectives_v
@@ -321,7 +323,7 @@ static func _open_required_objectives(quest: Resource, qid: StringName) -> Packe
 	var out := PackedStringArray()
 	if not QuestTracker.is_quest_active(qid):
 		return out
-	var objectives_v: Variant = quest.get("objectives")
+	var objectives_v: Variant = Common._live_objectives(quest, qid)
 	if not (objectives_v is Array):
 		return out
 	var objectives: Array = objectives_v
@@ -495,7 +497,7 @@ static func _objective_rows_of_type(obj_type: int) -> Array[Dictionary]:
 		var quest := QuestTracker.active_quest(qid)
 		if quest == null:
 			continue
-		var objectives_v: Variant = quest.get("objectives")
+		var objectives_v: Variant = QuestTracker.current_objectives(qid)  # the tracker only matches the current stage
 		if not (objectives_v is Array):
 			continue
 		var objectives: Array = objectives_v

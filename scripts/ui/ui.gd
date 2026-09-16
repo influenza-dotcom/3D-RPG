@@ -441,6 +441,9 @@ func _ready() -> void:
 	QuestTracker.objective_advanced.connect(_on_quest_objective)
 	QuestTracker.quest_completed.connect(_on_quest_completed)
 	QuestTracker.quest_failed.connect(_on_quest_failed)
+	# A stage change replaces the quest's live objectives, so the tracker line re-reads them. No toast: the stage's
+	# first objective reaching the line IS the feedback, and objective_complete already toasted the step that moved it.
+	QuestTracker.quest_stage_changed.connect(func(_q, _stage): _refresh_quest_tracker())
 	_refresh_quest_tracker()  # show any already-active quest (e.g. one restored from a save) from frame one
 	# B-F40: if the last profile load dropped any quest whose .tres went missing, tell the player — otherwise that
 	# progress vanishes silently. Consume-once (take_load_warnings clears them) so a HUD rebuild on a level change
@@ -1739,8 +1742,9 @@ func _push_toast(text: String, color: Color) -> void:
 static func quest_tracker_line(title: String, objective_desc: String, progress: int, required: int) -> String:
 	return PlayerText.quest_tracker_line(title, objective_desc, progress, required)
 
-## Refresh the tracker to the FIRST active quest's first incomplete, non-optional objective (or hide it when no
-## quest is active). Cheap — runs only on a quest signal, not per frame.
+## Refresh the tracker to the FIRST active quest's first incomplete, non-optional objective -- of the stage it is in, for
+## a staged quest (QuestTracker.current_objectives) -- or hide it when no quest is active. Cheap — runs only on a quest
+## signal, not per frame.
 func _refresh_quest_tracker() -> void:
 	if _quest_tracker == null:
 		return
@@ -1748,7 +1752,7 @@ func _refresh_quest_tracker() -> void:
 		var quest: Quest = GameState.active_quest(qid)
 		if quest == null:
 			continue
-		for obj in quest.objectives:
+		for obj in QuestTracker.current_objectives(qid):
 			if obj == null or obj.optional or GameState.is_objective_done(qid, obj.id):
 				continue
 			var desc: String = obj.description if obj.description != "" else String(obj.id)

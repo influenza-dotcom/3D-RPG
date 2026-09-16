@@ -1,9 +1,11 @@
 extends CanvasLayer
 ## QuestJournal — a read-only QUEST LOG screen, opened with its own key (InputManager.action_journal, default J).
 ## Registered as an autoload, mirroring StatsScreen / ReputationScreen, and a member of the
-## Pip-Boy tab group (Inventory / Stats / Implants / Map / Reputation / Journal). Lists ACTIVE quests (title + each objective with
-## a checkbox + progress) and COMPLETED ones. Like the other player menus it does NOT pause the world; it frees
-## the mouse (restored on close). Refreshes live off QuestTracker.quest_started / objective_advanced / quest_completed.
+## Pip-Boy tab group (Inventory / Stats / Implants / Map / Reputation / Journal). Lists ACTIVE quests (title, the journal
+## entry -- the current stage's journal_text, else the quest description -- and each CURRENT objective with a checkbox
+## + progress) and COMPLETED / FAILED ones. Like the other player menus it does NOT pause the world; it frees the mouse
+## (restored on close). Refreshes live off QuestTracker.quest_started / objective_advanced / quest_stage_changed /
+## quest_completed / quest_failed.
 ##
 ## AUTHORED SCENE: the layout lives in scenes/ui/quest_journal.tscn (this autoload IS that scene — see
 ## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
@@ -57,6 +59,7 @@ func open() -> void:
 		QuestTracker.objective_advanced.connect(_on_objective_changed)
 		QuestTracker.quest_completed.connect(_on_quests_changed)
 		QuestTracker.quest_failed.connect(_on_quests_changed)
+		QuestTracker.quest_stage_changed.connect(_on_objective_changed)  # (quest, stage): same two-arg repaint
 	_rebuild()
 	_root.visible = true
 	opened.emit()
@@ -71,6 +74,7 @@ func close() -> void:
 		QuestTracker.objective_advanced.disconnect(_on_objective_changed)
 		QuestTracker.quest_completed.disconnect(_on_quests_changed)
 		QuestTracker.quest_failed.disconnect(_on_quests_changed)
+		QuestTracker.quest_stage_changed.disconnect(_on_objective_changed)
 	PlayerMenus.leave()
 	closed.emit()
 
@@ -134,7 +138,9 @@ func _rebuild() -> void:
 	for quest in failed:
 		_list.add_child(_make_quest_block(quest.id, quest, true, true))
 
-## One quest block: a title header (dimmed when completed) + a line per objective.
+## One quest block: a title header (dimmed when completed), then -- for an ACTIVE quest -- its journal entry and a line
+## per objective of the stage it is in. A closed quest shows its title and, when it has no stages, its objectives all
+## ticked (a staged quest's past beats are not tracked, so it shows the title alone).
 func _make_quest_block(quest_id: StringName, quest: Quest, done: bool, failed := false) -> Control:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 3)
@@ -152,7 +158,19 @@ func _make_quest_block(quest_id: StringName, quest: Quest, done: bool, failed :=
 		head_color = MenuStyle.skin.text_dim_color
 	head.add_theme_color_override(&"font_color", head_color)
 	box.add_child(head)
-	for obj in quest.objectives:
+	if not done:
+		# The authored entry for where the player IS in the quest. Authored RESOURCE prose (a stage's journal_text or
+		# the quest's description), so it is set straight onto an auto-translated Label -- the engine translates it and
+		# the [PH] scrub applies, exactly as it does for the authored title above. Blank = no line at all.
+		var entry_text := summary_text(quest, QuestTracker.current_stage_id(quest_id))
+		if entry_text.strip_edges() != "":
+			var entry := Label.new()
+			entry.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # same no-horizontal-scroll rule as the title
+			entry.text = entry_text
+			entry.add_theme_color_override(&"font_color", MenuStyle.skin.text_dim_color)
+			box.add_child(entry)
+	var objectives: Array[QuestObjective] = QuestTracker.current_objectives(quest_id) if not done else closed_objectives(quest)
+	for obj in objectives:
 		if obj == null:
 			continue
 		var line := Label.new()
@@ -162,6 +180,19 @@ func _make_quest_block(quest_id: StringName, quest: Quest, done: bool, failed :=
 		line.add_theme_color_override(&"font_color", MenuStyle.skin.text_dim_color if od else MenuStyle.skin.text_color)
 		box.add_child(line)
 	return box
+
+## The journal entry for an active quest in `stage_id` -- the stage's journal_text, else the quest description (the
+## rule lives on Quest.journal_text_for; this is the journal's pure, testable entry point).
+static func summary_text(quest: Quest, stage_id: StringName) -> String:
+	return quest.journal_text_for(stage_id) if quest != null else ""
+
+## The objective lines a CLOSED quest shows: a stage-less quest's objectives (all ticked); nothing for a staged quest,
+## whose earlier stages are not tracked once it closes.
+static func closed_objectives(quest: Quest) -> Array[QuestObjective]:
+	var none: Array[QuestObjective] = []
+	if quest == null or quest.has_stages():
+		return none
+	return quest.objectives
 
 ## The display text for one objective — pure (takes done + progress), so it's unit-testable without GameState.
 ## A thin delegator kept with this signature for the call site + unit-test pins: only the description-or-id

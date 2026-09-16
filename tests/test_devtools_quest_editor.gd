@@ -768,3 +768,256 @@ func test_reward_count_bounds_after_ops() -> void:
 	assert_gte(q.rewards.size(), 1, "at least one reward row remains")
 	assert_lte(q.rewards.size(), 2, "no more rows than the two that were ever added")
 	q = null
+
+
+# ==============================================================================================================
+# STAGES -- the pure stage ops, then the tab's Stages block (off-tree, handlers driven directly: an off-tree
+# OptionButton / LineEdit emits nothing on assignment -- see the QA doc's "Two engine facts").
+# ==============================================================================================================
+
+func _staged_quest(ids: Array) -> Quest:
+	var q := Quest.new()
+	q.id = &"test_quest"
+	for sid in ids:
+		var st := QuestStage.new()
+		st.id = StringName(sid)
+		q.stages.append(st)
+	return q
+
+
+func test_add_stage_to_a_stage_less_quest_moves_its_objectives_into_the_first_stage() -> void:
+	var q := _quest_with(2)
+	var first_obj := q.objectives[0]
+	assert_true(QuestOps.add_stage(q), "a stage was added")
+	assert_eq(q.stages.size(), 1, "one stage")
+	assert_eq(q.stages[0].id, &"stage_1", "with the first free stage_N id")
+	assert_eq(q.stages[0].objectives.size(), 2, "the quest's own objectives moved into it")
+	assert_same(q.stages[0].objectives[0], first_obj, "the SAME objective resources (a move, not a copy -- ids and markers intact)")
+	assert_true(q.objectives.is_empty(), "the quest's own list is emptied, so nothing is left to be silently ignored")
+	assert_true(QuestOps.add_stage(q), "a second stage")
+	assert_eq(q.stages[1].id, &"stage_2", "unique id")
+	assert_true(q.stages[1].objectives.is_empty(), "later stages start empty")
+	assert_false(QuestOps.add_stage(null), "null quest: no-op")
+	q = null
+
+
+func test_removing_the_last_stage_hands_its_objectives_back() -> void:
+	var q := _quest_with(1)
+	QuestOps.add_stage(q)
+	assert_true(QuestOps.remove_stage(q, 0), "removed")
+	assert_true(q.stages.is_empty(), "no stages left")
+	assert_eq(q.objectives.size(), 1, "the objective is the quest's own again -- turning stages off loses nothing")
+	assert_false(QuestOps.remove_stage(q, 0), "out of range: no-op")
+	var two := _staged_quest(["a", "b"])
+	two.stages[0].next_stage_id = &"b"
+	assert_true(QuestOps.remove_stage(two, 1), "removing a stage that another links to is allowed")
+	assert_eq(two.stages[0].next_stage_id, &"b", "...but the link is NOT silently rewritten -- the Audit reports it")
+	q = null
+	two = null
+
+
+func test_move_stage_changes_which_stage_the_quest_starts_in() -> void:
+	var q := _staged_quest(["a", "b", "c"])
+	assert_true(QuestOps.move_stage(q, 2, -1), "moved up")
+	assert_eq(q.stage_ids(), [&"a", &"c", &"b"], "order changed")
+	assert_true(QuestOps.move_stage(q, 1, -1), "moved to the top")
+	assert_eq(q.first_stage_id(), &"c", "the quest now starts in c")
+	assert_false(QuestOps.move_stage(q, 0, -1), "off the top: no-op")
+	assert_false(QuestOps.move_stage(q, 0, 2), "a bad step: no-op")
+	q = null
+
+
+func test_rename_stage_id_carries_next_stage_links_and_refuses_bad_ids() -> void:
+	var q := _staged_quest(["intro", "bribe", "sneak", "inside"])
+	q.stages[1].next_stage_id = &"inside"
+	q.stages[2].next_stage_id = &"inside"
+	var r: Dictionary = QuestOps.rename_stage_id(q, q.stages[3], &"  vault ")
+	assert_true(r["ok"], "a rename to a fresh id is accepted")
+	assert_eq(q.stages[3].id, &"vault", "trimmed and written")
+	assert_eq(int(r["rewritten"]), 2, "both routes' Next stage links followed it")
+	assert_eq(q.stages[1].next_stage_id, &"vault", "bribe -> vault")
+	assert_eq(q.stages[2].next_stage_id, &"vault", "sneak -> vault")
+	for bad in [&"", &"   ", &"intro"]:
+		var refused: Dictionary = QuestOps.rename_stage_id(q, q.stages[3], bad)
+		assert_false(refused["ok"], "'%s' is refused (blank or a duplicate)" % bad)
+		assert_ne(String(refused["reason"]), "", "and says why")
+		assert_eq(q.stages[3].id, &"vault", "the stage keeps its id")
+	assert_true(QuestOps.rename_stage_id(q, q.stages[3], &"vault")["ok"], "renaming to its own id is an ok no-op")
+	q = null
+
+
+func test_objective_ops_edit_the_given_stage_and_ids_stay_unique_across_the_quest() -> void:
+	var q := _staged_quest(["a", "b"])
+	assert_true(QuestOps.add_objective(q, q.stages[0]), "added to stage a")
+	assert_true(QuestOps.add_objective(q, q.stages[1]), "added to stage b")
+	assert_eq(q.stages[0].objectives[0].id, &"obj_1", "stage a's objective")
+	assert_eq(q.stages[1].objectives[0].id, &"obj_2", "stage b's objective does NOT reuse obj_1 -- a trigger's advance_objective_id is never ambiguous")
+	assert_true(q.objectives.is_empty(), "the quest's own (ignored) list was not touched")
+	QuestOps.add_objective(q, q.stages[1])
+	assert_true(QuestOps.move_objective(q, 1, -1, q.stages[1]), "move within stage b")
+	assert_eq(q.stages[1].objectives[0].id, &"obj_3", "moved")
+	assert_true(QuestOps.remove_objective(q, 0, q.stages[1]), "remove within stage b")
+	assert_eq(q.stages[1].objectives.size(), 1, "one left in b")
+	assert_eq(q.stages[0].objectives.size(), 1, "a untouched")
+	q = null
+
+
+func test_normalize_trims_stage_ids_links_flags_and_stage_objectives() -> void:
+	var q := _staged_quest([" a ", "b"])
+	q.stages[1].next_stage_id = &"a "
+	q.stages[1].set_flag_on_enter = &" reached_b"
+	var o := QuestObjective.new()
+	o.id = &"obj_1 "
+	o.target_id = &" key"
+	o.required_count = 0
+	q.stages[1].objectives.append(o)
+	assert_eq(QuestOps.normalize(q), 6, "stage id + next link + flag + objective id + target + count")
+	assert_eq(q.stages[0].id, &"a", "stage id trimmed")
+	assert_eq(q.stages[1].next_stage_id, &"a", "link trimmed (it resolves now)")
+	assert_eq(q.stages[1].set_flag_on_enter, &"reached_b", "flag trimmed")
+	assert_eq(o.id, &"obj_1", "stage objective id trimmed")
+	assert_eq(o.required_count, 1, "stage objective count floored")
+	assert_eq(QuestOps.normalize(q), 0, "idempotent")
+	q = null
+
+
+func test_stage_widgets_are_built_inside_the_scroll() -> void:
+	var d = QuestEditor.new()
+	for prop: String in ["_stage_list", "_stage_add_btn", "_stage_id_edit", "_stage_journal", "_stage_next_pick", "_stage_flag_edit", "_obj_header"]:
+		var w = d.get(StringName(prop))
+		assert_not_null(w, "%s must be built in _init" % prop)
+		assert_true(_inside_scroll(d, w), "%s sits INSIDE the scroll (the height contract)" % prop)
+	assert_false(d._stage_next_pick.fit_to_longest_item, "the Next stage dropdown never sizes to its longest row")
+	assert_true(d._stage_add_btn.disabled, "Add stage is greyed with nothing open")
+	assert_eq(d._stage_add_btn.tooltip_text, "Pick a quest first.", "and says what is missing")
+	assert_true(d._stage_row_btns[0].disabled, "Remove stage is greyed with no stage picked")
+	d.free()
+
+
+func test_a_stage_less_quest_edits_its_own_objectives_and_add_stage_scopes_the_list() -> void:
+	var d = QuestEditor.new()
+	var q := _quest_with(2)
+	d._show_quest(q, "res://resources/quests/probe_quest.tres")
+	assert_eq(d._stage_list.item_count, 0, "no stages")
+	assert_eq(d._obj_list.item_count, 2, "the quest's own objectives are listed, exactly as before stages")
+	assert_eq(d._obj_header.text, "Objectives", "the header names no stage")
+	assert_false(d._stage_id_edit.editable, "no stage picked: the stage fields are read-only")
+	d._on_stage_add()
+	assert_true(d._dirty, "adding a stage is an edit")
+	assert_eq(d._stage_list.item_count, 1, "one stage row")
+	assert_eq(d._selected_stage_index(), 0, "and it is picked")
+	assert_eq(d._stage_list.get_item_text(0), "1. stage_1 -> (ends the quest) (2 objectives)", "the row reads id, next, objective count")
+	assert_eq(d._obj_list.item_count, 2, "the list now shows the STAGE's objectives -- the two that moved in")
+	assert_eq(d._obj_header.text, "Objectives of stage stage_1", "the header says whose")
+	assert_string_contains(d._status.text, "plays exactly as before")
+	d._on_stage_add()
+	assert_eq(d._selected_stage_index(), 1, "the new stage is picked")
+	assert_eq(d._obj_list.item_count, 0, "an empty stage lists nothing")
+	d._on_add()
+	assert_eq(q.stages[1].objectives.size(), 1, "Add objective reached the PICKED stage")
+	assert_eq(q.stages[1].objectives[0].id, &"obj_3", "with an id unique across the quest")
+	assert_true(q.objectives.is_empty(), "never the quest's ignored own list")
+	d.free()
+	q = null
+
+
+func test_stage_fields_push_write_and_reset() -> void:
+	var d = QuestEditor.new()
+	var q := _staged_quest(["intro", "inside"])
+	q.stages[0].journal_text = "A fixer wants the vault opened."
+	q.stages[0].next_stage_id = &"inside"
+	q.stages[0].set_flag_on_enter = &"heist_offered"
+	d._show_quest(q, "res://resources/quests/probe_quest.tres")
+	assert_eq(d._stage_id_edit.text, "intro", "stage id pushed")
+	assert_eq(d._stage_journal.text, "A fixer wants the vault opened.", "journal text pushed")
+	assert_eq(d._stage_flag_edit.text, "heist_offered", "flag pushed")
+	assert_eq(d._stage_next_pick.get_item_metadata(d._stage_next_pick.selected), "inside", "Next stage points at the authored link")
+	assert_eq(d._stage_next_pick.item_count, 2, "(none) + the OTHER stage (a stage never lists itself)")
+	assert_false(d._dirty, "pushes are not edits")
+	# writes
+	d._stage_journal.text = "New entry."
+	d._on_stage_journal_changed()
+	assert_eq(q.stages[0].journal_text, "New entry.", "journal text written")
+	d._on_stage_flag_changed(" met_fixer ")
+	assert_eq(q.stages[0].set_flag_on_enter, &"met_fixer", "flag written, trimmed")
+	d._on_stage_next_picked(0)
+	assert_eq(q.stages[0].next_stage_id, &"", "row 0 makes it a terminal stage")
+	assert_eq(d._stage_list.get_item_text(0), "1. intro -> (ends the quest) (0 objectives)", "the row repaints")
+	d._on_stage_next_picked(1)
+	assert_eq(q.stages[0].next_stage_id, &"inside", "row 1 links it again")
+	d._on_stage_next_picked(9)
+	assert_eq(q.stages[0].next_stage_id, &"inside", "a stale index is refused, never guessed")
+	# rename through the Id box
+	d._stage_id_edit.text = "inside"
+	d._commit_stage_id()
+	assert_eq(q.stages[0].id, &"intro", "a duplicate id is refused")
+	assert_eq(d._stage_id_edit.text, "intro", "and the box repaints from the model")
+	d._select_stage(1)
+	d._stage_id_edit.text = "vault"
+	d._commit_stage_id()
+	assert_eq(q.stages[1].id, &"vault", "renamed")
+	assert_eq(q.stages[0].next_stage_id, &"vault", "intro's Next stage followed the rename")
+	assert_string_contains(d._status.text, "1 Next stage link followed it")
+	# reset
+	d._clear_loaded()
+	assert_eq(d._stage_list.item_count, 0, "stage rows cleared")
+	assert_eq(d._stage_id_edit.text, "", "stage id reset to QuestStage's blank default")
+	assert_eq(d._stage_journal.text, "", "journal text reset")
+	assert_eq(d._stage_flag_edit.text, "", "flag reset")
+	assert_eq(d._obj_header.text, "Objectives", "header back to plain")
+	d.free()
+	q = null
+
+
+func test_a_dangling_next_stage_keeps_a_row_and_a_repick_changes_nothing() -> void:
+	var d = QuestEditor.new()
+	var q := _staged_quest(["a", "b"])
+	q.stages[0].next_stage_id = &"gone"
+	d._show_quest(q, "res://resources/quests/probe_quest.tres")
+	var sel: int = d._stage_next_pick.selected
+	assert_eq(d._stage_next_pick.get_item_text(sel), "gone  (missing)", "a link to no stage shows as (missing), never as (none)")
+	d._on_stage_next_picked(sel)
+	assert_eq(q.stages[0].next_stage_id, &"gone", "re-picking it keeps the authored id")
+	assert_false(d._dirty, "and is not an edit")
+	d.free()
+
+
+func test_a_staged_quest_with_no_stage_picked_greys_add_objective() -> void:
+	var d = QuestEditor.new()
+	var q := _staged_quest(["a"])
+	d._show_quest(q, "res://resources/quests/probe_quest.tres")
+	d._select_stage(-1)
+	assert_true(d._obj_add_btn.disabled, "a staged quest's objectives belong to a stage -- none picked, no Add")
+	assert_eq(d._obj_add_btn.tooltip_text, "Pick a stage in the list first.", "and the tooltip says so")
+	assert_eq(d._obj_header.text, "Objectives (pick a stage above)", "the header says so too")
+	d._on_add()
+	assert_true(q.stages[0].objectives.is_empty(), "a click that slips through adds nothing")
+	d.free()
+	q = null
+
+
+func test_discard_resets_stages_and_their_objectives() -> void:
+	var q := _staged_quest(["a"])
+	var o := QuestObjective.new()
+	o.id = &"obj_1"
+	o.target_id = &"typed"
+	q.stages[0].objectives.append(o)
+	q.stages[0].journal_text = "typed"
+	var st := q.stages[0]
+	assert_gte(QuestEditor._reset_to_defaults(o), 2, "an objective resets")
+	assert_gte(QuestEditor._reset_to_defaults(st), 2, "a stage resets (id, journal text, objectives list)")
+	assert_eq(st.journal_text, "", "stage journal text back to blank")
+	assert_true(st.objectives.is_empty(), "stage objectives emptied, so the reload refills them from the file")
+	q = null
+
+
+func test_stage_widget_signals_emit_with_the_right_arity() -> void:
+	var d = QuestEditor.new()
+	d._stage_id_edit.text_submitted.emit("x")
+	d._stage_id_edit.focus_exited.emit()
+	d._stage_next_pick.item_selected.emit(0)
+	d._stage_flag_edit.text_changed.emit("x")
+	d._stage_journal.text_changed.emit()
+	d._stage_list.item_selected.emit(0)
+	assert_false(d._dirty, "nothing open: every stage handler hit its guard and wrote nothing")
+	d.free()

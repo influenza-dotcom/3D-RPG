@@ -392,7 +392,9 @@ Acceptance:
 
 ### Choice consequences (Dialogue Edit)
 
-The Consequences group makes a choice able to start a quest, give an item or
+The Consequences group (which now also carries **Set quest stage** —
+`set_quest_stage_id`, jumping the Advance quest id's quest to a stage, tagged
+`[Q>]` only when both halves are set) makes a choice able to start a quest, give an item or
 money, reward reputation, and aggro the speaker. It is the seam that lets a
 conversation hand out a quest at all, so its failure modes are data loss rather
 than inconvenience.
@@ -468,6 +470,26 @@ operation most likely to DESTROY authored data, so it has one acceptance rule.
   seed progress as `progress[String(obj.id)]`, and dialogue matches them by
   value. `QuestOps.normalize` leaves them alone for the same reason, and the
   test suite pins the omission as intended rather than missing.
+- **Stages (Quest Edit).** The Stages block sits ABOVE Objectives and decides
+  what the Objectives list edits: a stage-less quest's own `objectives`, or the
+  PICKED stage's (a staged quest's own list is ignored at runtime, so the tab
+  never offers it — with no stage picked, Add objective is greyed with "Pick a
+  stage in the list first."). `QuestOps.add_stage` on a stage-less quest MOVES the
+  quest's objectives into the new first stage and `remove_stage` of the last
+  stage moves them back: turning stages on or off must never change how a quest
+  plays. New objective ids are unique across the whole quest. The stage id IS
+  editable (route names are authored meaning), but it commits ONCE on Enter /
+  focus loss through `QuestOps.rename_stage_id`, which carries every
+  `next_stage_id` in the quest and refuses a blank or duplicate id by repainting
+  the box; the status says a conversation's Set quest stage does not follow, and
+  the tooltip says what a rename costs a save sitting in the old id. Next stage is
+  a PickerRows dropdown of the OTHER stage ids with a "(missing)" transient for a
+  dangling link (re-picking it is a no-op). The stage fields follow the
+  three-site rule (`_load_stage_editor` is both the push and, with null, the reset
+  to QuestStage's blank defaults), the journal TextEdit ignores an unchanged
+  text (its `text_changed` arrives deferred), and Discard resets each stage's
+  objectives, then the stage, then the quest. Pinned by
+  `tests/test_devtools_quest_editor.gd`.
 
 ## Text Editor
 

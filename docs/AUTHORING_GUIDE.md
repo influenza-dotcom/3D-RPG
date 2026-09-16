@@ -444,8 +444,15 @@ problems; they change nothing.
   memory — a number that points past the end is kept and named for you to fix. The lines list reads `0 (greet): …`,
   so a line can be found by the id its choices name even after it has moved.
 - **A choice's row shows a tag** when it does something — `[Q+]` starts a quest, `[Q done]` completes one, `[Q++]`
-  advances one, `[item]` hands an item over, `[$]` moves money, `[rep]` moves reputation, `[aggro]` turns the
-  speaker hostile — so consequences are visible without opening every choice.
+  advances one, `[Q>]` jumps one to a stage, `[item]` hands an item over, `[$]` moves money, `[rep]` moves
+  reputation, `[aggro]` turns the speaker hostile — so consequences are visible without opening every choice.
+- **Stages (Quests).** The **Stages** block sits above Objectives. With no stages the Objectives list is the quest's
+  own, as always; once a quest has stages, pick a stage and the Objectives list is **that stage's**. The first
+  **Add** takes the quest's objectives into `stage_1`, so it plays the same; removing the last stage hands them back.
+  Each stage has **Stage id** (press Enter or click away to apply — every Next stage in the quest follows a rename),
+  **Stage journal text**, **Next stage** (a dropdown of the quest's other stages, or *(none)* to end the quest) and
+  **Flag on enter**. **Up/Down** decide only which stage the quest starts in (the top one). A conversation's
+  **Set quest stage** field (Dialogue tab) is where a route jumps in.
 - **Turn-in and markers (Quests).** `auto_complete` defaults **true**, so a quest completes itself the moment its
   objectives are done — untick it to author a hand-in step. A quest marker only renders in a level carrying a
   `QuestMarkerSync` node; today that is `LevelTemplate.tscn` alone, so a marker on an older level is silently
@@ -1646,6 +1653,7 @@ A `DialogueChoice` isn't only navigation — its **Consequences** group fires si
 - **`start_quest_on_choice`** (Quest) — begin a quest via `GameState.start_quest` (safe to re-pick: starting an already-active/completed quest is a no-op). Null = none.
 - **`complete_quest_id`** (StringName) — the **turn-in** path: finish a quest by id via `GameState.complete_quest` (use with the quest's `auto_complete = false`, §14). Empty = none.
 - **`advance_quest_id`** + **`advance_objective_id`** (both StringName) — advance one objective by one via `GameState.advance_objective`. **BOTH** are required; this is how a dialogue choice ticks a `TALK`-adjacent or manual objective.
+- **`advance_quest_id`** + **`set_quest_stage_id`** (both StringName) — **jump** that quest to the named stage (`QuestTracker.set_quest_stage`, §14 "Stages"). This is how a choice picks a route through a staged quest. Applied after the objective tick when both are set, so the jump wins. A stage id with no quest does nothing (and the Audit reports it).
 - **`give_item_id`** (StringName, a dropdown of item ids on disk) + **`give_item_count`** (int, default `1`) — give the player that item. Empty = none.
 - **`give_money`** (float, default `0.0`) — credit the wallet; **NEGATIVE for a fee/cost** (e.g. `-50` to charge for info). `0` = none.
 
@@ -2451,7 +2459,7 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `scripts/com
 **HUD markers (compass / minimap points of interest):**
 
 - **`WorldMarker`** (`world_marker.gd`, plain `Node3D`) — a point-of-interest beacon: drop it in the world and it shows as a chevron on the `Compass` (screen edge), a pip at its bearing on the top-centre `HudCompass` tape, and a dot on the `Minimap`. Joins the `"compass"` and `"minimap"` groups on `_ready` so every HUD channel picks it up with no wiring. Knobs: `on_compass`, `on_minimap`, `color` (tints BOTH compass surfaces). Place by hand for fixed landmarks (a vendor, an exit, a stash). The minimap and the heading tape both work out of the box (the HUD ships one of each, §16); only the screen-edge `Compass` still needs a `Compass` Control added to the HUD.
-- **`QuestMarkerSync`** (`quest_marker_sync.gd`, plain `Node`) — drop ONE into a level: it spawns a `WorldMarker` for each ACTIVE quest objective that has `show_marker`, and removes them as objectives complete / quests finish or fail — so the Compass + Minimap point at your current objectives with NO per-quest wiring. Driven by `QuestTracker`'s quest signals. Knob: `marker_color`. **`LevelTemplate.tscn` already ships one**, so a level started from the template needs nothing; add one by hand only to a level built another way. Pairs with the per-objective `show_marker` / `marker_position` exports (§14).
+- **`QuestMarkerSync`** (`quest_marker_sync.gd`, plain `Node`) — drop ONE into a level: it spawns a `WorldMarker` for each ACTIVE quest objective that has `show_marker` (a staged quest: only the stage it is in), and removes them as objectives complete / stages change / quests finish or fail — so the Compass + Minimap point at your current objectives with NO per-quest wiring. Driven by `QuestTracker`'s quest signals. Knob: `marker_color`. **`LevelTemplate.tscn` already ships one**, so a level started from the template needs nothing; add one by hand only to a level built another way. Pairs with the per-objective `show_marker` / `marker_position` exports (§14).
 - **`MinimapHide`** (`minimap_hide.gd`, plain `Node`) — child it under a prop (fence, awning, parked car, pipe run) to keep that prop's colliders out of the HUD minimap's wall cut; collision is untouched. **Marks its PARENT, not itself**, so it must be a child of the prop. Knob: `enabled`, read once at level load (see §16).
 - **`Compass`** (`compass.gd`, `extends Control`) — a screen-edge compass HUD (NOT the shipped top-centre heading tape, which is `HudCompass` and needs no authoring — see below): for every `WorldMarker` (anything in the `"compass"` group) it draws a dot at its on-screen position when visible, else a chevron pinned to the screen edge pointing toward it. Add it to the HUD (`res://scenes/player/ui.tscn`) as a full-rect Control. Knobs: `edge_margin` (px the edge ring is inset, default `28`), `marker_size` (px radius, default `6`), `max_distance` (hide farther markers; 0 = no limit).
 
@@ -3244,7 +3252,8 @@ A **`Quest`** (`class_name Quest`, an `@tool` `Resource`) is the whole quest. Cr
 - **`id`** (StringName) — the stable lookup key, unique per `.tres` (e.g. `&"clear_outpost"`). `GameState` keys everything off this; an id-less quest is silently refused by `start_quest`.
 - **`title`** (String) — the header shown in the Journal.
 - **`description`** (multiline) — flavour / detail text.
-- **`objectives`** (`Array[QuestObjective]`) — the ordered steps (see §2). Set the array size, then drop a `QuestObjective` into each row.
+- **`objectives`** (`Array[QuestObjective]`) — the ordered steps (see §2). Set the array size, then drop a `QuestObjective` into each row. **Ignored once the quest has `stages`** — each stage carries its own (the Audit warns when both are filled).
+- **`stages`** (`Array[QuestStage]`, optional) — split the quest into New Vegas-style **beats**, each with its own journal entry and objectives, and let different routes meet at a later beat. Leave it **empty** and the quest is one implicit beat, exactly as every quest before stages (both shipped quests are this shape). See **§1b**.
 
 **Rewards (on completion)**
 - **`rewards`** (`Array[ItemStack]`) — items handed to the player when the quest finishes. Count-based rows, same `ItemStack` seeding the loot pipeline uses everywhere (weapons seed as unique instances, stackables stack).
@@ -3280,6 +3289,26 @@ Each **`QuestObjective`** (`class_name QuestObjective`, also an `@tool` `Resourc
 
 > **Matching is string-exact.** `target_id` is compared verbatim against the NPC's identity key (`NpcData.id` / authored `display_name`) or the `Item.id`. A typo'd target (`&"Raider Boss "` with a trailing space, `&"raider boss"` lower-cased) silently never advances — the objective just sits at `[ ]` forever with no error. This is the #1 quest footgun; copy the value from the actual NpcData/NPC/Item resource, don't retype it.
 
+### 1b. Stages — journal beats and converging routes (`res://scripts/quests/quest_stage.gd`)
+
+A **`QuestStage`** (`class_name QuestStage`, an `@tool` `Resource`) is one beat of a quest. Fill a quest's `stages` array and the quest is always **in exactly one stage**, starting at `stages[0]`:
+
+- **`id`** (StringName) — the stage's name, unique within the quest (`&"bribe"`, `&"inside"`). This is what **`next_stage_id`** and a conversation's **`set_quest_stage_id`** name, and what the **save remembers** — so treat it like a key: renaming a stage a saved game is sitting in sends that save back to the quest's first stage on its next load (with a console warning). The Quests tab assigns `stage_1`, `stage_2`, … and renames them for you, carrying every `next_stage_id` in the quest along.
+- **`journal_text`** (multiline) — what the Journal shows under the quest title while the quest is in this stage. Blank = the quest's `description` shows instead.
+- **`objectives`** (`Array[QuestObjective]`) — this beat's steps; same `QuestObjective` as §2. Only the **current** stage's objectives react to gameplay — a kill the player is not on yet does nothing.
+- **`next_stage_id`** (StringName) — where the quest goes when this stage's required objectives are all done. **Blank = a terminal stage:** the quest completes (if `auto_complete`) or waits for its turn-in. A hand-off to the next stage happens **whatever `auto_complete` says** — that flag only governs the end.
+- **`set_flag_on_enter`** (StringName, optional) — a story flag set the moment the quest reaches this stage, so a door, a conversation or another quest can react.
+
+How a quest moves between stages:
+- **By finishing a stage** — its required objectives done → `next_stage_id`.
+- **By a jump** — a `DialogueChoice` with **`advance_quest_id`** (the quest) + **`set_quest_stage_id`** (the stage) moves the quest to that stage from wherever it is (§8 Consequences). This is how the player **chooses a route**.
+- **Two routes converge** by pointing both routes' `next_stage_id` at the same later stage, or by jumping into it.
+- **A stage with no objectives never finishes by itself** — it is a waiting beat (an offer, a "talk to the fixer" moment) that only a jump or a turn-in moves.
+
+Entering a stage seeds its objectives at 0, sets `set_flag_on_enter`, and back-fills any `FLAG` objective whose flag is already set (so a beat waiting on something the player already did completes at once — and can chain on). A quest can never lose its place mid-save: the save stores the current stage beside that stage's progress.
+
+**Worked example — "The Heist", two routes into one vault.** Four stages: `intro` (no objectives, `journal_text` "A fixer wants the vault opened.", `set_flag_on_enter = heist_offered`) → the fixer's conversation offers two choices, both with `advance_quest_id = heist`: "I'll pay the guard" (`set_quest_stage_id = bribe`) and "I'll use the vents" (`set_quest_stage_id = sneak`). `bribe` has a `FLAG` objective on `guard_paid`; `sneak` an `ENTER_AREA` objective on `vents`; both have `next_stage_id = inside`. `inside` has a `FLAG` objective on `vault_open` and a blank `next_stage_id`, so opening the vault completes the quest — whichever way the player got in.
+
 ### 3. The GameState API
 
 You drive quests through three calls on the **`GameState`** autoload (`res://managers/GameState.gd`):
@@ -3287,8 +3316,9 @@ You drive quests through three calls on the **`GameState`** autoload (`res://man
 - **`GameState.start_quest(quest)`** — begin tracking. No-op if `quest` is null, id-less, already active, already completed, already failed, or its `prereq_quest_id` isn't completed yet (so calling it twice from a repeatable dialogue is safe). Seeds every objective to 0, emits `quest_started`.
 - **`GameState.advance_objective(quest_id, objective_id, amount := 1)`** — bump one objective toward its `required_count` (clamped). When the quest `auto_completes` and every non-optional objective is met, it completes itself. No-op for an unknown quest/objective.
 - **`GameState.complete_quest(quest_id)`** — finish a quest explicitly (the turn-in path for `auto_complete = false`). Moves it to the completed list, grants the rewards, emits `quest_completed`.
+- **`QuestTracker.set_quest_stage(quest_id, stage_id)`** — jump an active staged quest to a stage (what `set_quest_stage_id` calls). Refused with a warning for an inactive quest, a quest with no stages, or an unknown stage; re-entering the current stage is a no-op. Read where a quest is with **`QuestTracker.current_stage_id(id)`** / **`current_stage(id)`**, and what it asks right now with **`current_objectives(id)`**. (These are new, so they live on `QuestTracker` only — no `GameState` forwarder.)
 
-Signals (the Journal listens to these; you can too) live on the **`QuestTracker`** autoload, not on `GameState` — the M1 split moved them with the state: **`QuestTracker.quest_started(quest)`**, **`objective_advanced(quest, objective)`**, **`quest_completed(quest)`**, **`quest_failed(quest)`**. The three calls above still forward from `GameState`, but `GameState.quest_started.connect(...)` is a **runtime error**.
+Signals (the Journal listens to these; you can too) live on the **`QuestTracker`** autoload, not on `GameState` — the M1 split moved them with the state: **`QuestTracker.quest_started(quest)`**, **`objective_advanced(quest, objective)`**, **`quest_stage_changed(quest, stage)`** (a staged quest moved to a different stage — not fired for the first stage `start_quest` puts it in), **`quest_completed(quest)`**, **`quest_failed(quest)`**. The three calls above still forward from `GameState`, but `GameState.quest_started.connect(...)` is a **runtime error**.
 ### 3b. Failing and expiring a quest (WR-6)
 
 A quest can also **FAIL** — a dead end, the opposite of completion: no rewards, no chaining, no re-start. There are two ways to fail one, and as a designer **you author neither in code**:
@@ -3323,7 +3353,7 @@ The remaining one has **no auto-hook**:
 
 The Journal is a `CanvasLayer` autoload bound to the **J** key (`InputManager.action_journal`) — read-only, with **no class_name** and nothing to place in a level. Its layout is an **authored scene** (`res://scenes/ui/quest_journal.tscn` — the autoload IS that scene; the script binds the chrome by %unique name and the skin owns the look, like the other menu screens). It is the **6th Pip-Boy tab** after Inventory / Stats / Implants / Map / Reputation, and like the other player menus it frees the cursor but **does not pause the world**.
 
-Press **J** and it lists every **active** quest (title + a line per objective) and a **completed** list below. Each objective line reads `[ ]` / `[x]`, shows an **`(n/m)` progress count only when `required_count > 1`**, and tags optional goals with **`(optional)`**. It refreshes live off the four `QuestTracker` quest signals (`quest_started` / `objective_advanced` / `quest_completed` / `quest_failed`) while open — kill the boss with the Journal up and you watch the line flip.
+Press **J** and it lists every **active** quest (title, its **journal entry** — the current stage's `journal_text`, else the quest `description` — and a line per objective of the stage it is in) and a **completed** list below (a stage-less quest lists its objectives ticked; a staged quest shows just its title). Each objective line reads `[ ]` / `[x]`, shows an **`(n/m)` progress count only when `required_count > 1`**, and tags optional goals with **`(optional)`**. It refreshes live off the `QuestTracker` quest signals (`quest_started` / `objective_advanced` / `quest_stage_changed` / `quest_completed` / `quest_failed`) while open — kill the boss with the Journal up and you watch the line flip.
 
 ### Worked example: "Clear the Outpost"
 
@@ -3353,11 +3383,13 @@ Press **J** and it lists every **active** quest (title + a line per objective) a
 - **`target_id` must EXACTLY match the NPC's identity key (`NpcData.id` / authored `display_name`) or the `Item.id`.** Matching is string-exact and silent on failure — a wrong case, trailing space, or renamed source value just never advances. Copy from the source resource. (Prefer targeting the `NpcData.id`: a display-name target breaks if you later rename the NPC, which is exactly what the id exists to survive.)
 - **`ENTER_AREA` has no automatic gameplay hook.** Drive it with a **`TriggerVolume`'s `quest_area_id`** export (it calls `GameState.notify_enter`, matched against the objective's `target_id`) — authoring the objective alone does nothing. (`USE_ITEM`, by contrast, *does* auto-advance: **using a consumable** fires `GameState.notify_use(Item.id)`. Only a non-consumable "use" would need a manual `GameState.advance_objective(...)`.)
 - **`reward_reputation` is granted by resource-path id.** Each key must be a real faction id (a `faction_id` dropdown value, §7) — an id that doesn't resolve in the Factions registry is silently skipped (no standing change). Copy the id from the faction, don't retype it.
-- **Quest progress IS save-persisted, by resource path.** Active, completed **and failed** quests round-trip through the autosave (the `[quests_active]` / `[quests_completed]` / `[quests_failed]` cfg sections, keyed by each `Quest`'s `.tres` path — with objective progress stored on the active ones only, since a closed quest has none). A failed quest therefore stays failed across a save/load, so `start_quest` keeps refusing it and it can never be re-offered. The catch: a quest authored as a `.tres` on disk persists; a quest with no `resource_path` (built in memory, never saved) is skipped on save (with a console warning naming it) and a **renamed or deleted** `.tres` is dropped on load with a warning, not a crash. So keep your quest `.tres` paths stable once a save exists.
+- **Quest progress IS save-persisted, by resource path.** Active, completed **and failed** quests round-trip through the autosave (the `[quests_active]` / `[quests_completed]` / `[quests_failed]` cfg sections, keyed by each `Quest`'s `.tres` path — with objective progress stored on the active ones only, since a closed quest has none; a **staged** quest also stores its current **stage id**, and its progress is that stage's). A save made before a quest had stages loads it in its first stage. A failed quest therefore stays failed across a save/load, so `start_quest` keeps refusing it and it can never be re-offered. The catch: a quest authored as a `.tres` on disk persists; a quest with no `resource_path` (built in memory, never saved) is skipped on save (with a console warning naming it) and a **renamed or deleted** `.tres` is dropped on load with a warning, not a crash. So keep your quest `.tres` paths stable once a save exists.
 - **Turn-in needs `auto_complete = false`.** Leave it on and the quest finishes the instant the last required objective ticks. For a "report back to the giver" beat, turn it off and call `GameState.complete_quest(id)` from the turn-in dialogue option.
 - **There is no giver field.** Nothing on the Quest names who offers it — starting a quest is always an explicit `start_quest` call (a QuestStarter, TriggerVolume, or dialogue choice).
 
-Relevant files: `res://scripts/quests/quest.gd`, `quest_objective.gd`; the quest STATE, the four signals and the reward granting in `res://managers/QuestTracker.gd`; the forwarding API + auto-hooks in `res://managers/GameState.gd`; the read-only log in `res://scripts/ui/quest_journal.gd`; author quests under `res://resources/quests/`.
+- **Stage ids are save keys; the Audit checks every stage link.** A `next_stage_id` or a conversation's `set_quest_stage_id` that names no stage, a blank or duplicate stage id, and a `set_quest_stage_id` whose choice has no `advance_quest_id` are all **ERRORs** in the Audit tab and `validate_all` — at runtime each is a quest that silently never moves. A staged quest that also keeps objectives on the Quest itself is a WARN (they are ignored).
+
+Relevant files: `res://scripts/quests/quest.gd`, `quest_stage.gd`, `quest_objective.gd`; the quest STATE (including the current stage), the quest signals and the reward granting in `res://managers/QuestTracker.gd`; the forwarding API + auto-hooks in `res://managers/GameState.gd`; the read-only log in `res://scripts/ui/quest_journal.gd`; author quests under `res://resources/quests/`.
 
 ---
 

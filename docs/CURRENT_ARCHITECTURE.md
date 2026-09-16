@@ -139,7 +139,7 @@ folded in and **first wins**, since `sanitize` only ever sees one level's list w
 the whole ledger.
 
 **Quests live on the `QuestTracker` autoload, but persist through `GameState` (M1).**
-The tracker dicts (active / completed / failed + objective progress), the four quest
+The tracker dicts (active / completed / failed + current stage + objective progress), the quest
 signals, reward granting, and the `[quests_active]` / `[quests_completed]` /
 `[quests_failed]` cfg round-trip all belong to `managers/QuestTracker.gd`;
 `GameState._save_perks_and_quests` / `_load_perks_and_quests` delegate their quest
@@ -414,7 +414,7 @@ verifiably has one. The first write after a fallback-recovered load does **not**
 rotate that path's primary onto `.bak` (it is the file the ladder just refused);
 the exception is tracked per save path, since quicksave and the named slots write
 through the same routine. Every save stamps `[meta].version` (`SAVE_VERSION`, now
-**5**) — read into `save_version`. Four schema migrations exist. **v2** (2026-07-09)
+**6**) — read into `save_version`. Five schema migrations exist. **v2** (2026-07-09)
 renamed the `persuasion` stat to `streetwise`, folding a pre-v2 save's
 `persuasion` points into `streetwise`. **v3** (2026-07-16) consolidated the
 `stealth` and `pickpocket` stats into one `larceny` stat, folding a pre-v3 save's
@@ -435,7 +435,38 @@ one save `money >= 0`, so it could never fire twice) — but that rests on the
 cash-only invariant, and `DialogueChoice.give_money` is documented as accepting a
 **negative** amount and applies it unclamped. A designer authoring one fee would
 have turned a live wallet into interest-bearing bank debt on the next load, so the
-fold is now gated on `save_version < 5` instead of on the data.
+fold is now gated on `save_version < 5` instead of on the data. **v6** (2026-09-16)
+added **quest stages** and is lazy like v4. A `[quests_active]` record of a STAGED
+quest (`Quest.stages` non-empty) now carries **`stage`** — the id of the
+`QuestStage` it is in — and its `progress` means THAT stage's objectives only, not
+the whole quest's (`QuestTracker.save_into` / `load_from`). A stage-less quest
+writes no `stage` key, so its record stays the pre-v6 `{path, progress}`. There is
+no fold: a record with no `stage` (every <v6 save, or a quest that gained stages
+after it was saved) resumes in `stages[0]` keeping the progress keys that match
+that stage, and a `stage` naming no stage of the quest (renamed/deleted since)
+resumes in `stages[0]` with a warning. Resuming never re-runs a stage's entry
+effects — the flags they set were saved with the profile. Pinned by
+`tests/test_quest_stages.gd`.
+
+**Stage flow (QuestTracker).** `Quest.objectives_for_stage(stage)` is the one
+resolver of "which objectives are live" (a stage-less quest: its own; a staged
+quest: the current stage's; an unknown stage: none), and every reader goes
+through it or `QuestTracker.current_objectives` — the hooks, `advance_objective`,
+the journal, the HUD tracker line, `QuestMarkerSync` and the debug console. A
+stage whose required objectives are done hands off to `next_stage_id` regardless
+of `auto_complete` (which governs only the end: a terminal stage completes or
+waits for its turn-in); `set_quest_stage` jumps from any stage
+(`DialogueChoice.set_quest_stage_id` with `advance_quest_id`). Entering a stage
+re-seeds progress, bumps an `epoch` (so a loop over one stage's objectives stops
+the moment an advance hands the quest on and can never tick a same-id objective of
+the next stage), emits `quest_stage_changed` (not for the first stage), back-fills
+already-set FLAG objectives, then sets `set_flag_on_enter` only if it is not
+already truthy (the back-fill already counted it). A `next_stage_id` naming no
+stage leaves the quest in place with a warning rather than completing it, and
+nesting is capped at `MAX_STAGE_ENTRY_DEPTH` so a loop of stages that complete on
+entry cannot recurse forever. `ScanWiring` (pass 2b) reports blank/duplicate stage
+ids, dangling `next_stage_id` / `set_quest_stage_id`, and ignored quest-level
+objectives on a staged quest.
 
 Level-identity restore is guarded (`respawn_level_matches`): on boot, if a loaded
 game's saved `current_level_path` can't be resolved to a scene-bearing `LevelData`

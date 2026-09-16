@@ -429,6 +429,10 @@ func _apply_choice_effects(choice: DialogueChoice) -> void:
 		GameState.start_quest(choice.start_quest_on_choice)
 	if choice.advance_quest_id != &"" and choice.advance_objective_id != &"":
 		GameState.advance_objective(choice.advance_quest_id, choice.advance_objective_id)
+	if choice.advance_quest_id != &"" and choice.set_quest_stage_id != &"":
+		# After the tick, so an explicit jump wins over a stage the tick may just have completed. QuestTracker directly:
+		# the stage API is new, and GameState's quest forwarders exist only for the call sites that predate the split.
+		QuestTracker.set_quest_stage(choice.advance_quest_id, choice.set_quest_stage_id)
 	if choice.complete_quest_id != &"":
 		GameState.complete_quest(choice.complete_quest_id)
 	if choice.give_money != 0.0 or choice.give_item_id != &"":

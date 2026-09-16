@@ -87,9 +87,15 @@ enum QuestGate { ANY, ACTIVE, COMPLETED, FAILED }
 @export var start_quest_on_choice: Quest
 ## Complete this quest by id when picked — the turn-in path (GameState.complete_quest). Empty = none.
 @export var complete_quest_id: StringName = &""
-## Advance objective `advance_objective_id` of quest `advance_quest_id` by one when picked. BOTH are needed.
+## The quest this choice moves forward -- `advance_objective_id` ticks one of its objectives by one, and / or
+## `set_quest_stage_id` jumps it to a named stage. Each needs this id too.
 @export var advance_quest_id: StringName = &""
 @export var advance_objective_id: StringName = &""
+## Jump quest `advance_quest_id` to the QuestStage with this id when picked (QuestTracker.set_quest_stage) -- how two
+## routes through a staged quest converge on one later beat. Applied AFTER the objective tick above, so the jump wins
+## when both are set. No-op unless the quest is active; an id that names no stage of that quest is refused with a
+## warning and reported by the Audit as an ERROR. Empty = no jump.
+@export var set_quest_stage_id: StringName = &""
 ## Give the player this item (by Item.id), `give_item_count` of it, when picked. Empty = none.
 @export var give_item_id: StringName = &""
 @export var give_item_count: int = 1

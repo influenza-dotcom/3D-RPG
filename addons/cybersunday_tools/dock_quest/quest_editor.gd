@@ -4,8 +4,9 @@ extends VBoxContainer
 ## QUEST EDIT dock (the "Quests" tool of the CYBER SUNDAY panel's Create group; the Control `name` stays "Quest Edit"
 ## because tests and cyber_panel's registry key on it — the panel sets the display title). It edits an authored
 ## Quest's headline fields, reward money/XP, the item rewards[] list, prereq + next-quest chaining, the auto-complete /
-## expire-on-flag flow flags, and its ordered objectives list (each with its optional world marker) WITHOUT the raw
-## inspector. A picker (scans resources/quests/) loads a Quest .tres into plain widgets; an objectives ItemList +
+## expire-on-flag flow flags, its optional STAGES (id, journal text, next stage, flag on enter), and the ordered
+## objectives list of the quest -- or of the picked stage, once the quest has stages -- (each with its optional world
+## marker) WITHOUT the raw inspector. A picker (scans resources/quests/) loads a Quest .tres into plain widgets; an objectives ItemList +
 ## Add/Remove/Up/Down + a per-objective editor (type dropdown, target id + stamp, required count, objective text,
 ## optional, marker + XYZ) edits the list; a parallel rewards ItemList + item picker + count edits rewards[]; Save
 ## Quest writes the .tres back (ContentSaveGuard.save_with_backup + FileSystem.update_file) so it persists.
@@ -47,7 +48,18 @@ extends VBoxContainer
 ##     key nothing looks up again. New rows get a unique `obj_N` from QuestOps.add_objective instead. (Worth knowing
 ##     when a quest reads perfectly here and does nothing in game: an objective authored ELSEWHERE with a BLANK id
 ##     gets no progress entry at all, so it can never advance — and this tab neither shows nor repairs that.)
-## Every OTHER field Quest and QuestObjective export is reachable in this tab.
+## Every OTHER field Quest, QuestStage and QuestObjective export is reachable in this tab.
+##
+## STAGES (QuestStage): the Stages block sits above Objectives. A quest with no stages edits `Quest.objectives` exactly
+## as before; once it has stages, the Objectives list shows the PICKED stage's objectives (the quest's own list is
+## ignored at runtime). QuestOps.add_stage moves the quest's own objectives into the FIRST stage it adds, and removing
+## the last stage moves them back, so turning stages on or off never changes how a quest plays. A stage id IS editable
+## here, unlike Quest.id / QuestObjective.id, because stage ids are the designer's route names ("bribe", "sneak") that
+## conversations jump to; the Id box commits ONCE (Enter / focus loss) through QuestOps.rename_stage_id, which carries
+## every next_stage_id in the quest, and its tooltip says what a rename costs a save sitting in the old id (that save
+## resumes the quest at its first stage). Next stage is a PickerRows dropdown of the quest's other stage ids -- a
+## dangling id keeps a transient "(missing)" row carrying the real id, so the dropdown never reads "(none)" while a
+## link is set and re-picking that row writes nothing new.
 ##
 ## ROUND-TRIP RULE (the reason this file is shaped the way it is): every widget must touch THREE sites, or adding it
 ## DESTROYS authored data. `_show_quest` / `_load_obj_editor` / `_load_reward_row` PUSH the model into the widget
@@ -134,6 +146,10 @@ const MARKER_TOOLTIP := "Shows a compass chevron and a minimap dot at Marker pos
 # be silent). Sharing the literal keeps the two in step.
 const MSG_NO_QUEST := "Pick a quest first."
 const MSG_NO_OBJ := "Pick an objective in the list first."
+const MSG_NO_STAGE := "Pick a stage in the list first."
+## Row 0 of the Next stage dropdown: a blank next_stage_id, i.e. a TERMINAL stage.
+const NEXT_STAGE_END := "(none -- this stage ends the quest)"
+const STAGE_ID_TIP := "This stage's id -- what Next stage and a conversation's Set quest stage name. Press Enter (or click away) to apply; every Next stage in this quest follows a rename. A saved game sitting in the old id restarts this quest at its first stage."
 const MSG_NO_REWARD := "Pick a reward row in the list first."
 const MSG_NOTHING_TO_SAVE := "Nothing is open to save"
 const MSG_NO_HOST := "Check Reach needs the CYBER SUNDAY panel."
@@ -175,6 +191,19 @@ var _reward_row_btns: Array[Button] = []
 var _reward_item_pick: OptionButton = null
 var _reward_count: SpinBox = null
 
+var _stage_list: ItemList = null
+var _stage_add_btn: Button = null
+## Remove / Up / Down for the stage list (greyed together when no stage is picked).
+var _stage_row_btns: Array[Button] = []
+var _stage_id_edit: LineEdit = null
+var _stage_journal: TextEdit = null
+var _stage_next_pick: OptionButton = null
+var _stage_flag_edit: LineEdit = null
+## The PickerRows rows CURRENTLY in `_stage_next_pick` (rebuilt on every stage load), so a pick resolves through
+## PickerRows.resolve_pick against exactly what the widget shows.
+var _stage_next_rows: Array = []
+## The Objectives header: says WHOSE objectives the list shows (the quest's, or the picked stage's).
+var _obj_header: Label = null
 var _obj_list: ItemList = null
 var _obj_add_btn: Button = null
 ## Remove / Up / Down for the objective list — greyed together with "Pick an objective in the list first."
@@ -420,8 +449,62 @@ func _init() -> void:
 
 	_body.add_child(HSeparator.new())
 
+	# --- stages list + the picked stage's fields ----------------------------------------------------------------
+	# Above Objectives because it decides which objectives the list below shows. Same shape as the rewards block: a
+	# SHORT header, an ItemList, an Add/Remove/Up/Down strip, then the row fields -- all inside the scroll.
+	_body.add_child(_field_label("Stages (optional)"))
+	_stage_list = ItemList.new()
+	_stage_list.custom_minimum_size = Vector2(0, 50)
+	_stage_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_stage_list.tooltip_text = "A quest with stages is always in one of them, starting at the top one. Each row: id, where it goes next, how many objectives it has. No stages = the whole quest is one beat."
+	_stage_list.item_selected.connect(_on_stage_selected)
+	_body.add_child(_stage_list)
+
+	var stage_btns := HBoxContainer.new()
+	_stage_add_btn = _btn("Add", _on_stage_add, "Adds a stage to the end of the list. The first stage you add takes this quest's objectives with it, so the quest plays the same. Writes nothing until Save Quest.")
+	stage_btns.add_child(_stage_add_btn)
+	_stage_row_btns.append(_btn("Remove", _on_stage_remove, "Removes the picked stage. Anything that moved the quest to it now points at nothing -- the Audit names those. Writes nothing until Save Quest."))
+	_stage_row_btns.append(_btn("Up", _on_stage_up, "Moves the picked stage one step earlier -- the quest starts in the TOP stage. Writes nothing until Save Quest."))
+	_stage_row_btns.append(_btn("Down", _on_stage_down, "Moves the picked stage one step later. Writes nothing until Save Quest."))
+	for b in _stage_row_btns:
+		stage_btns.add_child(b)
+	_body.add_child(stage_btns)
+
+	# The stage id commits ONCE (Enter / focus loss), never per keystroke: a rename rewrites every next_stage_id that
+	# named the old id, so committing each keystroke would drag those links through every half-typed spelling.
+	_stage_id_edit = LineEdit.new()
+	_stage_id_edit.tooltip_text = STAGE_ID_TIP
+	_stage_id_edit.text_submitted.connect(func(_t): _commit_stage_id())
+	_stage_id_edit.focus_exited.connect(_commit_stage_id)
+	_body.add_child(_pair("Stage id", _stage_id_edit))
+
+	_body.add_child(_field_label("Stage journal text"))
+	_stage_journal = TextEdit.new()
+	_stage_journal.custom_minimum_size = Vector2(0, 40)
+	_stage_journal.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_stage_journal.tooltip_text = "What the journal says while the quest is in this stage. Blank = the quest's Description shows instead."
+	_stage_journal.text_changed.connect(_on_stage_journal_changed)
+	_body.add_child(_stage_journal)
+
+	_stage_next_pick = OptionButton.new()
+	_stage_next_pick.fit_to_longest_item = false  # PickerRows.apply re-applies these on every fill; set here too so
+	_stage_next_pick.clip_text = true  # the empty dropdown can't widen the panel before the first load
+	_stage_next_pick.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_stage_next_pick.custom_minimum_size = Vector2(PickerRows.PICKER_MIN_WIDTH, 0)
+	_stage_next_pick.tooltip_text = "Where the quest goes when this stage's required objectives are done. (none) = this stage ends the quest -- it completes, or waits for its turn-in if Auto-complete is off."
+	_stage_next_pick.item_selected.connect(_on_stage_next_picked)
+	_body.add_child(_pair("Next stage", _stage_next_pick))
+
+	_stage_flag_edit = LineEdit.new()
+	_stage_flag_edit.tooltip_text = "A story flag set the moment the quest reaches this stage, so a conversation or a door can react. Blank = none."
+	_stage_flag_edit.text_changed.connect(_on_stage_flag_changed)
+	_body.add_child(_pair("Flag on enter", _stage_flag_edit))
+
+	_body.add_child(HSeparator.new())
+
 	# --- objectives list + reorder ----------------------------------------------------------------------------
-	_body.add_child(_field_label("Objectives"))
+	_obj_header = _field_label("Objectives")
+	_body.add_child(_obj_header)
 	_obj_list = ItemList.new()
 	_obj_list.custom_minimum_size = Vector2(0, 80)
 	_obj_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -514,6 +597,7 @@ func _init() -> void:
 	# Nothing is open yet: grey the form, the list buttons and Save (each says what is missing) and post the next step.
 	_set_form_enabled(false)
 	_load_reward_row(null)
+	_load_stage_editor(null)
 	_load_obj_editor(null)
 	_update_save_state()
 	_set_status(MSG_IDLE)
@@ -835,11 +919,14 @@ func _show_quest(q: Quest, path: String) -> void:
 	_set_form_enabled(true)
 	_refresh_reward_list()
 	_select_reward(0 if q.rewards.size() > 0 else -1)
-	_refresh_obj_list()
-	_select_obj(0 if q.objectives.size() > 0 else -1)
+	_refresh_stage_list()
+	_select_stage(0 if q.stages.size() > 0 else -1)  # also fills the Objectives list for the picked stage (or the quest)
 	_dirty = false
 	_update_save_state()
-	_set_status("Opened %s -- %s, %s." % [path.get_file(), _count(q.objectives.size(), "objective", "objectives"), _count(q.rewards.size(), "reward row", "reward rows")])
+	var shape := _count(q.objectives.size(), "objective", "objectives")
+	if q.has_stages():
+		shape = "%s, %s" % [_count(q.stages.size(), "stage", "stages"), _count(q.all_objectives().size(), "objective", "objectives")]
+	_set_status("Opened %s -- %s, %s." % [path.get_file(), shape, _count(q.rewards.size(), "reward row", "reward rows")])
 
 
 ## RESET SITE of the three-site rule: back to each field's RESOURCE default, not to the widget's, with the form, the
@@ -868,9 +955,13 @@ func _clear_loaded() -> void:
 	if _reward_list != null:
 		_reward_list.clear()
 	_load_reward_row(null)
+	if _stage_list != null:
+		_stage_list.clear()
+	_load_stage_editor(null)
 	if _obj_list != null:
 		_obj_list.clear()
 	_load_obj_editor(null)
+	_update_obj_header()
 	_set_form_enabled(false)
 	_update_save_state()
 	# Re-render (not re-write) the status: `_dirty` just went false, and the "(unsaved changes)" suffix is composed at
@@ -891,7 +982,8 @@ func _set_form_enabled(on: bool) -> void:
 	_next_quest_pick.disabled = not on
 	_expire_edit.editable = on
 	_set_buttons_enabled([_reward_add_btn], on, MSG_NO_QUEST)
-	_set_buttons_enabled([_obj_add_btn], on, MSG_NO_QUEST)
+	_set_buttons_enabled([_stage_add_btn], on, MSG_NO_QUEST)
+	_update_obj_add_state()
 
 
 # --- dirty state + the unsaved-changes guard ------------------------------------------------------------------
@@ -1021,6 +1113,13 @@ func _discard_changes() -> void:
 		for s: ItemStack in _quest.rewards:
 			if s != null:
 				_reset_to_defaults(s)
+		# Each stage's objectives BEFORE the stage (resetting a stage empties its list), and every stage before the quest.
+		for st: QuestStage in _quest.stages:
+			if st != null:
+				for o: QuestObjective in st.objectives:
+					if o != null:
+						_reset_to_defaults(o)
+				_reset_to_defaults(st)
 		_reset_to_defaults(_quest)
 	_dirty = false
 	if path.is_empty():
@@ -1364,15 +1463,259 @@ func _move_reward(dir: int) -> void:
 		_select_reward(i + dir)
 
 
+# --- stages list ------------------------------------------------------------------------------------------------
+
+## The objectives the Objectives list edits: the picked stage's once the quest has stages (EMPTY when none is picked --
+## a staged quest's own objectives are ignored at runtime, so the tab never offers them), else the quest's own.
+func _objectives() -> Array[QuestObjective]:
+	var none: Array[QuestObjective] = []
+	if _quest == null:
+		return none
+	if not _quest.has_stages():
+		return _quest.objectives
+	var st := _current_stage()
+	return st.objectives if st != null else none
+
+func _refresh_stage_list() -> void:
+	if _stage_list == null:
+		return
+	_stage_list.clear()
+	if _quest == null:
+		return
+	for i in range(_quest.stages.size()):
+		_stage_list.add_item(_stage_summary(i, _quest.stages[i]))
+
+## One stage row: "1. bribe -> inside (2 objectives)" / "3. inside -> (ends the quest) (1 objective)". A null hole reads
+## "(missing)" and a blank id "(no id)" -- both are Audit findings, named here so the row never looks authored.
+func _stage_summary(i: int, st: QuestStage) -> String:
+	if st == null:
+		return "%d. (missing)" % (i + 1)
+	var sid := String(st.id) if st.id != &"" else "(no id)"
+	var nxt := String(st.next_stage_id) if st.next_stage_id != &"" else "(ends the quest)"
+	return "%d. %s -> %s (%s)" % [i + 1, sid, nxt, _count(st.objectives.size(), "objective", "objectives")]
+
+## Repaint one stage row in place (its id, next stage or objective count changed) without disturbing the selection.
+func _refresh_stage_row(i: int) -> void:
+	if _quest == null or _stage_list == null or i < 0 or i >= _quest.stages.size() or i >= _stage_list.item_count:
+		return
+	_stage_list.set_item_text(i, _stage_summary(i, _quest.stages[i]))
+
+func _selected_stage_index() -> int:
+	if _stage_list == null:
+		return -1
+	var sel := _stage_list.get_selected_items()
+	return sel[0] if sel.size() > 0 else -1
+
+func _current_stage() -> QuestStage:
+	if _quest == null:
+		return null
+	var i := _selected_stage_index()
+	if i < 0 or i >= _quest.stages.size():
+		return null
+	return _quest.stages[i]
+
+## Pick stage `index` (-1 = none) and show it: the stage fields, then the Objectives list for that stage (or, for a
+## stage-less quest, the quest's own objectives), with its first objective picked.
+func _select_stage(index: int) -> void:
+	if _quest != null and index >= 0 and index < _quest.stages.size():
+		_stage_list.select(index)
+		_load_stage_editor(_quest.stages[index])
+	else:
+		if _stage_list != null:
+			_stage_list.deselect_all()
+		_load_stage_editor(null)
+	_refresh_obj_list()
+	_select_obj(0 if _objectives().size() > 0 else -1)
+
+func _on_stage_selected(index: int) -> void:
+	_select_stage(index)
+
+## PUSH + RESET site for the stage fields (the three-site rule). Every push is signal-free: `.text =` on the LineEdits
+## and the TextEdit (a TextEdit DOES emit text_changed later, deferred, which is why _on_stage_journal_changed ignores
+## an unchanged text), and PickerRows.apply's select() on the dropdown. Null resets each field to QuestStage's own
+## defaults (all blank) and greys the stage row buttons.
+func _load_stage_editor(st: QuestStage) -> void:
+	var has := st != null
+	if _stage_id_edit == null:
+		return
+	_stage_id_edit.editable = has
+	_stage_journal.editable = has
+	_stage_next_pick.disabled = not has
+	_stage_flag_edit.editable = has
+	_set_buttons_enabled(_stage_row_btns, has, MSG_NO_STAGE)
+	_stage_id_edit.text = String(st.id) if has else ""
+	_stage_journal.text = st.journal_text if has else ""
+	_stage_flag_edit.text = String(st.set_flag_on_enter) if has else ""
+	_refresh_stage_next_options(st)
+
+## Rebuild the Next stage rows from the quest's CURRENT stage ids (every other stage with an id), then point the widget at
+## `st.next_stage_id`. A next id no stage has gets ONE trailing "(missing)" row carrying the real id, so the dropdown
+## never reads "(none)" while a link is set; re-picking that row writes the same id back, which _on_stage_next_picked
+## treats as a no-op. Rebuilt on every load, so a stale transient never lingers.
+func _refresh_stage_next_options(st: QuestStage) -> void:
+	var rows: Array = [{"label": NEXT_STAGE_END, "value": ""}]
+	var current := String(st.next_stage_id) if st != null else ""
+	var known := false
+	if _quest != null and st != null:
+		for other in _quest.stages:
+			if other == null or other == st or other.id == &"":
+				continue
+			rows.append({"label": String(other.id), "value": String(other.id)})
+			if String(other.id) == current:
+				known = true
+	if current != "" and not known:
+		rows.append({"label": current + "  (missing)", "value": current})
+	_stage_next_rows = rows
+	PickerRows.apply(_stage_next_pick, rows, current)
+
+## The stage id's ONE commit point (Enter / focus loss). QuestOps.rename_stage_id carries every next_stage_id in this
+## quest; a refusal (blank, duplicate) repaints the box from the model and says why.
+func _commit_stage_id() -> void:
+	var st := _current_stage()
+	if st == null or _stage_id_edit == null:
+		return
+	var wanted := StringName(_stage_id_edit.text.strip_edges())
+	if wanted == st.id:
+		_stage_id_edit.text = String(st.id)
+		return
+	var r: Dictionary = QuestOps.rename_stage_id(_quest, st, wanted)
+	_stage_id_edit.text = String(st.id)
+	if not r["ok"]:
+		_set_status("Couldn't rename this stage: %s" % String(r["reason"]), true)
+		return
+	_mark_dirty()
+	_refresh_stage_list()
+	_stage_list.select(_quest.stages.find(st))
+	_refresh_stage_next_options(st)
+	_update_obj_header()
+	var msg := "Renamed the stage to %s" % st.id
+	if int(r["rewritten"]) > 0:
+		msg += " -- %s followed it" % _count(int(r["rewritten"]), "Next stage link", "Next stage links")
+	_set_status(msg + ". A conversation's Set quest stage that used the old id does not follow -- the Audit names it.")
+
+## TWO guards, as on the dialogue tab's line text: the _syncing-free push above still reaches here one frame later (a
+## TextEdit emits deferred), and an unchanged text is not an edit.
+func _on_stage_journal_changed() -> void:
+	var st := _current_stage()
+	if st == null or st.journal_text == _stage_journal.text:
+		return
+	st.journal_text = _stage_journal.text
+	_mark_dirty()
+
+func _on_stage_next_picked(idx: int) -> void:
+	var st := _current_stage()
+	if st == null:
+		return
+	var pick: Dictionary = PickerRows.resolve_pick(_stage_next_rows, idx)
+	match String(pick.get("action", "keep")):
+		"clear":
+			if st.next_stage_id == &"":
+				return
+			st.next_stage_id = &""
+		"set":
+			var v := StringName(String(pick.get("value", "")))
+			if st.next_stage_id == v:
+				return
+			st.next_stage_id = v
+		_:
+			return
+	_mark_dirty()
+	_refresh_stage_row(_selected_stage_index())
+
+func _on_stage_flag_changed(text: String) -> void:
+	var st := _current_stage()
+	if st == null:
+		return
+	st.set_flag_on_enter = StringName(text.strip_edges())  # matched exactly by GameState -- see _on_obj_target_changed
+	_mark_dirty()
+
+func _on_stage_add() -> void:
+	if _quest == null:
+		_set_status(MSG_NO_QUEST)
+		return
+	var moved := _quest.objectives.size() if _quest.stages.is_empty() else 0
+	if QuestOps.add_stage(_quest):
+		_mark_dirty()
+		_refresh_stage_list()
+		_select_stage(_quest.stages.size() - 1)
+		var sid := String(_quest.stages[-1].id)
+		if moved > 0:
+			_set_status("Added stage %s -- the quest's %s moved into it, so it plays exactly as before." % [sid, _count(moved, "objective", "objectives")])
+		else:
+			_set_status("Added stage %s -- give it objectives below, and link it with Next stage." % sid)
+
+func _on_stage_remove() -> void:
+	if _quest == null:
+		_set_status(MSG_NO_QUEST)
+		return
+	var i := _selected_stage_index()
+	if i < 0:
+		_set_status(MSG_NO_STAGE)
+		return
+	var st := _quest.stages[i]
+	var gone := String(st.id) if st != null else "(missing)"
+	if QuestOps.remove_stage(_quest, i):
+		_mark_dirty()
+		_refresh_stage_list()
+		_select_stage(mini(i, _quest.stages.size() - 1))
+		if _quest.stages.is_empty():
+			_set_status("Removed stage %s -- the quest has no stages now; its objectives are the quest's own again." % gone)
+		else:
+			_set_status("Removed stage %s. Anything that moved the quest to %s now points at nothing -- the Audit names it." % [gone, gone])
+
+func _on_stage_up() -> void:
+	_move_stage(-1)
+
+func _on_stage_down() -> void:
+	_move_stage(1)
+
+func _move_stage(dir: int) -> void:
+	if _quest == null:
+		_set_status(MSG_NO_QUEST)
+		return
+	var i := _selected_stage_index()
+	if i < 0:
+		_set_status(MSG_NO_STAGE)
+		return
+	if QuestOps.move_stage(_quest, i, dir):
+		_mark_dirty()
+		_refresh_stage_list()
+		_select_stage(i + dir)
+		if i == 0 or i + dir == 0:
+			_set_status("The quest now starts in stage %s (the top one)." % String(_quest.stages[0].id))
+
+## Say whose objectives the list below shows.
+func _update_obj_header() -> void:
+	if _obj_header == null:
+		return
+	if _quest == null or not _quest.has_stages():
+		_obj_header.text = "Objectives"
+		return
+	var st := _current_stage()
+	_obj_header.text = ("Objectives of stage %s" % (String(st.id) if st.id != &"" else "(no id)")) if st != null else "Objectives (pick a stage above)"
+
+## Add objective is live when a quest is open and -- for a staged quest -- a stage is picked; its greyed tooltip names
+## which of the two is missing.
+func _update_obj_add_state() -> void:
+	if _obj_add_btn == null:
+		return
+	if _quest == null:
+		_set_buttons_enabled([_obj_add_btn], false, MSG_NO_QUEST)
+		return
+	_set_buttons_enabled([_obj_add_btn], not _quest.has_stages() or _current_stage() != null, MSG_NO_STAGE)
+
+
 # --- objectives list -------------------------------------------------------------------------------------------
 
 func _refresh_obj_list() -> void:
 	_obj_list.clear()
+	_update_obj_header()
+	_update_obj_add_state()
 	if _quest == null:
 		return
-	for i in range(_quest.objectives.size()):
-		var o: QuestObjective = _quest.objectives[i]
-		_obj_list.add_item(_obj_summary(i, o))
+	var objs := _objectives()
+	for i in range(objs.size()):
+		_obj_list.add_item(_obj_summary(i, objs[i]))
 
 ## One objective's list text: "1. Kill raider x3 (optional) ◆". The type is its designer title (TYPE_TITLES); a
 ## missing row (a null hole in the array, authored elsewhere) reads "(missing)", and a type this build's enum no
@@ -1392,18 +1735,18 @@ func _selected_index() -> int:
 	return sel[0] if sel.size() > 0 else -1
 
 func _select_obj(index: int) -> void:
-	if _quest == null or index < 0 or index >= _quest.objectives.size():
+	if _quest == null or index < 0 or index >= _objectives().size():
 		_load_obj_editor(null)
 		return
 	_obj_list.select(index)
-	_load_obj_editor(_quest.objectives[index])
+	_load_obj_editor(_objectives()[index])
 
 
 func _on_obj_selected(index: int) -> void:
-	if _quest == null or index < 0 or index >= _quest.objectives.size():
+	if _quest == null or index < 0 or index >= _objectives().size():
 		_load_obj_editor(null)
 		return
-	_load_obj_editor(_quest.objectives[index])
+	_load_obj_editor(_objectives()[index])
 
 
 ## Mirror an objective's fields into the per-objective editor widgets (or blank + disable on null), and grey
@@ -1458,9 +1801,10 @@ func _current_obj() -> QuestObjective:
 	if _quest == null:
 		return null
 	var i := _selected_index()
-	if i < 0 or i >= _quest.objectives.size():
+	var objs := _objectives()
+	if i < 0 or i >= objs.size():
 		return null
-	return _quest.objectives[i]
+	return objs[i]
 
 func _on_obj_type_changed(idx: int) -> void:
 	var o := _current_obj()
@@ -1530,9 +1874,10 @@ func _on_obj_marker_changed(_value: float) -> void:
 ## and a null-safe pair is safe BY CONSTRUCTION instead of by call-site discipline that a later handler can forget.
 func _refresh_summary_for_selected() -> void:
 	var i := _selected_index()
-	if _quest == null or i < 0 or i >= _quest.objectives.size():
+	if _quest == null or i < 0 or i >= _objectives().size():
 		return
-	_obj_list.set_item_text(i, _obj_summary(i, _quest.objectives[i]))
+	_obj_list.set_item_text(i, _obj_summary(i, _objectives()[i]))
+	_refresh_stage_row(_selected_stage_index())  # a stage row counts its objectives
 
 
 # --- objective target_id stamp picker --------------------------------------------------------------------------
@@ -1615,11 +1960,15 @@ func _on_add() -> void:
 	if _quest == null:
 		_set_status(MSG_NO_QUEST)
 		return
-	if QuestOps.add_objective(_quest):
+	if _quest.has_stages() and _current_stage() == null:
+		_set_status(MSG_NO_STAGE)  # a staged quest's objectives belong to a stage
+		return
+	if QuestOps.add_objective(_quest, _current_stage()):
 		_mark_dirty()
 		_refresh_obj_list()
-		_select_obj(_quest.objectives.size() - 1)
-		_set_status("Added objective %d -- set its type and target." % _quest.objectives.size())
+		_select_obj(_objectives().size() - 1)
+		_refresh_stage_row(_selected_stage_index())
+		_set_status("Added objective %d -- set its type and target." % _objectives().size())
 
 func _on_remove() -> void:
 	if _quest == null:
@@ -1629,10 +1978,11 @@ func _on_remove() -> void:
 	if i < 0:
 		_set_status(MSG_NO_OBJ)
 		return
-	if QuestOps.remove_objective(_quest, i):
+	if QuestOps.remove_objective(_quest, i, _current_stage()):
 		_mark_dirty()
 		_refresh_obj_list()
-		_select_obj(mini(i, _quest.objectives.size() - 1))
+		_select_obj(mini(i, _objectives().size() - 1))
+		_refresh_stage_row(_selected_stage_index())
 		_set_status("Removed objective %d." % (i + 1))
 
 func _on_up() -> void:
@@ -1649,7 +1999,7 @@ func _move(dir: int) -> void:
 	if i < 0:
 		_set_status(MSG_NO_OBJ)
 		return
-	if QuestOps.move_objective(_quest, i, dir):
+	if QuestOps.move_objective(_quest, i, dir, _current_stage()):
 		_mark_dirty()
 		_refresh_obj_list()
 		_select_obj(i + dir)
@@ -1704,8 +2054,11 @@ func _on_save() -> void:
 	# out from under the designer. _select_*(-1) is the honest "nothing selected" path when there was no selection.
 	var obj_sel := _selected_index()
 	var reward_sel := _selected_reward_index()
+	var stage_sel := _selected_stage_index()
 	_prereq_edit.text = String(_quest.prereq_quest_id)
 	_expire_edit.text = String(_quest.expire_on_flag)
+	_refresh_stage_list()
+	_select_stage(stage_sel)  # re-pushes the stage fields (normalize may have trimmed an id) and refills Objectives
 	_refresh_obj_list()
 	_select_obj(obj_sel)
 	_refresh_reward_list()

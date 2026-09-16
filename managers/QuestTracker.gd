@@ -1,13 +1,16 @@
 extends Node
 ## @system Quests
-## @seam QuestTracker OWNS the live quest tracker (active/completed/failed + objective progress) and the four quest signals; GameState keeps one-line forwarders so authored content and old call sites keep working.
+## @seam QuestTracker OWNS the live quest tracker (active/completed/failed + current stage + objective progress) and the quest signals; GameState keeps one-line forwarders so authored content and old call sites keep working.
 ## @seam save_into/load_from write and restore the [quests_active]/[quests_completed]/[quests_failed] cfg sections; GameState._save_perks_and_quests / _load_perks_and_quests delegate their quest halves here.
 ## @seam notify_kill/pickup/talk/enter/use + notify_flag_set are the world's hooks INTO quests — one shared _advance_objectives_matching body behind all of them.
+## @seam A STAGED quest (Quest.stages non-empty) is always in one QuestStage: every objective read goes through Quest.objectives_for_stage(entry.stage), a stage hands off via next_stage_id / set_quest_stage, and the save writes the current stage id beside its progress (SAVE_VERSION 6, lazy: no stage field = stages[0]).
+## @risk Iterating a stage's objectives while advancing them can hand the quest to its NEXT stage mid-loop; every such loop re-checks the entry's `epoch` so it never advances a same-id objective of the stage it just left.
 ## @risk A quest transition that forgets _gs().autosave_world_state() leaves progress unpersisted until an unrelated money/xp event happens to coincide — the classic "Continue lost my progress" bug.
 ## @risk _grant_quest_rewards early-returns off-tree, so a bare test grants NOTHING (not even reputation); asserting rewards without a live player silently passes for the wrong reason.
 ## @risk Restoring a quest whose .tres moved drops it SILENTLY — the _load_warnings array is the only surface that tells the player, and it is consume-once.
 ## @test res://tests/test_quests.gd
 ## @test res://tests/test_quest_tracker.gd
+## @test res://tests/test_quest_stages.gd
 
 ## QuestTracker — the live quest tracker, split out of GameState (M1).
 ##
@@ -18,7 +21,7 @@ extends Node
 ## call sites — dialogue choices, TriggerVolumes, QuestStarters, Readables — keep working unedited.
 ##
 ## WHAT LIVES WHERE:
-##   • Here — the tracker dicts, the four signals, the whole quest API, reward granting, the cfg round-trip.
+##   • Here — the tracker dicts (including each active quest's current stage), the quest signals, the whole quest API, reward granting, the cfg round-trip.
 ##   • GameState — story FLAGS (quests only *read* them, via notify_flag_set), the autosave pump
 ##     (autosave_world_state), and the live-player lookup (live_player) that reward granting needs.
 ## The dependency runs ONE way at call time (tracker -> GameState), so autoload order does not matter; nothing here
@@ -42,9 +45,23 @@ signal objective_advanced(quest: Quest, objective: QuestObjective)
 signal quest_completed(quest: Quest)
 ## WR-6: a quest was FAILED (explicit fail_quest, or its expire_on_flag fired). Wire a journal strike-through / toast.
 signal quest_failed(quest: Quest)
+## An ACTIVE staged quest moved to a DIFFERENT stage (its next_stage_id on completing a stage, or a set_quest_stage
+## jump). NOT emitted for the first stage start_quest puts a quest in -- quest_started covers that. The journal, the HUD
+## tracker line and the objective markers repaint on it (the live objective list just changed wholesale).
+signal quest_stage_changed(quest: Quest, stage: QuestStage)
 
-## THE LIVE TRACKER. _quests_active: quest_id -> { quest: Quest, progress: { objective_id(String): int } }.
+## How deep stage entries may nest inside ONE call before the tracker refuses to enter another. A stage whose FLAG
+## objectives are already satisfied completes the moment it is entered (the back-fill), so a next_stage_id LOOP of such
+## stages would recurse forever; real content never chains anywhere near this many beats in a single instant.
+const MAX_STAGE_ENTRY_DEPTH := 32
+
+## THE LIVE TRACKER. _quests_active: quest_id -> { quest: Quest, stage: StringName, epoch: int,
+## progress: { objective_id(String): int } }. `stage` is the current QuestStage id (&"" for a stage-less quest), and
+## `progress` holds ONLY that stage's objectives (entering a stage re-seeds it). `epoch` counts stage entries, so a loop
+## over one stage's objectives can tell that an advance handed the quest to another stage -- even back to the SAME id.
 var _quests_active: Dictionary = {}
+## Current nesting of _enter_stage (see MAX_STAGE_ENTRY_DEPTH).
+var _stage_entry_depth := 0
 ## Finished quest ids -> the Quest resource (stored whole, not just a flag, so the journal can show completed titles).
 var _quests_completed: Dictionary = {}
 ## WR-6: failed/expired quest ids -> the Quest resource (mirrors _quests_completed). A failed quest can't be
@@ -83,46 +100,137 @@ func reset() -> void:
 
 # --- Starting / advancing / closing ---------------------------------------------------------------------------
 
-## Begin tracking `quest` — no-op if it's null/idless, already active, or already completed. Seeds each
-## objective's progress to 0 and emits quest_started.
+## Begin tracking `quest` — no-op if it's null/idless, already active, or already completed. Puts a staged quest in
+## stages[0] (a stage-less quest's stage is &""), seeds that stage's objectives to 0, emits quest_started, then runs
+## the stage-entry effects (set_flag_on_enter + the FLAG back-fill -- see _run_stage_entry).
 func start_quest(quest: Quest) -> void:
 	if quest == null or quest.id == &"" or is_quest_active(quest.id) or is_quest_completed(quest.id) or is_quest_failed(quest.id):
 		return  # WR-6: a failed quest is closed for good — it can't be re-started
 	if quest.prereq_quest_id != &"" and not is_quest_completed(quest.prereq_quest_id):
 		return  # a prerequisite quest hasn't been finished yet — this one can't start
-	var progress := {}
-	for obj in quest.objectives:
-		if obj != null and obj.id != &"":
-			progress[String(obj.id)] = 0
-	_quests_active[quest.id] = {"quest": quest, "progress": progress}
+	var stage := quest.first_stage_id()
+	_quests_active[quest.id] = {"quest": quest, "stage": stage, "epoch": 0, "progress": _seed_progress(quest, stage)}
 	quest_started.emit(quest)
-	# M15: back-fill FLAG objectives whose flag is ALREADY set — a CHAINED quest that keys on a flag an earlier quest
-	# (or any trigger/dialogue) already flipped. set_flag won't fire again, so without this the objective stalls at 0.
-	# Mirror the live set_flag hook (advance_objective, same call as _advance_flag_objectives) so it advances / auto-
-	# completes identically to a flag set while active. get_flag defaults false, so a falsey/unset flag is NOT satisfied.
-	for obj in quest.objectives:
-		if obj != null and obj.id != &"" and obj.type == QuestObjective.Type.FLAG and _gs().get_flag(obj.target_id):
-			advance_objective(quest.id, obj.id, 1)
+	_run_stage_entry(quest.id)
 	_gs().autosave_world_state()  # a started quest is world state — persist it
 
-## Bump an active quest's objective toward its required_count (clamped). Auto-completes the quest once every
-## non-optional objective is met (when the quest auto_completes). No-op for an unknown quest/objective.
+## Bump an active quest's objective toward its required_count (clamped). The objective is looked up in the quest's
+## CURRENT stage only (a stage-less quest: its own objectives), so an id belonging to another stage is a no-op. Once
+## every non-optional objective of that stage is met: a stage with a next_stage_id hands the quest on to it (whatever
+## auto_complete says -- that flag governs only the END); a terminal stage, or a stage-less quest, completes when the
+## quest auto_completes. No-op for an unknown quest/objective.
 func advance_objective(quest_id: StringName, objective_id: StringName, amount: int = 1) -> void:
 	if not is_quest_active(quest_id):
 		return
 	var entry: Dictionary = _quests_active[quest_id]
 	var quest: Quest = entry["quest"]
-	var obj := _quest_objective(quest, objective_id)
+	var stage: StringName = entry.get("stage", &"")
+	var obj := _quest_objective(quest, objective_id, stage)
 	if obj == null:
 		return
 	var key := String(objective_id)
 	var progress: Dictionary = entry["progress"]
 	progress[key] = mini(int(progress.get(key, 0)) + amount, obj.required_count)
 	objective_advanced.emit(quest, obj)
-	if quest.auto_complete and _all_required_done(quest, progress):
-		complete_quest(quest_id)  # this autosaves via complete_quest, so don't double-save below
-	else:
-		_gs().autosave_world_state()  # objective progress is world state — persist it
+	if not _at_epoch(quest_id, int(entry.get("epoch", 0))):
+		return  # a listener moved or closed the quest inside the emit -- this advance's stage is no longer current
+	if _all_required_done(quest.objectives_for_stage(stage), progress):
+		var st := quest.stage_by_id(stage)
+		if st != null and st.next_stage_id != &"":
+			if _enter_stage(quest_id, st.next_stage_id):
+				return  # _enter_stage autosaved
+			_gs().autosave_world_state()  # a dangling next_stage_id: the quest stays put (warned), but the tick persists
+			return
+		if quest.auto_complete:
+			complete_quest(quest_id)  # this autosaves via complete_quest, so don't double-save below
+			return
+	_gs().autosave_world_state()  # objective progress is world state — persist it
+
+
+## Move an ACTIVE staged quest to the stage `stage_id` -- a JUMP from wherever it is (the DialogueChoice
+## set_quest_stage_id consequence; two routes converge by jumping into the same stage). Returns true when the quest is
+## now in that stage. Re-entering the stage it is ALREADY in is a no-op that answers true (it does not reset that
+## stage's progress). Refused (false, with a warning naming the ids) for a quest that is not active, a stage-less quest,
+## or an id that names no stage of it -- the Audit reports that last one as an ERROR.
+func set_quest_stage(quest_id: StringName, stage_id: StringName) -> bool:
+	if not is_quest_active(quest_id):
+		return false
+	var entry: Dictionary = _quests_active[quest_id]
+	var quest: Quest = entry["quest"]
+	if not quest.has_stages():
+		push_warning("QuestTracker: set_quest_stage('%s', '%s') -- that quest has no stages" % [quest_id, stage_id])
+		return false
+	if entry.get("stage", &"") == stage_id:
+		return true
+	return _enter_stage(quest_id, stage_id)
+
+
+## Put an active quest into `stage_id`: re-seed progress for that stage's objectives, bump the entry's epoch, emit
+## quest_stage_changed, run the stage-entry effects, autosave. False (warned) for an unknown stage or a nesting past
+## MAX_STAGE_ENTRY_DEPTH (a next_stage_id loop whose stages all complete on entry).
+func _enter_stage(quest_id: StringName, stage_id: StringName) -> bool:
+	var entry: Dictionary = _quests_active[quest_id]
+	var quest: Quest = entry["quest"]
+	var st := quest.stage_by_id(stage_id)
+	if st == null:
+		push_warning("QuestTracker: quest '%s' has no stage '%s' -- it stays in '%s'" % [quest_id, stage_id, entry.get("stage", &"")])
+		return false
+	if _stage_entry_depth >= MAX_STAGE_ENTRY_DEPTH:
+		push_warning("QuestTracker: quest '%s' entered %d stages in one instant -- a next_stage_id loop of stages that complete on entry; stopped before '%s'" % [quest_id, MAX_STAGE_ENTRY_DEPTH, stage_id])
+		return false
+	_stage_entry_depth += 1
+	entry["stage"] = stage_id
+	entry["epoch"] = int(entry.get("epoch", 0)) + 1
+	entry["progress"] = _seed_progress(quest, stage_id)
+	quest_stage_changed.emit(quest, st)
+	_run_stage_entry(quest_id)
+	_stage_entry_depth -= 1
+	_gs().autosave_world_state()  # a stage change is world state — persist it
+	return true
+
+
+## What happens the moment a quest is IN a stage (its first, on start; any later one, on entry):
+##   1. M15 back-fill: every FLAG objective of the stage whose flag is ALREADY set advances once -- a chained quest or
+##      a later beat keying on a flag something flipped earlier. set_flag won't fire again, so without this the
+##      objective stalls at 0. Mirrors the live set_flag hook (advance_objective), so it can complete the stage /
+##      the quest identically; get_flag defaults false, so an unset/falsey flag is NOT satisfied.
+##   2. set_flag_on_enter, but only when that flag is not ALREADY truthy. Order matters: the back-fill has already
+##      counted an already-set flag once, and GameState.set_flag notifies on EVERY truthy write, so setting it again
+##      would tick a matching objective a second time.
+## Both steps stop the moment the quest leaves the stage (an advance completed it, or a flag listener moved / closed
+## it): the epoch check keeps a stale loop from ticking a same-id objective of the stage it handed off to.
+func _run_stage_entry(quest_id: StringName) -> void:
+	if not is_quest_active(quest_id):
+		return
+	var entry: Dictionary = _quests_active[quest_id]
+	var quest: Quest = entry["quest"]
+	var stage: StringName = entry.get("stage", &"")
+	var epoch := int(entry.get("epoch", 0))
+	for obj in quest.objectives_for_stage(stage):
+		if not _at_epoch(quest_id, epoch):
+			return
+		if obj != null and obj.id != &"" and obj.type == QuestObjective.Type.FLAG and _gs().get_flag(obj.target_id):
+			advance_objective(quest_id, obj.id, 1)
+	if not _at_epoch(quest_id, epoch):
+		return
+	var st := quest.stage_by_id(stage)
+	if st != null and st.set_flag_on_enter != &"" and not _gs().get_flag(st.set_flag_on_enter):
+		_gs().set_flag(st.set_flag_on_enter, true)
+
+
+## True while `quest_id` is still active AND still in the stage entry numbered `epoch`.
+func _at_epoch(quest_id: StringName, epoch: int) -> bool:
+	var entry: Variant = _quests_active.get(quest_id)
+	return entry != null and int(entry.get("epoch", 0)) == epoch
+
+
+## {objective id: 0} for every id'd objective of the quest while in `stage_id`.
+func _seed_progress(quest: Quest, stage_id: StringName) -> Dictionary:
+	var progress := {}
+	for obj in quest.objectives_for_stage(stage_id):
+		if obj != null and obj.id != &"":
+			progress[String(obj.id)] = 0
+	return progress
 
 ## Finish an active quest: move it to completed, grant its rewards, emit quest_completed. Works as an explicit
 ## turn-in or via auto-complete.
@@ -188,6 +296,30 @@ func failed_quests() -> Array:
 			out.append(q)
 	return out
 
+## The id of the stage an ACTIVE quest is in -- &"" for a stage-less quest or a quest that isn't active.
+func current_stage_id(quest_id: StringName) -> StringName:
+	var entry: Variant = _quests_active.get(quest_id)
+	return entry.get("stage", &"") if entry != null else &""
+
+## The QuestStage an ACTIVE quest is in (null for a stage-less quest or one that isn't active) -- the journal reads its
+## journal_text.
+func current_stage(quest_id: StringName) -> QuestStage:
+	var entry: Variant = _quests_active.get(quest_id)
+	if entry == null:
+		return null
+	var quest: Quest = entry["quest"]
+	return quest.stage_by_id(entry.get("stage", &"")) if quest != null else null
+
+## The objectives an ACTIVE quest is working on right now: the current stage's (a stage-less quest: its own). Empty
+## for a quest that isn't active. Every reader of "what does the player have to do" goes through here -- the journal,
+## the HUD tracker line, the objective markers, the debug console.
+func current_objectives(quest_id: StringName) -> Array[QuestObjective]:
+	var entry: Variant = _quests_active.get(quest_id)
+	if entry == null or entry["quest"] == null:
+		var none: Array[QuestObjective] = []
+		return none
+	return (entry["quest"] as Quest).objectives_for_stage(entry.get("stage", &""))
+
 ## An active objective's current count (0 when the quest/objective isn't active).
 func objective_progress(quest_id: StringName, objective_id: StringName) -> int:
 	if not is_quest_active(quest_id):
@@ -200,19 +332,22 @@ func is_objective_done(quest_id: StringName, objective_id: StringName) -> bool:
 		return true
 	if not is_quest_active(quest_id):
 		return false
-	var obj := _quest_objective(_quests_active[quest_id]["quest"], objective_id)
-	return obj != null and int(_quests_active[quest_id]["progress"].get(String(objective_id), 0)) >= obj.required_count
+	var entry: Dictionary = _quests_active[quest_id]
+	var obj := _quest_objective(entry["quest"], objective_id, entry.get("stage", &""))
+	return obj != null and int(entry["progress"].get(String(objective_id), 0)) >= obj.required_count
 
-func _quest_objective(quest: Quest, objective_id: StringName) -> QuestObjective:
+## The objective `objective_id` of `quest` while in `stage_id` (the current stage's list only), or null.
+func _quest_objective(quest: Quest, objective_id: StringName, stage_id: StringName = &"") -> QuestObjective:
 	if quest == null:
 		return null
-	for obj in quest.objectives:
+	for obj in quest.objectives_for_stage(stage_id):
 		if obj != null and obj.id == objective_id:
 			return obj
 	return null
 
-func _all_required_done(quest: Quest, progress: Dictionary) -> bool:
-	for obj in quest.objectives:
+## Every non-optional objective in `objectives` has reached its required_count in `progress`.
+func _all_required_done(objectives: Array[QuestObjective], progress: Dictionary) -> bool:
+	for obj in objectives:
 		if obj == null or obj.optional:
 			continue
 		if int(progress.get(String(obj.id), 0)) < obj.required_count:
@@ -282,13 +417,20 @@ func _reward_item_total(bag: CharacterInventory) -> int:
 ## identity-keyed objective survives display_name edits/localization, while a pre-identity .tres authored against
 ## a display name (clear_the_block's &"Raider") keeps working unedited. The != target guard means an objective
 ## matching BOTH forms (every id-less NPC: identity == name) still advances exactly ONCE per event.
+##
+## Only the CURRENT stage's objectives match (a staged quest does not react to an event its player is not on yet), and
+## the walk stops for a quest the moment an advance hands it to another stage -- the epoch check -- so one event can
+## never tick a same-id objective of the stage it just entered.
 func _advance_objectives_matching(obj_type: int, target: StringName, legacy_fallback: StringName = &"") -> void:
 	for quest_id in _quests_active.keys():
 		var entry: Variant = _quests_active.get(quest_id)
 		if entry == null:
 			continue
 		var quest: Quest = entry["quest"]
-		for obj in quest.objectives:
+		var epoch := int(entry.get("epoch", 0))
+		for obj in quest.objectives_for_stage(entry.get("stage", &"")):
+			if not _at_epoch(quest_id, epoch):
+				break
 			if obj == null or obj.type != obj_type:
 				continue
 			if obj.target_id == target \
@@ -341,6 +483,9 @@ func notify_use(item_id: StringName) -> void:
 
 ## Write the tracker to `cfg`, keyed by resource_path (a code-built quest with no path can't round-trip and is
 ## skipped with a warning). Active quests carry their objective progress; completed and failed carry just the path.
+## A STAGED active quest also carries `stage` -- its current stage id, beside the progress that belongs to that stage
+## (SAVE_VERSION 6). A stage-less quest writes no `stage` key at all, so its record is byte-for-byte the pre-stages
+## {path, progress} an older build reads.
 ## Called by GameState._save_perks_and_quests — the quest half of the same cfg.
 func save_into(cfg: ConfigFile) -> void:
 	for qid in _quests_active:
@@ -351,7 +496,11 @@ func save_into(cfg: ConfigFile) -> void:
 			# load-side degrade in this file pairs the drop with a push_warning; the save side gets the same.
 			push_warning("QuestTracker: active quest '%s' has no resource_path — it will NOT survive this save" % qid)
 			continue
-		cfg.set_value("quests_active", String(qid), {"path": q.resource_path, "progress": entry.get("progress", {})})
+		var rec := {"path": q.resource_path, "progress": entry.get("progress", {})}
+		var stage: StringName = entry.get("stage", &"")
+		if stage != &"":
+			rec["stage"] = String(stage)
+		cfg.set_value("quests_active", String(qid), rec)
 	for qid in _quests_completed:
 		var qc: Quest = _quests_completed[qid]
 		if qc != null and qc.resource_path != "":
@@ -363,6 +512,10 @@ func save_into(cfg: ConfigFile) -> void:
 
 ## Restore the tracker from `cfg` (resource-path keyed). A renamed/removed .tres path is skipped with a warning
 ## rather than crashing the boot load — degrade, never hard-fail. Repopulates _load_warnings for the HUD.
+## STAGES, lazily (SAVE_VERSION 6 -- no load-time fold): a staged quest's record with no `stage` field (a save written
+## before stages, or before the quest GAINED stages) resumes in stages[0]; a `stage` that names no stage of the quest
+## (renamed or deleted since the save) also resumes in stages[0], with a warning naming it. Resuming never re-runs
+## the stage-entry effects: the flags they set were saved with the profile. A stage-less quest ignores the field.
 ## Called by GameState._load_perks_and_quests.
 func load_from(cfg: ConfigFile) -> void:
 	_load_warnings.clear()  # B-F40: fresh warnings for THIS load (the HUD consumes them once)
@@ -389,7 +542,15 @@ func load_from(cfg: ConfigFile) -> void:
 					var v = prog[k]
 					if v is int or v is float or v is bool:
 						progress[str(k)] = int(v)
-			_quests_active[StringName(qid)] = {"quest": q, "progress": progress}
+			var stage := StringName(str(rec.get("stage", "")))
+			if q.has_stages():
+				if q.stage_by_id(stage) == null:
+					if stage != &"":
+						push_warning("QuestTracker: active quest '%s' was saved in stage '%s', which it no longer has -- resuming at its first stage" % [qid, stage])
+					stage = q.first_stage_id()
+			else:
+				stage = &""
+			_quests_active[StringName(qid)] = {"quest": q, "stage": stage, "epoch": 0, "progress": progress}
 	_quests_completed.clear()
 	if cfg.has_section("quests_completed"):
 		for qid in cfg.get_section_keys("quests_completed"):

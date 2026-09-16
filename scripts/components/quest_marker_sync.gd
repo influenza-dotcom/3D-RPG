@@ -2,7 +2,8 @@ class_name QuestMarkerSync
 extends Node
 
 ## Drop into a level: spawns a WorldMarker for each ACTIVE quest objective that has show_marker, and removes them
-## as objectives complete / quests finish or fail — so the Compass + Minimap point at your current objectives with
+## as objectives complete / stages change / quests finish or fail — so the Compass + Minimap point at your current
+## objectives (a staged quest: only the stage it is in) with
 ## no per-quest wiring. Driven by QuestTracker's quest signals (GameState only forwards the quest API; the signals
 ## live on QuestTracker); rebuilds the whole set on any quest change (cheap —
 ## there are few active objectives).
@@ -20,6 +21,8 @@ func _ready() -> void:
 	# completed one, so it needs the same rebuild — without this its beacons/pips linger for the rest of the session.
 	# quest_failed(quest) carries the same single arg as quest_started/quest_completed, so it shares the handler.
 	QuestTracker.quest_failed.connect(_on_quest_changed)
+	# A stage change swaps the live objective list wholesale: the old stage's beacons go, the new stage's appear.
+	QuestTracker.quest_stage_changed.connect(_on_objective_advanced)  # (quest, stage): same two-arg rebuild
 	_rebuild()
 
 func _on_quest_changed(_quest = null) -> void:
@@ -38,7 +41,7 @@ func _rebuild() -> void:
 		var q: Quest = GameState.active_quest(qid)
 		if q == null:
 			continue
-		for obj in q.objectives:
+		for obj in QuestTracker.current_objectives(qid):
 			if wants_marker(obj) and not GameState.is_objective_done(qid, obj.id):
 				_spawn_marker(obj.marker_position)
 

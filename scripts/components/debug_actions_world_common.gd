@@ -381,7 +381,19 @@ static func _quest_state(qid: StringName) -> String:
 		return "FAILED"
 	return "-"
 
-## `quest show`: the resource's flow fields plus, for an ACTIVE quest, live per-objective progress.
+## The objectives the console lists and addresses for `quest`: the CURRENT stage's while it is ACTIVE
+## (QuestTracker.current_objectives -- the same ids advance_objective will match), else what a start would put in play:
+## a staged quest's FIRST stage (Quest.objectives_for_stage), a stage-less quest's own `objectives`. Duck-typed, so a
+## malformed resource with no stage helpers still degrades to its `objectives` field (or null).
+static func _live_objectives(quest: Resource, qid: StringName) -> Variant:
+	if qid != &"" and QuestTracker.is_quest_active(qid):
+		return QuestTracker.current_objectives(qid)
+	if quest != null and quest.has_method(&"objectives_for_stage") and quest.has_method(&"first_stage_id"):
+		return quest.call(&"objectives_for_stage", quest.call(&"first_stage_id"))
+	return quest.get("objectives") if quest != null else null
+
+## `quest show`: the resource's flow fields plus, for an ACTIVE quest, live per-objective progress (a staged quest: the
+## stage it is in, and only that stage's objectives).
 static func _quest_report(quest: Resource, qid: StringName, path: String) -> PackedStringArray:
 	var out := PackedStringArray()
 	out.append("%s  \"%s\"   [%s]" % [qid, String(quest.get("title")), _quest_state(qid)])
@@ -395,7 +407,14 @@ static func _quest_report(quest: Resource, qid: StringName, path: String) -> Pac
 	if quest.get("next_quest") != null:
 		out.append("  chains into a next_quest on completion")
 	out.append("  " + _reward_text(quest))
-	var objectives_v: Variant = quest.get("objectives")
+	var stage_ids_v: Variant = quest.call(&"stage_ids") if quest.has_method(&"stage_ids") else []
+	if stage_ids_v is Array and not (stage_ids_v as Array).is_empty():
+		var names := PackedStringArray()
+		for sid in stage_ids_v:
+			names.append(String(sid))
+		var at := String(QuestTracker.current_stage_id(qid)) if QuestTracker.is_quest_active(qid) else "(not active)"
+		out.append("  stages %s   current: %s" % [" > ".join(names), at])
+	var objectives_v: Variant = _live_objectives(quest, qid)
 	var active := QuestTracker.is_quest_active(qid)
 	if objectives_v is Array:
 		var objectives: Array = objectives_v

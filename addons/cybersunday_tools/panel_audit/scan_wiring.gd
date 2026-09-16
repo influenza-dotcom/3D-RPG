@@ -24,10 +24,11 @@ extends RefCounted
 
 # --- field vocabularies (the REAL export names, read off the live scripts) ------------------------------------
 ## Story-flag fields that WRITE a flag (they call GameState.set_flag): TriggerVolume/DialogueChoice/Switch.set_flag,
-## Lock.unlock_flag, TutorialPrompt.seen_flag, Readable.set_flag_on_read, CutsceneAction.flag_name. unlock_flag is
-## ALSO read by Door, so it's a writer AND a reader. (set_flag does NOT false-match set_flag_on_read: _field_string_values
-## anchors `^\s*<field>\s*=`, and set_flag is followed by "_on_read", not "="; each field is matched independently.)
-const FLAG_WRITE_FIELDS: Array[String] = ["set_flag", "unlock_flag", "seen_flag", "set_flag_on_read", "flag_name"]
+## Lock.unlock_flag, TutorialPrompt.seen_flag, Readable.set_flag_on_read, CutsceneAction.flag_name,
+## QuestStage.set_flag_on_enter. unlock_flag is ALSO read by Door, so it's a writer AND a reader. (set_flag does NOT
+## false-match set_flag_on_read / set_flag_on_enter: _field_string_values anchors `^\s*<field>\s*=`, and set_flag is
+## followed by "_on_...", not "="; each field is matched independently.)
+const FLAG_WRITE_FIELDS: Array[String] = ["set_flag", "unlock_flag", "seen_flag", "set_flag_on_read", "flag_name", "set_flag_on_enter"]
 ## Story-flag fields that READ a flag (a gate / expiry): DialogueChoice.required_flag, Quest.expire_on_flag,
 ## Door.unlock_flag, and a FLAG QuestObjective's target_id (advanced when its flag is set).
 const FLAG_READ_FIELDS: Array[String] = ["required_flag", "expire_on_flag", "unlock_flag"]
@@ -84,6 +85,7 @@ static func run() -> Array:
 		"writers": {}, "readers": {}, "flag_src": {},
 		"quest_ids": {}, "objectives_by_quest": {},
 		"faction_ids": {}, "quest_refs": [], "advance_pairs": [], "faction_refs": [],
+		"stages_by_quest": {}, "stage_jumps": [], "quest_stage_findings": [],
 	}
 	_collect_factions(ctx)   # build the known-faction set (filenames + load to verify internal id) FIRST
 	_collect_quests(ctx)     # build the known-quest + per-quest objective sets
@@ -98,6 +100,11 @@ static func run() -> Array:
 		var msg := resolve_objective_id(pair["quest"], pair["objective"], ctx["objectives_by_quest"])
 		if msg != "":
 			out.append(_f("ERROR", pair["source"], msg))
+	for jump in ctx["stage_jumps"]:
+		var msg := resolve_stage_jump(jump["quest"], jump["stage"], ctx["quest_ids"], ctx["stages_by_quest"])
+		if msg != "":
+			out.append(_f("ERROR", jump["source"], msg))
+	out.append_array(ctx["quest_stage_findings"])
 	for ref in ctx["faction_refs"]:
 		var msg := resolve_faction_id(ref["value"], ctx["faction_ids"])
 		if msg != "":
@@ -151,6 +158,8 @@ static func _gather_file(path: String, ctx: Dictionary) -> void:
 		ctx["quest_refs"].append({"field": r["field"], "value": r["value"], "source": path})
 	for p in collect_advance_pairs(text):
 		ctx["advance_pairs"].append({"quest": p["quest"], "objective": p["objective"], "source": path})
+	for j in collect_stage_jumps(text):
+		ctx["stage_jumps"].append({"quest": j["quest"], "stage": j["stage"], "source": path})
 	for r in collect_faction_id_refs(text):
 		ctx["faction_refs"].append({"field": r["field"], "value": r["value"], "source": path})
 
@@ -222,11 +231,20 @@ static func _maybe_collect_quest(path: String, ctx: Dictionary) -> void:
 	var qid := str(quest.id)
 	if qid != "":
 		ctx["quest_ids"][qid] = true
+		# EVERY objective the quest can ever ask for (all_objectives: every stage's, for a staged quest) -- a trigger
+		# or conversation may legitimately advance an objective of a later stage.
 		var objs := {}
-		for obj in quest.objectives:
+		for obj in quest.all_objectives():
 			if obj != null and str(obj.id) != "":
 				objs[str(obj.id)] = true
 		ctx["objectives_by_quest"][qid] = objs
+		if quest.has_stages():
+			var sids := {}
+			for sid in quest.stage_ids():
+				sids[String(sid)] = true
+			ctx["stages_by_quest"][qid] = sids
+	for problem in quest_stage_problems(quest):
+		ctx["quest_stage_findings"].append(_f(String(problem["severity"]), path, String(problem["message"])))
 	# reward_reputation dict keys must name real factions (faction set was built first).
 	if not ctx.has("faction_dict_findings"):
 		ctx["faction_dict_findings"] = []
@@ -332,6 +350,86 @@ static func collect_advance_pairs(text: String) -> Array:
 		for i in n:
 			if quests[i] != "" and objs[i] != "":
 				out.append({"quest": quests[i], "objective": objs[i]})
+	return out
+
+
+# ------------------------------------------------------------------------------------------------------------
+# PASS 2b -- QUEST STAGES (QuestStage ids, next_stage_id, DialogueChoice.set_quest_stage_id)
+# ------------------------------------------------------------------------------------------------------------
+# A staged quest's stage ids are primary keys (the save stores the current one) AND the targets of two references:
+# a stage's next_stage_id inside the quest, and a conversation choice's set_quest_stage_id (whose quest is the same
+# block's advance_quest_id). Every way one of those can name nothing is an ERROR -- at runtime each is a silent
+# refusal (the quest just never moves), exactly the dead-end class this pass exists for.
+
+## The findings about ONE loaded quest's own stages, as [{severity, message}] (the caller stamps the source). PURE --
+## duck-typed over the resource, so a test hands it Quest.new()s. Rules:
+##   ERROR  a stage with a blank id (the save cannot remember it; nothing can jump to it)
+##   ERROR  two stages with the same id (the resolver takes the first; the second is unreachable)
+##   ERROR  a next_stage_id that names no stage of this quest (the quest stalls there instead of moving on)
+##   WARN   a null row in `stages` (a deleted sub-resource: ignored at runtime)
+##   WARN   a staged quest that ALSO carries objectives on the Quest itself (they are ignored once stages exist)
+static func quest_stage_problems(quest: Variant) -> Array:
+	var out: Array = []
+	if typeof(quest) != TYPE_OBJECT or not is_instance_valid(quest):
+		return out
+	var stages_v: Variant = quest.get("stages")
+	if not (stages_v is Array) or (stages_v as Array).is_empty():
+		return out
+	var stages: Array = stages_v
+	var seen := {}
+	for i in stages.size():
+		var st: Variant = stages[i]
+		if st == null:
+			out.append({"severity": "WARN", "message": "Quest stage %d is empty (a missing stage) -- it is skipped; remove the row." % (i + 1)})
+			continue
+		var sid := String(st.get("id"))
+		if sid == "":
+			out.append({"severity": "ERROR", "message": "Quest stage %d has no id -- a save cannot remember it and nothing can move the quest to it." % (i + 1)})
+		elif seen.has(sid):
+			out.append({"severity": "ERROR", "message": "Quest stage %d reuses the id \"%s\" (stage %d already has it) -- stage ids must be unique within a quest." % [i + 1, sid, int(seen[sid]) + 1]})
+		else:
+			seen[sid] = i
+	for i in stages.size():
+		var st: Variant = stages[i]
+		if st == null:
+			continue
+		var nxt := String(st.get("next_stage_id"))
+		if nxt != "" and not seen.has(nxt):
+			out.append({"severity": "ERROR", "message": "Quest stage \"%s\" moves on to stage \"%s\", which this quest doesn't have -- the quest would stall there. Pick a real stage or leave Next stage blank to end the quest." % [String(st.get("id")), nxt]})
+	var own_v: Variant = quest.get("objectives")
+	if own_v is Array and not (own_v as Array).is_empty():
+		out.append({"severity": "WARN", "message": "This quest has stages AND its own objectives -- once a quest has stages only the stages' objectives count, so its own %d are ignored. Move them into a stage." % (own_v as Array).size()})
+	return out
+
+
+## Resolve one set_quest_stage_id jump (the quest named by the SAME block's advance_quest_id). "" when it resolves or the
+## stage id is blank; an unknown quest id is left to pass 2's quest-id resolver (it already reports advance_quest_id),
+## so it is NOT double-reported here. PURE.
+static func resolve_stage_jump(quest_id: String, stage_id: String, known_quests: Dictionary, stages_by_quest: Dictionary) -> String:
+	if stage_id == "":
+		return ""
+	if quest_id == "":
+		return "set_quest_stage_id \"%s\" names no quest -- fill Advance quest id with the quest to move." % stage_id
+	if not known_quests.has(quest_id):
+		return ""
+	if not stages_by_quest.has(quest_id):
+		return "set_quest_stage_id \"%s\" jumps quest \"%s\", which has no stages -- add stages to the quest, or remove the jump." % [stage_id, quest_id]
+	if not (stages_by_quest[quest_id] as Dictionary).has(stage_id):
+		return "set_quest_stage_id \"%s\" names a stage quest \"%s\" doesn't have -- the jump would be refused." % [stage_id, quest_id]
+	return ""
+
+
+## The (advance_quest_id, set_quest_stage_id) jumps in one file's text, paired WITHIN each [node]/[sub_resource]
+## block like collect_advance_pairs (a DialogueChoice carries both on one block). Emitted whenever the block names a
+## stage -- a blank quest half is itself the finding. PURE.
+static func collect_stage_jumps(text: String) -> Array:
+	var out: Array = []
+	for block in _resource_blocks(text):
+		var stages := _field_string_values(block, "set_quest_stage_id")
+		if stages.is_empty() or String(stages[0]) == "":
+			continue
+		var quests := _field_string_values(block, "advance_quest_id")
+		out.append({"quest": String(quests[0]) if not quests.is_empty() else "", "stage": String(stages[0])})
 	return out
 
 

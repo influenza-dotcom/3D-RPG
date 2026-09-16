@@ -410,3 +410,65 @@ lines = Array[ExtResource("1_line")]([SubResource("Line_prompt"), SubResource("L
 	assert_eq(String(models[0]["where"]), "", "a .tres has no carrying node -- the source path names it")
 	assert_eq(Wiring.dialogue_findings(models[0]["model"], "res://x.tres").size(), 0, "a clean, fully id-addressed conversation has no findings")
 	assert_eq(Wiring.dialogue_models_from_text("[gd_scene format=3]\n[node name=\"X\" type=\"Node3D\"]\n").size(), 0, "a file with no dialogue scripts yields no models (and no false conversation)")
+
+
+# --- PASS 2b: quest stages -----------------------------------------------------------------------------------------
+
+func _stage(sid: StringName, next := &"") -> QuestStage:
+	var st := QuestStage.new()
+	st.id = sid
+	st.next_stage_id = next
+	return st
+
+
+func test_quest_stage_problems_is_silent_for_a_stage_less_quest_and_a_clean_staged_one() -> void:
+	var plain := Quest.new()
+	plain.objectives.append(QuestObjective.new())
+	assert_eq(Wiring.quest_stage_problems(plain).size(), 0, "a stage-less quest (every quest before stages) has no stage findings")
+	var q := Quest.new()
+	q.stages = [_stage(&"a", &"b"), _stage(&"b")]
+	assert_eq(Wiring.quest_stage_problems(q).size(), 0, "unique ids + a next_stage_id that resolves + a terminal stage = clean")
+	assert_eq(Wiring.quest_stage_problems(null).size(), 0, "null is no quest, no crash")
+
+
+func test_quest_stage_problems_reports_blank_duplicate_and_dangling_ids() -> void:
+	var q := Quest.new()
+	q.stages = [_stage(&"a", &"gone"), _stage(&""), _stage(&"a"), null]
+	q.objectives.append(QuestObjective.new())
+	var out: Array = Wiring.quest_stage_problems(q)
+	var by_sev := {"ERROR": 0, "WARN": 0}
+	var text := ""
+	for f in out:
+		by_sev[f["severity"]] += 1
+		text += String(f["message"]) + "\n"
+	assert_eq(by_sev["ERROR"], 3, "blank id + duplicate id + dangling next_stage_id are ERRORs")
+	assert_eq(by_sev["WARN"], 2, "a null stage row + the ignored quest-level objectives are WARNs")
+	assert_true(text.contains("stage 2 has no id"), "the blank id names the row")
+	assert_true(text.contains("reuses the id \"a\" (stage 1 already has it)"), "the duplicate names both rows")
+	assert_true(text.contains("moves on to stage \"gone\""), "the dangling next_stage_id names the id")
+	assert_true(text.contains("its own 1 are ignored"), "the ignored-objectives warning says how many")
+
+
+func test_resolve_stage_jump() -> void:
+	var quests := {"heist": true, "plain": true}
+	var stages := {"heist": {"intro": true, "inside": true}}
+	assert_eq(Wiring.resolve_stage_jump("heist", "inside", quests, stages), "", "a real stage of a staged quest resolves")
+	assert_eq(Wiring.resolve_stage_jump("heist", "", quests, stages), "", "a blank stage id is an unset field")
+	assert_true(Wiring.resolve_stage_jump("", "inside", quests, stages).contains("names no quest"), "a stage with no quest half is an error")
+	assert_true(Wiring.resolve_stage_jump("plain", "inside", quests, stages).contains("has no stages"), "jumping a stage-less quest is an error")
+	assert_true(Wiring.resolve_stage_jump("heist", "vault", quests, stages).contains("doesn't have"), "an unknown stage is an error")
+	assert_eq(Wiring.resolve_stage_jump("ghost", "inside", quests, stages), "", "an unknown QUEST is left to the quest-id resolver (reported once, not twice)")
+
+
+func test_collect_stage_jumps_pairs_within_a_block() -> void:
+	var text := "[sub_resource type=\"Resource\" id=\"c1\"]\nadvance_quest_id = &\"heist\"\nset_quest_stage_id = &\"inside\"\n\n[sub_resource type=\"Resource\" id=\"c2\"]\nset_quest_stage_id = &\"orphan\"\n\n[sub_resource type=\"Resource\" id=\"c3\"]\nadvance_quest_id = &\"heist\"\nadvance_objective_id = &\"x\"\n"
+	var jumps: Array = Wiring.collect_stage_jumps(text)
+	assert_eq(jumps.size(), 2, "one jump per block that names a stage (the objective-only block makes none)")
+	assert_eq(jumps[0], {"quest": "heist", "stage": "inside"}, "the stage pairs with its own block's quest")
+	assert_eq(jumps[1], {"quest": "", "stage": "orphan"}, "a stage with no quest in its block keeps a blank quest half (that is the finding)")
+
+
+func test_set_flag_on_enter_is_a_flag_writer() -> void:
+	var refs := Wiring.collect_flag_refs("set_flag_on_enter = &\"reached_vault\"\n")
+	assert_true(refs["write"].has("reached_vault"), "QuestStage.set_flag_on_enter sets a flag -- without this a gate reading it is a false 'dead gate'")
+	assert_false(refs["write"].has(""), "the shorter set_flag entry does not false-match set_flag_on_enter")

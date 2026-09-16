@@ -1,7 +1,8 @@
 @tool
 extends RefCounted
 
-## PURE static mutation ops on a Quest's OBJECTIVES list, its item REWARDS list, and its drift-prone id fields —
+## PURE static mutation ops on a Quest's STAGES, its OBJECTIVES (the quest's own, or one stage's), its item REWARDS
+## list, and its drift-prone id fields —
 ## the testable core of the Quest Edit dock. Every op works on a live Quest resource IN MEMORY only: no
 ## EditorInterface, no ResourceSaver, no scene tree, no file I/O. The dock (quest_editor.gd) is thin glue that
 ## calls these, then persists the result through ContentSaveGuard.save_with_backup; the GUT suite exercises THESE
@@ -15,17 +16,24 @@ extends RefCounted
 ## to the bool convention: it returns the NUMBER of fields it repaired, because the dock reports that count on its
 ## status line ("silently fixed 2 fields" is information a designer needs).
 ##
-## Field/method names mirror scripts/quests/quest.gd (Quest.objectives: Array[QuestObjective], Quest.rewards:
-## Array[ItemStack], Quest.prereq_quest_id, Quest.expire_on_flag), quest_objective.gd
+## Field/method names mirror scripts/quests/quest.gd (Quest.objectives: Array[QuestObjective], Quest.stages:
+## Array[QuestStage], Quest.rewards: Array[ItemStack], Quest.prereq_quest_id, Quest.expire_on_flag), quest_stage.gd
+## (QuestStage.id/journal_text/objectives/next_stage_id/set_flag_on_enter), quest_objective.gd
 ## (QuestObjective.id/type/target_id/required_count/description) and scripts/items/item_stack.gd (ItemStack.item:
 ## Item, ItemStack.count: int) EXACTLY.
+##
+## WHERE OBJECTIVES LIVE: a stage-less quest's objectives are Quest.objectives; a staged quest's are each
+## QuestStage.objectives (the Quest's own list is ignored at runtime). Every objective op therefore takes an OPTIONAL
+## `stage` -- null means the quest's own list, exactly the pre-stages call shape -- and the dock passes the stage the
+## designer picked.
 
 # --- objectives ------------------------------------------------------------------------------------------------
 
 ## A fresh QuestObjective seeded the same designer-friendly way content_scaffold.build_quest seeds one: a FLAG
-## objective (no on-disk target registry needed), a stable unique id, required_count 1. Appends it to the quest's
-## objectives and returns true. No-op (false) on a null quest.
-static func add_objective(q: Quest) -> bool:
+## objective (no on-disk target registry needed), a stable id unique across the WHOLE quest (its own list and every
+## stage's, so a trigger's advance_objective_id can never be ambiguous), required_count 1. Appends it to `stage`'s
+## objectives when a stage is given, else to the quest's own, and returns true. No-op (false) on a null quest.
+static func add_objective(q: Quest, stage: QuestStage = null) -> bool:
 	if q == null:
 		return false
 	var o := QuestObjective.new()
@@ -34,39 +42,133 @@ static func add_objective(q: Quest) -> bool:
 	o.target_id = &""
 	o.required_count = 1
 	o.description = "TODO: describe this objective."
-	q.objectives.append(o)
+	_objective_list(q, stage).append(o)
 	return true
 
 
 ## Remove the objective at `index`. Returns true if removed, false (no-op) on a null quest or an out-of-range
 ## index. Bounds-guarded so a stale selection can't crash the dock.
-static func remove_objective(q: Quest, index: int) -> bool:
+static func remove_objective(q: Quest, index: int, stage: QuestStage = null) -> bool:
 	if q == null:
 		return false
-	if index < 0 or index >= q.objectives.size():
+	var list := _objective_list(q, stage)
+	if index < 0 or index >= list.size():
 		return false
-	q.objectives.remove_at(index)
+	list.remove_at(index)
 	return true
 
 
 ## Move the objective at `index` by `dir` (-1 = up / earlier, +1 = down / later). Returns true if it moved, false
 ## (no-op) on a null quest, a bad index, a |dir| != 1, or a move that would fall off either end. Order matters:
 ## non-optional objectives gate completion in list order, so up/down is the designer's sequencing tool.
-static func move_objective(q: Quest, index: int, dir: int) -> bool:
+static func move_objective(q: Quest, index: int, dir: int, stage: QuestStage = null) -> bool:
 	if q == null:
 		return false
 	if dir != -1 and dir != 1:
 		return false
-	var n := q.objectives.size()
+	var list := _objective_list(q, stage)
+	var n := list.size()
 	if index < 0 or index >= n:
 		return false
 	var target := index + dir
 	if target < 0 or target >= n:
 		return false
-	var o := q.objectives[index]
-	q.objectives.remove_at(index)
-	q.objectives.insert(target, o)
+	var o := list[index]
+	list.remove_at(index)
+	list.insert(target, o)
 	return true
+
+
+# --- stages (Quest.stages: Array[QuestStage]) -------------------------------------------------------------------------
+# Same bool convention as the lists above. Two ops carry a deliberate data MOVE, and both exist so that turning stages
+# on or off never loses an objective or changes how the quest plays:
+#   * add_stage on a quest with NO stages yet moves the quest's own objectives into that first stage -- a one-stage,
+#     terminal quest with the same objectives plays exactly like the stage-less quest it was (and a save made before
+#     resumes in stages[0] with its progress keys intact);
+#   * remove_stage of the LAST stage moves its objectives back onto the quest (when the quest's own list is empty),
+#     the exact inverse.
+# Neither op rewrites a next_stage_id or a conversation's set_quest_stage_id that named a removed stage: no silent
+# edits -- the Audit reports every dangling one. rename_stage_id is the op that DOES carry references, because a
+# rename is a request to keep them.
+
+## Append a fresh stage with a unique "stage_N" id (terminal: no next stage) and return true. The FIRST stage added to a
+## quest takes the quest's own objectives with it (see above). No-op (false) on a null quest.
+static func add_stage(q: Quest) -> bool:
+	if q == null:
+		return false
+	var st := QuestStage.new()
+	st.id = _next_stage_id(q)
+	if q.stages.is_empty() and not q.objectives.is_empty():
+		st.objectives.append_array(q.objectives)
+		q.objectives.clear()
+	q.stages.append(st)
+	return true
+
+
+## Remove the stage at `index`. Returns true if removed, false on a null quest / out-of-range index. Removing the ONLY
+## stage hands its objectives back to the quest's own list when that list is empty (the quest becomes stage-less and
+## plays as one implicit stage again).
+static func remove_stage(q: Quest, index: int) -> bool:
+	if q == null or index < 0 or index >= q.stages.size():
+		return false
+	var st := q.stages[index]
+	q.stages.remove_at(index)
+	if q.stages.is_empty() and st != null and q.objectives.is_empty():
+		q.objectives.append_array(st.objectives)
+	return true
+
+
+## Move the stage at `index` by `dir` (-1 / +1). Order means ONE thing: the quest STARTS in stages[0]. After that it
+## moves by next_stage_id / a jump, never by position. False on null / bad index / bad step / off either end.
+static func move_stage(q: Quest, index: int, dir: int) -> bool:
+	if q == null or (dir != -1 and dir != 1):
+		return false
+	var n := q.stages.size()
+	if index < 0 or index >= n or index + dir < 0 or index + dir >= n:
+		return false
+	var st := q.stages[index]
+	q.stages.remove_at(index)
+	q.stages.insert(index + dir, st)
+	return true
+
+
+## Why `owner` may NOT take the stage id `id` (whitespace already stripped by the caller): "" when it may, else the
+## refusal in designer words. Never blank (the save could not remember it), never another stage's (the first match
+## would silently win).
+static func stage_id_refusal(q: Quest, owner: QuestStage, id: StringName) -> String:
+	if id == &"":
+		return "a stage id can't be blank -- the save remembers stages by id, and nothing could move the quest to it."
+	if q != null:
+		for i in q.stages.size():
+			var st := q.stages[i]
+			if st != null and st != owner and st.id == id:
+				return "'%s' is already stage %d's id -- stage ids must be unique within a quest." % [id, i + 1]
+	return ""
+
+
+## Rename `stage` to `new_id` (whitespace stripped) in ONE shot and carry every next_stage_id in the quest that named
+## the old id. Returns {ok, reason, rewritten}. A refusal leaves the quest untouched; renaming to the same id is an ok
+## no-op. References OUTSIDE the quest (a conversation's set_quest_stage_id) cannot be seen from here -- the Audit
+## reports them -- and a saved game sitting in the old id resumes this quest at its first stage on its next load.
+static func rename_stage_id(q: Quest, stage: QuestStage, new_id: StringName) -> Dictionary:
+	var out := {"ok": false, "reason": "", "rewritten": 0}
+	if q == null or stage == null:
+		out["reason"] = "nothing is picked."
+		return out
+	var wanted := StringName(String(new_id).strip_edges())
+	var why := stage_id_refusal(q, stage, wanted)
+	if why != "":
+		out["reason"] = why
+		return out
+	var old := stage.id
+	stage.id = wanted
+	if old != wanted and old != &"":
+		for st in q.stages:
+			if st != null and st.next_stage_id == old:
+				st.next_stage_id = wanted
+				out["rewritten"] += 1
+	out["ok"] = true
+	return out
 
 
 # --- rewards (Quest.rewards: Array[ItemStack], granted by QuestTracker on completion) ----------------------------
@@ -183,7 +285,20 @@ static func normalize(q: Quest) -> int:
 	if _drifted(q.expire_on_flag):
 		q.expire_on_flag = _trim(q.expire_on_flag)
 		changed += 1
-	for o in q.objectives:
+	for st in q.stages:
+		if st == null:
+			continue
+		# Stage ids are matched EXACTLY by the save, next_stage_id and set_quest_stage_id; the flag by GameState.
+		if _drifted(st.id):
+			st.id = _trim(st.id)
+			changed += 1
+		if _drifted(st.next_stage_id):
+			st.next_stage_id = _trim(st.next_stage_id)
+			changed += 1
+		if _drifted(st.set_flag_on_enter):
+			st.set_flag_on_enter = _trim(st.set_flag_on_enter)
+			changed += 1
+	for o in _every_objective(q):
 		if o == null:
 			continue  # a null row is a separate authoring problem the dock renders as "<null>"; skip, don't crash
 		if _drifted(o.id):
@@ -200,11 +315,40 @@ static func normalize(q: Quest) -> int:
 
 # --- helpers (pure) --------------------------------------------------------------------------------------------
 
-## A stable id unique within the quest, of the form "obj_N" (matching content_scaffold's seeding). Scans the
-## existing objective ids and picks the lowest N that's free, so re-adding after a remove never collides.
+## The list an objective op edits: `stage`'s objectives when a stage is given, else the quest's own. A typed Array is
+## a reference, so mutating the returned list mutates the resource.
+static func _objective_list(q: Quest, stage: QuestStage) -> Array[QuestObjective]:
+	return stage.objectives if stage != null else q.objectives
+
+
+## Every objective row the quest carries anywhere: its own list, then each stage's (even the own list of a staged
+## quest, which runtime ignores -- normalize and id uniqueness still cover it).
+static func _every_objective(q: Quest) -> Array[QuestObjective]:
+	var out: Array[QuestObjective] = []
+	out.append_array(q.objectives)
+	for st in q.stages:
+		if st != null:
+			out.append_array(st.objectives)
+	return out
+
+
+## A stage id unique within the quest, "stage_N" with the lowest free N.
+static func _next_stage_id(q: Quest) -> StringName:
+	var used := {}
+	for st in q.stages:
+		if st != null:
+			used[String(st.id)] = true
+	var i := 1
+	while used.has("stage_%d" % i):
+		i += 1
+	return StringName("stage_%d" % i)
+
+
+## A stable id unique within the WHOLE quest (its own objectives and every stage's), of the form "obj_N" (matching
+## content_scaffold's seeding). Picks the lowest N that's free, so re-adding after a remove never collides.
 static func _next_objective_id(q: Quest) -> StringName:
 	var used := {}
-	for o in q.objectives:
+	for o in _every_objective(q):
 		if o != null:
 			used[String(o.id)] = true
 	var i := 1

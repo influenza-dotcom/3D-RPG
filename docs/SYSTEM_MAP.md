@@ -465,12 +465,13 @@ GameRoot drives Ps1Warp.cover() on level load; cover() parents ONE ps1_applier u
 
 ### `autoload QuestTracker` - `managers/QuestTracker.gd`
 
-QuestTracker OWNS the live quest tracker (active/completed/failed + objective progress) and the four quest signals; GameState keeps one-line forwarders so authored content and old call sites keep working. save_into/load_from write and restore the [quests_active]/[quests_completed]/[quests_failed] cfg sections; GameState._save_perks_and_quests / _load_perks_and_quests delegate their quest halves here. notify_kill/pickup/talk/enter/use + notify_flag_set are the world's hooks INTO quests — one shared _advance_objectives_matching body behind all of them.
+QuestTracker OWNS the live quest tracker (active/completed/failed + current stage + objective progress) and the quest signals; GameState keeps one-line forwarders so authored content and old call sites keep working. save_into/load_from write and restore the [quests_active]/[quests_completed]/[quests_failed] cfg sections; GameState._save_perks_and_quests / _load_perks_and_quests delegate their quest halves here. notify_kill/pickup/talk/enter/use + notify_flag_set are the world's hooks INTO quests — one shared _advance_objectives_matching body behind all of them. A STAGED quest (Quest.stages non-empty) is always in one QuestStage: every objective read goes through Quest.objectives_for_stage(entry.stage), a stage hands off via next_stage_id / set_quest_stage, and the save writes the current stage id beside its progress (SAVE_VERSION 6, lazy: no stage field = stages[0]).
 
+- **Risk:** Iterating a stage's objectives while advancing them can hand the quest to its NEXT stage mid-loop; every such loop re-checks the entry's `epoch` so it never advances a same-id objective of the stage it just left.
 - **Risk:** A quest transition that forgets _gs().autosave_world_state() leaves progress unpersisted until an unrelated money/xp event happens to coincide — the classic "Continue lost my progress" bug.
 - **Risk:** _grant_quest_rewards early-returns off-tree, so a bare test grants NOTHING (not even reputation); asserting rewards without a live player silently passes for the wrong reason.
 - **Risk:** Restoring a quest whose .tres moved drops it SILENTLY — the _load_warnings array is the only surface that tells the player, and it is consume-once.
-- **Test:** `tests/test_quests.gd` `tests/test_quest_tracker.gd`
+- **Test:** `tests/test_quests.gd` `tests/test_quest_tracker.gd` `tests/test_quest_stages.gd`
 
 ## Rendering
 

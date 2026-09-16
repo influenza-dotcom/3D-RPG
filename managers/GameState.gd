@@ -60,7 +60,12 @@ const SAVE_PATH := "user://gamestate.cfg"
 ## DialogueChoice.give_money is documented as taking a NEGATIVE amount for a fee/cost, so a CURRENT run's wallet
 ## can legitimately land below zero. Ungated, the next load would silently convert that cash shortfall into
 ## interest-bearing bank debt. See the fold in load_from_disk.
-const SAVE_VERSION := 5
+## v6 is the FIFTH (quest stages): a [quests_active] record of a STAGED quest carries `stage` (its current QuestStage
+## id), and its `progress` now MEANS that stage's objectives only, not the whole quest's. The migration is LAZY, like
+## v4 -- there is no fold here: QuestTracker.load_from resumes a record with no `stage` (every <v6 save, and any save
+## of a quest that gained stages later) in the quest's first stage, keeping whatever progress matches that stage's
+## objective ids. A stage-less quest writes no `stage` key, so its record is unchanged from <v6.
+const SAVE_VERSION := 6
 ## The CharacterStats, by name — the columns of the [stats] save section. Derived from CharacterStats.STAT_NAMES
 ## (the single source; cannot drift — a stat added there becomes a save column here for free). Missing keys default
 ## to 0, so older mid-development profile saves migrate softly. A compile-time const fold (no autoload/cycle issue).

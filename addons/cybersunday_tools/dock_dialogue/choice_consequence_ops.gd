@@ -46,6 +46,7 @@ const SUMMARY_PREFIX := "  "
 const TAG_START_QUEST := "[Q+]"       # start_quest_on_choice is assigned  (dialogue_manager.gd:348)
 const TAG_COMPLETE_QUEST := "[Q done]"  # complete_quest_id is set         (dialogue_manager.gd:352)
 const TAG_ADVANCE_QUEST := "[Q++]"    # BOTH advance ids are set           (dialogue_manager.gd:350)
+const TAG_SET_STAGE := "[Q>]"         # advance_quest_id AND set_quest_stage_id (the stage jump beside the tick)
 const TAG_GIVE_ITEM := "[item]"       # an id AND a count > 0              (dialogue_manager.gd:359)
 const TAG_GIVE_MONEY := "[$]"         # give_money != 0 (negative = a fee) (dialogue_manager.gd:357)
 const TAG_REWARD_REP := "[rep]"       # faction id AND a non-zero delta    (dialogue_manager.gd:375)
@@ -164,6 +165,9 @@ static func consequence_summary(choice: Variant) -> String:
 	# BOTH advance fields, because dialogue_manager.gd:350 requires both — one alone advances nothing.
 	if _txt(choice.get(&"advance_quest_id")) != "" and _txt(choice.get(&"advance_objective_id")) != "":
 		tags.append(TAG_ADVANCE_QUEST)
+	# The stage jump shares the quest half with the tick above: a stage id with no quest id jumps nothing.
+	if _txt(choice.get(&"advance_quest_id")) != "" and _txt(choice.get(&"set_quest_stage_id")) != "":
+		tags.append(TAG_SET_STAGE)
 	# An id AND a positive count, because dialogue_manager.gd:359 gates the inventory add on BOTH — and the tab's
 	# "Give item count" SpinBox has min_value 0, so an id with a 0 count is authorable and hands over nothing. Same
 	# PAIR shape as [Q++] above and [rep] below: a half-authored pair is not a consequence, and a row claiming one

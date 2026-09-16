@@ -205,6 +205,9 @@ var _c_req_quest_state: OptionButton = null
 var _c_complete_quest: LineEdit = null
 var _c_advance_quest: LineEdit = null
 var _c_advance_objective: LineEdit = null
+## DialogueChoice.set_quest_stage_id: the stage the Advance quest id's quest jumps to. A bare LineEdit (no stage registry
+## is cached here -- stages live inside each quest); the Audit reports an id that names no stage.
+var _c_set_stage: LineEdit = null
 # The remaining @export_group("Consequences") fields (dialogue_choice.gd:66-89) -- the seven
 # DialogueManager._apply_choice_effects really applies. `_c_start_quest` is a resource-reference dropdown; every id
 # field beside it is a LineEdit + `*_stamp` OptionButton pair (see the header's authoring rules).
@@ -628,11 +631,14 @@ func _build_choices_block() -> Control:
 	_c_complete_quest.tooltip_text = "Quest id turned in (completed) when picked. Blank = none."
 	_c_complete_quest.text_changed.connect(func(_t): _write_choice())
 	_c_advance_quest = _add_field(_choice_box, "Advance quest id", LineEdit.new())
-	_c_advance_quest.tooltip_text = "Quest id whose objective moves forward when picked. Needs Advance objective id too."
+	_c_advance_quest.tooltip_text = "The quest this choice moves forward -- fill Advance objective id to tick one of its objectives, and / or Set quest stage to jump it to a stage."
 	_c_advance_quest.text_changed.connect(func(_t): _write_choice())
 	_c_advance_objective = _add_field(_choice_box, "Advance objective id", LineEdit.new())
 	_c_advance_objective.tooltip_text = "The objective (from that quest) that moves forward by one. Needs Advance quest id too."
 	_c_advance_objective.text_changed.connect(func(_t): _write_choice())
+	_c_set_stage = _add_field(_choice_box, "Set quest stage", LineEdit.new())
+	_c_set_stage.tooltip_text = "Jumps the Advance quest id's quest to the stage with this id when picked -- how two routes meet at one later stage. Applied after the objective tick. Blank = no jump."
+	_c_set_stage.text_changed.connect(func(_t): _write_choice())
 
 	_c_give_item = LineEdit.new()
 	_c_give_item.tooltip_text = "Item id given to the player when picked, Give item count of it. Blank = none."
@@ -690,8 +696,8 @@ func _build_choices_block() -> Control:
 ## The legend for the choice rows' tag suffix, built from Ops2's own TAG_* consts so it can never describe a glyph the
 ## summary stopped emitting. One line: the ItemList tooltip is the only place it fits without costing panel height.
 static func _tag_legend() -> String:
-	return "Tags after a choice show what it does: %s starts a quest -- %s advances a quest -- %s completes it -- %s gives an item -- %s money -- %s reputation -- %s turns hostile" % [
-		Ops2.TAG_START_QUEST, Ops2.TAG_ADVANCE_QUEST, Ops2.TAG_COMPLETE_QUEST, Ops2.TAG_GIVE_ITEM,
+	return "Tags after a choice show what it does: %s starts a quest -- %s advances a quest -- %s jumps it to a stage -- %s completes it -- %s gives an item -- %s money -- %s reputation -- %s turns hostile" % [
+		Ops2.TAG_START_QUEST, Ops2.TAG_ADVANCE_QUEST, Ops2.TAG_SET_STAGE, Ops2.TAG_COMPLETE_QUEST, Ops2.TAG_GIVE_ITEM,
 		Ops2.TAG_GIVE_MONEY, Ops2.TAG_REWARD_REP, Ops2.TAG_AGGRO]
 
 
@@ -1447,6 +1453,7 @@ func _on_choice_selected(_j: int) -> void:
 	_c_complete_quest.text = String(ch.complete_quest_id)
 	_c_advance_quest.text = String(ch.advance_quest_id)
 	_c_advance_objective.text = String(ch.advance_objective_id)
+	_c_set_stage.text = String(ch.set_quest_stage_id)
 	# The Consequences pushes. These are NOT optional polish: _write_choice is wired to _c_text.text_changed and fires
 	# on EVERY KEYSTROKE, writing EVERY widget — so a write-back without a matching push means typing one character
 	# into Label stamps the widgets' CONSTRUCTION DEFAULTS (give_money 0, give_item_id "", aggro_speaker false) onto the
@@ -1723,6 +1730,7 @@ func _write_choice() -> void:
 	ch.complete_quest_id = StringName(_c_complete_quest.text)
 	ch.advance_quest_id = StringName(_c_advance_quest.text)
 	ch.advance_objective_id = StringName(_c_advance_objective.text)
+	ch.set_quest_stage_id = StringName(_c_set_stage.text.strip_edges())
 	ch.give_item_id = StringName(_c_give_item.text)
 	ch.give_item_count = int(_c_give_count.value)
 	ch.give_money = _c_give_money.value
