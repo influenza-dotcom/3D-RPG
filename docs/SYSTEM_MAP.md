@@ -37,7 +37,7 @@ _27 system(s), 54 entries - scanned scripts/, managers/ + resources/._
 - [Rendering](#rendering)
 - [Run And Level Flow](#run-and-level-flow)
 - [Save Model](#save-model)
-- [Save Model — the EXACT-snapshot tier (authored-NPC death/position + cross-level deaths + container contents)](#save-model--the-exact-snapshot-tier-authored-npc-deathposition--cross-level-deaths--container-contents)
+- [Save Model — the PER-LEVEL WORLD LEDGER (authored-NPC alive/pos/hp + deaths + container contents, for every visited level)](#save-model--the-per-level-world-ledger-authored-npc-aliveposhp--deaths--container-contents-for-every-visited-level)
 - [Wait](#wait)
 
 ## Audio
@@ -494,12 +494,13 @@ THE PRESENTATION DIALS OF post_process.gdshader, in ONE place. Every screen that
 
 ### `class GameRoot` - `scripts/world/game_root.gd`
 
-GameRoot is game.tscn's level-load seam: resolve_boot_level picks the boot level (saved-by-path beats export); load_level swaps the single "Level" child and seeds PlayerSpawn + respawn.
+GameRoot is game.tscn's level-load seam: resolve_boot_level picks the boot level (saved-by-path beats export); load_level swaps the single "Level" child and seeds PlayerSpawn + respawn. load_level is where the per-level world ledger moves: it captures the OUTGOING level (GameState.capture_level_state) while it is still in the tree and under its own current_level_path, then applies the INCOMING level's bucket deferred (GameState.apply_level_state) once every node's _ready has run.
 
+- **Risk:** Capturing after set_current_level, or after the old Level left the tree, files the outgoing level's NPCs/containers under the NEW level's path (their snapshot_key fallback reads current_level_path) or captures nothing — a looted safe in the level you left silently restocks.
 - **Risk:** resolve_boot_level diverging from _ready's respawn_level_matches gate boots the WRONG level yet keeps the saved respawn — silent, no crash (both must read saved_level_is_bootable).
 - **Risk:** A should_place_at_spawn regression either clobbers a loaded game's restored respawn with the export spawn, or strands the player at stale wrong-level coords (should_place_at_spawn + _place_player_at_entry's re-seed).
 - **Risk:** If load_level's detach-rename-queue_free swap regresses (the _LevelFreeing rename before remove_child/queue_free), two "Level" children stack or refs to the freed level dangle mid-frame — silent stale geometry.
-- **Test:** `tests/test_level_flow.gd` `tests/test_level_boot_lifecycle.gd` `tests/test_level_data.gd`
+- **Test:** `tests/test_level_flow.gd` `tests/test_level_boot_lifecycle.gd` `tests/test_world_snapshot.gd` `tests/test_level_data.gd`
 
 ### `class LevelData` - `scripts/world/level_data.gd`
 
@@ -522,7 +523,7 @@ The additive per-object ledger world_objects[level][key]=state (record_object_st
 
 ### `autoload GameState` - `managers/GameState.gd`
 
-capture() -> save_to_disk atomically write the versioned user://gamestate.cfg; load_from_disk restores it and sets loaded/profile_active, the flags gating Player._ready — a checkpoint, not a world snapshot.
+capture() + capture_world_state() -> save_to_disk atomically write the versioned user://gamestate.cfg (profile + world_objects + the per-level world ledger); load_from_disk restores it and sets loaded/profile_active, the flags gating Player._ready.
 
 - **Risk:** Breaking _write_atomic's tmp->bak->rename rotation (e.g. dropping the Windows remove-before-rename guard) only loses the sole save on a real crash; the happy path keeps succeeding, so tests never surface it.
 - **Risk:** A field wired into only some of capture/save_to_disk/load_from_disk silently defaults on Continue; a STAT_NAMES rename with no SAVE_VERSION migration drops those points (cf. load_from_disk's legacy stat folds).
@@ -538,15 +539,16 @@ WorldSaveId.key_for(node, save_id): an authored save_id is the whole key 'id:<x>
 - **Risk:** Moving/renaming a hand-placed node between saves silently orphans its fallback-keyed state; give important objects/bodies a save_id or their world-state is lost after any layout edit.
 - **Test:** `tests/test_game_save.gd`
 
-## Save Model — the EXACT-snapshot tier (authored-NPC death/position + cross-level deaths + container contents)
+## Save Model — the PER-LEVEL WORLD LEDGER (authored-NPC alive/pos/hp + deaths + container contents, for every visited level)
 
 ### `file world_snapshot.gd` - `scripts/world/world_snapshot.gd`
 
-Rides the MANUAL quicksave/slot layer ONLY: built in GameState._capture_and_write, written as a sibling [world_snapshot] cfg section, applied by GameRoot.load_level (central push) gated on consume_world_snapshot(). The lean Dark-Souls autosave/Continue NEVER carries one — see GameState.autosave (nulls it) + save_to_disk.
+GameState.world_snapshot is ONE long-lived instance holding a bucket per visited level: GameRoot.load_level captures the OUTGOING level before freeing it and applies the INCOMING level's bucket after it spawns; every save (autosave, Continue, quicksave, slots) captures the current level + folds the death ledger and writes the whole ledger as [world_snapshot].
 
-- **Risk:** This is a SEPARATE product from the profile save. Never merge it into GameState's profile fields / capture() or the two blur the moment autosave runs (CLAUDE.md "Save semantics must be explicit"). world_objects is untouched.
+- **Risk:** A capture that runs BEFORE a freshly loaded level's bucket is applied overwrites the saved bucket with the level's authored seed (a looted safe restocks) — GameState._level_apply_pending is the guard; never capture a level whose apply is still queued.
+- **Risk:** The ledger and GameState.world_objects are two separate stores keyed differently (snapshot_key vs WorldSaveId.key_for); never merge them — doors/pickups ride world_objects, actors/containers ride this.
 - **Risk:** NPC identity is POSITION-INDEPENDENT (NPC.snapshot_key), NOT WorldSaveId.key_for — an NPC moves, so a position-keyed match would fail against the reloaded node sitting at its authored .tscn spot.
-- **Test:** `tests/test_world_snapshot.gd`
+- **Test:** `tests/test_world_snapshot.gd` `tests/test_level_boot_lifecycle.gd`
 
 ## Wait
 

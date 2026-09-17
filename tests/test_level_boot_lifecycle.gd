@@ -9,7 +9,9 @@ extends GutTest
 ##   - a FRESH game boots the EXPORTED level and PLACES + respawn-seeds the player at its PlayerSpawn;
 ##   - a LOADED game boots the SAVED level (resolved by PATH) over the export and does NOT re-place the player
 ##     (the real Player._ready restores the saved respawn — re-placing here would clobber it; place_at_spawn=false);
-##   - a runtime load_level() swap FREES the old Level, instantiates the new one, and re-places + re-seeds respawn.
+##   - a runtime load_level() swap FREES the old Level, instantiates the new one, and re-places + re-seeds respawn;
+##   - the per-level WORLD LEDGER rides that swap: a container looted in level A, a door to B, a save, a reload and a
+##     return to A finds the container still looted (the door round-trip the 2026-09-16 save policy exists for).
 ## This exercises the two-layer call_deferred ordering (_ready -> load_level -> _place_player_at_entry) and the
 ## group-based PlayerSpawn lookup (&"player_spawn"), neither of which the off-tree predicate tests can prove.
 ##
@@ -28,6 +30,9 @@ var _s_has_respawn: bool
 var _s_respawn_pos: Vector3
 var _s_respawn_yaw: float
 var _s_matches: bool
+var _s_ledger: RefCounted
+var _s_dead: Dictionary
+var _s_apply_pending: String
 
 
 func before_each() -> void:
@@ -37,6 +42,9 @@ func before_each() -> void:
 	_s_respawn_pos = GameState.respawn_position
 	_s_respawn_yaw = GameState.respawn_yaw
 	_s_matches = GameState.respawn_level_matches
+	_s_ledger = GameState.world_snapshot
+	_s_dead = GameState._dead_authored
+	_s_apply_pending = GameState._level_apply_pending
 	# A stray dev-start file would inject a one-shot spawn override and flip should_place_at_spawn -> the loaded-game
 	# "don't re-place" assertion would test a leftover instead of the real contract. Clear it first.
 	_remove(DEV_START_FILE)
@@ -49,7 +57,12 @@ func after_each() -> void:
 	GameState.respawn_position = _s_respawn_pos
 	GameState.respawn_yaw = _s_respawn_yaw
 	GameState.respawn_level_matches = _s_matches
+	GameState.world_snapshot = _s_ledger
+	GameState._dead_authored = _s_dead
+	GameState._level_apply_pending = _s_apply_pending
 	_remove(SAVED_LEVEL_PATH)
+	for f in [LEVEL_A_PATH, LEVEL_B_PATH, ROUND_TRIP_SAVE, ROUND_TRIP_SAVE + ".bak", ROUND_TRIP_SAVE + ".tmp"]:
+		_remove(f)
 
 
 func _remove(path: String) -> void:
@@ -326,3 +339,156 @@ func test_runtime_swap_frees_old_level_and_replaces_player() -> void:
 		"a runtime swap re-seeds the respawn at the new level (a later death returns to the NEW level, not the old)")
 	export_data = null
 	next_data = null
+
+
+# --- the per-level world ledger across a door round-trip ------------------------------------------------------
+
+const LEVEL_A_PATH := "user://test_lifecycle_level_a.tres"
+const LEVEL_B_PATH := "user://test_lifecycle_level_b.tres"
+const ROUND_TRIP_SAVE := "user://test_lifecycle_round_trip.cfg"
+const WorldSnapshotScript := preload("res://scripts/world/world_snapshot.gd")
+const HEALTHPACK := "res://resources/items/healthpack.tres"
+
+
+## A level scene with a marker, a PlayerSpawn, and ONE real ItemContainer (save_id `crate_id`) authored to hold three
+## healthpacks — so its _ready seeds a bag a test can loot, and the ledger captures / restores the real
+## snapshot_contents / restore_snapshot_contents pair rather than a stub.
+func _make_crate_level_scene(marker_name: String, crate_id: StringName) -> PackedScene:
+	var body := Node3D.new()
+	body.name = "LevelBody"
+	var marker := Node.new()
+	marker.name = marker_name
+	body.add_child(marker)
+	marker.owner = body
+	var spawn := PlayerSpawn.new()
+	spawn.name = "Spawn"
+	body.add_child(spawn)
+	spawn.owner = body
+	var crate := ItemContainer.new()
+	crate.name = "Crate"
+	crate.save_id = crate_id
+	var stack := ItemStack.new()
+	stack.item = load(HEALTHPACK)
+	stack.count = 3
+	crate.item_stacks.append(stack)
+	body.add_child(crate)
+	crate.owner = body
+	var packed := PackedScene.new()
+	var ok := packed.pack(body)
+	body.free()
+	assert_eq(ok, OK, "the crate level scene should pack")
+	return packed
+
+
+func _crate(host: Node) -> ItemContainer:
+	return host.get_node_or_null(^"Level/Crate") as ItemContainer
+
+
+func _healthpacks(crate: ItemContainer) -> int:
+	var item: Item = load(HEALTHPACK)
+	return crate.inventory.count_of_id(item.id) if crate != null and crate.inventory != null else -1
+
+
+func _frames(n: int) -> void:
+	for i in n:
+		await get_tree().process_frame
+
+
+func test_a_container_looted_in_level_a_stays_looted_across_a_door_a_save_a_reload_and_a_return() -> void:
+	var data_a := LevelData.new()
+	data_a.scene = _make_crate_level_scene("LevelA", &"crate_a")
+	assert_eq(ResourceSaver.save(data_a, LEVEL_A_PATH), OK, "level A's LevelData writes (the ledger keys on its path)")
+	var data_b := LevelData.new()
+	data_b.scene = _make_crate_level_scene("LevelB", &"crate_b")
+	assert_eq(ResourceSaver.save(data_b, LEVEL_B_PATH), OK, "level B's LevelData writes")
+	var level_a := load(LEVEL_A_PATH) as LevelData
+	var level_b := load(LEVEL_B_PATH) as LevelData
+
+	# A fresh run on the AUTOLOAD (GameRoot talks to it); before/after_each bank and restore every field touched.
+	GameState.loaded = false
+	GameState.current_level_path = ""
+	GameState.world_snapshot = WorldSnapshotScript.new()
+	GameState._dead_authored = {}
+	GameState._level_apply_pending = ""
+
+	# 1. Boot into A and loot its crate.
+	var ctx := _make_game_host(Vector3.ZERO)
+	var host := ctx["host"] as Node3D
+	var gr = ctx["root"]
+	gr.level = level_a
+	add_child(host)
+	await _frames(3)
+	var crate_a := _crate(host)
+	assert_not_null(crate_a, "level A booted with its crate")
+	assert_eq(_healthpacks(crate_a), 3, "precondition: the crate seeded its three authored healthpacks")
+	crate_a.inventory.clear()  # the player takes everything
+	assert_eq(_healthpacks(crate_a), 0, "looted")
+
+	# 2. Door to B. The swap must capture A on the way out, and must not write to disk by itself.
+	var writes_before := GameState.save_count
+	gr.load_level(level_b, &"", true)
+	await _frames(3)
+	assert_not_null(host.get_node_or_null(^"Level/LevelB"), "the door took the player to level B")
+	assert_eq(GameState.save_count, writes_before, "a level change captures in memory only — no disk write of its own (the autosave-storm counter)")
+	assert_true(GameState.world_snapshot.has_level(LEVEL_A_PATH), "leaving A filed A's state in the ledger")
+	assert_eq(_healthpacks(_crate(host)), 3, "B's untouched crate is exactly as authored")
+
+	# 3. Save in B: the ordinary save path refreshes the ledger (B is captured too) and writes it.
+	GameState.capture_world_state()
+	assert_eq(GameState.save_to_disk(ROUND_TRIP_SAVE), OK, "the save writes")
+	var cfg := ConfigFile.new()
+	cfg.load(ROUND_TRIP_SAVE)
+	var on_disk: Dictionary = cfg.get_value("world_snapshot", "data", {})
+	assert_true(on_disk.has(LEVEL_A_PATH) and on_disk.has(LEVEL_B_PATH), "the file carries BOTH levels' buckets, not just the level saved in")
+
+	# 4. Reload: a fresh run reads that file (a bare GameState stands in for the boot load, so the autoload's own
+	#    profile fields are not overwritten by the test), the old scene goes away, and a new game.tscn boots from it.
+	var reader = load("res://managers/GameState.gd").new()
+	assert_true(reader.load_from_disk(ROUND_TRIP_SAVE), "the save loads")
+	assert_eq(reader.current_level_path, LEVEL_B_PATH, "it was saved in level B")
+	remove_child(host)
+	host.free()
+	GameState.world_snapshot = reader.world_snapshot
+	GameState._dead_authored = reader._dead_authored
+	GameState._level_apply_pending = ""
+	GameState.loaded = true
+	GameState.current_level_path = reader.current_level_path
+	reader.free()
+	var ctx2 := _make_game_host(Vector3.ZERO)
+	var host2 := ctx2["host"] as Node3D
+	var gr2 = ctx2["root"]
+	gr2.level = level_a  # the export default — a loaded game must boot the SAVED level (B) instead
+	add_child_autofree(host2)
+	await _frames(3)
+	assert_not_null(host2.get_node_or_null(^"Level/LevelB"), "Continue boots the level the save was made in")
+
+	# 5. Return to A.
+	gr2.load_level(level_a, &"", true)
+	await _frames(3)
+	assert_not_null(host2.get_node_or_null(^"Level/LevelA"), "back in level A")
+	assert_eq(_healthpacks(_crate(host2)), 0, "A's crate is STILL LOOTED — restored from the ledger, not re-seeded from its authored three")
+	data_a = null
+	data_b = null
+	level_a = null
+	level_b = null
+
+
+func test_a_level_the_ledger_does_not_know_plays_from_its_authored_seed() -> void:
+	# The control for the round-trip: with an empty ledger, a crate seeds as authored — so the "still looted" pin above
+	# is proven to come from the ledger and not from a crate that never seeds.
+	var data_a := LevelData.new()
+	data_a.scene = _make_crate_level_scene("LevelA", &"crate_a")
+	assert_eq(ResourceSaver.save(data_a, LEVEL_A_PATH), OK, "level A writes")
+	GameState.loaded = false
+	GameState.current_level_path = ""
+	GameState.world_snapshot = WorldSnapshotScript.new()
+	GameState._dead_authored = {}
+	GameState._level_apply_pending = ""
+	var ctx := _make_game_host(Vector3.ZERO)
+	var host := ctx["host"] as Node3D
+	ctx["root"].level = load(LEVEL_A_PATH) as LevelData
+	add_child_autofree(host)
+	await _frames(3)
+	assert_eq(_healthpacks(_crate(host)), 3, "no bucket -> the authored seed")
+	assert_eq(GameState._level_apply_pending, "", "and no capture guard was armed")
+	data_a = null

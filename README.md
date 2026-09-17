@@ -207,7 +207,8 @@ rpg/
   (`Door` open/locked/destroyed plus consumed hand-placed pickups / destroyed props, via
   `GameState.world_objects` keyed by `WorldSaveId.key_for`) — see
   [docs/CURRENT_ARCHITECTURE.md](docs/CURRENT_ARCHITECTURE.md) (Save Model) for
-  the authoritative field list. It is not a full per-object world snapshot.
+  the authoritative field list. Every save also carries the per-level world ledger
+  (authored NPCs and container contents for each visited level).
 - **Startup warning + first-launch consent.** Every project launch begins with the
   internet-warning card before the computer-room intro or menu; on the very first boot
   of an install it is followed by a fake, comedic Terms-of-Service overlay (a
@@ -371,16 +372,15 @@ engine's output, and `logs/godot.log` in the folder above holds the same text.
 - Save/load preserves profile, active level identity, discovered corpse markers,
   and an additive per-object ledger — `Door` open/locked/destroyed plus consumed
   hand-placed `CanPickUp` / destroyed `CanDestroy` "gone" state, keyed through
-  each component's `save_id` into `GameState.world_objects`. That profile tier is still not an
-  exact snapshot. A manual quicksave (`F5`) / slot save (three named slots via the
-  in-game **Save / Load** screen, or **Load Game** at the start menu) additionally writes a
-  `WorldSnapshot` that persists authored-NPC death across levels (not just the one
-  you saved in) plus authored-NPC position/hp for the saved level, keyed by the
-  position-free `NPC.snapshot_key` (deliberately not `WorldSaveId.key_for`, so no
-  stable-ID work was needed), plus every authored container's exact contents, grid
-  layout and lock state in the level you saved in. Neither tier yet persists corpses,
-  loot drops, or dynamically-spawned / encounter NPCs; the profile tier alone never
-  persists containers (they re-seed from their authored exports on Continue).
+  each component's `save_id` into `GameState.world_objects`. Every save (the autosave
+  behind Continue, a quicksave (`F5`), or a slot save via the in-game **Save / Load**
+  screen or **Load Game** at the start menu) also writes the per-level world ledger, a
+  `WorldSnapshot`: for every level visited this run, authored-NPC death and
+  position/hp, keyed by the position-free `NPC.snapshot_key` (deliberately not
+  `WorldSaveId.key_for`, so no stable-ID work was needed), plus every authored
+  container's exact contents, grid layout and lock state. Leaving a level records it,
+  so a looted crate stays looted through a door round-trip too. Nothing yet persists
+  corpses, loot drops, NPC backpacks, or dynamically-spawned / encounter NPCs.
 - Authored scene wiring matters. Prefab exported `NodePath`s and required
   children deserve contract tests because code-only unit tests will not catch a
   bad inspector assignment.

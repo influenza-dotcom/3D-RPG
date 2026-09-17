@@ -3862,6 +3862,7 @@ func _on_death_sequence_done() -> void:
 			# section, so the load already rewinds standing to the pre-provoke totals. Reversing the deltas as well
 			# would double-count.
 			if not GameState.load_autosave():
+				_bank_level_before_fresh_reload()  # the in-memory run is kept, so its world ledger must match it (see below)
 				get_tree().reload_current_scene()  # no readable autosave — degrade to a plain reload of the in-memory run
 		PlayerFeedbackSettings.DeathMode.RELOAD_CHECKPOINT_FRESH:
 			_settle_provoked_grudges()           # BEFORE the reload: the fresh world spawns unprovoked NPCs, but Reputation
@@ -3872,6 +3873,7 @@ func _on_death_sequence_done() -> void:
 				GameState.loaded = true           # promote the in-memory run so the fresh Player APPLIES it (unlocks/xp/money/
 												  # inventory) instead of reseeding a default build — matters in a New-Game
 												  # session, where a disk load never ran so `loaded` was still false (P0-2)
+			_bank_level_before_fresh_reload()    # containers/deaths stay as the kept profile knows them; actors reset
 			get_tree().reload_current_scene()    # world resets; the in-memory profile + respawn carry to the fresh Player
 		_:                                        # CHECKPOINT_RESPAWN (default): Dark-Souls in-place revive, world untouched
 			if GameState.has_respawn:
@@ -3879,7 +3881,18 @@ func _on_death_sequence_done() -> void:
 			else:
 				_settle_provoked_grudges()        # same as CHECKPOINT_FRESH: reverse the provoke rep before the world is rebuilt
 				_restore_death_audio()            # falling back to a reload — un-duck first
+				_bank_level_before_fresh_reload()
 				get_tree().reload_current_scene()
+
+## Before a death reload that KEEPS the in-memory run (RELOAD_CHECKPOINT_FRESH, and the two plain-reload fallbacks):
+## record the level into GameState's per-level world ledger WITHOUT its NPC positions/hp. The reloaded level then
+## applies that bucket like any other load: enemies return to their authored spots at full health (the "fresh" in the
+## mode's name), dead ones stay dead, and every container keeps what the player took from it — the kept profile still
+## carries that loot, so re-seeding the crate from its authored exports would duplicate it. (RELOAD_LAST_SAVE's normal
+## path does not need this: it replaces the whole run, ledger included, from the autosave on disk.)
+func _bank_level_before_fresh_reload() -> void:
+	if is_inside_tree():
+		GameState.capture_level_state(get_tree(), GameState.current_level_path, false)
 
 ## Bring the player back to life at GameState's respawn point WITHOUT reloading: clear the death latches,
 ## restore HP + limbs, teleport upright to the point, hand the camera back to its driver, re-enable physics,

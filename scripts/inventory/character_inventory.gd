@@ -638,7 +638,7 @@ func _has_stack_key(key: int) -> bool:
 ## own cash never reaches a bag at all (it is the `money` float). NOTE: the player
 ## profile path (GameState.capture / Player._restore_saved_inventory) stays inline — it interleaves
 ## equipped_index and held-item bookkeeping with the loop, and its shape is pinned by test_game_save; this pair
-## exists for the exact-snapshot tier (ItemContainer) and any future non-player bag.
+## exists for the per-level world ledger (ItemContainer) and any future non-player bag.
 func serialize_stacks() -> Array:
 	var out: Array = []
 	for s in placed_contents():

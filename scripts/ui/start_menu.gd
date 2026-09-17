@@ -130,9 +130,9 @@ func _bind_ui() -> void:
 	# "Continue" resumes the autosave (loaded at boot by GameState); only shown when a save file exists. "New
 	# Game" wipes the loaded profile back to fresh defaults before starting (Dark Souls: one save, overwritten).
 	_setup_button(%ContinueButton, PlayerText.START_MENU_CONTINUE, _on_continue, GameState.has_save_file())
-	# "Load Game" opens the SaveLoadScreen in its LOAD-only menu mode — the manual quicksave/slot files, the
-	# EXACT-snapshot tier, deliberately a separate button from Continue (which resumes the lean autosave
-	# profile — the two save products must not blur). Only shown when any manual save exists on disk.
+	# "Load Game" opens the SaveLoadScreen in its LOAD-only menu mode — the manual quicksave/slot files,
+	# deliberately a separate button from Continue (which resumes the rolling autosave; every file holds the same
+	# save product, only who chose the moment differs). Only shown when any manual save exists on disk.
 	_setup_button(%LoadGameButton, PlayerText.START_MENU_LOAD_GAME, _on_load_game,
 		GameState.has_quicksave() or _any_slot_saved())
 	_setup_button(%NewGameButton, PlayerText.START_MENU_NEW_GAME, _on_new_game, true)
@@ -538,7 +538,7 @@ func _any_slot_saved() -> bool:
 ## overlay handling as CharacterCreation (_on_new_game): hide _buttons while it's up, restore them when it
 ## closes without booting. The boot Callable handed in is _start_game itself — after the screen's
 ## GameState.load_from_disk(slot_path) succeeds it closes and calls this, so a slot load boots exactly like
-## Continue (loaded = true; the parsed [world_snapshot] is consumed by GameRoot on boot).
+## Continue (loaded = true; GameRoot applies the booted level's world-ledger bucket on boot).
 func _on_load_game() -> void:
 	# The screen's own open() also refuses over a modal; the pre-check keeps the one-shot `closed` hookup and
 	# the button-hide from firing when the open would bounce (e.g. the Settings overlay is up).

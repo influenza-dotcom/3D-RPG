@@ -530,14 +530,15 @@ static func _notify_type_for(verb: String) -> int:
 ## `ledger [all]` — READ-ONLY dump of the live save-ledger state. Three things nothing else shows:
 ##   1. GameState.world_objects (the additive per-object PROFILE-tier ledger: Door open/locked, consumed pickups,
 ##      destroyed props) for the current level — every level with `all`;
-##   2. GameState._dead_authored (the cross-level authored-NPC death ledger — EXACT-SNAPSHOT tier only, private
-##      with no getter and no clear, read via GameState.get(&"…") — underscore is convention here, not access);
-##   3. the latches: world_snapshot present?, _world_snapshot_pending, reload_pending(), _world_save_queued.
+##   2. GameState._dead_authored (the cross-level authored-NPC death ledger folded into the per-level world ledger by
+##      every save — private with no getter and no clear, read via GameState.get(&"…") — underscore is convention here,
+##      not access), plus which levels the world ledger (GameState.world_snapshot) holds a bucket for;
+##   3. the latches: _level_apply_pending, reload_pending(), _world_save_queued.
 ## Flags the two key-shape traps world_save_id.gd documents: entries on the FRAGILE level|path|pos fallback (no
 ## save_id — a move/rename silently orphans them) and entries whose level component is BLANK (recorded while
 ## current_level_path was "" — the code-built LevelData trap). The editor Saves dock reads ON-DISK cfg only and
 ## the F3 overlay shows account/level/time, so _dead_authored appears nowhere else.
-## Never calls consume_world_snapshot() (a destructive one-shot latch) or take_load_warnings() (consume-once, and
+## Never calls apply_level_state() (it lifts the capture guard) or take_load_warnings() (consume-once, and
 ## ui.gd already owns it) — every read here is a plain field/getter.
 static func _cmd_ledger(args: PackedStringArray) -> PackedStringArray:
 	var all := not args.is_empty() and args[0].strip_edges().to_lower() == "all"
@@ -587,7 +588,7 @@ static func _cmd_ledger(args: PackedStringArray) -> PackedStringArray:
 		if blank_level > 0:
 			out.append("   ! %d recorded with a BLANK level component (current_level_path was \"\" at record time — the code-built LevelData trap); a real level never matches them" % blank_level)
 
-	# --- 2. the cross-level dead-NPC ledger (exact-snapshot tier) ---
+	# --- 2. the cross-level dead-NPC ledger (folded into the per-level world ledger by every save) ---
 	var dead_v: Variant = GameState.get(&"_dead_authored")
 	if not (dead_v is Dictionary):
 		out.append("-- dead authored NPCs: GameState has no _dead_authored Dictionary (API drift) — nothing to read")
@@ -596,18 +597,18 @@ static func _cmd_ledger(args: PackedStringArray) -> PackedStringArray:
 		var dlevels := PackedStringArray()
 		if all:
 			dlevels = Common._sorted_keys(dead)
-			out.append("-- dead authored NPCs (_dead_authored): %d level bucket(s)   (exact-snapshot tier ONLY: session-live, reaches disk only folded into a manual quick/slot save's [world_snapshot]; the profile never carries it; load_level frees the NPCs under these keys on EVERY re-instantiate)" % dlevels.size())
+			out.append("-- dead authored NPCs (_dead_authored): %d level bucket(s)   (folded into the world ledger's [world_snapshot] by EVERY save; load_level frees the NPCs under these keys on EVERY re-instantiate)" % dlevels.size())
 			if dlevels.is_empty():
-				out.append("   (empty — no authored NPC has died this session and no snapshot load restored one)")
+				out.append("   (empty — no authored NPC has died this run and no load restored one)")
 		else:
 			dlevels.append(level)
 		for lvl in dlevels:
 			var b: Variant = dead.get(lvl)
 			if not (b is Dictionary) or (b as Dictionary).is_empty():
-				out.append("-- dead authored NPCs [\"%s\"]: none%s" % [lvl, "" if all else "   (exact-snapshot tier ONLY: session-live, folded into a manual quick/slot save; the profile never carries it; load_level frees the NPCs under these keys on every re-instantiate)"])
+				out.append("-- dead authored NPCs [\"%s\"]: none%s" % [lvl, "" if all else "   (folded into the world ledger by every save; load_level frees the NPCs under these keys on every re-instantiate)"])
 				continue
 			var keys := Common._sorted_keys(b as Dictionary)
-			out.append("-- dead authored NPCs [\"%s\"]: %d%s" % [lvl, keys.size(), "" if all else "   (exact-snapshot tier ONLY: session-live, folded into a manual quick/slot save; the profile never carries it; load_level frees the NPCs under these keys on every re-instantiate — `resurrect` clears this bucket)"])
+			out.append("-- dead authored NPCs [\"%s\"]: %d%s" % [lvl, keys.size(), "" if all else "   (folded into the world ledger by every save; load_level frees the NPCs under these keys on every re-instantiate — `resurrect` clears this bucket)"])
 			var shown := 0
 			for k in keys:
 				if shown < Common.LEDGER_MAX_LINES:
@@ -619,18 +620,26 @@ static func _cmd_ledger(args: PackedStringArray) -> PackedStringArray:
 	# --- corpse discovery, the one other profile-tier world ledger (not level-bucketed) ---
 	out.append("-- discovered_corpses: %d key(s) in all   (profile tier; keyed by Corpse.save_id / the WorldSaveId fallback, not bucketed per level)" % GameState.discovered_corpses.size())
 
-	# --- 3. latches ---
+	# --- the per-level world ledger: which levels it knows ---
 	var snap: Variant = GameState.get(&"world_snapshot")
-	var snap_text := "none"
-	if snap != null and is_instance_valid(snap):
-		snap_text = "present"
-		if snap.has_method(&"is_empty") and bool(snap.call(&"is_empty")):
-			snap_text += " (empty)"
-	out.append("-- latches: world_snapshot %s · _world_snapshot_pending %s · reload_pending %s · _world_save_queued %s" % [
-		snap_text, str(Common._bool_of(GameState.get(&"_world_snapshot_pending"))), str(bool(GameState.reload_pending())), str(Common._bool_of(GameState.get(&"_world_save_queued")))])
-	out.append("   world_snapshot = the in-memory exact snapshot left by the last manual quick/slot save or load (ANY autosave nulls it); pending = a loaded one GameRoot has not applied yet; reload_pending = a quickload is in flight (autosave refuses); _world_save_queued = a coalesced world-state autosave flushes at end of frame.")
+	if snap != null and is_instance_valid(snap) and snap.has_method(&"to_dict"):
+		var ledger: Dictionary = snap.call(&"to_dict")
+		var lvls := Common._sorted_keys(ledger)
+		out.append("-- world ledger (world_snapshot): %d level bucket(s)   (authored NPCs alive/pos/hp + deaths + container contents; captured when you leave a level and at every save, applied whenever that level loads)" % lvls.size())
+		for lvl in lvls:
+			var b: Variant = ledger[lvl]
+			if b is Dictionary:
+				out.append("   %s  npcs %d · dead %d · containers %d%s" % [lvl, (b.get("authored_npcs", {}) as Dictionary).size(),
+					(b.get("dead_authored", []) as Array).size(), (b.get("containers", {}) as Dictionary).size(), "   <- this level" if lvl == level else ""])
+	else:
+		out.append("-- world ledger: GameState has no world_snapshot ledger (API drift) — nothing to read")
+
+	# --- 3. latches ---
+	out.append("-- latches: _level_apply_pending \"%s\" · reload_pending %s · _world_save_queued %s" % [
+		String(GameState.get(&"_level_apply_pending")) if GameState.get(&"_level_apply_pending") is String else "?", str(bool(GameState.reload_pending())), str(Common._bool_of(GameState.get(&"_world_save_queued")))])
+	out.append("   _level_apply_pending = a level GameRoot spawned whose ledger bucket is not applied yet (captures of it are refused until then); reload_pending = a quickload is in flight (autosave refuses); _world_save_queued = a coalesced world-state autosave flushes at end of frame.")
 	out.append("key shape (WorldSaveId.key_for): 'id:<save_id>' when the object has an authored save_id, else '<level>|<node path>|x,y,z' (fragile — re-keys on any move/rename); NPC.snapshot_key drops the position: 'id:<save_id>' else '<level>|<node path>'.")
-	out.append("in NEITHER ledger by design: corpses, dropped loot, dynamic (spawner) NPCs. Container contents ride the exact-snapshot tier only.")
+	out.append("in NO ledger by design: corpses, dropped loot, dynamic (spawner) NPCs, NPC backpacks. Container contents ride the world ledger, which every save writes.")
 	return out
 
 ## `wipeobjects` (danger) — erase this level's world_objects bucket, persist the erase, then re-instantiate the level
@@ -666,10 +675,10 @@ static func _cmd_wipeobjects(ctx: Dictionary) -> PackedStringArray:
 	if Common._player(ctx) == null:
 		out.append("! no player in ctx: if there is no live in-tree player the queued autosave NO-OPs, and the wipe lives in memory only until the next successful save.")
 	else:
-		out.append("a coalesced full-profile autosave was queued (deferred, end of frame): your Continue save now holds the wiped ledger, and a pending in-memory WorldSnapshot is nulled by it. (Sandbox rewrite applies if `sandbox on`.)")
+		out.append("a coalesced full-profile autosave was queued (deferred, end of frame): your Continue save now holds the wiped ledger. (Sandbox rewrite applies if `sandbox on`.)")
 	out.append_array(_reload_same_level(ctx, g))
 	out.append("every Door / CanPickUp / CanDestroy / MoneyPickup / UpgradePickup reads the ledger ONLY in _ready — the re-instantiate is what makes them come back authored.")
-	out.append("untouched: discovered_corpses, the cross-level dead-NPC ledger (authored NPCs you killed stay dead — `resurrect` is the other half), and the exact-snapshot container DATA in any quick/slot file (the LIVE containers still re-seeded authored contents, per the line above — that is the re-instantiate, not this ledger).")
+	out.append("untouched: discovered_corpses, the cross-level dead-NPC ledger (authored NPCs you killed stay dead — `resurrect` is the other half), and the world ledger's container contents (the re-instantiate captured and re-applied them, so looted crates stay looted).")
 	out.append("! a quicksave / slot file written BEFORE this still holds the OLD ledger — loading it brings every entry back.")
 	return out
 
@@ -717,8 +726,8 @@ static func _cmd_resurrect(ctx: Dictionary) -> PackedStringArray:
 	out.append_array(_reload_same_level(ctx, g))
 	out.append("GameRoot's deferred _suppress_dead_authored now finds an empty bucket, so every authored NPC stands at its .tscn spot with full hp; their corpses went with the old subtree (corpses are not persisted).")
 	out.append("kill XP, bounty, faction kill_penalty and any KILL objective fire again on a re-kill — a cheat, they are re-farmable.")
-	# The two save tiers, honestly: this ledger never touches the profile, and the exact-snapshot tier is SEPARATE.
-	out.append("no disk write happened: this ledger reaches disk only folded into a manual quick/slot save's [world_snapshot]. A quicksave/slot made BEFORE this still holds the deaths — loading it restores _dead_authored from its dead_map() and load_level frees them again (resurrect does NOT survive an older quickload). A quicksave made from HERE captures them alive (capture: live wins) and sticks. Continue/autosave never carried the ledger, so that tier revived them anyway.")
+	# What persists, honestly: the death ledger reaches disk folded into every save's world ledger.
+	out.append("no disk write happened: this death ledger reaches disk folded into the next save's [world_snapshot] (autosave, quicksave or slot). A save made BEFORE this still holds the deaths — loading it restores _dead_authored from its dead_map() and load_level frees them again (resurrect does NOT survive loading an older save). The next save from HERE captures them alive (capture: live wins) and sticks.")
 	return out
 
 ## The guards `wipeobjects` / `resurrect` run BEFORE touching a ledger, mirroring `_cmd_warp`'s for the SAME
@@ -798,10 +807,11 @@ static func _reload_same_level(ctx: Dictionary, g: Dictionary) -> PackedStringAr
 		out.append("! this level's root carries no level_root.gd, so Ps1Warp.cover() skipped it — no PS1 vertex-snap here.")
 	out.append("the old subtree was queue_free()d: corpses, dropped items, spawned NPCs and anything you parented into Level are gone; the RentCollector's dawn counters reset (the notice can serve again next dawn), DayNightSky re-captures its authored look, and the fresh NavigationRegion3D needs a map-sync frame before NPCs path.")
 	# Everything below is what a fresh Level._ready re-seeds from authored exports — none of it reads either ledger, so
-	# it comes back regardless of what the caller wiped (container.gd seeds in _ready and only a WorldSnapshot.apply
-	# restores contents; a persist_collected=false pickup never recorded itself; a recruited companion is an authored
-	# NPC that stayed parented under Level — CompanionRecruiter never reparents it — so it went with the subtree).
-	out.append("also re-seeded to authored by the re-instantiate: every ItemContainer's contents (loot you took is back — re-farmable), MoneyPickup/UpgradePickup with persist_collected off, and every EncounterSpawner re-arms; a recruited companion standing in this level was freed with it and its fresh copy is NOT following you.")
+	# it comes back regardless of what the caller wiped (a persist_collected=false pickup never recorded itself; a
+	# recruited companion is an authored NPC that stayed parented under Level — CompanionRecruiter never reparents it —
+	# so it went with the subtree). ItemContainers are NOT in this list any more: load_level captured the level into the
+	# world ledger on the way out and applies it back, so their contents survive the re-instantiate.
+	out.append("re-seeded to authored by the re-instantiate: MoneyPickUp/UpgradePickup with persist_collected off, and every EncounterSpawner re-arms; a recruited companion standing in this level was freed with it and its fresh copy is NOT following you. ItemContainers keep their contents (the world ledger captured and re-applied them), and authored NPCs return where they stood with their hp.")
 	# The old cast went with the subtree and the new one boots live, so a latched `freezeai ON` would now lie; the
 	# sticky `npc` target is a Node that was just freed.
 	var state := Common._state(ctx)

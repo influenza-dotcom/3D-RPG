@@ -1,6 +1,6 @@
 extends Node
 ## @system Save Model
-## @seam capture() -> save_to_disk atomically write the versioned user://gamestate.cfg; load_from_disk restores it and sets loaded/profile_active, the flags gating Player._ready — a checkpoint, not a world snapshot.
+## @seam capture() + capture_world_state() -> save_to_disk atomically write the versioned user://gamestate.cfg (profile + world_objects + the per-level world ledger); load_from_disk restores it and sets loaded/profile_active, the flags gating Player._ready.
 ## @risk Breaking _write_atomic's tmp->bak->rename rotation (e.g. dropping the Windows remove-before-rename guard) only loses the sole save on a real crash; the happy path keeps succeeding, so tests never surface it.
 ## @risk A field wired into only some of capture/save_to_disk/load_from_disk silently defaults on Continue; a STAT_NAMES rename with no SAVE_VERSION migration drops those points (cf. load_from_disk's legacy stat folds).
 ## @risk Dropping capture()'s Zorkmids.ITEM_ID skip lets a stray coin tile restore as cash the wallet never counted; applying respawn_position while ignoring respawn_level_matches teleports the player into the wrong level.
@@ -22,25 +22,28 @@ extends Node
 ## unlocked mechanics, and the backpack (items + the drawn weapon, keyed by Item.id through ItemDb) — plus the
 ## respawn point (the last bonfire, or the initial spawn). It is captured + written
 ## at every milestone: a wallet change (kill bounty / trade / pickup), a level-up, an upgrade pickup, and a
-## bonfire rest. On DEATH the world is NOT reloaded — you're brought back to LIFE at the respawn point (enemies
-## stay as they are); the autosave is the only thing that survives quitting.
+## bonfire rest. On DEATH (the default CHECKPOINT_RESPAWN mode) the world is NOT reloaded — you're brought back to LIFE
+## at the respawn point (enemies stay as they are); the autosave is the only thing that survives quitting.
 ##
 ## Boot: this autoload's _ready loads the save (if any) into memory, so the start menu can offer "Continue" and
 ## the Player's _ready can apply the loaded build. "New Game" calls reset_for_new_game() to start clean.
 ##
-## SAVE SCOPE — this is a PROFILE / checkpoint save with an ADDITIVE per-object ledger, NOT an exact world
-## snapshot. It persists the player's progression (money, stats, unlocks, perks, backpack), the run's world FLAGS +
-## QUEST state + faction standing + day/night clock, discovered Corpse markers, and the ACTIVE LEVEL identity
-## (current_level_path, so a reload returns you to the level the saved respawn belongs to). It ALSO now persists a
-## NAMED per-placed-object ledger (world_objects, keyed by level + WorldSaveId.key_for): a Door's open/locked
-## state, and a consumed CanPickUp / MoneyPickUp / UpgradePickup / destroyed CanDestroy prop's "gone" bit — so an
-## opened door stays open, a collected pickup stays collected (no respawn / infinite-money), and a smashed crate
-## stays smashed on Continue. It STILL does NOT persist: looted / refilled containers, dead NPCs,
-## dynamically-spawned entities (loot drops / encounter NPCs), or NPC positions — and it is NOT an exact snapshot
-## (only touched, authored objects are in the ledger). LIVE WEAPON CLIP ammo is not persisted either: every gun
-## loads a FULL magazine on Continue (the backpack's spare-CLIP reserve DOES persist) — a deliberate
-## fresh-magazine-per-session choice. The ledger is additive: it never rebrands the profile save as an exact
-## quicksave. See CLAUDE.md "Save semantics must be explicit".
+## SAVE SCOPE — ONE answer for every save file (the autosave behind Continue, the F5 quicksave, the three slots): the
+## PROFILE + the per-object ledger + the per-level WORLD LEDGER. Three stores, kept as three separate code seams:
+##   1. The PROFILE: the player's progression (money, stats, unlocks, perks, backpack), the run's world FLAGS + QUEST
+##      state + faction standing + day/night clock, discovered Corpse markers, and the ACTIVE LEVEL identity
+##      (current_level_path, so a reload returns you to the level the saved respawn belongs to).
+##   2. world_objects (keyed by level + WorldSaveId.key_for): a Door's open/locked state, and a consumed CanPickUp /
+##      MoneyPickUp / UpgradePickup / destroyed CanDestroy prop's "gone" bit.
+##   3. world_snapshot, the per-level WORLD LEDGER (scripts/world/world_snapshot.gd): for EVERY level visited this
+##      run, its authored NPCs (alive + position/yaw/hp), the authored NPCs killed there, and every authored
+##      ItemContainer's exact contents + Lock state. GameRoot captures a level when the player leaves it and applies
+##      its bucket whenever it loads again; every save also captures the level the player is standing in.
+## Still NOT persisted anywhere: corpses (a killed authored NPC just stays gone), dynamically-spawned entities (loot
+## drops / money bags / encounter NPCs), NPC backpacks, and LIVE WEAPON CLIP ammo (every gun loads a FULL magazine on
+## load; the backpack's spare-CLIP reserve DOES persist — a deliberate fresh-magazine-per-session choice). The manual
+## quicksave/slots differ from the autosave only in WHEN and WHERE they are written (and in stamping the respawn at the
+## player's spot), not in WHAT they hold. See CLAUDE.md "Save semantics must be explicit".
 
 const SAVE_PATH := "user://gamestate.cfg"
 ## Save schema version, stamped into [meta].version on every write (H1b). Bump ONLY for a BREAKING change to an
@@ -288,20 +291,23 @@ var waypoints: Dictionary = {}
 ## revision can equal, so the first paint after a load is forced regardless).
 var waypoints_rev: int = 0
 
-## --- EXACT-snapshot save tier (WorldSnapshot; manual quicksave/slots ONLY) -----------------------------------
-## The in-memory exact snapshot for the manual save tier. NON-NULL only after a manual quicksave/slot save built
-## one (in _capture_and_write) or a load pulled one off disk; the lean autosave/Continue path leaves it NULL and
-## save_to_disk therefore never writes a [world_snapshot] section into gamestate.cfg. NOT part of the profile —
-## kept structurally separate so the two save products can never blur (CLAUDE.md "Save semantics must be explicit").
-var world_snapshot: WorldSnapshot = null
-## One-shot: a load that carried a [world_snapshot] sets this true; GameRoot's post-level-load hook consumes it
-## exactly once to apply the snapshot (a twin of _clock_apply_pending / consume_clock_apply). False on a
-## profile-only load, a death-respawn reload, or a fresh game — so those never apply a snapshot.
-var _world_snapshot_pending: bool = false
+## --- The per-level WORLD LEDGER (WorldSnapshot) -----------------------------------------------------------------
+## ONE long-lived ledger for the whole run: a bucket per visited level (authored NPCs, their deaths, container
+## contents). Never null — a fresh run / a save that carried none starts EMPTY. Filled by capture_level_state (GameRoot,
+## as the player leaves a level) and capture_world_state (every save, for the current level); read by
+## apply_level_state (GameRoot, whenever a level loads); written by save_to_disk as [world_snapshot] and rebuilt by
+## load_from_disk. It stays a separate object from the profile fields and from world_objects on purpose: three stores,
+## three seams, one save (see the SAVE SCOPE header).
+var world_snapshot: WorldSnapshot = WorldSnapshot.new()
+## The level whose ledger bucket GameRoot has QUEUED an apply for but not yet applied (a deferred call), else "". While
+## set, a capture of THAT level is skipped: the level in the tree still holds its authored seed, so capturing it would
+## overwrite the saved bucket with the fresh level — a looted safe restocks on the next save. The classic trigger is an
+## autosave queued by something in the new level's _ready, which runs first in the FIFO deferred queue.
+var _level_apply_pending: String = ""
 ## Latched between "a quickload / slot-load / death reload (load_autosave) has loaded a save into memory + requested a scene reload" and "the fresh scene's
 ## GameRoot has booted" (cleared in set_current_level). While set, autosave() refuses to run: a one-frame-deferred autosave
 ## flush queued in the SAME frame as the load (a kill bounty / a door fire) would otherwise run AFTER load_from_disk, on the
-## still-in-tree OLD player, and overwrite the just-loaded profile (and null the pending world_snapshot) with the abandoned
+## still-in-tree OLD player, and overwrite the just-loaded profile (and its world ledger) with the abandoned
 ## timeline's state — then persist that franken-profile over the sole checkpoint. See _load_and_reload / autosave.
 var _reload_pending: bool = false
 
@@ -339,8 +345,8 @@ func add_credit_standing(delta: float) -> float:
 
 ## Live per-level ledger of authored NPCs that have died this run: { level_path -> { snapshot_key: true } }.
 ## Fed by record_npc_death (each NPC's died signal), read by WorldSnapshot.capture (a dead NPC has freed itself,
-## so it can't be seen in the tree at capture time), and reloaded from a snapshot on a snapshot load so post-load
-## deaths keep accumulating. Not persisted by the profile — it only reaches disk folded into a WorldSnapshot.
+## so it can't be seen in the tree at capture time), and reloaded from the world ledger on every load so post-load
+## deaths keep accumulating. Reaches disk folded into world_snapshot by every save (capture_world_state).
 var _dead_authored: Dictionary = {}
 
 ## QUESTS — the tracker dicts and the B-F40 load-warning array moved to the `QuestTracker` autoload (M1). They are
@@ -625,12 +631,14 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 			if not clean_wp.is_empty():
 				tracked_seen = _fold_tracked(clean_wp, tracked_seen)
 				waypoints[str(lvl)] = clean_wp
-	# Exact-snapshot tier: a MANUAL quicksave/slot file carries a [world_snapshot] section; the lean autosave does
-	# not. Its ABSENCE is the back-compat path (a profile-only load leaves world_snapshot null + nothing pending —
-	# byte-identical to today). A version we don't understand is ignored (profile still loads). On a real snapshot
-	# load we also reload the live death ledger from it so deaths AFTER the load keep accumulating onto the right set.
-	world_snapshot = null
-	_world_snapshot_pending = false
+	# The per-level world ledger. Every save written since 2026-09-16 carries [world_snapshot] once the run has any world
+	# state; an older AUTOSAVE (written when only quick/slot saves carried one) has none, which loads as an EMPTY ledger —
+	# every level then plays from its authored seed until the player changes it, exactly what that save meant. A version
+	# we don't understand is ignored (profile still loads). We also reload the live death ledger from it so deaths AFTER
+	# the load keep accumulating onto the right set. A load never applies anything itself: GameRoot applies the booted
+	# level's bucket when it spawns the level.
+	world_snapshot = WorldSnapshot.new()
+	_level_apply_pending = ""
 	_dead_authored.clear()
 	if cfg.has_section_key("world_snapshot", "data"):
 		var ws_ver := _cfg_int(cfg, "world_snapshot", "version", 0)
@@ -640,9 +648,7 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 		# being dropped. WorldSnapshot.SNAPSHOT_MIN_COMPAT rises only on a genuinely breaking reshape. A NEWER
 		# version than this build understands (a downgraded install) still degrades to profile-only below.
 		if ws_ver >= WorldSnapshot.SNAPSHOT_MIN_COMPAT and ws_ver <= WorldSnapshot.SNAPSHOT_VERSION and ws_raw is Dictionary:
-			world_snapshot = WorldSnapshot.new()
 			world_snapshot.from_dict(ws_raw)
-			_world_snapshot_pending = true
 			_dead_authored = world_snapshot.dead_map()
 		else:
 			push_warning("GameState: [world_snapshot] version %d unsupported — loaded the profile only." % ws_ver)
@@ -777,9 +783,9 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 	# WaypointBook.make on the way in), and re-sanitized on the way back out because the file is editable.
 	if not waypoints.is_empty():
 		cfg.set_value("waypoints", "data", waypoints)
-	# Exact-snapshot tier: write [world_snapshot] ONLY when a manual save populated one (autosave nulls world_snapshot
-	# first, so it can never leak into gamestate.cfg). Its own version stamp is decoupled from [meta].version. Empty
-	# snapshots are skipped so the section never bloats a save. This is what keeps the profile and the snapshot separate.
+	# The per-level world ledger, as [world_snapshot] — on EVERY save (autosave, quicksave, slots). It is written as it
+	# stands in memory: the caller (autosave / _capture_and_write, via capture_world_state) refreshes the current level
+	# first. Its own version stamp is decoupled from [meta].version, and an empty ledger writes no section at all.
 	if world_snapshot != null and not world_snapshot.is_empty():
 		cfg.set_value("world_snapshot", "version", WorldSnapshot.SNAPSHOT_VERSION)
 		cfg.set_value("world_snapshot", "data", world_snapshot.to_dict())
@@ -987,10 +993,8 @@ func autosave(player: Node) -> void:
 	# fresh scene will autosave normally once GameRoot boots (which clears this latch via set_current_level).
 	if _reload_pending:
 		return
-	world_snapshot = null  # the lean autosave/Continue profile NEVER carries an exact snapshot — clear any that a
-	_world_snapshot_pending = false  # (and its consume flag) so a stale pending can't ride into the reloaded scene
-						   # prior manual quicksave left in memory so save_to_disk can't write one into gamestate.cfg.
 	capture(player)
+	capture_world_state()  # the level the player is standing in joins the per-level world ledger this save writes
 	save_to_disk()
 
 ## The live HUMAN player — the non-NPC member of the Player group (companions ARE NPCs; mirrors NPC._real_player) —
@@ -1031,17 +1035,47 @@ func consume_clock_apply() -> bool:
 	_clock_apply_pending = false
 	return pending
 
-## Exact-snapshot tier: consume-once the "a loaded save carried a [world_snapshot]" flag. GameRoot calls this after
-## the level subtree is ready; true -> apply GameState.world_snapshot to the reloaded world (a manual quickload),
-## false -> no-op (Continue / autosave load / death-respawn reload / fresh game). Twin of consume_clock_apply.
-func consume_world_snapshot() -> bool:
-	var pending := _world_snapshot_pending
-	_world_snapshot_pending = false
-	return pending
+# --- The per-level world ledger: capture / apply ---------------------------------------------------------------------
 
-## Exact-snapshot tier: record that an authored NPC (keyed by its POSITION-FREE NPC.snapshot_key) has died, into the
-## live per-level ledger a later manual quicksave folds into its WorldSnapshot. Called from NPC's died signal. No
-## disk write here — deaths reach disk only when the player takes a manual quicksave/slot save. Empty key ignored.
+## Record `level_path`'s live state into the world ledger (WorldSnapshot.capture REPLACES that level's bucket) from
+## `tree`, which must hold that level. GameRoot calls it for the OUTGOING level right before freeing it on a level
+## change; the RELOAD_CHECKPOINT_FRESH death calls it with include_live_npcs = false (see WorldSnapshot.capture). No
+## disk write — the next save persists it — and a no-op for a blank path, a null tree, or the level whose bucket apply
+## is still queued (_level_apply_pending: capturing now would overwrite the saved state with the fresh seed).
+func capture_level_state(tree: SceneTree, level_path: String, include_live_npcs: bool = true) -> void:
+	if tree == null or level_path == "" or level_path == _level_apply_pending:
+		return
+	world_snapshot.capture(tree, level_path, _dead_authored.get(level_path, {}), include_live_npcs)
+
+## Bring the whole ledger up to date for a SAVE: capture the level the player is in (when in-tree), then fold every
+## level's death ledger into its bucket (a level the player has not re-entered since a kill keeps its captured live
+## data and gains the new dead keys). Called by autosave and _capture_and_write right before save_to_disk. Bounded:
+## each call REPLACES the current level's bucket, so saving a thousand times never grows the payload.
+func capture_world_state() -> void:
+	if is_inside_tree() and get_tree() != null:
+		capture_level_state(get_tree(), current_level_path)
+	world_snapshot.fold_dead_ledger(_dead_authored, current_level_path)
+
+## GameRoot is about to spawn `level_path`: arm the capture guard when the ledger has a bucket to apply to it (and clear
+## any guard left by an earlier load that was superseded). Returns whether an apply should be queued.
+func begin_level_load(level_path: String) -> bool:
+	var has := level_path != "" and world_snapshot.has_level(level_path)
+	_level_apply_pending = level_path if has else ""
+	return has
+
+## Apply `level_path`'s ledger bucket to the freshly spawned level in `tree` (deferred from GameRoot.load_level, after
+## every node's _ready): dead authored NPCs are freed, live ones get their position/yaw/hp back, and every captured
+## container its exact contents + Lock state. Lifts the capture guard for that level. Runtime-only.
+func apply_level_state(tree: SceneTree, level_path: String) -> void:
+	if _level_apply_pending == level_path:
+		_level_apply_pending = ""
+	if tree == null:
+		return
+	world_snapshot.apply(tree, level_path)
+
+## Record that an authored NPC (keyed by its POSITION-FREE NPC.snapshot_key) has died, into the live per-level death
+## ledger the world ledger folds in on the next save (capture_world_state). Called from NPC's died signal. No disk
+## write here. Empty key ignored.
 func record_npc_death(level_path: String, key: String) -> void:
 	if key.is_empty():
 		return
@@ -1049,13 +1083,14 @@ func record_npc_death(level_path: String, key: String) -> void:
 		_dead_authored[level_path] = {}
 	_dead_authored[level_path][key] = true
 
-## Exact-snapshot tier: free every authored NPC in `tree` whose snapshot_key is in this level's death ledger — so an NPC
-## the player killed EARLIER (this session via record_npc_death, OR restored dead from a quicksave via dead_map) STAYS
+## Free every authored NPC in `tree` whose snapshot_key is in this level's death ledger — so an NPC
+## the player killed EARLIER (this session via record_npc_death, OR restored dead from a save via dead_map) STAYS
 ## dead when the level re-instantiates: a door A->B->A return, or the boot after a load. Called by GameRoot.load_level on
 ## EVERY load (deferred, after NPC _ready has settled so snapshot_key resolves in-tree). A silent queue_free — NOT a death
 ## (no FX / loot re-roll; corpse reconstruction is a later phase). Deferred queue_free is safe while iterating the group
 ## snapshot. Dynamic (spawner) NPCs never enter _dead_authored, so only authored bodies are suppressed. Empty ledger / no
-## tree -> no-op, so a fresh game or a lean Continue (no snapshot -> empty ledger) suppresses nothing.
+## tree -> no-op, so a fresh game suppresses nothing. (apply_level_state frees the same keys when the level has a bucket;
+## this runs on EVERY load regardless, which covers a level with deaths but no captured bucket.)
 func suppress_dead_authored(tree: SceneTree, level_path: String) -> void:
 	if tree == null:
 		return
@@ -1086,12 +1121,11 @@ func set_current_level(path: String) -> void:
 
 # --- Manual save / quicksave / named slots (ML-1) -----------------------------------------------------------
 ## These layer over the path-parameterized save_to_disk(path) / load_from_disk(path). They are SEPARATE files from
-## the Dark-Souls autosave (SAVE_PATH): quitting still resumes the autosave. Unlike the lean autosave, a quick/slot
-## save is the EXACT-snapshot tier — it writes the profile+ledger PLUS a [world_snapshot] section (built in
-## _capture_and_write) so a load restores the WORLD as it was, not just your progression. The two products stay
-## distinct on purpose (autosave = lean profile, quick/slot = exact snapshot; see docs "Save semantics must be
-## explicit"). RESTORED by a scene reload (load_from_disk sets loaded=true, then reload_current_scene rebuilds a
-## fresh Player that re-applies the build; GameRoot then applies the snapshot) — we never mutate the live player,
+## the Dark-Souls autosave (SAVE_PATH): quitting still resumes the autosave. A quick/slot save holds EXACTLY what the
+## autosave holds (the profile + world_objects + the per-level world ledger — see the SAVE SCOPE header); what makes it
+## different is only that the player chose when and where, and that it stamps the respawn at the player's spot.
+## RESTORED by a scene reload (load_from_disk sets loaded=true, then reload_current_scene rebuilds a
+## fresh Player that re-applies the build; GameRoot then applies the booted level's ledger bucket) — we never mutate the live player,
 ## the same contract as boot / Continue. A quick/slot save also stamps the respawn point at the player's CURRENT
 ## position so a load returns you exactly where you saved (not the last bonfire).
 ## UI STATUS: the QUICKSAVE is written in-game by F5 (player.gd; F9 quickloads) and is a LOAD-only row on the
@@ -1131,14 +1165,7 @@ func _capture_and_write(player: Node, path: String) -> bool:
 		return false
 	set_respawn(player.global_position, player.rotation.y)  # a quick/slot save IS your new checkpoint
 	capture(player)
-	# Exact-snapshot tier: the manual path (and ONLY this path — autosave never calls here) builds a WorldSnapshot of the
-	# live world (current level's live NPCs + its dead ledger), THEN folds in every OTHER level's death ledger so a
-	# cross-level kill survives a quickload (you door back into a cleared level and it stays cleared). save_to_disk writes
-	# it as [world_snapshot]; a load reloads the full ledger via dead_map() and load_level suppresses the dead per level.
-	world_snapshot = WorldSnapshot.new()
-	if is_inside_tree() and get_tree() != null:
-		world_snapshot.capture(get_tree(), current_level_path, _dead_authored.get(current_level_path, {}))
-	world_snapshot.fold_dead_ledger(_dead_authored, current_level_path)  # other levels aren't in the tree — dead keys only
+	capture_world_state()  # the same world ledger refresh every autosave does
 	return save_to_disk(path) == OK
 
 ## Load the quicksave and re-apply it by reloading the scene (the fresh Player rebuilds the saved build from
@@ -1482,8 +1509,8 @@ func reset_for_new_game() -> void:
 	world_objects.clear()  # a fresh run forgets every door/pickup/prop world-state marker
 	waypoints.clear()      # ...and every map pin the previous run placed
 	_waypoints_loaded()    # (no autosave — a reset must not write over the file it is replacing)
-	world_snapshot = null          # ...and any in-memory exact snapshot (matters on a RELOAD_CHECKPOINT_FRESH death,
-	_world_snapshot_pending = false #    which keeps in-memory GameState — a fresh run must never apply a stale snapshot)
+	world_snapshot = WorldSnapshot.new()  # ...and every level's world ledger (a fresh run must never apply a stale bucket)
+	_level_apply_pending = ""
 	_dead_authored.clear()
 	_qt().reset()  # the journal + any prior boot-load's quest-restore warnings
 	_holster_forgiveness_tutorial_reminder_pending = false

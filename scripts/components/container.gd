@@ -23,10 +23,10 @@ extends LookAtInteractable
 @export var loot_table: LootTable = null
 ## Name shown on the look-at hover ("Loot <name>") + the transfer screen title. Blank -> just "Container".
 @export var container_name: String = ""
-## OPTIONAL stable id for the exact-save (WorldSnapshot quicksave/slot) tier. Leave blank for the
-## level|node-path fallback (fine for a hand-placed crate that is never renamed/re-parented); set it on
-## story containers whose looted/stashed state must survive a scene-layout edit. Mirrors NPC.save_id /
-## Corpse.save_id. Unused by the lean autosave/Continue profile (containers re-seed there, by design).
+## OPTIONAL stable id for the per-level world ledger (GameState.world_snapshot — every save, and every level change).
+## Leave blank for the level|node-path fallback (fine for a hand-placed crate that is never renamed/re-parented); set
+## it on story containers whose looted/stashed state must survive a scene-layout edit. Mirrors NPC.save_id /
+## Corpse.save_id.
 @export var save_id: StringName = &""
 
 ## The container's contents — LootScreen reads this. Built in _ready (a child CharacterInventory), seeded
@@ -92,7 +92,7 @@ func refill() -> void:
 			CharacterInventory.accumulate_baseline(baseline, st.item, st.count)
 	CharacterInventory.refill_to_baseline(inventory, baseline)
 
-# --- WorldSnapshot exact-save tier (manual quicksave/slots) --------------------------------------------------
+# --- The per-level world ledger (WorldSnapshot: every save + every level change) ---------------------------------
 
 ## POSITION-INDEPENDENT identity for the snapshot: an authored `save_id` is the whole key ("id:<x>"); else
 ## level|node_path — the same shape as NPC.snapshot_key (a container never moves, but the shared shape keeps
@@ -103,7 +103,7 @@ func snapshot_key() -> String:
 	var np: String = str(get_path()) if is_inside_tree() else String(name)
 	return "%s|%s" % [GameState.current_level_path, np]
 
-## This container's exact-save state, in the [world_snapshot] "containers" entry shape:
+## This container's world-ledger state, in the [world_snapshot] "containers" entry shape:
 ## { stacks: serialize_stacks() rows, grid: bool, locked: bool (only when a Lock child exists) }.
 ## The coin tile serializes like any other stack (a container's cash is REAL loot — the PLAYER's zorkmids are
 ## a `money` float that never enters a bag); `grid` records whether the loot screen has bounded us yet, so a restore
@@ -117,13 +117,13 @@ func snapshot_contents() -> Dictionary:
 		d["locked"] = lock.locked
 	return d
 
-## Central-push restore (WorldSnapshot.apply, deferred after _ready): REPLACE the freshly-seeded contents with
-## the snapshot's exact bag. _ready's authored seed + loot_table roll already ran — clear() discards it, so a
-## looted crate stays looted and a random table never re-rolls on quickload. When the save had the container
+## Central-push restore (WorldSnapshot.apply, deferred after _ready on any load of a level the ledger knows): REPLACE
+## the freshly-seeded contents with the saved exact bag. _ready's authored seed + loot_table roll already ran — clear()
+## discards it, so a looted crate stays looted and a random table never re-rolls, on a load or a door return. When the save had the container
 ## grid on (the loot screen had bounded it), re-bound at the same authored dims FIRST so each stack's saved
 ## cell is honored; LootScreen._open's enable is guarded on grid_enabled(), so the restored layout survives
-## the next open untouched. A Lock child gets its save-time locked bit back (quickload is time travel — a
-## re-lock is correct; the consumed key/pick lives in the profile tier, restored by the same load). Child
+## the next open untouched. A Lock child gets its captured locked bit back (a load is time travel — a
+## re-lock is correct; the consumed key/pick lives in the profile, restored by the same load). Child
 ## Restockers are told (note_restored) so the first reopen can't insta-refill what the snapshot restored.
 func restore_snapshot_contents(d: Dictionary) -> void:
 	if inventory == null:

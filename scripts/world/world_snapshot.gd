@@ -4,26 +4,33 @@ extends RefCounted
 ## headless GUT compiles it without a prior --import, matching WorldSaveId / Factions / GoapLibrary / ItemIds).
 ## Consumers: `const WorldSnapshot = preload("res://scripts/world/world_snapshot.gd")` (GameState, GameRoot, tests).
 ##
-## @system Save Model — the EXACT-snapshot tier (authored-NPC death/position + cross-level deaths + container contents)
+## @system Save Model — the PER-LEVEL WORLD LEDGER (authored-NPC alive/pos/hp + deaths + container contents, for every visited level)
 ## NOTE: each @seam/@risk below must stay on ONE line — ArchScan only reads lines that start with a @tag, so a
 ## wrapped continuation line is DROPPED and the statement renders truncated in docs/SYSTEM_MAP.md.
-## @seam Rides the MANUAL quicksave/slot layer ONLY: built in GameState._capture_and_write, written as a sibling [world_snapshot] cfg section, applied by GameRoot.load_level (central push) gated on consume_world_snapshot(). The lean Dark-Souls autosave/Continue NEVER carries one — see GameState.autosave (nulls it) + save_to_disk.
-## @risk This is a SEPARATE product from the profile save. Never merge it into GameState's profile fields / capture() or the two blur the moment autosave runs (CLAUDE.md "Save semantics must be explicit"). world_objects is untouched.
+## @seam GameState.world_snapshot is ONE long-lived instance holding a bucket per visited level: GameRoot.load_level captures the OUTGOING level before freeing it and applies the INCOMING level's bucket after it spawns; every save (autosave, Continue, quicksave, slots) captures the current level + folds the death ledger and writes the whole ledger as [world_snapshot].
+## @risk A capture that runs BEFORE a freshly loaded level's bucket is applied overwrites the saved bucket with the level's authored seed (a looted safe restocks) — GameState._level_apply_pending is the guard; never capture a level whose apply is still queued.
+## @risk The ledger and GameState.world_objects are two separate stores keyed differently (snapshot_key vs WorldSaveId.key_for); never merge them — doors/pickups ride world_objects, actors/containers ride this.
 ## @risk NPC identity is POSITION-INDEPENDENT (NPC.snapshot_key), NOT WorldSaveId.key_for — an NPC moves, so a position-keyed match would fail against the reloaded node sitting at its authored .tscn spot.
 ## @test res://tests/test_world_snapshot.gd
+## @test res://tests/test_level_boot_lifecycle.gd
 ##
-## An exact world snapshot, decoupled from the profile. Captures which AUTHORED NPCs are alive (and where) in the level
-## you saved IN, plus which authored NPCs have DIED across EVERY visited level (fold_dead_ledger folds the whole
-## GameState._dead_authored ledger — other levels aren't in the tree, so only their dead KEYS are known). On load the
-## full death set is restored (dead_map -> _dead_authored) and GameRoot.load_level suppresses the dead per level on every
-## load, so a killed NPC stays dead when you door back into a cleared level (in-session too — no save required; that path
-## is driven by the live ledger, not this snapshot). Live-POSITION restore is still single-level (the level you saved in).
-## v2 also captures every authored ItemContainer's exact contents (stacks + grid-bounded bit + Lock state) in the level
-## saved in, so a looted crate stays looted and a stash survives — restored by the same central push (a container
-## REPLACES its freshly-seeded bag via restore_snapshot_contents; a random loot_table never re-rolls on quickload).
-## Later phases grow the same capture()/apply() entry points with corpse rebuild, loot drops, money bags, dynamic
-## (EncounterSpawner) NPCs, and multi-level live positions — the written roadmap lives in
-## docs/CURRENT_ARCHITECTURE.md (Save Model -> "The exact-snapshot tier").
+## The per-level WORLD LEDGER. One bucket per level the player has visited this run, each holding the level's authored
+## NPCs (alive + pos/yaw/hp), the authored NPCs killed there, and every authored ItemContainer's exact contents (stacks
+## incl. the coin tile, the grid-bounded bit + cell layout, a Lock child's state). A bucket is written by capture() —
+## when the player LEAVES the level through GameRoot.load_level, and for the CURRENT level at every save — and read
+## back by apply() every time that level loads again (a door return, Continue, a quickload, a death reload). So a safe
+## looted in one building stays looted after the player has been through five other interiors, saved, quit and come
+## back. Levels not in the tree keep whatever bucket they had; fold_dead_ledger adds deaths recorded since.
+##
+## HISTORY (policy, 2026-09-16): this used to be a SEPARATE product riding the manual quicksave/slots only, applied as a
+## one-shot for the boot level, while autosave/Continue stayed a lean profile. It is now the ordinary save's world
+## state. The profile fields and the additive GameState.world_objects ledger are unchanged and stay separate code.
+## Still NOT in the ledger: corpses (a dead authored NPC just stays gone), loot drops / money bags, dynamic
+## (EncounterSpawner) NPCs, NPC backpacks — the roadmap in docs/CURRENT_ARCHITECTURE.md (Save Model).
+##
+## SIZE (the autosave-storm budget): a capture REPLACES its level's bucket, so the payload is bounded by the authored
+## content of the visited levels, never by play time or by how many times you save. See the measured per-entry sizes
+## in docs/CURRENT_ARCHITECTURE.md (Save Model); tests/test_world_snapshot.gd pins that re-capturing does not grow it.
 ##
 ## SHAPE (round-trips through ConfigFile as a nested Dictionary, exactly like GameState.world_objects):
 ##   { "<level_res_path>": {
@@ -37,7 +44,9 @@ extends RefCounted
 ## snapshot the running code doesn't understand is simply ignored (the profile still loads). The shape has only
 ## ever grown ADDITIVELY (v2 added "containers"; from_dict shape-filters whatever is absent/junk), so every
 ## version back to SNAPSHOT_MIN_COMPAT still loads — a pre-container quicksave keeps its NPC state instead of
-## being dropped on update. Raise SNAPSHOT_MIN_COMPAT only for a genuinely BREAKING reshape.
+## being dropped on update. The 2026-09-16 policy change did NOT bump it: the SHAPE is identical (a bucket per level
+## always existed); only which levels carry live data changed, and an old single-level quicksave is simply a ledger
+## that knows one level. Raise SNAPSHOT_MIN_COMPAT only for a genuinely BREAKING reshape.
 const SNAPSHOT_VERSION := 2
 const SNAPSHOT_MIN_COMPAT := 1
 
@@ -46,11 +55,18 @@ const SNAPSHOT_MIN_COMPAT := 1
 ## stores all three buckets, so a reader can assume the keys exist — the values may be empty.
 var _data: Dictionary = {}
 
-## Walk the live tree and record the current level's NPC state. `dead_keys` is GameState's per-level ledger of
-## authored NPCs that have ALREADY died this run (they've freed themselves, so they aren't in the tree to find);
-## it's unioned with any NPC caught mid-death-freeze (in-tree but not is_alive()). Duck-typed on snapshot_key /
-## is_alive / hp so a test can drive it with lightweight stubs (and so a non-NPC group member can't crash it).
-func capture(tree: SceneTree, level_path: String, dead_keys: Variant = {}) -> void:
+## Walk the live tree and REPLACE `level_path`'s bucket with what is there now. The caller guarantees the tree holds
+## that level and only that level (GameRoot captures the outgoing level BEFORE detaching it; a save captures the current
+## one). `dead_keys` is GameState's per-level ledger of authored NPCs that have ALREADY died this run (they've freed
+## themselves, so they aren't in the tree to find); it's unioned with any NPC caught mid-death-freeze (in-tree but not
+## is_alive()). Duck-typed on snapshot_key / is_alive / hp so a test can drive it with lightweight stubs (and so a
+## non-NPC group member can't crash it).
+##
+## `include_live_npcs` false records NO live NPC entries (deaths and containers still record): the fresh-world death
+## reload (RELOAD_CHECKPOINT_FRESH) banks the level this way so enemies return to their authored spots at full hp while
+## looted crates stay looted — the in-memory profile it keeps still holds that loot, so re-seeding the crate would
+## duplicate it.
+func capture(tree: SceneTree, level_path: String, dead_keys: Variant = {}, include_live_npcs: bool = true) -> void:
 	var live := {}
 	var dead := {}
 	if dead_keys is Dictionary:
@@ -77,6 +93,14 @@ func capture(tree: SceneTree, level_path: String, dead_keys: Variant = {}) -> vo
 			if n.has_method(&"is_alive") and not n.is_alive():
 				dead[key] = true
 				continue
+			# LIVE WINS over a stale ledger entry, whether or not live state is recorded: the death ledger only ever GROWS
+			# (record_npc_death never prunes), but a killed authored NPC can come back ALIVE when its level re-instantiates
+			# (a console `resurrect`, or a death ledger restored older than the level). If we see it alive in the tree now,
+			# it is NOT dead at capture time — drop the stale key, or apply() (which frees dead-first) would delete an NPC
+			# standing in front of the player and poison every later save of this level.
+			dead.erase(key)
+			if not include_live_npcs:
+				continue
 			var hp_v: Variant = n.get(&"hp")
 			live[key] = {
 				"alive": true,
@@ -84,17 +108,9 @@ func capture(tree: SceneTree, level_path: String, dead_keys: Variant = {}) -> vo
 				"yaw": n.rotation.y,
 				"hp": float(hp_v) if (hp_v is float or hp_v is int) else 0.0,
 			}
-			# LIVE WINS over a stale ledger entry: the death ledger only ever GROWS (record_npc_death never prunes), but a
-			# killed authored NPC comes back ALIVE when its level re-instantiates (door A->B->A, or a RELOAD_CHECKPOINT_FRESH
-			# death). If we see it alive in the tree now, it is NOT dead at save time — drop the stale key, or apply() (which
-			# frees dead-first) would delete an NPC standing in front of the player and poison every later quicksave here.
-			dead.erase(key)
 	# v2: every authored container's exact contents (duck-typed on snapshot_key/snapshot_contents so a test stub
-	# drives it, and so the corpse/loot-bag classes — which share no snapshot surface yet — are simply skipped).
-	# SINGLE-LEVEL, like the live NPC data above: only the level being walked can be captured, and apply() is a
-	# one-shot for the boot level, so a crate you looted in ANOTHER level re-seeds from its authored exports on
-	# quickload. Fixing that is the same "retain per-level buckets across door swaps" work the roadmap's
-	# multi-level live-position item describes — the two land together.
+	# drives it, and so the corpse/loot-bag classes — which share no snapshot surface yet — are simply skipped). Only the
+	# level being walked is captured; every OTHER level keeps the bucket it was given when the player last left it.
 	var conts := {}
 	if tree != null:
 		for c in tree.get_nodes_in_group(Groups.CONTAINERS):
@@ -141,14 +157,20 @@ func fold_dead_ledger(dead_authored_all: Dictionary, current_level_path: String)
 		var conts: Dictionary = existing.get("containers", {}) if existing is Dictionary else {}
 		_data[lvl_s] = {"authored_npcs": live, "dead_authored": merged.keys(), "containers": conts}
 
-## Central PUSH after the level subtree is ready (GameRoot.load_level, deferred). Match each reloaded NPC by its
+## True when the ledger holds a bucket for `level_path` — GameRoot asks before queueing an apply, and GameState uses it
+## to arm the capture guard (_level_apply_pending).
+func has_level(level_path: String) -> bool:
+	return _data.get(level_path) is Dictionary
+
+## Central PUSH after the level subtree is ready (GameRoot.load_level, deferred — on EVERY load of a level the ledger
+## has a bucket for). Match each reloaded NPC by its
 ## snapshot_key: a key in dead_authored -> the authored NPC had died, so free the fresh-alive spawn (a silent
 ## queue_free, NOT a death — no FX / loot re-roll; CORPSE REBUILD is the next unshipped item on the roadmap in
 ## docs/CURRENT_ARCHITECTURE.md, "The exact-snapshot tier roadmap"). A key in authored_npcs -> hand it back its
 ## saved transform + hp. Then every captured CONTAINER is handed its exact bag back (restore_snapshot_contents,
 ## which REPLACES the fresh _ready seed). Unmatched reloaded NPCs/containers (e.g. a dynamic spawn, or a crate
 ## added to the level after the save) are left alone. queue_free is deferred, so freeing while iterating the
-## group snapshot is safe. SCOPE: only `level_path`'s bucket is applied — see the single-level caveat on capture().
+## group snapshot is safe. SCOPE: only `level_path`'s bucket is applied (the only level in the tree).
 func apply(tree: SceneTree, level_path: String) -> void:
 	if tree == null:
 		return
@@ -182,7 +204,7 @@ func apply(tree: SceneTree, level_path: String) -> void:
 				c.restore_snapshot_contents(conts[ckey])
 
 ## The dead-authored keys per level as a { level_path -> { key: true } } ledger — GameState reloads its live death
-## accumulator from this on a snapshot load, so NPCs that die AFTER the load keep piling onto the right set.
+## accumulator from this on every load that carries a ledger, so NPCs that die AFTER the load pile onto the right set.
 func dead_map() -> Dictionary:
 	var out := {}
 	for lvl in _data:
@@ -195,8 +217,8 @@ func dead_map() -> Dictionary:
 				out[str(lvl)] = m
 	return out
 
-## Nothing worth persisting? (No live NPC captured and no death recorded, for any level.) GameState skips writing
-## the [world_snapshot] section when this is true, so an empty snapshot never bloats a save.
+## Nothing worth persisting? (No live NPC, death or container recorded, for any level.) GameState skips writing the
+## [world_snapshot] section when this is true, so a run that has not left its first empty level writes none.
 func is_empty() -> bool:
 	for lvl in _data:
 		var b: Variant = _data[lvl]

@@ -99,7 +99,8 @@ Session-only by design: a crash or relaunch boots the REAL profile. `_write_atom
 attempt (`save_count` / `save_fail_count` / `last_save_*`) and emits `saved(path, err)`, which the F3 overlay
 paints as a disk-write line — the autosave-storm bug class made visible. Pinned by `tests/test_debug_sandbox.gd`.
 
-`GameState` is a profile/checkpoint save, not a full world snapshot. It persists
+`GameState` writes ONE save product to every file (autosave, quicksave, slots): the
+profile plus two separate world ledgers (see Save Model below). The profile persists
 player progression, stats, inventory, equipped item, money, reputation, story
 flags, quests, perks, ability unlocks (installed microchip upgrades), XP, status
 effects, clock, respawn transform, current level identity, lightweight
@@ -258,8 +259,9 @@ back untouched. `LootScreen` wallet modes are now just `TILE` (every cash source
 `NONE` (gear exchange — a cash deposit is refused, since gifting a friend's wallet isn't
 "exchanging"). Corpses aren't saved, so their coin tiles re-seed from the
 authored/earned `money` on the next spawn; a CONTAINER's coin tile is real loot and
-DOES ride the exact-snapshot tier (`serialize_stacks`), so a quickload restores exactly the
-cash you left in the crate — it re-seeds from `money` only on the profile/Continue tier.
+DOES ride the per-level world ledger (`serialize_stacks`), so any load or return to the level
+restores exactly the cash you left in the crate — it re-seeds from `money` only in a level the
+ledger has no bucket for.
 `LootScreen._take` credits the player through `add_money` and debits **nothing else**: a
 corpse / container has no `money` float at all, and a pickpocket target's is already 0
 (frozen into the very tile being lifted), so there is no second ledger a take could
@@ -346,8 +348,8 @@ return `null` where it previously returned an item; a modded gun whose template 
 `resources/items/` keeps its restored scalars with a warning rather than being nulled.
 
 What survives where follows the ordinary rules: a modded gun in the player's bag or hands rides
-the **profile** tier (autosave, Continue, quicksave, slots); one in an authored `ItemContainer` or
-stash rides the **manual quicksave/slot** tier only (`WorldSnapshot`); one dropped as a `WorldItem`
+the **profile** (every save); one in an authored `ItemContainer` or
+stash rides the **per-level world ledger** (`WorldSnapshot`, also every save); one dropped as a `WorldItem`
 is persisted by neither, exactly like every other dropped item. The parts themselves are plain
 stacking `Item`s keyed on `Item.id` — no special case anywhere.
 
@@ -485,26 +487,75 @@ a door shot to pieces; its partial HP is deliberately not persisted), and a cons
 bit — set an authored `save_id` on hand-placed objects that must survive layout
 edits (else a level/path/position fallback is used). Code-spawned pickups (a
 dropped money bag's reclaim child) set `persist_collected = false` to stay out of
-the ledger — a dynamic spawn has no stable identity. It still does NOT persist looted/refilled containers, killed
-NPCs, dynamically-spawned entities (loot drops / encounter NPCs), or NPC
-positions, and it is NOT an exact snapshot — only touched, authored objects are in
-the ledger. This ledger is additive: it does not rebrand the profile save as an
-"exact quicksave."
+the ledger — a dynamic spawn has no stable identity. It does NOT persist
+dynamically-spawned entities (loot drops / encounter NPCs); only touched, authored
+objects are in it. Container contents, killed authored NPCs and NPC positions live in
+the second ledger below, never here.
 
-Those omissions describe the PROFILE ledger. A separate **exact-snapshot tier**
-already ships on top of it, riding the **manual quicksave/slot** layer ONLY (the
-lean Dark-Souls autosave / Continue never carries one). It is a `WorldSnapshot`
-(`scripts/world/world_snapshot.gd`) built in `GameState._capture_and_write` and
-written as a sibling `[world_snapshot]` cfg section with its OWN `SNAPSHOT_VERSION`
-(**2**), decoupled from `SAVE_VERSION`. The snapshot shape has only ever grown
-ADDITIVELY, so the load gate is RANGED (`SNAPSHOT_MIN_COMPAT`..`SNAPSHOT_VERSION`
-— an older quicksave keeps its world state on update); a version outside the range
-(a downgraded install) is ignored while the profile still loads. On a manual
-quickload `GameRoot.load_level` applies it via
-`GameState.consume_world_snapshot()` (a one-shot, so Continue or a death-respawn
-reload never re-applies it).
+**The per-level world ledger.** Beside `world_objects` sits a second, separately
+keyed store: `GameState.world_snapshot`, ONE long-lived `WorldSnapshot`
+(`scripts/world/world_snapshot.gd`) holding a bucket per level visited this run.
+A bucket records the level's authored NPCs (alive + position/yaw/hp), the authored
+NPCs killed there, and every authored `ItemContainer`'s exact contents + `Lock`
+state. The two ledgers stay two code seams with different keys
+(`WorldSaveId.key_for` vs the position-free `snapshot_key`); never merge the
+dictionaries.
 
-The player-facing face of this manual tier is the **`SaveLoadScreen`** autoload
+What rides where (the 2026-09-16 policy; before it, only the manual quicksave/slots
+carried a snapshot, and only of the level saved in):
+
+- **Moving between levels.** `GameRoot.load_level` captures the OUTGOING level
+  (`GameState.capture_level_state`) while it is still in the tree and before
+  `set_current_level` changes the bucket key. It then queues
+  `GameState.apply_level_state` for the INCOMING level's bucket before `add_child`,
+  so the apply runs after every `_ready` but ahead of anything those `_ready`s
+  defer. `begin_level_load` arms a capture guard (`_level_apply_pending`) until the
+  apply lands, so an autosave queued by the new level cannot overwrite the saved
+  bucket with the fresh authored seed. No disk write. Only a `Level` GameRoot
+  itself loaded is captured (a hand-placed one has no `LevelData` path).
+- **Every save.** `autosave` and `_capture_and_write` (quicksave/slots) call
+  `capture_world_state()`: capture the current level, then `fold_dead_ledger` for
+  every other level. `save_to_disk` writes the whole ledger as a sibling
+  `[world_snapshot]` cfg section; an empty ledger writes no section.
+- **Every load.** `load_from_disk` rebuilds the ledger and the live death map
+  (`_dead_authored`) from it, and GameRoot applies the booted level's bucket.
+  Continue, quickload, a slot load and a `LevelDoor` return all take that path.
+- **A `RELOAD_CHECKPOINT_FRESH` death** (and the plain-reload fallbacks) keeps the
+  in-memory run, so `Player` first banks the level with `include_live_npcs = false`:
+  enemies return to their authored spots at full health, the dead stay dead, and
+  containers keep what the player took (the kept profile holds that loot, so a
+  re-seed would duplicate it). `RELOAD_LAST_SAVE` replaces the run, ledger
+  included, from the autosave.
+
+The section carries its OWN `SNAPSHOT_VERSION` (**2**; the policy change did not
+change the shape, only what rides where), decoupled from `SAVE_VERSION`. The load
+gate is RANGED (`SNAPSHOT_MIN_COMPAT`..`SNAPSHOT_VERSION`): an older quicksave that
+carries a single-level snapshot loads as a one-bucket ledger, and an older autosave
+written without the section loads an empty ledger, so every level plays from its
+authored seed until the player changes it (what that save meant). A version outside
+the range (a downgraded install) is ignored while the profile still loads.
+
+**Size budget (the autosave-storm check).** `capture` REPLACES its level's bucket
+and `fold_dead_ledger` merges keys, so saving repeatedly never grows the payload.
+It grows only with the number of levels visited and what they hold. A level change
+costs no disk write (`save_count` and `saved(path, err)` stay put). Measured
+ConfigFile text:
+
+| Part of a bucket | Bytes |
+|---|---|
+| bucket overhead | ≈150 |
+| each live authored NPC (level\|node_path key) | ≈190 |
+| each dead authored NPC key | ≈95 |
+| each container, empty | ≈125 |
+| each stack inside a container | ≈70 |
+
+A small interior (5 NPCs, 6 two-stack crates) is ≈3 KB per level; a dense
+district (40 NPCs, 30 two-stack crates) is ≈16 KB. A `save_id` key is shorter than
+the path fallback. Pinned by `tests/test_world_snapshot.gd`
+(`test_capture_replaces_its_bucket_so_saving_repeatedly_never_grows_the_payload`,
+`test_capture_level_state_never_writes_to_disk`).
+
+The player-facing face of the manual saves is the **`SaveLoadScreen`** autoload
 (`scripts/ui/save_load_screen.gd`), a slot menu registered in the
 `InputManager` modal registry (like every screen it does not pause the tree —
 only `DialogueManager` still does): a load-only quicksave row (F5 owns writing it)
@@ -514,48 +565,46 @@ Options menu's *Save / Load* button (Options closes first — modals never stack
 with Save (overwrite-confirmed on an occupied slot) and Load per slot; at the
 start menu the *Load Game* button opens it load-only, booting the chosen file
 through `load_from_disk` + the same boot path Continue uses. It lists ONLY the
-quicksave/slot files — the lean autosave/Continue profile is deliberately not a
-row there, keeping the two save products distinct.
+quicksave/slot files: the autosave is the run's rolling checkpoint behind
+Continue, not a bookmark the player chose. Every file holds the same save product.
 
-**The exact-snapshot tier roadmap** (this section is the written design brief the
+**The world ledger roadmap** (this section is the written design brief the
 code comments point at — keep it current as phases land):
 
-- **DONE — authored-NPC death + position** (v1): for the level you saved in, which
-  AUTHORED NPCs are alive plus their position/yaw/hp, keyed by the POSITION-FREE
-  `NPC.snapshot_key` (`save_id` else level|node_path).
+- **DONE — authored-NPC death + position** (v1): which AUTHORED NPCs are alive
+  plus their position/yaw/hp, keyed by the POSITION-FREE `NPC.snapshot_key`
+  (`save_id` else level|node_path).
 - **DONE — cross-level deaths** (v1): `fold_dead_ledger` folds every visited
   level's authored-NPC death ledger (`GameState._dead_authored`) so cross-level
   kills stay dead on reload; `GameRoot.load_level` also suppresses the dead on
-  EVERY load from the live ledger (door A→B→A needs no save).
+  EVERY load from the live ledger.
 - **DONE — container contents** (v2): every authored `ItemContainer`'s exact bag
   (stacks incl. its REAL coin tile + per-instance `weapon_delta`, the
   grid-bounded bit + cell layout, a `Lock` child's locked state), keyed by
   `ItemContainer.snapshot_key`. Restore REPLACES the fresh `_ready` seed via
   `restore_snapshot_contents` — a looted crate stays looted, a random
   `loot_table` never re-rolls, a stash survives, and child `Restocker`s are
-  marked spent (`note_restored`) so quickload is never a free instant restock.
+  marked spent (`note_restored`) so a load is never a free instant restock.
   Runtime-spawned containers (`@`-pathed, no `save_id`) are excluded like
   dynamic NPCs.
-- **REMAINING — NPC backpacks** (a known consequence of shipping containers
-  first): NPC bags are in NEITHER tier. `NpcScavenge` moves real items OUT of an
-  `ItemContainer` into an NPC's bag, so if an NPC loots a crate and you then
-  quicksave and quickload, the crate correctly restores to its save-time
-  (emptied) contents while the NPC respawns with only its authored loadout — the
-  scavenged item is gone. Before containers persisted, the crate re-seeded
-  instead, which duplicated it. Neither is right; serializing NPC bags (the same
-  `serialize_stacks` shape) is the fix, and it pairs naturally with the
-  dynamic-spawn item below.
-- **REMAINING — containers outside the saved level**: capture walks only the live
-  level and `apply()` is a one-shot for the boot level, so a crate you looted in
-  another level re-seeds from its authored exports on quickload. Lands with the
-  multi-level live-position item below (both need per-level buckets retained
-  across door swaps).
+- **DONE — per-level buckets on every save** (2026-09-16): containers and live NPC
+  positions in every visited level, not just the one saved in; the outgoing level
+  is captured in `GameRoot.load_level`, and the autosave behind Continue carries
+  the ledger like the manual saves (the policy above).
+- **REMAINING — NPC backpacks**: NPC bags are in no ledger. `NpcScavenge` moves
+  real items OUT of an `ItemContainer` into an NPC's bag, so if an NPC loots a
+  crate and you then save and reload (or leave the level and come back), the crate
+  correctly restores to its emptied contents while the NPC respawns with only its
+  authored loadout — the scavenged item is gone. Before containers persisted, the
+  crate re-seeded instead, which duplicated it. Neither is right; serializing NPC
+  bags (the same `serialize_stacks` shape) is the fix, and it pairs naturally with
+  the dynamic-spawn item below.
 - **REMAINING — corpse rebuild**: a dead authored NPC currently just VANISHES on
-  quickload (`WorldSnapshot.apply` silently frees the fresh spawn — no corpse, no
+  a load (`WorldSnapshot.apply` silently frees the fresh spawn — no corpse, no
   loot). Rebuilding = capture runtime `LootableCorpse` state (position + bag via
   the same `serialize_stacks` shape) and re-instantiate on apply; must first WIPE
   root-parented gore/corpses (they deliberately survive `reload_current_scene`)
-  or quickload duplicates them. Keep keys aligned with the profile-tier
+  or a load duplicates them. Keep keys aligned with the profile's
   `GameState.discovered_corpses` (`Corpse.save_id`).
 - **REMAINING — loot drops + money bags**: dropped `CanPickUp`s / money bags are
   re-INSTANTIATE-on-drop props (live state in `Item` meta + `preset_*`), which is
@@ -564,13 +613,9 @@ code comments point at — keep it current as phases land):
 - **REMAINING — dynamic (encounter-spawner) NPCs**: needs spawn-definition +
   runtime state serialization (an ephemeral `@`-path key matches nothing on
   reload) plus `NpcPool` interplay (per-life fields reset via `reset_for_reuse`).
-- **REMAINING — multi-level live positions**: positions/hp are captured only for
-  the level you save IN; other visited levels contribute dead KEYS only, so a
-  moved-but-alive NPC elsewhere snaps back to its authored spot. Extending =
-  retain per-level `authored_npcs` buckets across door swaps (capture the
-  outgoing level in `GameRoot.load_level` before freeing it).
 
-Further exact-snapshot work extends THIS tier, not the profile-save language.
+Further world-state work extends THIS ledger, not the profile fields or
+`world_objects`.
 
 ## Content Data
 
@@ -2265,7 +2310,7 @@ The contract that makes reuse correct:
   `_pool == null`): the freeze-in-place beat disables processing + `ALWAYS`
   descendants irreversibly and arms a timer that would re-fire death on the
   reused body.
-- **Save tier:** pooled bodies are dynamic spawns — excluded from the exact-save
+- **Save tier:** pooled bodies are dynamic spawns — excluded from the world
   ledger (`_record_snapshot_death` no-ops when pooled), consistent with the
   existing "encounter NPCs don't persist" rule below.
 
@@ -3164,8 +3209,9 @@ current paths, and current field names.
 ## Current Design Risks
 
 - Scene wiring can regress silently without contract tests.
-- Profile saves and exact world snapshots are different products; avoid UI/docs
-  that blur them.
+- One save product, three stores (profile, `world_objects`, the per-level world
+  ledger): keep them as separate code seams, and avoid UI/docs implying that a
+  manual save restores more of the world than Continue.
 - Persisted corpse discovery is the exception to general object-state reset:
   authored bodies should use `Corpse.save_id`; fallback path/position keys are
   only stable enough for unchanged hand-placed markers.

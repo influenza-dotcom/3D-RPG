@@ -14,13 +14,13 @@ extends CanvasLayer
 ##     reload path (_load_and_reload) sweeps every modal itself — including this screen — before the scene swap.
 ##   • menu mode (the start menu's "Load Game" button): LOAD-only. A load runs GameState.load_from_disk on the
 ##     file's path and then hands off to the `boot` Callable open() was given (StartMenu passes _start_game —
-##     the exact boot Continue uses; the parsed [world_snapshot] is consumed by GameRoot on boot).
+##     the exact boot Continue uses; GameRoot applies the booted level's world-ledger bucket on boot).
 ##
 ## NON-pausing on purpose — the OptionsMenu Dark-Souls posture: the world keeps simulating and the player stays
 ## vulnerable; player CONTROL is suppressed via the InputManager modal registry instead (this screen is ONE
 ## _modal_reg row there, blocks_tabs = false, which wires gameplay_suppressed / any_modal_open / close_all_modals).
-## These slot files are the EXACT-SNAPSHOT tier; the lean autosave/Continue profile is deliberately NOT a row
-## here — presenting it as a manual save would blur the two products (CLAUDE.md "Save semantics must be explicit").
+## These are the player's chosen saves; the autosave is deliberately NOT a row here — it is the rolling checkpoint
+## Continue resumes, not a bookmark. Every file holds the same save product (CLAUDE.md "Save semantics must be explicit").
 ##
 ## AUTHORED SCENE: the static chrome lives in scenes/ui/save_load_screen.tscn (this autoload IS that scene —
 ## see project.godot [autoload]); this script binds it by %unique name in _bind_ui and applies the skin-driven
@@ -364,7 +364,7 @@ func _do_save(slot: int) -> void:
 ## Load clicked. In-game the GameState reload path is the whole story: it closes every modal (including this
 ## screen) and reloads the scene, so success needs nothing from us but the commit cue — only a failure (file
 ## vanished/unreadable since the paint) stays here to report + repaint. Menu mode loads the profile and hands off to
-## the boot Callable (the Continue path: loaded = true, GameRoot consumes the parsed [world_snapshot] on boot).
+## the boot Callable (the Continue path: loaded = true, GameRoot applies the booted level's world-ledger bucket on boot).
 func _on_load_pressed(slot: int) -> void:
 	if _in_game:
 		var ok := GameState.quickload() if slot == QUICKSAVE_SLOT else GameState.load_from_slot(slot)

@@ -2,11 +2,14 @@ extends GutTest
 
 const WorldSnapshot = preload("res://scripts/world/world_snapshot.gd")
 
-## WorldSnapshot — the exact-snapshot save tier (authored-NPC death/position, cross-level deaths, and v2's
-## container contents). Covers the serializer (capture/apply/round-trip) with lightweight in-tree stubs (per
-## CLAUDE.md we never run NPC._ready in a unit test), the real ItemContainer serialize/restore pair off-tree,
-## and the GameState save/load glue on a BARE instance (never the real autoload, so a test run can't clobber the
-## user's real save — save/load target throwaway user:// temp files).
+## WorldSnapshot — the per-level WORLD LEDGER every save carries (authored-NPC alive/position/hp, deaths, and every
+## authored container's exact contents, for every level visited this run). Covers the serializer (capture/apply/
+## round-trip) with lightweight in-tree stubs (per CLAUDE.md we never run NPC._ready in a unit test), the real
+## ItemContainer serialize/restore pair off-tree, and the GameState glue on a BARE instance (never the real autoload,
+## so a test run can't clobber the user's real save — save/load target throwaway user:// temp files): every save writes
+## the ledger, a load rebuilds it, the capture guard for a level whose apply is queued, and the payload-growth bound.
+## The in-tree door round-trip across two levels (loot in A, door to B, save, reload, return to A) lives in
+## tests/test_level_boot_lifecycle.gd, where a real GameRoot drives load_level.
 
 ## Duck-typed NPC stand-in: enough surface (snapshot_key / is_alive / hp / global_position) for capture+apply to
 ## drive it. In-tree (add_child_autofree) so global_position doesn't trip GUT's tracked-error guard.
@@ -350,78 +353,87 @@ func test_apply_ignores_unknown_level() -> void:
 func _bare_gs() -> Node:
 	return load("res://managers/GameState.gd").new()
 
-func test_manual_save_writes_section_autosave_omits_it() -> void:
+func test_every_save_writes_the_ledger_and_an_empty_ledger_writes_no_section() -> void:
+	# POLICY (2026-09-16): the ledger is the ordinary save's world state — save_to_disk writes it whenever it holds
+	# anything, whichever path called (autosave, quicksave, a slot). An EMPTY ledger (a run that has recorded no world
+	# state yet) writes no section, so an untouched run's file stays lean.
 	var gs := _bare_gs()
-	# Manual path populates world_snapshot -> [world_snapshot] is written.
-	gs.world_snapshot = WorldSnapshot.new()
 	gs.world_snapshot.from_dict({"res://lvl.tres": {"authored_npcs": {}, "dead_authored": ["id:x"]}})
-	assert_eq(gs.save_to_disk(TMP_A), OK, "the manual save writes")
+	assert_eq(gs.save_to_disk(TMP_A), OK, "the save writes")
 	var cfg_a := ConfigFile.new()
 	cfg_a.load(TMP_A)
-	assert_true(cfg_a.has_section_key("world_snapshot", "data"), "a manual (snapshot-bearing) save writes [world_snapshot]")
-
-	# Lean path leaves world_snapshot null -> the section is ABSENT (the load-bearing 'profile != snapshot' invariant).
-	gs.world_snapshot = null
-	assert_eq(gs.save_to_disk(TMP_B), OK, "the lean save writes")
+	assert_true(cfg_a.has_section_key("world_snapshot", "data"), "a save with world state writes [world_snapshot]")
+	var fresh := _bare_gs()
+	assert_not_null(fresh.world_snapshot, "the ledger is never null — a fresh GameState starts with an EMPTY one")
+	assert_true(fresh.world_snapshot.is_empty(), "...and empty")
+	assert_eq(fresh.save_to_disk(TMP_B), OK, "an empty-ledger save writes")
 	var cfg_b := ConfigFile.new()
 	cfg_b.load(TMP_B)
-	assert_false(cfg_b.has_section("world_snapshot"), "a lean (profile-only) save has NO [world_snapshot] section")
+	assert_false(cfg_b.has_section("world_snapshot"), "an empty ledger writes NO [world_snapshot] section")
 	gs.free()
+	fresh.free()
 
-func test_load_restores_snapshot_and_pending_is_one_shot() -> void:
+func test_load_rebuilds_the_ledger_and_arms_the_booted_level() -> void:
 	var writer := _bare_gs()
-	writer.world_snapshot = WorldSnapshot.new()
 	writer.world_snapshot.from_dict({"res://lvl.tres": {"authored_npcs": {}, "dead_authored": ["id:z"]}})
 	writer.save_to_disk(TMP_A)
 	writer.free()
 
 	var gs := _bare_gs()
 	assert_true(gs.load_from_disk(TMP_A), "the temp save loads")
-	assert_not_null(gs.world_snapshot, "a load with a [world_snapshot] section rebuilds the snapshot in memory")
-	assert_true(gs.consume_world_snapshot(), "the pending flag is set once by the load")
-	assert_false(gs.consume_world_snapshot(), "and is consumed exactly once (one-shot, like the clock-apply flag)")
-	# the live death ledger is reloaded from the snapshot so post-load deaths accumulate correctly
-	assert_true(gs._dead_authored.has("res://lvl.tres"), "the per-level death ledger is reloaded from the snapshot")
+	assert_true(gs.world_snapshot.has_level("res://lvl.tres"), "the load rebuilds the ledger in memory")
+	assert_true(gs._dead_authored.has("res://lvl.tres"), "the per-level death ledger is reloaded from it")
+	# A load applies NOTHING itself — GameRoot applies the booted level's bucket when it spawns the level.
+	assert_eq(gs._level_apply_pending, "", "a load arms no capture guard on its own")
+	assert_true(gs.begin_level_load("res://lvl.tres"), "a level the ledger knows gets an apply queued (Continue, quickload, a door return)")
+	assert_eq(gs._level_apply_pending, "res://lvl.tres", "...and the capture guard is armed for it")
+	assert_false(gs.begin_level_load("res://never_visited.tres"), "a level the ledger has no bucket for plays from its authored seed")
+	assert_eq(gs._level_apply_pending, "", "...and a superseding load clears the previous guard")
 	gs.free()
 
 func test_multi_level_deaths_survive_save_and_load() -> void:
-	# Phase 2 end-to-end: a snapshot carrying deaths for MULTIPLE levels round-trips through disk, and load restores the
-	# FULL cross-level ledger (via dead_map) so per-level suppression works everywhere, not just the level saved in.
+	# A ledger carrying deaths for MULTIPLE levels round-trips through disk, and load restores the FULL cross-level
+	# death ledger (via dead_map) so per-level suppression works everywhere, not just the level saved in.
 	var writer := _bare_gs()
-	writer.world_snapshot = WorldSnapshot.new()
 	writer.world_snapshot.from_dict({
 		"res://a.tres": {"authored_npcs": {}, "dead_authored": ["id:a"]},
 		"res://b.tres": {"authored_npcs": {}, "dead_authored": ["id:b1", "id:b2"]},
 	})
-	assert_eq(writer.save_to_disk(TMP_A), OK, "the multi-level snapshot save writes")
+	assert_eq(writer.save_to_disk(TMP_A), OK, "the multi-level ledger save writes")
 	writer.free()
 
 	var gs := _bare_gs()
-	assert_true(gs.load_from_disk(TMP_A), "the multi-level snapshot loads")
+	assert_true(gs.load_from_disk(TMP_A), "the multi-level ledger loads")
 	assert_true(gs._dead_authored.has("res://a.tres") and gs._dead_authored["res://a.tres"].has("id:a"), "level A deaths restored")
 	assert_true(gs._dead_authored.has("res://b.tres") and gs._dead_authored["res://b.tres"].has("id:b1") and gs._dead_authored["res://b.tres"].has("id:b2"), "level B deaths restored too")
 	gs.free()
 
-func test_profile_only_load_has_no_snapshot() -> void:
+func test_a_save_written_before_the_ledger_policy_loads_an_empty_ledger() -> void:
+	# An AUTOSAVE from before 2026-09-16 never carried [world_snapshot] (only quick/slot saves did). It must load as an
+	# EMPTY ledger — every level plays from its authored seed, exactly what that save meant — never a null ledger.
 	var writer := _bare_gs()
-	writer.world_snapshot = null  # lean
-	writer.save_to_disk(TMP_A)
+	writer.save_to_disk(TMP_A)  # empty ledger -> no section: the same file shape an old autosave has
 	writer.free()
+	var cfg := ConfigFile.new()
+	cfg.load(TMP_A)
+	assert_false(cfg.has_section("world_snapshot"), "precondition: the file has no ledger section")
 
 	var gs := _bare_gs()
+	gs.record_npc_death("res://stale.tres", "id:stale")  # in-memory state from a previous run must not survive the load
 	gs.load_from_disk(TMP_A)
-	assert_null(gs.world_snapshot, "a profile-only load leaves world_snapshot null")
-	assert_false(gs.consume_world_snapshot(), "and nothing pending — Continue never applies a snapshot")
+	assert_not_null(gs.world_snapshot, "the ledger is an empty object, never null")
+	assert_true(gs.world_snapshot.is_empty(), "a ledger-less save loads as an empty ledger")
+	assert_true(gs._dead_authored.is_empty(), "and the death ledger is cleared, not carried over from the previous run")
 	gs.free()
 
-func test_reset_for_new_game_clears_snapshot_state() -> void:
+func test_reset_for_new_game_clears_the_ledger() -> void:
 	var gs := _bare_gs()
-	gs.world_snapshot = WorldSnapshot.new()
-	gs._world_snapshot_pending = true
+	gs.world_snapshot.from_dict({"res://lvl.tres": {"authored_npcs": {}, "dead_authored": ["id:x"]}})
+	gs.begin_level_load("res://lvl.tres")
 	gs.record_npc_death("res://lvl.tres", "id:x")
 	gs.reset_for_new_game()
-	assert_null(gs.world_snapshot, "New Game drops any in-memory snapshot")
-	assert_false(gs.consume_world_snapshot(), "New Game clears the pending flag")
+	assert_true(gs.world_snapshot.is_empty(), "New Game forgets every level's bucket")
+	assert_eq(gs._level_apply_pending, "", "New Game clears the capture guard")
 	assert_true(gs._dead_authored.is_empty(), "New Game forgets the death ledger")
 	gs.free()
 
@@ -463,7 +475,7 @@ func test_v1_snapshot_still_loads_under_v2() -> void:
 	cfg.save(TMP_A)
 	var gs := _bare_gs()
 	assert_true(gs.load_from_disk(TMP_A), "the v1-stamped save loads")
-	assert_not_null(gs.world_snapshot, "a v1 snapshot still loads under the v2 build (additive shape)")
+	assert_true(gs.world_snapshot.has_level("res://lvl.tres"), "a v1 snapshot (an old single-level quicksave) still loads as a one-level ledger (additive shape)")
 	assert_true(gs._dead_authored.has("res://lvl.tres"), "and its death ledger restores")
 	gs.free()
 
@@ -479,7 +491,7 @@ func test_future_snapshot_version_degrades_to_profile_only() -> void:
 	cfg.save(TMP_A)
 	var gs := _bare_gs()
 	assert_true(gs.load_from_disk(TMP_A), "the profile still loads under an unknown future snapshot version")
-	assert_null(gs.world_snapshot, "the too-new snapshot itself is dropped, never misread")
+	assert_true(gs.world_snapshot.is_empty(), "the too-new ledger itself is dropped (an empty ledger), never misread")
 	gs.free()
 
 func test_item_container_serialize_restore_round_trips_coins_and_layout() -> void:
@@ -608,8 +620,8 @@ func test_restocker_does_not_insta_refill_a_restored_container() -> void:
 func test_autosave_bails_while_reload_pending() -> void:
 	# During a quickload/slot-load the OLD player is still in-tree while the scene reload is deferred. A same-frame
 	# deferred autosave flush (a kill bounty / a door fire) must NOT capture it over the freshly-loaded profile. The
-	# latch guard sits AFTER the in-tree guard, so an in-tree stub player reaches it and bails BEFORE world_snapshot is
-	# nulled or anything is written — we prove the bail by the sentinel snapshot surviving untouched.
+	# latch guard sits AFTER the in-tree guard, so an in-tree stub player reaches it and bails BEFORE the ledger is
+	# captured into or anything is written — we prove the bail by the sentinel ledger surviving untouched.
 	var gs := _bare_gs()
 	var player := Node.new()
 	add_child_autofree(player)  # in-tree -> passes autosave's first guard so we actually reach the latch
@@ -617,7 +629,8 @@ func test_autosave_bails_while_reload_pending() -> void:
 	gs.world_snapshot = sentinel
 	gs._reload_pending = true
 	gs.autosave(player)
-	assert_eq(gs.world_snapshot, sentinel, "a reload-in-flight autosave bails before nulling the snapshot or writing the profile")
+	assert_eq(gs.world_snapshot, sentinel, "a reload-in-flight autosave bails before touching the ledger or writing the profile")
+	assert_true(sentinel.is_empty(), "nothing was captured into it")
 	gs.free()
 
 func test_set_current_level_lifts_the_reload_freeze() -> void:
@@ -628,4 +641,112 @@ func test_set_current_level_lifts_the_reload_freeze() -> void:
 	gs.set_current_level("res://lvl.tres")
 	assert_false(gs._reload_pending, "GameRoot boot lifts the autosave freeze latch")
 	assert_eq(gs.current_level_path, "res://lvl.tres", "and records the active level")
+	gs.free()
+
+
+# --- The per-level world ledger (2026-09-16 policy) -----------------------------------------------------------
+
+func test_has_level_answers_per_bucket() -> void:
+	var snap := WorldSnapshot.new()
+	assert_false(snap.has_level("res://a.tres"), "an empty ledger knows no level")
+	snap.from_dict({"res://a.tres": {"authored_npcs": {}, "dead_authored": []}})
+	assert_true(snap.has_level("res://a.tres"), "a bucket (even an empty one) makes the level known")
+	assert_false(snap.has_level("res://b.tres"), "another level stays unknown")
+	snap = null
+
+func test_capture_without_live_npcs_keeps_deaths_and_containers() -> void:
+	# The RELOAD_CHECKPOINT_FRESH death banks the level this way: actors go back to their authored spots, but the loot
+	# the kept profile already holds must not re-seed into its crate (a duplicate), and the dead stay dead.
+	var alive := NpcStub.new()
+	alive.key = "id:guard"
+	add_child_autofree(alive)
+	alive.add_to_group(Groups.NPC)
+	var crate := ContainerStub.new()
+	crate.key = "id:crate"
+	crate.contents = {"stacks": [], "grid": false}
+	add_child_autofree(crate)
+	crate.add_to_group(Groups.CONTAINERS)
+	var snap := WorldSnapshot.new()
+	snap.capture(get_tree(), "res://lvl.tres", {"id:dead": true, "id:guard": true}, false)
+	var b: Dictionary = snap.to_dict()["res://lvl.tres"]
+	assert_true((b["authored_npcs"] as Dictionary).is_empty(), "no live NPC position/hp is recorded")
+	assert_eq(b["dead_authored"], ["id:dead"], "deaths still record — and a stale key for an NPC seen ALIVE still drops (live wins)")
+	assert_eq(b["containers"], {"id:crate": crate.contents}, "containers still record")
+	snap = null
+
+func test_capture_replaces_its_bucket_so_saving_repeatedly_never_grows_the_payload() -> void:
+	# The autosave-storm budget: autosave runs on every milestone (a pickup, a kill bounty, a flag), and every one now
+	# captures the current level. A capture must REPLACE the level's bucket and a fold must MERGE keys, so a thousand
+	# saves of the same world produce the same bytes as one.
+	var npc := NpcStub.new()
+	npc.key = "id:guard"
+	add_child_autofree(npc)
+	npc.add_to_group(Groups.NPC)
+	var crate := ContainerStub.new()
+	crate.key = "id:crate"
+	crate.contents = {"stacks": [{"id": "ammo_pistol", "count": 12, "x": 0, "y": 0, "w": 1, "h": 1}], "grid": true}
+	add_child_autofree(crate)
+	crate.add_to_group(Groups.CONTAINERS)
+	var dead_all := {"res://lvl.tres": {"id:ghost": true}, "res://other.tres": {"id:b": true}}
+	var snap := WorldSnapshot.new()
+	snap.capture(get_tree(), "res://lvl.tres", dead_all["res://lvl.tres"])
+	snap.fold_dead_ledger(dead_all, "res://lvl.tres")
+	var once := var_to_str(snap.to_dict()).length()
+	for i in 25:
+		snap.capture(get_tree(), "res://lvl.tres", dead_all["res://lvl.tres"])
+		snap.fold_dead_ledger(dead_all, "res://lvl.tres")
+	assert_eq(var_to_str(snap.to_dict()).length(), once, "25 more saves of the same world write exactly the same payload")
+	snap = null
+
+func test_capture_level_state_skips_a_level_whose_apply_is_queued() -> void:
+	var gs := _bare_gs()
+	gs.world_snapshot.from_dict({"res://lvl.tres": {"authored_npcs": {}, "dead_authored": [],
+		"containers": {"id:crate": {"stacks": [], "grid": false}}}})  # saved: looted empty
+	var crate := ContainerStub.new()
+	crate.key = "id:crate"
+	crate.contents = {"stacks": [{"id": "ammo_pistol", "count": 30}], "grid": false}  # the fresh authored seed
+	add_child_autofree(crate)
+	crate.add_to_group(Groups.CONTAINERS)
+	assert_true(gs.begin_level_load("res://lvl.tres"), "precondition: the level has a bucket, so its apply is queued")
+	gs.capture_level_state(get_tree(), "res://lvl.tres")
+	assert_eq(gs.world_snapshot.to_dict()["res://lvl.tres"]["containers"]["id:crate"]["stacks"], [],
+		"a capture BEFORE the apply is refused — the saved looted state is not overwritten by the fresh seed")
+	gs.apply_level_state(get_tree(), "res://lvl.tres")
+	assert_eq(crate.restored_with, {"stacks": [], "grid": false}, "the apply hands the container its saved state")
+	assert_eq(gs._level_apply_pending, "", "and lifts the guard")
+	crate.contents = {"stacks": [], "grid": false}  # what the container now reports
+	gs.capture_level_state(get_tree(), "res://lvl.tres")
+	assert_true(gs.world_snapshot.has_level("res://lvl.tres"), "after the apply, captures run normally")
+	gs.capture_level_state(get_tree(), "")
+	assert_false(gs.world_snapshot.has_level(""), "a blank level path (a code-built LevelData) is never captured")
+	gs.free()
+
+func test_capture_level_state_never_writes_to_disk() -> void:
+	# Watch the autosave-storm counters: a level change captures the outgoing level, and that must cost NO disk write
+	# of its own — the next ordinary save persists it.
+	var gs := _bare_gs()
+	var crate := ContainerStub.new()
+	crate.key = "id:crate"
+	add_child_autofree(crate)
+	crate.add_to_group(Groups.CONTAINERS)
+	watch_signals(gs)
+	var before: int = gs.save_count
+	gs.capture_level_state(get_tree(), "res://lvl.tres")
+	gs.capture_world_state()
+	assert_eq(gs.save_count, before, "capturing never increments save_count")
+	assert_signal_not_emitted(gs, "saved", "and never emits saved(path, err)")
+	gs.free()
+
+func test_capture_world_state_folds_deaths_into_levels_not_in_the_tree() -> void:
+	# A bare (off-tree) GameState cannot capture a live level, but the fold still runs: a kill recorded in level B since
+	# the player last left it reaches B's bucket without disturbing B's captured containers.
+	var gs := _bare_gs()
+	gs.world_snapshot.from_dict({"res://b.tres": {"authored_npcs": {}, "dead_authored": [],
+		"containers": {"id:safe": {"stacks": [], "grid": false}}}})
+	gs.current_level_path = "res://a.tres"
+	gs.record_npc_death("res://b.tres", "id:guard")
+	gs.capture_world_state()
+	var b: Dictionary = gs.world_snapshot.to_dict()["res://b.tres"]
+	assert_eq(b["dead_authored"], ["id:guard"], "the new death reached level B's bucket")
+	assert_true((b["containers"] as Dictionary).has("id:safe"), "and B's looted safe is still in it")
 	gs.free()

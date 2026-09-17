@@ -580,7 +580,7 @@ static func _cmd_save(ctx: Dictionary, args: PackedStringArray) -> PackedStringA
 		out.append("slot %d: %s" % [slot, "written" if ok else "FAILED (nothing hit disk)"])
 	if ok:
 		out.append("your respawn checkpoint MOVED here (a quick/slot save is your new checkpoint).")
-		out.append("this is the exact-snapshot tier: live NPCs, cross-level kills and container contents were captured too.")
+		out.append("the world ledger rode along (as on every save): this level's live NPCs and containers were captured, and every visited level's bucket was written.")
 	return out
 
 
@@ -996,7 +996,7 @@ static func _cmd_killall(ctx: Dictionary, args: PackedStringArray) -> PackedStri
 		# Every AUTHORED (.tscn-placed) death went through NPC._record_snapshot_death -> GameState.record_npc_death, and
 		# GameRoot.load_level suppresses those keys on EVERY re-instantiate — so `killall` + `reload` leaves the level
 		# empty for the rest of the session. Nothing public clears that ledger except `resurrect`; say so here.
-		out.append("! authored (.tscn-placed) kills were written to the exact-snapshot death ledger — they stay dead across `reload` / door swaps for the rest of the session; `resurrect` forgets this level's entries.")
+		out.append("! authored (.tscn-placed) kills were written to the world ledger's death ledger — they stay dead across `reload` / door swaps for the rest of the session; `resurrect` forgets this level's entries.")
 		if player == null:
 			out.append("! no player was passed as the attacker, so no XP, no kill bounty and no quest notify_kill.")
 	return out
@@ -1990,7 +1990,7 @@ static func _cmd_soak(ctx: Dictionary, args: PackedStringArray) -> PackedStringA
 		out.append(faction_note)
 	out.append("the wave spawns under a root-parented driver (not the level), so a `warp`/`reload` mid-run does not free it — the report still arrives, marked INCONCLUSIVE; `navdebug on` shows the islands they wedge on.")
 	out.append("nav must be synced: a soak right after `warp` reports INCONCLUSIVE (nav_ready false) by design — retry once the map is up.")
-	out.append("the driver stamps every wave body _dynamic_spawn (kept out of the exact-save tier + the death ledger, like `spawn`) and re-anchors its wander centre on the scattered spot (soak_harness.gd moves a body AFTER its _ready latched _spawn_position at the origin) — the wave renders un-warped (no Ps1Warp cover under root; cosmetic).")
+	out.append("the driver stamps every wave body _dynamic_spawn (kept out of the world ledger + the death ledger, like `spawn`) and re-anchors its wander centre on the scattered spot (soak_harness.gd moves a body AFTER its _ready latched _spawn_position at the origin) — the wave renders un-warped (no Ps1Warp cover under root; cosmetic).")
 	return out
 
 

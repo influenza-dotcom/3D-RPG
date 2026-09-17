@@ -36,8 +36,10 @@ autoload state.
 - Do not rely on "playtested" for a seam that can be checked cheaply off-tree or with a tiny in-tree harness.
 
 ## Save semantics must be explicit
-Keep one clear answer for what a save means. If it is a profile/checkpoint save, UI and docs should not imply an
-exact world snapshot. If it is an exact snapshot, persist the active level plus per-level object state.
+Keep one clear answer for what a save means. Every save file (the autosave behind Continue, the F5 quicksave, the
+three slots) holds the SAME product: the profile, the additive per-object ledger, and the per-level world ledger. A
+manual save differs only in when/where it is written and in stamping the respawn at the player's spot, so UI and docs
+must not imply that a quick/slot save restores more of the world than Continue does.
 - At minimum, saves that restore a player transform must also restore the level identity that transform belongs to.
 - Object state such as opened doors, looted containers, dead NPCs, and spawned pickups needs a stable id before
   it can be saved. If it is intentionally not persisted, document that near the system.
@@ -45,12 +47,14 @@ exact world snapshot. If it is an exact snapshot, persist the active level plus 
   open/locked and consumed-`CanPickUp` / `MoneyPickUp` / `UpgradePickup` / destroyed-`CanDestroy` "gone" bits
   persist there (a code-spawned pickup opts out — `MoneyPickUp`/`UpgradePickup` via `persist_collected = false`, a
   loot-dropped `CanPickUp` via `build_model_from_item`). Extend it for a new
-  object type via `record_object_state`/`object_state` + a `save_id` export; it stays additive (never rebrand the
-  profile save as an exact snapshot). Corpses and dynamic spawns are deliberately still excluded from BOTH tiers.
-- The SEPARATE exact-snapshot tier (`WorldSnapshot`, manual quicksave/slots ONLY — autosave/Continue never carries
-  one) persists authored-NPC alive/pos/hp, cross-level deaths, and every authored `ItemContainer`'s exact contents
-  + grid layout + `Lock` state (keyed by `snapshot_key`: `save_id` else level|node_path). Its roadmap lives in
-  `docs/CURRENT_ARCHITECTURE.md` (Save Model); never merge it into the profile fields.
+  object type via `record_object_state`/`object_state` + a `save_id` export. Corpses and dynamic spawns are
+  deliberately still excluded from BOTH ledgers.
+- The per-level WORLD LEDGER (`GameState.world_snapshot`, one `WorldSnapshot`) is a separate store with its own seam:
+  a bucket per visited level holding authored-NPC alive/pos/hp, deaths, and every authored `ItemContainer`'s exact
+  contents + grid layout + `Lock` state (keyed by `snapshot_key`: `save_id` else level|node_path).
+  `GameRoot.load_level` captures the outgoing level before freeing it and applies the incoming level's bucket; every
+  save captures the current level first. Never merge it into the profile fields or into `world_objects`. Its roadmap
+  and per-level size budget live in `docs/CURRENT_ARCHITECTURE.md` (Save Model).
 - Corpse discovery is the narrow exception already handled: `Corpse.discovered` persists through
   `GameState.discovered_corpses`, keyed by authored `Corpse.save_id` when available and by a fallback
   level/path/position marker otherwise. Use `save_id` for important hand-placed bodies.

@@ -230,9 +230,9 @@ static func _npc_kill(ctx: Dictionary, npc: Node) -> PackedStringArray:
 	if Common._bool_of(npc.get(&"_dynamic_spawn")) or pooled:
 		out.append("a dynamic (spawner-produced%s) body — its death stays OUT of the save's death ledger" % (" / pooled" if pooled else ""))
 	else:
-		# _record_snapshot_death writes an authored NPC's node path into GameState's per-level death ledger, so the
-		# exact-snapshot tier (quick/slot saves) remembers it dead — the profile/Continue tier does not.
-		out.append("! an AUTHORED NPC — its death is recorded in the exact-snapshot death ledger: a quick/slot save made from here keeps it dead (Continue/autosave does not)")
+		# _record_snapshot_death writes an authored NPC's node path into GameState's per-level death ledger, which the
+		# world ledger folds into every save (autosave included) — so it stays dead on any load and on a door return.
+		out.append("! an AUTHORED NPC — its death is recorded in the world ledger: it stays dead through a door return and in any save made from here (autosave included)")
 	return out
 
 ## heal: prefer NpcHomeReturn.restore_full_health (the leash's own top-up: Character.heal() so `damaged` fires for

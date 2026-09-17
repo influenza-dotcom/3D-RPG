@@ -87,10 +87,10 @@ const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")  # canoni
 ## Deliberately NOT NpcData-stamped (PROFILE_STAMPED_FIELDS): the job is the component, not the archetype.
 @export var job: String = ""
 
-## Optional STABLE id for the EXACT-snapshot save tier (WorldSnapshot — manual quicksave/slots). It lets a
-## quicksave match THIS authored NPC across a reload so it comes back at its saved position (or stays dead). Leave
-## blank for the level|node-path fallback (fine for a hand-placed NPC that is never renamed/re-parented); set it on
-## story NPCs whose exact-save state must survive a scene-layout edit. Unused by the lean autosave/Continue profile.
+## Optional STABLE id for the per-level world ledger (GameState.world_snapshot — every save, and every level change).
+## It lets the ledger match THIS authored NPC across a reload or a door return so it comes back at its captured position
+## (or stays dead). Leave blank for the level|node-path fallback (fine for a hand-placed NPC that is never
+## renamed/re-parented); set it on story NPCs whose state must survive a scene-layout edit.
 ## Mirrors Corpse.save_id; keyed POSITION-FREE (see snapshot_key) because an NPC moves.
 @export var save_id: StringName = &""
 
@@ -613,8 +613,8 @@ func _ready() -> void:
 	_resolve_faction()  # the faction_id dropdown (set here or stamped from the profile) -> the live Faction resource
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
 	add_to_group(Groups.NPC)  # so hostile NPCs can find us as a target (the _acquire_target scan enumerates this)
-	# WorldSnapshot (exact-save tier): record our death into GameState's live per-level ledger so a later manual
-	# quicksave knows this authored NPC is dead — by capture time it has freed itself and can't be found in the tree.
+	# The world ledger: record our death into GameState's live per-level death ledger so the next capture / save
+	# knows this authored NPC is dead — by capture time it has freed itself and can't be found in the tree.
 	# Wired in CODE (not the scene's died->_on_died) so it fires for EVERY NPC base scene (enemy/civilian/blank).
 	died.connect(_record_snapshot_death)
 	# Behaviour children that EVERY NPC carries — built before _setup_outline so the outline child exists
@@ -1465,7 +1465,7 @@ func _emit_gunfire_noise() -> void:
 	if _noise_pulser != null:
 		_noise_pulser.pulse(gunfire_noise_radius, true)  # throttled: fold rapid shots into one pulse
 
-# --- WorldSnapshot exact-save tier (manual quicksave/slots) --------------------------------------------------
+# --- The per-level world ledger (WorldSnapshot: every save + every level change) ---------------------------------
 ## POSITION-INDEPENDENT identity for the snapshot: an authored `save_id` is the whole key ("id:<x>"); else
 ## level|node_path. Deliberately NOT WorldSaveId.key_for — that folds the live POSITION into the fallback key, but
 ## an NPC MOVES, so a position-keyed capture (taken after it wandered / at its death spot) would never match the
@@ -1496,8 +1496,8 @@ func _record_snapshot_death() -> void:
 	if not is_inside_tree():
 		return
 	if _pool != null or _dynamic_spawn:
-		return  # a spawner-produced encounter NPC (pooled OR pool-less) is a DYNAMIC actor (excluded from the exact-save
-		# tier); recording its ephemeral @-node_path as permanently dead would pollute the ledger and, on a re-spawn at
+		return  # a spawner-produced encounter NPC (pooled OR pool-less) is a DYNAMIC actor (excluded from the world
+		# ledger); recording its ephemeral @-node_path as permanently dead would pollute the ledger and, on a re-spawn at
 		# the same @path, suppress a legit enemy. Only authored (.tscn-placed) NPCs reach record_npc_death.
 	GameState.record_npc_death(GameState.current_level_path, snapshot_key())
 
@@ -1560,12 +1560,12 @@ func death_pauses_game() -> bool:
 ## The NpcPool that OWNS this instance, or null for a normal (free-on-death) NPC. Set by NpcPool.adopt() before the
 ## NPC ever spawns; while set, die() returns the body to the pool instead of queue_free()-ing it, the death-freeze
 ## beat is skipped (death_freezes gate below), and the snapshot death-ledger recording is suppressed (a pooled
-## encounter spawn is a DYNAMIC actor, excluded from the exact-save tier). Duck-typed as a plain reference so npc.gd
+## encounter spawn is a DYNAMIC actor, excluded from the world ledger). Duck-typed as a plain reference so npc.gd
 ## needn't preload NpcPool (avoids a class-parse cycle); NpcPool.reclaim(self) is the only method called on it.
 var _pool: Node = null
 
 ## True when an EncounterSpawner produced this body (pooled OR the pool-less default path). A spawner NPC is a DYNAMIC
-## actor — excluded from the exact-save snapshot tier (its runtime @-generated node_path is ephemeral, so recording it
+## actor — excluded from the per-level world ledger (its runtime @-generated node_path is ephemeral, so recording it
 ## as dead would pollute the per-level death ledger and, on a reuse at the same @path, could suppress a legit enemy).
 ## Authored NPCs placed directly in a level .tscn leave this false and ARE tracked. Set by EncounterSpawner / NpcPool.
 var _dynamic_spawn: bool = false

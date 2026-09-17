@@ -25,12 +25,9 @@ extends Node
 ## report below recaps everything into the FRESH console for that reason.
 ##   (a) GameState.capture(player) — FIRST, or save_to_disk writes the stale in-memory mirror (ALL-GOTCHAS) — then
 ##       flatten_profile() + flatten_world() + flatten_live() into ONE flat { key -> value } Dictionary (capture A).
-##   (b) build the EXACT-SNAPSHOT tier exactly like GameState._capture_and_write does (WorldSnapshot.capture of the
-##       live level + fold_dead_ledger of the others), assign it to GameState.world_snapshot and save_to_disk(SCRATCH_PATH).
-##       Why the snapshot tier and not the lean profile: a profile-only load CLEARS GameState._dead_authored and re-seeds
-##       every authored NPC at its .tscn spot with full hp (load_from_disk / GameRoot), which is BY DESIGN for the
-##       Continue tier — but it would drown the diff in resurrections and repositionings that are not defects. The
-##       manual quick/slot save is the tier whose live re-apply is still "playtest-PENDING", so that is the one fuzzed.
+##   (b) refresh the per-level world ledger exactly like every save does (GameState.capture_world_state: capture the
+##       live level + fold every level's deaths) and save_to_disk(SCRATCH_PATH) — the same file shape F5, a slot and the
+##       autosave all write (one save product since 2026-09-16).
 ##       SCRATCH_PATH is a NON-CANONICAL user:// path: GameState.resolve_save_path is an exact-path allowlist over the
 ##       five real files, so it passes through UNCHANGED, sandbox on or off — the real profile is never touched.
 ##       Unlike quicksave the CHECKPOINT is not moved for good: the respawn triple is banked, pointed at the player's
@@ -43,7 +40,7 @@ extends Node
 ##       knows how to swap profiles safely stays the one place.
 ##   (d) poll per PHYSICS frame (SETTLE_FRAME_CAP): a NEW human Player exists (instance id != the old one) and is
 ##       is_node_ready(), GameState.reload_pending() is false (set_current_level ran = load_level ran) and the "Level"
-##       node exists; then SETTLE_EXTRA_FRAMES more so GameRoot's deferred _apply_world_snapshot /
+##       node exists; then SETTLE_EXTRA_FRAMES more so GameRoot's deferred _apply_level_state /
 ##       _suppress_dead_authored have run AND their queue_free()s have resolved (a dead NPC is still in the tree —
 ##       and still is_alive() — for a frame after apply()).
 ##   (e) restore the banked checkpoint, GameState.capture(fresh) and flatten the same way (capture B).
@@ -69,10 +66,9 @@ extends Node
 ## DEV-ONLY: it prints developer copy through print() and the console's echo(); it never paints a Label or toast, so
 ## it is not a paint site and needs no ScanText.SKIP_FILES entry — keep it that way.
 
-## Preloaded by PATH (no class_name on world_snapshot.gd at all; groups.gd's is old but preloading keeps this file
-## free of any global-class-cache dependency, like debug_actions_world.gd does). ErrorSink is loaded LAZILY by path
-## in _install_sink for the same reason DebugOverlay preloads it untyped: a stale cache must never take this file down.
-const WorldSnapshotScript := preload("res://scripts/world/world_snapshot.gd")
+## Preloaded by PATH (groups.gd's class_name is old, but preloading keeps this file free of any global-class-cache
+## dependency, like debug_actions_world.gd does). ErrorSink is loaded LAZILY by path in _install_sink for the same
+## reason DebugOverlay preloads it untyped: a stale cache must never take this file down.
 const GroupsScript := preload("res://scripts/world/groups.gd")
 const ERROR_SINK_PATH := "res://scripts/components/error_sink.gd"
 
@@ -86,7 +82,7 @@ const NODE_NAME := &"DebugRoundtrip"
 ## Physics frames to wait for the fresh scene before giving up with a "never settled" report (~15 s at 60 Hz — a
 ## level load plus a slow disk is seconds, not minutes). Frame-counted, not a timer, so a hitch cannot fake a settle.
 const SETTLE_FRAME_CAP := 900
-## Extra physics frames AFTER the settle condition: GameRoot's deferred _apply_world_snapshot / _suppress_dead_authored
+## Extra physics frames AFTER the settle condition: GameRoot's deferred _apply_level_state / _suppress_dead_authored
 ## run a flush later than load_level, and their queue_free()s resolve a frame after that.
 const SETTLE_EXTRA_FRAMES := 6
 ## Two Vector3 values closer than this are NOT a diff: an NPC restored to its saved spot re-snaps to the navmesh and
@@ -143,8 +139,9 @@ func _exit_tree() -> void:
 # =============================================================================================================
 
 ## Steps (a)-(c). Returns "" once the reload is IN FLIGHT (the coroutine has been started and will report), else a
-## one-line refusal — and on a refusal NOTHING was reloaded and every GameState field this touched is put back
-## (checkpoint, world_snapshot; capture()'s refresh of the in-memory mirror is the same one every autosave does).
+## one-line refusal — and on a refusal NOTHING was reloaded and the checkpoint is put back (capture()'s refresh of the
+## in-memory mirror and capture_world_state's refresh of the current level's ledger bucket are the same ones every
+## autosave does, so they are not undone).
 ## Synchronous up to and including reload_current_scene() — which DETACHES the caller's scene on the spot (see the
 ## FLOW note): the console's _exit_tree has already run when this returns, its Object survives only to frame end.
 func begin(player: Node) -> String:
@@ -188,12 +185,9 @@ func begin(player: Node) -> String:
 	}
 	GameState.set_respawn(body.global_position, body.rotation.y)
 
-	# (b) the exact-snapshot tier + the scratch write. world_snapshot is banked too so a refusal leaves it as found.
-	var prev_snapshot: Variant = GameState.get(&"world_snapshot")
-	GameState.set(&"world_snapshot", snap)
+	# (b) the scratch write (the ledger was refreshed by _build_world_snapshot above, the way every save refreshes it).
 	var err := int(GameState.save_to_disk(SCRATCH_PATH))
 	if err != OK:
-		GameState.set(&"world_snapshot", prev_snapshot)
 		_restore_respawn(true)
 		_uninstall_sink()
 		return "roundtrip REFUSED — save_to_disk(%s) returned Error %d (%s); nothing was reloaded" % [SCRATCH_PATH, err, error_string(err)]
@@ -204,7 +198,6 @@ func begin(player: Node) -> String:
 	if not ok:
 		# _load_and_reload returns false only when the existence gate or load_from_disk's ladder refused the file (an
 		# off-tree GameState returns TRUE without reloading — the autoload is always in-tree, so that case never lands here).
-		GameState.set(&"world_snapshot", prev_snapshot)
 		_restore_respawn(true)
 		_uninstall_sink()
 		return "roundtrip REFUSED — GameState._load_and_reload(%s) returned false (the scratch just written did not read back as a profile); nothing was reloaded" % SCRATCH_PATH
@@ -276,7 +269,7 @@ func _await_and_report() -> void:
 	lines.append("post-reload hands: hub-drawn %s · bag-equipped %s · held %s" % [
 		value_text(b.get("live/drawn_weapon", "")), value_text(b.get("live/bag_equipped", "")), value_text(b.get("live/held_item", ""))])
 	lines.append_array(_sink_lines())
-	lines.append("tier: the EXACT-SNAPSHOT save (profile + [world_snapshot]: authored-NPC alive/pos/hp, cross-level deaths, container contents) — the same product F5/F9 write and read; the checkpoint %s." % _restore_respawn_text())
+	lines.append("save: the one save product (profile + world_objects + [world_snapshot], the per-level world ledger: authored-NPC alive/pos/hp, deaths, container contents) — what the autosave, F5/F9 and the slots all write and read; the checkpoint %s." % _restore_respawn_text())
 	lines.append("scratch save left at %s (+ .tmp/.bak siblings from earlier runs) — a non-canonical path, so the sandbox rewrite never touched it and the scratch WRITE never touched the real profile (the fresh scene's own autosaves behave exactly as after F9). GameState.loaded is now true (as after any death reload)." % SCRATCH_PATH)
 	_finish(lines)
 
@@ -338,16 +331,12 @@ func _restore_respawn_text() -> String:
 	return "did not exist before, so the spot you stood on is now the checkpoint"
 
 
-## The exact-snapshot capture GameState._capture_and_write performs, minus its set_respawn: the live level's NPCs +
-## containers, then every OTHER level's dead keys folded in. `_dead_authored` is read through get(): it is private
-## with no public getter (the console's `resurrect` reaches for it the same way).
-func _build_world_snapshot(tree: SceneTree):
-	var snap = WorldSnapshotScript.new()
-	var dead_v: Variant = GameState.get(&"_dead_authored")
-	var dead: Dictionary = dead_v if dead_v is Dictionary else {}
-	snap.capture(tree, _level_path, dead.get(_level_path, {}))
-	snap.fold_dead_ledger(dead, _level_path)
-	return snap
+## Refresh the per-level world ledger the way every save does (GameState.capture_world_state: the live level's NPCs +
+## containers, every level's deaths folded in) and hand back THE ledger itself — capture A flattens exactly what the
+## scratch save will write. `_tree` is kept for the call shape; the capture reads GameState's own tree.
+func _build_world_snapshot(_tree: SceneTree):
+	GameState.capture_world_state()
+	return GameState.world_snapshot
 
 
 func _install_sink() -> void:

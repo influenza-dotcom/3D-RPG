@@ -441,8 +441,8 @@ const START_MENU_SETTINGS := "Settings"
 const START_MENU_QUIT := "Quit Game"
 ## "Load Game" — opens the SaveLoadScreen in its LOAD-only menu mode; only shown when a manual save exists
 ## (StartMenu._bind_ui checks has_quicksave / has_slot). Distinct from START_MENU_CONTINUE on purpose:
-## Continue resumes the lean AUTOSAVE profile, this loads an exact-snapshot quicksave/slot file — the two-tier
-## save language must stay visible in the copy (CLAUDE.md "Save semantics must be explicit").
+## Continue resumes the rolling AUTOSAVE, this loads a save the player chose to make. Both files hold the same save
+## product (CLAUDE.md "Save semantics must be explicit"), so the copy must not promise this one restores more.
 const START_MENU_LOAD_GAME := "Load Game"
 
 ## The manual Save / Load slot screen (scripts/ui/save_load_screen.gd) — its own surface family, one const per

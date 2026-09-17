@@ -1528,8 +1528,8 @@ static func _credit(args: PackedStringArray) -> PackedStringArray:
 		var rating: Dictionary = p.call(&"credit_rating")
 		out.append("  score %d, band %s, limit %s" % [int(rating.get("score", 0)), String(rating.get("band", &"")), _money_text(float(p.call(&"credit_limit")))])
 	# Only persist when something actually moved. add_credit_standing returns 0.0 for a zero/clamped-out delta,
-	# and autosave_world_state is a full profile capture + atomic disk write that ALSO discards any pending
-	# in-memory WorldSnapshot (GameState.gd:876-878) — not something to spend on a no-op.
+	# and autosave_world_state is a full profile + world-ledger capture and an atomic disk write — not something to
+	# spend on a no-op.
 	if not is_zero_approx(moved):
 		GameState.autosave_world_state()
 	return out

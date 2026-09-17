@@ -1,11 +1,14 @@
 @tool
 ## @system Run And Level Flow
 ## @seam GameRoot is game.tscn's level-load seam: resolve_boot_level picks the boot level (saved-by-path beats export); load_level swaps the single "Level" child and seeds PlayerSpawn + respawn.
+## @seam load_level is where the per-level world ledger moves: it captures the OUTGOING level (GameState.capture_level_state) while it is still in the tree and under its own current_level_path, then applies the INCOMING level's bucket deferred (GameState.apply_level_state) once every node's _ready has run.
+## @risk Capturing after set_current_level, or after the old Level left the tree, files the outgoing level's NPCs/containers under the NEW level's path (their snapshot_key fallback reads current_level_path) or captures nothing — a looted safe in the level you left silently restocks.
 ## @risk resolve_boot_level diverging from _ready's respawn_level_matches gate boots the WRONG level yet keeps the saved respawn — silent, no crash (both must read saved_level_is_bootable).
 ## @risk A should_place_at_spawn regression either clobbers a loaded game's restored respawn with the export spawn, or strands the player at stale wrong-level coords (should_place_at_spawn + _place_player_at_entry's re-seed).
 ## @risk If load_level's detach-rename-queue_free swap regresses (the _LevelFreeing rename before remove_child/queue_free), two "Level" children stack or refs to the freed level dangle mid-frame — silent stale geometry.
 ## @test res://tests/test_level_flow.gd
 ## @test res://tests/test_level_boot_lifecycle.gd
+## @test res://tests/test_world_snapshot.gd
 ## @test res://tests/test_level_data.gd
 class_name GameRoot
 extends Node3D
@@ -27,9 +30,6 @@ extends Node3D
 ## DEV ONLY: the editor's play-from-spawn toolbar writes a PlayerSpawn entry_id here; _ready consumes it ONCE so the
 ## first level loads with the player placed at that spawn instead of the default first one. Absent in normal play.
 const DEV_START_FILE := "user://_dev_start_entry.txt"
-## Exact-snapshot serializer applied after a manual quickload (preloaded, NOT class_name — matches the codebase's
-## helper-script idiom so there's no global-class-cache dependency to miss). See _apply_world_snapshot.
-const WorldSnapshot = preload("res://scripts/world/world_snapshot.gd")
 ## The in-level effect prewarmer (scripts/components/effect_prewarmer.gd) — stage two of the first-kill / first-hit
 ## hitch fix, driven from load_level (see _prewarm_effects). Loaded BY PATH at runtime and driven duck-typed, never
 ## by its class_name: this is a @tool script on game.tscn's root, and a brand-new class_name isn't in the editor's
@@ -39,6 +39,12 @@ const EFFECT_PREWARMER_SCRIPT_PATH := "res://scripts/components/effect_prewarmer
 ## Name of the prewarmer child under the host. A hand-placed child of this name (beside the Player in game.tscn) is
 ## REUSED rather than duplicated, which is how its @exports (hold frames, spawn distance) stay Inspector-tunable.
 const EFFECT_PREWARMER_NODE := &"EffectPrewarmer"
+
+## The "Level" child THIS GameRoot instantiated (null until the first load_level). load_level captures the outgoing level
+## into the world ledger only when the child it is about to free is this one — a hand-placed "Level" (the
+## adopt-incrementally path) was never loaded under any LevelData path, so capturing it would file its nodes under a
+## level they don't belong to.
+var _level_node: Node = null
 
 
 func _ready() -> void:
@@ -131,10 +137,17 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	# conversation and a LevelDoor needs an interact key the dialogue freeze eats — so this is here for the debug
 	# console's `warp` / `resurrect`, which run PROCESS_MODE_ALWAYS straight through that pause. No-op when idle.
 	DialogueManager.abort()
-	level = data
-	GameState.set_current_level(data.resource_path)  # record the active level so a save reloads THIS one, not the export
 	var host := _host()
 	var existing := host.get_node_or_null(^"Level")
+	# THE WORLD LEDGER, OUTGOING HALF: record the level the player is leaving (its authored NPCs, their deaths, every
+	# container's exact contents) BEFORE anything else happens to it. Order is load-bearing: the level must still be in
+	# the tree (group walks) and current_level_path must still be ITS path (the bucket key, and the snapshot_key fallback
+	# of every node without a save_id), so this runs before set_current_level and before the detach below. No disk write:
+	# the next save persists it. Only a level WE loaded is captured (see _level_node).
+	if existing != null and existing == _level_node and is_inside_tree():
+		GameState.capture_level_state(get_tree(), GameState.current_level_path)
+	level = data
+	GameState.set_current_level(data.resource_path)  # record the active level so a save reloads THIS one, not the export
 	if existing != null:
 		# B-F62: defer the old level's free (queue_free, not a synchronous free) so anything still referencing it THIS
 		# frame isn't invalidated mid-swap. Detach + rename FIRST so the queued node can't collide the new "Level" name.
@@ -145,8 +158,19 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	if inst == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 		push_warning("GameRoot.load_level: scene of '%s' instantiated null (editor reimport transient?) — skipping load" % data.resource_path)
 		return
+	# THE WORLD LEDGER, INCOMING HALF: when the ledger has a bucket for this level (the player was here before this run,
+	# or the loaded save carried one), hand it back — dead authored NPCs freed, live ones repositioned with their hp,
+	# every captured ItemContainer given its exact contents + Lock state. EVERY load: boot / Continue / quickload, a
+	# LevelDoor return, a death reload. Queued HERE, before add_child, on purpose: the deferred apply then runs after
+	# every node's _ready (add_child runs them synchronously) but AHEAD of anything those _ready calls defer — an
+	# autosave queued there would otherwise capture the still-fresh level first. begin_level_load also arms GameState's
+	# capture guard until the apply has run, for anything that captures synchronously. (Corpse rebuild, dynamic spawns
+	# and loot drops are still outside the ledger — the roadmap in docs/CURRENT_ARCHITECTURE.md, Save Model.)
+	if GameState.begin_level_load(data.resource_path):
+		_apply_level_state.call_deferred(data.resource_path)
 	inst.name = &"Level"
 	host.add_child(inst)
+	_level_node = inst
 	_apply_audio(data)
 	# GameRoot owns the level-load seam (boot, a LevelDoor swap, and a death reload_current_scene all reach here), so
 	# it drives the global PS1 warp directly instead of Ps1Warp watching the tree-wide node_added signal — one fewer
@@ -161,20 +185,6 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	# host, never under the level) are outside the applier's material sweep. Fired, not awaited: the helper waits its
 	# own two frames and load_level stays synchronous.
 	_prewarm_effects()
-	# Exact-snapshot tier (WorldSnapshot): after the level subtree is in the tree, a MANUAL quickload applies its
-	# snapshot as a central push — dead authored NPCs are freed, live ones repositioned, and every captured
-	# ItemContainer is handed back its exact saved contents (corpse rebuild + dynamic spawns are still unshipped —
-	# see the roadmap in docs/CURRENT_ARCHITECTURE.md). Gated ONE-SHOT via consume_world_snapshot() so Continue /
-	# a death-respawn reload / a runtime door swap
-	# never applies one. Deferred so every NPC's _ready has settled (hp = max_hp, spawn anchor, target acquire) before
-	# we overwrite it. Consumed synchronously here (a latch) so a later load_level can't double-apply.
-	if GameState.consume_world_snapshot():
-		# The snapshot REFERENCE is bound at queue time, not read when the deferred call runs: the reload freeze
-		# lifted at set_current_level (top of this func), so an autosave queued deferred by a level node's _ready
-		# would run FIRST in the FIFO deferred queue and null GameState.world_snapshot before the apply reached
-		# it. Nothing in-repo records world state from _ready today — the bound argument makes that a non-event
-		# instead of an unstated invariant.
-		_apply_world_snapshot.call_deferred(GameState.world_snapshot)
 	# In-session persistence (Phase 2): on EVERY level load (boot, a LevelDoor swap, a death/quickload reload), suppress
 	# authored NPCs the player has already KILLED — driven by the live GameState death ledger, INDEPENDENT of any one-shot
 	# [world_snapshot]. So a door A->B->A return finds a cleared level still cleared (in-session), and a quickload restores
@@ -191,14 +201,13 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 func load_assigned_level() -> void:
 	load_level(level)
 
-## Exact-snapshot tier: apply the loaded WorldSnapshot to the just-reloaded level (deferred from load_level after a
-## manual quickload consumed the pending flag; `snap` was bound at queue time — see load_level's note). No-op on a
-## null snapshot or off-tree. The snapshot itself frees dead authored NPCs, repositions live ones, and restores
-## every captured container's contents (WorldSnapshot.apply). Runtime-only.
-func _apply_world_snapshot(snap: WorldSnapshot) -> void:
-	if snap == null or not is_inside_tree() or get_tree() == null:
+## The world ledger's incoming half, deferred from load_level: apply `level_path`'s bucket to the level that just spawned.
+## Skipped when a later load_level already replaced that level (the path no longer matches — that load queued its own
+## apply) or off-tree. GameState.apply_level_state lifts the capture guard. Runtime-only.
+func _apply_level_state(level_path: String) -> void:
+	if not is_inside_tree() or get_tree() == null or GameState.current_level_path != level_path:
 		return
-	snap.apply(get_tree(), GameState.current_level_path)
+	GameState.apply_level_state(get_tree(), level_path)
 
 ## In-session + cross-level death persistence: free authored NPCs the player has already killed for the level just loaded
 ## (deferred from load_level, EVERY load). Driven by GameState's live death ledger — no [world_snapshot] required, so it

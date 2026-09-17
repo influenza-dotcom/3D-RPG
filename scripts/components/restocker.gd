@@ -71,10 +71,10 @@ func _resolve_target() -> Node:
 		return get_node_or_null(target_path)
 	return get_parent()
 
-## Exact-snapshot restore hook (WorldSnapshot tier): after a quickload rebuilds the host's contents to their
-## save-time state, treat the restock cycle as freshly spent — _refilled_once so the FIRST-visit-always rule
+## World-ledger restore hook (WorldSnapshot.apply): after a load or a door return rebuilds the host's contents to their
+## captured state, treat the restock cycle as freshly spent — _refilled_once so the FIRST-visit-always rule
 ## can't fire (an ON_VISIT crate would otherwise top a just-restored looted bag straight back up, making
-## quickload a free instant restock), and _elapsed = 0 so the next refill waits a full interval. Deliberately
+## reload a free instant restock), and _elapsed = 0 so the next refill waits a full interval. Deliberately
 ## CONSERVATIVE, not exact: the true pre-save _elapsed isn't persisted, so a restock can arrive up to one
 ## interval later than it would have — the safe direction (never earlier/doubled).
 func note_restored() -> void:
