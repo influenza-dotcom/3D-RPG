@@ -185,10 +185,11 @@ func apply(tree: SceneTree, level_path: String) -> void:
 		if not is_instance_valid(n) or not n.has_method(&"snapshot_key"):
 			continue
 		var key: String = str(n.snapshot_key())
-		if dead.has(key):
+		var legacy := _legacy_key(n)
+		if dead.has(key) or (legacy != "" and dead.has(legacy)):
 			n.queue_free()
-		elif live.has(key):
-			var s: Dictionary = live[key]
+		elif live.has(key) or (legacy != "" and live.has(legacy)):
+			var s: Dictionary = live[key] if live.has(key) else live[legacy]
 			if n.has_method(&"restore_snapshot_state"):
 				n.restore_snapshot_state(s.get("pos", Vector3.ZERO), float(s.get("yaw", 0.0)), float(s.get("hp", 0.0)))
 	# v2: hand each captured container its exact bag back (it replaces its freshly-seeded contents). A container
@@ -200,8 +201,17 @@ func apply(tree: SceneTree, level_path: String) -> void:
 			if not is_instance_valid(c) or not c.has_method(&"snapshot_key") or not c.has_method(&"restore_snapshot_contents"):
 				continue
 			var ckey: String = str(c.snapshot_key())
+			var clegacy := _legacy_key(c)
 			if conts.has(ckey):
 				c.restore_snapshot_contents(conts[ckey])
+			elif clegacy != "" and conts.has(clegacy):
+				c.restore_snapshot_contents(conts[clegacy])
+
+## The legacy read path (WorldSaveId): the level|node_path key a bucket written before `n` had a save_id used, or ""
+## when `n` has none. apply() uses it only when the id key misses; the next capture REPLACES the bucket, so the entry
+## is re-filed under the id key without any migration pass.
+static func _legacy_key(n: Object) -> String:
+	return str(n.snapshot_legacy_key()) if n.has_method(&"snapshot_legacy_key") else ""
 
 ## The dead-authored keys per level as a { level_path -> { key: true } } ledger — GameState reloads its live death
 ## accumulator from this on every load that carries a ledger, so NPCs that die AFTER the load pile onto the right set.

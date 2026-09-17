@@ -1,3 +1,4 @@
+@tool
 class_name MoneyPickUp
 extends LookAtInteractable
 
@@ -28,8 +29,9 @@ const CHACHING := preload("res://assets/audio/sfx/Chaching.mp3")
 @export var pickup_volume_db: float = 0.0
 
 @export_group("Save")
-## OPTIONAL stable id so a HAND-PLACED money pickup stays collected across a save/load (and node moves). Blank =
-## level+path+position fallback (fine for a pickup that never moves — see WorldSaveId). Mirrors CanPickUp/CanDestroy.
+## The PRIMARY key for this object's saved state (see WorldSaveId). The CYBER SUNDAY Place tab, Palette and Item placer
+## stamp a unique one on placement, and Place -> Stamp Missing save_ids fills any a level lacks. Blank falls back to a
+## level+path+position key that a move or rename loses, so a blank id in a level is a config warning / Audit row / validate_all WARN.
 @export var save_id: StringName = &""
 ## A hand-placed pickup persists its "gone" bit so it doesn't respawn once collected; a code-SPAWNED one opts out (a
 ## dropped money bag's Reclaim child sets this false) — a dynamic spawn has no stable identity and must never enter
@@ -39,10 +41,12 @@ const CHACHING := preload("res://assets/audio/sfx/Chaching.mp3")
 ## Build the world visual (custom model, else a default coin) when no body was authored. BEFORE super() so
 ## the look-at outline + auto-fit collider pick up the new mesh.
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool only so the editor shows _get_configuration_warnings; never build the coin or touch GameState there
 	# Stay collected across a reload: a hand-placed money pickup already scooped this run doesn't respawn (mirrors
 	# CanPickUp). A code-spawned pickup (persist_collected=false — a dropped money bag's Reclaim child) is skipped: a
 	# dynamic spawn has no stable identity. The "gone" bit is coerced via GameState.as_bool (persisted-Variant safety).
-	if persist_collected and GameState.as_bool(GameState.object_state(GameState.current_level_path, _save_key()).get("gone", false)):
+	if persist_collected and GameState.as_bool(WorldSaveId.read_object_state(self, save_id).get("gone", false)):
 		queue_free()
 		return
 	if highlight_target == null:
@@ -54,7 +58,7 @@ func _ready() -> void:
 		auto_fit_collider = true
 	super._ready()
 	# Item light: a small gold glow on the cash stash. Skipped for an already-collected pickup (amount zeroed / freed
-	# above). MoneyPickUp isn't @tool, so this is runtime-only.
+	# above). Runtime-only: the editor returned at the top of _ready.
 	if amount > 0.0:
 		PickupBeacon.attach_kind(self, PickupBeacon.Kind.MONEY)
 
@@ -62,6 +66,13 @@ func _validate_property(property: Dictionary) -> void:
 	if property.name == &"world_model":
 		property.hint = PROPERTY_HINT_RESOURCE_TYPE
 		property.hint_string = ModelResourceUtil.HINT
+
+func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
+	var id_warning := WorldSaveId.blank_id_warning(self)  # quiet when persist_collected is off
+	if id_warning != "":
+		w.append(id_warning)
+	return w
 
 ## Collect: credit the player's wallet, trigger HUD money feedback, remove the world object.
 func start_talk(player: Node) -> void:
@@ -74,8 +85,8 @@ func start_talk(player: Node) -> void:
 	amount = 0.0  # zero BEFORE freeing so can_be_talked_to() goes false even if the free is deferred a frame
 	# Persist "gone" so a hand-placed money pickup stays collected across a reload (stops respawn / infinite-money on
 	# Continue). A code-spawned bag Reclaim child opts out via persist_collected=false — a dynamic spawn has no stable
-	# identity. Recorded on the committed grant, before the deferred free below. Mirrors CanPickUp; not @tool, so the
-	# editor guard is harmless-safe (kept for symmetry with UpgradePickup).
+	# identity. Recorded on the committed grant, before the deferred free below. Mirrors CanPickUp; the editor guard
+	# keeps a @tool instance from ever writing GameState.
 	if persist_collected and not Engine.is_editor_hint():
 		GameState.record_object_state(GameState.current_level_path, _save_key(), {"gone": true})
 	# Free the CORRECT node: a built-in coin child is OUR descendant (host is a child of self) — freeing it would

@@ -231,6 +231,27 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
   TrenchBroom if you would rather separate the brushes). `overlap_report(root, top_n)` is the census,
   `last_report` the tally. Pinned by `tests/test_brush_zfight_clean.gd`.
 
+### Save identity (`save_id`) — read before adding a persistable
+
+Every component whose state survives a save (`Door`, `ItemContainer`, `CanPickUp`, `MoneyPickUp`, `UpgradePickup`,
+`CanDestroy`, plus `NPC` and `Corpse` outside this tree) is keyed by ONE field, its authored `save_id`, through
+`scripts/world/world_save_id.gd`. A new persistable must:
+- export `@export var save_id: StringName = &""` (the Place tab / Palette / Item placer stamp it — `PlaceOps.stamp_save_ids`
+  finds any node exporting that name);
+- restore through `WorldSaveId.read_object_state(self, save_id)` (world_objects) or key the world ledger with
+  `WorldSaveId.snapshot_key_for` + offer `snapshot_legacy_key()` — never build a key by hand, or an old save's state stops
+  matching once the object gains an id (the legacy read path lives in those helpers);
+- append `WorldSaveId.blank_id_warning(self)` to `_get_configuration_warnings` (the script must be `@tool`, with its
+  `_ready` returning early in the editor);
+- if it can opt out of persistence, expose `persist_collected` (or `build_model_from_item`) — `WorldSaveId.wants_save_id`
+  reads those names, so an opted-out instance neither warns nor gets stamped.
+`tests/test_save_identity.gd` pins the contract.
+
+**Story flag fields** follow a sibling rule: a new `StringName` flag field suggests `StoryFlags.names_csv()` from
+`_validate_property` (`scripts/quests/story_flags.gd`), and joins `ScanWiring.FLAG_WRITE_FIELDS` / `FLAG_READ_FIELDS` so
+the Audit can check it against `resources/story/FlagCatalog.tres`. ⭐A subclass that adds its own `_validate_property`
+calls `super(property)` first — the engine runs only the most-derived one (`TutorialPrompt` over `TriggerVolume`).
+
 ### Adding a new interactable type
 
 1. `class_name Foo` / `extends LookAtInteractable`. Add `@tool` only if you want an in-editor preview or a

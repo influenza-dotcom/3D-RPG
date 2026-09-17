@@ -159,3 +159,13 @@ func _get_configuration_warnings() -> PackedStringArray:
 	if (advance_quest_id != &"") != (advance_objective_id != &""):
 		w.append("Quest advance needs BOTH `advance_quest_id` and `advance_objective_id` — one is set without the other.")
 	return w
+
+## The story-flag catalog, for the flag dropdown below (preloaded, no class_name — the ItemIds / Factions idiom).
+const StoryFlags = preload("res://scripts/quests/story_flags.gd")
+
+## Suggest the catalogued story flags for the flag this volume sets — a SUGGESTION, so a flag not yet in
+## resources/story/FlagCatalog.tres stays typable; the Audit tab / validate_all WARN on it instead.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "set_flag":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = StoryFlags.names_csv()

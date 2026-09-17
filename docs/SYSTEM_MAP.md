@@ -10,7 +10,7 @@ This index is generated from `@system` annotations in the code, so it cannot dri
 For the deep narrative see [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md); for current rough edges
 see [ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md).
 
-_27 system(s), 54 entries - scanned scripts/, managers/ + resources/._
+_28 system(s), 55 entries - scanned scripts/, managers/ + resources/._
 
 - [Audio](#audio)
 - [Brush Z-Fight Clean](#brush-z-fight-clean)
@@ -38,6 +38,7 @@ _27 system(s), 54 entries - scanned scripts/, managers/ + resources/._
 - [Run And Level Flow](#run-and-level-flow)
 - [Save Model](#save-model)
 - [Save Model — the PER-LEVEL WORLD LEDGER (authored-NPC alive/pos/hp + deaths + container contents, for every visited level)](#save-model--the-per-level-world-ledger-authored-npc-aliveposhp--deaths--container-contents-for-every-visited-level)
+- [Story Flags](#story-flags)
 - [Wait](#wait)
 
 ## Audio
@@ -533,11 +534,11 @@ capture() + capture_world_state() -> save_to_disk atomically write the versioned
 
 ### `file world_save_id.gd` - `scripts/world/world_save_id.gd`
 
-WorldSaveId.key_for(node, save_id): an authored save_id is the whole key 'id:<x>' (survives moves), else a level|path|position (_round_cm) fallback — the shared GameState.world_objects key generalizing Corpse.save_key().
+WorldSaveId is the ONE identity scheme for every persistable (Door, ItemContainer, Corpse, CanPickUp, MoneyPickUp, UpgradePickup, CanDestroy, NPC): an authored save_id is the whole key 'id:<x>'; a blank id falls back to level|path|position (world_objects, corpse discovery) or level|node_path (the world ledger), and a node that HAS an id reads those old keys only as a legacy path (read_object_state / corpse_discovered / snapshot_legacy_key_for), adopting the state onto its id key.
 
-- **Risk:** Changing the fallback shape (node_path source or _round_cm precision) silently re-keys every un-authored object, so its saved state stops matching on reload — no error.
-- **Risk:** Moving/renaming a hand-placed node between saves silently orphans its fallback-keyed state; give important objects/bodies a save_id or their world-state is lost after any layout edit.
-- **Test:** `tests/test_game_save.gd`
+- **Risk:** Changing a fallback shape (node_path source or _round_cm precision) silently re-keys every object still without a save_id, and breaks the legacy read that lets a newly stamped object find its old state — no error.
+- **Risk:** A save_id authored INSIDE a reusable prefab is shared by every copy of it, so they all load one saved state; ScanScene.save_id_findings reports the duplicate as an ERROR, and blank_id_warning_in stays quiet while a prefab (not a level) is being edited so nobody is told to put one there.
+- **Test:** `tests/test_save_identity.gd` `tests/test_game_save.gd`
 
 ## Save Model — the PER-LEVEL WORLD LEDGER (authored-NPC alive/pos/hp + deaths + container contents, for every visited level)
 
@@ -549,6 +550,15 @@ GameState.world_snapshot is ONE long-lived instance holding a bucket per visited
 - **Risk:** The ledger and GameState.world_objects are two separate stores keyed differently (snapshot_key vs WorldSaveId.key_for); never merge them — doors/pickups ride world_objects, actors/containers ride this.
 - **Risk:** NPC identity is POSITION-INDEPENDENT (NPC.snapshot_key), NOT WorldSaveId.key_for — an NPC moves, so a position-keyed match would fail against the reloaded node sitting at its authored .tscn spot.
 - **Test:** `tests/test_world_snapshot.gd` `tests/test_level_boot_lifecycle.gd`
+
+## Story Flags
+
+### `class FlagCatalog` - `scripts/quests/flag_catalog.gd`
+
+FlagCatalog (resources/story/FlagCatalog.tres, read through scripts/quests/story_flags.gd) lists every story flag name with a one-line description; every flag field (set_flag / required_flag / unlock_flag / expire_on_flag / set_flag_on_enter / FLAG objective target_id …) suggests these names in the Inspector, and ScanWiring WARNs on a flag the content uses that is not listed.
+
+- **Risk:** The dropdowns are SUGGESTIONS (PROPERTY_HINT_ENUM_SUGGESTION), not a closed enum, so a typo still saves — the ScanWiring WARN (Audit tab, validate_all) is what catches it; never turn the hint into PROPERTY_HINT_ENUM, or a flag not yet catalogued could not be typed at all.
+- **Test:** `tests/test_flag_catalog.gd`
 
 ## Wait
 

@@ -87,12 +87,15 @@ const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")  # canoni
 ## Deliberately NOT NpcData-stamped (PROFILE_STAMPED_FIELDS): the job is the component, not the archetype.
 @export var job: String = ""
 
-## Optional STABLE id for the per-level world ledger (GameState.world_snapshot — every save, and every level change).
-## It lets the ledger match THIS authored NPC across a reload or a door return so it comes back at its captured position
-## (or stays dead). Leave blank for the level|node-path fallback (fine for a hand-placed NPC that is never
-## renamed/re-parented); set it on story NPCs whose state must survive a scene-layout edit.
-## Mirrors Corpse.save_id; keyed POSITION-FREE (see snapshot_key) because an NPC moves.
+## The PRIMARY key for this NPC in the per-level world ledger (see WorldSaveId): it lets the ledger match THIS authored NPC
+## across a reload or a door return so it comes back at its captured position (or stays dead). The CYBER SUNDAY Place
+## tab stamps a unique one on placement, and Place -> Stamp Missing save_ids fills any a level lacks. Blank falls back
+## to a level|node-path key that a rename or re-parent loses, so a blank id in a level warns. Keyed POSITION-FREE (see
+## snapshot_key) because an NPC moves.
 @export var save_id: StringName = &""
+## The one identity scheme (save_id primary, the path key kept as a legacy read): snapshot_key / snapshot_legacy_key /
+## the blank-id config warning. Preloaded, no class_name, per the helper idiom.
+const WorldSaveId = preload("res://scripts/world/world_save_id.gd")
 
 ## Slice 3 (stable identity): the quest/known-names key, LATCHED once in _ready right after the profile stamp so a
 ## RUNTIME display_name rename (Claimable pet naming writes a player-typed name into display_name) can never mutate
@@ -1473,10 +1476,12 @@ func _emit_gunfire_noise() -> void:
 ## PackedScene re-instantiates identical names); it also stays identical between our death (died.emit, in-tree) and
 ## the reload, so a dead NPC's recorded key matches the fresh spawn that must be suppressed.
 func snapshot_key() -> String:
-	if save_id != &"":
-		return "id:%s" % String(save_id)
-	var np: String = str(get_path()) if is_inside_tree() else String(name)
-	return "%s|%s" % [GameState.current_level_path, np]
+	return WorldSaveId.snapshot_key_for(self, save_id)
+
+## The key an older world ledger / death ledger filed this NPC under before it had a save_id (level|node_path), or ""
+## while save_id is blank. WorldSnapshot.apply and GameState.suppress_dead_authored match it as the legacy read path.
+func snapshot_legacy_key() -> String:
+	return WorldSaveId.snapshot_legacy_key_for(self, save_id)
 
 ## Re-apply a WorldSnapshot's captured transform + hp onto this freshly-reloaded authored NPC (called by the
 ## GameRoot post-load push, deferred so our _ready has already seeded hp = max_hp and the wander anchor). Rewrites
@@ -4295,6 +4300,9 @@ func _get_configuration_warnings() -> PackedStringArray:
 			w.append("`profile` (NpcData) is set with profile_fills_blanks_only OFF, so at spawn the profile OVERWRITES these inline edits: %s. Tick profile_fills_blanks_only to keep them, or move the values onto the NpcData." % ", ".join(clobbered))
 	if profile != null and loot != null:
 		w.append("Inline `loot` AND a `profile` are set — the profile's loot wins (even if the profile leaves it empty), so this inline `loot` is ignored. Put the table on the NpcData, or clear the profile.")
+	var id_warning := WorldSaveId.blank_id_warning(self)
+	if id_warning != "":
+		w.append(id_warning)
 	return w
 
 ## EDITOR helper for the warning above: the stamped fields this instance has edited AWAY from the npc.gd default

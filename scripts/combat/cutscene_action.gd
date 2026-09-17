@@ -72,3 +72,13 @@ enum Type { WAIT, SET_FLAG, CALL_METHOD, DIALOGUE, CAMERA_MOVE, FADE, TOAST, CAP
 ## Animation name for a PLAY_ANIM step — played on the actor's assigned AnimationPlayer if it has one (actors are
 ## procedural by default, so this is usually a no-op; a rig is a separate art task).
 @export var anim_name: StringName = &""
+
+## The story-flag catalog, for the flag dropdown below (preloaded, no class_name — the ItemIds / Factions idiom).
+const StoryFlags = preload("res://scripts/quests/story_flags.gd")
+
+## Suggest the catalogued story flags for the flag a SET_FLAG action writes — a SUGGESTION, so a flag not yet in
+## resources/story/FlagCatalog.tres stays typable; the Audit tab / validate_all WARN on it instead.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "flag_name":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = StoryFlags.names_csv()

@@ -203,11 +203,17 @@ open scene's config warnings + typed level checks), Domain B (a `res://` file sc
 a choice's target id that names no line, a duplicate or reserved-word line id, an
 out-of-range line number — for `.tres` conversations AND the ones embedded inline
 in a `.tscn`, parsed from the scene text), Domain C (wiring — dead story flags,
-dangling quest/faction ids),
+flags missing from `resources/story/FlagCatalog.tres` (WARN), dangling quest/faction ids),
 Domain D (the hardcoded player-facing text ratchet), Domain E (menu-sound
 blindspots), Domain F (**the content check** — `ContentValidator` over the shared
 `core/item_scan.gd` folder scan, the same rules the Level tab's Validate Content
 runs), and the designer's own rules in `res://audit_rules/`.
+
+Domain A also reports save identity on a LEVEL scene: a persistable's blank
+`save_id` arrives as its own config warning, and two persistables sharing one
+`save_id` is an ERROR row (`ScanScene.save_id_findings`). The fix for blanks is
+the Place tab's **Stamp Missing save_ids**, not an Audit fixer (it edits the open
+scene, not a file).
 
 Audit fixers are allowed only for mechanical, unambiguous changes.
 
@@ -702,6 +708,13 @@ Acceptance:
   Prefabs keep the camera-focus height, since an NPC or a door is dragged into
   place anyway. The probe reads the edited scene's `World3D` from a BUTTON
   HANDLER — that call RAISES off-tree, so it may never move into `_init`.
+- **save_id stamping.** Placing an NPC / Door / Container stamps a unique
+  `save_id` on the instance root inside the same undo action
+  (`PlaceOps.stamp_save_ids`); an instance's internals are never stamped unless
+  the level has Editable Children on for it. **Stamp Missing save_ids** stamps
+  every blank persistable the open scene saves (`PlaceOps.missing_save_id_nodes`)
+  as ONE undoable action and reports the count; with none missing it says so and
+  writes nothing. Pinned by `tests/test_save_identity.gd`.
 - Handoff: `select_path(path)` re-points the NpcData archetype dropdown after the
   New / Blueprints tabs create an archetype (`cyber_panel.editor_tab_for` maps
   `NpcData` to "Place", because "open the archetype" for a designer means "put one
@@ -732,6 +745,9 @@ Acceptance:
   class name) instead of throwing.
 - The list is driven by `Catalog.COMPONENTS` — add a row there to expose a new
   component; the dock keeps no hardcoded twin list.
+- A persistable component (anything exporting `save_id` that has not opted out
+  of persistence) gets a unique `save_id` inside the add's undo action
+  (`PlaceOps.stamp_save_ids`).
 - Constructs off-tree — pinned by `tests/test_devtools_docks.gd`.
 
 ## Item Placer (Items Tab)
@@ -751,7 +767,9 @@ Acceptance:
   the scene.
 - The placed subtree is owned via the shared `place_ops.own_recursive` — the
   ONE tested owner static, so the instanced-node stop-guard from the Place tab
-  applies here too (pinned by `tests/test_devtools_placer.gd`).
+  applies here too (pinned by `tests/test_devtools_placer.gd`). The same action
+  stamps a unique `save_id` on the built pickup (`PlaceOps.stamp_save_ids`); an
+  authored `world_prop` instance is stamped only at its root.
 - The build is `WorldItem.build`, identical to a runtime drop, so editor
   placement can't drift from in-game behavior (pinned by
   `tests/test_devtools_docks.gd`).

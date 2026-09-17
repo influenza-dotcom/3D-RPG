@@ -51,13 +51,17 @@ must not imply that a quick/slot save restores more of the world than Continue d
   deliberately still excluded from BOTH ledgers.
 - The per-level WORLD LEDGER (`GameState.world_snapshot`, one `WorldSnapshot`) is a separate store with its own seam:
   a bucket per visited level holding authored-NPC alive/pos/hp, deaths, and every authored `ItemContainer`'s exact
-  contents + grid layout + `Lock` state (keyed by `snapshot_key`: `save_id` else level|node_path).
+  contents + grid layout + `Lock` state (keyed by `snapshot_key`: `save_id`, see the identity bullet below).
   `GameRoot.load_level` captures the outgoing level before freeing it and applies the incoming level's bucket; every
   save captures the current level first. Never merge it into the profile fields or into `world_objects`. Its roadmap
   and per-level size budget live in `docs/CURRENT_ARCHITECTURE.md` (Save Model).
 - Corpse discovery is the narrow exception already handled: `Corpse.discovered` persists through
-  `GameState.discovered_corpses`, keyed by authored `Corpse.save_id` when available and by a fallback
-  level/path/position marker otherwise. Use `save_id` for important hand-placed bodies.
+  `GameState.discovered_corpses`, keyed like every other persistable.
+- ONE identity scheme (`scripts/world/world_save_id.gd`): every persistable is keyed by its authored `save_id`. The
+  old fallbacks (level|path|position, level|node_path) are used for a blank id and otherwise ONLY as a legacy read that
+  moves old state onto the id key — never write a new key shape. A new persistable exports `save_id`, reads through
+  `WorldSaveId` (`read_object_state` / `snapshot_key_for` + `snapshot_legacy_key_for`), and appends
+  `WorldSaveId.blank_id_warning(self)` to its config warnings; `tests/test_save_identity.gd` pins the contract.
 
 ## Keep the settings menu in sync with features (don't stop at gameplay code)
 When you add anything player-facing, wire it into the in-game settings menu too:

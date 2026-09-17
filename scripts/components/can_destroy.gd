@@ -11,12 +11,15 @@ extends StaticBody3D
 ## collision layer (1 = world), so shots land on it just like a wall — set the layer in the scene if needed.
 
 const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable per-object save key (GameState.world_objects)
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 
 @export var max_hp: int = 1                ## how many shots to destroy it (1 = one-shot)
 @export var destroy_effect: PackedScene    ## optional VFX spawned at our position on destruction (one-shot)
 @export var destroy_sound: AudioStream     ## optional 3D one-shot played on destruction
-## OPTIONAL stable id so this prop stays destroyed across a save/load (and node moves). Blank = level+path+position
-## fallback (fine for a hand-placed prop that never moves — see WorldSaveId). Only destroyed props are stored.
+## The PRIMARY key for this object's saved state (see WorldSaveId). The CYBER SUNDAY Place tab, Palette and Item placer
+## stamp a unique one on placement, and Place -> Stamp Missing save_ids fills any a level lacks. Blank falls back to a
+## level+path+position key that a move or rename loses, so a blank id in a level is a config warning / Audit row / validate_all WARN.
+## Only destroyed props are stored.
 @export var save_id: StringName = &""
 
 signal destroyed
@@ -30,7 +33,7 @@ func _ready() -> void:
 	# (@tool _ready also runs in-editor — never touch GameState there). The "gone" bit is coerced through
 	# GameState.as_bool (persisted-Variant safety, mirrors Door): a hand-edited / legacy gamestate.cfg could hold a
 	# String under the key, and bare truthiness on a non-empty String reads true — as_bool degrades junk to the default.
-	if not Engine.is_editor_hint() and GameState.as_bool(GameState.object_state(GameState.current_level_path, _save_key()).get("gone", false)):
+	if not Engine.is_editor_hint() and GameState.as_bool(WorldSaveId.read_object_state(self, save_id).get("gone", false)):
 		queue_free()
 
 ## A shot (or any damage source) landed on us. Signature mirrors Character / Throwable.take_damage so the
@@ -54,7 +57,7 @@ func _destroy() -> void:
 			# empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 			if fx == null:
 				return
-			get_tree().root.add_child(fx)
+			WorldSpawn.add(self, fx, global_position)
 			if fx is Node3D:
 				(fx as Node3D).global_position = global_position
 			if fx is GPUParticles3D:
@@ -74,9 +77,15 @@ func _save_key() -> String:
 ## collider must be a direct child of this StaticBody3D (a mesh may live elsewhere, so we don't warn on that).
 ## Re-evaluated by the editor when children change.
 func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
+	var has_shape := false
 	for c in get_children():
 		if c is CollisionShape3D and (c as CollisionShape3D).shape != null:
-			return PackedStringArray()
-	return PackedStringArray([
-		"No CollisionShape3D (with a shape) child — shots can't hit this StaticBody3D, so it can never be destroyed. Add one sized to the object.",
-	])
+			has_shape = true
+			break
+	if not has_shape:
+		w.append("No CollisionShape3D (with a shape) child — shots can't hit this StaticBody3D, so it can never be destroyed. Add one sized to the object.")
+	var id_warning := WorldSaveId.blank_id_warning(self)
+	if id_warning != "":
+		w.append(id_warning)
+	return w

@@ -76,11 +76,15 @@ func _get_configuration_warnings() -> PackedStringArray:
 		w.append("`standalone` is on but this Merchant is a child of a dialogue NPC — its talk-layer hitbox steals the interaction ray from the NPC's Talkable. Set `standalone` = false and open the shop from the dialogue's \"Trade\" option.")
 	return w
 
-## Self-populate the faction_id dropdown from the factions on disk (WR-2), like NpcData / BuildGate.
+## Self-populate the faction_id dropdown from the factions on disk (WR-2), like NpcData / BuildGate, and required_flag
+## from the story-flag catalog (both SUGGESTIONs, still typable).
 func _validate_property(property: Dictionary) -> void:
 	if property.name == "faction_id":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = Factions.ids_csv()
+	elif property.name == "required_flag":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = StoryFlags.names_csv()
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
@@ -358,3 +362,6 @@ func dialogue_station_option() -> Dictionary:
 ## (a talking shopkeeper vouches for you; a vending machine doesn't), and behaviour stays identical.
 func open_dialogue_station(player: Node) -> void:
 	ShopScreen.open_shop(self, player)
+
+## The story-flag catalog, for the required_flag dropdown (preloaded, no class_name — the ItemIds / Factions idiom).
+const StoryFlags = preload("res://scripts/quests/story_flags.gd")

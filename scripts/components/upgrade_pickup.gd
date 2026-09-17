@@ -35,8 +35,9 @@ const AbilityRegistry := preload("res://scripts/components/abilities/ability_reg
 @export var toast_color: Color = Color(0.5, 0.85, 1.0)
 
 @export_group("Save")
-## OPTIONAL stable id so a HAND-PLACED upgrade pickup stays collected across a save/load (and node moves). Blank =
-## level+path+position fallback (fine for a pickup that never moves — see WorldSaveId). Mirrors CanPickUp/CanDestroy.
+## The PRIMARY key for this object's saved state (see WorldSaveId). The CYBER SUNDAY Place tab, Palette and Item placer
+## stamp a unique one on placement, and Place -> Stamp Missing save_ids fills any a level lacks. Blank falls back to a
+## level+path+position key that a move or rename loses, so a blank id in a level is a config warning / Audit row / validate_all WARN.
 @export var save_id: StringName = &""
 ## A hand-placed pickup persists its "gone" bit so a granted upgrade never re-grants on Continue; a code-SPAWNED one
 ## opts out — a dynamic spawn has no stable identity and must never enter the world_objects ledger. Leave true for
@@ -51,7 +52,7 @@ func _ready() -> void:
 	# Stay collected across a reload: a hand-placed upgrade pickup already taken this run doesn't respawn (stops it
 	# re-granting on Continue). Runtime-only — MUST sit AFTER the editor early-return so it never touches GameState
 	# in-editor. The "gone" bit is coerced via GameState.as_bool (persisted-Variant safety). Mirrors CanPickUp.
-	if persist_collected and GameState.as_bool(GameState.object_state(GameState.current_level_path, _save_key()).get("gone", false)):
+	if persist_collected and GameState.as_bool(WorldSaveId.read_object_state(self, save_id).get("gone", false)):
 		queue_free()
 		return
 	if highlight_target == null:
@@ -114,11 +115,13 @@ func can_be_talked_to() -> bool:
 ## Editor warning: an upgrade pickup that grants nothing (no `grants` ability scene AND no legacy `unlock_id`)
 ## is a no-op — the player can't pick it up (can_be_talked_to is false). Mirrors that same check.
 func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
 	if grants == null and unlock_id == "":
-		return PackedStringArray([
-			"Grants nothing — assign an ability scene to `grants` (preferred) or pick a legacy `unlock_id`. As-is the player can't pick this up."
-		])
-	return PackedStringArray()
+		w.append("Grants nothing — assign an ability scene to `grants` (preferred) or pick a legacy `unlock_id`. As-is the player can't pick this up.")
+	var id_warning := WorldSaveId.blank_id_warning(self)  # quiet when persist_collected is off
+	if id_warning != "":
+		w.append(id_warning)
+	return w
 
 ## Self-populate the legacy `unlock_id` dropdown from the ability scenes on disk (AbilityRegistry) rather than a
 ## hand-maintained suggestion list — add an ability scene and it appears. @tool, so the editor honours the hint.

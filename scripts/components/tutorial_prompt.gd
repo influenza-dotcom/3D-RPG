@@ -65,3 +65,13 @@ func _get_configuration_warnings() -> PackedStringArray:
 	if seen_flag == &"":
 		w.append("seen_flag is empty — this prompt repeats on EVERY entry. Give it a unique flag to show once and persist across saves.")
 	return w
+
+## Suggest the catalogued story flags for seen_flag — a SUGGESTION, so a flag not yet in
+## resources/story/FlagCatalog.tres stays typable; the Audit tab / validate_all WARN on it instead. StoryFlags is the
+## registry TriggerVolume already preloads (a subclass may not redeclare the const). super() FIRST: the engine calls
+## only the most-derived _validate_property, so without it the inherited set_flag would lose TriggerVolume's dropdown.
+func _validate_property(property: Dictionary) -> void:
+	super(property)
+	if property.name == "seen_flag":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = StoryFlags.names_csv()

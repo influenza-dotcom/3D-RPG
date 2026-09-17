@@ -18,6 +18,10 @@ extends RefCounted
 ## has AND from the text of every .tscn that embeds a conversation (inline conversations on a Talkable were never
 ## audited before ids; now they are).
 ##
+## PASS 1 also checks the story-flag CATALOG (resources/story/FlagCatalog.tres, read through StoryFlags): a flag the
+## content reads or writes that the catalog does not list is a WARN, so a typo'd or undocumented flag shows up even
+## when its misspelling happens to be both read and written.
+##
 ## SPLIT: every predicate below is a PURE static func (no EditorInterface / no scene tree / no autoload) so the GUT
 ## suite tests the classifier + resolver logic on small fixture strings/dicts; run() and the .tres LOADS are the
 ## thin editor glue on top. Designer-first: the rows surface in the existing Audit tab automatically.
@@ -53,6 +57,8 @@ const DOMAIN := "content"
 ## Shared one-read-per-file cache (see scan_cache.gd) — this pass walks res:// reading the SAME files scan_disk just
 ## read. Inert outside audit_panel's begin()/end() window, so a standalone run behaves exactly as before.
 const ScanCache := preload("res://addons/cybersunday_tools/panel_audit/scan_cache.gd")
+## The story-flag catalog registry (no class_name, no autoload; the catalog .tres is loaded lazily by path).
+const StoryFlags := preload("res://scripts/quests/story_flags.gd")
 
 ## scan_disk.gd is resolved with a LAZY load(), NOT a `const` preload: scan_disk already preloads THIS file (its
 ## run() appends our rows), so a const preload back would be a parse-time cyclic reference. load() at call time is
@@ -112,6 +118,7 @@ static func run() -> Array:
 	out.append_array(ctx["faction_dict_findings"] if ctx.has("faction_dict_findings") else [])
 	out.append_array(ctx["faction_mismatch_findings"] if ctx.has("faction_mismatch_findings") else [])
 	out.append_array(flag_findings(ctx["writers"], ctx["readers"], ctx["flag_src"]))
+	out.append_array(uncatalogued_flag_findings(ctx["writers"], ctx["readers"], StoryFlags.name_set(), ctx["flag_src"]))
 	return out
 
 
@@ -297,6 +304,24 @@ static func flag_findings(writers: Dictionary, readers: Dictionary, src_of: Dict
 	for name in writers:
 		if not readers.has(name):
 			out.append(_f("WARN", _src(src_of, name), "Story flag \"%s\" is WRITTEN but nothing READS it — a likely typo, or a gate you forgot to wire." % name))
+	return out
+
+
+## A flag the content reads OR writes that the story-flag catalog does not list: one WARN per name (sorted, so the Audit
+## rows are stable). `catalogued` is a set { name: true } (StoryFlags.name_set()). WARN, not ERROR — the flag still works
+## at runtime; the catalog is the designer's shared vocabulary, and an entry is one Inspector row to add. PURE.
+static func uncatalogued_flag_findings(writers: Dictionary, readers: Dictionary, catalogued: Dictionary, src_of: Dictionary = {}) -> Array:
+	var used := {}
+	for name in writers:
+		used[str(name)] = true
+	for name in readers:
+		used[str(name)] = true
+	var names := used.keys()
+	names.sort()
+	var out: Array = []
+	for name in names:
+		if not catalogued.has(name):
+			out.append(_f("WARN", _src(src_of, name), "Story flag \"%s\" is not in the flag catalog (%s) — add it there with a one-line description so every flag field suggests it, or fix the name if it is a typo." % [name, StoryFlags.CATALOG_PATH]))
 	return out
 
 

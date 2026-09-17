@@ -94,3 +94,13 @@ func _get_configuration_warnings() -> PackedStringArray:
 		elif not t.has_method(action):
 			w.append("`target` '%s' has no method `%s` — the call will be skipped at runtime." % [str(t.name), str(action)])
 	return w
+
+## The story-flag catalog, for the flag dropdown below (preloaded, no class_name — the ItemIds / Factions idiom).
+const StoryFlags = preload("res://scripts/quests/story_flags.gd")
+
+## Suggest the catalogued story flags for the flag this switch sets — a SUGGESTION, so a flag not yet in
+## resources/story/FlagCatalog.tres stays typable; the Audit tab / validate_all WARN on it instead.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "set_flag":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = StoryFlags.names_csv()

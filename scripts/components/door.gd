@@ -40,6 +40,7 @@ signal destroyed
 
 ## Drives the `key_item_id` / `lockpick_item_id` dropdowns from the item ids on disk (const-preloaded — see item_ids.gd).
 const ItemIds = preload("res://scripts/items/item_ids.gd")
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 ## The shared key-vs-pick decision (with key precedence), so the Door gate and the Lock component can't drift.
 const LockRules = preload("res://scripts/components/lock_rules.gd")
 const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable per-object save key (see GameState.world_objects)
@@ -139,9 +140,10 @@ const SWING_TIE_EPSILON := 0.0001
 @export var texture_tint: Color = Color.WHITE: set = _set_texture_tint
 
 @export_group("Save")
-## OPTIONAL stable id so this door's open/locked/destroyed state survives a save/load AND node renames/moves. Leave
-## blank for the level+path+position fallback (fine for a door that never moves — see WorldSaveId); set it on
-## important hand-placed doors. Only doors actually opened/closed/unlocked/broken at least once are written to the ledger.
+## The PRIMARY key for this object's saved state (see WorldSaveId). The CYBER SUNDAY Place tab, Palette and Item placer
+## stamp a unique one on placement, and Place -> Stamp Missing save_ids fills any a level lacks. Blank falls back to a
+## level+path+position key that a move or rename loses, so a blank id in a level is a config warning / Audit row / validate_all WARN.
+## Only doors actually opened/closed/unlocked/broken at least once are written to the ledger.
 @export var save_id: StringName = &""
 
 ## Live hit points. Seeded from max_hp here (so an off-tree instance is whole) and again in _ready (the authored
@@ -175,8 +177,9 @@ func _ready() -> void:
 			_open = true
 			_set_pivot_yaw(_closed_yaw + deg_to_rad(open_angle))
 	# Restore saved open/locked state OVER the authored defaults (GameState.world_objects). Runs in _ready like the
-	# Corpse-discovery restore; current_level_path is already set by GameRoot before the level subtree's _ready.
-	var st := GameState.object_state(GameState.current_level_path, _save_key())
+	# Corpse-discovery restore; current_level_path is already set by GameRoot before the level subtree's _ready. Read
+	# through WorldSaveId's legacy path, so a door stamped with a save_id still finds a save made before it had one.
+	var st := WorldSaveId.read_object_state(self, save_id)
 	# A door broken earlier this run stays broken: apply the destroyed pose SILENTLY (no crash, no noise, no FX) and
 	# skip the lock / swing / open restore — there is no panel left for any of it to pose.
 	if GameState.as_bool(st.get("destroyed", false)):
@@ -562,7 +565,7 @@ func _break() -> void:
 		if break_effect != null:
 			var fx := break_effect.instantiate()
 			if fx != null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip, don't crash
-				get_tree().root.add_child(fx)
+				WorldSpawn.add(self, fx, at)
 				if fx is Node3D:
 					(fx as Node3D).global_position = at
 				if fx is GPUParticles3D:
@@ -676,6 +679,9 @@ func _get_configuration_warnings() -> PackedStringArray:
 	# bake's source) the blocker bakes into the mesh, the doorway erodes shut, and no NPC ever paths through it.
 	if _inside_navmesh_source():
 		warnings.append("This Door sits inside the navmesh bake source (it or an ancestor is in the `navmesh` group), so its closed panel bakes the doorway SHUT and NPCs will never path through it. Move the Door out from under the NavigationRegion3D / Geometry nodes (e.g. to the level root), then re-bake.")
+	var id_warning := WorldSaveId.blank_id_warning(self)
+	if id_warning != "":
+		warnings.append(id_warning)
 	return warnings
 
 ## Is this door (or an ancestor) in the navmesh bake-source group? See the config warning above.
@@ -687,8 +693,15 @@ func _inside_navmesh_source() -> bool:
 		n = n.get_parent()
 	return false
 
-## Self-populate the key / lockpick id dropdowns from the item ids on disk (SUGGESTIONs, still typable).
+## Self-populate the key / lockpick id dropdowns from the item ids on disk, and unlock_flag from the story-flag
+## catalog (SUGGESTIONs, still typable).
 func _validate_property(property: Dictionary) -> void:
 	if property.name == "key_item_id" or property.name == "lockpick_item_id":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = ItemIds.ids_csv()
+	elif property.name == "unlock_flag":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = StoryFlags.names_csv()
+
+## The story-flag catalog, for the unlock_flag dropdown (preloaded, no class_name — the ItemIds / Factions idiom).
+const StoryFlags = preload("res://scripts/quests/story_flags.gd")

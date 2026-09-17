@@ -1,3 +1,4 @@
+@tool
 class_name Corpse
 extends Node3D
 
@@ -18,8 +19,9 @@ const GROUP := Groups.CORPSE  ## same value (&"corpse") as before; npc.gd's Corp
 ## keys IDENTICALLY to the rest of the ledger instead of a bespoke twin. Preloaded (no class_name) per the idiom.
 const WorldSaveId = preload("res://scripts/world/world_save_id.gd")
 
-## Optional stable key for authored corpse markers. Leave blank for the path/position fallback; set it on
-## hand-placed story bodies when you want the discovery state to survive node renames or layout edits.
+## Stable key for an authored corpse marker (the primary key; see WorldSaveId). A blank one falls back to the
+## path/position key, which a rename or move loses, so a hand-placed body in a level warns until it has one. A marker
+## spawned at a death at runtime never needs one.
 @export var save_id: StringName = &""
 
 ## Once true, NPCs stop reacting to this body. Flipped by the FIRST NPC that notices it (NpcDistraction.discover_corpse),
@@ -31,18 +33,25 @@ var discovered: bool = false
 var who: String = ""
 
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool only so the editor shows _get_configuration_warnings; a marker does nothing in the editor
 	add_to_group(GROUP)
-	if GameState.is_corpse_discovered(save_key()):
+	# Through WorldSaveId's legacy path: a hand-placed body stamped with a save_id still finds a discovery saved before.
+	if WorldSaveId.corpse_discovered(self, save_id):
 		discovered = true
 
-## Stable-enough persistence key for the narrow "already discovered" marker — now the SHARED world_objects key
-## (WorldSaveId.key_for): an authored save_id is the whole key ("id:<x>", survives moves), else a
-## level|scene-path|rounded-position fallback so hand-placed bodies survive reloads without a new asset. The old
-## bespoke key also folded in `who` (the dead NPC's name), but node_path already disambiguates same-spot bodies, so
-## dropping it just unifies the scheme (and gains WorldSaveId's off-tree guard for free — global_position off-tree
-## would have errored). BACK-COMPAT: a pre-fold save's FALLBACK-keyed discovery markers re-key and won't match, so a
-## once-investigated UN-AUTHORED body may re-spook once after loading an old save — low stakes (body-discovery is
-## off by default, and authored "id:<x>" keys are unchanged). Give story bodies a save_id if discovery must persist.
+func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
+	var id_warning := WorldSaveId.blank_id_warning(self)
+	if id_warning != "":
+		w.append(id_warning)
+	return w
+
+## The persistence key for the narrow "already discovered" marker — the SHARED WorldSaveId key: an authored save_id
+## is the whole key ("id:<x>", survives moves), else the level|scene-path|rounded-position fallback. A body that
+## gains a save_id reads its old fallback-keyed discovery once through WorldSaveId.corpse_discovered (the legacy read
+## path). Older history: the bespoke pre-WorldSaveId key also folded in `who`; a save from before THAT fold still
+## re-keys, so a once-investigated body with no save_id may re-spook once (body-discovery is off by default).
 func save_key() -> String:
 	return WorldSaveId.key_for(self, save_id)
 

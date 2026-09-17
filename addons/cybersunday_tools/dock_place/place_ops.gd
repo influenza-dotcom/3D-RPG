@@ -9,6 +9,14 @@ extends RefCounted
 ## or instance a subtree and add it to the edited scene, every freshly-built node must have its `owner` set to the
 ## scene root or it WON'T be written to the .tscn on save. An instanced sub-scene root is owned but NOT recursed
 ## into — its internals belong to that instance and must keep their own owner.
+##
+## save_id STAMPING (the one identity scheme, see scripts/world/world_save_id.gd): stamp_save_ids() gives every blank
+## persistable a placement just added a unique save_id, and missing_save_id_nodes() lists the ones an existing level
+## lacks for the Place tab's batch stamp. Both follow own_recursive's instance rule: only a node the LEVEL saves
+## (owned by the scene root, or an instance's root) is stamped — a property set inside an instance is not written
+## to the level file, so an id there would silently vanish on save.
+
+const WorldSaveId := preload("res://scripts/world/world_save_id.gd")
 
 
 ## Own `node` + every freshly-built descendant to `root` so the whole subtree saves into the edited scene. An
@@ -63,3 +71,65 @@ static func owned_count(node: Node) -> int:
 		else:
 			n += 1
 	return n
+
+
+## Stamp a unique save_id on every persistable in the subtree rooted at `node` whose id is blank (WorldSaveId
+## .wants_save_id — opted-out pickups stay blank), descending the way own_recursive does: an instanced sub-scene is
+## stamped at its root but never inside, unless the level has Editable Children on for it. Ids are unique against
+## every id already used under `root`. Returns how many were stamped. The Place tab, Palette and Item placer run it
+## inside their placement undo action, so undoing the placement removes the stamped node with it.
+static func stamp_save_ids(node: Node, root: Node) -> int:
+	if node == null or root == null:
+		return 0
+	var taken := used_save_ids(root)
+	var targets: Array[Node] = []
+	_collect_stampable(node, targets, root)
+	var stamped := 0
+	for n in targets:
+		if StringName(n.get(&"save_id")) != &"":
+			continue
+		var id := WorldSaveId.new_save_id(n, taken)
+		taken[id] = true
+		n.set(&"save_id", id)
+		stamped += 1
+	return stamped
+
+
+## Every blank persistable in the scene that the scene file itself saves (the nodes stamp_save_ids would stamp if the
+## whole scene were placed), for the Place tab's "Stamp Missing save_ids". The root itself is skipped: a prefab's own
+## root is what gets stamped once it is placed in a level.
+static func missing_save_id_nodes(root: Node) -> Array[Node]:
+	var out: Array[Node] = []
+	if root == null:
+		return out
+	var targets: Array[Node] = []
+	for c in root.get_children():
+		_collect_stampable(c, targets, root)
+	for n in targets:
+		if StringName(n.get(&"save_id")) == &"":
+			out.append(n)
+	return out
+
+
+## The set { save_id: true } of every non-blank save_id under `root` (all descendants, instances included — an id
+## baked into a prefab still collides).
+static func used_save_ids(root: Node) -> Dictionary:
+	var out := {}
+	if root == null:
+		return out
+	if &"save_id" in root:
+		var id := StringName(root.get(&"save_id"))
+		if id != &"":
+			out[id] = true
+	for c in root.get_children():
+		out.merge(used_save_ids(c))
+	return out
+
+
+static func _collect_stampable(node: Node, out: Array[Node], root: Node) -> void:
+	if WorldSaveId.wants_save_id(node):
+		out.append(node)
+	if node.scene_file_path != "" and node != root and not root.is_editable_instance(node):
+		return  # an instance: its root is saved in the level, its internals are not (unless Editable Children is on)
+	for c in node.get_children():
+		_collect_stampable(c, out, root)

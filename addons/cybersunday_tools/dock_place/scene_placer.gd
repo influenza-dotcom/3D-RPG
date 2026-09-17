@@ -153,6 +153,8 @@ func _init() -> void:
 		"A door that swings open inside this level. Writes: the open scene.")
 	_add_button("Place Container", _place_container,
 		"A lootable box -- assign a loot table in the Inspector. Writes: the open scene.")
+	_add_button("Stamp Missing save_ids", _stamp_missing_save_ids,
+		"Gives every door, container, NPC, pickup, destructible and corpse marker in this level that has no save_id a unique one, so its saved state survives moving or renaming it. Placing from these tabs already does this. Writes: the open scene.")
 
 	# --- Blockout (CSG) -------------------------------------------------------------------------------------
 	# Carve the walkable SHELL of a level — floors, walls, ramps, enterable building shells — as native CSG. CSG
@@ -450,6 +452,9 @@ func _finish_place(node: Node, label: String, on_ground: bool = false) -> void:
 	ur.add_do_method(parent, "add_child", node)
 	ur.add_do_reference(node)
 	ur.add_do_method(PlaceOps, "own_recursive", node, root)  # own the whole subtree so every node saves
+	# A placed Door / Container / NPC gets its own unique save_id, the primary key of its saved state — so a designer
+	# never types one, and a later move or rename keeps the state (see WorldSaveId). Undo removes the node, id and all.
+	ur.add_do_method(PlaceOps, "stamp_save_ids", node, root)
 	if node is Node3D:
 		ur.add_do_property(node, "global_position", pos)  # drop it in front of the editor camera, not the origin
 	ur.add_undo_method(parent, "remove_child", node)
@@ -577,6 +582,31 @@ func _snapped(pos: Vector3) -> Vector3:
 	if s <= 0.0:
 		return pos
 	return Vector3(roundf(pos.x / s) * s, pos.y, roundf(pos.z / s) * s)
+
+## Stamp a unique save_id on every persistable the open scene saves that has none (PlaceOps.missing_save_id_nodes), as
+## ONE undoable action — the fix for the Audit tab's blank-save_id rows on a level built before placement stamped ids.
+## Old saves still load: a stamped object reads its old path-keyed state once through WorldSaveId's legacy path.
+func _stamp_missing_save_ids() -> void:
+	var root := EditorInterface.get_edited_scene_root()
+	on_scene_changed(root)
+	if root == null:
+		_set_status("Open a scene first, then stamp.")
+		return
+	var missing := PlaceOps.missing_save_id_nodes(root)
+	if missing.is_empty():
+		_set_status("Every door, container, NPC, pickup, destructible and corpse marker here already has a save_id.")
+		return
+	var taken := PlaceOps.used_save_ids(root)
+	var ur := EditorInterface.get_editor_undo_redo()
+	ur.create_action("Stamp missing save_ids")
+	for n in missing:
+		var id := PlaceOps.WorldSaveId.new_save_id(n, taken)
+		taken[id] = true
+		ur.add_do_property(n, "save_id", id)
+		ur.add_undo_property(n, "save_id", &"")
+	ur.commit_action()
+	_set_status("Stamped a save_id on %d object(s) -- save the scene (Ctrl+S) to keep them. Ctrl+Z undoes it." % missing.size())
+
 
 ## Round the selected 3D nodes' X/Z onto the current grid (one undoable action) so hand-placed floors/walls tile
 ## flush — gaps between floor pieces are the root cause of navmesh island fragmentation.

@@ -32,6 +32,8 @@ extends VBoxContainer
 ## handler or behind Engine.is_editor_hint(), so _init never touches EditorInterface.
 
 const Catalog := preload("res://addons/cybersunday_tools/core/catalog.gd")
+## save_id stamping for a persistable component (stamp_save_ids — the same tested static the Place and Item tabs use).
+const PlaceOps := preload("res://addons/cybersunday_tools/dock_place/place_ops.gd")
 
 ## One sentence per guard, shared by the Add button's disabled tooltip AND the post-click status (a double-click on
 ## a row bypasses the disabled button, so the click must never be silent). Sharing the literal keeps them in step.
@@ -241,6 +243,9 @@ func _on_add() -> void:
 	ur.create_action("Add %s" % node.name)
 	ur.add_do_method(parent, "add_child", node)
 	ur.add_do_property(node, "owner", root)
+	# A persistable component (a CanDestroy, a pickup, a Corpse marker…) gets a unique save_id, the primary key of its
+	# saved state (see WorldSaveId), so a designer never types one. Undo removes the node, id and all.
+	ur.add_do_method(PlaceOps, "stamp_save_ids", node, root)
 	ur.add_do_reference(node)
 	ur.add_undo_method(parent, "remove_child", node)
 	ur.commit_action()

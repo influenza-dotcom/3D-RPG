@@ -127,8 +127,15 @@ func _toast(opener: Node, text: String, good: bool) -> void:
 		opener.notify_toast(text, Color(0.4, 1.0, 0.45) if good else Color(1.0, 0.55, 0.4))
 
 ## Self-populate the key / lockpick id dropdowns from the item ids on disk (SUGGESTIONs, so a custom / not-yet-authored
-## key or pick is still typable). Keeps a lock's ids spelled exactly like the Items they need.
+## key or pick is still typable). Keeps a lock's ids spelled exactly like the Items they need. unlock_flag suggests the
+## story-flag catalog (resources/story/FlagCatalog.tres) the same way.
 func _validate_property(property: Dictionary) -> void:
 	if property.name == "key_item_id" or property.name == "lockpick_item_id":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = ItemIds.ids_csv()
+	elif property.name == "unlock_flag":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = StoryFlags.names_csv()
+
+## The story-flag catalog, for the unlock_flag dropdown (preloaded, no class_name — the ItemIds / Factions idiom).
+const StoryFlags = preload("res://scripts/quests/story_flags.gd")

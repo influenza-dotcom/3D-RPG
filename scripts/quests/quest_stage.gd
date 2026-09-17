@@ -39,3 +39,13 @@ extends Resource
 ## OPTIONAL: set this GameState story flag (to true) the moment the quest enters this stage -- so a conversation, a
 ## door or a later quest can key off "the player reached this beat". Blank = none.
 @export var set_flag_on_enter: StringName = &""
+
+## The story-flag catalog, for the flag dropdown below (preloaded, no class_name — the ItemIds / Factions idiom).
+const StoryFlags = preload("res://scripts/quests/story_flags.gd")
+
+## Suggest the catalogued story flags for the flag entering this stage sets — a SUGGESTION, so a flag not yet in
+## resources/story/FlagCatalog.tres stays typable; the Audit tab / validate_all WARN on it instead.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "set_flag_on_enter":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = StoryFlags.names_csv()

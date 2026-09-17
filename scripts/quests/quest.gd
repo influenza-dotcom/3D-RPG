@@ -116,3 +116,13 @@ func journal_text_for(stage_id: StringName) -> String:
 	if st != null and st.journal_text.strip_edges() != "":
 		return st.journal_text
 	return description
+
+## The story-flag catalog, for the flag dropdown below (preloaded, no class_name — the ItemIds / Factions idiom).
+const StoryFlags = preload("res://scripts/quests/story_flags.gd")
+
+## Suggest the catalogued story flags for the flag that expires this quest — a SUGGESTION, so a flag not yet in
+## resources/story/FlagCatalog.tres stays typable; the Audit tab / validate_all WARN on it instead.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "expire_on_flag":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = StoryFlags.names_csv()

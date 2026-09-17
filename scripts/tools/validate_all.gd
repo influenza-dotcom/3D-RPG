@@ -14,6 +14,11 @@ extends SceneTree
 ##   * ScanText.run()          (addons/cybersunday_tools/panel_audit/scan_text.gd) — Domain D: hardcoded
 ##                             player-facing strings at paint sites (the PlayerText chokepoint / l10n ratchet).
 ##   * NavMeshAudit.analyze()  (scripts/tools/navmesh_audit.gd) — disconnected islands + elevated polys, per level scene.
+##   * ScanScene.save_id_findings() (addons/cybersunday_tools/panel_audit/scan_scene.gd) — per level scene: a
+##                             persistable (door, container, NPC, pickup, destructible, corpse marker) with a BLANK
+##                             save_id is a WARN (its state is keyed by path + position, so a layout edit loses it); two
+##                             sharing one id is an ERROR (they load and overwrite one saved state). The Audit tab shows
+##                             the same rows for the open scene; Place → Stamp Missing save_ids fixes the blanks.
 ## (Domain A per-scene config-warnings are deliberately skipped here — they're editor-time @tool guidance; the audit
 ## panel covers them. The high-value content/wiring/navmesh checks are all headless-pure.)
 ##
@@ -37,6 +42,8 @@ const SCAN_DISK_PATH := "res://addons/cybersunday_tools/panel_audit/scan_disk.gd
 ## Runtime-loaded for the same reason as the two above: ScanText preloads ScanDisk, whose compile chain
 ## reaches loot_table.gd -> GameSettings (not registered during a `-s` script's boot compile).
 const SCAN_TEXT_PATH := "res://addons/cybersunday_tools/panel_audit/scan_text.gd"
+## Runtime-loaded too: scan_scene preloads WorldSaveId, which reads the GameState autoload.
+const SCAN_SCENE_PATH := "res://addons/cybersunday_tools/panel_audit/scan_scene.gd"
 const LEVELS_DIR := "res://scenes/levels"
 
 ## Empty starter templates authors INSTANCE new levels from: their NavigationRegion3D carries the required bake
@@ -105,9 +112,24 @@ func _run_all() -> int:
 		print("  WARN   %s  —  %s" % [str(f.get("source", "?")), str(f.get("message", ""))])
 	warns += text_debt.size()
 
-	# --- 4) NAVMESH: disconnected islands + elevated (prop/roof) polys, per level scene ---
 	var auditing_explicit := not explicit_levels.is_empty()
 	var level_paths := explicit_levels if auditing_explicit else _all_level_scenes()
+
+	# --- 4) SAVE IDS: blank save_id (WARN) / duplicate save_id (ERROR) on the persistables of every level scene ---
+	# One row per level with the count, then one line per object, so a level built before placement stamped ids reads
+	# as a single actionable block (the fix is one click: Place → Stamp Missing save_ids).
+	var scan_scene := load(SCAN_SCENE_PATH)  # runtime load: see the const comment (autoload timing)
+	print_rich("
+[b]-- save ids --[/b]  (%d level scene(s))" % level_paths.size())
+	for path in level_paths:
+		var id_rows: Array = _audit_save_ids(scan_scene, path)
+		for f in id_rows:
+			if str(f.get("severity", "WARN")) == "ERROR":
+				errors += 1
+			else:
+				warns += 1
+
+	# --- 5) NAVMESH: disconnected islands + elevated (prop/roof) polys, per level scene ---
 	print_rich("\n[b]-- navmesh --[/b]  (%d level scene(s))" % level_paths.size())
 	for path in level_paths:
 		if not auditing_explicit and path in NAVMESH_TEMPLATE_SCENES:
@@ -126,6 +148,25 @@ func _run_all() -> int:
 	if not strict and (warns > 0 or navmesh_issues > 0):
 		print("  (warnings + navmesh issues are reported but don't fail without --strict)")
 	return 1 if fail else 0
+
+
+## The save_id findings for one level scene, printed under its path. Instantiated WITHOUT entering the tree (no _ready
+## runs), like _audit_level; save_id_findings reads only exports and node paths, so an off-tree instance is enough.
+func _audit_save_ids(scan_scene: Variant, path: String) -> Array:
+	var ps := load(path) as PackedScene
+	var root: Node = ps.instantiate() if ps != null else null
+	if root == null or scan_scene == null:
+		print("  ", path, " — could not load (skipped).")
+		if root != null:
+			root.free()
+		return []
+	var rows: Array = scan_scene.save_id_findings(root, true)
+	var blanks := rows.filter(func(f): return str(f.get("severity", "")) == "WARN").size()
+	print("  %s — %s" % [path, "OK" if rows.is_empty() else "%d without a save_id, %d duplicate id(s)" % [blanks, rows.size() - blanks]])
+	for f in rows:
+		print("    %-5s  %s  —  %s" % [str(f.get("severity", "WARN")), str(f.get("source", "?")), str(f.get("message", ""))])
+	root.free()
+	return rows
 
 
 func _all_level_scenes() -> Array[String]:

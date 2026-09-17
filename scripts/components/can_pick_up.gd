@@ -65,9 +65,11 @@ const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable pe
 @export var build_model_from_item: bool = false
 
 @export_group("Save")
-## OPTIONAL stable id so a HAND-PLACED pickup stays collected across a save/load (and node moves). Blank =
-## level+path+position fallback. Ignored for loot-dropped / code-spawned pickups (build_model_from_item) — those
-## aren't re-instanced on reload and have no stable identity, so they're never persisted.
+## The PRIMARY key for this object's saved state (see WorldSaveId). The CYBER SUNDAY Place tab, Palette and Item placer
+## stamp a unique one on placement, and Place -> Stamp Missing save_ids fills any a level lacks. Blank falls back to a
+## level+path+position key that a move or rename loses, so a blank id in a level is a config warning / Audit row / validate_all WARN.
+## Ignored for loot-dropped / code-spawned pickups (build_model_from_item) — those aren't re-instanced on reload and
+## have no stable identity, so they're never persisted and never warn.
 @export var save_id: StringName = &""
 
 var _claimed: bool = false  ## latched the instant pickup commits, before the deferred queue_free lands
@@ -87,7 +89,7 @@ func _ready() -> void:
 	# The "gone" bit is coerced through GameState.as_bool (persisted-Variant safety, mirrors Door): a hand-edited /
 	# legacy gamestate.cfg could hold a String under the key, and a bare truthiness test on a non-empty String reads
 	# true — as_bool degrades non-numeric junk to the default (and dodges the bool(<String>) crash) instead.
-	if not build_model_from_item and GameState.as_bool(GameState.object_state(GameState.current_level_path, _save_key()).get("gone", false)):
+	if not build_model_from_item and GameState.as_bool(WorldSaveId.read_object_state(self, save_id).get("gone", false)):
 		queue_free()
 		return
 	if build_model_from_item and item != null:
@@ -224,11 +226,13 @@ func _has_payload() -> bool:
 ## Editor warning: a pickup with nothing to give is a no-op — the player can't pick it up (can_be_talked_to
 ## is false). Mirrors that exact emptiness check so the inspector flags an unfinished pickup.
 func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
 	if item == null and loot_table == null and item_stacks.is_empty():
-		return PackedStringArray([
-			"Nothing to grant — set `item`, add `item_stacks` rows, or assign a `loot_table`. As-is the player can't pick this up."
-		])
-	return PackedStringArray()
+		w.append("Nothing to grant — set `item`, add `item_stacks` rows, or assign a `loot_table`. As-is the player can't pick this up.")
+	var id_warning := WorldSaveId.blank_id_warning(self)  # quiet for a build_model_from_item pickup (never persisted)
+	if id_warning != "":
+		w.append(id_warning)
+	return w
 
 ## Hover readout: the configured label, else "Take <item>", else a generic.
 func look_name() -> String:

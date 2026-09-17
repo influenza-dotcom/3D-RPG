@@ -14,6 +14,7 @@ enum Type { KILL, TALK, PICKUP, ENTER_AREA, USE_ITEM, FLAG }
 
 ## Drives the target_id dropdown (item ids on disk) for PICKUP/USE_ITEM objectives — const-preloaded, see item_ids.gd.
 const ItemIds = preload("res://scripts/items/item_ids.gd")
+const StoryFlags = preload("res://scripts/quests/story_flags.gd")  # the FLAG target_id dropdown
 
 ## Stable id, unique within the quest — the key advance_objective / progress queries use.
 @export var id: StringName = &""
@@ -22,7 +23,7 @@ const ItemIds = preload("res://scripts/items/item_ids.gd")
 @export var type: Type = Type.FLAG:
 	set(value):
 		type = value
-		notify_property_list_changed()  # refresh target_id's hint — the item-id dropdown only applies to PICKUP/USE_ITEM
+		notify_property_list_changed()  # refresh target_id's hint — item ids for PICKUP/USE_ITEM, story flags for FLAG
 ## What to match for `type`: an NPC identity key (KILL/TALK — prefer the NpcData.id so the objective survives a
 ## display_name edit/localization; the NPC's display_name ALSO matches, as the legacy fallback, so pre-identity
 ## quests authored against a display string keep working unedited), an Item.id (PICKUP/USE_ITEM), an area/group
@@ -40,10 +41,14 @@ const ItemIds = preload("res://scripts/items/item_ids.gd")
 ## World position the marker sits at (the objective's destination — a turn-in NPC, an area, a pickup).
 @export var marker_position: Vector3 = Vector3.ZERO
 
-## For PICKUP / USE_ITEM objectives, target_id IS an Item.id — self-populate it from the item ids on disk (a
-## SUGGESTION, still typable). For KILL/TALK (an NPC identity key / display name), ENTER_AREA (an area name), or
-## FLAG (a flag name) there's no on-disk registry, so the field stays free text.
+## For PICKUP / USE_ITEM objectives, target_id IS an Item.id — self-populate it from the item ids on disk; for FLAG
+## it is a story flag, suggested from the flag catalog (resources/story/FlagCatalog.tres). Both SUGGESTIONs, still
+## typable. KILL/TALK (an NPC identity key / display name) and ENTER_AREA (an area name) have no registry, so they stay
+## free text.
 func _validate_property(property: Dictionary) -> void:
 	if property.name == "target_id" and (type == Type.PICKUP or type == Type.USE_ITEM):
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = ItemIds.ids_csv()
+	elif property.name == "target_id" and type == Type.FLAG:
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = StoryFlags.names_csv()

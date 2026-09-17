@@ -329,6 +329,9 @@ func _place() -> void:
 	ur.add_do_method(parent, "add_child", node)
 	ur.add_do_reference(node)
 	ur.add_do_method(PlaceOps, "own_recursive", node, root)  # own the whole built subtree so every node saves (the ONE tested static)
+	# A pickup the designer places gets a unique save_id, the primary key of its "collected" bit (see WorldSaveId), so
+	# a designer never types one. Undo removes the node, id and all.
+	ur.add_do_method(PlaceOps, "stamp_save_ids", node, root)
 	ur.add_do_property(node, "global_position", pos)  # drop it in front of the editor camera, not at the origin
 	ur.add_undo_method(parent, "remove_child", node)
 	ur.commit_action()

@@ -23,11 +23,12 @@ extends LookAtInteractable
 @export var loot_table: LootTable = null
 ## Name shown on the look-at hover ("Loot <name>") + the transfer screen title. Blank -> just "Container".
 @export var container_name: String = ""
-## OPTIONAL stable id for the per-level world ledger (GameState.world_snapshot — every save, and every level change).
-## Leave blank for the level|node-path fallback (fine for a hand-placed crate that is never renamed/re-parented); set
-## it on story containers whose looted/stashed state must survive a scene-layout edit. Mirrors NPC.save_id /
-## Corpse.save_id.
+## The PRIMARY key for this container in the per-level world ledger (see WorldSaveId). The CYBER SUNDAY Place tab,
+## Palette and Item placer stamp a unique one on placement, and Place -> Stamp Missing save_ids fills any a level lacks.
+## Blank falls back to a level|node-path key that a rename or re-parent loses, so a blank id in a level warns.
 @export var save_id: StringName = &""
+## The one identity scheme: snapshot keys + the legacy read + the blank-id warning (preloaded, no class_name).
+const WorldSaveId = preload("res://scripts/world/world_save_id.gd")
 
 ## The container's contents — LootScreen reads this. Built in _ready (a child CharacterInventory), seeded
 ## from item_stacks.
@@ -98,10 +99,20 @@ func refill() -> void:
 ## level|node_path — the same shape as NPC.snapshot_key (a container never moves, but the shared shape keeps
 ## one matching rule across the tier, and node_path survives a same-scene reload identically).
 func snapshot_key() -> String:
-	if save_id != &"":
-		return "id:%s" % String(save_id)
-	var np: String = str(get_path()) if is_inside_tree() else String(name)
-	return "%s|%s" % [GameState.current_level_path, np]
+	return WorldSaveId.snapshot_key_for(self, save_id)
+
+## The key an older world ledger filed this container under before it had a save_id (level|node_path), or "" while
+## save_id is blank. WorldSnapshot.apply matches it when the id key misses, so a crate stamped with an id since the
+## save still gets its looted bag back.
+func snapshot_legacy_key() -> String:
+	return WorldSaveId.snapshot_legacy_key_for(self, save_id)
+
+func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
+	var id_warning := WorldSaveId.blank_id_warning(self)
+	if id_warning != "":
+		w.append(id_warning)
+	return w
 
 ## This container's world-ledger state, in the [world_snapshot] "containers" entry shape:
 ## { stacks: serialize_stacks() rows, grid: bool, locked: bool (only when a Lock child exists) }.

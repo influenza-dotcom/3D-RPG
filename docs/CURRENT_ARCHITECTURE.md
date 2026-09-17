@@ -155,6 +155,14 @@ to `QuestTracker.quest_started` / `objective_advanced` / `quest_completed` /
 `QuestTracker.notify_flag_set` — that one call both advances matching FLAG objectives
 and expires (auto-fails) any quest whose `expire_on_flag` matches.
 
+**Story flag names are catalogued.** `resources/story/FlagCatalog.tres` (`FlagCatalog`, read through the no-class_name
+registry `scripts/quests/story_flags.gd`) lists every flag name with a one-line description. It is authoring data
+only — `GameState` still accepts any name at runtime. Every flag field's `_validate_property` suggests those names
+(`PROPERTY_HINT_ENUM_SUGGESTION`, so an uncatalogued name stays typable; a subclass that adds its own hint calls
+`super`, because the engine runs only the most-derived `_validate_property`), and `ScanWiring` WARNs on a flag the
+content reads or writes that the catalog does not list (`uncatalogued_flag_findings`). Pinned by
+`tests/test_flag_catalog.gd`.
+
 > ⭐ **Pairing is decided by identity, not by a default.** `GameState._qt()` returns the
 > `QuestTracker` autoload only when `self == GameState`; **any other** GameState instance
 > builds its OWN private tracker as a child (freed with it). That is what preserves unit-test
@@ -484,13 +492,29 @@ level + `WorldSaveId.key_for`): a `Door`'s open/locked state (plus `swing`, the
 side it stands open toward — an NPC swings a door away from itself — and `destroyed`,
 a door shot to pieces; its partial HP is deliberately not persisted), and a consumed
 `CanPickUp` / `MoneyPickUp` / `UpgradePickup` / destroyed `CanDestroy` prop's "gone"
-bit — set an authored `save_id` on hand-placed objects that must survive layout
-edits (else a level/path/position fallback is used). Code-spawned pickups (a
+bit — keyed by the object's `save_id` (see *One identity scheme* below). Code-spawned pickups (a
 dropped money bag's reclaim child) set `persist_collected = false` to stay out of
 the ledger — a dynamic spawn has no stable identity. It does NOT persist
 dynamically-spawned entities (loot drops / encounter NPCs); only touched, authored
 objects are in it. Container contents, killed authored NPCs and NPC positions live in
 the second ledger below, never here.
+
+**One identity scheme.** Every persistable (`Door`, `ItemContainer`, `Corpse`, `CanPickUp`, `MoneyPickUp`,
+`UpgradePickup`, `CanDestroy`, `NPC`) is keyed by its authored `save_id` ("id:<x>") in whichever store it rides;
+`scripts/world/world_save_id.gd` (`WorldSaveId`) owns every key. A blank id still keys by the old fallback —
+level|path|position (`key_for` / `legacy_key_for`: `world_objects`, corpse discovery) or position-free level|node_path
+(`snapshot_key_for`: the world ledger, the death ledger) — because nothing else identifies such a node. Those fallbacks
+are otherwise ONLY a legacy read path: a node that has an id and finds nothing under it looks under the key it would
+have had without one and moves the entry onto its id, in memory with no autosave (`WorldSaveId.read_object_state` →
+`GameState.adopt_legacy_object_state`, `WorldSaveId.corpse_discovered` → `adopt_legacy_corpse_key`, the
+`snapshot_legacy_key` match in `WorldSnapshot.apply` and `GameState.suppress_dead_authored`). So an old save keeps its
+state after a designer stamps ids, and the next save writes each object once, under its id. Authoring keeps ids from
+being blank: the Place tab, Palette and Item placer stamp one on placement (`PlaceOps.stamp_save_ids`), Place → Stamp
+Missing save_ids fills a level (`PlaceOps.missing_save_id_nodes`), and a blank id on a persistable authored in a level
+(`WorldSaveId.is_level_scene`, so editing a prefab never asks for one) is a config warning, an Audit WARN and a
+`validate_all` WARN (ERROR under `--strict`), while a duplicate id is an ERROR (`ScanScene.save_id_findings`). Pinned
+by `tests/test_save_identity.gd`. `Faction.id == filename` is a separate content identity, still checked by
+`ContentValidator`.
 
 **The per-level world ledger.** Beside `world_objects` sits a second, separately
 keyed store: `GameState.world_snapshot`, ONE long-lived `WorldSnapshot`
@@ -3212,9 +3236,10 @@ current paths, and current field names.
 - One save product, three stores (profile, `world_objects`, the per-level world
   ledger): keep them as separate code seams, and avoid UI/docs implying that a
   manual save restores more of the world than Continue.
-- Persisted corpse discovery is the exception to general object-state reset:
-  authored bodies should use `Corpse.save_id`; fallback path/position keys are
-  only stable enough for unchanged hand-placed markers.
+- A persistable with a blank `save_id` is keyed by its path (and position, for
+  `world_objects` and corpse discovery), so a layout edit silently orphans its saved
+  state. Placement stamps ids and the Audit / `validate_all` report blanks, but an
+  id authored inside a reusable prefab is shared by every copy (the duplicate ERROR).
 - **Hotbar KIND dedupe degrades for a modded gun.** `hotbar.gd`'s "is this the same
   weapon?" comparisons are `slotted.weapon == it.weapon`, i.e. WeaponData object identity.
   A bench refit deliberately produces a NEW `WeaponData` object (that is what makes the

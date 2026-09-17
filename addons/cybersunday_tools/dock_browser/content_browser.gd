@@ -40,6 +40,7 @@ const Browse := preload("res://addons/cybersunday_tools/dock_browser/browse_scan
 ## a folder with sub-folders (resources/parts/arms, /bodies, /heads, /legs) still lands as one flat group.
 const ROOTS := {
 	"Quests": "res://resources/quests/",
+	"Story Flags": "res://resources/story/",
 	"NPCs": "res://resources/characters/",
 	"Weapons": "res://resources/weapons/",
 	"Items": "res://resources/items/",

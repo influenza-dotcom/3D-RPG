@@ -1100,7 +1100,16 @@ func suppress_dead_authored(tree: SceneTree, level_path: String) -> void:
 	for n in tree.get_nodes_in_group(Groups.NPC):
 		if not is_instance_valid(n) or n.is_queued_for_deletion() or not n.has_method(&"snapshot_key"):
 			continue
-		if (dead as Dictionary).has(str(n.snapshot_key())):
+		var key := str(n.snapshot_key())
+		if (dead as Dictionary).has(key):
+			n.queue_free()
+			continue
+		# The legacy read path (WorldSaveId): an NPC killed before it had a save_id was recorded under its level|node_path
+		# key. Match that too, and move the death onto the id key so the next save writes it once, under the id.
+		var legacy := str(n.snapshot_legacy_key()) if n.has_method(&"snapshot_legacy_key") else ""
+		if legacy != "" and (dead as Dictionary).has(legacy):
+			(dead as Dictionary).erase(legacy)
+			(dead as Dictionary)[key] = true
 			n.queue_free()
 
 ## Record the LevelData GameRoot just loaded (its resource_path) so the next save knows which level to reload.
@@ -1572,6 +1581,15 @@ func has_flag(flag: StringName) -> bool:
 func is_corpse_discovered(key: String) -> bool:
 	return not key.is_empty() and discovered_corpses.has(key)
 
+## The legacy read path for a Corpse that gained a save_id (WorldSaveId.corpse_discovered): when `legacy_key` holds a
+## discovery, move it to `key` and return true. In memory only — a load-time read must not queue an autosave.
+func adopt_legacy_corpse_key(legacy_key: String, key: String) -> bool:
+	if legacy_key.is_empty() or key.is_empty() or not discovered_corpses.has(legacy_key):
+		return false
+	discovered_corpses.erase(legacy_key)
+	discovered_corpses[key] = true
+	return true
+
 ## Record a Corpse marker's one-shot discovery and queue the same coalesced world-state autosave used by flags.
 func mark_corpse_discovered(key: String) -> void:
 	if key.is_empty() or discovered_corpses.has(key):
@@ -1670,6 +1688,19 @@ func object_state(level_path: String, key: String) -> Dictionary:
 func has_object_state(level_path: String, key: String) -> bool:
 	var per = world_objects.get(level_path)
 	return per is Dictionary and per.has(key)
+
+## The legacy read path for an object that gained a save_id (WorldSaveId.read_object_state): its state from an older
+## save sits under `legacy_key` (the level|path|position fallback). Move that entry to `key` and return it, or return
+## {} when there is none. In memory only: this runs from _ready while a level loads, and must not queue an autosave
+## (the next ordinary save writes the id key).
+func adopt_legacy_object_state(level_path: String, legacy_key: String, key: String) -> Dictionary:
+	var per = world_objects.get(level_path)
+	if legacy_key.is_empty() or key.is_empty() or not (per is Dictionary) or not (per.get(legacy_key) is Dictionary):
+		return {}
+	var state: Dictionary = per[legacy_key]
+	per.erase(legacy_key)
+	per[key] = state
+	return state
 
 # --- The player's own map pins (waypoints + notes) -----------------------------------------------------------
 ## Emitted after ANY change to the waypoint ledger — an add, an edit, a delete, a level's list being cleared,

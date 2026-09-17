@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="FlagCatalog" format=3]
+
+[ext_resource type="Script" path="res://scripts/quests/flag_catalog.gd" id="1_flags"]
+
+[resource]
+script = ExtResource("1_flags")
+flags = Dictionary[StringName, String]({
+&"tutorial_holster_forgiveness_seen": "Set by code (GameState.mark_holster_forgiveness_tutorial_seen) once the player has seen the tip that holstering calms a provoked NPC; the tip never shows again."
+})

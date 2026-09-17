@@ -402,8 +402,9 @@ Check:
   that `QuestStarter` refuses active/completed quests, and — since world-object
   save v1 — a consumed `CanPickUp` (like the package) records a "gone" bit in
   `GameState.world_objects` (keyed by level + `WorldSaveId`), so the collected
-  package stays gone across a save/reload. Set the pickup's `save_id` if it must
-  survive scene edits; otherwise it falls back to a level/path/position key. Still
+  package stays gone across a save/reload. The key is the pickup's `save_id`
+  (stamped when you place it from CYBER SUNDAY); a blank one falls back to a
+  level/path/position key that a scene edit loses, and warns. Still
   not persisted by THIS ledger: containers, dead NPCs, and dynamic/loot-dropped
   spawns. Dead authored NPCs and authored-container contents ride the separate
   per-level world ledger instead, which every save carries (Continue included) and

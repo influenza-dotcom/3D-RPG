@@ -207,7 +207,8 @@ rpg/
   (`Door` open/locked/destroyed plus consumed hand-placed pickups / destroyed props, via
   `GameState.world_objects` keyed by `WorldSaveId.key_for`) — see
   [docs/CURRENT_ARCHITECTURE.md](docs/CURRENT_ARCHITECTURE.md) (Save Model) for
-  the authoritative field list. Every save also carries the per-level world ledger
+  the authoritative field list. Every persistable object is keyed by its authored
+  `save_id` (CYBER SUNDAY stamps one on placement). Every save also carries the per-level world ledger
   (authored NPCs and container contents for each visited level).
 - **Startup warning + first-launch consent.** Every project launch begins with the
   internet-warning card before the computer-room intro or menu; on the very first boot

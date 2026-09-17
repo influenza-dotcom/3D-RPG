@@ -22,6 +22,9 @@ const ItemIds = preload("res://scripts/items/item_ids.gd")
 const Factions = preload("res://scripts/faction/factions.gd")
 ## Perk registry (preloaded by path — like the two above it carries NO class_name) for the perk gate dropdown.
 const Perks = preload("res://scripts/player/perks.gd")
+## Story-flag registry (preloaded by path, no class_name) for the required_flag / set_flag dropdowns — the names in
+## resources/story/FlagCatalog.tres.
+const StoryFlags = preload("res://scripts/quests/story_flags.gd")
 
 ## Which tracked state a quest gate (required_quest_id) checks for: ANY = the player merely KNOWS the quest
 ## (active OR completed OR failed); ACTIVE / COMPLETED / FAILED = exactly that state (WR-6 adds FAILED).
@@ -116,12 +119,15 @@ enum QuestGate { ANY, ACTIVE, COMPLETED, FAILED }
 ## one field a bare LineEdit on purpose). The registries are plain folder scanners that touch no autoload, which
 ## is why const-preloading them from a @tool Resource is safe.
 ##
+## The flag names (`required_flag` / `set_flag`) suggest the story-flag catalog (StoryFlags — the resource at
+## resources/story/FlagCatalog.tres is loaded lazily by path, so preloading the registry drags nothing in).
+##
 ## NOT covered — do not read the list above as "every drift-prone id on this Resource is handled". Still bare:
-## the quest ids (`required_quest_id` / `complete_quest_id` / `advance_quest_id`), `advance_objective_id`, and the
-## flag names (`required_flag` / `set_flag`). The quest ids are the ones that would pay off most, and the drift
-## they are exposed to is LIVE on disk — recover_the_package.tres carries id &"recover_package" — so a suggestion
-## scan there must LOAD each resources/quests/*.tres and read Quest.id, because the filename lies. Objective ids
-## nest inside a Quest rather than sitting in a folder, and flag names have no registry to scan at all.
+## the quest ids (`required_quest_id` / `complete_quest_id` / `advance_quest_id`) and `advance_objective_id`. The
+## quest ids are the ones that would pay off most, and the drift they are exposed to is LIVE on disk —
+## recover_the_package.tres carries id &"recover_package" — so a suggestion scan there must LOAD each
+## resources/quests/*.tres and read Quest.id, because the filename lies. Objective ids nest inside a Quest rather
+## than sitting in a folder.
 func _validate_property(property: Dictionary) -> void:
 	if property.name == "target_id" or property.name == "target_on_fail_id":
 		# Only the two sentinel WORDS can be suggested here: a nested sub-resource has no pointer to the
@@ -144,3 +150,6 @@ func _validate_property(property: Dictionary) -> void:
 		# Perks.ids() reads off resources/perks/ — not the filenames.
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = Perks.ids_csv()
+	elif property.name == "required_flag" or property.name == "set_flag":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = StoryFlags.names_csv()
