@@ -9,10 +9,24 @@ extends GutTest
 ##   4. The talk duck (the slight per-spoken-line dip under the voice): its two levels COMPOSE instead of
 ##      stomping one volume_db, a stale auto-release can't cut the next line's dip, and the pulse is inert
 ##      without a playing bed.
-## The bed itself is built OFF-TREE (.new() without add_child, so _ready never runs) — no audio device, no
-## GameSettings mutation, per the "don't run _ready() in a unit test" rule.
+## Most beds are built OFF-TREE (.new() without add_child, so _ready never runs). The tests that need the fade tweens a
+## call builds to be real (and run to their end) use an IN-TREE bed from _live_bed, whose _ready only READS
+## GameSettings.dialogue; a knob one of them retunes goes through _retune and is put back in after_each.
 
 const BED_SCRIPT := preload("res://scripts/dialogue/dialogue_music_bed.gd")
+
+## [resource, property, previous value] for every shared GameSettings knob a test retuned, unwound in after_each.
+var _retuned: Array = []
+
+func _retune(res: Resource, prop: StringName, value: Variant) -> void:
+	_retuned.append([res, prop, res.get(prop)])
+	res.set(prop, value)
+
+func after_each() -> void:
+	for i in range(_retuned.size() - 1, -1, -1):
+		var entry: Array = _retuned[i]
+		(entry[0] as Resource).set(entry[1], entry[2])
+	_retuned.clear()
 
 func _make_bed() -> DialogueMusicBed:
 	return BED_SCRIPT.new() as DialogueMusicBed
@@ -165,13 +179,22 @@ func test_dialogue_manager_builds_the_music_bed_child() -> void:
 
 func test_bed_without_a_stream_is_inert() -> void:
 	# An unauthored dialogue_music must leave set_bed_playing() a no-op (conversations play dry, the pre-bed
-	# behaviour) rather than erroring on a null stream. Off-tree: _ready never ran, so stream is null.
-	var bed := _make_bed()
-	assert_null(bed.stream, "an off-tree bed has no stream until _ready reads the settings")
-	bed.set_bed_playing(true)
-	assert_false(bed.playing, "set_bed_playing(true) with no authored track must not start playback")
-	bed.set_bed_playing(false)
-	bed.free()
+	# behaviour). IN-TREE, so the fade tween the call would build is real and can be run to its end: a bed that
+	# got past the no-track guard would swell its envelope up to the authored level. The level is retuned well
+	# above the silent floor so that swell cannot hide.
+	_retune(GameSettings.dialogue, &"dialogue_music_volume_db", -12.0)
+	var dry := _live_bed()
+	dry.stream = null  # what _ready leaves when DialogueSettings authors no dialogue_music
+	dry.set_bed_playing(true)
+	_land(dry._fade)
+	assert_almost_eq(dry.volume_db, DialogueMusicBed.SILENT_DB, 0.01,
+		"a conversation opening with no authored track must leave the bed at its silent floor, not fade an empty player up")
+	# CONTROL: the same in-tree bed holding a track does get past the guard and swells up to the authored level.
+	var scored := _live_bed()
+	scored.set_bed_playing(true)
+	_land(scored._fade)
+	assert_almost_eq(scored.volume_db, -12.0, 0.01,
+		"control: a bed WITH a track fades up to dialogue_music_volume_db when a conversation opens")
 
 # --- The talk duck ----------------------------------------------------------------------------------
 
@@ -202,16 +225,29 @@ func test_volume_is_the_sum_of_envelope_and_talk_duck() -> void:
 	bed.free()
 
 func test_a_stale_auto_release_does_not_cut_the_next_lines_dip() -> void:
-	# Each pulse bumps _speech_token and the timed release only fires on a matching token — so line 1's timer
-	# expiring mid-line-2 must NOT swell the bed back up while the NPC is still talking. Driven directly
-	# (off-tree there are no real timers): a release bound to a stale token is ignored, the current one lands.
-	var bed := _make_bed()
-	bed._set_speech_duck_db(-4.0)
-	var stale := bed._speech_token
-	bed._speech_token += 1  # "line 2 pulsed" — what note_line_speech does before arming its own release
-	bed._release_speech_duck(stale)
-	assert_eq(bed._speech_duck_db, -4.0, "a stale (superseded) auto-release must leave the dip alone")
-	bed.free()
+	# A monologue: line 1 dips the bed and arms a timed release; line 2 is pulsed before that timer runs out. Line 1's
+	# release expiring mid-line-2 must NOT swell the bed back up while the NPC is still talking. IN-TREE with two real
+	# pulses, so every tween the calls build can be run to its end. The release each pulse arms is bound to the token
+	# the pulse leaves behind, which is read here; the timers themselves (5 s) never fire inside the test, so each
+	# release is invoked by hand at the moment its timer would.
+	_retune(GameSettings.dialogue, &"dialogue_music_talk_duck_db", -4.0)
+	var bed := _live_bed()
+	bed.set_bed_playing(true)
+	bed.note_line_speech(5.0)  # line 1
+	_land(bed._duck_fade)
+	assert_almost_eq(bed._speech_duck_db, -4.0, 0.01, "setup: line 1 dips the bed by the talk duck")
+	var line_1_release: int = bed._speech_token
+	bed.note_line_speech(5.0)  # line 2, before line 1's release is due
+	_land(bed._duck_fade)
+	bed._release_speech_duck(line_1_release)  # line 1's timer expires mid-line-2
+	_land(bed._duck_fade)
+	assert_almost_eq(bed._speech_duck_db, -4.0, 0.01,
+		"line 1's release firing while line 2 is spoken must leave the dip alone")
+	# CONTROL: the release line 2 armed does land, so the dip above held because that release was stale.
+	bed._release_speech_duck(bed._speech_token)
+	_land(bed._duck_fade)
+	assert_almost_eq(bed._speech_duck_db, 0.0, 0.01,
+		"control: the current line's own release swells the bed back up once its spoken time is over")
 
 # --- The station-terminal handover (the THIRD summed level) -------------------------------------------
 
@@ -239,14 +275,47 @@ func test_the_menu_handover_is_latched_so_a_per_frame_assert_is_free() -> void:
 	assert_null(bed._menu_fade, "asserting the state it is already in must not build a tween")
 	bed.free()
 
+## An IN-TREE bed holding a real looping stream, so set_bed_playing is live rather than the null-stream no-op. Its
+## _ready only READS GameSettings.dialogue; the authored stream it picked is swapped for a fixture so the test does
+## not depend on the shipped track. Autofreed with the test.
+func _live_bed() -> DialogueMusicBed:
+	var bed := _make_bed()
+	add_child_autofree(bed)
+	var wav := _silent_wav(1.0)
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_end = 44100
+	bed.stream = wav
+	return bed
+
+## Run a fade tween straight to its end (no real-time wait): the level writer lands on the fade's target.
+func _land(t: Tween) -> void:
+	if t != null and t.is_valid():
+		t.custom_step(60.0)
+
 func test_a_conversation_settles_the_menu_duck_on_the_way_in_and_out() -> void:
 	# The symmetric trap to the talk duck's: a conversation that ENDED while a terminal was up would otherwise
 	# freeze a -60 dB dip in and the NEXT conversation would open inaudible. set_bed_playing settles it both
 	# directions; StationMusic simply re-asserts next frame if a terminal really is still open.
-	var bed := _make_bed()
-	bed._menu_ducked = true
-	bed._menu_duck_db = -60.0
-	bed.set_bed_playing(true)  # inert without an authored stream, so drive the settle directly
-	bed.note_menu_music(false)
-	assert_false(bed._menu_ducked, "the latch must clear so the swell-back actually runs")
-	bed.free()
+	var cfg: DialogueSettings = GameSettings.dialogue
+	var bed := _live_bed()
+	bed.note_menu_music(true)   # a station screen stepped the bed aside...
+	_land(bed._menu_fade)
+	assert_true(bed._menu_ducked, "setup: the terminal handover is latched")
+	assert_lt(bed._menu_duck_db, 0.0,
+		"control: the terminal handover really pulled the bed down, so the swell-back asserted below is a real change")
+
+	bed.set_bed_playing(true)   # ...and a conversation opens with that dip still latched
+	assert_false(bed._menu_ducked, "opening a conversation must drop the stale terminal latch so the swell-back runs")
+	_land(bed._fade)
+	_land(bed._menu_fade)
+	assert_almost_eq(bed._menu_duck_db, 0.0, 0.01, "the stale terminal dip swells back out as the conversation opens")
+	assert_almost_eq(bed.volume_db, cfg.dialogue_music_volume_db, 0.01,
+		"the conversation's bed plays at the authored level, not buried under a frozen terminal dip")
+
+	bed.note_menu_music(true)   # a dialogue-hosted shop opens mid-conversation...
+	_land(bed._menu_fade)
+	bed.set_bed_playing(false)  # ...and the conversation ends (the player dies) while it is still up
+	assert_false(bed._menu_ducked, "closing the conversation must settle the terminal latch too")
+	_land(bed._menu_fade)
+	assert_almost_eq(bed._menu_duck_db, 0.0, 0.01,
+		"the dip is released on the way out, so the NEXT conversation does not inherit it")

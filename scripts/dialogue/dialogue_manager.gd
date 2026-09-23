@@ -760,6 +760,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	# bindings (keys 1..9, 0) rather than nine new actions: the Player is PAUSABLE and the tree is paused,
 	# so those actions are otherwise idle for the whole conversation, and a player's hotbar rebinds carry
 	# straight over — the row gutters paint the live binding (get_action_binding), so they always match.
+	# ⭐ui_cancel only reaches this handler because our [autoload] row sits BELOW OptionsMenu's in project.godot:
+	# a later row hears _unhandled_input first, and OptionsMenu marks every Escape handled even when open() refuses
+	# over a conversation. Move this row above it and Escape silently stops saying Goodbye
+	# (tests/test_dialogue_escape_goodbye.gd).
 	if _choices_shown:
 		for i in range(1, 10):
 			if event.is_action_pressed(InputManager.hotbar_actions[i - 1]):

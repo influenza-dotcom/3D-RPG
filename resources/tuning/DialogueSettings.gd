@@ -123,7 +123,7 @@ extends Resource
 @export var choice_button_spacing: int = 3
 ## Max height of the scrollable response rows as a fraction of screen height — a many-option line SCROLLS
 ## past this instead of growing off the top. The pinned exit row sits BELOW the scroll and never scrolls away.
-@export var choices_scroll_max_height_fraction: float = 0.45
+@export var choices_scroll_max_height_fraction: float = 0.6
 ## Width (px) of the left-hand response column. Wide enough that a long reply wraps to two rows, not five;
 ## it stops well short of the speaker, whom the dialogue camera frames right-of-centre
 ## (CameraSettings.dialogue_frame_offset_deg).

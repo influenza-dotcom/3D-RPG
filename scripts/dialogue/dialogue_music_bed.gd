@@ -12,6 +12,9 @@ extends AudioStreamPlayer
 ## dialogue_music_volume_db / dialogue_music_fade_in / dialogue_music_fade_out / dialogue_music_talk_duck_db /
 ## dialogue_music_talk_duck_fade / dialogue_music_bus).
 ## Leave `dialogue_music` EMPTY for the old behaviour: conversations play with no bed at all.
+## The PLAYER can switch the whole layer off in Options > Audio > Dialogue Music (Settings.dialogue_music_enabled),
+## which reaches exactly one place: the start gate in set_bed_playing below. Off is identical to an unauthored
+## track — conversations run dry — and nothing else in the mix moves (the bus duck and a station's shop radio both stay).
 ##
 ## TWO THINGS THIS IS NOT:
 ## • Not the MusicDucker. That fades the whole `music` BUS down so whatever is already playing (a diegetic
@@ -89,6 +92,14 @@ func _looping_copy(authored: AudioStream) -> AudioStream:
 ## authored track. Safe to call repeatedly — a redundant true won't restart the loop mid-conversation.
 func set_bed_playing(play_bed: bool) -> void:
 	if stream == null:
+		return
+	# The player's Options > Audio > Dialogue Music row, read LIVE at the one fire time that matters — a
+	# conversation OPENING (the heartbeat_enabled / screen_flash_enabled "poll it where it fires" shape). Off,
+	# this returns before the latch flips, so the bed never play()s and every downstream pulse is already inert
+	# (note_line_speech bails on _bed_playing): the conversation runs DRY, exactly as an unauthored
+	# dialogue_music does. Deliberately gates only the START — a conversation already under way keeps its bed,
+	# and _finish's set_bed_playing(false) still fades it out normally rather than cutting it dead.
+	if play_bed and not Settings.dialogue_music_enabled:
 		return
 	if play_bed == _bed_playing:
 		return  # already in the requested state; never re-seek a loop that's already under the conversation

@@ -4,8 +4,8 @@ extends Node
 ## Conversation-time camera + weapon handling: swings the camera onto a dialogue target (FNV-style
 ## distance zoom timed to the letterbox bars), holsters the weapon for the duration and restores it
 ## after, and drives the weapon holster/unholster swing (incl. the de-escalation that makes provoked
-## NPCs stand down when you put the gun away). Built in code under the Player and given a host ref
-## right after .new().
+## NPCs stand down when you DELIBERATELY put the gun away — the forced dialogue holster is not that,
+## see on_dialogue_started). Built in code under the Player and given a host ref right after .new().
 ##
 ## The Player keeps the externally-probed focus_camera_on() NAME (talkable.gd / dialogue_npc.gd call
 ## it via player.focus_camera_on) and forwards here; the dialogue + holster signal handlers are
@@ -18,15 +18,22 @@ extends Node
 var host: Player
 
 var _holster_before_dialogue: bool = false  ## weapon holster state before a conversation, restored after
+## Up ONLY for the instant on_dialogue_started forces the holster. set_holstered emits holster_changed
+## synchronously, so on_weapon_holstered reads this to tell "the conversation stowed the gun" from "the
+## player chose to stand down" and skips the pardon for the former.
+var _holstering_for_dialogue: bool = false
 var _zoom_tween: Tween  ## drives the dialogue FOV zoom, timed to the letterbox bars
 
 ## Swing the gun down out of view (holster) or back up into the ready pose (unholster), FNV-style.
 ## Driven by Attack.holster_changed (hold-R toggle / dialogue).
 func on_weapon_holstered(on: bool) -> void:
-	if on and host.should_holster_deescalate():
+	if on and not _holstering_for_dialogue and host.should_holster_deescalate():
 		# FNV-style de-escalation: holstering signals you mean no harm, so any NPC you PROVOKED into
 		# hostility (a neutral/friendly you attacked) forgives you and stands down. Genuinely-hostile
-		# factions (which were never provoked) are unaffected.
+		# factions (which were never provoked) are unaffected. The DIALOGUE holster is excluded (the
+		# latch above): starting a conversation stows the gun for the camera, it isn't you surrendering,
+		# and having every provoked NPC in the level drop aggro the moment you talk to someone read as a
+		# jarring free pardon (and quietly spent their one-shot betrayal latch).
 		for n in get_tree().get_nodes_in_group(Groups.NPC):
 			if n.has_method(&"forgive_provoke"):
 				n.forgive_provoke()
@@ -37,11 +44,17 @@ func on_weapon_holstered(on: bool) -> void:
 	else:
 		host.gun_mesh.unholster()
 
-## Put the weapon away for a conversation, remembering its prior state to restore afterward.
+## Put the weapon away for a conversation, remembering its prior state to restore afterward. This holster is
+## FORCED, so it is fenced out of the de-escalation pardon (see on_weapon_holstered): talking to someone must
+## not make the enemies you provoked forgive you. The fence is a latch around the call rather than a check on
+## "is a dialogue running" because the holster_changed signal fires INSIDE set_holstered, before any
+## dialogue-active state elsewhere could be trusted to be up.
 func on_dialogue_started(_resource: DialogueResource = null) -> void:
 	if host.weapon_system and host.weapon_system.attack:
 		_holster_before_dialogue = host.weapon_system.attack.holstered
+		_holstering_for_dialogue = true
 		host.weapon_system.attack.set_holstered(true)
+		_holstering_for_dialogue = false
 
 func on_dialogue_finished() -> void:
 	if host.weapon_system and host.weapon_system.attack:
