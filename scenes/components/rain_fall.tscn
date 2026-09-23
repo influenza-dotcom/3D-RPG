@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/components/rain_fall.gd" id="1_rain"]
+
+[node name="RainFall" type="GPUParticles3D"]
+script = ExtResource("1_rain")

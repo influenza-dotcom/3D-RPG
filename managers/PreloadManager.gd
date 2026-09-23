@@ -72,6 +72,9 @@ const PARTICLE_WARM_PATHS: Array[String] = [
 	# Root-instance of dust.tscn with the SparkAttack script + an amount override — same pipeline family
 	# as dust today, listed for the same "features could diverge" insurance as the rest of that family.
 	"res://scenes/effects/spark_attack.tscn",
+	# RainFall builds its process material + drop mesh in _ready (the AmbientDust idiom), so the scene is just the
+	# scripted root — levels INSTANCE it rather than carry an inline emitter, which is what keeps it on this list.
+	"res://scenes/components/rain_fall.tscn",
 ]
 
 ## res:// path -> the loaded Resource. Holding the ref is what keeps Godot's cache warm; nothing else
@@ -155,6 +158,9 @@ func _prewarm_gpu_particles() -> void:
 		var inst := ps.instantiate()
 		if inst == null:
 			continue  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
+		# An emitter that owns a sound bed (RainFall) starts it in _ready — a non-positional player the warm-up
+		# viewport cannot contain. Switch it off BEFORE add_child; set() is a no-op on emitters without the field.
+		inst.set(&"use_default_sound", false)
 		vp.add_child(inst)
 		if inst is GPUParticles3D:
 			var p := inst as GPUParticles3D
