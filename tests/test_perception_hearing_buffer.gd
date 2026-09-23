@@ -3,6 +3,11 @@ extends GutTest
 ## The HEARING REACTION BUFFER (GameSettings.npc_ai.hearing_reaction_time / _jitter): a cold enemy that hears
 ## something BANKS the reaction and fires it a beat later, instead of escalating on the frame the sound landed.
 ##
+## ⭐WHAT IS DEFERRED IS THE BODY, NOT THE "!". just_spotted is emitted by the cold ARM (with the sound) and the fire
+## stays silent, so the player is told "he knows" immediately and the beat afterwards reads as the guard coming around
+## rather than as lag. The pair of rules those two halves rest on -- announce ONCE per episode, never on a re-arm --
+## is pinned below alongside the clock's own arm-vs-accumulate split, because the same trap breaks both.
+##
 ## Everything here runs on a bare off-tree Perception. That is possible at all because the front door,
 ## Perception.hear_noise(pos, seed_radius, source), takes a plain Vector3 and never reads a transform -- unlike
 ## can_hear(), which reads global_position and is why the hearing path has never had a unit test before.
@@ -86,7 +91,32 @@ func test_a_real_delay_banks_the_reaction_without_reacting() -> void:
 		assert_eq(p.state, Perception.State.UNAWARE, "the sound landed but the enemy has NOT reacted yet -- that beat is the whole feature")
 		assert_true(p.hearing_pending(), "the reaction is committed to, just not delivered")
 		assert_almost_eq(p.hearing_pending_time(), 0.4, 0.001, "with jitter 0 the countdown starts at exactly hearing_reaction_time")
-		assert_signal_not_emitted(p, "just_spotted", "and NOTHING is telegraphed at the stimulus -- the '!' IS the reaction")
+		assert_signal_emitted(p, "just_spotted", "but the '!' IS telegraphed at the stimulus -- only the BODY waits out the buffer")
+		assert_signal_emit_count(p, "just_spotted", 1, "exactly once, on the cold arm")
+		p.free())
+
+func test_the_announcement_names_the_source_at_arm_time() -> void:
+	# The "!" handler splits a 2D "I heard YOU" sting from a positional "I heard a can rattle" one off `noticed`, so
+	# announcing early is only worth anything if the attribution is published early WITH it.
+	_with_delay(0.4, 0.0, func() -> void:
+		var p := _perc()
+		var who := Node3D.new()
+		p.hear_noise(Vector3(2.0, 0.0, 2.0), 3.0, who)
+		assert_eq(p.noticed, who, "`noticed` is the noise's source from the moment the reaction is committed to")
+		who.free()
+		p.free())
+
+func test_a_re_arm_never_re_announces() -> void:
+	# THE RESTART TRAP'S TWIN. A persisting noise re-arms every think (Path A) or every scan (Path B); if the
+	# announcement rode the refresh instead of the commit, walking past a guard would machine-gun the "!" at 60 Hz.
+	_with_delay(0.5, 0.0, func() -> void:
+		var p := _perc()
+		watch_signals(p)
+		for i in 5:
+			p.hear_noise(Vector3(1.0 + i, 0.0, 0.0), 2.0)  # still sounding, and moving
+		assert_signal_emit_count(p, "just_spotted", 1,
+			"one episode, one '!' -- the announcement belongs to the COMMIT, exactly like the clock")
+		assert_eq(p._hear_point, Vector3(5.0, 0.0, 0.0), "while the snapshot still tracks the freshest spot")
 		p.free())
 
 func test_the_banked_reaction_fires_once_the_buffer_drains() -> void:
@@ -101,8 +131,8 @@ func test_the_banked_reaction_fires_once_the_buffer_drains() -> void:
 		assert_eq(p.state, Perception.State.INVESTIGATING, "the buffer drained -> the enemy reacts")
 		assert_eq(p.last_known_position, spot, "at the spot latched when the noise was HEARD")
 		assert_eq(p._search.seed_radius, 5.0, "and with the search ring sized by how loud it was, not the generic tuning base")
-		assert_signal_emitted(p, "just_spotted", "the '!' sting fires with the reaction")
-		assert_signal_emit_count(p, "just_spotted", 1, "EXACTLY once -- sense()'s own edge block must not double-emit on top of investigate_point's")
+		assert_signal_not_emitted(p, "just_spotted",
+			"and NO second '!' when the body finally turns -- the arm spent it, so one noise stings, pops and barks once")
 		assert_false(p.hearing_pending(), "the latch is spent")
 		p.free())
 
@@ -173,7 +203,9 @@ func test_a_noise_heard_inside_sense_banks_instead_of_escalating() -> void:
 		p.sense(0.1)
 		assert_eq(p.state, Perception.State.UNAWARE, "Path A buffers too: hearing the target no longer escalates on the frame the sound lands")
 		assert_true(p.hearing_pending(), "it banks a reaction instead")
-		assert_signal_not_emitted(p, "just_spotted", "and stays silent until the reaction actually happens"))
+		assert_signal_emitted(p, "just_spotted", "but the '!' still fires on the think the sound landed -- Path A announces at the arm too")
+		assert_eq(p.state, Perception.State.UNAWARE,
+			"and the announcement must NOT escalate as a side effect: only the fire may move the state"))
 
 func test_the_arming_think_does_not_spend_its_own_delta() -> void:
 	# ⭐THE AI-LOD REGRESSION GUARD. Under AiLod a throttled NPC hands sense() the whole banked think interval, and
@@ -197,7 +229,8 @@ func test_path_a_reacts_after_its_buffer() -> void:
 		p.sense(0.05)  # arms
 		p.sense(0.25)  # drains past the delay
 		assert_eq(p.state, Perception.State.INVESTIGATING, "and then it does react")
-		assert_eq(p.noticed, t, "at the target it heard, so the '!' reads as 'I heard YOU'"))
+		assert_eq(p.noticed, t,
+			"with the attribution the arm published still standing after the silent fire (the '!' read as 'I heard YOU')"))
 
 
 # --- pre-emption: a hunch never outranks something better ------------------------------------------------------

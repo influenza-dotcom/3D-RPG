@@ -224,8 +224,11 @@ extends Resource
 @export var hearing_initiates: bool = false
 ## REACTION TIME (seconds): the beat between a noise ARRIVING and the NPC actually turning toward it. A cold
 ## (perception-UNAWARE) enemy that hears something now BANKS the reaction and fires it this many seconds later --
-## the state flip, the head turn, the "!" sting, the GOAP replan and the CAUTION music all move together as one
-## beat, so what the player reads is "he heard that... and now he's turning", not a snap.
+## the state flip, the head turn, the GOAP replan and the CAUTION music all move together as one beat, so what the
+## player reads is "he heard that... and now he's turning", not a snap.
+## ⭐The "!" STING IS NOT ON THAT BEAT. It fires the instant the sound lands (Perception.hear_noise announces on the
+## cold arm), because a delay with no feedback at the front of it reads as the NPC lagging rather than reacting: the
+## cue tells you he KNOWS, and this dial only buys the beat before he comes around.
 ## Why it exists: SIGHT already had latency and hearing had none. A seen target has to fill a whole
 ## Perception.time_to_detect (1.0 s) meter through DETECTING before the enemy locks on, but a heard one escalated
 ## on the very frame the sound landed -- so a guard spun around mid-footstep, and a thrown decoy got a reaction

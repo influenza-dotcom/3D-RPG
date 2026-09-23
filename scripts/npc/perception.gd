@@ -12,7 +12,8 @@ extends Node3D
 ## so the cone points along the enemy's facing automatically. (Hearing is OR-ed into the
 ## perceived test: a heard noise raises INVESTIGATING via can_hear() -- but NOT on the frame it lands. A cold
 ## enemy that hears something BANKS a reaction and turns a beat later; see the hearing reaction buffer below
-## (hear_noise / _tick_hearing, GameSettings.npc_ai.hearing_reaction_time).)
+## (hear_noise / _tick_hearing, GameSettings.npc_ai.hearing_reaction_time). The "!" is NOT held back with it -- it
+## fires the instant the sound lands, so the beat reads as the enemy KNOWING and then coming around.)
 ##
 ## Two target-side stealth modifiers ride on top, both read duck-typed off the target so an NPC target is
 ## unaffected: CROUCHING shrinks the sight RANGE (crouch_sight_mult), and CARRYING A LIT LAMP — the player's
@@ -26,9 +27,10 @@ enum State { UNAWARE, DETECTING, ALERTED, INVESTIGATING }
 enum SuspicionTier { CALM, WARY, SUSPICIOUS, ALERTED }
 
 ## Emitted when the enemy FIRST becomes aware of SOMETHING by ANY sense (sight -> DETECTING, a hit / a caught
-## thief -> ALERTED, a heard noise / scripted point -> INVESTIGATING), before the meter fills. Instant for every
-## sense EXCEPT a cold heard noise, which fires this one hearing_reaction_time later -- the "!" IS the reaction,
-## so nothing at all is emitted at the stimulus (see hear_noise). Drives the MGS "!" alert sting. Carries no args (AiEventLog binds onto it); WHAT was noticed is
+## thief -> ALERTED, a heard noise / scripted point -> INVESTIGATING), before the meter fills. INSTANT FOR EVERY
+## SENSE, a cold heard noise included -- that one arrives while the enemy is still outwardly UNAWARE, because the
+## hearing reaction buffer defers the BODY (the turn, the state flip) and never the feedback. The "!" says "I know
+## you're there"; it is not a caption on the turn (see hear_noise). Drives the MGS "!" alert sting. Carries no args (AiEventLog binds onto it); WHAT was noticed is
 ## published in `noticed` immediately before each emit — read it from the handler.
 signal just_spotted
 ## Emitted when the enemy locks on / becomes ALERTED (about to fire). Drives the sniper charge sfx.
@@ -130,6 +132,10 @@ var _pursuit_grace_t: float = 0.0
 ## hearing escalated on the very frame the sound landed, so a guard snapped around mid-footstep. A heard noise now
 ## ARMS this countdown instead of escalating; _tick_hearing drains it at the bottom of sense() and, on expiry, fires
 ## the reaction through investigate_point().
+## ⭐THE "!" IS NOT PART OF WHAT IS DEFERRED. The ARM emits just_spotted on the spot, so the sting, the head icon and
+## the callout land WITH the sound and the countdown holds back only the body. A silent beat at the front of the
+## reaction read as the guard lagging rather than reacting -- that disorientation is what this split removes -- and
+## the fire then passes alerting=false, so one noise still stings exactly ONCE.
 ## _hear_t is a NEGATIVE-SENTINEL countdown (the NPC._aim_sfx_delay idiom): >= 0.0 = a reaction is committed and
 ## counting down, < 0.0 = nothing pending. Per-life, so forget() (and reset_for_reuse through it) clears all four —
 ## a stale latch on a POOLED body would fire a phantom "!" from a prior life's noise on its first think.
@@ -176,6 +182,11 @@ func sense(delta: float) -> void:
 	# is, and collapse the buffer to a same-frame snap outright whenever the interval reaches the delay.
 	var hear_was_pending := _hear_t >= 0.0
 	if heard and state == State.UNAWARE:
+		# The arm announces the "!" itself (hear_noise) and leaves `state` UNAWARE, so a sighting that lands on this
+		# SAME think still reaches the edge block below and emits its own just_spotted. Deliberate: that second edge
+		# is about a BETTER stimulus (YOU, seen, not a noise) and must keep its 2D "you have been seen" read. It can't
+		# double-blare either — NpcAudioCues' two spot cooldowns are asymmetric, so a positional hunch sting never
+		# stamps the player one, and a repeat of the SAME player sting is swallowed by npc_bark.alert_cooldown_ms.
 		hear_noise(_target_point(), GameSettings.search.seed_radius, target)
 	var prev_state := state
 	match state:
@@ -272,8 +283,8 @@ func sense(delta: float) -> void:
 		if prev_state != State.INVESTIGATING:
 			begin_search(GameSettings.search.seed_radius)  # combat lost-LOS: no noise source, so seed from the tuning base
 	# HEARING REACTION BUFFER — the DRAIN. Dead LAST in sense(), after the "!" edge block AND after the search tail,
-	# so a reaction that fires HERE emits exactly one just_spotted (its own, from investigate_point) and seeds
-	# exactly one search ring (the noise-sized one, never clobbered by the generic begin_search above). `seen` is
+	# so a reaction that fires HERE seeds exactly one search ring (the noise-sized one, never clobbered by the generic
+	# begin_search above) and emits NO just_spotted at all — the arm already spent the "!". `seen` is
 	# handed in so sight can pre-empt a pending hunch on the very tick it lands. No-op when nothing is armed.
 	_tick_hearing(delta, seen, hear_was_pending)
 
@@ -321,6 +332,11 @@ func refresh_investigation() -> void:
 ## which is correct and matches how NpcSenses.loudest_noise re-picks the loudest source each scan: latching the
 ## FIRST point would send a guard to where a rolling can was, not where it is.
 ##
+## ⭐THE COLD ARM ALSO ANNOUNCES. just_spotted -- the "!" sting, the head icon and the detection bark -- fires HERE,
+## with the sound, never with the turn: the delay is on the BODY alone. A re-arm never re-announces, exactly as it
+## never restarts the clock (the announcement belongs to the episode, not to the latest stimulus), and the later fire
+## passes alerting=false, so one noise is announced exactly once however long it keeps sounding.
+##
 ## Pure Vector3/float in, no transform reads -> off-tree unit-testable on a bare Perception (unlike can_hear(),
 ## which reads global_position). `source` = WHO made it (a NoiseSource.emitter, or the target itself); null = the
 ## noise is nobody in particular, so the reaction is aimed at a POINT and the "!" stays positional.
@@ -328,6 +344,7 @@ func hear_noise(pos: Vector3, seed_radius: float = 0.0, source: Node = null) -> 
 	if state != State.UNAWARE:
 		investigate_point(pos, true, seed_radius, NAN, source)  # already reacted: this is TRACKING, not reacting
 		return
+	var armed_now := false
 	if _hear_t < 0.0:  # COLD -> commit to a reaction and start the clock, ONCE
 		var d := reaction_delay(GameSettings.npc_ai.hearing_reaction_time,
 				GameSettings.npc_ai.hearing_reaction_jitter, get_instance_id())
@@ -335,10 +352,19 @@ func hear_noise(pos: Vector3, seed_radius: float = 0.0, source: Node = null) -> 
 			investigate_point(pos, true, seed_radius, NAN, source)  # parity: same frame, same call, exactly as before
 			return
 		_hear_t = d
+		armed_now = true
 	# ARMED -> refresh the SNAPSHOT (never the clock). Latched BY VALUE: see the _hear_point / _hear_seed field docs.
 	_hear_point = pos
 	_hear_seed = seed_radius
 	_hear_source = source
+	# ANNOUNCE — on the cold arm only, and as the LAST statement. The enemy knows NOW; only its body is a beat behind.
+	# ⭐Last on purpose: just_spotted is synchronous and its handler chain reaches NpcVoice.emit (which awaits) and
+	# NpcAudioCues, so a handler must never observe a half-armed buffer — the same reasoning that clears the latch
+	# BEFORE the fire in _tick_hearing. `noticed` is the noise's SOURCE, which is what splits the 2D "I heard YOU"
+	# sting from the positional "I heard a can rattle" one; null = nobody in particular, so the cue stays positional.
+	if armed_now:
+		noticed = source
+		just_spotted.emit()
 
 
 ## This enemy's own reaction time in seconds: the species-wide base plus a STABLE per-NPC offset within +/- `jitter`.
@@ -362,8 +388,9 @@ static func reaction_delay(base: float, jitter: float, instance_id: int) -> floa
 ## Drain the reaction buffer by one think and, on expiry, DO the reaction. Called as the last statement of sense().
 ##
 ## The fire routes through investigate_point() rather than writing `state =` directly, which buys the whole reaction
-## atomically and for free: the UNAWARE -> INVESTIGATING flip, _investigate_t = forget_time, the noise-sized search
-## ring, `noticed`, and the "!" just_spotted edge -- one call, already correct, already tested.
+## atomically and for free: the UNAWARE -> INVESTIGATING flip, _investigate_t = forget_time and the noise-sized search
+## ring -- one call, already correct, already tested. It is the ONE caller that passes alerting=FALSE for this reason:
+## the "!" was spent back on the cold arm, and re-announcing here would sting, pop and bark twice for one noise.
 ## `was_pending` = did this latch already exist when the think began? Only an OLDER latch may be drained by this
 ## think's delta (see the sense() capture site) -- one armed a few lines ago has not aged by a single second yet.
 func _tick_hearing(delta: float, seen: bool, was_pending: bool = true) -> void:
@@ -396,11 +423,16 @@ func _tick_hearing(delta: float, seen: bool, was_pending: bool = true) -> void:
 	# self-frees or an emitter NPC dies, and investigate_point's `source` is a TYPED Node param that rejects a freed
 	# handle. Null simply means "a point, not a person".
 	var who: Node = _hear_source if is_instance_valid(_hear_source) else null
-	# Clear BEFORE the fire, never after: just_spotted is synchronous and its handler chain reaches NpcVoice.emit,
-	# which awaits -- clearing first makes a re-entrant double-fire impossible by construction rather than by
-	# reasoning about the handler chain.
+	# Clear BEFORE the fire, never after. The synchronous just_spotted this once guarded against has moved to the arm,
+	# but the ordering stays: the latch is spent the moment we commit to firing it, so no handler reached from here
+	# (investigate_point -> begin_search, and whatever a future edge adds) can ever observe a live countdown and
+	# re-enter. Cheap, and it keeps the invariant true by construction rather than by reading the handler chain.
 	_clear_hearing()
-	investigate_point(pos, true, seed_radius, NAN, who)
+	# `noticed` is re-published from the FIRE-time sanitize (the arm's handle may have died inside the window), then
+	# alerting=false keeps the reaction silent — see this function's doc. Written HERE rather than passed through
+	# investigate_point because that call only publishes it alongside an emit, which is exactly what we are skipping.
+	noticed = who
+	investigate_point(pos, false, seed_radius, NAN, who)
 
 
 ## Drop any pending reaction. A pending reaction is a HUNCH, so anything that means "we are not acting on a hunch"
