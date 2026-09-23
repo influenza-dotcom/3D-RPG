@@ -430,6 +430,32 @@ jobs:
       - name: Import project (warm the class cache)
         run: godot --headless --import || true
 
+      - name: Stamp the build version
+        # project.godot carries the DEV BASELINE (config/version). This rewrites it, in the runner's checkout
+        # only, to say exactly which build this is — because CrashGuard.environment() puts the string into every
+        # crash report, and an unstamped build reports "unset", which cannot be tied back to a commit when a
+        # tester sends one in. It must run BEFORE the export: the exporter bakes project.godot into the pack as
+        # project.binary, so a stamp applied afterwards would not be in the shipped build.
+        #   tag push  -> the tag with its leading v dropped   (v0.1.0-alpha -> 0.1.0-alpha)
+        #   main push -> <baseline>+<run number>.<short sha>  (0.1.0-alpha+42.cc939c2)
+        # The build metadata after "+" is semver's own escape hatch for exactly this, so a dev build sorts as the
+        # baseline while still naming its commit.
+        run: |
+          set -euo pipefail
+          base="$(sed -n 's/^config\/version="\(.*\)"$/\1/p' project.godot)"
+          if [ -z "$base" ]; then
+            echo "::error::project.godot has no config/version line to stamp — add one to [application]"
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${base}+${GITHUB_RUN_NUMBER}.${GITHUB_SHA::7}"
+          fi
+          sed -i "s|^config/version=\".*\"$|config/version=\"${version}\"|" project.godot
+          grep '^config/version=' project.godot
+          echo "stamped version: ${version}"
+
       - name: Export "Windows Desktop" (release)
         # The preset is TRACKED (export_presets.cfg): the same filters, console wrapper and font-licence include
         # every developer exports with. Headless on purpose — the editor GUI export has crashed mid-pck on this
@@ -483,4 +509,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" "$name.zip" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          # An -alpha / -beta / -rc tag is published as a PRERELEASE, so it does not become the repo's
+          # "Latest release" download and nobody grabs an alpha thinking it is the stable build.
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-alpha*|*-beta*|*-rc*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" "$name.zip" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag $prerelease
