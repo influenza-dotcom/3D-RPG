@@ -76,6 +76,75 @@ func test_marker_round_trips_through_the_config_file() -> void:
 	assert_eq(GUARD.load_marker("user://gut_temp_directory/does_not_exist.cfg"), {}, "a missing file loads as {}")
 
 
+# --- many processes, one user:// folder -----------------------------------------------------------------
+
+func _clear_dir(dir_path: String) -> void:
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return
+	for file_name in dir.get_files():
+		dir.remove(file_name)
+
+
+func test_each_process_owns_its_own_marker_file() -> void:
+	assert_eq(GUARD.marker_path_for(4242), "user://crash_guard/session_4242.cfg", "the marker is named by the pid")
+	assert_ne(GUARD.marker_path_for(1), GUARD.marker_path_for(2), "two live processes never write the same file")
+	assert_true(GUARD.is_marker_file("session_4242.cfg"), "a per-process marker is recognised")
+	assert_false(GUARD.is_marker_file("session.cfg"), "the old single shared marker is not read")
+	assert_false(GUARD.is_marker_file("session_4242.cfg.tmp"), "a stray non-.cfg file is not a marker")
+
+
+func test_finished_runs_leave_a_live_instance_and_this_runs_marker_alone() -> void:
+	var dir := "user://gut_temp_directory/crash_guard_runs"
+	_clear_dir(dir)
+	var live := _fake_marker()
+	live["pid"] = 101
+	var dead := _fake_marker()
+	dead["pid"] = 102
+	var clean := _fake_marker()
+	clean["pid"] = 103
+	clean["clean_exit"] = true
+	var own := _fake_marker()
+	own["pid"] = 104
+	for m in [live, dead, clean, own]:
+		GUARD.save_marker(dir.path_join("session_%d.cfg" % m["pid"]), m)
+	# 101 and 103 "still run": only the not-clean one is protected by that; a clean marker is over regardless.
+	var alive := func(marker: Dictionary) -> bool: return int(marker.get("pid", 0)) in [101, 103]
+	var names: Array = []
+	for run in GUARD.finished_runs(dir, dir.path_join("session_104.cfg"), alive):
+		names.append(str(run["path"]).get_file())
+	names.sort()
+	assert_eq(names, ["session_102.cfg", "session_103.cfg"],
+			"a dead not-clean run and a clean run are over; a live not-clean run and this run's own marker are not")
+	assert_eq(GUARD.finished_runs("user://gut_temp_directory/no_such_dir", "", alive), [], "a missing folder -> nothing")
+	_clear_dir(dir)
+
+
+func test_run_liveness_never_protects_a_marker_without_a_pid_or_with_this_pid() -> void:
+	assert_false(GUARD.run_is_alive({"clean_exit": false}), "no pid (an old marker) -> treated as dead, so it is reported")
+	assert_false(GUARD.run_is_alive({"pid": OS.get_process_id()}), "this very pid on a marker = a dead run whose pid was reused")
+
+
+func test_tasklist_rows_match_the_pid_and_the_image() -> void:
+	var row := "\"CYBERSUNDAY.exe\",\"34716\",\"Console\",\"1\",\"838,560 K\"\r\n"
+	assert_true(GUARD.tasklist_lists_run(row, 34716, "CYBERSUNDAY.exe"), "a row with the pid and the image -> running")
+	assert_true(GUARD.tasklist_lists_run(row, 34716, "cybersunday.EXE"), "the image name compares without case")
+	assert_true(GUARD.tasklist_lists_run(row, 34716, ""), "no recorded image -> the pid alone decides")
+	assert_false(GUARD.tasklist_lists_run(row, 34716, "godot.windows.opt.tools.64.exe"),
+			"the pid now belongs to another program -> the marker's run is gone")
+	assert_false(GUARD.tasklist_lists_run(row, 347, "CYBERSUNDAY.exe"), "a pid that is only a prefix of the row's does not match")
+	assert_false(GUARD.tasklist_lists_run("INFO: No tasks are running which match the specified criteria.\r\n", 34716, ""),
+			"tasklist's no-match sentence is not a row")
+
+
+func test_an_exported_run_never_shows_an_editor_runs_death() -> void:
+	assert_false(GUARD.surfaces_in_this_run({"editor_run": true}, false),
+			"an export does not open the card for a Stop press or a killed test run from the tools executable")
+	assert_true(GUARD.surfaces_in_this_run({"editor_run": false}, false), "an export shows an exported run's death")
+	assert_true(GUARD.surfaces_in_this_run({}, false), "a marker that does not say (older build) is shown, the safe side")
+	assert_true(GUARD.surfaces_in_this_run({"editor_run": true}, true), "under the editor previous_crash() still answers")
+
+
 # --- Windows' own record of the crash -------------------------------------------------------------------
 
 func test_windows_events_pick_the_newest_record_for_this_executable() -> void:
@@ -144,9 +213,11 @@ func test_log_tail_reads_only_the_end_of_a_big_file() -> void:
 # --- the live contract --------------------------------------------------------------------------------------
 
 func test_the_live_autoload_wrote_its_marker_at_boot_and_it_is_not_clean_yet() -> void:
-	assert_true(FileAccess.file_exists(GUARD.MARKER_PATH), "CrashGuard._init wrote the session marker before the suite loaded")
-	var m: Dictionary = GUARD.load_marker(GUARD.MARKER_PATH)
+	var own: String = GUARD.marker_path_for(OS.get_process_id())
+	assert_true(FileAccess.file_exists(own), "CrashGuard._init wrote THIS process's marker before the suite loaded")
+	var m: Dictionary = GUARD.load_marker(own)
 	assert_eq(m.get("clean_exit"), false, "the marker is NOT clean while the process lives — only _exit_tree flips it")
+	assert_eq(m.get("pid"), OS.get_process_id(), "the marker names this process's pid (what a later boot asks the OS about)")
 	assert_false(str(m.get("started", "")).is_empty(), "the marker names when this run began")
 	assert_eq(m.get("executable"), OS.get_executable_path().get_file(), "the marker names THIS executable (what the Windows event lookup matches on)")
 	assert_true(CrashGuard.previous_crash() is Dictionary, "previous_crash() answers a Dictionary ({} when the last run quit cleanly)")

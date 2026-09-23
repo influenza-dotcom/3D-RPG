@@ -81,6 +81,27 @@ func test_open_fills_the_box_and_close_clears_the_modal() -> void:
 	assert_signal_emitted(inst, "closed", "closed fires")
 
 
+## A crash found at boot is HELD, not opened: show_pending_report() (StartMenu's reveal) opens it one frame later, once,
+## with the report in the box. Opening straight from _ready put the card over the warning cards, whose skip ate its
+## clicks and whose HIDDEN cursor it restored on close — no cursor on the main menu (2026-09-16, an export).
+func test_a_boot_crash_is_held_until_the_menu_asks_and_opens_once() -> void:
+	var inst := (load(SCENE) as PackedScene).instantiate()
+	inst.auto_open = false
+	add_child_autofree(inst)
+	inst.set(&"_pending", {"report": "HELD REPORT", "path": "user://crash_reports/held.txt"})
+	await wait_process_frames(1)
+	assert_false(inst.is_open(), "a held crash never opens on its own")
+	inst.show_pending_report()
+	assert_false(inst.is_open(), "deferred: the host's reveal finishes its own cursor writes before the card stashes the mode")
+	await wait_process_frames(1)
+	assert_true(inst.is_open(), "the menu's reveal opens the held card")
+	assert_eq((inst.get_node("%Report") as TextEdit).text, "HELD REPORT", "the held report lands in the box")
+	inst.close()
+	inst.show_pending_report()
+	await wait_process_frames(1)
+	assert_false(inst.is_open(), "one-shot: a later reveal (a warm return from in-game) never re-opens it")
+
+
 func test_never_auto_opens_under_the_editor() -> void:
 	# The Stop button kills the game process, which the marker cannot tell from a crash — so under the editor
 	# feature the card stays closed and the dev gets the Output line + file instead. GUT runs in the editor binary.

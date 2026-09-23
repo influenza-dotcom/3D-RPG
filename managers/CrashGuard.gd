@@ -1,8 +1,8 @@
 extends Node
 
 ## @system Crash Guard
-## @seam The FIRST [autoload] row in project.godot: _init writes user://crash_guard/session.cfg before any other autoload's _init runs, and ONLY a clean quit (_exit_tree) rewrites it as clean — a marker found not-clean at the next boot means the previous run died (a crash, a hang killed from Task Manager, or the editor's Stop button).
-## @seam CrashReportScreen (the LAST [autoload] row) calls previous_crash() once in its _ready and shows the player the report; nothing else reads the marker, and any script may drop a breadcrumb(text) so a report says what the game was doing.
+## @seam The FIRST [autoload] row in project.godot: _init writes THIS process's marker, user://crash_guard/session_<pid>.cfg, before any other autoload's _init runs, and ONLY a clean quit (_exit_tree) rewrites it as clean — a not-clean marker found at a later boot whose process is gone means that run died (a crash, a hang killed from Task Manager, or the editor's Stop button); one whose process still runs is another live instance sharing user://, never a crash.
+## @seam CrashReportScreen (the LAST [autoload] row) calls previous_crash() once in its _ready and shows the player the report (an exported run is never handed an EDITOR run's death); nothing else reads the markers, and any script may drop a breadcrumb(text) so a report says what the game was doing.
 ## @seam Installs an ErrorSink (scripts/components/error_sink.gd) in EVERY build, so the marker carries the last errors even in a release export; the DebugOverlay's sink is a second, debug-only listener on the same OS.add_logger seam.
 ## @risk A crash BEFORE this _init (a GDExtension that fails to load, a hollow .pck) leaves no marker and is invisible here — the console wrapper (CYBERSUNDAY.console.exe) and user://logs/godot.log are the only trail, and README says so.
 ## @risk A heap-corruption fail-fast never delivers NOTIFICATION_CRASH, so the last heartbeat (HEARTBEAT_SECONDS) BOUNDS the moment of death; it does not pin it.
@@ -20,12 +20,20 @@ extends Node
 ## process, so the next run reads it as an abnormal end. The report is still written and one Output line
 ## names it — deliberately, it is exactly the trail a dev wants — but CrashReportScreen only auto-opens
 ## OUTSIDE the editor, so the card never nags a developer who just pressed Stop.
+##
+## ONE user:// FOLDER, MANY PROCESSES: every copy of the game on this machine writes to the same
+## user://crash_guard/ — a second instance on a player's box, and on a dev box the editor's runs, headless test
+## runs and an exported build all at once. A single shared marker made each live process read the others'
+## not-yet-clean marker as a crash (2026-09-16: an export's card showed a GUT run that was still running). So each
+## process owns its own marker, a not-clean marker is only a death once the OS says its pid is gone
+## (run_is_alive), and an exported run never shows the card for an editor run (surfaces_in_this_run) — a player
+## never produces one; on a dev box it is a Stop press or a killed probe.
 
 ## Preloaded BY PATH (not the global class_name) so a not-yet-rescanned editor cache cannot cascade — the
 ## DebugOverlay precedent. See [[new-classname-not-registered-cascade]].
 const ErrorSinkScript := preload("res://scripts/components/error_sink.gd")
 
-const MARKER_PATH := "user://crash_guard/session.cfg"
+const MARKER_DIR := "user://crash_guard"   ## one marker per process: session_<pid>.cfg (marker_path_for)
 const REPORT_DIR := "user://crash_reports"
 const LOG_DIR := "user://logs"          ## where the engine's own file logger rotates (debug/file_logging, on by default on PC)
 const KEEP_REPORTS := 10                ## oldest report files are pruned past this many
@@ -38,7 +46,8 @@ const WINDOWS_EVENT_COUNT := 8          ## how many recent Application-Error eve
 const REPORT_SINCE_SLACK := 60          ## seconds before the crashed run's start that a Windows event may still count
 
 var _session: Dictionary = {}
-var _previous: Dictionary = {}
+var _marker_path := ""                  ## this process's own marker file
+var _reused_marker: Dictionary = {}     ## a dead run's marker that sat at THIS pid's path (the OS reused its pid)
 var _previous_crash: Dictionary = {}    ## { "report": String, "path": String } once a bad marker became a report
 var _sink = null                        ## an ErrorSink (untyped: the DebugOverlay precedent for the new global class_name)
 var _accum := 0.0
@@ -48,19 +57,37 @@ var _last_error_total := 0
 func _init() -> void:
 	# _init, not _ready: this is the first autoload, so nothing else has run yet — the marker is on disk before
 	# any other autoload's _init can crash the game. (An autoload _init may not touch the tree; nothing here does.)
-	_previous = load_marker(MARKER_PATH)
+	_marker_path = marker_path_for(OS.get_process_id())
+	# A marker already at this path is a dead run whose pid the OS handed to this process: keep it for _ready's
+	# post-mortem before this run's marker replaces it.
+	_reused_marker = load_marker(_marker_path)
 	_session = new_session()
-	save_marker(MARKER_PATH, _session)
+	save_marker(_marker_path, _session)
 	_sink = ErrorSinkScript.new(MAX_ERRORS)
 	_sink.install()
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS   # the heartbeat keeps running through a paused menu
-	if previous_ended_abnormally(_previous):
-		_previous_crash = _write_previous_report()
-		if not _previous_crash.is_empty():
-			print("CrashGuard: the previous run did not exit cleanly — report written to ", _previous_crash.get("path", ""))
+	# The post-mortem runs here, not in _init: asking the OS whether a pid lives spawns a process (~170 ms on
+	# Windows), and only a not-clean marker pays it — a player's box after a clean quit never does.
+	var runs := finished_runs(MARKER_DIR, _marker_path, func(m: Dictionary) -> bool: return run_is_alive(m))
+	if not _reused_marker.is_empty():
+		runs.append({"path": "", "marker": _reused_marker})   # its file is already this run's own marker
+	_reused_marker = {}
+	var newest_shown := ""
+	for run in runs:
+		var marker: Dictionary = run["marker"]
+		if previous_ended_abnormally(marker):
+			var written := _write_report(marker)
+			print("CrashGuard: the previous run did not exit cleanly — report written to ", written.get("path", ""))
+			# Several dead runs (a dev box's killed test runs) each get a file; the card shows the newest it may.
+			var started := str(marker.get("started", ""))
+			if surfaces_in_this_run(marker, OS.has_feature("editor")) and started >= newest_shown:
+				newest_shown = started
+				_previous_crash = written
+		if not str(run["path"]).is_empty():
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(str(run["path"])))
 	breadcrumb("boot")
 
 
@@ -72,7 +99,7 @@ func _process(delta: float) -> void:
 	_accum = 0.0
 	_last_error_total = errors_now
 	_refresh_live_fields()
-	save_marker(MARKER_PATH, _session)
+	save_marker(_marker_path, _session)
 
 
 func _notification(what: int) -> void:
@@ -81,7 +108,7 @@ func _notification(what: int) -> void:
 		# say so. A heap fail-fast never gets here (see the @risk above).
 		_session["crash_signal"] = true
 		_refresh_live_fields()
-		save_marker(MARKER_PATH, _session)
+		save_marker(_marker_path, _session)
 
 
 func _exit_tree() -> void:
@@ -89,7 +116,7 @@ func _exit_tree() -> void:
 	# anything that skips this (a crash, a kill) leaves the not-clean marker for the next boot to find.
 	_refresh_live_fields()
 	_session["clean_exit"] = true
-	save_marker(MARKER_PATH, _session)
+	save_marker(_marker_path, _session)
 	if _sink != null:
 		_sink.uninstall()
 		_sink = null
@@ -104,7 +131,7 @@ func breadcrumb(text: String) -> void:
 	crumbs.append("%s  %s" % [_uptime_stamp(), text])
 	_session["breadcrumbs"] = trim_to(crumbs, MAX_BREADCRUMBS)
 	_refresh_live_fields()
-	save_marker(MARKER_PATH, _session)
+	save_marker(_marker_path, _session)
 
 
 ## The previous run's crash, if there was one: { "report": <the whole text>, "path": <user:// file> }; {} otherwise.
@@ -141,15 +168,15 @@ func _uptime_stamp() -> String:
 	return "%7.1fs" % _uptime()
 
 
-## Compose + write the report for a bad marker. Returns { report, path } (path "" if the write failed).
-func _write_previous_report() -> Dictionary:
+## Compose + write the report for a dead run's marker. Returns { report, path } (path "" if the write failed).
+func _write_report(prev: Dictionary) -> Dictionary:
 	var detected := Time.get_datetime_string_from_system(false)
-	var started := str(_previous.get("started", detected))
+	var started := str(prev.get("started", detected))
 	var since := int(Time.get_unix_time_from_datetime_string(started)) - REPORT_SINCE_SLACK
-	var win := windows_crash_record(str(_previous.get("executable", "")), since)
+	var win := windows_crash_record(str(prev.get("executable", "")), since)
 	var log_path := previous_log_path()
 	var tail := log_tail(log_path) if not log_path.is_empty() else PackedStringArray()
-	var text := compose_report(_previous, detected, win, log_path, tail)
+	var text := compose_report(prev, detected, win, log_path, tail)
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(REPORT_DIR))
 	var path := REPORT_DIR.path_join("crash_%s.txt" % started.replace(":", "-"))
 	var f := FileAccess.open(path, FileAccess.WRITE)
@@ -185,6 +212,7 @@ static func environment() -> Dictionary:
 static func new_session() -> Dictionary:
 	var s := environment()
 	s["started"] = Time.get_datetime_string_from_system(false)   # local, ISO "YYYY-MM-DDTHH:MM:SS"
+	s["pid"] = OS.get_process_id()   # names the marker file, and lets a later boot ask the OS whether this run lives
 	s["clean_exit"] = false
 	s["crash_signal"] = false
 	s["uptime"] = 0.0
@@ -216,9 +244,78 @@ static func load_marker(path: String) -> Dictionary:
 	return out
 
 
-## A marker that exists and was never marked clean = the run it describes died.
+## A marker that exists and was never marked clean = the run it describes died (once finished_runs has ruled out
+## that it is still running).
 static func previous_ended_abnormally(marker: Dictionary) -> bool:
 	return not marker.is_empty() and marker.get("clean_exit", false) != true
+
+
+## The marker file a process with this pid owns.
+static func marker_path_for(pid: int) -> String:
+	return MARKER_DIR.path_join("session_%d.cfg" % pid)
+
+
+static func is_marker_file(file_name: String) -> bool:
+	return file_name.begins_with("session_") and file_name.ends_with(".cfg")
+
+
+## Every marker in `dir_path` whose run is OVER, as { "path", "marker" }, in no particular order. A clean marker
+## is over by definition; a not-clean one is over only when `alive.call(marker)` says its process is gone —
+## otherwise it is another live instance mid-run, left alone. `own_path` (this run's marker) is skipped, and so
+## is a file that does not parse (a live writer caught mid-save).
+static func finished_runs(dir_path: String, own_path: String, alive: Callable) -> Array:
+	var out: Array = []
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return out
+	for file_name in dir.get_files():
+		if not is_marker_file(file_name):
+			continue
+		var path := dir_path.path_join(file_name)
+		if path == own_path:
+			continue
+		var marker := load_marker(path)
+		if marker.is_empty():
+			continue
+		if previous_ended_abnormally(marker) and alive.call(marker) == true:
+			continue
+		out.append({"path": path, "marker": marker})
+	return out
+
+
+## Is the run a marker describes still going? Asks the OS about its pid — `tasklist` on Windows (which also names
+## the image, so a pid the OS has since handed to another program does not count), `ps` elsewhere. Godot's own
+## OS.is_process_running only knows processes THIS engine spawned (probed on 4.7.2 Windows: false for a live
+## editor). No pid (a pre-2026-09-16 marker), this very pid, or a failure to ask all answer false: the run is
+## reported, which is the safe side.
+static func run_is_alive(marker: Dictionary) -> bool:
+	var pid := int(marker.get("pid", 0))
+	if pid <= 0 or pid == OS.get_process_id():
+		return false
+	var out: Array = []
+	if OS.get_name() == "Windows":
+		if OS.execute("tasklist", ["/FI", "PID eq %d" % pid, "/NH", "/FO", "CSV"], out, true) != 0 or out.is_empty():
+			return false
+		return tasklist_lists_run(str(out[0]), pid, str(marker.get("executable", "")))
+	return OS.execute("ps", ["-p", str(pid)], out, true) == 0
+
+
+## Read `tasklist /FI "PID eq <pid>" /NH /FO CSV` output: true when a row carries `pid` and, when `exe_name` is
+## given, that image name. With no match tasklist prints an INFO sentence (localized) rather than a row.
+static func tasklist_lists_run(text: String, pid: int, exe_name: String) -> bool:
+	for line in text.split("\n", false):
+		var cols: PackedStringArray = str(line).strip_edges().split("\",\"")
+		if cols.size() < 2 or cols[1] != str(pid):
+			continue
+		return exe_name.is_empty() or cols[0].trim_prefix("\"").to_lower() == exe_name.to_lower()
+	return false
+
+
+## Whether a dead run's report is handed to CrashReportScreen. An exported run never shows the death of an EDITOR
+## run (the tools executable: a Stop press, a killed test or probe on a dev box sharing this user:// folder) — a
+## player never produces one. Its report file and Output line still land either way.
+static func surfaces_in_this_run(marker: Dictionary, this_run_is_editor: bool) -> bool:
+	return this_run_is_editor or marker.get("editor_run", false) != true
 
 
 static func trim_to(list: Array, cap: int) -> Array:

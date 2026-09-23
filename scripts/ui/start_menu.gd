@@ -343,7 +343,7 @@ func _maybe_start_internet_warning() -> void:
 
 func _play_internet_warning() -> void:
 	_internet_warning_pending = false
-	_internet_warning_skippable = Settings.tos_accepted
+	_internet_warning_skippable = true  # any press cuts the cards, first launch included — a splash nobody can skip reads as a hang
 	if warm_return or INTERNET_WARNING_CARDS.is_empty():
 		_reveal_menu_after_internet_warning()  # a return from in-game (or nothing authored): no cards, straight on
 		return
@@ -421,6 +421,10 @@ func reveal_hosted_menu() -> void:
 	_set_menu_buttons_disabled(false)
 	_buttons.visible = true
 	_arm_menu_input_shield()
+	# Last run crashed? Its report card opens NOW, over a menu that can take it — not over the warning cards /
+	# turn-on, whose skips ate its clicks and whose HIDDEN cursor it handed back on close (crash_report_screen.gd,
+	# "WHY IT WAITS FOR THE MENU"). One-shot inside the card, so a warm return reaching here again is a no-op.
+	CrashReportScreen.show_pending_report()
 
 func _arm_menu_input_shield() -> void:
 	_menu_input_locked = true

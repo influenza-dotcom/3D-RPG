@@ -2,7 +2,7 @@ extends CanvasLayer
 
 ## @system Crash Report Screen
 ## @seam Autoload modal and the LAST [autoload] row on purpose: unhandled input walks the tree from the last child back, so its ui_cancel wins over every other screen; registered in InputManager's modal registry as blocks_tabs so gameplay stays suppressed while it is up.
-## @seam Reads CrashGuard.previous_crash() ONCE in _ready and opens itself over the boot scene when the marker says the last run died — nothing else opens it, and it never auto-opens inside the editor (OS.has_feature("editor")), so the Stop button cannot nag a developer; the file and the Output line still land.
+## @seam Reads CrashGuard.previous_crash() ONCE in _ready and HOLDS it until StartMenu.reveal_hosted_menu calls show_pending_report() — the moment the main menu first becomes clickable, never over the boot flow (whose press-anything skips ate the card's clicks and whose HIDDEN cursor the card stashed and handed back on close: no cursor on the main menu); it never auto-opens inside the editor (OS.has_feature("editor")), so the Stop button cannot nag a developer; the file and the Output line still land.
 ## @seam Copy = DisplayServer.clipboard_set of the whole report; Open folder = OS.shell_open of CrashGuard.report_dir_global(); Report online = OS.shell_open(report_url), an @export a designer points at the tracker (empty = no button).
 ## @risk The card is a FIXED frame: the report scrolls inside a reserved TextEdit and the status line hides by ALPHA, so copying can never resize or re-centre the card under the cursor (the house rule, tests/test_menu_layout_stability.gd).
 ## @test res://tests/test_crash_report_screen_scene.gd
@@ -17,7 +17,16 @@ extends CanvasLayer
 ## skin-driven look (MenuStyle adopters) on top. NO text is authored in the scene — every string is set here
 ## from PlayerText.
 ##
-## REAL-TIME like the other standalone modals: it opens over the BOOT scene, where there is no world to pause.
+## REAL-TIME like the other standalone modals: it opens over the MAIN MENU, where there is no world to pause.
+##
+## ⭐WHY IT WAITS FOR THE MENU (2026-09-16, "no cursor on the main menu" in an export). It used to open deferred from
+## _ready, i.e. over the internet-warning cards. Three things then went wrong at once: (1) StartMenu's and
+## ComputerRoom's press-anything skips run in _input, BEFORE the GUI, so the player's click on Copy/Close skipped a
+## card or the CRT turn-on instead and was swallowed; (2) the boot flow hid the cursor for the turn-on while the card
+## was still up; (3) open() stashed the cards' HIDDEN mode, so a close AFTER the menu revealed restored HIDDEN over a
+## clickable menu. Opening at the reveal fixes all three: nothing below is skipping any more and the stashed mode is
+## the menu's VISIBLE. The cost: a crash that repeats BEFORE the menu reveals (inside the computer room) never shows
+## the card — the report file and the Output line still land.
 
 signal opened
 signal closed
@@ -40,34 +49,47 @@ var _is_open := false
 var _report := ""
 var _report_path := ""
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_VISIBLE
+## The crash _ready found, { report, path }, waiting for show_pending_report(); {} once shown or when there is none.
+var _pending: Dictionary = {}
 
 
 func _ready() -> void:
-	layer = 122                                  # above every gameplay modal (121): it opens over the boot scene
+	layer = 122                                  # above every gameplay modal (121): it opens over the main menu
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_bind_ui()
 	_root.visible = false
 	if auto_open and not OS.has_feature("editor"):
-		var prev: Dictionary = CrashGuard.previous_crash()
-		if not prev.is_empty():
-			# Deferred: open() grabs the mouse and seeds focus, which wants the boot scene already in the tree.
-			open.call_deferred(str(prev.get("report", "")), str(prev.get("path", "")))
+		_pending = CrashGuard.previous_crash()   # held, not opened: see "WHY IT WAITS FOR THE MENU" above
 
 
 func is_open() -> bool:
 	return _is_open
 
 
-## Show the card with `report` in the box. No modal gate: it opens at boot before any other screen exists, and
-## a later caller (a menu button) is showing the player something they asked for.
-func open(report: String, path: String = "") -> void:
+## Open the card for the crash _ready found, ONCE. StartMenu.reveal_hosted_menu calls it every time the menu is
+## revealed; only the first call on a boot after a crash opens anything (a clean boot, the editor, and every warm
+## return from in-game are no-ops). Deferred so the host finishes its own cursor writes for that reveal (ComputerRoom
+## sets VISIBLE right AFTER calling reveal_hosted_menu) before open() stashes the mode that close() restores.
+func show_pending_report() -> void:
+	if _pending.is_empty():
+		return
+	var crash := _pending
+	_pending = {}
+	# Cue OFF: the menu's own arrival sting plays on this very reveal.
+	open.call_deferred(str(crash.get("report", "")), str(crash.get("path", "")), false)
+
+
+## Show the card with `report` in the box. No modal gate: it opens over the freshly revealed main menu before any
+## other screen can be up, and a later caller (a menu button) is showing the player something they asked for.
+## `play_cue` false skips the open sting for a caller whose own sound already covers the moment.
+func open(report: String, path: String = "", play_cue: bool = true) -> void:
 	if _is_open:
 		return
 	_report = report
 	_report_path = path
 	_report_box.text = report
 	_show_status("", MenuStyle.text_color())
-	_prev_mouse_mode = ModalMenu.grab_mouse()
+	_prev_mouse_mode = ModalMenu.grab_mouse(play_cue)
 	_is_open = true
 	_root.visible = true
 	# Seed pad/keyboard focus once the card is VISIBLE (grab_focus on a hidden Control does nothing).
@@ -144,6 +166,7 @@ func _bind_ui() -> void:
 
 	_body = %Body
 	_body.text = PlayerText.CRASH_BODY
+	_body.visible = false  # the title and the Copy button say it; the "paste it into a bug report so it can be fixed" paragraph is gone
 	_body.add_theme_color_override(&"font_color", MenuStyle.dim_color())
 
 	_report_box = %Report
