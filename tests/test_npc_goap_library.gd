@@ -39,21 +39,30 @@ func test_build_goap_goals_is_the_full_combat_set() -> void:
 	assert_has(names, &"Idle", "the always-feasible floor")
 	npc.free()
 
-func test_build_goap_goals_priorities_are_pinned() -> void:
-	# The SOURCE-OF-TRUTH authored priorities (the matrix/brain tests use local copies that could drift from
-	# this). A reorder here flips real combat behavior: Survive must top the order so a fleer runs, and Engage
-	# must outrank Investigate/Detect so a fighter fights.
-	var npc = load(NPC_SCRIPT).new()
+## goal name -> priority(ws) at full health, for a built goal list.
+func _priorities(goals: Array) -> Dictionary:
 	var ws := GoapWorldState.new({&"hp_frac": 1.0})
-	var by_name := {}
-	for g in npc._build_goap_goals():
-		by_name[g.name] = g.priority(ws)
-	assert_almost_eq(float(by_name[&"Survive"]), 3.0, 0.001, "Survive 3.0 (highest)")
-	assert_almost_eq(float(by_name[&"Engage"]), 2.0, 0.001, "Engage 2.0")
-	assert_almost_eq(float(by_name[&"Investigate"]), 0.4, 0.001, "Investigate 0.4")
-	assert_almost_eq(float(by_name[&"Detect"]), 0.3, 0.001, "Detect 0.3")
-	assert_almost_eq(float(by_name[&"Idle"]), 0.1, 0.001, "Idle 0.1")
+	var out := {}
+	for g in goals:
+		out[g.name] = float(g.priority(ws))
+	return out
+
+func test_build_goap_goals_priority_order_lets_a_fleer_run_and_a_fighter_fight() -> void:
+	# The SOURCE-OF-TRUTH priority ORDER GoapPlanner.select_goal ranks feasible goals by. Pinned as the relations
+	# combat needs, not the authored numbers, so a retune that keeps the order stays green while a reorder fails:
+	# Survive must top the order so a fleer runs, Engage must outrank Investigate/Detect so a fighter fights, and
+	# the Idle floor must sit under every combat goal or a noticed threat loses to scavenging.
+	var npc = load(NPC_SCRIPT).new()
+	var pri := _priorities(npc._build_goap_goals())
 	npc.free()
+	assert_gt(pri[&"Survive"], pri[&"Engage"],
+		"Survive must outrank Engage -- otherwise a fleeing civilian with a gun turns and fights instead of running")
+	for lesser in [&"Investigate", &"Detect", &"Idle"]:
+		assert_gt(pri[&"Engage"], pri[lesser],
+			"Engage must outrank %s -- otherwise an ALERTED fighter searches/idles instead of shooting back" % lesser)
+	for combat in [&"Investigate", &"Detect"]:
+		assert_gt(pri[combat], pri[&"Idle"],
+			"%s must outrank the Idle floor -- otherwise a suspicious NPC ignores the noise and keeps scavenging" % combat)
 
 ## Build a GoapGoalPriority / GoapActionCost dropdown row (the override shape that replaced the free-text dicts).
 func _gpri(g: String, p: float) -> GoapGoalPriority:
@@ -76,13 +85,13 @@ func test_goap_profile_overrides_goal_priority_and_action_cost() -> void:
 	var prof := GoapProfile.new()
 	prof.goal_priorities.assign([_gpri("Survive", 5.0)])        # a coward
 	prof.action_cost_overrides.assign([_acost("Flee", 0.05)])   # cheaper flee
+	var defaults := _priorities(npc._build_goap_goals())  # no profile yet -> the library's authored priorities
 	npc.goap_profile = prof
-	var ws := GoapWorldState.new({&"hp_frac": 1.0})
-	var goal_pri := {}
-	for g in npc._build_goap_goals():
-		goal_pri[g.name] = g.priority(ws)
+	var goal_pri := _priorities(npc._build_goap_goals())
 	assert_almost_eq(float(goal_pri[&"Survive"]), 5.0, 0.001, "Survive priority overridden via a String key")
-	assert_almost_eq(float(goal_pri[&"Engage"]), 2.0, 0.001, "an un-overridden goal keeps its default")
+	for g in [&"Engage", &"Investigate", &"Detect", &"Idle"]:
+		assert_almost_eq(float(goal_pri[g]), float(defaults[g]), 0.001,
+			"an un-overridden goal (%s) keeps the library's authored priority -- one override must not retune the rest" % g)
 	var flee_cost := -1.0
 	for a in npc._build_goap_actions():
 		if a.name == &"Flee":
@@ -95,13 +104,15 @@ func test_goap_profile_unknown_override_key_is_ignored() -> void:
 	# A typo'd key matches no goal -> the override silently no-ops (validate() surfaces it separately); the
 	# defaults must stand, not crash or mis-apply.
 	var npc = load(NPC_SCRIPT).new()
+	var defaults := _priorities(npc._build_goap_goals())  # no profile -> the library's authored priorities
 	var prof := GoapProfile.new()
 	prof.goal_priorities.assign([_gpri("Typoed", 9.0)])
 	npc.goap_profile = prof
-	var ws := GoapWorldState.new({&"hp_frac": 1.0})
-	for g in npc._build_goap_goals():
-		if g.name == &"Survive":
-			assert_almost_eq(g.priority(ws), 3.0, 0.001, "unknown key ignored -> Survive keeps its default 3.0")
+	var built := _priorities(npc._build_goap_goals())
+	assert_eq(built.size(), defaults.size(), "a typo'd override row neither adds nor drops a goal")
+	for g in defaults:
+		assert_almost_eq(float(built[g]), float(defaults[g]), 0.001,
+			"unknown key ignored -> %s keeps its authored priority (a typo must never mis-apply 9.0 to a real goal)" % g)
 	prof = null
 	npc.free()
 

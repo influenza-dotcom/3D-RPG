@@ -6,9 +6,10 @@ extends GutTest
 ##
 ## SCOPE — this file deliberately covers only the angles NOT already asserted elsewhere:
 ##   * AudioManager: the pure DEFAULT_3D_MAX_DISTANCE constant, the two null-guard
-##     no-op paths, and the public method surface (has_method). The non-null spawn
-##     path is intentionally SKIPPED — it needs a SceneTree (get_tree()) and starts
-##     real audio playback; test_audio_manager_spawn.gd already covers it in-tree.
+##     no-op paths, and the public method surface (has_method). The null-guard tests
+##     drive the REAL autoload and watch the tree root (where one-shots are parented),
+##     each with a silent real-stream control proving the count can see a spawn; the
+##     spawn path's own properties are test_audio_manager_spawn.gd's.
 ##   * EffectFactory: the seven PackedScene @export slots not covered by
 ##     test_autoload_order.gd (which only checks blood_decal/explosion_area non-null),
 ##     the spawn_at(null) graceful-degradation guard, and the by-name wrapper surface.
@@ -29,9 +30,10 @@ extends GutTest
 ##     fields, and test_smoke.gd asserts typeof on yet another subset — the .new()
 ##     defaults + ordering invariants here do not overlap with either. The groups added /
 ##     extended by the designer-first refactor follow the same rule with two extra
-##     exclusions: EXACT-value pins for player_feedback live in test_player_core.gd and
-##     for effects.blood_drop_* in test_effects.gd, so this file adds only the
-##     range/ordering bounds those pins don't state (a range assert survives a designer
+##     exclusions: player_feedback is DRIVEN through the hurt/dash/death beats in
+##     test_player_core.gd and effects.blood_drop_* through the emitter in test_effects.gd
+##     (both drive the knobs now rather than pinning their values), so this file keeps the
+##     range/ordering bounds neither states (a range assert survives a designer
 ##     retune; a pin does not), and any bound those files already assert AS a range
 ##     (hurt_freeze_scale < 1, lpf cutoff < clear, dash_flash_peak_alpha < 1,
 ##     death_time_scale < 1, death_camera_roll > 0) is NOT repeated here.
@@ -40,20 +42,18 @@ extends GutTest
 ##     coverage in any suite, so their range/ordering asserts land here in full.
 ##
 ## TESTABILITY NOTES:
-##   * AudioManager / EffectFactory are loaded with load(path).new() and NOT added to the
-##     tree: they have no _ready/@onready (AudioManager) and only @export preload(uid://)
-##     initializers (EffectFactory, resolved at script-compile time and merely re-bound on
-##     .new(), per test_autoload_order.gd), so .new() is side-effect-free and get_tree()
-##     stays null — making exactly the pre-get_tree() null-guard branches reachable. Each
-##     is .free()'d.
+##   * The AudioManager surface/constant tests and the EffectFactory tests load the script
+##     with load(path).new() and do NOT add it to the tree: AudioManager has no
+##     _ready/@onready and EffectFactory only @export preload(uid://) initializers
+##     (resolved at script-compile time and merely re-bound on .new(), per
+##     test_autoload_order.gd), so .new() is side-effect-free. Each is .free()'d.
 ##   * Settings subclasses are plain Resource (no _init/_ready) — built with ClassName.new()
-##     and released with .free(), never add_child_autofree (they are not Nodes).
-##   * play_sfx / play_2d_sfx are declared `-> void`, so their result must NOT be captured
-##     into a variable (that is a GDScript analyzer error). Instead the null-guard tests
-##     CALL the no-op (which, per AudioManager.gd, returns before any get_tree()/node
-##     creation) and then assert get_child_count()==0 — the guarded path must spawn nothing,
-##     and if the guard were removed the bare instance's null get_tree() would error and
-##     fail the test, which is exactly the regression we want to catch.
+##     and released with `= null`, never add_child_autofree (they are not Nodes).
+##   * play_sfx / play_2d_sfx are declared `-> void` and parent their player to
+##     get_tree().root, never to AudioManager itself — so a null-guard test must count the
+##     ROOT's one-shots before/after (an instance's own child count is 0 whatever the guard
+##     does). The headless dummy audio driver never emits `finished`, so the control
+##     spawn is freed by hand.
 ##   * EffectFactory.spawn_at(null, ...) calls push_warning() before returning null — that
 ##     is a console warning, not a failure; it is expected and called out in the assert
 ##     message so it isn't mistaken for a real error in GUT output.
@@ -73,26 +73,67 @@ func test_audio_manager_default_3d_max_distance() -> void:
 
 
 func test_audio_manager_play_sfx_null_stream_is_noop() -> void:
-	# play_sfx is `-> void`, so its result must NOT be captured (analyzer error). The
-	# `if stream == null: return` guard (AudioManager.gd:23-24) precedes any
-	# get_tree()/add_child, so this call is reachable on a bare load().new() with no tree:
-	# it must return without touching get_tree() and without spawning a player.
-	var am = load("res://managers/AudioManager.gd").new()
-	am.play_sfx(Vector3.ZERO, null)
-	assert_eq(am.get_child_count(), 0,
-		"play_sfx with a null stream must early-return before any get_tree()/node creation and spawn nothing — a missing stream is silently ignored, never a crash (if the guard were removed, the bare instance's null get_tree() would error here)")
-	am.free()
+	# A call site with an optional / unassigned stream export stays unconditional, so a null stream must spawn
+	# NOTHING at the root (a silent, never-freed player per call would leak one node per footstep).
+	var before := _root_one_shots()
+	AudioManager.play_sfx(Vector3.ZERO, null)
+	assert_eq(_new_one_shots(before).size(), 0,
+		"play_sfx with a null stream must spawn no AudioStreamPlayer3D at the tree root — a missing stream is silently ignored")
+	# Control: the identical call with a real (silent) stream DOES add exactly one root one-shot, so the zero
+	# above is the guard, not a count that cannot see a spawn.
+	AudioManager.play_sfx(Vector3.ZERO, _silent_wav(), -80.0, 1.0, &"sfx", AudioManager.DEFAULT_MAX_DB, false)
+	var spawned := _new_one_shots(before)
+	assert_eq(spawned.size(), 1, "control: play_sfx with a real stream must spawn one one-shot at the root")
+	_free_one_shots(spawned)
 
 
 func test_audio_manager_play_2d_sfx_null_stream_is_noop() -> void:
-	# play_2d_sfx is `-> void`; do not capture its result. The `if stream == null: return`
-	# guard (AudioManager.gd:39-40) precedes get_tree(). The non-null spawn+autofree path
-	# is covered by test_audio_manager_spawn.gd.
-	var am = load("res://managers/AudioManager.gd").new()
-	am.play_2d_sfx(null)
-	assert_eq(am.get_child_count(), 0,
-		"play_2d_sfx with a null stream must be a safe no-op (returns before get_tree(), spawns nothing) so 2D call sites can pass an optional/missing stream without guarding")
-	am.free()
+	# The 2D twin: an optional/missing stream is a safe no-op, so 2D call sites need no guard of their own.
+	var before := _root_one_shots()
+	AudioManager.play_2d_sfx(null)
+	assert_eq(_new_one_shots(before).size(), 0,
+		"play_2d_sfx with a null stream must spawn no AudioStreamPlayer at the tree root — 2D call sites pass optional streams unguarded")
+	AudioManager.play_2d_sfx(_silent_wav(), -80.0, 1.0, &"sfx", false)
+	var spawned := _new_one_shots(before)
+	assert_eq(spawned.size(), 1, "control: play_2d_sfx with a real stream must spawn one one-shot at the root")
+	_free_one_shots(spawned)
+
+
+## Every AudioManager one-shot currently parented directly to the root (the ONE_SHOT_META stamp both spawn helpers
+## write), as a set. A shallow scan: that is exactly where play_sfx / play_2d_sfx put them.
+func _root_one_shots() -> Dictionary:
+	var out := {}
+	for child in get_tree().root.get_children():
+		if child.has_meta(AudioManager.ONE_SHOT_META):
+			out[child] = true
+	return out
+
+
+func _new_one_shots(before: Dictionary) -> Array:
+	var out := []
+	for child in _root_one_shots():
+		if not before.has(child):
+			out.append(child)
+	return out
+
+
+## Stop and free spawned one-shots by hand — the headless dummy driver never emits `finished`, so they would
+## otherwise sit at the root for the rest of the run.
+func _free_one_shots(nodes: Array) -> void:
+	for n in nodes:
+		if is_instance_valid(n):
+			n.call(&"stop")
+			n.queue_free()
+
+
+func _silent_wav() -> AudioStreamWAV:
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_8_BITS
+	stream.mix_rate = 22050
+	var silence := PackedByteArray()
+	silence.resize(2205)
+	stream.data = silence
+	return stream
 
 
 func test_audio_manager_public_method_surface() -> void:
@@ -417,16 +458,19 @@ func test_dialogue_settings_defaults() -> void:
 
 
 func test_search_settings_defaults() -> void:
-	# Stealth Slice 8 search-feel dials. The PARITY defaults must keep the search INERT (today's single-point stare):
-	# max_search_radius == 0 and sample_points == 1 collapse the breadcrumb trail to the last-known spot, and a null
-	# intensity_curve reads as flat energy. The seeding scales are sane but only bite once max_search_radius > 0.
+	# Stealth Slice 8 search-feel dials. SearchSettings.tres authors ONLY max_search_radius (10.0), so that knob's
+	# script default is not what ships and only its range is held here. sample_points is NOT authored: it stays at
+	# this script default, and Perception.searching_area() needs sample_points > 1, so the multi-point breadcrumb
+	# sweep ships OFF (the documented "only sample_points is still inert at 1" state in docs/AUTHORING_GUIDE.md) —
+	# that ship decision is pinned below. The rest are the RANGES that keep any authored shape valid: an ordered
+	# radius clamp, non-negative seeding. A null intensity_curve reads as flat energy.
 	var s = SearchSettings.new()
-	assert_eq(s.max_search_radius, 0.0,
-		"max_search_radius must default 0 — the master inert switch: 0 forces a single-point search (today's stare)")
+	assert_gte(s.max_search_radius, 0.0,
+		"max_search_radius must be >= 0 — it is a distance, and 0 is the legitimate single-point (inert) search")
 	assert_eq(typeof(s.sample_points), TYPE_INT,
 		"sample_points must be an int — it is a breadcrumb count")
 	assert_eq(s.sample_points, 1,
-		"sample_points must default 1 — the legacy single breadcrumb (no multi-point sweep until a designer opts in)")
+		"the multi-point search sweep ships OFF — SearchSettings.tres does not author sample_points, so this default IS the shipped value (Perception.searching_area needs > 1)")
 	assert_null(s.intensity_curve,
 		"intensity_curve must default null — read through a null-guard as flat 1.0 (parity); no crash on the common path")
 	assert_gte(s.uncertainty_grow_rate, 0.0,
@@ -865,6 +909,26 @@ func _credit_score(values: Dictionary, eco: EconomySettings) -> int:
 	return EconomySettings.credit_score_for(_credit_sheet(values), eco, CREDIT_FLOOR, CREDIT_CEIL)
 
 
+## The spending limit `score` earns under `eco`'s OWN limit knobs — the exact chain implant_choice.gd's
+## _compute_credit quotes, so a relation on it is a relation on what the player is actually offered.
+func _live_limit(score: int, eco: EconomySettings) -> float:
+	return EconomySettings.credit_limit_for(score, eco.credit_score_min, eco.credit_score_max,
+		eco.credit_limit_max, eco.credit_limit_step, eco.credit_limit_curve)
+
+
+## The cheapest price the New Game implant screen would quote `sheet` for any chip on its roster (INF when the
+## roster is empty). Asks the screen's own roster + pricing seams on an OFF-TREE instance (no _ready, so no UI is
+## built) rather than re-filtering ItemDb here, so the "one cheap chip" relation follows whatever the screen sells.
+func _cheapest_starting_chip(sheet: Dictionary) -> float:
+	var screen = load("res://scripts/ui/implant_choice.gd").new()
+	screen._stat_values = sheet
+	var cheapest := INF
+	for item in screen._chip_roster():
+		cheapest = minf(cheapest, float(screen._price_of(item)))
+	screen.free()
+	return cheapest
+
+
 func test_starting_credit_absent_sheet_and_no_file_sheet_are_different_inputs() -> void:
 	# THE distinction the whole model rests on. An EMPTY dict is the ABSENCE of an application (a bare-scene
 	# instantiation with no present_build) and fails OPEN to the ceiling — that is what keeps the implant
@@ -957,12 +1021,21 @@ func test_starting_credit_degrades_safely_on_a_bad_table() -> void:
 		"a stat name with no underwriting row neither crashes nor moves the rating")
 	# An EMPTY table is a flat credit market at the baseline — never a bank that declines everybody. This is
 	# the ONE case that legitimately wants a bare .new(): an unauthored economy is exactly what it models.
+	# The knobs are set here so the expected rating is hand-arithmetic, not the scorer's own formula retyped:
+	# baseline 0.5 of the 100..900 span is 500, whatever build applies.
 	var flat := EconomySettings.new()
 	flat.credit_underwriting = []
-	var baseline_score := int(roundf(float(flat.credit_score_min)
-		+ float(flat.credit_score_max - flat.credit_score_min) * flat.credit_baseline_fraction))
-	assert_eq(EconomySettings.credit_score_for(build, flat, CREDIT_FLOOR, CREDIT_CEIL), baseline_score,
-		"an unauthored table rates every build at the baseline — a flat market, not a blanket decline")
+	flat.credit_score_min = 100
+	flat.credit_score_max = 900
+	flat.credit_baseline_fraction = 0.5
+	assert_eq(EconomySettings.credit_score_for(build, flat, CREDIT_FLOOR, CREDIT_CEIL), 500,
+		"an unauthored table rates a committed build at the baseline — a flat market, not a blanket decline")
+	var crippled := _credit_sheet({&"strength": -5, &"endurance": -5, &"gunplay": -5, &"agility": -5,
+		&"streetwise": -5, &"larceny": -5})
+	assert_eq(EconomySettings.credit_score_for(crippled, flat, CREDIT_FLOOR, CREDIT_CEIL), 500,
+		"…and the fully dumped build rates the SAME baseline: with no rows there is nothing to price a pledge against")
+	assert_eq(EconomySettings.credit_score_for(_credit_sheet({}), flat, CREDIT_FLOOR, CREDIT_CEIL), 500,
+		"…as does the filed-but-empty sheet — every applicant gets identical terms in a flat market")
 	# A mis-authored NEGATIVE weight is floored to 0, i.e. it DISABLES that line rather than inverting it.
 	# ⭐Note the direction differs by line, which is the whole point of pinning it: zeroing one of the three
 	# ADDITIVE lines removes a bonus (the score falls), while zeroing the SUBTRACTIVE exposure line removes a
@@ -1033,20 +1106,51 @@ func test_starting_credit_reason_codes_are_actionable() -> void:
 
 
 func test_starting_credit_score_curve() -> void:
-	# The shipped rating of the canonical builds — the numbers the design was tuned to, pinned so a re-price
-	# of the actuarial table is a DELIBERATE act rather than a silent drift. (Ordering + structure are pinned
-	# separately above, so a designer retuning the table only has to revisit this one test.)
+	# The design statements behind the shipped ratings (EconomySettings.gd's knob docs), held as RELATIONS over the
+	# live table + knobs, so a re-price of the actuarial table fails only when it breaks one of them. (The headline
+	# "commit beats nothing" case is test_starting_credit_committing_to_a_build_always_beats_allocating_nothing's.)
 	var eco := _live_eco()
-	assert_eq(_credit_score({}, eco), 432,
-		"the no-file build rates 432 — good for one cheap chip, so allocating nothing is never a lockout")
-	assert_eq(_credit_score({&"gunplay": 10, &"strength": 10, &"endurance": -5, &"agility": -5,
-		&"streetwise": -5, &"larceny": -5}, eco), 842,
-		"the best legal build rates 842 — deliberately just under score_max: the Ledger never quotes its own ceiling")
-	assert_eq(_credit_score({&"gunplay": 5, &"endurance": -5}, eco), 600,
-		"the headline regression case (which the retired model fined BELOW the do-nothing build) now rates 600")
-	assert_eq(_credit_score({&"strength": -5, &"endurance": -5, &"gunplay": -5, &"agility": -5,
-		&"streetwise": -5, &"larceny": -5}, eco), 300,
-		"the self-crippled build reaches score_min honestly (every line at its worst), not by clamp arithmetic")
+	# 1. Allocating nothing is never a LOCKOUT: the no-file applicant's advance, plus the cash every run starts
+	#    with, must buy at least the cheapest chip the New Game implant screen offers that same sheet.
+	var nothing_sheet := _credit_sheet({})
+	var nothing_advance := _live_limit(_credit_score({}, eco), eco)
+	var cheapest := _cheapest_starting_chip(nothing_sheet)
+	assert_true(cheapest < INF, "the New Game implant roster must offer at least one chip to buy")
+	assert_gte(eco.player_starting_money + nothing_advance, cheapest,
+		"the no-file build's credit (%s) + starting cash must cover the cheapest implant (%s) — allocating nothing must never lock a player out of the implant screen" % [nothing_advance, cheapest])
+	# 2. The Ledger never quotes its own ceiling: no legal (zero-sum, in-bounds) build reaches score_max, so none
+	#    is advanced the full advertised cap. The committed two-stat corner is checked by name, plus a
+	#    deterministic walk over legal sheets for the interior.
+	var corner := _credit_score({&"gunplay": 10, &"strength": 10, &"endurance": -5, &"agility": -5,
+		&"streetwise": -5, &"larceny": -5}, eco)
+	assert_lt(corner, eco.credit_score_max,
+		"the maxed two-stat build must rate strictly under score_max — a bank that hands out its advertised maximum is not a bank")
+	assert_lt(_live_limit(corner, eco), eco.credit_limit_max,
+		"…and so must be advanced strictly less than credit_limit_max")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260917  # deterministic: the same walk every run
+	var stats: Array = CharacterStats.STAT_NAMES
+	for i in 150:
+		var sheet := _credit_sheet({})
+		for step in 40:  # zero-sum point transfers, each kept inside the allocator's bounds
+			var to: StringName = stats[rng.randi_range(0, stats.size() - 1)]
+			var from: StringName = stats[rng.randi_range(0, stats.size() - 1)]
+			if to != from and int(sheet[to]) < CREDIT_CEIL and int(sheet[from]) > CREDIT_FLOOR:
+				sheet[to] = int(sheet[to]) + 1
+				sheet[from] = int(sheet[from]) - 1
+		var score := EconomySettings.credit_score_for(sheet, eco, CREDIT_FLOOR, CREDIT_CEIL)
+		if score >= eco.credit_score_max:
+			fail_test("legal build %s rates %d, reaching score_max %d — the Ledger must never quote its own ceiling" % [sheet, score, eco.credit_score_max])
+			break
+	# 3. The self-crippled build bottoms out with every underwriting line at its WORST value (no assets, no
+	#    specialty, everything pledged) — the floor is earned by the sheet, not by one line misreading it.
+	var crippled := EconomySettings.credit_rating_for(_credit_sheet({&"strength": -5, &"endurance": -5,
+		&"gunplay": -5, &"agility": -5, &"streetwise": -5, &"larceny": -5}), eco, CREDIT_FLOOR, CREDIT_CEIL)
+	assert_eq(float(crippled["capacity"]), 0.0, "an all-dumped sheet has no CAPACITY — nothing invested earns")
+	assert_eq(float(crippled["viability"]), 0.0, "…no VIABILITY")
+	assert_eq(float(crippled["trade"]), 0.0, "…no TRADE")
+	assert_almost_eq(float(crippled["exposure"]), 1.0, 0.0001, "…and full EXPOSURE: every stat pledged to its floor")
+	assert_eq(int(crippled["score"]), eco.credit_score_min, "so it rates exactly score_min")
 	# No cliff off zero: the first traded point must be a smooth step, not a jump.
 	var one_step := _credit_score({&"strength": 1, &"endurance": -1}, eco)
 	var two_step := _credit_score({&"strength": 2, &"endurance": -2}, eco)
@@ -1081,38 +1185,63 @@ func test_starting_credit_limit_curve() -> void:
 	# The documented OFF-SWITCH: a degenerate score range (min >= max) rates everyone at the cap:
 	assert_eq(EconomySettings.credit_limit_for(400, 500, 500, 2100.0, 50.0), 2100.0,
 		"score_min == score_max is the credit check's off-switch — every build rates the full cap")
-	# The SHIPPED gamma (1.6) is what the game actually quotes — pin the live path too, not just the identity.
+	# A gamma curve (1.6 here), hand-worked: 2100 x (542/550)^1.6 = 2051.3 -> floors to 2050; 2100 x (132/550)^1.6
+	# = 214.1 -> 200; 2100 x (300/550)^1.6 = 796.2 -> 750. The live knob's own contract is asserted further down.
 	assert_eq(EconomySettings.credit_limit_for(842, 300, 850, 2100.0, 50.0, 1.6), 2050.0,
-		"the best legal build (842) is advanced 2050 zm — just under the advertised cap, by design")
+		"a near-ceiling score under a 1.6 gamma is advanced just under the cap, floored to the step")
 	assert_eq(EconomySettings.credit_limit_for(432, 300, 850, 2100.0, 50.0, 1.6), 200.0,
-		"the no-file build (432) is still advanced 200 zm — exactly one cheap chip, so nobody is locked out")
+		"a low score under a 1.6 gamma still earns its whole steps, floored — never rounded up")
 	assert_eq(EconomySettings.credit_limit_for(600, 300, 850, 2100.0, 50.0, 1.6), 750.0,
-		"a serviceable rating (600) buys 750 zm — the gamma makes a mediocre file buy proportionally less")
+		"a mid score under a 1.6 gamma buys proportionally less than its linear share (1145.45) — the gamma's whole point")
 	assert_lt(EconomySettings.credit_limit_for(575, 300, 850, 2100.0, 50.0, 1.6),
 		EconomySettings.credit_limit_for(575, 300, 850, 2100.0, 50.0, 1.0),
 		"a gamma above 1 lends LESS at every score below the ceiling than the linear map did")
 	assert_eq(EconomySettings.credit_limit_for(850, 300, 850, 2100.0, 50.0, 1.6), 2100.0,
 		"…but the ceiling itself is unmoved: a perfect score still earns the whole cap at any gamma")
-	# The shipped knob defaults — the feature's authored contract, incl. the 2100 zm ceiling:
+	# The shipped knobs, held to the contracts their docs state rather than copied from their @export lines
+	# (EconomySettings.tres authors none of these, so the script defaults ARE the live values):
 	var s := EconomySettings.new()
-	assert_eq(s.credit_limit_max, 2100.0, "credit_limit_max ships at 2100 zm — the specified ceiling")
-	assert_eq(s.credit_score_min, 300, "credit_score_min ships at the classic 300 floor")
-	assert_eq(s.credit_score_max, 850, "credit_score_max ships at the classic 850 ceiling")
-	assert_eq(s.credit_limit_step, 50.0, "credit_limit_step ships at 50 zm round-number quotes")
-	assert_eq(s.credit_limit_curve, 1.6, "credit_limit_curve ships at 1.6 (the .tres is knob-default here, so this IS the live gamma)")
-	assert_eq(s.credit_baseline_fraction, 0.24, "credit_baseline_fraction ships at 0.24 — where the no-file applicant sits")
-	assert_eq(s.credit_weight_capacity, 0.48, "the CAPACITY weight ships at 0.48")
-	assert_eq(s.credit_weight_viability, 0.38, "the VIABILITY weight ships at 0.38")
-	assert_eq(s.credit_weight_trade, 0.23, "the TRADE weight ships at 0.23")
-	assert_eq(s.credit_weight_exposure, 0.30, "the EXPOSURE weight ships at 0.30 — the only subtractive line")
-	assert_eq(s.credit_depth_points, 8,
-		"credit_depth_points ships at 8 — anchored on the pickpocket equipped-weapon threshold, the game's one real stat breakpoint")
-	assert_eq(s.credit_dump_exponent, 1.6, "credit_dump_exponent ships at 1.6 — pledges price superlinearly")
+	assert_lt(s.credit_score_min, s.credit_score_max,
+		"the credit check ships ON — score_min == score_max is its documented off-switch (every build rates the full cap)")
+	assert_gt(s.credit_limit_max, 0.0, "credit_limit_max must be positive or no build could ever borrow toward an implant")
+	assert_gt(s.credit_limit_step, 0.0, "the shipped limit is quoted in whole steps (banks quote round numbers); 0 would be unstepped")
+	assert_eq(EconomySettings.credit_limit_for(s.credit_score_max, s.credit_score_min, s.credit_score_max,
+		s.credit_limit_max, s.credit_limit_step, s.credit_limit_curve), s.credit_limit_max,
+		"with the SHIPPED step and gamma a perfect score must still earn exactly credit_limit_max — a cap that is not a whole number of steps floors below its own advertised ceiling")
+	var mid := int((s.credit_score_min + s.credit_score_max) / 2.0)
+	assert_lt(EconomySettings.credit_limit_for(mid, s.credit_score_min, s.credit_score_max, s.credit_limit_max, 0.0, s.credit_limit_curve),
+		EconomySettings.credit_limit_for(mid, s.credit_score_min, s.credit_score_max, s.credit_limit_max, 0.0, 1.0),
+		"the shipped credit_limit_curve must lend a mid-range rating LESS than the linear map — that is the knob's documented purpose")
+	for knob in ["credit_weight_capacity", "credit_weight_viability", "credit_weight_trade", "credit_weight_exposure"]:
+		assert_gt(float(s.get(knob)), 0.0,
+			"%s must ship positive — a zero weight silently deletes that underwriting line from every rating" % knob)
+	assert_gte(s.credit_depth_points, 1, "credit_depth_points is the peak stat at which TRADE saturates; below 1 there is no specialty to price")
+	assert_lte(s.credit_depth_points, CREDIT_CEIL,
+		"credit_depth_points must be reachable by the allocator (<= STAT_MAX) or no build could ever read as a complete specialty")
+	assert_eq(s.credit_depth_points, GameSettings.pickpocket.equipped_pickpocket_threshold,
+		"credit_depth_points is ANCHORED on the pickpocket equipped-weapon threshold (EconomySettings.gd) — the game's one real stat breakpoint; retune them together")
+	# credit_dump_exponent: "pledges price superlinearly" — driven on a one-row table with the SHIPPED exponent, a
+	# two-point pledge must expose MORE than twice a one-point pledge.
+	var row := StatUnderwriting.new()
+	row.stat = &"strength"
+	row.dump_severity = 1.0
+	row.dump_saturation = 5
+	var rows: Array[StatUnderwriting] = [row]
+	var dump_eco := EconomySettings.new()
+	dump_eco.credit_underwriting = rows
+	var one := float(EconomySettings.credit_rating_for({&"strength": -1}, dump_eco, CREDIT_FLOOR, CREDIT_CEIL)["exposure"])
+	var two := float(EconomySettings.credit_rating_for({&"strength": -2}, dump_eco, CREDIT_FLOOR, CREDIT_CEIL)["exposure"])
+	assert_gt(one, 0.0, "a one-point pledge must register some exposure")
+	assert_gt(two, 2.0 * one,
+		"with the shipped credit_dump_exponent a -2 pledge must cost MORE than two -1 pledges — hitting a floor is categorical, not incremental")
+	rows.clear()
+	row = null
+	dump_eco = null
 	s = null
 
 
 func test_player_feedback_settings_defaults() -> void:
-	# Range/ordering angles ONLY — EXACT pins for the hurt/dash/respawn/death fields live in
+	# Range/ordering angles ONLY — the hurt/dash/respawn/death fields are DRIVEN in
 	# test_player_core.gd, and the bounds it already asserts AS ranges (hurt_freeze_scale < 1,
 	# lpf cutoff < clear, dash_flash_peak_alpha < 1, death_time_scale < 1,
 	# death_camera_roll > 0) are deliberately NOT repeated here.
@@ -1232,10 +1361,10 @@ func test_npc_ai_settings_defaults() -> void:
 		"hearing_initiates must default OFF — noise only matters once an NPC has a target, so idle stays byte-identical")
 	assert_gte(s.distraction_scan_interval, 0.0,
 		"distraction_scan_interval must be >= 0 (0 = scan the noise/corpse groups every frame)")
-	assert_eq(s.hearing_reaction_time, 0.0,
-		"hearing_reaction_time must default to 0 -- a bare NpcAiSettings reacts to a noise on the same frame it lands, byte-identical to before the reaction buffer existed")
-	assert_eq(s.hearing_reaction_jitter, 0.0,
-		"hearing_reaction_jitter must default to 0 -- with no spread authored every NPC reacts on exactly hearing_reaction_time")
+	assert_gte(s.hearing_reaction_time, 0.0,
+		"hearing_reaction_time cannot be negative — 0 is the same-frame reaction, anything above is the banked beat")
+	assert_gte(s.hearing_reaction_jitter, 0.0,
+		"hearing_reaction_jitter is a +/- spread, never negative")
 	assert_false(s.hearing_occlusion,
 		"hearing_occlusion must default OFF -> sound rounds corners exactly as before (behaviour-preserving)")
 	assert_gte(s.hearing_wall_attenuation, 0.0, "hearing_wall_attenuation must be >= 0 (a fraction of the radius cut by a wall)")

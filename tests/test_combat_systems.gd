@@ -1,46 +1,70 @@
 extends GutTest
 
-## GUT coverage for the Combat systems subsystem — the four combat scripts under
-## res://scripts/combat (weapon_system.gd, scope_in.gd, swap_weapons.gd, attack.gd).
+## GUT coverage for the Combat systems subsystem: the combat scripts under res://scripts/combat (weapon_system.gd,
+## scope_in.gd, swap_weapons.gd, attack.gd, spray_painter.gd), the Throwable carry / breathing / gib-confetti seams, and
+## the stamina price and AGILITY scaling Attack applies to a weapon's clocks.
 ##
-## What this file asserts (all SAFE-SURFACE, no scene wiring, no real side effects):
-##   - Weapon: the public null-guarded query surface (can_fire/is_busy/is_scoped/
-##     current_ammo/equipped_weapon/reload) all report a sane "unwired" answer on a
-##     fresh, NOT-add_child'd load(...).new() instance (attack/ammo/inventory/scope_in
-##     exports are null), plus its host-facing has_method contract.
-##   - ScopeIn: is_scoped starts false; force_unscope() is a safe no-op when already
-##     un-scoped and correctly clears + emits scoped_in(false) when flipped manually.
-##   - Attack: plain-var defaults, the firing/scope has_method surface, and the two
-##     call-safe (current_weapon-guarded) entry points can_enter_scope()/
-##     start_secondary_cooldown() behaving as documented no-ops on a bare instance.
-##   - SwapWeapons: the out-of-box 6-slot default array, and _try_equip() emitting
-##     (or, when out of range, NOT emitting) its equip_this signal.
+## How the parts are driven without weapon.tscn's _ready:
+##   - Attack is NEVER add_child'd (its _ready connects a null inventory and reads @onready $ShellImpact). Its attack /
+##     reload / swap slots get real one-shot Timers parented under THIS test instead (_give_timers), because
+##     Timer.start() errors off-tree. That is enough to drive the real reload, cooldown, can_fire and scope gates.
+##   - ScopeIn is ticked by calling _process by hand with a bare Camera3D, with "Zoom" held through
+##     Input.action_press (after_each releases it).
+##   - Weapon (weapon_system.gd) is built bare; setup() is never called (it dereferences every internal part).
+##   - The Throwable carry-pose and confetti tests go IN the tree: they read global transforms / cast a world ray.
 ##
-## What this file deliberately SKIPS and why:
-##   - Weapon.setup(): un-guarded, dereferences null internal parts — needs the real
-##     weapon.tscn (Inventory/Ammo/Timers/spawner). Out of scope.
-##   - Attack.can_fire()/is_reload_or_swap_active() CALLS: they dereference the null
-##     @export Timer nodes (attack/reload/swap) and would crash a bare instance — only
-##     has_method is safe here; the real boolean needs full Timer + Inventory wiring.
-##   - Attack._ready/_physics_process and the whole fire/spray/colour-picker/
-##     swap-state path: these connect to a null inventory, dereference null
-##     character/clip/muzzle, spawn nodes into the tree, play audio, raycast the world,
-##     call FreezeFrame, and set Input.mouse_mode — never safe to drive in a unit test.
-##     Hence Attack is instantiated WITHOUT add_child throughout (and freed by hand).
-##   - ScopeIn._process: requires a real camera + a fully-wired Attack (Timer derefs);
-##     the is_scoped state machine is exercised here only via direct field set +
-##     force_unscope(), never by ticking a frame.
-##   - WeaponData .tres field values, Inventory.equip/weapon_changed, GameSettings/
-##     InputManager tuning, and Attack.flash_muzzle wiring are already covered by
-##     test_smoke.gd — not duplicated here.
-##
-## test_smoke.gd already asserts ScopeIn.new().has_method("force_unscope") and (via
-## source text) that Attack defines can_enter_scope; the NEW value
-## below is the actual runtime BEHAVIOUR (defaults, no-op/flip semantics, emitted
-## signals, real return values), not the existence checks.
+## Attack's fire path (_on_mouse_input_attack) is driven only as far as a committed pull (the gates, the round, the
+## stamina, the cadence Timer): the off-tree Attack returns at its is_inside_tree() check before the muzzle flash.
+## Still NOT driven here: the rest of the shot and the spray / colour-picker path (spawns into the world, raycasts,
+## plays audio, calls FreezeFrame) and Throwable destruction (particles, decals, AudioManager). Player and NPC _ready
+## never run.
 
 const WEAPON_SYSTEM_PATH := "res://scripts/combat/weapon_system.gd"
 const ATTACK_PATH := "res://scripts/combat/attack.gd"
+
+## A Player whose throw_equipped_weapon() only COUNTS the request and succeeds, so Attack's scoped-throw decision can
+## be observed without a carry rig. Built at runtime and never add_child'd, so Player._ready never runs.
+const THROW_SPY_SOURCE := "extends \"res://scripts/player/player.gd\"\nvar throws: int = 0\nfunc throw_equipped_weapon() -> bool:\n\tthrows += 1\n\treturn true\n"
+
+var _throw_spy_script: GDScript = null
+
+
+func after_each() -> void:
+	Input.action_release("Zoom")  # the ScopeIn tests hold ADS through the real action; never leak it into the next test
+
+
+func after_all() -> void:
+	_throw_spy_script = null
+
+
+func _new_throw_spy():
+	if _throw_spy_script == null:
+		_throw_spy_script = GDScript.new()
+		_throw_spy_script.source_code = THROW_SPY_SOURCE
+		_throw_spy_script.reload()
+	return _throw_spy_script.new()
+
+
+## Real one-shot Timers in the attack / reload / swap slots of a bare, OFF-tree Attack. The Timers are parented under
+## this test (Timer.start() errors off-tree) and autofreed; the Attack itself is still never add_child'd.
+func _give_timers(a) -> void:
+	for slot in [&"attack", &"reload", &"swap"]:
+		var t := Timer.new()
+		t.one_shot = true
+		add_child_autofree(t)
+		a.set(slot, t)
+
+
+## An EMPTY, caliber-less (free refill) clip for `weapon`, parented under the off-tree Attack so freeing the Attack
+## frees it too. Both of _on_reload_reload's clip gates (already full / no reserve supply) let a reload through.
+func _give_empty_clip(a, weapon: WeaponData) -> Ammo:
+	var clip := Ammo.new()
+	clip.current_weapon = weapon
+	clip.current_ammo = 0
+	a.add_child(clip)
+	a.clip = clip
+	return clip
+
 
 func _packed_visual_scene(mesh: Mesh) -> PackedScene:
 	var root := Node3D.new()
@@ -104,14 +128,34 @@ func test_weapon_equipped_weapon_null_when_unwired() -> void:
 	w.free()
 
 
-func test_weapon_reload_is_safe_noop_when_unwired() -> void:
-	# Body: `if attack: attack._on_reload_reload()`. attack is null, so this must
-	# be a no-op and leave the (null-guarded) ammo count at 0.
+func test_weapon_reload_starts_the_wired_attacks_reload_and_is_a_noop_unwired() -> void:
+	# reload() is the AI wielder's ONLY reload (an NPC has no reload input). One rig for both halves: a real Attack
+	# holding an empty, free-refill clip that WOULD reload, first not yet handed to the Weapon (the state before setup()
+	# wires the parts), then wired. Only the wiring differs, so the first half is the guard and the second its control.
+	var gun := _priced_gun()
+	gun.reload_time = 2.0
+	var a = load(ATTACK_PATH).new()
+	_give_timers(a)
+	a.current_weapon = gun
+	_give_empty_clip(a, gun)
 	var w = load(WEAPON_SYSTEM_PATH).new()
+	watch_signals(a)
 	w.reload()
-	assert_eq(w.current_ammo, 0,
-		"The AI-reload entry reload() must be a safe no-op before setup() — with no Attack it must not crash and must leave current_ammo at 0.")
+	assert_true(a.reload.is_stopped(),
+		"an unwired Weapon's reload() must be a silent no-op: before setup() it has no Attack to reload through")
+	assert_signal_not_emitted(a, "reload_started",
+		"no reload may start through a Weapon that is not wired to this Attack")
+	w.attack = a
+	w.reload()
+	assert_false(a.reload.is_stopped(),
+		"once wired, reload() must start the Attack's real reload, or an NPC that runs its clip dry can never refill it")
+	assert_almost_eq(a.reload.wait_time, 2.0, 0.0001,
+		"a wielder-less reload runs for the weapon's authored reload_time")
+	assert_signal_emitted(a, "reload_started",
+		"the AI reload must emit the same reload_started a player reload does, so its listeners hear it")
 	w.free()
+	a.free()
+	gun = null
 
 
 func test_weapon_exposes_host_facing_api() -> void:
@@ -130,17 +174,85 @@ func test_weapon_exposes_host_facing_api() -> void:
 
 
 # ---------------------------------------------------------------------------
-# ScopeIn (scope_in.gd) — ADS state machine, tested via direct field set only.
-# Never add_child'd: _process derefs `camera`/`attack`. ScopeIn.new() (no tree
-# entry) matches the existing test_smoke.gd pattern.
+# ScopeIn (scope_in.gd) — the ADS state machine. Never add_child'd: _process is called by hand with a bare Camera3D
+# and a bare Attack carrying real Timers, wired the way weapon.tscn wires them.
 # ---------------------------------------------------------------------------
 
-func test_scope_in_not_scoped_by_default() -> void:
-	# `var is_scoped: bool = false` (scope_in.gd:9).
+## A ScopeIn wired like weapon.tscn (camera + attack + scoped_in -> Attack._on_scope_in_scoped_in) around a bare
+## Attack with real Timers, holding `weapon`. Free with _free_scope_rig.
+func _scope_rig(weapon: WeaponData) -> Dictionary:
+	var a = load(ATTACK_PATH).new()
+	_give_timers(a)
+	a.current_weapon = weapon
+	var cam := Camera3D.new()
+	cam.fov = GameSettings.camera.default_fov
 	var si := ScopeIn.new()
+	si.camera = cam
+	si.attack = a
+	si.scoped_in.connect(a._on_scope_in_scoped_in)
+	return {"a": a, "cam": cam, "si": si}
+
+
+func _free_scope_rig(rig: Dictionary) -> void:
+	rig["si"].free()
+	rig["cam"].free()
+	rig["a"].free()
+
+
+func test_scope_in_fresh_rig_stays_at_the_hip_until_zoom_is_held() -> void:
+	var gun := _priced_gun()
+	var rig := _scope_rig(gun)
+	var si: ScopeIn = rig["si"]
+	var cam: Camera3D = rig["cam"]
+	var rest_fov := cam.fov
+	watch_signals(si)
+	si._process(0.1)
 	assert_false(si.is_scoped,
-		"ADS must start disengaged — a freshly-spawned ScopeIn that began life 'scoped' would zoom the camera with no input.")
-	si.free()
+		"a freshly spawned weapon with Zoom released must be at the hip")
+	assert_signal_not_emitted(si, "scoped_in",
+		"a fresh rig must not pulse scoped_in on its first frame: a ScopeIn that began life scoped drops out of ADS here and jolts the spread/FOV with no input")
+	Input.action_press("Zoom")
+	si._process(0.1)
+	assert_true(si.is_scoped,
+		"holding Zoom on an idle, loaded, drawn weapon must enter ADS (Attack.can_fire() and can_enter_scope() both allow it)")
+	assert_eq(get_signal_parameters(si, "scoped_in"), [true],
+		"entering ADS must tell Attack scoped_in(true)")
+	assert_lt(cam.fov, rest_fov,
+		"entering ADS must start narrowing the camera toward the scoped FOV")
+	Input.action_release("Zoom")
+	si._process(0.1)
+	assert_false(si.is_scoped, "releasing Zoom must drop the scope")
+	assert_eq(get_signal_parameters(si, "scoped_in"), [false],
+		"leaving ADS must tell Attack scoped_in(false)")
+	_free_scope_rig(rig)
+	gun = null
+
+
+func test_scope_in_refuses_ads_mid_reload_and_a_reload_breaks_it_but_a_shot_cooldown_does_not() -> void:
+	var gun := _priced_gun()
+	var rig := _scope_rig(gun)
+	var si: ScopeIn = rig["si"]
+	var a = rig["a"]
+	Input.action_press("Zoom")
+	a.reload.start(2.0)
+	si._process(0.1)
+	assert_false(si.is_scoped,
+		"Zoom held mid-reload must NOT enter ADS: the gun is down for the magazine change")
+	a.reload.stop()
+	si._process(0.1)
+	assert_true(si.is_scoped,
+		"the same held Zoom enters ADS as soon as the reload is over (control: only the reload refused it)")
+	a.attack.start(0.44)
+	si._process(0.1)
+	assert_true(si.is_scoped,
+		"a per-shot cooldown must NOT break ADS, or every automatic weapon would drop out of the scope between shots")
+	a.attack.stop()
+	a.reload.start(2.0)
+	si._process(0.1)
+	assert_false(si.is_scoped,
+		"a reload starting while scoped must force the scope off even with Zoom still held")
+	_free_scope_rig(rig)
+	gun = null
 
 
 func test_scope_in_force_unscope_is_noop_when_not_scoped() -> void:
@@ -171,44 +283,110 @@ func test_scope_in_force_unscope_clears_and_emits_when_scoped() -> void:
 
 
 # ---------------------------------------------------------------------------
-# Attack (attack.gd) — bare instance, NEVER add_child'd.
-# _ready() (line 61) connects inventory.weapon_changed on a null inventory and
-# relies on @onready $ShellImpact (line 42); add_child would crash. We use
-# load(...).new() WITHOUT add_child, assert, then free().
-# can_fire()/is_reload_or_swap_active() are NOT called (they deref null Timers);
-# can_enter_scope()/start_secondary_cooldown() ARE call-safe (guard on the null
-# current_weapon first).
+# Attack (attack.gd) — bare instance, NEVER add_child'd: _ready connects inventory.weapon_changed on a null inventory
+# and relies on @onready $ShellImpact. Tests that need the attack / reload / swap clocks give it in-tree Timers
+# (_give_timers); a bare instance without them must not call can_fire() / is_reload_or_swap_active().
 # ---------------------------------------------------------------------------
 
-func test_attack_default_flag_state() -> void:
-	# current_weapon (untyped null), _is_scoped and _swap_raising all start false.
+func test_attack_starts_at_the_hip_and_only_a_scope_in_arms_the_scoped_weapon_throw() -> void:
+	# A throw_on_scoped_attack knife is a knife at the HIP and a thrown knife only while aimed. Attack learns it is aimed
+	# solely from ScopeIn's scoped_in signal, so a fresh Attack must start un-scoped: one that began life "scoped" would
+	# hurl the player's knife on the very first hip click.
+	var knife := _slow_melee(0.88, 0.1)
+	knife.throw_on_scoped_attack = true
+	knife.pellet_spread = 6.0
 	var a = load(ATTACK_PATH).new()
-	assert_eq(a.current_weapon, null,
-		"A bare Attack has no equipped weapon — current_weapon must be null until weapon_changed seeds it.")
-	assert_false(a._is_scoped,
-		"An unwired Attack starts un-scoped (_is_scoped false) so it doesn't apply the scoped spread divisor with no ADS.")
-	assert_false(a._swap_raising,
-		"_swap_raising must start false — no weapon-swap raise is in progress on a fresh Attack.")
+	_give_timers(a)
+	var hands = _new_throw_spy()
+	a.character = hands
+	a._on_weapon_changed(knife)  # what the inventory's weapon_changed does on equip: seeds current_weapon + spread
+	assert_false(a._try_scoped_weapon_throw(false),
+		"a fresh Attack is at the hip, so a click with a throwable knife must stay an ordinary swing")
+	assert_eq(hands.throws, 0, "a hip click must never ask the wielder to throw its weapon")
+	a._on_scope_in_scoped_in(true)
+	assert_lt(a.current_spread, 6.0, "scoping in must tighten the spread")
+	assert_almost_eq(a.current_spread * GameSettings.weapon_general.scope_spread_divisor, 6.0, 0.0001,
+		"and by exactly scope_spread_divisor, the knob that tunes ADS accuracy")
+	assert_true(a._try_scoped_weapon_throw(false),
+		"once scoped, the same click with the same knife IS the throw (control: only the scope state changed)")
+	assert_eq(hands.throws, 1, "the throw must go through the wielder's hands exactly once")
+	a.attack.stop()
+	a._on_scope_in_scoped_in(false)
+	assert_almost_eq(a.current_spread, 6.0, 0.0001, "scoping out must restore the hip spread")
+	assert_false(a._try_scoped_weapon_throw(false),
+		"scoping back out must return the next click to an ordinary swing")
+	assert_eq(hands.throws, 1, "no second throw after scoping out")
+	hands.free()
 	a.free()
+	knife = null
 
 
-func test_attack_can_enter_scope_true_by_default() -> void:
-	# Unconditional today: the air-dash ADS lockout that was its only refusal went away with the scoped launch.
-	# Pinned anyway — it is the seam ScopeIn polls every frame, so a future weapon-side refusal lands here.
+func test_attack_secondary_cooldown_shares_the_cadence_of_the_weapon_that_acted() -> void:
+	# start_secondary_cooldown lets a non-firing action (the ADS knife throw) block the next attack for one cadence.
+	# The Attack is wielder-less, so every cadence expected here is the weapon's authored attack_speed.
+	var fists := _slow_melee(1.2, 0.2)
+	var knife := _slow_melee(0.88, 0.1)
 	var a = load(ATTACK_PATH).new()
-	assert_true(a.can_enter_scope(),
-		"Re-scoping must be allowed by default — a bare Attack has nothing to refuse ADS for.")
-	a.free()
-
-
-func test_attack_start_secondary_cooldown_is_noop_without_weapon() -> void:
-	# attack.gd:87-91 — body is `if not current_weapon: return`, so with no weapon
-	# it must NOT touch the null attack Timer. Returns void; verify via state read.
-	var a = load(ATTACK_PATH).new()
+	_give_timers(a)
 	a.start_secondary_cooldown()
-	assert_eq(a.current_weapon, null,
-		"start_secondary_cooldown() must be a safe no-op before a weapon is equipped — it early-returns on a null current_weapon instead of touching the null attack Timer.")
+	assert_true(a.attack.is_stopped(),
+		"with nothing equipped and no weapon passed there is no cadence to share, so no cooldown may start")
+	a.current_weapon = fists
+	assert_true(a.can_fire(), "guard: an idle, drawn Attack can fire before the cooldown")
+	a.start_secondary_cooldown()
+	assert_false(a.can_fire(),
+		"a secondary cooldown must block the next attack exactly like a shot's own cooldown")
+	assert_almost_eq(a.attack.wait_time, 1.2, 0.0001,
+		"with no weapon passed the cooldown paces at the equipped weapon's cadence")
+	a.attack.stop()
+	a.start_secondary_cooldown(knife)
+	assert_almost_eq(a.attack.wait_time, 0.88, 0.0001,
+		"the knife throw re-arms the FISTS before it settles up and passes the knife: the cooldown must pace at the knife's 0.88 s, not the fists' 1.2 s")
 	a.free()
+	fists = null
+	knife = null
+
+
+func test_attack_weapon_swap_lowers_then_raises_and_chains_a_request_queued_mid_swap() -> void:
+	# The swap Timer runs TWICE per swap: the down phase, whose end mounts the new model (swap_finished), then the raise,
+	# whose end frees the gun to fire. A fresh Attack must read its first swap timeout as the DOWN phase, or the new
+	# weapon's model never mounts. The Timer's timeout is unconnected here, so each timeout is played by hand the way a
+	# one-shot Timer delivers it: stopped first, then the callback.
+	var pistol := _priced_gun()
+	var knife := _slow_melee(0.88, 0.1)
+	var shotgun := _priced_gun(2.0, 0.9)
+	var a = load(ATTACK_PATH).new()
+	_give_timers(a)
+	var inv := Inventory.new()
+	a.inventory = inv
+	inv.weapon_changed.connect(a._on_weapon_changed)  # the connection Attack._ready makes
+	inv.equip(pistol)
+	watch_signals(a)
+	a._on_swap_weapons_equip_this(knife)
+	assert_signal_emit_count(a, "swap_started", 1, "picking another weapon must start a swap")
+	assert_true(a.current_weapon == knife, "the swap equips the picked weapon on the hub as it starts")
+	assert_false(a.can_fire(), "nothing may fire while the old weapon is going down")
+	a._on_swap_weapons_equip_this(shotgun)
+	assert_signal_emit_count(a, "swap_started", 1,
+		"a second pick mid-swap must be queued, not started over the swap already running")
+	a.swap.stop()
+	a._on_swap_timeout()
+	assert_signal_emit_count(a, "swap_finished", 1,
+		"the FIRST swap timeout on a fresh Attack is the down phase: it must mount the new weapon's model")
+	assert_false(a.swap.is_stopped(), "and start the raise, so firing stays blocked until the gun is back up")
+	assert_almost_eq(a.swap.wait_time, GameSettings.weapon_general.swap_raise_duration, 0.0001,
+		"the raise runs for swap_raise_duration")
+	a.swap.stop()
+	a._on_swap_timeout()
+	assert_signal_emit_count(a, "swap_finished", 1, "the raise ending must not mount a model a second time")
+	assert_signal_emit_count(a, "swap_started", 2,
+		"the raise ending must chain the pick queued mid-swap, so the LAST selection is what ends up in your hands")
+	assert_true(a.current_weapon == shotgun, "the queued shotgun is the weapon being drawn now")
+	a.free()
+	inv.free()
+	pistol = null
+	knife = null
+	shotgun = null
 
 
 func test_attack_exposes_firing_and_scope_api() -> void:
@@ -242,9 +420,8 @@ func test_spray_painter_dialogue_started_uses_resource_arg_adapter() -> void:
 
 
 # ---------------------------------------------------------------------------
-# SwapWeapons (swap_weapons.gd) — the only combat script safe to add_child:
-# no _ready, no @onready. add_child_autofree lets watch_signals/assert_signal_*
-# observe equip_this; _try_equip is called directly (not via input).
+# Attack stamina: the melee can-start gate + spend, and the derived per-shot ranged price. A bare Attack with a real
+# off-tree Player as the wielder (its stamina pool works without _ready).
 # ---------------------------------------------------------------------------
 
 func test_attack_melee_stamina_gate_and_spend() -> void:
@@ -268,21 +445,36 @@ func test_attack_melee_stamina_gate_and_spend() -> void:
 
 
 func test_attack_ranged_weapon_skips_melee_stamina() -> void:
+	# The melee can-start gate and the melee spend are MELEE-only. The gate is read on an EMPTY pool, where the same rig
+	# refuses a melee weapon: StaminaManager.can_spend_stamina is a has-any test, so on any positive pool a swing would
+	# pass too and a gun passing would prove nothing about the ranged exemption. The melee weapon is also the paying
+	# control for the spend half.
 	var a = load(ATTACK_PATH).new()
 	var p = load("res://scripts/player/player.gd").new()
-	var gun := WeaponData.new()
-	gun.is_melee = false
-	a.current_weapon = gun
+	var gun := _priced_gun()
+	var melee := _slow_melee()
+	var swing_cost: float = GameSettings.player_movement.stamina_melee_attack_cost
+	assert_gt(swing_cost, 0.0, "precondition: a swing has a price, or the paying control below proves nothing")
 	a.character = p
-	p.stamina = 5.0
+	p.stamina = 0.0
+	a.current_weapon = melee
+	assert_false(a._can_start_melee_attack(),
+		"control: on an empty pool the melee stamina gate refuses a melee weapon")
+	a.current_weapon = gun
 	assert_true(a._can_start_melee_attack(),
-		"non-melee weapons do not use the melee stamina gate")
+		"a ranged weapon on the SAME empty pool is not held by the melee stamina gate")
+	p.stamina = 5.0
 	a._spend_melee_attack_stamina()
 	assert_almost_eq(p.stamina, 5.0, 0.001,
-		"non-melee weapons do not spend melee stamina")
+		"a ranged weapon does not spend melee stamina")
+	a.current_weapon = melee
+	a._spend_melee_attack_stamina()
+	assert_almost_eq(p.stamina, 5.0 - swing_cost, 0.001,
+		"control: the same spend with the melee weapon equipped does charge the swing")
 	p.free()
 	a.free()
 	gun = null
+	melee = null
 
 
 # --- Ranged per-shot stamina (_shot_stamina_cost / _spend_shot_stamina) -------------------------------
@@ -407,13 +599,17 @@ func test_shot_stamina_is_clamped_so_fire_never_outdrains_sprinting() -> void:
 	var absurd := _priced_gun(100.0, 0.125)  # SMG cadence, a hundred damage a round
 	a.current_weapon = absurd
 	var cost: float = a._shot_stamina_cost()
-	var ceiling: float = mv.stamina_shot_drain_ceiling * mv.stamina_sprint_drain * 0.125
-	assert_almost_eq(cost, ceiling, 0.001,
-		"an over-powered weapon is clamped to its cadence ceiling instead of charging the derived price")
+	assert_lt(cost, mv.stamina_shot_cost * absurd.stamina_effort(),
+		"an over-powered weapon must be charged LESS than its derived price: the cadence ceiling has to bite")
+	var absurder := _priced_gun(1000.0, 0.125)
+	a.current_weapon = absurder
+	assert_almost_eq(a._shot_stamina_cost(), cost, 0.001,
+		"past the ceiling power stops mattering: ten times the damage at the same cadence costs the same per shot")
 	assert_lt(cost / 0.125, mv.stamina_sprint_drain,
 		"the clamp must hold sustained drain strictly under the sprint drain for ANY weapon a designer authors")
 	a.free()
 	absurd = null
+	absurder = null
 
 
 func test_melee_weapon_pays_no_shot_stamina() -> void:
@@ -437,22 +633,46 @@ func test_melee_weapon_pays_no_shot_stamina() -> void:
 
 
 func test_shot_stamina_never_refuses_fire_on_an_empty_pool() -> void:
-	# The deliberate melee/ranged asymmetry: _can_start_melee_attack() refuses a swing at zero, but there is no
-	# equivalent shot gate - an exhausted player must still be able to shoot, so the spend simply no-ops.
-	var a = load(ATTACK_PATH).new()
-	var p = load("res://scripts/player/player.gd").new()
+	# The deliberate melee/ranged asymmetry, driven through the real PLAYER trigger pull (_on_mouse_input_attack): on an
+	# empty pool the stamina gate refuses a swing, but a gun still fires and its spend no-ops. The Attack is off-tree, so
+	# a pull that gets through every gate (round consumed, stamina charged, cadence Timer started) returns at the
+	# is_inside_tree() check before any world effect. A started cadence Timer is therefore the sign the pull was NOT
+	# refused. Both weapons are auto_fire with no wind-up, so neither the semi-auto click check (which reads real Input)
+	# nor a wind-up await (which needs the tree) is what decides the outcome.
 	var gun := _priced_gun()
-	a.current_weapon = gun
+	gun.auto_fire = true
+	var fists := _slow_melee(1.0, 0.0)
+	fists.auto_fire = true
+	var a = load(ATTACK_PATH).new()
+	_give_timers(a)
+	var p = load("res://scripts/player/player.gd").new()
 	a.character = p
-	assert_false(a.has_method("_can_start_shot"),
-		"ranged fire must NOT grow a can-start stamina gate - an empty pool may never refuse a shot")
+	var clip := _give_empty_clip(a, gun)
+	clip.current_ammo = 6
 	p.stamina = 0.0
-	a._spend_shot_stamina()
+	a.current_weapon = fists
+	a._on_mouse_input_attack(null)
+	assert_true(a.attack.is_stopped(),
+		"control: on an empty pool the melee stamina gate refuses a swing through this same trigger pull")
+	p.stamina = 5.0
+	a._on_mouse_input_attack(null)
+	assert_false(a.attack.is_stopped(),
+		"control: the same swing goes through once the pool has stamina, so it was the empty pool that refused it")
+	a.attack.stop()
+	p.stamina = 0.0
+	a.current_weapon = gun
+	var rounds: int = clip.current_ammo
+	a._on_mouse_input_attack(null)
+	assert_false(a.attack.is_stopped(),
+		"a gun on the SAME empty pool must still fire: an exhausted player keeps an attack, so there is no shot stamina gate")
+	assert_eq(clip.current_ammo, rounds - 1,
+		"the round is spent: the shot was committed, not refused")
 	assert_almost_eq(p.stamina, 0.0, 0.001,
 		"firing on a pool ALREADY at zero is free - the spend no-ops rather than digging the debt deeper")
 	p.free()
 	a.free()
 	gun = null
+	fists = null
 
 
 func test_shot_from_a_positive_but_insufficient_pool_overdraws_into_debt() -> void:
@@ -507,29 +727,57 @@ func test_firing_arms_the_long_shot_regen_hold_not_the_movement_one() -> void:
 
 
 func test_shot_stamina_is_safe_without_a_stamina_bearing_wielder() -> void:
-	# An NPC wielder has no stamina pool (no spend_stamina method), and an unwired Attack has no wielder at all.
-	# Both must be silent no-ops, exactly like the melee spend — AI fire is always free.
+	# An NPC wielder has no stamina pool (npc.gd has no spend_stamina method), and an unwired Attack has no wielder at
+	# all. Both must be silent no-ops, exactly like the melee spend — AI fire is always free. The gun is PRICED, so the
+	# spend gets past its zero-cost early return and really reaches the wielder duck-type: calling spend_stamina on the
+	# NPC anyway would be a script error, and GUT fails a test on a script error. A Player wielding the same gun is the
+	# control that pays. The NPC is built off-tree and never add_child'd, so its _ready never runs.
+	var gun := _priced_gun()
 	var a = load(ATTACK_PATH).new()
-	var gun := WeaponData.new()
-	gun.is_melee = false
 	a.current_weapon = gun
+	var cost: float = a._shot_stamina_cost()
+	assert_gt(cost, 0.0, "precondition: the shot has a price, so the spend cannot return before the wielder check")
+	var npc = load("res://scripts/npc/npc.gd").new()
+	assert_false(npc.has_method("spend_stamina"), "precondition: an NPC carries no stamina pool to charge")
+	a.character = npc
+	a._spend_shot_stamina()  # a priced shot from a stamina-less NPC: must be a silent no-op
+	var p = load("res://scripts/player/player.gd").new()
+	p.stamina = 50.0
+	a.character = p
+	a._spend_shot_stamina()
+	assert_almost_eq(p.stamina, 50.0 - cost, 0.001,
+		"control: the same priced shot charges a stamina-bearing wielder")
 	a.character = null
-	a._spend_shot_stamina()  # must not crash
+	a._spend_shot_stamina()  # no wielder at all: a silent no-op
 	a.current_weapon = null
 	assert_almost_eq(a._shot_stamina_cost(), 0.0, 0.001,
 		"an Attack with no equipped weapon reports no shot stamina cost")
-	a._spend_shot_stamina()  # must not crash
+	a._spend_shot_stamina()
+	npc.free()
+	p.free()
 	a.free()
 	gun = null
 
 
-func test_swap_weapons_default_slots_empty() -> void:
-	# weapon_slots defaults to [] (swap_weapons.gd) so the player starts with NOTHING; a designer populates it on
-	# the SwapWeapons node in weapon.tscn (or assigns a Loadout) to hand out a starting kit.
-	var sw := SwapWeapons.new()
-	assert_eq(sw.weapon_slots.size(), 0,
-		"the default loadout is empty -- the player starts with no weapons until the scene / a Loadout supplies them")
-	sw.free()
+# ---------------------------------------------------------------------------
+# SwapWeapons (swap_weapons.gd) — the only combat script safe to add_child:
+# no _ready, no @onready. add_child_autofree lets watch_signals/assert_signal_*
+# observe equip_this; _try_equip is called directly (not via input).
+# ---------------------------------------------------------------------------
+
+func test_shipped_weapon_prefab_starts_the_player_with_no_weapons() -> void:
+	# The starting kit is read off the PREFAB, not the script default: Player seeds its backpack from
+	# Weapon.weapon_loadout(), which reads the SwapWeapons child of the weapon.tscn it instantiates, so a slot or a
+	# Loadout authored on that node would hand everyone a kit whatever swap_weapons.gd defaults to. Instantiated only,
+	# never added to the tree (no _ready runs).
+	var w = load("res://scenes/weapons/weapon.tscn").instantiate()
+	assert_true(w.get_node_or_null("SwapWeapons") is SwapWeapons,
+		"weapon.tscn must keep its SwapWeapons child, or weapon_loadout() reads [] for the wrong reason and the check below proves nothing")
+	assert_eq(w.weapon_loadout().size(), 0,
+		"SHIP DECISION: the player starts with NO weapons (scavenge your own gear), so the shipped weapon prefab must not author a starting kit")
+	assert_true(w.loadout() == null,
+		"SHIP DECISION: no Loadout resource on the shipped prefab may hand out a kit, clips or money either")
+	w.free()
 
 
 func test_swap_weapons_try_equip_valid_index_emits() -> void:
@@ -546,15 +794,24 @@ func test_swap_weapons_try_equip_valid_index_emits() -> void:
 
 
 func test_swap_weapons_try_equip_out_of_range_does_not_emit() -> void:
-	# Bounds guard: `var slots := effective_slots(); if index < 0 or index >= slots.size(): return`
-	# (swap_weapons.gd). Neither -1 nor 999 may emit.
+	# ONE authored slot, so both out-of-range edges and the in-range control share a rig: -1 (a negative index would
+	# WRAP to the last slot in GDScript) and slots.size() (the first index past the end) must both be refused, while
+	# slot 0 of the same loadout emits.
 	var sw := SwapWeapons.new()
+	var pistol: WeaponData = load("res://resources/weapons/pistol.tres")
+	var slots: Array[Resource] = [pistol]
+	sw.weapon_slots = slots
 	add_child_autofree(sw)
 	watch_signals(sw)
 	sw._try_equip(-1)
-	sw._try_equip(999)
+	sw._try_equip(1)
 	assert_signal_not_emitted(sw, "equip_this",
-		"An out-of-range slot key must not emit a spurious equip_this — only bound slots (0..5) may trigger a weapon swap.")
+		"An out-of-range slot key (-1, or one past the last authored slot) must not emit a spurious equip_this — only an index inside the authored slots may trigger a weapon swap.")
+	sw._try_equip(0)
+	assert_signal_emit_count(sw, "equip_this", 1,
+		"control: the in-range slot of the same loadout does emit, so the refusals above came from the bounds check")
+	assert_eq(get_signal_parameters(sw, "equip_this"), [pistol],
+		"and it hands out that slot's weapon")
 
 
 func test_swap_weapons_request_equip_emits() -> void:
@@ -580,26 +837,11 @@ func test_swap_weapons_request_equip_null_is_noop() -> void:
 
 
 # ---------------------------------------------------------------------------
-# Throwable (Throwable.gd) — gib-confetti ELIGIBILITY GUARD logic.
-# A RigidBody3D whose _ready() arms contact monitoring, connects body_entered,
-# builds the overlay chain AND stamps _spawn_msec = Time.get_ticks_msec(). We
-# instantiate WITHOUT add_child so _ready never fires: this leaves _spawn_msec at
-# its default 0 (so every gib reads as "stale" — far past confetti_fresh_window_ms)
-# and avoids the tree/World3D entirely. data is set via `inter.data = d`; the
-# _set_data setter only touches visuals under Engine.is_editor_hint(), so outside
-# the editor it is a plain assignment (a no-op beyond storing the value).
-#
-# What we deliberately SKIP and why:
-#   - The POSITIVE path (_is_confetti_kill returning true) is intentionally NOT
-#     unit-tested: it falls through every guard to _is_airborne(), which derefs
-#     get_world_3d().direct_space_state and casts a real raycast — that needs a
-#     live tree + World3D + physics space and cannot run on a bare instance. The
-#     four early-return guards below (data/is_gib, eligibility, freshness, attacker)
-#     each short-circuit BEFORE that world access, so they ARE safe to assert here.
-#   - _destroy() / on_impact() / take_damage() and the rest of the destruction
-#     path (particles, decals, screen shake, AudioManager, queue_free) are NOT
-#     exercised: they spawn nodes into get_tree().root, raycast the world, and
-#     play audio — never safe to drive in a unit test without the real scene.
+# Throwable (Throwable.gd) — the instance -> ThrowableData -> default resolvers, the carry pose, breathing, and the
+# gib-confetti trick-shot. Most tests build the prop OFF-tree (load(...).new(), no add_child) so _ready never arms
+# contact monitoring or builds the overlay chain; `inter.data = d` is a plain assignment outside the editor.
+# The carry-pose and confetti tests go IN the tree (they read global transforms / cast a world ray).
+# Not exercised: _destroy() / on_impact() / take_damage() (particles, decals, screen shake, AudioManager, queue_free).
 # ---------------------------------------------------------------------------
 
 func test_throwable_look_name_defaults_to_generic_pick_up() -> void:
@@ -1062,14 +1304,24 @@ func test_throwable_held_visibility_instance_can_force_opaque() -> void:
 	inter.free()
 
 
-func test_throwable_breathe_defaults_off() -> void:
+func test_throwable_breathe_defaults_off_and_an_untuned_opt_in_still_breathes_subtly() -> void:
 	var inter = load("res://scripts/components/Throwable.gd").new()
 	assert_false(inter.breathes(),
 		"An unconfigured Throwable should stay visually static by default.")
-	assert_eq(inter._resolved_breathe_amount(), 0.03,
-		"Default throwable breathe amount mirrors the NPC torso breathe amount.")
-	assert_eq(inter._resolved_breathe_rate(), 1.6,
-		"Default throwable breathe rate mirrors the NPC torso breathe rate.")
+	var mi := MeshInstance3D.new()
+	inter.add_child(mi)
+	inter.mesh_instance = mi
+	inter.hp = 1
+	inter.breathe = true  # opted in, breathe_amount / breathe_rate left at 0 = inherit the defaults
+	inter._cache_breathe_base_scale()
+	var peak := 0.0
+	for i in 200:  # 10 s of 0.05 s ticks: several whole breaths at any sane default rate
+		inter._animate_breathing(0.05)
+		peak = maxf(peak, absf(mi.scale.x - 1.0))
+	assert_gt(peak, 0.0,
+		"a prop opted into breathing with no tuning must still visibly pulse: 0 on the knobs means inherit the default, not off")
+	assert_lt(peak, 0.1,
+		"the untuned default must read as a subtle breath, not the prop swelling by 10% or more")
 	inter.free()
 
 
@@ -1130,79 +1382,78 @@ func test_throwable_breathe_scales_visual_only() -> void:
 	inter.free()
 
 
-func test_interactable_confetti_eligible_true_on_fresh_instance() -> void:
-	# `var _confetti_eligible: bool = true` (Throwable.gd:38) — a fresh gib is
-	# eligible for the confetti trick-shot until something picks it up.
-	var inter = load("res://scripts/components/Throwable.gd").new()
-	assert_true(inter._confetti_eligible,
-		"A freshly-spawned Throwable must start confetti-eligible — a gib straight off a kill is the only thing that can earn the trick-shot confetti.")
-	inter.free()
+# ---------------------------------------------------------------------------
+# Gib-confetti trick-shot (_is_confetti_kill). IN the tree: its last gate is _is_airborne's world raycast, and _ready
+# stamps the spawn time the freshness gate measures. Each gib is frozen (no gravity drift) far above anything a test
+# builds, so it reads as mid-air. Every test starts from a gib that DOES qualify and flips exactly one condition, so a
+# refusal can never pass just because the whole predicate went dead.
+# ---------------------------------------------------------------------------
+
+const CONFETTI_Y := 5000.0
 
 
-func test_interactable_on_picked_up_clears_confetti_eligible() -> void:
-	# on_picked_up() body: `_confetti_eligible = false` (Throwable.gd:435-436).
-	# Picking a gib up disqualifies it from the confetti trick-shot (anti-cheese).
-	var inter = load("res://scripts/components/Throwable.gd").new()
-	inter.on_picked_up(null)
-	assert_false(inter._confetti_eligible,
-		"on_picked_up() must clear _confetti_eligible so a picked-up/thrown gib can't be shot for cheesed confetti.")
-	inter.free()
+func _fresh_midair_gib(x: float) -> Throwable:
+	var gib := Throwable.new()
+	gib.freeze = true
+	add_child_autofree(gib)
+	gib.global_position = Vector3(x, CONFETTI_Y, 0.0)
+	var d := ThrowableData.new()
+	d.is_gib = true
+	gib.data = d
+	return gib
+
+
+func _player_shooter() -> Node:
+	var shooter: Node = autofree(Node.new())
+	shooter.add_to_group(Groups.PLAYER)  # off-tree: is_in_group answers, and no global group scan can see it
+	return shooter
+
+
+func test_throwable_fresh_midair_gib_shot_by_the_player_confettis_until_it_is_picked_up() -> void:
+	var gib := _fresh_midair_gib(0.0)
+	var shooter := _player_shooter()
+	assert_true(gib._is_confetti_kill(shooter),
+		"a gib fresh off a kill, shot mid-air by the player, must be a confetti trick-shot")
+	gib.on_picked_up(null)
+	assert_false(gib._is_confetti_kill(shooter),
+		"once the player has picked the gib up it is disqualified: tossing a gib and shooting it must not farm confetti")
 
 
 func test_interactable_is_confetti_kill_false_when_data_null() -> void:
-	# First guard: `if data == null or not data.is_gib: return false`
-	# (Throwable.gd:290-291). With no data resource at all it must bail out
-	# immediately — before any eligibility/freshness/world access.
-	var inter = load("res://scripts/components/Throwable.gd").new()
-	assert_false(inter._is_confetti_kill(null),
-		"_is_confetti_kill() must return false when data is null — a prop with no ThrowableData is never a gib and can't confetti.")
-	inter.free()
+	var gib := _fresh_midair_gib(10.0)
+	var shooter := _player_shooter()
+	assert_true(gib._is_confetti_kill(shooter), "guard: this mid-air gib qualifies while it carries gib data")
+	gib.data = null
+	assert_false(gib._is_confetti_kill(shooter),
+		"a prop with no ThrowableData is not a gib and must never confetti")
 
 
 func test_interactable_is_confetti_kill_false_for_non_gib_data() -> void:
-	# Same first guard via the `not data.is_gib` arm: a crate-style ThrowableData
-	# (is_gib defaults to false) must never confetti.
-	var inter = load("res://scripts/components/Throwable.gd").new()
-	var d := ThrowableData.new()
-	# is_gib defaults to false (throwable_data.gd:89) — a plain crate.
-	inter.data = d
-	assert_false(inter._is_confetti_kill(null),
-		"_is_confetti_kill() must return false for a non-gib ThrowableData — crates and barrels never burst into confetti, only gore gibs.")
-	inter.free()
-
-
-func test_interactable_is_confetti_kill_false_after_pickup() -> void:
-	# Eligibility guard: `if not _confetti_eligible: return false`
-	# (Throwable.gd:292-293). With a GIB data resource the first guard passes,
-	# but on_picked_up() has cleared eligibility — and that gate short-circuits
-	# BEFORE any world/raycast access, so this is safe with no tree.
-	var inter = load("res://scripts/components/Throwable.gd").new()
-	var d := ThrowableData.new()
-	d.is_gib = true
-	inter.data = d
-	inter.on_picked_up(null)
-	assert_false(inter._is_confetti_kill(null),
-		"_is_confetti_kill() must return false once a gib has been picked up — the eligibility gate disqualifies a thrown gib before any world access.")
-	inter.free()
+	var gib := _fresh_midair_gib(20.0)
+	var shooter := _player_shooter()
+	assert_true(gib._is_confetti_kill(shooter), "guard: this mid-air gib qualifies while its data is a gib")
+	gib.data = ThrowableData.new()  # a plain crate: is_gib left at its default
+	assert_false(gib._is_confetti_kill(shooter),
+		"crates and barrels never burst into confetti, only gore gibs")
 
 
 func test_interactable_is_confetti_kill_false_for_stale_gib() -> void:
-	# Freshness guard: `if Time.get_ticks_msec() - _spawn_msec >= confetti_fresh_window_ms: return false`.
-	# Stamp _spawn_msec deterministically into the PAST (older than the window) so staleness never depends
-	# on how long the engine has been up. The freshness gate (3rd check) trips BEFORE the attacker/world
-	# checks, so even a valid Player-group attacker still yields false — proving it's the staleness (not a
-	# null attacker) that disqualifies the gib, and confirming no World3D is ever touched on this path.
-	var inter = load("res://scripts/components/Throwable.gd").new()
-	var d := ThrowableData.new()
-	d.is_gib = true
-	inter.data = d
-	inter._spawn_msec = Time.get_ticks_msec() - inter.confetti_fresh_window_ms - 1000
-	var attacker := Node.new()
-	attacker.add_to_group(&"Player")
-	assert_false(inter._is_confetti_kill(attacker),
-		"_is_confetti_kill() must return false for a stale gib — only a gib fresh off a kill (within confetti_fresh_window_ms) qualifies; the freshness gate trips before the attacker/world checks.")
-	attacker.free()
-	inter.free()
+	var gib := _fresh_midair_gib(30.0)
+	var shooter := _player_shooter()
+	assert_true(gib._is_confetti_kill(shooter), "guard: the gib qualifies the moment it bursts out")
+	gib._spawn_msec = Time.get_ticks_msec() - gib.confetti_fresh_window_ms - 1000
+	assert_false(gib._is_confetti_kill(shooter),
+		"a gib older than confetti_fresh_window_ms has been lying around, not flying off a fresh kill, so it must not confetti")
+
+
+func test_throwable_confetti_needs_the_player_to_have_fired_the_shot() -> void:
+	var gib := _fresh_midair_gib(40.0)
+	assert_true(gib._is_confetti_kill(_player_shooter()), "guard: the player's shot qualifies")
+	var npc_shooter: Node = autofree(Node.new())
+	assert_false(gib._is_confetti_kill(npc_shooter),
+		"an NPC's round hitting the same mid-air gib must not pay out the player's trick-shot")
+	assert_false(gib._is_confetti_kill(null),
+		"nor may a hit with no attacker at all")
 
 
 # ---------------------------------------------------------------------------
@@ -1403,14 +1654,20 @@ func test_attack_reload_view_scale_tracks_the_reload_it_scaled() -> void:
 	# and GunPose mirrors into `gun_raised` — which BLOCKS FIRING. So a fixed 0.5 s raise would be a flat tail on
 	# every reload that agility could never shorten: the player-felt reload would be effective + 0.5 s, turning a
 	# promised 4x into 2x. That is an interior plateau arriving by the back door, and the NO SOFT CAP contract
-	# forbids it. This pins the factor against the duration it came from, so the two cannot drift.
+	# forbids it. This pins the factor against the seconds the reload Timer is ACTUALLY waiting, read off a real reload
+	# started through _on_reload_reload, so the view gesture and the clock cannot drift apart.
 	var gun := _priced_gun()
 	gun.reload_time = 2.0
 	for agi in [0, 4, 10, 20]:
 		var pair := _wielder_attack(agi, gun)
 		var a = pair[0]
-		assert_almost_eq(a.reload_view_scale(), a.effective_reload_time() / gun.reload_time, 0.0001,
-			"at agility %d the view scale must be exactly the ratio the reload Timer took" % agi)
+		_give_timers(a)
+		_give_empty_clip(a, gun)
+		a._on_reload_reload()
+		assert_false(a.reload.is_stopped(), "guard: the reload must actually have started at agility %d" % agi)
+		var timer_seconds: float = a.reload.wait_time
+		assert_almost_eq(a.reload_view_scale() * gun.reload_time, timer_seconds, 0.0001,
+			"at agility %d the view model's reload gesture must be scaled by exactly the ratio the reload Timer is waiting" % agi)
 		_free_pair(pair)
 	gun = null
 

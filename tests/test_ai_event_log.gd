@@ -1,14 +1,25 @@
 extends GutTest
 
 ## AiEventLog (2026-08-18, in-game debug suite iter 4): the PURE helpers — line formatting, the ring cap, the
-## snapshot diff, lines() filter + count over the shared STATIC ring, the enum-word mapping — plus an off-tree
-## construct + panel-API check. The live sweep (group polling, duck-typed NPC reads, signal edges) is
+## snapshot diff, lines() filter + count over the shared STATIC ring, the enum-word mapping — plus the panel
+## (built by a real in-tree instance with no NPCs around) and the channel mute mask. The live sweep (group polling, duck-typed NPC reads, signal edges) is
 ## play-verified: it needs real NPCs, and a unit test must never _ready() one (CLAUDE.md, Tests).
 
 ## Preloaded by PATH, never by class_name: a not-yet-rescanned editor cache would fail the whole file to parse
 ## with "Could not find type AiEventLog" (the new-classname-not-registered cascade).
 const AiEventLogScript := preload("res://scripts/components/ai_event_log.gd")
 const PerceptionScript := preload("res://scripts/npc/perception.gd")
+
+
+## Duck-typed stand-ins for archetype_of: an NpcData-shaped profile and an NPC-shaped handle carrying it.
+class _Profile extends Resource:
+	var id: String = ""
+	var display_name: String = ""
+
+
+class _NpcStub extends Node:
+	var profile: Resource = null
+	var display_name: String = ""
 
 
 func before_each() -> void:
@@ -221,6 +232,25 @@ func test_gone_word_tells_freed_from_pooled_from_left_group() -> void:
 	assert_eq(AiEventLogScript.gone_word(off_tree), "freed", "a freed handle reads as freed (untyped param — no type-check rejection first)")
 
 
+func test_archetype_of_prefers_the_profile_id_then_the_profile_name_then_the_npcs_own_name() -> void:
+	var npc := _NpcStub.new()
+	var prof := _Profile.new()
+	prof.id = "raider_scav"
+	prof.display_name = "Scavenger"
+	npc.profile = prof
+	npc.display_name = "Bob"
+	assert_eq(AiEventLogScript.archetype_of(npc), "raider_scav", "the authored NpcData.id wins — it is the rename-proof identity")
+	prof.id = ""
+	assert_eq(AiEventLogScript.archetype_of(npc), "Scavenger", "no id -> the profile's display_name")
+	npc.profile = null
+	npc.display_name = "  Bob  "
+	assert_eq(AiEventLogScript.archetype_of(npc), "Bob", "no profile -> the NPC's own name, trimmed")
+	npc.display_name = "   "
+	assert_eq(AiEventLogScript.archetype_of(npc), "-", "a blank own name is no name -> dash")
+	npc.free()
+	prof = null
+
+
 func test_archetype_of_degrades_to_dash() -> void:
 	assert_eq(AiEventLogScript.archetype_of(null), "-", "no handle -> dash")
 	var bare := Node.new()
@@ -228,15 +258,44 @@ func test_archetype_of_degrades_to_dash() -> void:
 	bare.free()
 
 
-# --- construct off-tree + panel API ---------------------------------------------------------------------------------
+# --- the panel + the mute mask, driven on a real instance ------------------------------------------------------------
+# In-tree is safe: _ready only builds the panel and starts a sweep of Groups.NPC, which is empty in a unit test.
 
-func test_constructs_off_tree_and_panel_api_is_safe_before_ready() -> void:
+func test_a_panel_authored_on_before_ready_is_built_visible_and_tails_the_ring() -> void:
+	for i in 5:
+		AiEventLogScript.record("l%d" % i)
 	var n = AiEventLogScript.new()
-	assert_not_null(n, "the drop-in compiles + constructs off-tree (no _ready until added to a tree)")
-	assert_false(n.is_panel_visible(), "the panel ships hidden")
+	n.panel_lines = 3
+	n.show_panel = true  # a scene-authored export lands through the setter BEFORE _ready builds the panel
+	add_child_autofree(n)
+	var panel: Control = n.get_node_or_null(^"Panel")
+	assert_true(panel != null, "_ready builds the last-N panel")
+	assert_true(panel.visible, "a panel ticked on in the scene must come up visible once built (_ready catches up from show_panel)")
+	assert_true(n.is_panel_visible(), "…and reports itself visible")
+	assert_eq(n._label.text, "l2\nl3\nl4", "the panel shows the last panel_lines lines, oldest on top and the newest at the bottom")
+
+
+func test_toggling_the_panel_paints_lines_recorded_while_hidden_and_hides_it_again() -> void:
+	var n = AiEventLogScript.new()
+	add_child_autofree(n)
+	var panel: Control = n.get_node_or_null(^"Panel")
+	assert_true(panel != null, "_ready builds the panel even while it is hidden")
+	assert_false(panel.visible, "the panel ships hidden")
+	AiEventLogScript.record("T+1.0s  raider  target: - -> Player")
 	n.set_panel_visible(true)
-	assert_true(n.is_panel_visible(), "the flag flips even before the panel is built (no crash on a null panel)")
+	assert_true(panel.visible, "`ailog on` shows the built panel")
+	assert_true(n._label.text.contains("raider  target"), "a line recorded while hidden is painted the moment the panel opens, not a tick later")
 	n.set_panel_visible(false)
-	assert_false(n.is_panel_visible())
-	assert_eq(int(n.channels), int(AiEventLogScript.ALL_CHANNELS), "every channel records by default")
+	assert_false(panel.visible, "`ailog off` hides the panel again")
+	assert_false(n.is_panel_visible(), "…and reports itself hidden")
+
+
+func test_a_fresh_log_records_every_channel_and_a_mute_silences_only_that_channel() -> void:
+	var n = AiEventLogScript.new()
+	for ch in AiEventLogScript.CHANNEL_BITS:
+		assert_true(n._channel_on(ch), "an untouched log records the '%s' channel — nothing ships muted" % ch)
+	n.channels = int(n.channels) & ~int(AiEventLogScript.CHANNEL_BITS[AiEventLogScript.CH_TARGET])
+	assert_false(n._channel_on(AiEventLogScript.CH_TARGET), "unticking target stops recording target flips")
+	assert_true(n._channel_on(AiEventLogScript.CH_GOAL), "…and leaves every other channel recording")
+	assert_true(n._channel_on("some_future_channel"), "a channel word with no mute bit is always on, never silently muted")
 	n.free()

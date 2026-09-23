@@ -67,14 +67,66 @@ func test_skin_exposes_volume_trims_and_retrigger_limits() -> void:
 	# denied_volume_db is the ONE trim with a non-zero default, and deliberately so: its default voice is a
 	# BORROWED clip (back_sound), levelled for a different job, so it needs pulling down out of the box.
 	assert_true(props.has(&"denied_volume_db"), "MenuSkin must expose denied_volume_db")
-	assert_eq(skin.denied_volume_db, -2.0, "denied_volume_db default (the derived cue borrows a clip levelled for 'close')")
+	assert_lt(skin.denied_volume_db, 0.0,
+		"denied_volume_db must default BELOW 0 dB — the derived cue borrows back_sound, a clip levelled for 'close', and plays it louder than a refusal should be otherwise")
 	assert_true(props.has(&"denied_pitch_scale"), "MenuSkin must expose denied_pitch_scale")
 	assert_lt(skin.denied_pitch_scale, 1.0,
 		"the denial must default BELOW unity pitch — detuning is the only thing separating a derived refusal from the close cue it borrows")
-	# The anti-machine-gun thresholds are designer knobs, not consts (CLAUDE.md: never hardcode a tunable).
-	assert_eq(skin.hover_min_interval, 0.05, "hover_min_interval default")
-	assert_eq(skin.step_min_interval, 0.08, "step_min_interval default")
-	assert_eq(skin.slider_tick_count, 12, "slider_tick_count default")
+	# The anti-machine-gun thresholds are designer knobs, not consts (CLAUDE.md: never hardcode a tunable). Their
+	# values are the designer's; what a bare skin must NOT do is ship with the throttle switched off (0 = no limit)
+	# or a slider that ticks once per sweep. That the knobs are actually READ is driven in
+	# test_retrigger_limits_are_read_from_the_skin below.
+	for knob in [&"hover_min_interval", &"step_min_interval", &"slider_tick_count"]:
+		assert_true(props.has(knob), "MenuSkin must expose the '%s' retrigger knob" % knob)
+	assert_gt(skin.hover_min_interval, 0.0, "a bare skin throttles hover ticks — 0 would machine-gun a cursor sweep down a list")
+	assert_gt(skin.step_min_interval, 0.0, "a bare skin throttles step ticks — 0 would machine-gun keyboard auto-repeat")
+	assert_gt(skin.slider_tick_count, 1, "a full slider sweep ticks more than once, or dragging has no audible texture")
+	skin = null
+
+
+## The retrigger knobs are the ones the throttles actually consult. Driven on a BARE instance with a fixture skin
+## (clips left null, so nothing ever reaches a player) whose _build_sound() has run off-tree — the throttle stamps
+## are the observable: a stamp that moves means the cue got past its window, a stamp that stays means it was dropped.
+## Each window is exercised both ways on the SAME stamp age, so only the knob's value decides the outcome.
+func test_retrigger_limits_are_read_from_the_skin() -> void:
+	var bare: Node = load(STYLE_SCRIPT).new()
+	var skin := MenuSkin.new()
+	bare.skin = skin
+	bare._build_sound()
+	var now := Time.get_ticks_msec()
+	# Step: the last tick was 100 ms ago.
+	skin.step_min_interval = 1.0
+	bare._step_last_ms = now - 100
+	bare.play_step(1)
+	assert_eq(bare._step_last_ms, now - 100, "a step 100 ms after the last one is DROPPED under a 1 s step_min_interval")
+	skin.step_min_interval = 0.01
+	bare.play_step(1)
+	assert_true(bare._step_last_ms >= now, "the same step gets through once step_min_interval is 10 ms — the window is the skin's")
+	# Hover: same shape, unkeyed (id 0) so only the interval floor applies.
+	skin.hover_min_interval = 1.0
+	bare._hover_last_ms = now - 100
+	bare.play_hover(0)
+	assert_eq(bare._hover_last_ms, now - 100, "a hover 100 ms after the last one is DROPPED under a 1 s hover_min_interval")
+	skin.hover_min_interval = 0.01
+	bare.play_hover(0)
+	assert_true(bare._hover_last_ms >= now, "the same hover gets through once hover_min_interval is 10 ms")
+	# Slider: a full 0..100 sweep with the time throttle bypassed ticks ~slider_tick_count times — for a count the
+	# live skin does not use, so a hardcoded bucket count cannot pass.
+	skin.slider_tick_count = 4
+	var s := HSlider.new()
+	s.min_value = 0.0
+	s.max_value = 100.0
+	s.step = 1.0
+	bare.play_slider_step(s, 0.0)  # seed
+	var ticks := 0
+	for v in range(1, 101):
+		bare._step_last_ms = 0
+		bare.play_slider_step(s, float(v))
+		if bare._step_last_ms != 0:
+			ticks += 1
+	assert_almost_eq(ticks, 4, 1, "a full sweep ticks ~slider_tick_count (4) times, got %d — the quantiser ignores the knob" % ticks)
+	s.free()
+	bare.free()
 	skin = null
 
 
@@ -173,11 +225,21 @@ func test_denial_has_its_own_voice_outside_the_pool() -> void:
 ## work for a list that repaints under a stationary cursor; passing 0 opts out of that gate (but not the
 ## interval floor). Asserted through the public seam only — the internals are free to move.
 func test_play_hover_accepts_a_target_id_and_stays_silent_while_quiet() -> void:
+	MenuStyle._hover_player.stop()
+	MenuStyle._hover_last_ms = 0  # a clean throttle, so only the latch can silence the first call
+	MenuStyle._hover_last_id = 0
 	MenuStyle.set_quiet(true)
 	MenuStyle.play_hover(12345)   # must be a no-op, not an error, during the close-everything sweep
 	MenuStyle.set_quiet(false)
 	assert_false(MenuStyle._hover_player.playing,
 		"a hover fired under the quiet latch must not sound — close_all_modals holds it across ~17 screens")
+	# Control: the same keyed hover with the latch released DOES sound, so the silence above was the latch.
+	MenuStyle._hover_last_ms = 0
+	MenuStyle._hover_last_id = 0
+	MenuStyle.play_hover(12345)
+	assert_true(MenuStyle._hover_player.playing,
+		"with the latch released a keyed play_hover sounds on the shipped skin — a tile hover is audible")
+	MenuStyle._hover_player.stop()
 
 
 # --- The boot / off-tree structural guard --------------------------------------------------------------
@@ -239,6 +301,7 @@ func test_muted_button_keeps_hover_but_never_clicks() -> void:
 	MenuStyle.set_button_sound(btn, &"")
 	MenuStyle._wire_button(btn)
 	assert_false(btn.pressed.is_connected(MenuStyle._play_click), "a muted button must not fire the generic click")
+	assert_true(btn.mouse_entered.get_connections().size() > 0, "...but its hover blip stays wired — mute is click-only")
 	assert_eq(StringName(btn.get_meta(&"_snd_semantic")), &"", "&\"\" is the explicit mute marker")
 	btn.free()
 
@@ -258,15 +321,35 @@ func test_set_button_sound_is_idempotent_and_repointable() -> void:
 
 func test_first_slider_call_only_seeds() -> void:
 	# Menus write .value programmatically (loading settings, Revert, rebuilding a tab). The first call for a
-	# slider must therefore be silent, or every Apply would tick.
+	# slider must therefore be silent, or every Apply would tick. The CONTROL is the same 0 -> 50 jump on a slider
+	# that HAS been seen at 0: that one is half a sweep across buckets and ticks, so this fixture is audible (not
+	# latched quiet, not throttled) and the silence of the unseen slider's write to 50 is the first-call rule.
+	assert_false(MenuStyle._quiet, "precondition: the cues are not latched silent, so a tick this test expects is reachable")
+	var seen := HSlider.new()
+	seen.min_value = 0.0
+	seen.max_value = 100.0
+	seen.step = 1.0
+	MenuStyle.play_slider_step(seen, 0.0)  # seen once, at its minimum
+	MenuStyle._step_last_ms = 0
+	MenuStyle.play_slider_step(seen, 50.0)
+	assert_ne(MenuStyle._step_last_ms, 0, "control: a slider already seen at 0 TICKS when it moves to 50")
 	var s := HSlider.new()
 	s.min_value = 0.0
 	s.max_value = 100.0
 	s.step = 1.0
 	MenuStyle._step_last_ms = 0
-	MenuStyle.play_slider_step(s, 50.0)
-	assert_true(s.has_meta(&"_snd_last"), "the first call stashes the previous value on the slider")
-	assert_eq(MenuStyle._step_last_ms, 0, "the seeding call must NOT play — it is bookkeeping, not a drag")
+	MenuStyle.play_slider_step(s, 50.0)  # the first call this slider ever makes, straight to 50
+	assert_true(s.has_meta(&"_snd_last"), "the first call stashes the value on the slider")
+	assert_eq(MenuStyle._step_last_ms, 0,
+		"the seeding call must NOT play — a first-sight write to 50 is a settings load, not a drag from the minimum")
+	# The stash is what the NEXT call measures from, so a seed that recorded nothing (or the wrong value) shows here.
+	MenuStyle._step_last_ms = 0
+	MenuStyle.play_slider_step(s, 0.0)
+	assert_ne(MenuStyle._step_last_ms, 0,
+		"...and the seed was the value written: the next move, 50 back down to 0, is a real drag and ticks")
+	for v: AudioStreamPlayer in MenuStyle._ui_players:
+		v.stop()
+	seen.free()
 	s.free()
 
 
@@ -291,14 +374,25 @@ func test_slider_ticks_once_per_bucket_not_once_per_step() -> void:
 
 
 func test_step_throttle_drops_a_repeat_inside_the_window() -> void:
-	# This is what tames keyboard AUTO-REPEAT on the Options cyclers, which deliberately allow echo.
-	MenuStyle._step_last_ms = 0
+	# This is what tames keyboard AUTO-REPEAT on the Options cyclers, which deliberately allow echo. Asserted on the
+	# LIVE autoload with the SHIPPED skin's window: test_retrigger_limits_are_read_from_the_skin proves the knob is
+	# read on a fixture skin, this proves the skin the player actually hears throttles at all. The repeat is placed
+	# HALF a window after the last tick by backdating the stamp (at least 1 ms, so a zero window cannot pass by two
+	# calls landing in the same millisecond), and the control is the same step once the window has fully passed.
+	assert_false(MenuStyle._quiet, "precondition: the cues are not latched silent, so only the throttle can drop a step")
+	var window_ms := int(MenuStyle.skin.step_min_interval * 1000.0)
+	var now := Time.get_ticks_msec()
+	var last_tick := now - maxi(1, int(window_ms * 0.5))
+	MenuStyle._step_last_ms = last_tick
 	MenuStyle.play_step(1)
-	var first: int = MenuStyle._step_last_ms
-	assert_ne(first, 0, "the first step stamps the throttle clock")
+	assert_eq(MenuStyle._step_last_ms, last_tick,
+		"a step half of the shipped step_min_interval (%d ms) after the last tick must be DROPPED, not queued" % window_ms)
+	MenuStyle._step_last_ms = now - window_ms - 50
 	MenuStyle.play_step(1)
-	assert_eq(MenuStyle._step_last_ms, first,
-		"a second step inside skin.step_min_interval must be DROPPED, not queued")
+	assert_true(MenuStyle._step_last_ms >= now,
+		"control: the same step once the whole window has passed gets through, so the drop above was the window")
+	for v: AudioStreamPlayer in MenuStyle._ui_players:
+		v.stop()
 
 
 func test_zero_direction_is_a_no_op() -> void:
@@ -341,10 +435,19 @@ func test_a_stale_click_is_not_cut_by_a_later_cue() -> void:
 
 
 func test_quiet_next_back_eats_exactly_one_back() -> void:
-	# For a commit that immediately closes its own screen (respec confirm, a save that reloads).
+	# For a commit that immediately closes its own screen (respec confirm, a save that reloads). Observed on the
+	# semantic pool: the eaten back must leave every voice silent, and the NEXT back must speak.
+	MenuStyle._quiet_backs = 0
+	for v: AudioStreamPlayer in MenuStyle._ui_players:
+		v.stop()
 	MenuStyle.quiet_next_back()
-	assert_eq(MenuStyle._quiet_backs, 1, "one token queued")
 	MenuStyle.play_back()
-	assert_eq(MenuStyle._quiet_backs, 0, "the next back cue consumes the token")
+	assert_false(MenuStyle._ui_players.any(func(v: AudioStreamPlayer) -> bool: return v.playing),
+		"the back cue right after quiet_next_back is eaten — no pool voice starts")
 	MenuStyle.play_back()
-	assert_eq(MenuStyle._quiet_backs, 0, "and only ONE back is eaten — later closes still speak")
+	assert_true(MenuStyle._ui_players.any(func(v: AudioStreamPlayer) -> bool:
+			return v.playing and v.stream == MenuStyle.skin.back_sound),
+		"and only ONE back is eaten — the next close speaks with the back clip")
+	for v: AudioStreamPlayer in MenuStyle._ui_players:
+		v.stop()
+	MenuStyle._quiet_backs = 0

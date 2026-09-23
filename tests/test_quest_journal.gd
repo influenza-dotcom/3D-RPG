@@ -17,11 +17,11 @@ func _obj(oid: StringName, desc := "", cnt := 1, optional := false) -> QuestObje
 
 func test_objective_line_formatting() -> void:
 	var j = load(JOURNAL_PATH).new()
-	assert_eq(j.objective_line(_obj(&"o", "Kill the boss"), false, 0), "[ ] Kill the boss", "open single objective")
-	assert_eq(j.objective_line(_obj(&"o", "Kill the boss"), true, 1), "[x] Kill the boss", "done -> checked box")
-	assert_eq(j.objective_line(_obj(&"o", "Collect parts", 5), false, 2), "[ ] Collect parts (2/5)", "a counted objective shows progress")
-	assert_eq(j.objective_line(_obj(&"o", "Find the cache", 1, true), false, 0), "[ ] Find the cache  (optional)", "optional tag")
-	assert_eq(j.objective_line(_obj(&"reach_exit", "", 1), false, 0), "[ ] reach_exit", "falls back to the id when no description")
+	assert_eq(j.objective_line(_obj(&"o", "Kill the boss"), false, 0), "Kill the boss", "open single objective")
+	assert_eq(j.objective_line(_obj(&"o", "Kill the boss"), true, 1), "Kill the boss", "done -> checked box")
+	assert_eq(j.objective_line(_obj(&"o", "Collect parts", 5), false, 2), "Collect parts (2/5)", "a counted objective shows progress")
+	assert_eq(j.objective_line(_obj(&"o", "Find the cache", 1, true), false, 0), "Find the cache  (optional)", "optional tag")
+	assert_eq(j.objective_line(_obj(&"reach_exit", "", 1), false, 0), "Reach Exit", "falls back to the CAPITALIZED id when no description (never a raw snake_case id on screen)")
 	j.free()
 
 func test_active_and_completed_getters() -> void:

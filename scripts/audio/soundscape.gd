@@ -65,10 +65,16 @@ static func scan(tree: SceneTree) -> Dictionary:
 ## know how loud the world currently is (the wandering bed, a debug readout). COMBAT outranks CAUTION, so a
 ## mixed crowd of one shooter and one searcher reports COMBAT.
 static func alert_level(tree: SceneTree) -> Alert:
-	var s := scan(tree)
-	if bool(s["combat"]):
+	return collapse(scan(tree))
+
+
+## The worst-first collapse of a scan() pair into one tier. Split out of alert_level as a pure static so the
+## ordering can be pinned with literal pairs: the mixed crowd it exists for needs live NPCs in the `npc` group,
+## and an NPC's _ready can never run in a unit test.
+static func collapse(seen: Dictionary) -> Alert:
+	if bool(seen["combat"]):
 		return Alert.COMBAT
-	if bool(s["caution"]):
+	if bool(seen["caution"]):
 		return Alert.CAUTION
 	return Alert.CALM
 

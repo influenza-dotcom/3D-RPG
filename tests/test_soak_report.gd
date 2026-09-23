@@ -30,11 +30,33 @@ func test_leak_detected_needs_two_samples() -> void:
 		"no samples is not a leak")
 
 
-func test_stranded_threshold_matches_npc_convention() -> void:
-	# npc.gd's _tick_stranded flags at _stranded_cycles >= 3; the soak MUST use the same number or it would
-	# disagree with the engine's own "looks STRANDED" warning. Guards against a silent divergence.
-	assert_eq(SoakReportScript.STRANDED_THRESHOLD, 3,
-		"SoakReport.STRANDED_THRESHOLD must mirror NPC._tick_stranded's >= 3")
+func test_leak_detected_compares_the_last_wave_to_the_first() -> void:
+	# The documented rule is LAST vs FIRST, not wave-to-wave: a slow creep that never jumps more than the slack in
+	# one wave is still a leak once it has accumulated past it, and a transient spike that settled back is not.
+	assert_true(SoakReportScript.leak_detected(PackedInt32Array([100, 108, 115]), 10),
+		"a creep of +8 then +7 per wave (+15 overall, > slack 10) is a leak even though no single wave grew past the slack")
+	assert_false(SoakReportScript.leak_detected(PackedInt32Array([100, 180, 105]), 10),
+		"a mid-run spike that settled back to +5 overall is not a leak — only the net growth since the first wave counts")
+
+
+func test_stranded_threshold_agrees_with_the_npcs_own_stranded_warning() -> void:
+	# The soak harness flags an NPC once its _stranded_cycles reaches STRANDED_THRESHOLD; npc.gd's _tick_stranded is
+	# what raises the engine's own "looks STRANDED" warning. Drive the real counter on a bare off-tree NPC (no
+	# _ready, the test_ranged_behavior idiom) and find the give-up that first reads as stranded: the two must agree,
+	# or the soak and the in-game warning would disagree about the same wedged body.
+	var npc: Node = load("res://scripts/npc/npc.gd").new()
+	var spot := Vector3(5, 1, 5)
+	var first_stranded := -1
+	for tick in range(1, 11):
+		if npc._tick_stranded(spot):
+			first_stranded = tick
+			break
+	assert_gt(first_stranded, 0, "ten same-spot give-ups must eventually read as stranded")
+	assert_eq(first_stranded, SoakReportScript.STRANDED_THRESHOLD,
+		"SoakReport.STRANDED_THRESHOLD must equal the give-up count at which NPC._tick_stranded first reports STRANDED")
+	assert_eq(int(npc.get(&"_stranded_cycles")), SoakReportScript.STRANDED_THRESHOLD,
+		"the counter the harness reads (_stranded_cycles) sits exactly at the threshold on that give-up")
+	npc.free()
 
 
 func test_ok_requires_nav_ready() -> void:

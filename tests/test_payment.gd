@@ -31,6 +31,11 @@ func before_each() -> void:
 	_prev_profile = GameState.profile_active
 	GameState.account = 0.0
 	GameState.payment_method = "debit"
+	# GameState._ready loads the dev's autosave, so standing arrives as whatever that run earned. It feeds
+	# credit_rating_for, and _player()'s fixture sits one step under credit_limit_max: a single cleared debt
+	# (+credit_standing_debt_cleared) would pin `before` at the cap and turn the "line rises" asserts into
+	# a false red. Normalize to a neutral standing; after_each restores the real one.
+	GameState.credit_standing = 0.0
 
 
 func after_each() -> void:
@@ -254,15 +259,35 @@ func test_the_credit_line_is_recomputed_from_the_live_sheet() -> void:
 	var before: float = p.credit_limit()
 	var sheet: CharacterStats = p.stats
 	sheet.streetwise = 10  # a real, permanent improvement to the sheet
-	assert_gte(p.credit_limit(), before,
-		"improving the permanent stat sheet can only raise the line — the Ledger re-rates you continuously")
+	assert_gt(p.credit_limit(), before,
+		"improving the permanent stat sheet must raise the line on the very next read (%s -> %s) — the Ledger re-rates you continuously, there is no stale persisted copy" % [before, p.credit_limit()])
 	p.free()
 
 
 func test_a_timed_buff_cannot_inflate_the_line() -> void:
-	# credit_limit reads RAW get_stat, so equipping a trinket at the terminal is not a credit exploit. This
-	# pins the seam by source: the moment it started folding in status modifiers, the line would be gameable.
-	var src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
-	assert_true(src.contains("func credit_limit()"), "credit_limit lives on Player")
-	assert_false(src.split("func credit_limit()")[1].split("func ")[0].contains("status_stat_modifier"),
-		"credit_limit must never fold in status_stat_modifier — only the PERMANENT sheet sets your line")
+	# credit_limit reads RAW get_stat, so a timed stim or a trinket equipped at the terminal is not a credit
+	# exploit. Driven for real: a live StatusEffectManager child carrying a +3-to-everything effect.
+	var p = load(PLAYER_PATH).new()
+	p.stats = CharacterStats.new()  # a baseline sheet, well under the cap, so a +3 has room to move the line
+	var line_before: float = p.credit_limit()
+	var buff := StatusEffect.new()
+	buff.id = &"test_credit_stim"
+	buff.duration = 30.0
+	for n in CharacterStats.STAT_NAMES:
+		buff.stat_modifiers[String(n)] = 3
+	var mgr := StatusEffectManager.new()
+	p.add_child(mgr)  # off-tree parent: no _ready runs, the manager is a plain buff source
+	mgr.apply_effect(buff)
+	assert_almost_eq(p.status_stat_modifier(&"streetwise"), 3.0, 0.001,
+		"precondition: the buff is LIVE — every multiplier seam (prices, sway, move speed) would see +3 right now")
+	assert_eq(p.credit_limit(), line_before,
+		"a timed +3 on every stat must not move the credit line — only the PERMANENT sheet rates you, or buying a stim at the ATM becomes a loan")
+	# Control: the SAME +3, made permanent on the sheet, does move the line — so the unchanged number above is the
+	# buff being ignored, not a line that is insensitive to +3.
+	var sheet: CharacterStats = p.stats
+	for n in CharacterStats.STAT_NAMES:
+		sheet.set(n, int(sheet.get(n)) + 3)
+	assert_gt(p.credit_limit(), line_before,
+		"control: +3 on every stat of the permanent sheet raises the line (%s -> %s)" % [line_before, p.credit_limit()])
+	buff = null
+	p.free()

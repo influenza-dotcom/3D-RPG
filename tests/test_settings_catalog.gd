@@ -130,14 +130,15 @@ func test_catalog_covers_the_five_tabs() -> void:
 	for spec in cat.specs:
 		if spec != null:
 			tabs[spec.tab] = true
-	for expected in [&"Video", &"Audio", &"Game", &"Controls", &"Accessibility"]:
+	for expected in [&"Video", &"Audio", &"Game", &"HUD", &"Accessibility"]:
 		assert_true(tabs.has(expected), "the catalog must populate the '%s' tab" % expected)
+	assert_false(tabs.has(&"Controls"), "Controls carries no hand-authored row — its rebind rows come from the ActionCatalog")
 
 func test_options_menu_builds_five_tabs_from_catalog() -> void:
 	# The live autoload built its tabs from the catalog at startup (smoke-overlaps test_options_menu, kept
 	# here so a catalog regression points straight at the catalog).
-	assert_eq(OptionsMenu._tabs.get_tab_count(), 5,
-		"OptionsMenu must build exactly the 5 catalog tabs")
+	assert_eq(OptionsMenu._tabs.get_tab_count(), 6,
+		"OptionsMenu must build exactly the 5 catalog tabs + Controls")
 
 func test_options_tab_page_node_names_are_the_tab_keys() -> void:
 	# Un-fused key/title contract: each tab page's NODE NAME is the KEY (String(spec.tab)); the VISIBLE
@@ -146,7 +147,7 @@ func test_options_tab_page_node_names_are_the_tab_keys() -> void:
 	var names := {}
 	for page in OptionsMenu._tabs.get_children():
 		names[String(page.name)] = true
-	for expected in [&"Video", &"Audio", &"Game", &"Controls", &"Accessibility"]:
+	for expected in [&"Video", &"Audio", &"Game", &"HUD", &"Accessibility", &"Controls"]:
 		assert_true(names.has(String(expected)),
 			"a tab page NODE must be named by its key '%s' (display titles are set_tab_title, never the name)" % expected)
 

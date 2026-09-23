@@ -1,13 +1,23 @@
 extends GutTest
 
-## Rank 30: Compass.project_to_edge (the pure screen-edge projection) + WorldMarker channel membership +
-## QuestObjective marker fields + QuestMarkerSync.wants_marker. The compass DRAWING is playtest-verified; the edge
-## math + wiring are unit-tested here, and QuestMarkerSync's in-tree rebuild (including the WR-6 "a failed quest
-## drops its markers" contract) is pinned in test_quests.gd.
+## The compass marker channel, end to end: Compass.project_to_edge (the pure screen-edge projection), the
+## WorldMarker opt-in/out of the compass + minimap channels, Compass.marker_color's colour priority, and
+## QuestMarkerSync turning an objective's authored marker fields into a live WorldMarker (placed, tinted,
+## removed when the objective is done). The compass DRAWING is playtest-verified; QuestMarkerSync's
+## "a failed quest drops its markers" (WR-6) contract is pinned in test_quests.gd.
 
 const CompassScript = preload("res://scripts/ui/compass.gd")
 const WorldMarkerScript = preload("res://scripts/components/world_marker.gd")
 const QuestMarkerSyncScript = preload("res://scripts/components/quest_marker_sync.gd")
+
+## Set by the QuestMarkerSync tests, which start quests on the shared GameState AUTOLOAD (the sync hard-references
+## it — the test_quests.gd idiom); after_each then resets it so no active quest leaks into the next suite.
+var _started_quests := false
+
+func after_each() -> void:
+	if _started_quests:
+		GameState.reset_for_new_game()
+		_started_quests = false
 
 func test_project_to_edge_cardinals() -> void:
 	var size := Vector2(800, 600)  # center (400, 300)
@@ -39,35 +49,32 @@ func test_project_to_edge_diagonal_stays_in_rect() -> void:
 func test_world_marker_joins_channels() -> void:
 	var m = WorldMarkerScript.new()
 	add_child_autofree(m)  # _ready adds the groups
-	assert_true(m.is_in_group("compass"), "WorldMarker joins the compass channel")
-	assert_true(m.is_in_group("minimap"), "WorldMarker joins the minimap channel")
+	# Through the Groups registry, the same names the Compass / HudCompass / Minimap consumers query.
+	assert_true(m.is_in_group(Groups.COMPASS), "WorldMarker joins the compass channel")
+	assert_true(m.is_in_group(Groups.MINIMAP), "WorldMarker joins the minimap channel")
 
 func test_world_marker_channel_opt_out() -> void:
 	var m = WorldMarkerScript.new()
 	m.on_compass = false
 	add_child_autofree(m)
-	assert_false(m.is_in_group("compass"), "on_compass off -> not on the compass channel")
-	assert_true(m.is_in_group("minimap"), "still on the minimap channel")
+	assert_false(m.is_in_group(Groups.COMPASS), "on_compass off -> not on the compass channel")
+	assert_true(m.is_in_group(Groups.MINIMAP), "still on the minimap channel")
 
 func test_marker_color_prefers_markers_own_then_skin_fallback() -> void:
 	var c = CompassScript.new()
 	autofree(c)
 	var m = WorldMarkerScript.new()  # off-tree: no _ready, marker_color only .get()s the export
 	autofree(m)
-	m.color = Color(0.1, 0.2, 0.3)
-	assert_eq(c.marker_color(m), Color(0.1, 0.2, 0.3), "a marker's own color wins")
-	var bare := Node3D.new()  # no `color` property at all -> the artist skin's fallback gold
+	var own := Color(0.1, 0.2, 0.3)
+	# Precondition: the marker's own tint must differ from the skin fallback, or "own wins" could not be told apart
+	# from "always the fallback".
+	assert_ne(own, MenuStyle.hud.compass_fallback_color, "precondition: the test tint is not the skin fallback")
+	m.color = own
+	assert_eq(c.marker_color(m), own, "a marker's own color wins")
+	var bare := Node3D.new()  # no `color` property at all -> the artist skin's fallback
 	autofree(bare)
 	assert_eq(c.marker_color(bare), MenuStyle.hud.compass_fallback_color,
 			"colourless marker falls back to MenuStyle.hud.compass_fallback_color")
-	assert_eq(MenuStyle.hud.compass_fallback_color, Color(1.0, 0.85, 0.3),
-			"...which ships as the former hardcoded gold")
-
-func test_quest_objective_marker_defaults() -> void:
-	var o := QuestObjective.new()
-	assert_false(o.show_marker, "show_marker defaults off")
-	assert_eq(o.marker_position, Vector3.ZERO, "marker_position defaults zero")
-	o = null
 
 func test_wants_marker_pure() -> void:
 	assert_false(QuestMarkerSyncScript.wants_marker(null), "null objective wants no marker")
@@ -76,3 +83,72 @@ func test_wants_marker_pure() -> void:
 	o.show_marker = true
 	assert_true(QuestMarkerSyncScript.wants_marker(o), "show_marker on -> wants a marker")
 	o = null
+
+# --- QuestMarkerSync: authored marker fields -> a live WorldMarker ------------------------------------------
+
+func _objective(oid: StringName, marked: bool, at: Vector3) -> QuestObjective:
+	var o := QuestObjective.new()
+	o.id = oid
+	o.required_count = 1
+	o.show_marker = marked
+	o.marker_position = at
+	return o
+
+## The sync's LIVE markers: a rebuild queue_free()s the previous set, which only leaves the tree at the next
+## frame flush, so a node already queued for deletion is not a marker the player can see.
+func _live_markers(sync: Node) -> Array[Node3D]:
+	var out: Array[Node3D] = []
+	for child in sync.get_children():
+		if child is Node3D and not child.is_queued_for_deletion():
+			out.append(child as Node3D)
+	return out
+
+func test_quest_marker_sync_places_a_tinted_beacon_only_for_a_marked_objective() -> void:
+	_started_quests = true
+	GameState.reset_for_new_game()
+	var sync = QuestMarkerSyncScript.new()
+	sync.marker_color = Color(0.2, 0.7, 0.4)
+	add_child_autofree(sync)  # _ready connects the QuestTracker signals and does the first (empty) rebuild
+	assert_eq(_live_markers(sync).size(), 0, "control: no active quest -> no beacon")
+	var q := Quest.new()
+	q.id = &"compass_marked"
+	# One objective left at its authored defaults (only the fields every objective needs are set, so show_marker is
+	# whatever a designer gets from a fresh QuestObjective), one opted in at a real destination.
+	var unmarked := QuestObjective.new()
+	unmarked.id = &"unmarked"
+	unmarked.required_count = 1
+	q.objectives.append(unmarked)
+	q.objectives.append(_objective(&"marked", true, Vector3(4.0, 1.5, 7.0)))
+	GameState.start_quest(q)
+	var markers := _live_markers(sync)
+	assert_eq(markers.size(), 1,
+		"only the objective with show_marker gets a beacon — an objective left at its defaults must not put a chevron on the compass")
+	if markers.size() != 1:
+		return
+	var beacon := markers[0]
+	assert_true(beacon is WorldMarker, "the spawned beacon is a real WorldMarker (it is what the HUD channels read)")
+	assert_true(beacon.global_position.is_equal_approx(Vector3(4.0, 1.5, 7.0)),
+		"the beacon sits at the objective's marker_position (got %s) — anywhere else points the player the wrong way" % beacon.global_position)
+	assert_eq(beacon.get(&"color"), Color(0.2, 0.7, 0.4), "the beacon wears the sync's marker_color tint")
+	assert_true(beacon.is_in_group(Groups.COMPASS), "the beacon is on the compass channel, so the heading tape shows it")
+	q = null
+
+func test_quest_marker_sync_drops_a_done_objectives_beacon_and_keeps_the_rest() -> void:
+	_started_quests = true
+	GameState.reset_for_new_game()
+	var sync = QuestMarkerSyncScript.new()
+	add_child_autofree(sync)
+	var q := Quest.new()
+	q.id = &"compass_two_stops"
+	q.objectives.append(_objective(&"first_stop", true, Vector3(1.0, 0.0, 0.0)))
+	q.objectives.append(_objective(&"second_stop", true, Vector3(0.0, 0.0, 12.0)))
+	GameState.start_quest(q)
+	assert_eq(_live_markers(sync).size(), 2, "control: two marked objectives -> two beacons")
+	GameState.advance_objective(&"compass_two_stops", &"first_stop")
+	assert_true(GameState.is_quest_active(&"compass_two_stops"), "precondition: one stop left, the quest is still running")
+	var markers := _live_markers(sync)
+	assert_eq(markers.size(), 1, "a finished objective's beacon is removed — it must not keep pointing at a place already visited")
+	if markers.size() == 1:
+		assert_true(markers[0].global_position.is_equal_approx(Vector3(0.0, 0.0, 12.0)),
+			"the surviving beacon is the UNFINISHED objective's (got %s)" % markers[0].global_position)
+	q = null

@@ -1,14 +1,16 @@
 extends GutTest
 
-## H2 (Wave 5): NpcCombat is the firing-dispatch component extracted off npc.gd — the armed body (act_alerted),
-## the unarmed body (act_unarmed), the punch, and the combat dodge. These pin the extraction seam:
-## - the GOAP entry points act_alerted/act_unarmed exist on the component;
-## - the NPC still exposes the thin _act_alerted/_act_unarmed facades the GOAP actions call, and _punch/_maybe_dodge
-##   are GONE from the root (moved here);
-## - the combat-dodge bookkeeping behaves (a successful roll opens a burst + re-arms the cooldown; a degenerate roll skips);
-## - the GOAP FireArmed/FireUnarmed actions still call the host facades (so the extraction is invisible to the planner).
-## The heavyweight per-frame bodies (aim/telegraph/fire) run only in-tree with a live weapon/perception — playtest +
-## the tests_soak combat smoke harness (T1) cover those; here we pin the seam + the pure dodge logic.
+## NpcCombat (scripts/npc/npc_combat.gd) is the firing-dispatch component extracted off npc.gd — the armed body
+## (act_alerted), the unarmed body (act_unarmed), the punch and the combat dodge — plus the pure statics the NPC's
+## aim and cadence are built from. This file covers, in order:
+## - the extraction surface (NpcCombat's GOAP entry points, the NPC's duck-typed _act_alerted/_act_unarmed facades;
+##   that the GOAP FireArmed/FireUnarmed actions really CALL those facades is driven in test_goap_action_fire_*.gd);
+## - the fire-range grace band, the alerted-chase predicate and the combat dodge (burst, floored cooldown, skip);
+## - target leading: the intercept geometry, and that only the fired direction leads (never _aim_point, never a
+##   melee swing or a spray can) on a bare in-tree NPC wired with a muzzle, weapon and target;
+## - aim inertia: the capped slew, the eased velocity read, tracking above the AI-LOD gate, and the per-life reset;
+## - the AI shot cadence (breathing floor, bursts) and its AGILITY coupling with Attack's melee cadence.
+## The full per-frame fire body (telegraph -> wind-up -> round) runs only with a live brain: tests_soak covers it.
 
 const CombatScript := preload("res://scripts/npc/npc_combat.gd")
 
@@ -80,13 +82,28 @@ func test_maybe_dodge_opens_a_burst_and_rearms_cooldown() -> void:
 	var host := _HostStub.new()
 	add_child_autofree(host)  # in-tree so global_position is valid
 	host.global_position = Vector3.ZERO
+	host.dodge_interval = CombatScript.DODGE_MIN_INTERVAL * 0.25  # authored UNDER the anti-jitter floor, whatever the floor is
 	c.host = host
 	# dodge_chance = 1.0 so the roll always succeeds; the aim is offset so the us->target vector isn't degenerate.
 	c._maybe_dodge(0.016, Vector3(5.0, 0.0, 0.0))
 	assert_almost_eq(c._dodge_t, host.dodge_duration, 0.001, "a successful roll opens an active strafe burst (_dodge_t = dodge_duration)")
-	assert_almost_eq(c._dodge_cd, 2.0, 0.001, "the cooldown re-arms to max(dodge_interval, DODGE_MIN_INTERVAL) = 2.0")
-	assert_gt(host._desired_velocity.length(), 0.0, "the burst drives host._desired_velocity sideways")
+	assert_almost_eq(c._dodge_cd, CombatScript.DODGE_MIN_INTERVAL, 0.001,
+		"an authored dodge_interval under the anti-jitter floor re-arms at the floor, so the NPC can't weave on a twitch")
+	var strafe: Vector3 = host._desired_velocity
+	assert_almost_eq(strafe.dot(Vector3.RIGHT), 0.0, 0.001,
+		"the burst is a SIDESTEP: perpendicular to the line to the target, never a step toward or away from it")
+	assert_almost_eq(strafe.length(), 2.5, 0.001, "the sidestep runs at dodge_speed_fraction (half) of the 5 m/s move_speed")
 	c.free()
+	# Control: a SLOWER authored interval is kept as-is — the floor only stops jitter, it never speeds a dodger up.
+	var patient = CombatScript.new()
+	var slow_host := _HostStub.new()
+	add_child_autofree(slow_host)
+	slow_host.dodge_interval = CombatScript.DODGE_MIN_INTERVAL + 3.0
+	patient.host = slow_host
+	patient._maybe_dodge(0.016, Vector3(5.0, 0.0, 0.0))
+	assert_almost_eq(patient._dodge_cd, slow_host.dodge_interval, 0.001,
+		"a dodge_interval above the floor re-arms at the authored interval, not at the floor")
+	patient.free()
 
 
 func test_maybe_dodge_skips_a_degenerate_direction() -> void:
@@ -99,13 +116,6 @@ func test_maybe_dodge_skips_a_degenerate_direction() -> void:
 	c._maybe_dodge(0.016, Vector3(2.0, 0.0, 2.0))  # aim == position
 	assert_eq(c._dodge_t, 0.0, "a degenerate (on-target) roll opens no strafe burst")
 	c.free()
-
-
-func test_goap_fire_actions_call_the_host_facades() -> void:
-	# Drift guard: the GOAP FireArmed/FireUnarmed actions must keep calling host._act_alerted / host._act_unarmed so
-	# the extraction stays invisible to the planner (the bodies moved to NpcCombat, but the entry points didn't).
-	assert_true(FileAccess.get_file_as_string("res://scripts/npc/goap/actions/goap_action_fire_armed.gd").contains("host._act_alerted("), "FireArmed action must call host._act_alerted")
-	assert_true(FileAccess.get_file_as_string("res://scripts/npc/goap/actions/goap_action_fire_unarmed.gd").contains("host._act_unarmed("), "FireUnarmed action must call host._act_unarmed")
 
 
 # --- Target leading (NpcCombat.lead_aim_point) ---
@@ -188,38 +198,62 @@ func test_lead_aim_point_leads_backward_for_a_closing_target() -> void:
 
 
 func test_ai_lead_uses_the_slowed_ai_round_speed() -> void:
-	# THE trap this pins: AI rounds fly at npc_projectile_speed_mult of the authored speed (the dodge window),
-	# so the lead solve must use ProjectileSpawner.round_speed(w, false). Solving with the PLAYER's faster
-	# figure would under-lead by exactly the margin that multiplier was added to create.
+	# THE trap this pins: AI rounds fly at npc_projectile_speed_mult of the authored speed (the dodge window) —
+	# ProjectileSpawner launches an AI wielder's round at round_speed(w, false) — so the NPC's shot has to be solved
+	# for THAT round. Solving with the PLAYER's faster figure would under-lead by exactly the margin the multiplier
+	# was added to create. Driven through the real fired direction (get_aim_direction on an armed NPC) and judged by
+	# where that round goes: flown straight down the shot at the AI round speed, it has to MEET the strafer. (The
+	# SMG's launch_angle and gravity arc bend a real round only vertically, which leading deliberately leaves alone;
+	# shooter and target share a height here, so the whole check lives in the ground plane.)
 	var smg := load("res://resources/weapons/smg.tres") as WeaponData
-	assert_lt(smg.npc_projectile_speed_mult, 1.0, "the SMG's AI rounds are slowed on purpose (the dodge window)")
-	var target := Vector3(0.0, 0.0, -20.0)
-	var vel := Vector3(4.0, 0.0, 0.0)
-	var ai_lead := CombatScript.lead_aim_point(
-			Vector3.ZERO, target, vel, ProjectileSpawner.round_speed(smg, false), 1.0, 5.0)
-	var player_lead := CombatScript.lead_aim_point(
-			Vector3.ZERO, target, vel, ProjectileSpawner.round_speed(smg, true), 1.0, 5.0)
-	assert_gt(ai_lead.x, player_lead.x,
-		"a slower AI round spends longer in flight, so it must be led FURTHER ahead")
-	# And the lead has to actually cover a body: a 4 m/s strafe at 20 m was the exact case that made
-	# incoming fire infinitely dodgeable.
-	assert_gt(ai_lead.x, 0.8, "the SMG's AI lead at 20 m clears a player capsule's width of drift")
+	var ai_speed: float = ProjectileSpawner.round_speed(smg, false)
+	var player_speed: float = ProjectileSpawner.round_speed(smg, true)
+	assert_lt(ai_speed, player_speed, "premise: the SMG's AI rounds are slowed on purpose (the dodge window)")
+	var target := _MovingTarget.new()
+	add_child_autofree(target)
+	target.global_position = Vector3(0.0, 0.0, -20.0)
+	target.velocity = Vector3(4.0, 0.0, 0.0)
+	var npc = _armed_npc_aiming_at(target, smg)
+	# A perfect marksman (gunplay far over baseline: see test_aim_lead_fraction_tracks_the_tuned_dial_and_gunplay),
+	# so the only thing standing between its shot and the target is the round speed the shot was solved for.
+	var elite := CharacterStats.new()
+	elite.gunplay = CharacterStats.BASELINE + 20
+	npc.stats = elite
+	assert_eq(npc.aim_lead_fraction(), 1.0, "premise: this NPC leads the full intercept, no marksmanship residual")
+	var origin: Vector3 = npc.get_aim_origin()
+	var body: Vector3 = npc._aim_point()
+	# An intercept can take at most |to target| / (round speed - target speed); keep that inside the lead-time cap
+	# so the cap is not what this measures.
+	assert_lt((body - origin).length() / (ai_speed - target.velocity.length()), GameSettings.npc_ai.aim_lead_max_time,
+		"premise: the AI round's flight to this strafer sits inside aim_lead_max_time")
+	var shot: Vector3 = npc.get_aim_direction()
+	var miss := _closest_pass(origin, shot * ai_speed, body, target.velocity)
+	assert_lt(miss, 0.005,
+		"a round flown down the NPC's shot at the AI round speed meets the strafing target (it passed %.4f m away)" % miss)
+	# Control: the same shot solved for the PLAYER's round speed — the trap — sends that same slowed round past
+	# behind the target, so the check above really does tell the two speeds apart.
+	var trap_point := CombatScript.lead_aim_point(origin, body, target.velocity, player_speed, 1.0,
+			GameSettings.npc_ai.aim_lead_max_time)
+	var trap_miss := _closest_pass(origin, (trap_point - origin).normalized() * ai_speed, body, target.velocity)
+	assert_gt(trap_miss, 0.5,
+		"control: a shot led for the player's faster round trails a strafing player by more than a capsule's width (%.3f m)" % trap_miss)
+	elite = null
 
 
-func test_npc_exposes_the_lead_seam() -> void:
-	# The wiring seam: leading lives on get_aim_direction's helper ONLY. _aim_point must stay un-led — it is
-	# also the pathing goal, the ally alert point and the clear-shot LOS ray.
-	var npc = load("res://scripts/npc/npc.gd").new()
-	assert_true(npc.has_method("_lead_aim_point"), "NPC computes its led aim point for the shot direction")
-	assert_true(npc.has_method("aim_lead_fraction"), "NPC exposes the gunplay-scaled lead dial (twin of aim_error_spread)")
-	npc.free()
-	var src := FileAccess.get_file_as_string("res://scripts/npc/npc.gd")
-	assert_true(src.contains("_lead_aim_point(origin)"),
-		"get_aim_direction aims at the LED point (source pin: leading must not be quietly dropped)")
-	assert_string_contains(src, "ShotResolver.ai_fires_live_projectile(w)")
+## How close a round launched from `origin` at `round_velocity` comes to a point that starts at `target_start` and
+## moves at `target_velocity`. Both travel in straight lines, so the gap is smallest at one closed-form instant
+## (clamped to after the shot: a round can't hit anything before it is fired). Pure relative-motion kinematics,
+## independent of the intercept solve it is used to judge.
+func _closest_pass(origin: Vector3, round_velocity: Vector3, target_start: Vector3, target_velocity: Vector3) -> float:
+	var offset := origin - target_start
+	var closing := round_velocity - target_velocity
+	var t := 0.0
+	if closing.length_squared() > 0.000001:
+		t = maxf(0.0, -offset.dot(closing) / closing.length_squared())
+	return (offset + closing * t).length()
 
 
-## A moving target for the wiring test below: a CharacterBody3D (like the player and every NPC) whose
+## A moving target for the wiring tests below: a CharacterBody3D (like the player and every NPC) whose
 ## `velocity` the lead solve duck-types off. Never ticked — the value is just read at trigger time.
 class _MovingTarget extends CharacterBody3D:
 	pass
@@ -283,6 +317,77 @@ func test_get_aim_direction_does_not_lead_a_melee_swing() -> void:
 	target.velocity = Vector3(4.0, 0.0, 0.0)
 	var npc = _armed_npc_aiming_at(target, melee)
 	assert_almost_eq(npc.get_aim_direction().x, 0.0, 0.0001, "a melee swing aims at the body, never ahead of it")
+	# The shipped knife alone can't prove the GATE: it authors no projectile_scene and a projectile_speed of 0, and a
+	# zero round speed already falls back to the body inside the lead solve. So hand a knife everything a led shot
+	# needs — the SMG's live round and muzzle velocity — and leave is_melee as the only thing in the way.
+	var smg := load("res://resources/weapons/smg.tres") as WeaponData
+	var live_knife := melee.duplicate() as WeaponData
+	live_knife.projectile_scene = smg.projectile_scene
+	live_knife.projectile_speed = smg.projectile_speed
+	live_knife.npc_projectile_speed_mult = smg.npc_projectile_speed_mult
+	assert_gt(ProjectileSpawner.round_speed(live_knife, false), 0.0, "premise: this knife has a real AI round speed to lead with")
+	var knife_target := _MovingTarget.new()
+	add_child_autofree(knife_target)
+	knife_target.global_position = Vector3(0.0, 0.0, -20.0)
+	knife_target.velocity = Vector3(4.0, 0.0, 0.0)
+	assert_almost_eq(_armed_npc_aiming_at(knife_target, live_knife).get_aim_direction().x, 0.0, 0.0001,
+		"a melee weapon is never led, even one that authors a travelling round — is_melee alone keeps the swing on the body")
+	# Same-setup control: the identical weapon at the identical geometry with only is_melee cleared IS led, so the
+	# refusal above is the melee carve-out and nothing else.
+	var unflagged := live_knife.duplicate() as WeaponData
+	unflagged.is_melee = false
+	var control_target := _MovingTarget.new()
+	add_child_autofree(control_target)
+	control_target.global_position = Vector3(0.0, 0.0, -20.0)
+	control_target.velocity = Vector3(4.0, 0.0, 0.0)
+	assert_gt(_armed_npc_aiming_at(control_target, unflagged).get_aim_direction().x, 0.0,
+		"control: the same weapon with is_melee cleared IS led ahead of the strafer")
+	live_knife = null
+	unflagged = null
+
+
+func test_get_aim_direction_does_not_lead_a_spray_paint_can() -> void:
+	# The other carve-out: the can DOES author a projectile_scene, so only its is_spray_paint flag keeps the AI from
+	# leading a damage-free tagging tool as if it were a gun (the ShotResolver.ai_fires_live_projectile predicate).
+	var spray := load("res://resources/weapons/spray_paint.tres") as WeaponData
+	assert_not_null(spray.projectile_scene, "premise: the can spawns projectiles, so the projectile check alone would lead it")
+	var target := _MovingTarget.new()
+	add_child_autofree(target)
+	target.global_position = Vector3(0.0, 0.0, -20.0)
+	target.velocity = Vector3(4.0, 0.0, 0.0)
+	var npc = _armed_npc_aiming_at(target, spray)
+	assert_almost_eq(npc.get_aim_direction().x, 0.0, 0.0001, "a spray-paint NPC sprays at the body, never ahead of it")
+	# Same-setup control: the identical can at the identical geometry, with only is_spray_paint cleared, IS led. Without
+	# this the refusal above would stay green if the can's lead collapsed for any other reason (a projectile_speed of 0
+	# falls back to the body, a lead path that ignores the weapon).
+	var unflagged := spray.duplicate() as WeaponData
+	unflagged.is_spray_paint = false
+	var control_target := _MovingTarget.new()
+	add_child_autofree(control_target)
+	control_target.global_position = Vector3(0.0, 0.0, -20.0)
+	control_target.velocity = Vector3(4.0, 0.0, 0.0)
+	assert_gt(_armed_npc_aiming_at(control_target, unflagged).get_aim_direction().x, 0.0,
+			"control: the same can with is_spray_paint cleared IS led, so the flag is the only thing keeping a tagging tool from leading")
+	unflagged = null
+
+
+func test_the_lead_bends_the_shot_but_never_the_aim_point() -> void:
+	# Leading is confined to the fired direction. _aim_point() is also the pathing goal, the ally alert point, the
+	# body-facing target and the clear-shot LOS ray: led, the NPC would walk at empty floor and its
+	# `hit.collider == _target` fire gate would stop passing against a strafing player.
+	var target := _MovingTarget.new()
+	add_child_autofree(target)
+	target.global_position = Vector3(0.0, 0.0, -20.0)
+	target.velocity = Vector3(4.0, 0.0, 0.0)
+	var npc = _armed_npc_aiming_at(target, load("res://resources/weapons/smg.tres") as WeaponData)
+	assert_gt(npc.get_aim_direction().x, 0.0, "premise: the SMG shot IS led ahead of the strafing target")
+	# Ground-plane components only: the lead drifts x/z, while y is the NPC's target_height tuning, not this concern.
+	var aim_point: Vector3 = npc._aim_point()
+	var body := target.global_position
+	assert_almost_eq(aim_point.x, body.x, 0.0001,
+		"the aim point stays on the target's body (x %s), not on the led intercept (got x %s)" % [body.x, aim_point.x])
+	assert_almost_eq(aim_point.z, body.z, 0.0001,
+		"the aim point stays at the target's depth (z %s), not on the led intercept (got z %s)" % [body.z, aim_point.z])
 
 
 func test_aim_lead_fraction_tracks_the_tuned_dial_and_gunplay() -> void:
@@ -480,19 +585,62 @@ func test_lead_is_solved_against_an_eased_velocity() -> void:
 		"a shot taken the instant someone re-peeks is barely led at all")
 
 
-func test_aim_inertia_is_wired_and_per_life() -> void:
-	var src := FileAccess.get_file_as_string("res://scripts/npc/npc.gd")
-	assert_string_contains(src, "_tick_aim_tracking(delta)")
-	assert_true(src.contains("_sync_weapon_anchor(delta)\n\t# Swing the AIM onto the target"),
-		"aim tracking ticks beside the weapon anchor, ABOVE the AI-LOD gate — on the real delta, never the banked one")
-	# Source-pinned rather than called: NPC.reset_for_reuse drives the whole per-life teardown (the Character
-	# super, the inventory re-seed, every component's own reset) and needs a real pooled body, which the fast
-	# suite deliberately does not build. tests_soak's pool-reuse harness exercises it live; this pins that the
-	# two new per-life fields are IN that list.
-	var reset := src.substr(src.find("func reset_for_reuse() -> void:"))
-	assert_true(reset.contains("_aim_dir = Vector3.ZERO"),
-		"NpcPool reuse must drop the tracked aim, or a respawned body comes back already locked on (a free instant kill)")
-	assert_true(reset.contains("_aim_target_vel = Vector3.ZERO"), "...and its stale velocity belief goes with it")
+## An AiLod stand-in that banks every tick and lets no think through — a far-band NPC between two thinks.
+## NPC._physics_process duck-types _ai_lod (think_delta / player_distance), and reset_for_reuse calls its reset.
+class _SkipEveryThinkLod extends Node:
+	var thinks_skipped := 0
+
+	func think_delta(_delta: float, _distance: float, _force_full: bool) -> float:
+		thinks_skipped += 1
+		return 0.0
+
+	func player_distance(_from_position: Vector3) -> float:
+		return 1000.0
+
+	func reset_for_reuse() -> void:
+		pass
+
+
+func test_aim_keeps_swinging_on_the_real_delta_while_the_ai_lod_skips_the_think() -> void:
+	# The aim has to track ABOVE the AI-LOD gate: a throttled NPC that only swung on its thinks would fire a shot
+	# taken between two thinks down a stale direction, and would slew in slow motion on the banked delta.
+	var target := _MovingTarget.new()
+	add_child_autofree(target)
+	target.global_position = Vector3(20.0, 0.0, 0.0)  # 90 deg off the body's +Z facing
+	var npc = _armed_npc_aiming_at(target, load("res://resources/weapons/smg.tres") as WeaponData)
+	_sensing_perception(npc, target, true)
+	var lod := _SkipEveryThinkLod.new()
+	npc.add_child(lod)
+	npc._ai_lod = lod
+	npc._physics_process(0.05)
+	assert_eq(lod.thinks_skipped, 1, "premise: this frame reached the AI-LOD gate and its think was skipped")
+	assert_almost_eq(rad_to_deg(npc._body_forward().angle_to(npc._aim_dir)), GameSettings.npc_ai.aim_turn_rate_deg * 0.05, 0.01,
+		"a frame whose think was skipped still turns the aim by one REAL frame of the turn rate")
+
+
+func test_pool_reuse_drops_the_tracked_aim_and_velocity_belief() -> void:
+	# NpcPool reuse: a respawned body must swing onto its new target from its own facing. Keeping last life's
+	# tracked aim would hand a pooled respawn a free instant lock, and a kept velocity belief would lead its
+	# first shot off the previous target's motion.
+	var target := _MovingTarget.new()
+	add_child_autofree(target)
+	target.global_position = Vector3(20.0, 0.0, 0.0)
+	target.velocity = Vector3(0.0, 0.0, 4.0)
+	var npc = _armed_npc_aiming_at(target, load("res://resources/weapons/smg.tres") as WeaponData)
+	_sensing_perception(npc, target, true)
+	for _i in 60:
+		npc._tick_aim_tracking(0.05)
+	assert_lt(rad_to_deg(npc._aim_dir.angle_to(Vector3.RIGHT)), 20.0, "premise: last life's aim is swung onto the foe at +X")
+	assert_gt(npc._aim_target_vel.length(), 1.0, "premise: last life believes its target is moving")
+	npc.reset_for_reuse()
+	assert_true(npc._aim_dir.is_zero_approx(), "a reused body carries no tracked aim from the life that died")
+	assert_true(npc._aim_target_vel.is_zero_approx(), "...and no belief about the previous target's motion")
+	# The next life's first tracked frame therefore starts from the body's facing, not from the old lock.
+	npc._target = target
+	npc._target_body = target
+	_sensing_perception(npc, target, true)
+	npc._tick_aim_tracking(0.016)
+	assert_gt(npc._aim_dir.z, 0.9, "the new life's aim starts along the body's +Z facing and has to swing onto the foe again")
 
 
 # --- Breathing room between ranged shots (2026-08-26) -------------------------------------------------
@@ -575,8 +723,8 @@ func test_ranged_floor_leaves_the_incoming_beep_a_silent_gap() -> void:
 
 func test_smg_is_the_weapon_authored_to_burst() -> void:
 	var smg: WeaponData = load("res://resources/weapons/smg.tres")
-	assert_eq(CombatScript.burst_rounds_for(smg), 3,
-		"the shipped SMG answers a trigger pull with a 3-round burst — the gun this feature exists for")
+	assert_gt(CombatScript.burst_rounds_for(smg), 1,
+		"the shipped SMG answers a trigger pull with a multi-round burst — the gun this feature exists for")
 	assert_almost_eq(CombatScript.burst_interval_for(smg), smg.attack_speed, 0.0001,
 		"an unauthored npc_burst_interval bursts at the gun's OWN cyclic rate (attack_speed), not the AI cadence")
 	# The load-bearing relation: the burst has to FIT inside the between-shots cadence, or the string would still
@@ -666,23 +814,75 @@ func test_shot_interval_melee_scale_moves_the_ai_clock_with_the_weapon() -> void
 		"and a clumsy body's clock lengthens with it instead of asking for swings the weapon will refuse")
 
 func test_ai_melee_clock_never_outruns_the_attack_cadence_at_any_agility() -> void:
-	# ⭐ The regression this pairing exists to prevent, checked end to end against the SHIPPED melee NPC:
-	# scenes/characters/NPC.tscn wields melee.tres at rate_of_fire_factor 1.136. Before the two clocks shared a
-	# scale, agility -3 put the AI interval (0.9997 s) UNDER the Attack cadence (1.012 s) and every second swing
-	# request was swallowed. The invariant is simply: the AI never asks faster than the weapon can swing.
-	var floor_s: float = GameSettings.npc_ai.min_shot_interval
-	var min_cadence: float = GameSettings.weapon_general.min_melee_attack_speed
-	var melee: WeaponData = load("res://resources/weapons/melee.tres")
-	var rate := 1.136  # scenes/characters/NPC.tscn
+	# ⭐ The regression this pairing exists to prevent, checked end to end against the SHIPPED melee NPC: the AI's own
+	# clock (NPC._shot_interval on an armed body) against the cadence its wielded Attack really waits
+	# (Attack.effective_attack_speed — the attack Timer's wait_time on every swing), both read off ONE stat sheet.
+	# Before the two clocks shared a scale, agility -3 put the shipped NPC's AI interval (0.9997 s) UNDER its Attack
+	# cadence (1.012 s) and every second swing request was swallowed.
+	var weapon_data: Variant = _scene_root_property("res://scenes/characters/NPC.tscn", &"weapon_data")
+	var rate_value: Variant = _scene_root_property("res://scenes/characters/NPC.tscn", &"rate_of_fire_factor")
+	var melee := weapon_data as WeaponData
+	assert_true(melee != null and melee.is_melee, "premise: the shipped NPC.tscn wields a melee weapon")
+	assert_true(rate_value is float, "premise: NPC.tscn authors its own rate_of_fire_factor")
+	if melee == null or not (rate_value is float):
+		return
+	var rate: float = rate_value
 	for agi in [0, 4, 10, 13, 20, -3, -10]:
 		var sheet := CharacterStats.new()
 		sheet.agility = agi
-		var scale: float = Attack.melee_time_scale_for(melee, sheet.melee_time_mult(), min_cadence)
-		var cadence: float = melee.attack_speed * scale
-		var interval: float = NPC.shot_interval_for(melee, rate, floor_s, scale)
+		var npc = _off_tree_armed_npc(melee)
+		npc.rate_of_fire_factor = rate
+		npc.stats = sheet
+		assert_true(npc._can_fight_with_gun(), "premise: agility %d: the body is armed, so _shot_interval takes the weapon branch" % agi)
+		var atk := Attack.new()  # bare, never add_child'd (no _ready); wielded by the same body
+		atk.character = npc
+		atk.current_weapon = melee
+		var cadence: float = atk.effective_attack_speed()
+		var interval: float = npc._shot_interval()
+		# The invariant: the AI never asks faster than the weapon can swing, or Attack silently refuses the request.
 		assert_gte(interval, cadence - 0.0001,
 			"agility %d: the AI's melee clock (%.4fs) must not run under the weapon's own cadence (%.4fs), or Attack silently eats the swing" % [agi, interval, cadence])
+		# ...and never slower than the authored ratio either: a quick body has to get its agility back in the AI's pace.
+		assert_almost_eq(interval / cadence, rate, 0.0001,
+			"agility %d: the AI clock keeps NPC.tscn's rate_of_fire_factor ratio to the real swing cadence at every agility (%.4fs vs %.4fs)" % [agi, interval, cadence])
+		atk.free()
+		npc.free()
 		sheet = null
+
+
+## A root-node property authored on a shipped PackedScene, read through its SceneState (never instantiated, so no
+## _ready). null when the scene does not author it.
+func _scene_root_property(scene_path: String, property: StringName) -> Variant:
+	var state := (load(scene_path) as PackedScene).get_state()
+	for i in state.get_node_property_count(0):
+		if state.get_node_property_name(0, i) == property:
+			return state.get_node_property_value(0, i)
+	return null
+
+
+## A bare OFF-tree NPC (no _ready) armed with `w` the way NPC._can_fight_with_gun reads it: a weapon Item equipped in
+## its backpack, plus a Weapon hub whose Inventory holds `w` with a round in the clip. The caller frees it.
+func _off_tree_armed_npc(w: WeaponData) -> Node:
+	var npc = load("res://scripts/npc/npc.gd").new()
+	var bag := CharacterInventory.new()
+	var item := Item.new()
+	item.category = Item.Category.WEAPON
+	item.weapon = w
+	bag.equipped_item = item
+	npc.add_child(bag)
+	npc.inventory = bag
+	var weapon := Weapon.new()
+	var inv := Inventory.new()
+	inv.equipped_weapon = w
+	weapon.add_child(inv)
+	weapon.inventory = inv
+	var clip := Ammo.new()
+	clip.current_ammo = 1
+	weapon.add_child(clip)
+	weapon.ammo = clip
+	npc.add_child(weapon)
+	npc._weapon = weapon
+	return npc
 
 func test_melee_time_scale_for_is_a_no_op_on_anything_that_is_not_melee() -> void:
 	# The scale is applied unconditionally in shot_interval_for, so it has to answer 1.0-shaped for the cases

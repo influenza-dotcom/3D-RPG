@@ -23,6 +23,16 @@ extends GutTest
 
 const PLAYER_SCRIPT_PATH := "res://scripts/player/player.gd"
 
+var _prev_clear_on_respawn: bool
+
+
+func before_each() -> void:
+	_prev_clear_on_respawn = GameSettings.effects.clear_player_gore_on_respawn
+
+
+func after_each() -> void:
+	GameSettings.effects.clear_player_gore_on_respawn = _prev_clear_on_respawn
+
 ## Stands in for an NPC / the abstract base: tags nothing.
 class _Stub extends Character:
 	pass
@@ -129,8 +139,23 @@ func test_respawn_gore_wipe_is_a_designer_knob_and_defaults_on() -> void:
 	fx = null
 
 
-func test_live_effects_resource_carries_the_knob() -> void:
-	# The registry copy is what the game actually reads (Player._clear_own_death_gore gates on it), so a knob that
-	# existed only on the class would be a dead switch.
-	assert_true(&"clear_player_gore_on_respawn" in GameSettings.effects,
-		"GameSettings.effects must expose clear_player_gore_on_respawn — Player._clear_own_death_gore reads it on every revive")
+func test_the_revive_sweep_obeys_the_live_knob() -> void:
+	# The REAL Player._clear_own_death_gore, driven off-tree: its gate reads the live GameSettings.effects copy, and
+	# its sweep is handed the GoreSpawner of an in-tree tagged stand-in (the Player itself may never enter the tree),
+	# so a knob that nothing reads — a dead switch — goes red here, not just a missing property.
+	var host := _actor(true)
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	p._gore_spawner = host._gore_spawner  # a reference only: the spawner stays parented (and freed) under `host`
+	var remains := _gore_node(host, Groups.PLAYER_GORE)
+
+	GameSettings.effects.clear_player_gore_on_respawn = false
+	p._clear_own_death_gore()
+	assert_false(remains.is_queued_for_deletion(),
+		"with clear_player_gore_on_respawn OFF the revive must leave the player's remains lying where they fell — that is the designer's whole reason to turn it off")
+
+	GameSettings.effects.clear_player_gore_on_respawn = true
+	p._clear_own_death_gore()
+	assert_true(remains.is_queued_for_deletion(),
+		"control: with the knob ON the same revive sweeps the tagged remains, so the OFF case above was the knob, not a broken sweep")
+	p._gore_spawner = null
+	p.free()

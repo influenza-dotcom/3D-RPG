@@ -75,12 +75,29 @@ func test_scaling_one_emitter_leaves_another_untouched() -> void:
 	assert_eq(b_pm.scale_max, b_max, "the sniper's 3x casing must not bleed into the pistol's emitter")
 
 
-func test_bare_node_without_a_process_material_is_safe() -> void:
-	var sd = load(SCRIPT_PATH).new()
-	add_child_autofree(sd)
-	assert_null(sd.process_material, "a bare ShellDrop has no material")
-	sd.set_casing_scale(2.0)
-	pass_test("set_casing_scale on a material-less emitter is a no-op, not an error")
+func test_casing_scale_leaves_an_emitter_without_a_particle_material_as_authored() -> void:
+	# The guard's two refusals: no process material at all, and a process material that is not a
+	# ParticleProcessMaterial (a ShaderMaterial has no draw-scale range to resize). Either must be left exactly as
+	# authored — no material conjured, no swap — and GUT's engine-error check covers "no error". The CONTROL at the
+	# end is the shipped scene emitter (a real ParticleProcessMaterial), which the same call DOES resize.
+	var bare = load(SCRIPT_PATH).new()
+	add_child_autofree(bare)
+	bare.set_casing_scale(2.0)
+	assert_null(bare.process_material,
+		"a material-less ShellDrop must stay material-less — resizing a casing must not invent an emitter setup")
+	var shader_pm := ShaderMaterial.new()
+	var custom = load(SCRIPT_PATH).new()
+	custom.process_material = shader_pm
+	add_child_autofree(custom)
+	custom.set_casing_scale(2.0)
+	assert_eq(custom.process_material, shader_pm,
+		"a custom (shader) process material must survive set_casing_scale untouched, not be replaced by a stock one")
+	var control = _in_tree()
+	var control_pm := control.process_material as ParticleProcessMaterial
+	var authored_max := control_pm.scale_max
+	control.set_casing_scale(2.0)
+	assert_almost_eq(control_pm.scale_max, authored_max * 2.0, 0.0001,
+		"control: the same call on the shipped ParticleProcessMaterial emitter DOES resize the casing")
 
 
 func test_emit_restarts_the_one_shot() -> void:

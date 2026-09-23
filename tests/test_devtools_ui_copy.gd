@@ -5,7 +5,7 @@ extends GutTest
 ## This tab rewrites a `.gd` file, which is the riskiest write in the plugin, so the load-bearing test is
 ## `test_rewriting_every_value_back_to_itself_is_byte_identical`: parse the REAL file, feed every parsed value
 ## straight back in as an edit, and require the result to equal the original byte for byte. If escaping, line
-## indexing or the constant regex is wrong in any way, that test fails — on the actual 1,860-line file rather
+## indexing or the constant regex is wrong in any way, that test fails — on the actual ~2,300-line file rather
 ## than on a fixture that happens to be easy.
 ##
 ## Everything else here is a pure static over a small literal fixture, so a failure names one rule.
@@ -184,10 +184,17 @@ func test_inline_literals_skip_short_strings_and_keys() -> void:
 	assert_eq(Ops.inline_literals(src).size(), 0, "a dictionary key is not prose")
 
 
-func test_the_real_file_still_has_inline_literals_this_tab_cannot_edit() -> void:
+## A ZERO ratchet, the test_player_text baseline idiom: on 2026-09-15 every prose literal that sat inside a
+## PlayerText function body was lifted to a `const NAME := "..."` declared directly above its function, so the
+## tab edits all of them. A new inline literal is a regression — the writer loses it and the deferred tr() sweep
+## cannot wrap it — so this names the offender rather than tolerating it.
+func test_the_real_file_has_no_inline_literals_left() -> void:
 	var text := FileAccess.get_file_as_string(Ops.SOURCE_PATH)
 	var found := Ops.inline_literals(text)
-	assert_true(found.size() > 0, "the tab must keep reporting the code-only lines while any remain")
+	var names := PackedStringArray()
+	for e in found:
+		names.append("%s: %s" % [e["func_name"], e["text"]])
+	assert_eq(found.size(), 0, "every PlayerText prose template is a const now — lift these out of their function bodies: %s" % [names])
 
 
 func test_summary_counts_what_is_written_and_what_is_not() -> void:

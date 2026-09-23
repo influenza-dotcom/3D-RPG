@@ -12,6 +12,8 @@ extends GutTest
 ##  - The POSE math (_apply) — offset off the AUTHORED rest X (not 0), and the roll SIGN, which must match the
 ##    strafe tilt CameraEffects already applies or the two conventions fight.
 ##  - The accessibility tie-in: "Camera Tilt" off must kill the ROLL and keep the positional peek.
+##  - The TWO GATES in _wanted_side, driven with a real held key (Input.action_press): the posture gate zeroes the
+##    lean and KEEPS the claim (the 2026-08-20 shoot-and-lean regression); the hard gate DROPS it.
 ##
 ## Off-tree throughout: Lean is a plain Node whose _ready() touches nothing but its own fields, so we call it by
 ## hand after wiring a stub head (Player._enter_tree does that injection in the real game). Nothing here runs a
@@ -19,6 +21,24 @@ extends GutTest
 
 const LeanScript := preload("res://scripts/player/lean.gd")
 const SETTINGS_PATH := "res://resources/tuning/PlayerLeanSettings.tres"
+
+var _saved_dialogue_active: DialogueResource = null
+var _saved_dialogue_suspended: bool = false
+
+
+func before_each() -> void:
+	_saved_dialogue_active = DialogueManager._active
+	_saved_dialogue_suspended = DialogueManager._suspended
+
+
+func after_each() -> void:
+	# The gate tests hold real keys on the global Input singleton and fake a conversation on the autoload; neither
+	# may leak into a later test or file.
+	Input.action_release(InputManager.action_lean_left)
+	Input.action_release(InputManager.action_lean_right)
+	DialogueManager._active = _saved_dialogue_active
+	DialogueManager._suspended = _saved_dialogue_suspended
+	_saved_dialogue_active = null
 
 
 func _settings() -> PlayerLeanSettings:
@@ -39,6 +59,15 @@ func _rig(rest_x: float = 0.0) -> Array:
 func _free_rig(rig: Array) -> void:
 	(rig[0] as Node).free()
 	(rig[1] as Node).free()
+
+
+## The shipped settings with the two switches the gate tests lean on forced to their shipped meaning (lean ON,
+## airborne lean OFF), on a duplicate so the shared .tres is never written.
+func _gate_settings() -> PlayerLeanSettings:
+	var s := _settings().duplicate() as PlayerLeanSettings
+	s.enabled = true
+	s.allow_airborne = false
+	return s
 
 
 # --- the tuning resource -------------------------------------------------------------------------------------
@@ -128,11 +157,20 @@ func test_same_binding_compares_the_control_not_the_event() -> void:
 func test_same_binding_falls_back_to_keycode_when_physical_is_absent() -> void:
 	# The project's [input] defaults are all physical_keycode, but a hand-authored or rebound event may carry
 	# only `keycode`. Falling back keeps the arbitration honest for those instead of reading them as "no match".
+	# Both halves are needed: a keycode-only event carries physical_keycode 0, so a compare that only read the
+	# physical field would answer 0 == 0 and call EVERY pair of such events the same key. The positive case alone
+	# cannot see that; the different-key and no-key cases can.
 	var a := InputEventKey.new()
 	a.keycode = KEY_E
 	var b := InputEventKey.new()
 	b.keycode = KEY_E
 	assert_true(InputManager.same_binding(a, b), "keycode-only events still compare")
+	var q := InputEventKey.new()
+	q.keycode = KEY_Q
+	assert_false(InputManager.same_binding(a, q),
+		"...and it is a real compare, not a match-anything: keycode-only E and keycode-only Q are different keys")
+	assert_false(InputManager.same_binding(InputEventKey.new(), InputEventKey.new()),
+		"two key events that name no key at all (no physical_keycode, no keycode) never match — a blank binding must not read as shared")
 
 
 # --- the claim (what the verb drivers stand down on) ----------------------------------------------------------
@@ -197,16 +235,23 @@ func test_reset_drops_the_claims_and_snaps_the_pose() -> void:
 # leaves the claim alone.
 
 func test_posture_gate_zeroes_the_lean_but_keeps_the_claim() -> void:
-	var rig := _rig()
-	var lean: Lean = rig[0]
+	# Driven through _wanted_side — the function the regression lived in — with Lean Left genuinely HELD.
 	# The LEFT side on purpose: Q is the side that still shares a key with a verb, so owns_action is the honest
 	# read of "is the claim still standing the takedown down" (E shares nothing now — see the right-side test).
-	lean._set_claim(true, true)       # a left lean already claimed and held
-	lean._airborne_t = 10.0           # ...and now a recoil hop (or a jump) has us off the floor
-	var s := _settings()
-	assert_false(lean._posture_allows(s), "off the floor past the grace window, the posture gate must refuse")
+	var rig := _rig()
+	var lean: Lean = rig[0]
+	var s := _gate_settings()
+	Input.action_press(InputManager.action_lean_left)
+	assert_eq(lean._wanted_side(s), -1.0, "control: pressing Lean Left on the ground asks for a left lean")
+	assert_true(lean.owns_action(InputManager.action_takedown), "control: the press claimed the shared Q key")
+	await wait_process_frames(2)  # still HELD, but no longer just_pressed: from here only the claim keeps the lean alive
+	lean._airborne_t = s.ground_grace + 1.0  # a recoil hop (or a jump) has us off the floor past the grace window
+	assert_eq(lean._wanted_side(s), 0.0, "airborne past the grace window, the posture gate must zero the lean target")
 	assert_true(lean.owns_action(InputManager.action_takedown),
 		"the claim MUST survive a posture refusal — dropping it strands a HELD key, since only a fresh press re-arms it")
+	lean._airborne_t = 0.0  # landed, key never released
+	assert_eq(lean._wanted_side(s), -1.0,
+		"on landing the held lean must come straight back WITHOUT a fresh press — one trigger pull must not kill the peek")
 	_free_rig(rig)
 
 func test_ground_grace_absorbs_a_recoil_hop() -> void:
@@ -222,15 +267,25 @@ func test_ground_grace_absorbs_a_recoil_hop() -> void:
 	_free_rig(rig)
 
 func test_hard_gate_is_the_one_that_drops_claims() -> void:
-	# The other half of the split: when the input genuinely isn't ours (a menu owns the keyboard, the player is
-	# dead), the claim MUST go, or the takedown/pet verbs stay standing down forever on a key we no longer drive.
+	# The other half of the split: when the input genuinely isn't ours (a conversation or a menu owns the keyboard,
+	# the player is dead), the claim MUST go, or the takedown/pet verbs stay standing down forever on a key we no
+	# longer drive. Driven through _wanted_side with the key held and a conversation opened mid-hold.
 	var rig := _rig()
 	var lean: Lean = rig[0]
-	lean._set_claim(true, true)
-	lean._set_claim(false, true)
-	lean._release_claims()
-	assert_false(lean.owns_action(InputManager.action_takedown), "a hard gate releases the Takedown-side claim")
-	assert_false(lean.owns_action(InputManager.action_pickup), "...and the Interact-side one")
+	var s := _gate_settings()
+	Input.action_press(InputManager.action_lean_left)
+	assert_eq(lean._wanted_side(s), -1.0, "control: pressing Lean Left with the input ours leans left")
+	await wait_process_frames(2)  # held, no longer just_pressed
+	assert_eq(lean._wanted_side(s), -1.0, "control: with nothing gating, the held claim keeps leaning frame after frame")
+	assert_true(lean.owns_action(InputManager.action_takedown), "control: ...and keeps the shared Takedown key claimed")
+	DialogueManager._active = DialogueResource.new()
+	DialogueManager._suspended = false  # a live conversation: is_active() true, the keyboard is the dialogue's
+	assert_eq(lean._wanted_side(s), 0.0, "a conversation owns the keyboard, so the lean must stand straight")
+	assert_false(lean.owns_action(InputManager.action_takedown),
+		"a hard gate must RELEASE the Takedown-side claim, or Q stays dead for takedown/pet after the conversation")
+	DialogueManager._active = null
+	assert_eq(lean._wanted_side(s), 0.0,
+		"the gated press is swallowed: closing the conversation with Q still held must not resume a lean nobody re-pressed")
 	_free_rig(rig)
 
 func test_airborne_tracker_resets_without_a_player() -> void:
@@ -296,13 +351,33 @@ func test_camera_tilt_accessibility_toggle_kills_the_roll_but_keeps_the_peek() -
 
 func test_a_lean_with_no_head_is_inert() -> void:
 	# The Player wires `head` in _enter_tree; a bare .new() (or an extraction that clears the export) must
-	# no-op rather than crash the physics step.
+	# no-op rather than crash the physics step. Driven with Lean Left genuinely HELD, so the step has something to
+	# do: the CONTROL rig takes the same press on the same frame with a head wired and really eases out and claims
+	# Q, which is what makes the headless rig's untouched lean_t and claim an answer rather than an idle default.
+	# _physics_process reads the LIVE GameSettings.player_lean (not a passed-in settings), hence the precondition.
+	var live: PlayerLeanSettings = GameSettings.player_lean
+	assert_true(live != null and live.enabled and live.max_offset > 0.0 and live.lerp_speed > 0.0,
+		"precondition: the live lean settings are wired and a held key can move the lean at all")
+	Input.action_press(InputManager.action_lean_left)
+	var rig := _rig()
+	var control: Lean = rig[0]
+	control._physics_process(0.016)
+	assert_lt(control.lean_t, 0.0, "control: with a head wired, a held Lean Left starts easing the lean out to the left")
+	assert_true(control.owns_action(InputManager.action_takedown), "control: ...and the press claims the shared Q key")
+	_free_rig(rig)
 	var lean: Lean = LeanScript.new()
 	lean._ready()
-	lean._physics_process(0.016)
-	assert_eq(lean.lean_t, 0.0, "no head -> no lean, no error")
+	lean._physics_process(0.016)  # the SAME just-pressed frame the control leaned on
+	assert_eq(lean.lean_t, 0.0,
+		"no head -> the physics step bails before it eases lean_t (and before _apply would dereference the missing rig)")
+	assert_false(lean.owns_action(InputManager.action_takedown),
+		"...and before it polls the key, so an inert lean claims nothing a takedown would stand down for")
+	lean.lean_t = -0.6
+	lean._set_claim(true, true)
 	lean.reset()
-	assert_eq(lean.lean_t, 0.0, "reset is safe with no head wired")
+	assert_eq(lean.lean_t, 0.0, "reset still snaps the blend upright with no head wired")
+	assert_false(lean.owns_action(InputManager.action_takedown),
+		"...and still drops the claims — only the pose write is skipped when there is no head to write to")
 	lean.free()
 
 

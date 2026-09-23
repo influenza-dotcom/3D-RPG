@@ -52,7 +52,7 @@ func test_scene_authors_no_text() -> void:
 
 
 func test_bound_chrome_keeps_the_layout_contracts() -> void:
-	# The loot layout's structural contracts: the panel sits on the PANEL_MARGIN 0.12 anchor band; the two
+	# The loot layout's structural contracts: the panel sits on the PANEL_MARGIN 0.05 (tall) anchor band; the two
 	# grid columns split the panel EXPAND_FILL side by side; each scroll slot expands both ways with
 	# horizontal scroll DISABLED (the grid fits by width — a sideways scrollbar would hide columns); the
 	# footer is a clipping host (fixed height is stamped from the skin at bind time) whose detail label
@@ -60,10 +60,10 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 	var inst: Node = (load(SCENE) as PackedScene).instantiate()
 	var panel := (inst.get_node("%Root") as Control).get_node("Panel") as PanelContainer
 	assert_not_null(panel, "the anchor-band Panel exists under %Root")
-	assert_almost_eq(panel.anchor_left, 0.12, 0.001, "the panel keeps the PANEL_MARGIN left anchor")
-	assert_almost_eq(panel.anchor_top, 0.12, 0.001, "the panel keeps the PANEL_MARGIN top anchor")
-	assert_almost_eq(panel.anchor_right, 0.88, 0.001, "the panel keeps the PANEL_MARGIN right anchor")
-	assert_almost_eq(panel.anchor_bottom, 0.88, 0.001, "the panel keeps the PANEL_MARGIN bottom anchor")
+	assert_almost_eq(panel.anchor_left, 0.05, 0.001, "the panel keeps the PANEL_MARGIN left anchor")
+	assert_almost_eq(panel.anchor_top, 0.05, 0.001, "the panel keeps the PANEL_MARGIN top anchor")
+	assert_almost_eq(panel.anchor_right, 0.95, 0.001, "the panel keeps the PANEL_MARGIN right anchor")
+	assert_almost_eq(panel.anchor_bottom, 0.95, 0.001, "the panel keeps the PANEL_MARGIN bottom anchor")
 	var columns := inst.get_node("%Columns") as HBoxContainer
 	assert_eq(columns.size_flags_vertical, Control.SIZE_EXPAND_FILL, "the columns row takes the panel's spare height")
 	for c in ["SourceColumn", "PlayerColumn"]:

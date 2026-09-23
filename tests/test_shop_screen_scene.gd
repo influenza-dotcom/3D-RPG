@@ -5,11 +5,11 @@ extends GutTest
 ## designer/artist edits; the script binds chrome by %unique name and applies the skin-driven look on top.
 ## These are prefab WIRING contract tests (the silent-when-broken seams): the autoload points at the SCENE,
 ## every %node the script binds exists, no text is authored in the scene (strings belong to PlayerText /
-## l10n, never a .tscn), and the shop's own layout discipline holds. Behaviour (open/buy/sell, and the
-## real-time posture) stays covered by test_merchant.gd's in-tree cases + playtest.
+## l10n, never a .tscn), and the shop's own layout discipline holds. One runtime half is DRIVEN on the live
+## autoload — open_shop seeds pad focus, with the cash-only fallback — using an off-tree Merchant + bare Player (the
+## test_merchant.gd idiom). Behaviour (open/buy/sell, and the real-time posture) stays covered by test_merchant.gd.
 
 const SCENE := "res://scenes/ui/shop_screen.tscn"
-const SCREEN_SOURCE := "res://scripts/ui/shop_screen.gd"
 
 ## Every unique name shop_screen.gd binds in _bind_ui — a rename in the editor breaks the bind at boot,
 ## so pin the roster here where it fails loudly instead.
@@ -56,7 +56,7 @@ func test_scene_authors_no_text() -> void:
 
 func test_bound_chrome_keeps_the_layout_contracts() -> void:
 	# The shop's own layout discipline survives the scene conversion:
-	#  * root/dim span the screen; the panel keeps the 0.12 anchor band (the design-canvas geometry every
+	#  * root/dim span the screen; the panel keeps the 0.05 (tall) anchor band (the design-canvas geometry every
 	#    cell-size number in _bind_ui's comments is derived from);
 	#  * the Sort button clips + right-aligns (its FIXED width is a skin budget, code-set; focus is pinned
 	#    separately below — the pad-parity contract);
@@ -74,8 +74,8 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 	assert_false((inst.get_node("%Root") as Control).visible, "the screen ships hidden until open_shop")
 	var panel := (inst.get_node("%VBox") as Control).get_parent() as Control
 	assert_true(panel is PanelContainer, "the content VBox lives in the themed PanelContainer")
-	assert_almost_eq(panel.anchor_left, 0.12, 0.001, "the panel keeps the 0.12 anchor band (left)")
-	assert_almost_eq(panel.anchor_bottom, 0.88, 0.001, "the panel keeps the 0.12 anchor band (bottom)")
+	assert_almost_eq(panel.anchor_left, 0.05, 0.001, "the panel keeps the 0.05 (tall) anchor band (left)")
+	assert_almost_eq(panel.anchor_bottom, 0.95, 0.001, "the panel keeps the 0.05 (tall) anchor band (bottom)")
 	var sort_btn := inst.get_node("%SortButton") as Button
 	assert_true(sort_btn.clip_text, "the Sort button clips its caption (fixed footprint as the mode cycles)")
 	assert_eq(sort_btn.alignment, HORIZONTAL_ALIGNMENT_RIGHT, "the Sort caption right-aligns against the panel edge")
@@ -120,29 +120,66 @@ func test_every_authored_button_is_reachable_by_a_pad() -> void:
 	inst.free()
 
 
+## Off-tree fixtures for the focus tests (the test_merchant.gd shapes), released in after_each whatever the asserts did.
+var _merchant: Merchant = null
+var _player: Player = null
+var _prev_account: float
+var _prev_method: String
+
+func before_each() -> void:
+	# Pricing the rows reads the SHARED GameState banking fields (the payment seam); pin a known posture.
+	_prev_account = GameState.account
+	_prev_method = GameState.payment_method
+	GameState.account = 0.0
+	GameState.payment_method = "debit"
+
+func after_each() -> void:
+	if ShopScreen.is_open():
+		ShopScreen.close()
+	if _merchant != null:
+		_merchant.stock.free()
+		_merchant.free()
+		_merchant = null
+	if _player != null:
+		_player.inventory.free()
+		_player.free()
+		_player = null
+	GameState.account = _prev_account
+	GameState.payment_method = _prev_method
+
+## Open the LIVE autoload on a fresh off-tree merchant (never added to the tree, so no Merchant/Player _ready runs).
+func _open_shop(accepts_ledger: bool) -> void:
+	_merchant = Merchant.new()
+	_merchant.stock = CharacterInventory.new()
+	_merchant.accepts_ledger = accepts_ledger
+	_player = load("res://scripts/player/player.gd").new()
+	_player.inventory = CharacterInventory.new()
+	get_viewport().gui_release_focus()
+	ShopScreen.open_shop(_merchant, _player)
+
+
 func test_the_pad_landing_spot_is_seeded_when_the_shop_opens() -> void:
-	# The other half of parity is RUNTIME (focus grabbed in open_shop on a live viewport), which a unit test
-	# must not run — this autoload's _ready binds real chrome and open_shop wants a live Merchant and Player.
-	# So it is pinned by SOURCE, the test_atm_screen_scene.gd / test_payment_rail_selector.gd idiom.
-	#
-	# Every offset below is guarded before it is sliced or compared: find() answers -1 for a needle that has
-	# been renamed away and a bad substr yields "", over which a contains() check quietly reads as "absent" — a
-	# pin that retires itself in silence is worse than no pin.
-	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
-	assert_gt(src.length(), 0, "shop_screen.gd must be readable")
-	var open_at := src.find("func open_shop(")
-	assert_gt(open_at, -1, "func open_shop( no longer present — the pin is stale")
-	assert_eq(src.rfind("func open_shop("), open_at,
-		"open_shop must be defined exactly ONCE, or the body sliced below is not the one that runs")
-	var open_end := src.find("\nfunc ", open_at + 1)
-	assert_gt(open_end, open_at, "open_shop's body must end at the next function — the pin is stale")
-	var body := src.substr(open_at, open_end - open_at)
-	var shown := body.find("_root.visible = true")
-	assert_gt(shown, -1, "_root.visible = true no longer present in open_shop — the pin is stale")
-	var grabbed := body.find("_rail_btn.grab_focus()")
-	assert_gt(grabbed, -1,
+	# The other half of parity is RUNTIME: open_shop must hand the viewport a focus owner, or ui navigation has
+	# nowhere to start and every chrome button is pad-unreachable. A merchant that takes the ledger SHOWS the rail
+	# selector (it re-prices every deal), so the pad lands there.
+	_open_shop(true)
+	assert_true(ShopScreen.is_open(), "precondition: the shop opens on a valid merchant + player")
+	var rail: Button = ShopScreen._rail_btn
+	assert_true(rail.is_visible_in_tree(), "precondition: a ledger-accepting merchant shows the rail selector")
+	assert_true(rail.has_focus(),
 		"open_shop must SEED focus on the rail selector — with no focus owner, ui navigation has nowhere to start and every chrome button is pad-unreachable")
-	assert_gt(grabbed, shown,
-		"and it must grab AFTER the root is shown — grab_focus on a hidden Control does nothing, so seeding first would leave the pad with no owner anyway")
-	assert_gt(body.find("_sort_btn.grab_focus()"), grabbed,
-		"and a cash-only merchant (rail selector hidden by _rebuild) must fall back to seeding Sort — a hidden Control's grab_focus is a silent no-op, so rail-only seeding strands exactly those shops")
+
+
+func test_a_cash_only_shop_seeds_focus_on_sort_instead() -> void:
+	# The fallback, with the rail case above as its control: a cash-only merchant HIDES the rail selector, and focus
+	# parked on an invisible button strands the pad just as surely as no owner at all — so Sort, which every shop
+	# shows, must take it.
+	_open_shop(false)
+	assert_true(ShopScreen.is_open(), "precondition: a cash-only merchant still opens the shop")
+	var rail: Button = ShopScreen._rail_btn
+	var sort: Button = ShopScreen._sort_btn
+	assert_false(rail.visible, "precondition: a cash-only merchant hides the rail selector")
+	assert_true(sort.is_visible_in_tree(), "precondition: Sort shows on every shop")
+	assert_true(sort.has_focus(),
+		"a cash-only shop must seed focus on Sort — the rail is hidden, so rail-only seeding strands exactly those shops")
+	assert_false(rail.has_focus(), "and never on the hidden rail selector")

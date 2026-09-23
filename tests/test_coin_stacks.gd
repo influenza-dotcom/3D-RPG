@@ -10,14 +10,30 @@ extends GutTest
 ##     pickpocket freeze/thaw pushes a wallet float through. Create / update-in-place (placement preserved) /
 ##     remove-at-zero / no-op-when-equal / duplicate-collapse / footprint refit, with the grid both OFF
 ##     (an unbounded corpse-copy bag) and ON (a bounded Tetris bag).
-##   * The coin<->wallet round-trip math: one coin = one Zorkmids.QUANTUM (0.01 zm), so coins = round(money/QUANTUM)
-##     and the tile reprints fmt(coins × QUANTUM) VERBATIM as the wallet — the fraction survives the integer stack.
+##   * The wallet -> coin tile SEEDING a loot source does at spawn (ItemContainer._seed_contents for a crate's
+##     authored `money`, LootableCorpse.setup for a dead NPC's wallet): one coin per hundredth of a zorkmid, so a
+##     fractional wallet lands as an exact integer stack — including the wallets (0.29, 19.99, 1234.56 ...) whose
+##     float division lands a hair UNDER the whole coin count, where a truncating conversion would steal a coin.
 ##
-## SCOPE / testability: both angles are pure + off-tree (CharacterInventory is a bare Node built with .new(); its
-## _grid is initialized at declaration, so set_item_count needs no _ready). The live freeze/thaw around a
-## pickpocket session is covered against the real autoload in tests/test_loot_drop.gd.
+## SCOPE / testability: all off-tree (CharacterInventory is a bare Node built with .new(); its _grid is initialized
+## at declaration, so set_item_count needs no _ready; the container is seeded by setting `inventory` and calling
+## _seed_contents, the corpse through setup(), neither needing _ready). The live freeze/thaw around a pickpocket
+## session is covered against the real autoload in tests/test_loot_drop.gd.
 
-const ZORKMIDS_UNIT := 0.01  ## == Zorkmids.QUANTUM; a local copy so a QUANTUM change trips test_money.gd, not this
+const ZORKMIDS_TRES := "res://resources/items/zorkmids.tres"
+
+## [wallet in zorkmids, the coin count the player's cash must become]. Hand-written hundredths, NOT recomputed: the
+## drifting rows are the whole point (0.29 / 0.01 == 28.999999999999996 in floating point, 1234.56 / 0.01 ==
+## 123455.99999999999), next to exact ones (0.5, 12.5) and the smallest coin (0.01).
+const WALLET_COINS := [
+	[0.01, 1],
+	[0.29, 29],
+	[0.5, 50],
+	[4.35, 435],
+	[12.5, 1250],
+	[19.99, 1999],
+	[1234.56, 123456],
+]
 
 
 ## A bare MISC item standing in for the coin template (id + 1×1 footprint is all set_item_count reads).
@@ -163,32 +179,60 @@ func _coin_row(inv: CharacterInventory, coin: Item) -> Dictionary:
 
 
 # ---------------------------------------------------------------------------
-# coin <-> wallet round-trip: the fraction survives the integer stack count
+# wallet -> coin tile seeding: every hundredth of the wallet becomes exactly one coin, in ONE tile
 # ---------------------------------------------------------------------------
 
-func test_coin_count_round_trips_fractional_wallets_verbatim() -> void:
-	# For each quantized wallet value: coins = round(money / QUANTUM), then the tile prints fmt(coins × QUANTUM).
-	# The reprint must equal fmt(money) — i.e. the integer stack loses NOTHING, halves and quarters included.
-	for money in [0.0, 0.01, 0.5, 0.75, 3.1, 12.5, 100.0, 1234.56]:
-		var coins := int(round(money / Zorkmids.QUANTUM))
-		var reprint := Zorkmids.fmt(float(coins) * Zorkmids.QUANTUM)
-		assert_eq(reprint, Zorkmids.fmt(money),
-			"a %s-zorkmid wallet is %d coins and prints back as itself — one coin per QUANTUM keeps fractions exact" % [Zorkmids.fmt(money), coins])
+func test_container_cash_seeds_one_coin_per_hundredth_as_a_single_tile() -> void:
+	for row in WALLET_COINS:
+		var wallet: float = row[0]
+		var coins: int = row[1]
+		var crate := ItemContainer.new()
+		crate.inventory = CharacterInventory.new()  # _ready would build this; set it directly for the off-tree seed
+		crate.money = wallet
+		crate._seed_contents()
+		assert_eq(crate.inventory.count_of_id(Zorkmids.ITEM_ID), coins,
+			"a crate stashing %s zm must loot as %d coins — a lost coin here is cash the player can see authored but never collect" % [str(wallet), coins])
+		assert_eq(crate.inventory.contents().size(), 1,
+			"the %s zm stash must sit in ONE coin tile, not spill across several stacks" % str(wallet))
+		var tile: Dictionary = crate.inventory.contents()[0]
+		assert_eq((tile["item"] as Item).resource_path, ZORKMIDS_TRES,
+			"the tile must be the shipped zorkmids.tres coin (the one Zorkmids.ITEM_ID resolves to), so the loot screen converts it to money")
+		crate.inventory.free()
+		crate.free()
 
-func test_half_a_zorkmid_is_fifty_coins() -> void:
-	assert_eq(int(round(0.5 / Zorkmids.QUANTUM)), 50,
-		"half a zorkmid is 50 coin-units (0.5 / 0.01) — the fractional wallet maps onto a whole integer stack count")
-	assert_eq(Zorkmids.QUANTUM, ZORKMIDS_UNIT,
-		"this suite's coin unit tracks Zorkmids.QUANTUM — if the quantum ever changes, test_money.gd is the deliberate gate")
+
+func test_container_without_cash_seeds_no_coin_tile() -> void:
+	for wallet in [0.0, -5.0]:
+		var crate := ItemContainer.new()
+		crate.inventory = CharacterInventory.new()
+		crate.money = wallet
+		crate._seed_contents()
+		assert_true(crate.inventory.is_empty(),
+			"a crate authored with %s zm must open empty — no zero-coin tile cluttering the loot grid" % str(wallet))
+		crate.inventory.free()
+		crate.free()
 
 
-# ---------------------------------------------------------------------------
-# the coin id constant (the single source shared by loot_screen / grid_tile / GameState)
-# ---------------------------------------------------------------------------
-
-func test_item_id_constant_is_zorkmids() -> void:
-	assert_eq(Zorkmids.ITEM_ID, &"zorkmids",
-		"the coin Item's id is the stable key resources/items/zorkmids.tres carries — LootScreen converts a tile to money by it, grid_tile renders by it, and GameState.capture EXCLUDES a stray one from the save by it")
+func test_corpse_wallet_seeds_one_coin_per_hundredth_as_a_single_tile() -> void:
+	for row in WALLET_COINS:
+		var wallet: float = row[0]
+		var coins: int = row[1]
+		var corpse := LootableCorpse.new()
+		corpse.setup(null, "Mark", wallet)
+		assert_eq(corpse.inventory.count_of_id(Zorkmids.ITEM_ID), coins,
+			"a body that died carrying %s zm must loot as %d coins — the player must get back every hundredth the NPC held" % [str(wallet), coins])
+		assert_eq(corpse.inventory.contents().size(), 1,
+			"the dead NPC's %s zm wallet must be ONE coin tile" % str(wallet))
+		assert_true(corpse.can_be_talked_to(),
+			"a body holding only cash must still be lootable (the coin tile counts as loot)")
+		corpse.free()
+	var broke := LootableCorpse.new()
+	broke.setup(null, "Broke", 0.0)
+	assert_true(broke.inventory.is_empty(),
+		"control: a body with an empty wallet gets no coin tile at all")
+	assert_false(broke.can_be_talked_to(),
+		"...so an empty-handed, penniless body does not advertise itself as lootable")
+	broke.free()
 
 
 # ---------------------------------------------------------------------------
@@ -239,13 +283,31 @@ func test_footprint_stays_put_when_the_bigger_size_cannot_fit() -> void:
 
 
 func test_footprint_growth_never_evicts_another_item() -> void:
+	# The pile grows from 1×1 to 3×3 while another item sits INSIDE the 3×3 it would claim at its own corner. Growth must
+	# route around it: the neighbour keeps its exact tile, and no cell ends up claimed by both. Counting stacks cannot
+	# see this — a grid eviction leaves the stack list untouched — so the check reads the placements themselves.
 	var inv := CharacterInventory.new()
 	inv.enable_grid(6, 5)
 	var coin := _coin()
 	var keepme := _misc(&"keepme")
 	inv.set_item_count(coin, 50, 1, 1)
 	inv.add(keepme, 1)
-	inv.set_item_count(coin, 50, 3, 3)  # grow — must route AROUND keepme, never over it
-	assert_eq(inv.count_of(keepme), 1,
-		"growing the money pile only ever claims FREE cells — it relocates around other items, never evicts them")
+	var before := _coin_row(inv, keepme)
+	var before_cell := Vector2i(int(before["x"]), int(before["y"]))
+	assert_true(Rect2i(0, 0, 3, 3).has_point(before_cell),
+		"harness: the other item must sit inside the 3×3 the pile would grow into in place, or nothing is at stake")
+	# CONTROL: the growth really happens (relocated, not refused), so the neighbour checks below grade a real refit.
+	assert_true(inv.set_item_count(coin, 50, 3, 3), "the pile's footprint changed, so set_item_count reports a change")
+	var grown := _coin_row(inv, coin)
+	assert_eq(Vector2i(int(grown["w"]), int(grown["h"])), Vector2i(3, 3), "control: the pile did grow to 3×3")
+	assert_gte(int(grown["x"]), 0, "control: ...and it is placed on the grid, not parked unplaced")
+	var after := _coin_row(inv, keepme)
+	assert_eq(Vector2i(int(after["x"]), int(after["y"])), before_cell,
+		"growing the money pile never moves or unplaces another item — it keeps its exact tile")
+	assert_true(inv.can_place_stack(int(after["key"]), before_cell.x, before_cell.y, 1, 1),
+		"the other item's cell still belongs to it alone — the pile's growth claimed no cell under it")
+	var grown_rect := Rect2i(int(grown["x"]), int(grown["y"]), int(grown["w"]), int(grown["h"]))
+	assert_false(grown_rect.intersects(Rect2i(before_cell, Vector2i(int(after["w"]), int(after["h"])))),
+		"the grown pile and the other item share no cell — growth only ever claims FREE cells, never evicts")
+	assert_eq(inv.count_of(keepme), 1, "...and the other item is still in the bag")
 	inv.free()

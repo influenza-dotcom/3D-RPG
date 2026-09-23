@@ -12,10 +12,16 @@ class _ArgTarget extends Node:
 	func plain() -> void:
 		got = "plain"
 
-func test_switch_look_name_is_the_verb() -> void:
+## The [F] hover prompt the PickupRay paints: a lever dropped in with no verb authored must still say SOMETHING
+## (a blank prompt reads as "not interactable"), and an authored verb must replace that generic, verbatim.
+func test_switch_hover_prompt_is_never_blank_and_an_authored_verb_replaces_it() -> void:
 	var s := Switch.new()
+	var generic := s.look_name()
+	assert_false(generic.strip_edges().is_empty(),
+		"a Switch with no verb authored must still show a hover prompt — a blank [F] label reads as a dead prop")
 	s.verb = "Pull the lever"
-	assert_eq(s.look_name(), "Pull the lever", "the hover label is the configured verb")
+	assert_eq(s.look_name(), "Pull the lever", "the designer's verb is the hover prompt, verbatim")
+	assert_ne(s.look_name(), generic, "...and it replaces the generic prompt rather than being ignored")
 	s.free()
 
 func test_switch_one_shot_spends_after_use() -> void:
@@ -46,7 +52,22 @@ func test_readable_single_paragraph_is_one_page() -> void:
 	var r := Readable.new()
 	r.text = "Just a one-liner note."
 	assert_eq(r._build_pages().lines.size(), 1, "a single paragraph is one page")
-	assert_eq(r.look_name(), "[PH] Read", "default hover verb")
+	assert_false(r.look_name().strip_edges().is_empty(),
+		"a Readable with no verb authored still shows a hover prompt — a blank [F] label reads as a dead prop")
+	r.free()
+
+## A SINGLE newline is a line break INSIDE a page, never a page break: a note typed as a short verse or an
+## address block must not shatter into one dialogue page per line. Only a BLANK line turns the page.
+func test_readable_single_newline_stays_on_the_same_page() -> void:
+	var r := Readable.new()
+	r.text = "Dear Sam,\nthe key is under the mat.\n\nBurn this note."
+	var pages := r._build_pages()
+	assert_eq(pages.lines.size(), 2, "one blank line = two pages; the single newline inside the first paragraph must not split it")
+	if pages.lines.size() == 2:
+		assert_true(pages.lines[0].text.contains("Dear Sam,") and pages.lines[0].text.contains("under the mat."),
+			"both lines of the first paragraph read together on page one")
+		assert_eq(pages.lines[1].text, "Burn this note.", "the paragraph after the blank line is page two")
+	pages = null
 	r.free()
 
 func test_switch_passes_activator_to_a_one_arg_action() -> void:

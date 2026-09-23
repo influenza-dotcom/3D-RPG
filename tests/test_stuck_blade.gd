@@ -9,11 +9,11 @@ extends GutTest
 ##
 ## Two seams are covered separately, on purpose:
 ##   * the DECISION + the RIDE — driven by calling _try_stick_in_body / _follow_stuck_part directly, which is
-##     every line of the feature except its one call site. Calling them beats staging a real physics contact
-##     because the alternative pulls the whole damage path (ShotResolver, blood particles, damage popups) into a
-##     headless run to test something none of it decides.
-##   * the CALL SITE — pinned as SOURCE TEXT at the bottom, which is the cheap guard against exactly the bug the
-##     pin kill shipped with: every piece correct, and nothing ever calling them.
+##     every line of the feature except its one call site, so each degrade can be staged without a damage roll.
+##   * the CALL SITE — driven at the bottom through the real contact callback (`_on_body_entered`) with the
+##     velocity the solver would have latched, exactly the test_throwable_inert_gore.gd idiom. That is the guard
+##     against the bug the pin kill shipped with: every piece correct, and nothing ever calling them — and it
+##     also catches a call that exists but sits behind the wrong gate (a blade that sticks only in corpses).
 ##
 ## The base `Character` is safe to build in-tree (unlike NPC / Player — see CLAUDE.md): its _ready stamps stats,
 ## builds the GoreSpawner / DustSpawner / DamageThud helpers and an inventory, and touches no weapon scene, nav
@@ -21,7 +21,6 @@ extends GutTest
 ## the whole rig — the same seam GoreSpawner finds a real BodyModelSwap through.
 
 const ThrowableScript := preload("res://scripts/components/Throwable.gd")
-const THROWABLE_SOURCE := "res://scripts/components/Throwable.gd"
 
 ## `Character` is @abstract, so the test needs a concrete actor. This adds NOTHING — the base class's own
 ## behaviour is the subject, deliberately without NPC's weapon hub / nav agent / perception or Player's controller.
@@ -141,16 +140,40 @@ func test_a_survived_thrown_hit_leaves_the_blade_in_the_body() -> void:
 	assert_gt(_blade.collision_layer, 0,
 		"but it KEEPS its layer — that is what lets PickupRay's aim ray still find it to pull it out")
 
+## A DISTINCT displacement per part of the stub rig. Where a stuck blade sits right after the strike cannot say which
+## part it chose (it is seated at the strike point whichever part it then rides), but where it goes when every part
+## moves differently can: it travels exactly as far as the part it is buried in.
+const PART_NUDGES := {
+	"torso": Vector3(0.0, -0.2, 0.0),
+	"head": Vector3(0.0, 0.3, 0.0),
+	"arm_l": Vector3(-0.25, 0.0, 0.0),
+	"arm_r": Vector3(0.25, 0.0, 0.0),
+	"leg_l": Vector3(0.0, 0.0, -0.3),
+	"leg_r": Vector3(0.0, 0.0, 0.3),
+}
+
+## Move every part by its PART_NUDGES offset, replay the ride once, put the parts back, and return how far the blade
+## moved — i.e. the nudge of the part it is riding.
+func _blade_travel_when_every_part_moves() -> Vector3:
+	var before := _blade.global_position
+	for key in PART_NUDGES:
+		(_parts[key] as Node3D).position += PART_NUDGES[key]
+	_blade._follow_stuck_part()
+	var moved := _blade.global_position - before
+	for key in PART_NUDGES:
+		(_parts[key] as Node3D).position -= PART_NUDGES[key]
+	return moved
+
 func test_the_blade_ends_up_in_the_part_it_struck() -> void:
 	_strike(HEAD)
 	assert_true(_blade.is_stuck_in_body(), "a head-height hit sticks")
-	assert_lt(_blade.global_position.distance_to((_parts["head"] as Node3D).global_position), 0.5,
-		"a head-height strike leaves the knife at the HEAD, not at some fixed part")
+	assert_almost_eq(_blade_travel_when_every_part_moves(), PART_NUDGES["head"], Vector3.ONE * 0.0001,
+		"a head-height strike leaves the knife riding the HEAD — not the torso just below it, not some fixed part")
 	_blade.unstick()
 	_strike(Vector3(-0.42, 1.15, 0.18))
 	assert_true(_blade.is_stuck_in_body(), "an arm hit sticks — arms ship ON for this effect, unlike the wall pin")
-	assert_lt(_blade.global_position.distance_to((_parts["arm_l"] as Node3D).global_position), 0.5,
-		"...and it resolves LEFT vs RIGHT, which Character.body_part_at cannot")
+	assert_almost_eq(_blade_travel_when_every_part_moves(), PART_NUDGES["arm_l"], Vector3.ONE * 0.0001,
+		"...and it rides the LEFT arm it struck, not the right one: the choice resolves LEFT vs RIGHT, which Character.body_part_at cannot")
 
 func test_the_blade_is_driven_into_the_body_not_left_on_its_surface() -> void:
 	_strike(CHEST)
@@ -215,11 +238,18 @@ func test_unstick_is_idempotent() -> void:
 		"the death poll, the pickup and _exit_tree can all reach unstick for one blade — the second must not stomp")
 
 func test_an_embedded_blade_cannot_restrike_the_body_carrying_it() -> void:
+	# The re-touch goes through the real contact callback WITH a stabbing speed latched (_land_throw, below), so the
+	# speed gate cannot be what refuses it. The control lands the same contact at the same speed from the same blade
+	# once it has been pulled out, and that one wounds.
 	_strike(CHEST)
 	var hp_before := _victim.hp
-	_blade._on_body_entered(_victim)
+	_land_throw(_blade.global_position)
 	assert_almost_eq(_victim.hp, hp_before, 0.0001,
 		"the victim's own capsule re-touches the hilt every step; the knife in their shoulder must not re-stab them")
+	_blade.unstick()
+	_land_throw(_blade.global_position)
+	assert_lt(_victim.hp, hp_before,
+		"control: the same blade, pulled out, wounds on the same fast contact — so it was the embedding that spared the victim above")
 
 
 # --- The degrades: each of these rebounds and drops, exactly as a thrown prop always did ------------------------
@@ -273,19 +303,58 @@ func test_a_blade_already_in_someone_does_not_stick_twice() -> void:
 	assert_lt(_blade.global_position.distance_to((_parts["torso"] as Node3D).global_position), 0.5,
 		"...it is still riding the TORSO it went into, not re-anchored to the head")
 
-# --- The call site: the guard against shipping every piece correct and nothing calling them ---------------------
+# --- The call site: a landed throw, through the real contact callback --------------------------------------------
 
-func test_the_damage_path_actually_reaches_the_stick_and_gates_it_correctly() -> void:
-	# SOURCE TEXT, deliberately, and it is the most valuable assertion in the file. The bug this whole file exists
-	# to prevent is a feature wired correctly everywhere except at the one place that would run it, and no
-	# behavioural assertion above can see that — while driving it for real would drag the entire damage path
-	# (ShotResolver, blood particles, damage popups) into a headless run to test something none of it decides.
-	# Pinned as the CALL and the GATE, never a bare name, so a surviving declaration cannot satisfy it.
-	var src := FileAccess.get_file_as_string(THROWABLE_SOURCE)
-	assert_gt(src.length(), 0, "Throwable.gd must be readable for this pin to mean anything")
-	assert_true(src.contains("_try_stick_in_body(character, hit_pos, _pre_step_velocity)"),
-		"_try_damage_character must actually CALL the stick, with the same located contact point the damage used")
-	assert_true(src.contains("if sticks_in_body and thrown_weapon != null"),
-		"...only for a prop that OPTED IN, and only on the located weapon path that carries a contact point at all")
-	assert_true(src.contains("character.is_alive():"),
-		"...and only on the SURVIVE branch, which is what keeps one hit from both sticking and pinning")
+## Fast enough to clear PhysicsDamageSettings.interactable_damage_min_velocity (6 m/s) with room to spare.
+const THROW_SPEED := 12.0
+
+## Land the blade on the victim the way the solver does: at `contact`, carrying the velocity latched on the step
+## before, through `_on_body_entered`. Every gate between the contact and the stick runs for real. The blade is made
+## indestructible so its own impact self-damage can't shatter it and turn the test into one about the prop.
+func _land_throw(contact: Vector3, velocity: Vector3 = THROW_DIR * THROW_SPEED) -> void:
+	_blade.destructible = false
+	_blade.global_position = contact
+	_blade._pre_step_velocity = velocity
+	_blade._on_body_entered(_victim)
+
+func test_a_landed_throw_the_victim_survives_leaves_the_blade_in_them() -> void:
+	var hp_before := _victim.hp
+	_land_throw(CHEST)
+	assert_lt(_victim.hp, hp_before, "precondition: the thrown knife actually wounded the victim")
+	assert_true(_victim.is_alive(), "precondition: a 100 hp victim survives one thrown knife")
+	assert_true(_blade.is_stuck_in_body(),
+		"a real landed throw the victim survives must leave the knife in them — the damage path has to reach the stick")
+	assert_lt(_blade.global_position.distance_to((_parts["torso"] as Node3D).global_position), 0.5,
+		"a chest-height throw leaves the knife in the TORSO")
+
+func test_a_landed_throw_sticks_where_it_struck_not_at_the_victim_s_feet() -> void:
+	_land_throw(HEAD)
+	assert_true(_blade.is_stuck_in_body(), "a survived head-height throw sticks")
+	assert_lt(_blade.global_position.distance_to((_parts["head"] as Node3D).global_position), 0.5,
+		"the stick must be handed the SAME contact point the damage used, so a knife thrown at the head ends up in the head")
+
+func test_a_killing_throw_leaves_no_blade_in_the_corpse() -> void:
+	# Same throw as the survivor test above; only the victim's health differs. A kill belongs to the pin / the death
+	# burst, so a knife must never be left riding a corpse.
+	_victim.hp = 1.0
+	_land_throw(CHEST)
+	assert_false(_victim.is_alive(), "precondition: a 1 hp victim dies to the thrown knife")
+	assert_false(_blade.is_stuck_in_body(),
+		"a throw that KILLS must not embed the knife — sticking is only for the hits people survive")
+
+func test_a_prop_that_did_not_opt_in_never_sticks_from_a_landed_throw() -> void:
+	_blade.sticks_in_body = false
+	var hp_before := _victim.hp
+	_land_throw(CHEST)
+	assert_lt(_victim.hp, hp_before, "control: the throw still landed and wounded")
+	assert_false(_blade.is_stuck_in_body(),
+		"a prop without sticks_in_body bounces off like any thrown prop, however hard it hits")
+
+func test_an_unlocated_bludgeon_never_sticks_from_a_landed_throw() -> void:
+	# No thrown_weapon = the velocity bludgeon path, which carries no contact point, so there is nowhere to embed.
+	_blade.thrown_weapon = null
+	var hp_before := _victim.hp
+	_land_throw(CHEST)
+	assert_lt(_victim.hp, hp_before, "control: the bludgeon still landed and wounded")
+	assert_false(_blade.is_stuck_in_body(),
+		"only the located WEAPON path can embed a blade; a tumbling prop that opted in must still bounce")

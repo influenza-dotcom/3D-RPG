@@ -21,19 +21,31 @@ const BOUND := ["Dim", "Column", "Title", "Subtitle", "Scroll", "BodyLabel", "Sc
 
 
 func test_host_points_at_the_authored_scene() -> void:
-	# The conversion contract: StartMenu preloads the SCENE (root carries the script) — a bare-script .new()
-	# would silently skip the authored layout and _bind_ui would null-deref on the very first launch.
-	var host_src := FileAccess.get_file_as_string(HOST_SCRIPT)
-	assert_true(host_src.contains("preload(\"%s\")" % SCENE),
-		"StartMenu preloads the authored terms-of-service scene")
-	assert_false(host_src.contains("preload(\"%s\")" % SCRIPT_PATH),
-		"StartMenu no longer preloads the bare script")
-	var scene: PackedScene = load(SCENE)
-	assert_not_null(scene, "the authored scene loads")
-	var inst: Node = scene.instantiate()
+	# The conversion contract: StartMenu instances the gate from its TermsScreen const
+	# (`_terms_screen = TermsScreen.instantiate()`), which must be the authored SCENE whose root carries the
+	# script — a bare-script .new() would silently skip the authored layout and _bind_ui would null-deref on the
+	# very first launch. Pinned on the VALUE the host holds (its compiled constant), not on its source text, and
+	# the instance is built from that same value. The live first-launch flow is driven in tests/test_start_menu.gd.
+	var host: GDScript = load(HOST_SCRIPT)
+	assert_true(host != null, "start_menu.gd loads")
+	if host == null:
+		return
+	var held: Variant = null
+	var consts := host.get_script_constant_map()
+	for k in consts:
+		if String(k) == "TermsScreen":
+			held = consts[k]
+	assert_true(held is PackedScene,
+		"StartMenu's TermsScreen is a PackedScene (the authored layout), not a bare script it would .new() without its children")
+	if not held is PackedScene:
+		return
+	var packed := held as PackedScene
+	assert_eq(packed.resource_path, SCENE, "StartMenu instances the authored terms-of-service scene")
+	var inst: Node = packed.instantiate()
 	assert_true(inst is Control, "root is the full-rect Control overlay StartMenu add_child's")
-	assert_not_null(inst.get_script(), "the root carries a script")
-	assert_eq(String(inst.get_script().resource_path), SCRIPT_PATH, "the root carries terms_of_service_screen.gd")
+	assert_true(inst.get_script() != null, "the root carries a script")
+	if inst.get_script() != null:
+		assert_eq(String(inst.get_script().resource_path), SCRIPT_PATH, "the root carries terms_of_service_screen.gd")
 	inst.free()
 
 

@@ -2,16 +2,28 @@ extends GutTest
 
 ## Diegetic HUD weight (scripts/ui/hud_sway.gd + the ui.gd wiring's knobs): the damped-spring maths
 ## behind the corner HUD cluster trailing camera turns. Pure state off-tree — target clamping, spring
-## convergence, the settle-back-to-zero, the frame-hitch dt clamp, the shipped HudSettings knobs, and
-## the Settings accessibility scale. The on-screen feel (subtle, not seasick) is playtest territory.
+## convergence, the settle-back-to-zero, the frame-hitch dt clamp, the PROMISES the shipped HudSettings
+## "HUD weight" knobs must keep (driven through the real spring, never pinned as literals), and the
+## Settings accessibility scale. The last word on feel is still a playtest; these pin its bounds.
 
 ## Loaded BY PATH (not the class_name) — the editor class-cache cascade guard.
 const SWAY := preload("res://scripts/ui/hud_sway.gd")
 
-## Shipped spring knobs, mirrored from HudSettings defaults so the behaviour tests exercise the real feel.
+## A REFERENCE spring for the maths tests: the ~0.72-ratio under-damped pair HudSettings' docs derive their
+## numbers from (the 0.044*v kick-peak law). Deliberately NOT read from HudSettings — the maths must hold for
+## this reference whatever a designer retunes. The SHIPPED knobs are exercised by the test_shipped_* tests.
 const STIFFNESS := 70.0
 const DAMPING := 12.0
 const DT := 1.0 / 60.0
+## HudSettings.hud_sway_max's documented ceiling: past ~12 px on the 792x444 canvas the panel reads seasick.
+const SEASICK_PX := 12.0
+## "Went past home at all": far above the semi-implicit integrator's own residue near critical damping (well
+## under 0.001 px), so any release excursion past this is a real under-damped overshoot, however small.
+const OVERSHOOT_EPS_PX := 0.01
+## A second swing back past home smaller than this is not read as wobble: a quarter of a canvas pixel, ~0.6
+## screen px after the 792x444 canvas's ~2.4x upscale. Deliberately a VISIBILITY bound, not a band around the
+## shipped damping, so a designer can retune the spring's feel without tripping it.
+const RINGING_PX := 0.25
 
 var _prev_loaded: bool
 var _prev_scale: float
@@ -64,17 +76,24 @@ func test_step_settles_back_to_zero_when_the_look_stops() -> void:
 	s = null
 
 func test_step_overshoots_once_then_settles_the_mass_read() -> void:
-	# The shipped knobs are deliberately slightly UNDER-damped (~0.72 ratio): releasing a swing must
-	# cross zero at least once (the settle that sells mass), then die out. Pin the overshoot exists.
+	# The reference pair is deliberately slightly UNDER-damped (~0.72 ratio): releasing a held swing must carry
+	# the panel past home ONCE (the settle that sells mass) and then rest — never swing back past home again,
+	# which reads as wobble. Tracked the same way as the shipped-knob test: the deepest excursion past home on
+	# the far side, then any rebound back over home after it.
 	var s = SWAY.new()
 	for i in 60:
 		s.step(Vector2(8.0, 0.0), STIFFNESS, DAMPING, DT)
-	var crossed := false
+	var overshoot := 0.0  # deepest excursion past home, on the far side from the held swing
+	var rebound := 0.0    # any swing BACK past home after that overshoot — ringing
 	for i in 240:
-		s.step(Vector2.ZERO, STIFFNESS, DAMPING, DT)
-		if s.offset.x < -0.05:
-			crossed = true
-	assert_true(crossed, "release carries one visible overshoot past home (under-damped on purpose)")
+		var x: float = s.step(Vector2.ZERO, STIFFNESS, DAMPING, DT).x
+		if x < 0.0:
+			overshoot = minf(overshoot, x)
+		elif overshoot < -OVERSHOOT_EPS_PX:
+			rebound = maxf(rebound, x)
+	assert_lt(overshoot, -0.05, "release carries one visible overshoot past home (under-damped on purpose)")
+	assert_lt(rebound, RINGING_PX,
+		"...and only ONE: the spring must not swing back past home a second time (%.3f px) — ringing reads as wobble" % rebound)
 	assert_lt(s.offset.length(), 0.1, "…and still dies out to rest")
 	s = null
 
@@ -143,12 +162,26 @@ func test_fov_scale_target_clamps_and_survives_degenerate_rest() -> void:
 	assert_eq(SWAY.fov_scale_target(90.0, 0.0, 0.1, 0.04), 0.0,
 		"degenerate rest_fov degrades to zero — never a divide-by-zero")
 
-func test_hud_settings_motion_channel_defaults() -> void:
-	var h := HudSettings.new()
-	assert_eq(h.hud_vel_gain, Vector2(0.45, 0.3), "shipped body-lean gain (px per m/s; x lateral, y vertical)")
-	assert_almost_eq(h.hud_fov_scale_gain, 0.1, 0.001, "shipped lens-breath gain (+20% FOV dash -> ~2% shrink)")
-	assert_almost_eq(h.hud_fov_scale_max, 0.04, 0.001, "shipped lens-breath cap (panel never leaves 96..104%)")
-	h = null
+func test_shipped_motion_channels_lean_naturally_inside_the_one_sway_budget() -> void:
+	# The LIVE shipped resource (GameSettings.hud = HudSettings.tres), driven through the real statics. The
+	# lean gains are positive-means-natural by contract (the inertia sign lives in velocity_target), and the
+	# lean SUMS with the look target under the ONE hud_sway_max cap — so a full-speed strafe on its own must
+	# leave the look channel room, or turning while strafing reads dead.
+	var h: HudSettings = GameSettings.hud
+	assert_gt(h.hud_vel_gain.x, 0.0,
+		"hud_vel_gain.x must be positive — the inertia sign is in the formula, so a negative gain leans the panel INTO a strafe")
+	assert_gt(h.hud_vel_gain.y, 0.0,
+		"hud_vel_gain.y must be positive — a negative gain floats the panel on a jump launch and presses it down on a fall")
+	var strafe: Vector2 = SWAY.velocity_target(GameSettings.player_movement.max_speed, 0.0, h.hud_vel_gain)
+	assert_gt(strafe.length(), 0.0, "a full-speed strafe must lean the panel at all, or the body channel is dead")
+	assert_lt(strafe.length(), h.hud_sway_max,
+		"a full-speed strafe alone must lean less than hud_sway_max, or the shared cap leaves the look channel no travel")
+	# Lens breath with the shipped gain + cap: the panel belongs to the WORLD, so it shrinks as the lens widens.
+	var rest: float = GameSettings.camera.default_fov
+	assert_lte(SWAY.fov_scale_target(rest * 1.3, rest, h.hud_fov_scale_gain, h.hud_fov_scale_max), 0.0,
+		"a widening lens must never SWELL the panel (a negative hud_fov_scale_gain inverts the lens breath)")
+	assert_gte(SWAY.fov_scale_target(rest * 0.7, rest, h.hud_fov_scale_gain, h.hud_fov_scale_max), 0.0,
+		"a narrowing lens must never SHRINK the panel")
 
 # --- the discrete impact channel (impulse / kicks) ---------------------------------------------------
 
@@ -167,9 +200,10 @@ func test_impulse_dips_downward_then_settles_home() -> void:
 	s = null
 
 func test_impulse_peak_is_subtle_at_the_shipped_kick() -> void:
-	# Pin the tuning math documented on HudSettings.hud_land_kick: with the shipped 70/12 spring a kick
+	# Pin the tuning math documented on HudSettings.hud_land_kick: with the 70/12 reference spring a kick
 	# of v peaks at ~0.044*v px in a 60 fps sim — 110 px/s lands ~4.9 px. A regression outside ~4..6.5 px
-	# means someone changed spring constants without re-deriving the kick (or vice versa).
+	# means the integrator changed and the documented derivation no longer holds. (Whether the SHIPPED
+	# knobs keep a kick inside the cap is test_shipped_kicks_land_unclipped_and_dip_inside_the_sway_cap.)
 	var s = SWAY.new()
 	s.impulse(Vector2(0.0, 110.0))
 	var peak := 0.0
@@ -203,22 +237,57 @@ func test_land_kick_maps_intensity_linearly_and_floors_at_zero() -> void:
 	assert_eq(SWAY.land_kick(-0.5, 65.0), Vector2.ZERO,
 		"negative intensity floors at zero (a bad caller can't kick the panel UP)")
 
-func test_hud_settings_kick_defaults() -> void:
-	var h := HudSettings.new()
-	assert_almost_eq(h.hud_land_kick, 110.0, 0.001, "shipped landing kick (px/s -> ~5 px full-slam dip at the 0.044*v peak law)")
-	assert_almost_eq(h.hud_kick_max, 150.0, 0.001, "shipped per-kick cap (px/s -> ~6.6 px peak, the impulse twin of hud_sway_max)")
-	h = null
+func test_shipped_kicks_land_unclipped_and_dip_inside_the_sway_cap() -> void:
+	# hud_kick_max is documented as the impulse-channel twin of hud_sway_max: whatever the source or tuning, the
+	# hottest kick that survives the cap must dip the panel no further than the continuous channel's own cap.
+	# And the cap must not eat the ordinary full-slam landing, or the land knob has a dead band above it.
+	var h: HudSettings = GameSettings.hud
+	var landing: Vector2 = SWAY.land_kick(1.0, h.hud_land_kick)
+	assert_gt(landing.y, 0.0, "a full-slam landing must kick the panel DOWN — no kick means touchdown has no weight")
+	assert_almost_eq(SWAY.kick_scaled(landing, h.hud_kick_max, 1.0).y, landing.y, 0.001,
+		"hud_kick_max must sit at or above a full landing kick — a cap below it silently flattens every hard landing")
+	var s = SWAY.new()
+	s.impulse(SWAY.kick_scaled(Vector2(0.0, 1.0e6), h.hud_kick_max, 1.0))  # the hottest kick any source can land
+	var peak := 0.0
+	for i in 120:  # 2 s at 60 fps — well past the dip's peak
+		peak = maxf(peak, s.step(Vector2.ZERO, h.hud_sway_stiffness, h.hud_sway_damping, DT).y)
+	assert_gt(peak, 0.0, "a capped kick must still move the panel")
+	assert_lte(peak, h.hud_sway_max,
+		"the hottest capped kick must dip the panel no further than hud_sway_max (peak %.2f px) — impacts obey the same subtle cap" % peak)
+	s = null
 
 # --- shipped knobs + the accessibility scale ---------------------------------------------------------
 
-func test_hud_settings_sway_defaults_are_subtle() -> void:
-	var h := HudSettings.new()
-	assert_eq(h.hud_sway_gain, Vector2(2.6, 2.2), "shipped gain (px per rad/s, x=yaw y=pitch)")
-	assert_almost_eq(h.hud_sway_max, 8.0, 0.001,
-		"the sway cap ships at 8 px on the 792x444 canvas — subtle is the contract, not seasick")
-	assert_almost_eq(h.hud_sway_stiffness, 70.0, 0.001, "shipped spring stiffness")
-	assert_almost_eq(h.hud_sway_damping, 12.0, 0.001, "shipped damping (~0.72 ratio — one small settle overshoot)")
-	h = null
+func test_shipped_sway_is_subtle_and_settles_with_one_overshoot() -> void:
+	# What the "HUD weight" group promises, checked on the LIVE knobs by driving the real spring rather than by
+	# pinning numbers: gains trail the turn, the cap stays under the seasick line, and releasing a held flick
+	# carries ONE small overshoot (slightly under-damped, the "mass" read) that dies without ringing.
+	var h: HudSettings = GameSettings.hud
+	assert_gt(h.hud_sway_gain.x, 0.0, "yaw gain must be positive — positive trails the turn; negative makes the panel LEAD it")
+	assert_gt(h.hud_sway_gain.y, 0.0, "pitch gain must be positive — positive trails the look")
+	assert_gt(h.hud_sway_max, 0.0, "a zero sway cap welds the panel static whatever the player's HUD Sway slider says")
+	assert_lte(h.hud_sway_max, SEASICK_PX, "hud_sway_max past ~12 px on the 792x444 canvas reads seasick, not weighty")
+	var s = SWAY.new()
+	var flick: Vector2 = SWAY.look_target(50.0, 0.0, h.hud_sway_gain, h.hud_sway_max)  # a violent yaw flick, held
+	var peak := 0.0
+	for i in 60:
+		peak = maxf(peak, s.step(flick, h.hud_sway_stiffness, h.hud_sway_damping, DT).length())
+	assert_lte(peak, SEASICK_PX,
+		"a held flick, overshoot included, must never swing the panel past the seasick line (peak %.2f px)" % peak)
+	var overshoot := 0.0  # deepest excursion past home, on the far side from the flick
+	var rebound := 0.0    # any swing BACK past home after that overshoot — ringing
+	for i in 120:  # the camera stops: 2 s of release
+		var x: float = s.step(Vector2.ZERO, h.hud_sway_stiffness, h.hud_sway_damping, DT).x
+		if x < 0.0:
+			overshoot = minf(overshoot, x)
+		elif overshoot < -OVERSHOOT_EPS_PX:
+			rebound = maxf(rebound, x)
+	assert_lt(overshoot, -OVERSHOOT_EPS_PX,
+		"release must carry an overshoot past home (the under-damped 'mass' read) — critically damped knobs ease back with no life")
+	assert_lt(rebound, RINGING_PX,
+		"...and only ONE: the panel must not swing back past home again (%.3f px) — ringing reads as wobble" % rebound)
+	assert_lt(s.offset.length(), 0.1, "the panel comes to rest within 2 s of the camera stopping")
+	s = null
 
 func test_settings_hud_sway_scale_default_full_and_clamps() -> void:
 	# FULL (1.0) by default — the authored sway ships on; a motion-sensitive player dials the

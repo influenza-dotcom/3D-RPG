@@ -20,10 +20,11 @@ extends GutTest
 ## (Throwable._is_inert_player_gore reading is_in_group + _credited_attacker + the GameSettings knob) is one
 ## unbranching line over it. The DEFAULT of that knob is pinned in tests/test_managers_tuning.gd.
 ##
-## AND A LIVE HALF (bottom of the file), because a policy nobody reaches is worth nothing and the source-text pin
-## only proves the call EXISTS. Those drive the real Throwable._on_body_entered against a real in-tree Character
-## and assert hp — the test_stuck_blade.gd idiom. No physics is stepped: `_pre_step_velocity` is written directly
-## and the contact callback invoked, which is exactly what the solver does one frame later, minus the flakiness.
+## AND A LIVE HALF (bottom of the file), because a policy nobody reaches is worth nothing. Those drive the real
+## Throwable._on_body_entered against a real in-tree Character and assert hp — the test_stuck_blade.gd idiom — which
+## is what proves the guard is wired in, and wired in the right PLACE (the chunk still breaks, and burns no cooldown).
+## No physics is stepped: `_pre_step_velocity` is written directly and the contact callback invoked, which is exactly
+## what the solver does one frame later, minus the flakiness.
 
 const Throwable := preload("res://scripts/components/Throwable.gd")
 
@@ -82,22 +83,6 @@ func test_the_knob_restores_the_old_behaviour_wholesale() -> void:
 		"with player_gore_damages_characters ON, even loose player gore must damage again — the knob's whole job is to restore the old behaviour, not to soften it")
 	assert_false(Throwable.gore_spares_characters(false, false, true),
 		"the knob cannot make anything MORE inert than the default does — every other combination already damages")
-
-
-# --- the live wiring the pure policy sits under ---------------------------------------------------------------
-
-func test_the_guard_is_wired_into_the_damage_path() -> void:
-	# A pure policy nobody calls is worthless, and the call site is load-bearing in a way the static can't state:
-	# it must sit in _try_damage_character (so the thud, the decoy noise and the gib's own self-damage in
-	# _on_body_entered still run — the burst has to LOOK identical), and after `attacker` is resolved.
-	# Single-line needles on purpose: the house idiom (tests/test_stuck_blade.gd) and immune to a CRLF flip.
-	var src := FileAccess.get_file_as_string("res://scripts/components/Throwable.gd")
-	assert_true(src.contains("if _is_inert_player_gore(attacker):"),
-		"Throwable._try_damage_character must consult _is_inert_player_gore — without the call site the pure policy above is dead code and the player's corpse kills again")
-	assert_true(src.contains("func _is_inert_player_gore(attacker: Node) -> bool:"),
-		"_is_inert_player_gore must exist as the one place the two terms and the designer knob are resolved")
-	assert_true(src.contains("is_in_group(Groups.PLAYER_GORE)"),
-		"the provenance term must read Groups.PLAYER_GORE — the tag GoreSpawner already stamps on everything the PLAYER'S death spawns, and the same question the checkpoint revive's sweep asks")
 
 
 # --- LIVE: the real damage path, driven against a real Character ----------------------------------------------
@@ -180,3 +165,32 @@ func test_live_the_knob_puts_the_old_behaviour_back() -> void:
 	GameSettings.effects.player_gore_damages_characters = prior
 	assert_lt(after, before,
 		"ticking player_gore_damages_characters must restore the pre-fix behaviour on the real path, not just in the pure policy")
+
+
+func test_live_player_gore_still_breaks_on_the_strike_it_spares() -> void:
+	# The guard lives in _try_damage_character, not at the top of _on_body_entered, so the burst LOOKS identical: the
+	# chunk still thuds and still takes its own impact damage, so a fragile chunk bursts. Only the victim is spared.
+	_gib.hp = 1  # fragile on purpose: the claim is about the guard's placement, not the gib's authored hp
+	_gib.add_to_group(Groups.PLAYER_GORE)
+	var before := _victim.hp
+	_gib._on_body_entered(_victim)
+	assert_almost_eq(_victim.hp, before, 0.0001, "precondition: the player's gore spared the enemy")
+	assert_true(_gib._destroyed,
+		"the chunk must still burst on the strike it spares — the guard may silence the damage, not the whole contact")
+
+
+func test_live_an_inert_strike_burns_no_damage_cooldown() -> void:
+	# "No damage, no blood, no cooldown": a spared contact leaves the prop exactly as it found it. Proven by what a
+	# burned cooldown would break: the player picks the same chunk up and throws it straight back, and it must bite.
+	_gib.destructible = false  # the chunk must survive the first contact to be thrown back
+	_gib.add_to_group(Groups.PLAYER_GORE)
+	_gib._on_body_entered(_victim)
+	assert_almost_eq(_victim.hp, 14.0, 0.0001, "precondition: the loose chunk dealt nothing")
+	assert_false(_gib._destroyed, "precondition: the chunk survived its first contact, so it can really be thrown again")
+	var thrower := VictimActor.new()
+	add_child_autofree(thrower)
+	thrower.add_to_group(Groups.PLAYER)
+	_gib.mark_thrown_by(thrower)
+	_gib._on_body_entered(_victim)
+	assert_lt(_victim.hp, 14.0,
+		"a throw landing right after an inert contact must still wound — the spared contact must not have burned the damage cooldown")

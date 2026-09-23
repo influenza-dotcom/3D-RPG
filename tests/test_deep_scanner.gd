@@ -4,7 +4,8 @@ extends GutTest
 ## BioScanner at a longer reach, under its OWN ability id (a chip installs one id, an id resolves to one
 ## script/scene pair, the range is a property of the pair). Pinned on a bare `.new()` — the object a runtime
 ## grant actually builds — so the SCRIPT default is the number a paid install grants:
-##   * ability_id &"deep_scanner", the script default 55 m, scan_range_m() with the zero clamp;
+##   * ability_id &"deep_scanner", a bare .new() granting a real reach that scan_range_m() reports, with the zero
+##     clamp (the exact metres are a designer knob — the relation to the bio tier below is the design);
 ##   * it OUT-REACHES the bio tier (AbilityManager.scan_range takes the widest enabled one, so "owning both is
 ##     simply the deep one" only holds while 55 > 22);
 ##   * the registry resolves the id to this script, the authored scene agrees with the default, the chip
@@ -29,11 +30,11 @@ func test_is_an_ability_with_its_own_id() -> void:
 	a.free()
 
 
-func test_the_script_default_is_the_range_a_chip_install_grants() -> void:
+func test_a_bare_build_grants_a_real_range_honours_its_export_and_clamps_a_negative() -> void:
 	var a = _bare()
-	assert_eq(a.scan_range, 55.0, "a bare .new() must grant 55 m — the number the chip is sold on")
-	assert_true(a.has_method(&"scan_range_m"), "AbilityManager.scan_range duck-types on scan_range_m()")
-	assert_eq(a.scan_range_m(), 55.0, "scan_range_m() reports the export")
+	assert_gt(a.scan_range_m(), 0.0, "a bare .new() (what a paid install / save load builds) must grant a real reach — a scene-only range would install as a 0 m scanner")
+	a.scan_range = 31.5
+	assert_almost_eq(a.scan_range_m(), 31.5, 0.0001, "scan_range_m() — the number AbilityManager.scan_range duck-reads — must report the export")
 	a.scan_range = -1.0
 	assert_eq(a.scan_range_m(), 0.0, "a negative clamps to no scanner")
 	a.free()
@@ -71,4 +72,7 @@ func test_the_chip_installs_this_id() -> void:
 	assert_not_null(chip, "chip_deep_scanner.tres must load")
 	if chip == null:
 		return
-	assert_eq(chip.installs_ability, ID, "the Deep-Scan chip must install &\"deep_scanner\"")
+	var bare = _bare()
+	assert_eq(chip.installs_ability, bare.ability_id(), "the Deep-Scan chip must install the id this scanner answers with — a mismatch is a paid install that grants nothing")
+	assert_eq(AbilityRegistry.script_path_for(chip.installs_ability), SCRIPT_PATH, "...and that id must build THIS script at install time")
+	bare.free()

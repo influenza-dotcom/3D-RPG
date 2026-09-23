@@ -100,25 +100,6 @@ func test_shirt_reset_drops_two_sided_custom_shirt() -> void:
 	assert_eq(cc._shirt_canvas._imgs[ShirtCanvasScript.SIDE_FRONT].get_pixel(4, 4), Color.WHITE, "front art is blanked")
 	assert_eq(cc._shirt_canvas._imgs[ShirtCanvasScript.SIDE_BACK].get_pixel(4, 4), Color.WHITE, "back art is blanked")
 
-func test_the_stats_tab_states_the_zero_sum_rule_under_the_banner() -> void:
-	# The tab opens with every stat at 0, "Points to spend: 0" and every "+" painted disabled — which reads as a
-	# BROKEN menu unless something says that a "−" on another stat is what funds a "+". The rule line is that
-	# something. It is CODE-BUILT into the authored StatsTab (the scene carries no text), so the scene-wiring
-	# suite cannot see it at all; pinned here, on the real screen, in the position it has to hold.
-	var cc = _make_screen()
-	var tab := cc.get_node("%StatsTab") as VBoxContainer
-	var banner := cc.get_node("%PointsLabel") as Label
-	var rule := tab.get_child(banner.get_index() + 1) as Label
-	assert_not_null(rule, "a Label sits directly under the points banner (before the stat scroll)")
-	assert_eq(rule.text, PlayerText.CHARACTER_CREATE_STAT_RULE,
-		"…painted from the authored const, never a literal at the paint site")
-	# ONE LINE, by construction: a wrapping label owns its row's height, so a second line would push the stat
-	# list down AND grow the Stats page's minimum past the card's anchor band — the menus-don't-resize rule
-	# tests/test_menu_layout_stability.gd exists to police.
-	assert_eq(rule.autowrap_mode, TextServer.AUTOWRAP_OFF,
-		"the rule line never wraps — a second line would resize the card")
-	assert_true(rule.clip_text, "…and clips instead, so a re-worded or l10n'd line can never widen it either")
-
 func test_plus_steppers_gate_on_spare_points() -> void:
 	var cc = _make_screen()
 	assert_true((cc._plus_buttons[&"strength"] as Button).disabled, "the + stepper is disabled with no spare points")
@@ -156,32 +137,26 @@ func test_confirm_emits_trimmed_name_and_stat_dict() -> void:
 	var appearance: Dictionary = params[2]
 	assert_true(appearance.has("head") and appearance.has("body"), "the appearance carries a head + body pick")
 
-# A run MUST be NAMED before it can begin: Begin is gated OFF while the name is blank (widget state), and _on_begin
-# refuses to emit a nameless run (the backstop). Setting .text in code doesn't emit text_changed, so we drive
-# _on_name_changed as the LineEdit signal would.
-func test_begin_disabled_until_named() -> void:
+# The field opens FILLED (a random SEED_NAMES pick), so Begin is live from the first frame and the screen carries
+# no "name required" line. A cleared field is not a refusal: Begin falls back to the seed at commit.
+func test_the_name_field_opens_seeded_and_begin_is_always_live() -> void:
 	var cc = _make_screen()
-	assert_true((cc._begin_btn as Button).disabled, "Begin boots disabled on a fresh, unnamed sheet")
-	# The hint hides by ALPHA, never by `visible` — a hidden Container child loses its layout slot and the whole
-	# tab block below would jump on the first keystroke. `visible` must therefore stay true in every state.
-	assert_true(cc._name_hint.visible, "the hint keeps its layout slot (visible) while unnamed")
-	assert_eq(cc._name_hint.self_modulate.a, 1.0, "the 'name required' hint is painted while unnamed")
-	cc._name_edit.text = "Rae Vandel"
-	cc._on_name_changed("Rae Vandel")
-	assert_false((cc._begin_btn as Button).disabled, "naming the character enables Begin")
-	assert_true(cc._name_hint.visible, "the hint keeps its layout slot (visible) once named — alpha does the hiding")
-	assert_eq(cc._name_hint.self_modulate.a, 0.0, "the hint paints transparent once a name is entered")
-	cc._name_edit.text = "   "  # whitespace-only strips to empty -> still unnamed
+	assert_false((cc._begin_btn as Button).disabled, "Begin is live on a fresh sheet")
+	assert_false(cc._name_edit.text.strip_edges().is_empty(), "the field opens with a seeded name")
+	assert_true(cc.SEED_NAMES.has(cc._name_edit.text), "...picked from SEED_NAMES")
+	assert_eq(cc._seed_name, cc._name_edit.text, "the seed is remembered for the blank-field fallback")
+	cc._name_edit.text = "   "
 	cc._on_name_changed("   ")
-	assert_true((cc._begin_btn as Button).disabled, "a whitespace-only name still counts as unnamed")
-	assert_eq(cc._name_hint.self_modulate.a, 1.0, "the hint repaints when the name is cleared to blank")
+	assert_false((cc._begin_btn as Button).disabled, "clearing the field never disables Begin")
 
-func test_begin_refuses_blank_name() -> void:
+func test_begin_falls_back_to_the_seed_on_a_blank_name() -> void:
 	var cc = _make_screen()
 	cc._name_edit.text = "   "  # blank after strip_edges
 	watch_signals(cc)
 	cc._on_begin()
-	assert_signal_not_emitted(cc, "confirmed", "Begin refuses to emit a nameless run even if pressed while blank")
+	assert_signal_emitted(cc, "confirmed", "a blank field still begins the run")
+	var params: Array = get_signal_parameters(cc, "confirmed")
+	assert_eq(str(params[0]), cc._seed_name, "...under the seeded name, never an empty one")
 
 
 func test_keyboard_or_pad_can_reach_the_stat_steppers() -> void:
@@ -209,6 +184,7 @@ func test_pad_keyboard_types_into_the_name_field_and_gates_begin() -> void:
 	var cc = _make_screen()
 	assert_not_null(cc._pad_kb, "the creation screen builds the pad keyboard")
 	assert_false(cc._pad_kb.visible, "hidden until asked for")
+	cc._name_edit.text = ""  # the field opens SEEDED (SEED_NAMES); clear it so the typed keys are all there is
 	cc._pad_kb.open(cc._name_edit)
 	assert_true(cc._pad_kb.visible)
 	cc._pad_kb._type("R")

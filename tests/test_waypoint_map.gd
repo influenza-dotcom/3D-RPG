@@ -17,9 +17,11 @@ extends GutTest
 ## Loaded BY PATH and constructed bare, the test_minimap.gd contract: this widget must stay fully functional
 ## as a `.new()` with no scene, no children and no tree.
 ##
-## ⭐The bare `.new()` is off-tree, so `_draw` never runs — every stamp below is moved by calling the widget's
-## own accessors, never by rendering. That is deliberate: it proves the GATE, which is the part that decides
-## whether a render ever happens.
+## ⭐The bare `.new()` is off-tree, so `_draw` never runs on it — most stamps below are moved by calling the
+## widget's own accessors, never by rendering, which proves the GATE, the part that decides whether a render ever
+## happens. The ONE exception is the wiring test (test_the_channel_is_part_of_the_repaint_decision): _needs_repaint's
+## last term scans node groups, so it takes an IN-TREE widget that really paints (the tests/test_minimap.gd
+## _idle_minimap idiom) — which is also what proves _draw re-stamps the channel rather than pinning the gate open.
 
 const MINIMAP_SCRIPT := "res://scripts/ui/minimap.gd"
 const WAYPOINT_BOOK := "res://scripts/world/waypoint_book.gd"
@@ -122,16 +124,61 @@ func test_the_stamps_are_seeded_unreachable() -> void:
 		"a fresh widget asks for its first paint — the stamps seed to values no revision (>= 0) or selection (>= -1) can equal")
 
 
-func test_the_channel_is_part_of_the_repaint_decision() -> void:
-	var mm = _widget()
+## An in-tree, PAINTING widget in the state the idle gate exists for: a settled level and nobody walking. The two
+## seeds are what _process would have consumed during a normal boot (tests/test_minimap.gd's _idle_minimap, whose
+## note has the full argument): _source_region_id matches this tree's region-less answer so no rebake re-raises
+## _deck_dirty, and _deck_dirty itself starts clear so it cannot hold the gate open over everything under it.
+## _process then bails at the missing human player, so nothing but _draw ever moves a stamp.
+func _idle_widget():
+	var mm = load(MINIMAP_SCRIPT).new()
+	mm._source_region_id = 0
 	mm._deck_dirty = false
-	mm._painted = false
-	mm._drawn_waypoint_rev = GameState.waypoints_rev
-	mm._drawn_waypoint_sel = mm.selected_waypoint
-	var quiet: bool = mm._needs_repaint(false)
+	add_child_autofree(mm)
+	mm.size = GameSettings.hud.minimap_size
+	return mm
+
+
+## One painted frame: a queued redraw lands at the end of the frame (tests/test_minimap.gd's _repaint).
+func _repaint(mm) -> void:
+	mm.queue_redraw()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+
+## THE CHANNEL IS WIRED INTO THE GATE, driven through the real paint. The tests above prove the stamp pair
+## MOVES; this one proves _needs_repaint actually ASKS it (a term computed but never wired in is a no-op, and the
+## pin you just placed never appears) and that _draw re-stamps it (a stamp nothing re-takes pins the gate open at
+## full frame rate forever). Both edges, for both halves of the stamp, starting from a gate proven quiet.
+func test_the_channel_is_part_of_the_repaint_decision() -> void:
+	var mm = _idle_widget()
+	await _repaint(mm)
+	assert_false(mm._needs_repaint(false), "precondition: an empty map under a standing player is idle")
 	mm.selected_waypoint = 1
 	assert_true(mm._needs_repaint(false),
-		"_needs_repaint must actually CONSULT the waypoint stamp — a term computed but never wired in is a no-op (was quiet: %s)" % quiet)
+		"moving the selection on an otherwise idle map must open the gate — nothing else on the map asks, so the ring would strand on the old pin")
+	await _repaint(mm)
+	assert_false(mm._needs_repaint(false),
+		"...for exactly ONE repaint: the paint re-stamps the selection it drew and the gate shuts again")
+	GameState.add_waypoint(LEVEL, mm.point_to_world(mm.size * 0.5), "placed while standing still", "", 0, 0)
+	assert_true(mm._needs_repaint(false),
+		"a pin placed while the player stands still must open the gate, or it never appears on the map")
+	await _repaint(mm)
+	assert_false(mm._needs_repaint(false),
+		"...and the paint that inks it re-stamps the ledger revision, so a pin on the map costs nothing once drawn")
+
+
+## The stamp is taken in _draw, NOT inside _paint_waypoints, because that function early-outs on a switched-off
+## channel: a stamp taken past the early-out would never move, and a widget with dot_waypoints off would repaint
+## at full frame rate for a channel that draws nothing.
+func test_a_switched_off_channel_does_not_hold_the_gate_open() -> void:
+	var mm = _idle_widget()
+	mm.dot_waypoints = false
+	await _repaint(mm)
+	GameState.add_waypoint(LEVEL, Vector3.ZERO, "hidden", "", 0, 0)
+	assert_true(mm._needs_repaint(false), "precondition: the ledger moved, so the gate is open for one paint")
+	await _repaint(mm)
+	assert_false(mm._needs_repaint(false),
+		"with the channel switched off a pin in the ledger must still let the gate shut after one paint — the stamp cannot live behind the channel's early-out")
 
 
 # --- Tints ---------------------------------------------------------------------------------------------
@@ -170,10 +217,29 @@ func test_point_to_world_inverts_the_view_matrix() -> void:
 	assert_almost_eq(off.x, 1.0, 0.001, "one metre's worth of pixels to the right is exactly one world metre east")
 
 
+## A click-placed pin sits on a STOREY, not at world zero. Before the first grounded sample _ground_y is a
+## meaningless 0.0, so the floor of the band being DRAWN is the honest answer; once the player has stood
+## somewhere, the floor they stand on wins. Driven two storeys up on purpose: on the ground floor both answers
+## ARE world zero and the branch between them is invisible.
 func test_point_to_world_puts_a_pin_on_the_drawn_floor() -> void:
 	var mm = _widget()
-	assert_almost_eq(mm.point_to_world(mm.size * 0.5).y, mm.active_band_floor(), 0.001,
-		"before a grounded sample the pin lands on the band being DRAWN, never at world zero")
+	var band: float = GameSettings.hud.minimap_band_height
+	assert_gt(band, 0.0, "precondition: the shipped tuning slices real floor bands")
+	var standing_y: float = band * 2.5
+	mm._ensure_deck(null, standing_y)  # the deck _process builds for a player at that height (null = no navmesh region)
+	var floor_y: float = mm.active_band_floor()
+	assert_gt(floor_y, 0.0, "precondition: the drawn deck is off the ground floor, so its floor is not world zero")
+	assert_true(floor_y <= standing_y and standing_y < floor_y + band,
+		"precondition: the drawn deck is the band the player is standing in")
+	var centre: Vector2 = mm.size * 0.5
+	assert_almost_eq(mm.point_to_world(centre).y, floor_y, 0.001,
+		"before a grounded sample a pin lands on the floor of the band being DRAWN, never at world zero")
+	var body := Node3D.new()
+	add_child_autofree(body)  # global_position on an off-tree Node3D is an engine error
+	body.global_position = Vector3(0.0, floor_y + 1.25, 0.0)  # no is_on_floor(): tracks live Y, the documented degrade
+	mm._update_ground_reference(body)
+	assert_almost_eq(mm.point_to_world(centre).y, floor_y + 1.25, 0.001,
+		"once the player has a grounded floor a pin lands on THAT floor — the one they stand on, not the band's lower edge")
 
 
 func test_waypoint_at_point_hits_a_pin_and_misses_empty_map() -> void:
@@ -186,25 +252,53 @@ func test_waypoint_at_point_hits_a_pin_and_misses_empty_map() -> void:
 	assert_eq(mm.waypoint_at_point(centre), 0, "a click on a pin's glyph SELECTS it rather than stacking a second pin on it")
 
 
-func test_waypoint_at_point_misses_a_pin_far_away() -> void:
+## THE TARGET IS THE GLYPH, NOT THE NEIGHBOURHOOD. The pin is drawn ON the box (no cull, no rim rule in play), so the
+## only thing that can turn a click beside it into a miss is the hit tolerance itself. The control clicks the glyph's
+## own rim and selects it; the miss lands one whole glyph width of empty map past that rim, still on the box. A
+## tolerance measured in metres, or widened to "the nearest pin anywhere near", would select the pin from there.
+func test_waypoint_at_point_misses_a_pin_just_beside_its_glyph() -> void:
 	var mm = _widget()
-	var centre: Vector2 = mm.size * 0.5
-	GameState.add_waypoint(LEVEL, mm.point_to_world(centre) + Vector3(50, 0, 50), "far", "", 0, 0)
-	assert_eq(mm.waypoint_at_point(centre), -1,
-		"the hit tolerance is the glyph's own drawn size, not the whole map — a click on empty floor places a pin")
-
-
-## The tolerance is a PIXEL radius converted through the live scale, so it stays a constant on-screen target
-## at every zoom — which is what the player is actually aiming at.
-func test_the_hit_tolerance_tracks_zoom() -> void:
-	var mm = _widget()
-	var centre: Vector2 = mm.size * 0.5
 	mm.zoom_override = 1.0
-	var reach_at_1x: float = mm.point_to_world(centre + Vector2(1.0, 0.0)).x
+	var centre: Vector2 = mm.size * 0.5
+	var reach: float = MenuStyle.hud.minimap_waypoint_glyph_px
+	assert_gt(reach, 0.0, "precondition: the shipped skin draws a real glyph")
+	GameState.add_waypoint(LEVEL, mm.point_to_world(centre), "here", "", 0, 0)
+	var q: Vector2 = _pin_point(mm, GameState.waypoint_at(LEVEL, 0))
+	var box := Rect2(Vector2.ZERO, mm.size)
+	assert_true(box.has_point(q), "precondition: the pin is drawn inside the box, not culled or rim-pinned")
+	assert_eq(mm.waypoint_at_point(q + Vector2(0.0, reach)), 0,
+		"control: a click on the glyph's own rim selects the pin")
+	var beside: Vector2 = q + Vector2(0.0, reach * 3.0)
+	assert_true(box.has_point(beside), "precondition: the click beside the glyph is still on the box, on empty map")
+	assert_eq(mm.waypoint_at_point(beside), -1,
+		"a click one glyph width clear of the pin's rim is empty floor and must place a NEW pin — the hit target is the glyph's own drawn radius plus a few px of slop, not a wider neighbourhood around it")
+
+
+## ZOOM MOVES THE GLYPH, AND THE CLICK TARGET MOVES WITH IT AT A CONSTANT PIXEL SIZE. The tolerance is the glyph's
+## drawn radius in real pixels — what the player is actually aiming at — so zooming must neither shrink it (a
+## zoomed-in pin you cannot hit) nor grow it with the metres (a click where the glyph USED to be still selecting it,
+## instead of placing a new pin on the empty floor under the cursor).
+func test_the_hit_target_follows_the_zoom_at_a_constant_pixel_size() -> void:
+	var mm = _widget()
+	var centre: Vector2 = mm.size * 0.5
+	var reach: float = MenuStyle.hud.minimap_waypoint_glyph_px
+	assert_gt(reach, 0.0, "precondition: the shipped skin draws a real glyph")
+	mm.zoom_override = 1.0
+	# One glyph radius east of the player: four times that is still well inside the box, and the 3x gap zooming
+	# opens between the old spot and the new one is wider than any click target sized off the glyph itself.
+	GameState.add_waypoint(LEVEL, mm.point_to_world(centre + Vector2(reach, 0.0)), "east", "", 0, 0)
+	var rec: Dictionary = GameState.waypoint_at(LEVEL, 0)
+	var at_1x: Vector2 = _pin_point(mm, rec)
+	assert_eq(mm.waypoint_at_point(at_1x + Vector2(0.0, reach)), 0, "at 1x a click on the glyph's rim selects it")
 	mm.zoom_override = 4.0
-	var reach_at_4x: float = mm.point_to_world(centre + Vector2(1.0, 0.0)).x
-	assert_lt(reach_at_4x, reach_at_1x,
-		"zoomed IN, one pixel is fewer metres — so the same pixel tolerance covers a smaller patch of world")
+	var at_4x: Vector2 = _pin_point(mm, rec)
+	assert_true(Rect2(Vector2.ZERO, mm.size).has_point(at_4x), "precondition: the zoomed glyph is still on the box, not culled")
+	assert_almost_eq(at_4x.distance_to(centre), 4.0 * at_1x.distance_to(centre), 0.01,
+		"zooming 4x magnifies the map around the player, so the glyph is painted four times as far from the centre")
+	assert_eq(mm.waypoint_at_point(at_4x + Vector2(0.0, reach)), 0,
+		"...and a click the SAME number of pixels off the zoomed glyph still selects it — the target never shrinks with zoom")
+	assert_eq(mm.waypoint_at_point(at_1x), -1,
+		"...while a click where the glyph WAS at 1x misses — the target follows the paint and does not swell with the metres")
 
 
 ## THE RIM-CLICK AGREEMENT: on a host that pins (the MAP TAB — the editing surface, where a pin you cannot see
@@ -283,21 +377,42 @@ func test_the_tracked_pin_reserves_room_for_its_outer_ring() -> void:
 	var skin = MenuStyle.hud
 	assert_gt(mm._waypoint_pad(skin, true), mm._waypoint_pad(skin, false),
 		"a tracked pin needs one more gap of rim inset than a plain one — its ring is one gap further out")
-	assert_almost_eq(mm._waypoint_pad(skin, false),
-		float(skin.minimap_waypoint_glyph_px) + maxf(0.0, skin.minimap_waypoint_selected_gap_px), 0.0001,
-		"the plain inset is unchanged: the glyph plus the selection ring's gap, reserved for every pin")
+	# ...and the inset really keeps the rings ON the box. Two far pins pinned into the same corner — one plain, one
+	# tracked — measured against the ring radii _paint_waypoints inks around them: the selection ring every pin
+	# may wear, and the tracked ring one gap outside it. A ring crossing the box edge is sliced by clip_contents.
+	var r: float = skin.minimap_waypoint_glyph_px
+	var gap: float = maxf(0.0, skin.minimap_waypoint_selected_gap_px)
+	mm.waypoint_pin_offscreen = true
+	var far: Vector3 = mm.point_to_world(mm.size * 0.5) + Vector3(500, 0, 500)  # off the box's corner
+	GameState.add_waypoint(LEVEL, far, "plain", "", 0, 0)
+	GameState.add_waypoint(LEVEL, far, "the objective", "", 0, 0)
+	_track(1)
+	for probe in [[0, r + gap, "a plain pin's selection ring"], [1, r + gap * 2.0, "the tracked pin's outer ring"]]:
+		var ring: float = probe[1]
+		var q: Vector2 = _pin_point(mm, GameState.waypoint_at(LEVEL, probe[0]))
+		assert_ne(q, Vector2.INF, "precondition: pin %d rim-pins" % probe[0])
+		assert_true(q.x - ring >= 0.0 and q.y - ring >= 0.0 and q.x + ring <= mm.size.x and q.y + ring <= mm.size.y,
+			"%s must sit wholly inside the %s box at its rim point %s (radius %.1f) — the rim inset exists so clip_contents never slices it" % [probe[2], mm.size, q, ring])
 
 
+## THE DISTANCE CULL, clicked exactly where the glyph would be. A pin 15 m out sits inside the box at 1x, so with no
+## cull it is drawn and clickable at one known point (the control). Switching a 10 m cull on must take it out of the
+## paint AND out of the hit test AT THAT SAME POINT — the click lands on the very pixel the glyph used to occupy, so
+## a hit test that ignored max_marker_distance is the only thing that could still answer 0 there.
 func test_a_distance_culled_pin_is_not_clickable() -> void:
 	var mm = _widget()
-	mm.waypoint_pin_offscreen = true  # prove the CULL, not the rim rule
+	mm.zoom_override = 1.0
+	var here: Vector3 = mm.point_to_world(mm.size * 0.5)
+	GameState.add_waypoint(LEVEL, here + Vector3(15.0, 0.0, 0.0), "culled", "", 0, 0)
+	var rec: Dictionary = GameState.waypoint_at(LEVEL, 0)
+	var would: Vector2 = _pin_point(mm, rec)
+	assert_true(Rect2(Vector2.ZERO, mm.size).has_point(would),
+		"precondition: with no cull the 15 m pin is drawn inside the box, so neither the rim rule nor the off-box drop is in play")
+	assert_eq(mm.waypoint_at_point(would), 0, "control: with no cull a click on that glyph selects the pin")
 	mm.max_marker_distance = 10.0
-	var far: Vector3 = mm.point_to_world(mm.size * 0.5) + Vector3(500, 0, 0)
-	GameState.add_waypoint(LEVEL, far, "culled", "", 0, 0)
-	assert_eq(_pin_point(mm, GameState.waypoint_at(LEVEL, 0)), Vector2.INF,
-		"the cull really removes it from the paint")
-	assert_eq(mm.waypoint_at_point(mm.size * 0.5), -1,
-		"...and what is not drawn is not clickable — the hit test honours the same cull")
+	assert_eq(_pin_point(mm, rec), Vector2.INF, "a 10 m cull removes the 15 m pin from the paint")
+	assert_eq(mm.waypoint_at_point(would), -1,
+		"...and what is not drawn is not clickable — a click on the spot the glyph used to occupy is empty map, because the hit test honours the same cull")
 
 
 func test_the_channel_reads_the_current_level_only() -> void:
@@ -340,12 +455,23 @@ func test_a_pin_stays_clickable_after_a_pan() -> void:
 		"...and it is still clickable at the point the paint now inks it")
 
 
-## Seeded to a value no finite pan can equal, so the FIRST compare mismatches. ZERO would have been wrong:
-## that is the shipped HUD box's REAL offset, so a widget would have started life claiming its stamp was current.
+## A widget that has never painted must ask for its first paint on the pan term's account too — even when its pan
+## sits at ZERO, the shipped HUD box's REAL offset. A stamp seeded to a value live state can hold would start life
+## claiming a paint that never happened. Every OTHER view term is settled first, so the pan is the only one left
+## that could be asking; the control at the end proves it was.
 func test_the_pan_stamp_is_seeded_unreachable() -> void:
 	var mm = _widget()
-	assert_eq(mm._drawn_view_offset, Vector2.INF,
-		"the pan stamp seeds to INF — ZERO is a legitimate live value and could not serve as the sentinel")
+	mm._drawn_zoom = mm.effective_zoom()
+	mm._drawn_span = mm.effective_world_span()
+	mm._drawn_rotates = mm.effective_rotates()
+	mm._drawn_show_npcs = Settings.minimap_show_npcs
+	mm._drawn_show_stations = Settings.minimap_show_stations
+	assert_eq(mm.view_offset, Vector2.ZERO, "precondition: an un-panned widget, exactly the HUD corner box's live state")
+	assert_true(mm._options_changed(),
+		"a never-painted widget with its pan at ZERO must still ask for the first paint — ZERO is a legitimate live pan, so it cannot be what the stamp seeds to")
+	mm._drawn_view_offset = mm.view_offset
+	assert_false(mm._options_changed(),
+		"control: once the pan is stamped the view terms go quiet, so the pan stamp alone was what asked")
 
 
 ## ⭐THE TERM THE WHOLE FEATURE HANGS ON. Dragging the map is the exact case the idle gate withholds repaints

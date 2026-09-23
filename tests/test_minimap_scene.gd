@@ -5,7 +5,7 @@ extends GutTest
 ## are authored in the editor now instead of being computed in ui.gd.
 ##
 ## The widget is NOT an autoload — ui.gd instances it into the HUD — so the "autoload points at the scene"
-## test becomes "the HOST points at the scene", greped out of ui.gd. The rest mirrors
+## test becomes "the HOST instances the scene", read off a LIVE UI layer whose _ready built it. The rest mirrors
 ## test_character_creation_scene.gd: every slot the script adopts exists, no text is authored, and the
 ## screen-specific contracts hold.
 ##
@@ -15,12 +15,12 @@ extends GutTest
 ## drags the box in the editor without mirroring it into HudSettings.tres, those pins quietly stop describing
 ## the corner the game actually draws. test_the_authored_box_is_the_box_the_stack_measures is that tie.
 ##
-## These tests instantiate() off-tree and never run _ready, except the one marked otherwise. BEHAVIOUR (the
+## These tests instantiate() off-tree and never run _ready, except the host test (a live UI layer) and the one
+## marked IN-TREE. BEHAVIOUR (the
 ## deck cache, the idle gate, the underlay stamp) stays in tests/test_minimap.gd.
 
 const SCENE := "res://scenes/ui/hud_minimap.tscn"
 const SCRIPT_PATH := "res://scripts/ui/minimap.gd"
-const HOST_SCRIPT := "res://scripts/ui/ui.gd"
 
 ## Every unique name minimap.gd reaches for in _ready. A rename in the editor silently drops the slot (the
 ## reads are get_node_or_null, deliberately, so a bare .new() stays legal) — so pin the roster here, where it
@@ -28,21 +28,37 @@ const HOST_SCRIPT := "res://scripts/ui/ui.gd"
 const BOUND := ["MapUnder", "MapOver", "EditorPreview"]
 
 
-## The conversion contract, both halves: ui.gd reaches for the SCENE, and no longer preloads the bare script.
-## Greps for the PATH rather than for `preload("…tscn")` because the safe form here is a runtime load() — see
-## the MINIMAP_SCENE const's own note in ui.gd about the class_name cyclic-reference trap.
+## The conversion contract, DRIVEN: a live UI layer (adding it to the tree runs _ready — the shipping path, the
+## test_hud_curve.gd idiom) must hold the AUTHORED scene as its minimap, never a bare minimap.gd .new(). The tell is
+## read off the instance ui.gd actually built: a bare script has no scene_file_path and none of the %MapUnder /
+## %MapOver slots, so art an artist drops into the scene would never reach the HUD. The instance must also hang off
+## the carrier HudSettings.minimap_rides_hud_weight picks, keep the box exactly as authored (ui.gd writes none of it
+## back), and share its right edge with the clock under it — the one instrument column the header promises.
 func test_host_instances_the_authored_scene() -> void:
-	var host_src := FileAccess.get_file_as_string(HOST_SCRIPT)
-	assert_true(host_src.contains(SCENE), "ui.gd points at the authored minimap scene")
-	assert_false(host_src.contains("preload(\"%s\")" % SCRIPT_PATH),
-		"ui.gd no longer preloads the bare minimap script (a half-done conversion)")
-	var scene: PackedScene = load(SCENE)
-	assert_not_null(scene, "the authored scene loads")
-	var inst: Node = scene.instantiate()
-	assert_true(inst is Control, "root is the Control ui.gd parents into the HUD-weight carrier")
-	assert_not_null(inst.get_script(), "the root carries a script")
-	assert_eq(String(inst.get_script().resource_path), SCRIPT_PATH, "the root carries minimap.gd")
-	inst.free()
+	var authored: Control = (load(SCENE) as PackedScene).instantiate()
+	var authored_offsets := [authored.offset_left, authored.offset_top, authored.offset_right, authored.offset_bottom]
+	authored.free()
+	var ui := UI.new()
+	add_child_autofree(ui)
+	var map = ui._minimap
+	assert_true(map is Control, "UI._ready must build the minimap Control the top-right stack measures")
+	if not (map is Control):
+		return
+	assert_eq(String(map.scene_file_path), SCENE,
+		"ui.gd instances the AUTHORED minimap scene — a bare minimap.gd .new() would drop every authored art slot")
+	assert_true(map.get_script() != null and String(map.get_script().resource_path) == SCRIPT_PATH,
+		"the instanced root carries minimap.gd")
+	for n in BOUND:
+		assert_true(map.get_node_or_null("%" + n) != null, "%%%s reaches the live HUD with the instance" % n)
+	var carrier: Node = ui._weighted if GameSettings.hud.minimap_rides_hud_weight else ui
+	assert_true(map.get_parent() == carrier,
+		"the map rides the carrier HudSettings.minimap_rides_hud_weight picks (the weighted carrier sways with the clock; the layer pins it)")
+	assert_eq([map.offset_left, map.offset_top, map.offset_right, map.offset_bottom], authored_offsets,
+		"the live map keeps the box exactly as the scene authors it — the host must not write the geometry back")
+	assert_true(ui._clock != null, "precondition: _ready built the clock that captions the map")
+	if ui._clock != null:
+		assert_eq(ui._clock.offset_right, map.offset_right,
+			"the clock's right edge lines up with the AUTHORED map's, so dragging the box in the editor slides the clock's rail with it")
 
 
 func test_scene_instantiates_with_every_bound_unique_name() -> void:
@@ -140,7 +156,7 @@ func test_scene_authors_no_text() -> void:
 	inst.free()
 
 
-## THE ONE IN-TREE TEST. Two behaviours _ready owns, both of which only exist because the widget is a scene
+## THE IN-TREE WIDGET TEST. Two behaviours _ready owns, both of which only exist because the widget is a scene
 ## now: the editor-only backing fill is hidden at runtime, and every authored art node is swept to
 ## MOUSE_FILTER_IGNORE — an artist's TextureRect/NinePatchRect/ColorRect defaults to STOP and would re-open the
 ## "the HUD eats clicks in the corner" bug the moment the first PNG lands.

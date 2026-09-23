@@ -46,10 +46,37 @@ func test_actor_delegates_to_npc() -> void:
 	assert_false(npc.control, "end releases control")
 	npc.free()
 
-func test_actor_play_anim_no_rig_is_noop() -> void:
-	var actor = ActorScript.new()
+## An NPC with no rig wired (the shipped default: actors are procedural) must shrug off PLAY_ANIM without stealing
+## the NPC's brain or poking anything else; the SAME actor wired to a real AnimationPlayer must actually play the
+## clip, and a clip the rig lacks (a typo in the Cutscene resource) must be skipped rather than erroring mid-scene.
+func test_actor_play_anim_is_a_no_op_without_a_rig_and_plays_a_wired_clip() -> void:
 	var npc := StubNpc.new()
+	add_child_autofree(npc)
+	var actor = ActorScript.new()
 	npc.add_child(actor)
-	actor.play_anim(&"wave")  # no AnimationPlayer assigned -> must not crash
-	assert_true(true, "play_anim with no rig is a safe no-op")
-	npc.free()
+	actor.play_anim(&"wave")  # animation_player_path empty -> nothing to play on
+	assert_false(npc.control, "PLAY_ANIM with no rig must not take cutscene control (the NPC's brain keeps running)")
+	assert_eq(npc.walked, Vector3.ZERO, "PLAY_ANIM with no rig must not start a scripted walk")
+	assert_eq(npc.faced, Vector3.ZERO, "PLAY_ANIM with no rig must not start a scripted turn")
+
+	# Control: wire a real rig with one clip and the same call now plays it.
+	var ap := AnimationPlayer.new()
+	ap.name = "Rig"
+	var lib := AnimationLibrary.new()
+	var clip := Animation.new()
+	clip.length = 1.0
+	lib.add_animation(&"wave", clip)
+	ap.add_animation_library(&"", lib)
+	npc.add_child(ap)
+	actor.animation_player_path = NodePath("../Rig")
+	actor.play_anim(&"dance")
+	assert_false(ap.is_playing(), "a clip the rig does not have is skipped, not played (and never errors mid-cutscene)")
+	actor.play_anim(&"")
+	assert_false(ap.is_playing(), "an empty clip name plays nothing")
+	actor.play_anim(&"wave")
+	assert_true(ap.is_playing(), "a wired rig with the named clip plays it — PLAY_ANIM visibly animates the NPC")
+	assert_eq(String(ap.current_animation), "wave", "and it is the clip the cutscene asked for")
+	assert_false(npc.control, "playing a clip still never takes the NPC's brain (only walk_to/face do)")
+	ap.stop()
+	lib = null
+	clip = null

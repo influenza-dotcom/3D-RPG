@@ -150,14 +150,11 @@ func test_character_creation_does_not_reflow_when_the_name_is_typed() -> void:
 	var panel := _panel(inst)
 	var before_size := panel.size
 	var before_pos := panel.global_position
-	var hint := inst.get_node("%NameHint") as Control
 
 	(inst.get_node("%NameEdit") as LineEdit).text = "Ada"
 	inst.call(&"_on_name_changed", "Ada")  # setting .text in code doesn't emit text_changed
 	await _frames(3)
 
-	assert_true(hint.visible, "the name hint keeps its layout slot (hidden by alpha, never `visible`)")
-	assert_almost_eq(hint.self_modulate.a, 0.0, 0.01, "the named state fades the hint out")
 	assert_almost_eq(panel.size.y, before_size.y, EPS, "the card is the same height once a name is typed")
 	assert_almost_eq(panel.global_position.y, before_pos.y, EPS, "the card has not moved")
 

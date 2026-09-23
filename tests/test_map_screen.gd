@@ -18,24 +18,29 @@ extends GutTest
 ## pinning is that _bind_ui really ran at boot and really built what it claims — an instantiate-without-
 ## add_child never runs _ready, so it could only re-assert the .tscn the scene test already reads.
 ##
-## ⭐open()/close() are deliberately NOT driven: they want a live human Player in-tree, which CLAUDE.md forbids
-## a unit test from building, so the open PATH stays playtest-verified (and its refusal gates are pinned by
-## source in test_modal_registry.gd). The gesture tests below flip the `_is_open` latch by hand and restore it
-## the same way, never through close() — close() would drive PlayerMenus.leave() over a screen that never
-## entered, which is a different bug being invented to test this one.
+## ⭐open() is driven by exactly ONE test (test_open_puts_the_view_back_on_the_player), through a Player-TYPED
+## stub whose _ready never runs — the tests/test_minimap.gd HumanPlayerStub idiom, which satisfies open()'s
+## has_player() gate without building the actor CLAUDE.md keeps out of unit tests. Every other test flips the
+## `_is_open` latch by hand and restores it the same way. Two tests let a real close() run: that one, where it
+## pairs the enter() the real open() ran, and the staged-Esc test, where it IS the second stage and
+## PlayerMenus.leave() writes the mouse mode for an enter() that never ran — so every test snapshots and
+## restores Input.mouse_mode.
 ##
 ## ⭐THEY MUTATE LIVE AUTOLOADS. Settings.map_zoom persists to settings.cfg and GameState's waypoint ledger is
 ## the running profile, so every test restores the rows it touched and clears the pins it placed (the
 ## autoload-split isolation rule).
 
-const SOURCE := "res://scripts/ui/map_screen.gd"
 const LEVEL := "res://tests/_fake_map_screen_level.tscn"  ## never loaded — the ledger keys on the PATH STRING alone
 
 var _was_map_zoom: float = 1.0
 var _was_minimap_zoom: float = 1.0
 var _was_level: String = ""
+## open() runs PlayerMenus.enter() and close() runs leave(), and both write the mouse mode — the open test and
+## the Esc test drive them.
+var _was_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_VISIBLE
 
 func before_each() -> void:
+	_was_mouse_mode = Input.mouse_mode
 	_was_map_zoom = Settings.map_zoom
 	_was_minimap_zoom = Settings.minimap_zoom
 	_was_level = GameState.current_level_path
@@ -51,8 +56,8 @@ func after_each() -> void:
 	Settings.set_minimap_zoom(_was_minimap_zoom)
 	if MapScreen._prompt != null and MapScreen._prompt.is_open():
 		MapScreen._prompt.close()
-	# The latch is cleared DIRECTLY rather than through close(): only _arm() can have set it here (open()
-	# refuses without a live Player), and close() would call PlayerMenus.leave() for an enter() that never ran.
+	# The latch is cleared DIRECTLY, as a backstop: the tests that run a real open()/close() shut it themselves,
+	# and for a latch _arm() set by hand close() would call PlayerMenus.leave() for an enter() that never ran.
 	MapScreen._is_open = false
 	GameState.waypoints.clear()
 	GameState.current_level_path = _was_level
@@ -62,6 +67,7 @@ func after_each() -> void:
 	var vp := get_viewport()
 	if vp != null:
 		vp.gui_release_focus()  # a card that grabbed focus must not hand it to the next test
+	Input.mouse_mode = _was_mouse_mode
 
 
 func test_the_autoload_bound_its_widget_and_built_its_chrome_at_boot() -> void:
@@ -70,7 +76,6 @@ func test_the_autoload_bound_its_widget_and_built_its_chrome_at_boot() -> void:
 	assert_not_null(MapScreen._input,
 		"the pointer overlay was built into %MapHost — without it NOTHING on the plan is clickable, which is exactly the bug this rebuild fixed")
 	assert_not_null(MapScreen._card, "the floating pin card was built")
-	assert_not_null(MapScreen._tutorial, "the on-plan empty-state tutorial was built")
 	assert_not_null(MapScreen._prompt, "the editor card was built")
 	assert_not_null(MapScreen._next_btn, "the footer's pad selection path exists")
 	assert_not_null(MapScreen._place_btn, "...and its placement path")
@@ -109,11 +114,6 @@ func test_the_pointer_overlay_owns_the_plan_and_the_card_sits_above_it() -> void
 	assert_gt(MapScreen._card.get_index(), MapScreen._input.get_index(),
 		"the card is picked BEFORE the overlay — build order is what makes its buttons clickable at all")
 	assert_false(MapScreen._card.visible, "...and it is hidden while nothing is selected")
-	assert_eq(MapScreen._tutorial.get_parent(), host, "the tutorial floats over the plan too")
-	assert_eq(MapScreen._tutorial.mouse_filter, Control.MOUSE_FILTER_IGNORE,
-		"...but it must be mouse-TRANSPARENT: it sits on the surface whose whole job is receiving clicks, and a tutorial that ate the click it teaches is its own punchline")
-	assert_gt(MapScreen._card.get_index(), MapScreen._tutorial.get_index(),
-		"the card draws OVER the tutorial (they can never be up together, but tree order is the guarantee, not the timing)")
 
 
 ## ⭐THE CURSOR IS THE AFFORDANCE, and it is the only thing on this screen that says "this surface takes a
@@ -184,46 +184,8 @@ func test_the_tab_names_every_pin_and_shows_the_ones_off_the_view() -> void:
 		"...and rim-pins the ones off the view, because this is the surface you SELECT them on")
 
 
-## ⭐THE FOOTER HINT AND THE TUTORIAL SWAPPED JOBS. The footer used to carry the whole gesture line and could
-## never fit it — the QA shots caught it ellipsized to "[PH] Click to pi…", which teaches nothing while still
-## costing the row its width. The footer now states the one fact it can say in three words (the tab is
-## north-up while the corner box is heading-up), and the gestures moved onto the plan, where they have the
-## panel's whole width.
-func test_the_footer_states_the_bearing_and_the_gestures_live_on_the_plan() -> void:
-	var hint := MapScreen.get_node("%Hint") as Label
-	assert_eq(hint.text, PlayerText.MAP_NORTH_UP,
-		"the footer hint names the BEARING — the one thing down there the player genuinely needs")
-	assert_eq(hint.autowrap_mode, TextServer.AUTOWRAP_OFF,
-		"...and it still may not wrap: this label is the footer's height, and a wrapped one starves the map")
-	assert_eq(MapScreen._tutorial.text, PlayerText.MAP_HINT,
-		"the gesture tutorial is the label OVER THE PLAN now")
-	assert_false(PlayerText.MAP_HINT.contains(PlayerText.PH_PREFIX),
-		"both are authored copy — a '[PH]' on the loudest line of the screen is the 'unfinished' signal this pass exists to kill")
-	assert_false(PlayerText.MAP_NORTH_UP.contains(PlayerText.PH_PREFIX), "...and so is the footer's")
-
-
-## ⭐THE TUTORIAL IS AN EMPTY STATE, NOT CHROME. Three conditions, and each one is the difference between
-## teaching and wallpaper: the tab is up, this LEVEL's ledger is empty, and nothing is selected. The first pin
-## takes it away for good on that level; a fresh level with no pins teaches again.
-func test_the_tutorial_shows_only_on_an_empty_map_with_nothing_selected() -> void:
-	_arm()
-	MapScreen._refresh_card()
-	assert_true(MapScreen._tutorial.visible, "an open tab over a level with no pins teaches the gestures")
-	GameState.add_waypoint(LEVEL, Vector3.ZERO, "a", "", 0, 0)
-	assert_false(MapScreen._tutorial.visible,
-		"the first pin proves the player knows the gesture — the line has done its job and goes")
-	MapScreen._select(0)
-	assert_false(MapScreen._tutorial.visible, "...and a selection puts the card in the same corner of the picture")
-	assert_true(GameState.remove_waypoint(LEVEL, 0), "clear the level back down")
-	assert_eq(MapScreen._selected, -1, "the ledger emptied, so the selection went with it")
-	assert_true(MapScreen._tutorial.visible, "an empty level teaches again — the state is the LEVEL's, not the profile's")
-	_disarm()
-	MapScreen._refresh_card()
-	assert_false(MapScreen._tutorial.visible, "and a shut tab teaches nobody")
-
-
-## ⭐DARK-ON-DARK, the regression this pins. FOUR of this screen's labels are drawn over the widget's near-black
-## plan rather than on the panel's parchment — the on-plan tutorial, the "no plan for this floor" notice and the
+## ⭐DARK-ON-DARK, the regression this pins. THREE of this screen's labels are drawn over the widget's near-black
+## plan rather than on the panel's parchment — the "no plan for this floor" notice and the
 ## floating card's name and note — and every one of them shipped wearing MenuStyle's PANEL ink, a dark plum
 ## authored for paper. The QA shots read the screen's only tutorial line and the selected pin's own name as
 ## invisible smudges (wp_shots7/01, wp_shots7/05). They take the MINIMAP's caption ink instead, outline
@@ -237,7 +199,7 @@ func test_every_label_over_the_plan_wears_the_maps_ink_not_the_panels() -> void:
 	var ink: Color = MenuStyle.hud.minimap_waypoint_label_color  # a duck-typed autoload read is a Variant, never `:=`
 	var rim: Color = MenuStyle.hud.label_outline_color
 	var outline := int(MenuStyle.hud.minimap_waypoint_label_outline_size)
-	for l: Label in [MapScreen._tutorial, MapScreen._empty, MapScreen._card_name, MapScreen._card_note]:
+	for l: Label in [MapScreen._empty, MapScreen._card_name, MapScreen._card_note]:
 		var got: Color = l.get_theme_color(&"font_color")
 		# Compared on the HUE alone (alpha carries the dim/full weight, asserted separately below).
 		assert_eq(Color(got.r, got.g, got.b), Color(ink.r, ink.g, ink.b),
@@ -257,25 +219,30 @@ func test_every_label_over_the_plan_wears_the_maps_ink_not_the_panels() -> void:
 ## ⭐PANNING IS THE ONE GESTURE THAT CANNOT UNDO ITSELF: drag far enough and the player caret is off the view,
 ## so nothing left on screen points home. Recentre is the way back, and it reports what HAPPENED rather than
 ## that a button was pressed — a press on an already-centred map claims no move (the _nudge_zoom rule).
+##
+## "Which sound did that press make" is exactly the fact this button gets wrong if anyone simplifies it (a
+## confirm on a refused press claims a move the player then looks for and cannot find), so it is HEARD here
+## rather than grepped: a confirm rides MenuStyle's click voice (play_select) and a refusal its own dedicated
+## denied voice, and a started voice reads `playing` headless (tests/test_menu_sound.gd's idiom). Both voices
+## are silenced before each press, so a ring left over from the previous press cannot answer for this one.
 func test_recentre_walks_the_view_home_and_refuses_when_it_is_already_there() -> void:
+	assert_false(MenuStyle._quiet, "precondition: the menu cues are not latched silent, so a cue this press makes is audible")
 	MapScreen._pan_by(Vector2(25.0, -10.0))
 	assert_ne(MapScreen._map.view_offset, Vector2.ZERO, "precondition: the view is off the player")
+	_silence_menu_voices()
 	MapScreen._on_recentre_pressed()
 	assert_eq(MapScreen._map.view_offset, Vector2.ZERO, "Recentre puts the pan back on the player")
+	assert_true(MenuStyle._click_player.playing, "a press that really moved the view CONFIRMS it")
+	assert_false(MenuStyle._denied_player.playing,
+		"...and does not buzz a refusal over a move the player just watched happen")
+	_silence_menu_voices()
 	MapScreen._on_recentre_pressed()
-	assert_eq(MapScreen._map.view_offset, Vector2.ZERO, "...and a second press moves nothing")
-	# The CUE half is pinned off the source: MenuStyle plays into the audio bus and records nothing a test can
-	# read back, and "which sound did that press make" is exactly the fact this button gets wrong if anyone
-	# simplifies it (a confirm on a refused press claims a move the player then looks for and cannot find).
-	var src := FileAccess.get_file_as_string(SOURCE)
-	var from := src.find("func _on_recentre_pressed(")
-	var to := src.find("func _centre_view_on(")
-	assert_gt(from, 0, "_on_recentre_pressed exists")
-	assert_gt(to, from, "...and _centre_view_on follows it")
-	var body := src.substr(from, to - from)
-	assert_true(body.contains("MenuStyle.play_denied()"),
+	assert_eq(MapScreen._map.view_offset, Vector2.ZERO, "a press on a centred map leaves it centred")
+	assert_true(MenuStyle._denied_player.playing,
 		"an already-centred map REFUSES out loud rather than sounding a move that did not happen")
-	assert_true(body.contains("MenuStyle.play_select()"), "...and a real move confirms")
+	assert_false(MenuStyle._click_player.playing,
+		"...and never plays the confirm, which would send the player looking for a move they cannot find")
+	_silence_menu_voices()
 
 
 ## The zoom is a PLAYER value (Settings.map_zoom) rather than screen state: it persists, and the Options ->
@@ -307,29 +274,66 @@ func test_zooming_the_map_leaves_the_hud_minimap_alone() -> void:
 ## The clamp is the setter's (shared with the minimap row). A step the clamp swallows is a REFUSAL, not a
 ## step — the cue must not claim a move that never happened (the implants-tab refused-flip rule), and the
 ## value must stay put rather than drifting past the end of the range.
+##
+## The value alone cannot tell a refusal from a step here — Settings.set_map_zoom clamps either way — so the
+## refusal is HEARD (the recentre test's idiom): a swallowed notch buzzes the denied voice and starts no step
+## voice. The CONTROL is the same verb one notch short of the end, which really steps and really sounds the step,
+## so the silence of the step voices at the end is the refusal and not a fixture that cannot hear a step.
+## The step throttle's stamp is cleared before every notch, so an earlier step cannot swallow this one's cue.
 func test_a_step_past_the_end_of_the_range_is_refused_not_silently_clamped_forward() -> void:
-	Settings.set_map_zoom(Settings.MINIMAP_ZOOM_MAX)
+	assert_false(MenuStyle._quiet, "precondition: the menu cues are not latched silent, so a cue this notch makes is audible")
+	var step: float = GameSettings.hud.map_zoom_wheel_step
+	Settings.set_map_zoom(Settings.MINIMAP_ZOOM_MAX - step)
+	_silence_menu_voices()
+	MenuStyle._step_last_ms = 0
+	MapScreen._nudge_zoom(1)
+	assert_almost_eq(Settings.map_zoom, Settings.MINIMAP_ZOOM_MAX, 0.0001, "control: one notch short of maximum really zooms in")
+	assert_true(_step_voice_playing(), "control: ...and sounds the step cue, so a step is audible in this fixture")
+	assert_false(MenuStyle._denied_player.playing, "control: ...with no refusal buzzed over a zoom that happened")
+	_silence_menu_voices()
+	MenuStyle._step_last_ms = 0
 	MapScreen._nudge_zoom(1)
 	assert_almost_eq(Settings.map_zoom, Settings.MINIMAP_ZOOM_MAX, 0.0001,
 		"zooming in at maximum leaves the map exactly where it was")
+	assert_true(MenuStyle._denied_player.playing, "...and REFUSES out loud")
+	assert_false(_step_voice_playing(), "...and never plays the step cue, which would claim a zoom the player cannot see")
 	Settings.set_map_zoom(Settings.MINIMAP_ZOOM_MIN)
+	_silence_menu_voices()
+	MenuStyle._step_last_ms = 0
 	MapScreen._nudge_zoom(-1)
 	assert_almost_eq(Settings.map_zoom, Settings.MINIMAP_ZOOM_MIN, 0.0001,
 		"...and likewise at minimum")
+	assert_true(MenuStyle._denied_player.playing, "zooming out at minimum refuses out loud too")
+	assert_false(_step_voice_playing(), "...with no step cue")
+	_silence_menu_voices()
 
 
-## The readout paints through PlayerText + TextFormat (a whole template with the number substituted as a
-## VALUE), never a hand-built string — the text-debt ratchet owns every painted literal in this project.
-func test_the_zoom_readout_is_a_substituted_template() -> void:
-	Settings.set_map_zoom(1.5)
-	MapScreen._apply_zoom()
-	assert_eq(MapScreen._zoom_value.text,
-		TextFormat.subst(PlayerText.MAP_ZOOM_READOUT, {"zoom": TextFormat.num(1.5, 2)}),
-		"the readout is PlayerText.MAP_ZOOM_READOUT with the live zoom substituted")
-	assert_string_contains(MapScreen._zoom_value.text, "1.5")
+## The readout names the LIVE zoom, and the number is the only thing on that line that moves. It is read the way
+## the player reads it: to the two decimals a quarter step needs (1.25 must not round to 1.3), with no padding
+## noise (1.5 never reads "1.50", a whole zoom never reads "1.0"), and with the rest of the line being the
+## authored PlayerText copy — a whole template with the number substituted as a VALUE, never a hand-built string
+## (the text-debt ratchet owns every painted literal in this project). The expected numbers are written out here
+## by hand rather than produced by TextFormat, so a formatting change in the paint cannot also rewrite the answer.
+func test_the_zoom_readout_names_the_live_zoom_and_nothing_else_on_the_line_moves() -> void:
+	var authored := PlayerText.MAP_ZOOM_READOUT.replace("{zoom}", "")  # the template's static half
+	var readouts := {}
+	for pair: Array in [[1.5, "1.5"], [1.25, "1.25"], [1.0, "1"]]:
+		Settings.set_map_zoom(float(pair[0]))
+		MapScreen._apply_zoom()
+		var text: String = MapScreen._zoom_value.text
+		readouts[pair[1]] = text
+		assert_false(text.contains("{"),
+			"the readout at zoom %s substituted its token rather than painting the raw template" % pair[1])
+		assert_eq(text.replace(String(pair[1]), ""), authored,
+			"at zoom %s the readout is exactly that number plus the authored copy — nothing padded, nothing rebuilt" % pair[1])
+	assert_false(String(readouts["1.5"]).contains("1.50"), "a zoom of 1.5 reads 1.5, never a padded 1.50")
+	assert_false(String(readouts["1"]).contains("1.0"), "a whole zoom reads as a bare 1, never 1.0")
+	# The STEP path too: the wheel and the footer buttons repaint the readout, not only an explicit apply.
 	Settings.set_map_zoom(1.0)
 	MapScreen._apply_zoom()
-	assert_string_contains(MapScreen._zoom_value.text, "1")
+	MapScreen._nudge_zoom(1)
+	assert_ne(MapScreen._zoom_value.text, readouts["1"],
+		"a zoom step repaints the readout — a label left saying the old zoom lies about the map under it")
 
 
 ## The "no plan for this floor" line is the map's answer to minimap.gd's documented silent degrade (an
@@ -371,17 +375,32 @@ func test_the_pan_is_clamped_to_the_authored_leash() -> void:
 
 
 ## A pan is a GESTURE, not a preference: the zoom persists to settings.cfg on purpose and the pan must not,
-## or a map reopened 300 m off the player reads as a broken screen showing the wrong place. open() cannot be
-## driven from a unit test (it wants a live human Player in-tree), so the CALL is pinned off the source and
-## the BEHAVIOUR by the test above.
+## or a map reopened 300 m off the player reads as a broken screen showing the wrong place.
+##
+## ⭐THE REAL open(), end to end. Its has_player() gate is Groups.human_player() finding a node that `is Player`
+## in the tree, so the test stands up _human_player() (a Player subclass whose _enter_tree/_ready/_physics_process
+## are empty — the tests/test_minimap.gd idiom, see the harness) rather than a real actor. The view is panned
+## off the player first, and a handler on `opened` records the offset it sees: the pan must be gone once open()
+## returns AND already gone when `opened` fires, because that signal is the first point outside code sees the
+## opened map, so anything reacting to the open must read the centred view. close() then shuts the tab for real;
+## it pairs the enter() open() ran, so leave() puts back the mouse mode enter() recorded.
 func test_open_puts_the_view_back_on_the_player() -> void:
-	var src := FileAccess.get_file_as_string(SOURCE)
-	var from := src.find("func open(")
-	var to := src.find("func close(")
-	assert_gt(from, 0, "open() exists")
-	assert_gt(to, from, "...and close() follows it")
-	assert_true(src.substr(from, to - from).contains("_reset_view()"),
-		"open() re-centres the view on the player — a pan must not survive the tab being shut")
+	var p := _human_player()
+	MapScreen._pan_by(Vector2(25.0, -10.0))
+	assert_ne(MapScreen._map.view_offset, Vector2.ZERO, "precondition: the view is panned off the player")
+	var seen := {}  # a Dictionary, because a lambda cannot reassign a local it captured
+	var on_open := func() -> void: seen["offset"] = MapScreen._map.view_offset
+	MapScreen.opened.connect(on_open)
+	MapScreen.open()
+	if MapScreen.opened.is_connected(on_open):
+		MapScreen.opened.disconnect(on_open)
+	assert_true(MapScreen.is_open(), "precondition: with a human player in the tree the tab really opens")
+	assert_eq(MapScreen._map.view_offset, Vector2.ZERO,
+		"a reopened map is back on the player — a pan must not survive the tab being shut")
+	assert_eq(seen.get("offset"), Vector2.ZERO,
+		"...and already is when `opened` fires, so anything reacting to the open reads the centred view")
+	MapScreen.close()
+	p.free()
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -513,12 +532,20 @@ func test_the_wheel_zooms_about_the_cursor() -> void:
 ## The FOOTER's zoom buttons keep centre-zoom, and that is deliberate rather than an oversight: a button press
 ## has no cursor over the plan to zoom about, and anchoring on wherever the pointer happens to be resting (or,
 ## on a pad, nowhere) would make the map lurch for no reason the player could name.
+##
+## Started from a PANNED view on purpose: from a centred one, "the offset is still zero" would hold for any zoom
+## that never touched the pan at all, and would not tell a centre-zoom from a zoom that re-anchored somewhere.
 func test_the_footer_zoom_buttons_keep_centre_zoom() -> void:
+	MapScreen._map.size = Vector2(529.0, 191.0)  # the wheel test's zero-rect note: a real scale, so an anchor WOULD move the pan
 	Settings.set_map_zoom(1.0)
 	MapScreen._apply_zoom()
+	MapScreen._pan_by(Vector2(12.0, -7.0))
+	var was: Vector2 = MapScreen._map.view_offset
+	assert_ne(was, Vector2.ZERO, "precondition: the view is panned off the player")
 	MapScreen._nudge_zoom(1)
-	assert_eq(MapScreen._map.view_offset, Vector2.ZERO,
-		"a button zoom moves the scale and nothing else — there is no cursor for it to anchor on")
+	assert_almost_eq(Settings.map_zoom, 1.0 + GameSettings.hud.map_zoom_wheel_step, 0.0001, "precondition: the step landed")
+	assert_eq(MapScreen._map.view_offset, was,
+		"a button zoom moves the scale and nothing else — there is no cursor for it to anchor on, so the view keeps its centre")
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -649,16 +676,28 @@ func test_clicking_a_rim_pinned_glyph_fetches_the_pin_while_an_on_plan_click_doe
 ## ⭐THERE IS NOW A MOUSE WAY OUT OF A SELECTION. A left click on empty plan PLACES, so before this the only
 ## way to drop a selection with the mouse was to place a pin you did not want. An idle right-click refuses
 ## nothing, so it says nothing and changes nothing.
+##
+## Both halves are HEARD. The deselect withdraws with the back cue (MapScreen._deselect), and that audible back is
+## the control for the idle half: a stray deselect on the idle path would leave `_selected` at -1 all the same, so
+## the silence of every menu voice is the only thing that can tell "did nothing" from "withdrew nothing, loudly".
 func test_right_click_deselects_and_an_idle_one_does_nothing() -> void:
+	assert_false(MenuStyle._quiet, "precondition: the menu cues are not latched silent, so a cue this click makes is audible")
+	assert_eq(MenuStyle._quiet_backs, 0, "precondition: no back cue is queued to be eaten, so a back this click makes is heard")
 	GameState.add_waypoint(LEVEL, Vector3.ZERO, "a", "", 0, 0)
 	MapScreen._select(0)
 	_arm()
+	_silence_menu_voices()
 	MapScreen._on_map_gui_input(_right_press(Vector2(40, 30)))
 	assert_eq(MapScreen._selected, -1, "right-click drops the selection")
 	assert_false(MapScreen._card.visible, "...and the card goes with it")
+	assert_true(_pool_voice_playing([MenuStyle.skin.back_sound]),
+		"...and it is heard withdrawing, on the back cue — the same sound the first Esc makes")
+	_silence_menu_voices()
 	MapScreen._on_map_gui_input(_right_press(Vector2(40, 30)))
 	_disarm()
 	assert_eq(MapScreen._selected, -1, "a second one changes nothing")
+	assert_false(_any_menu_voice_playing(),
+		"...and SAYS nothing: an idle right-click withdrew nothing and refused nothing, so no back, no denial, no click")
 	assert_eq(GameState.waypoints_for(LEVEL).size(), 1,
 		"and a right-click NEVER places — that is the left button's job on empty plan")
 
@@ -666,22 +705,23 @@ func test_right_click_deselects_and_an_idle_one_does_nothing() -> void:
 ## ⭐ESC IS STAGED: card, then selection, then the tab. Two Escs from a selected pin read as "drop the pin,
 ## close the map" rather than "close the map and leave a ring armed on a screen you can no longer see".
 ##
-## Only the DESELECT stage is driven here. The close stage wants a live Player in-tree (see the header) and is
-## pinned off the source instead — what must hold there is that the branch exists at all.
+## BOTH stages are driven: the tab is armed by hand, and shut by the real second Esc, whose close() is the latch,
+## the root and PlayerMenus.leave() — the tests/test_player_menus.gd idiom. leave() restores the group's pre-menu
+## mouse mode for an enter() that never ran here, which is why before_each/after_each snapshot and restore
+## Input.mouse_mode around every test.
 func test_escape_drops_the_selection_before_it_closes_the_tab() -> void:
 	GameState.add_waypoint(LEVEL, Vector3.ZERO, "a", "", 0, 0)
 	MapScreen._select(0)
 	_arm()
+	watch_signals(MapScreen)
 	MapScreen._on_escape()
 	assert_eq(MapScreen._selected, -1, "the first Esc spends itself on the selection")
 	assert_true(MapScreen.is_open(), "...and the tab is still up — a player must SEE the first half happen")
-	_disarm()
-	var src := FileAccess.get_file_as_string(SOURCE)
-	var from := src.find("func _on_escape(")
-	assert_gt(from, 0, "_on_escape exists")
-	var body := src.substr(from, 260)
-	assert_true(body.contains("_deselect()"), "stage one is the selection")
-	assert_true(body.contains("close()"), "...and stage two closes the tab")
+	assert_signal_not_emitted(MapScreen, "closed", "...so the first Esc must not also have shut the tab behind it")
+	MapScreen._on_escape()
+	assert_false(MapScreen.is_open(), "with nothing selected, the next Esc closes the tab")
+	assert_signal_emitted(MapScreen, "closed", "...through close() itself, the path the rest of the game hears")
+	assert_eq(GameState.waypoints_for(LEVEL).size(), 1, "and neither Esc touched the pin it deselected")
 
 
 ## ⭐EVERY VERB REFUSES WHILE THE EDITOR CARD IS UP. The card's scrim stops the MOUSE, but focus is a second
@@ -719,13 +759,78 @@ func test_every_verb_refuses_while_the_editor_card_is_open() -> void:
 # Harness
 # ---------------------------------------------------------------------------------------------------
 
-## Flip the open latch by hand — see the header. Restored by _disarm (and by after_each, belt and braces),
-## never by close(), which would drive PlayerMenus.leave() for an enter() that never happened.
+## Flip the open latch by hand — see the header. Restored by _disarm (and by after_each, belt and braces). Of the
+## tests that arm by hand, only test_escape_drops_the_selection_before_it_closes_the_tab shuts the latch through a
+## real close() (the second Esc IS that stage); the rest stay off close(), which drives PlayerMenus.leave() for an
+## enter() that never happened. test_open_puts_the_view_back_on_the_player never arms: it runs the real open().
 func _arm() -> void:
 	MapScreen._is_open = true
 
 func _disarm() -> void:
 	MapScreen._is_open = false
+
+## What Groups.human_player() accepts, copied from tests/test_minimap.gd (HumanPlayerStub + _human_player). That
+## lookup is a positive `is Player` TYPE test, so nothing short of a subclass gets past open()'s has_player() gate.
+## The empty overrides are what keep CLAUDE.md's "never run a Player's _ready in a unit test" rule: without a
+## super() call only the most-derived virtual runs, so neither Player._ready nor Player._enter_tree ever does.
+class HumanPlayerStub extends Player:
+	func _enter_tree() -> void: pass
+	func _ready() -> void: pass
+	func _physics_process(_delta: float) -> void: pass
+
+## Build that stub in the tree. The Head chain is there because Player's `@onready var white_flash: Sprite3D`
+## resolves `Head/ScreenShake/Camera3D/white flash` whether or not _ready is overridden, and a missing node is an
+## engine error GUT fails the test on. The "Camera3D" is a plain Node3D on purpose (a real Camera3D would make
+## itself the viewport's current camera), and the children go on BEFORE the stub enters the tree, which is when
+## @onready resolves. hp is raised off the bare stub's 0: at 0 Character.is_alive() is false, and open()'s
+## PlayerMenus.player_alive() gate would refuse the open as mid-death. The caller frees it; autofree is the backstop.
+func _human_player() -> Node3D:
+	var p := HumanPlayerStub.new()
+	var head := Node3D.new()
+	head.name = "Head"
+	var shake := Node3D.new()
+	shake.name = "ScreenShake"
+	var cam := Node3D.new()
+	cam.name = "Camera3D"
+	var flash := Sprite3D.new()  # the @onready is TYPED Sprite3D, so the leaf's class matters as well as its name
+	flash.name = "white flash"   # the authored name, space included
+	cam.add_child(flash)
+	shake.add_child(cam)
+	head.add_child(shake)
+	p.add_child(head)
+	add_child_autofree(p)
+	p.add_to_group(Groups.PLAYER)
+	p.hp = 1.0
+	return p
+
+## Stop every MenuStyle voice a map verb's cue can land on (confirm = the click voice, refusal = the denied voice,
+## a zoom step or a withdrawal = a semantic pool voice), so the NEXT press's cue is the only thing that can make
+## any of them read `playing`.
+func _silence_menu_voices() -> void:
+	MenuStyle._click_player.stop()
+	MenuStyle._denied_player.stop()
+	for v: AudioStreamPlayer in MenuStyle._ui_players:
+		v.stop()
+
+## Is a semantic pool voice ringing one of `streams`? play_ui routes every cue except the click and the denial
+## onto that pool, so this is where a step or a back is heard.
+func _pool_voice_playing(streams: Array) -> bool:
+	for v: AudioStreamPlayer in MenuStyle._ui_players:
+		if v.playing and v.stream != null and streams.has(v.stream):
+			return true
+	return false
+
+func _step_voice_playing() -> bool:
+	return _pool_voice_playing([MenuStyle.skin.step_left_sound, MenuStyle.skin.step_right_sound])
+
+## Any menu voice at all — the click, the denial, or a pool voice — ringing.
+func _any_menu_voice_playing() -> bool:
+	if MenuStyle._click_player.playing or MenuStyle._denied_player.playing:
+		return true
+	for v: AudioStreamPlayer in MenuStyle._ui_players:
+		if v.playing:
+			return true
+	return false
 
 func _press(at: Vector2) -> InputEventMouseButton:
 	var e := InputEventMouseButton.new()

@@ -11,7 +11,17 @@ extends GutTest
 
 const AiLodScript := preload("res://scripts/components/ai_lod.gd")
 
-# Band-table defaults mirrored from the @export defaults, so a knob change that breaks the table fails here.
+# One band table for the driven checks below, used three different ways:
+# - the band-table tests pass these values straight into cadence_for;
+# - the stagger/reuse tests (_mid_window_lod) pin them onto their instance;
+# - the accumulator and cohort tests drive a bare AiLodScript.new() on its @export defaults and pin nothing, so they
+#   RELY on these consts equalling those defaults: the cohort test sizes its tick budget from FAR_INTERVAL while its
+#   instances run far_interval, and the accumulator tests hard-code a 0.25 s far window (the literal 0.25 / 31-tick
+#   window, the 0.26 conservation slack, the ~0.16 s bank) and near/far distances that put 2-5 m and 100 m in the
+#   near and far bands. Nothing here asserts that equality, so retuning an @export default on ai_lod.gd means
+#   updating these consts and those literals with it.
+# The shipped defaults themselves are only checked as relations (band ordering, @export == NpcAiSettings seed) in the
+# tests above the band-table section.
 const NEAR := 20.0
 const FAR := 45.0
 const MID_INTERVAL := 0.1
@@ -244,35 +254,87 @@ func test_a_cohort_entering_a_band_together_fans_out_across_ticks() -> void:
 		lod.free()
 
 
+## Far-band ticks (at 120 Hz) until `lod` next thinks, counting the tick that fires; -1 if it stalls past 2 windows.
+func _ticks_to_far_think(lod: Node) -> int:
+	for i in 60:
+		if lod.think_delta(1.0 / 120.0, 100.0, false) > 0.0:
+			return i + 1
+	return -1
+
+
+## A fresh AiLod whose stagger slot is clearly MID-window (so "its slice" and "a whole window" are distinguishable),
+## with the bands _ticks_to_far_think assumes pinned on it (distance 100 is FAR-band, 2.0 is near, 60 ticks covers
+## two far windows) so a retune of the @export defaults cannot turn a test into a stall or a near-band measurement.
+## phase() only SELECTS the instance; every expectation is measured by driving think_delta. Null after failing.
+func _mid_window_lod() -> Node:
+	var lod: Node = null
+	var rejects: Array[Node] = []
+	for attempt in 200:
+		var candidate: Node = AiLodScript.new()
+		if candidate.phase() >= 0.25 and candidate.phase() <= 0.75:
+			lod = candidate
+			break
+		rejects.append(candidate)
+	for r in rejects:
+		r.free()
+	assert_true(lod != null, "precondition: some AiLod out of 200 lands mid-window")
+	if lod == null:
+		return null
+	lod.near_distance = NEAR
+	lod.far_distance = FAR
+	lod.mid_interval = MID_INTERVAL
+	lod.far_interval = FAR_INTERVAL
+	return lod
+
+
 func test_re_entering_a_throttled_band_re_staggers() -> void:
 	# Full rate clears the threshold, so the NEXT entry re-seeds the staggered first wait. Without this a group
-	# that walks near and then away again re-forms a convoy (they all zeroed together while close).
-	var lod: Node = AiLodScript.new()
-	for i in 10:
-		lod.think_delta(1.0 / 120.0, 100.0, false)  # throttled, banking
-	lod.think_delta(1.0 / 120.0, 2.0, false)        # walks into near range -> full rate, state cleared
-	# Back out to the far band: the first think must again wait only our SLICE, not the whole window.
-	var ticks := 0
-	while lod.think_delta(1.0 / 120.0, 100.0, false) <= 0.0:
-		ticks += 1
-		assert_lt(ticks, 60, "re-entry must think within one far-band window, not stall")
-	var slot: float = 1.0 - lod.phase()
-	assert_almost_eq(float(ticks + 1) / 120.0, FAR_INTERVAL * slot, 0.02,
-			"re-entry waits this NPC's staggered slice of the window, proving the stagger is re-applied on "
-			+ "every band ENTRY rather than once at construction")
+	# that walks near and then away again re-forms a convoy (they all zeroed together while close) — every one of
+	# them would wait a whole window from the same tick.
+	var lod := _mid_window_lod()
+	if lod == null:
+		return
+	var first_entry := _ticks_to_far_think(lod)  # the first entry's staggered wait
+	var full_window := _ticks_to_far_think(lod)  # a steady-state window, now that the stagger is spent
+	assert_gt(full_window, 0, "a steady far-band window must fire, not stall")
+	assert_between(first_entry, 1, full_window - 1,
+			"the first entry waits only this NPC's slice of the window (the stagger), never a whole window")
+	lod.think_delta(1.0 / 120.0, 2.0, false)  # walks into near range -> full rate
+	var re_entry := _ticks_to_far_think(lod)  # back out to the far band
+	assert_eq(re_entry, first_entry,
+			"re-entering the far band waits the SAME staggered slice as the first entry, not a whole window — the "
+			+ "stagger is re-applied on every band ENTRY rather than once at construction")
 	lod.free()
 
 
 func test_reset_for_reuse_clears_bank_but_keeps_the_stagger_slot() -> void:
-	# Pooling contract: a body back from the pool must not inherit last life's banked time, but MUST keep its
-	# phase — the slot is what stops a reused wave coming back as a convoy.
-	var lod: Node = AiLodScript.new()
-	var before: float = lod.phase()
+	# Pooling contract: a body back from the pool must not inherit last life's banked time or band state, but MUST
+	# keep its stagger slot — the slot is what stops a reused wave coming back as a convoy. Measured where both halves
+	# are visible: in the FAR band, where think_delta actually reads the bank and the threshold (a near-band tick is a
+	# pass-through that ignores both, so it could never see a leftover).
+	var lod := _mid_window_lod()
+	if lod == null:
+		return
+	const DT := 1.0 / 120.0
+	var first_entry := _ticks_to_far_think(lod)  # a fresh body's staggered first wait: the reference a reused one must match
+	assert_gt(first_entry, 1, "precondition: a mid-window slot waits several ticks, so a leftover bank could cut it short")
+	# Last life: bank ~0.17 s toward a steady far-band window without reaching it (a full window is ~31 ticks).
+	var early_thinks := 0
 	for i in 20:
-		lod.think_delta(1.0 / 120.0, 100.0, false)
+		if lod.think_delta(DT, 100.0, false) > 0.0:
+			early_thinks += 1
+	assert_eq(early_thinks, 0, "precondition: 20 ticks banked inside one steady far window have not thought yet")
 	lod.reset_for_reuse()
-	assert_eq(lod.phase(), before,
-			"the stagger slot is instance-id derived and must SURVIVE pooling")
-	assert_almost_eq(lod.think_delta(1.0 / 120.0, 5.0, false), 1.0 / 120.0, 0.0001,
-			"after a reuse reset the next near-range tick is a clean pass-through, not a catch-up lurch")
+	# Next life, back out in the far band: count the ticks to its first think and take the delta that think hands over.
+	var ticks := 0
+	var handed := 0.0
+	for i in 60:
+		ticks += 1
+		handed = lod.think_delta(DT, 100.0, false)
+		if handed > 0.0:
+			break
+	assert_eq(ticks, first_entry,
+			"a reused body's first far-band think lands on the SAME staggered tick as a fresh body's: leftover banked time would fire it early, and a leftover steady-state threshold would make it wait a whole window — either way the reused wave re-forms a convoy")
+	assert_almost_eq(handed, ticks * DT, 0.0001,
+			"...and that think hands the brain only the time elapsed in THIS life, never last life's bank as one catch-up lurch")
 	lod.free()

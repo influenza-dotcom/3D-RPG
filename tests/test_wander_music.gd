@@ -14,8 +14,9 @@ extends GutTest
 ##   2. WHO OWNS THE MOMENT and in what order. Five suppressors, one of them (dialogue) load-bearing for
 ##      correctness rather than taste.
 ##   3. The shared scan's degenerate inputs (null tree) and its radio distance gate.
-##   4. The extraction itself: StationMusic.pick_next_index must still answer exactly as it did before the
-##      picker moved to MusicPlaylist, and LoopableStream must now force the loop flag in BOTH directions.
+##   4. The extraction itself: the bed's own pick (MusicPlaylist.pick_next_index over the non-null slots) never
+##      repeats and never plays a cleared slot, and LoopableStream must force the loop flag in BOTH directions.
+##      StationMusic's delegating pick_next_index is pinned by its own rules in tests/test_station_music.gd.
 ##   5. The live node's resting posture — PROCESS_MODE_ALWAYS (a conversation pauses the tree and a pausable
 ##      AudioStreamPlayer silences itself with nothing logged), silent, stopped, claiming nothing.
 
@@ -191,22 +192,32 @@ func test_the_authored_bus_exists() -> void:
 		% cfg.bus + "'music' with only a warning")
 
 func test_the_radio_folder_scan_cannot_see_the_wandering_folder() -> void:
-	# ⭐LOAD-BEARING PLACEMENT, not tidiness. Radio.music_folder defaults to res://assets/audio/music and its
-	# scan is NON-recursive, so a track left FLAT in that folder gets shuffled into every in-world radio and
-	# every thrown radio-grenade. The station themes live in music/station/ for the same reason.
+	# ⭐LOAD-BEARING PLACEMENT, not tidiness. Every in-world radio (and every thrown radio-grenade) scans
+	# Radio.music_folder, and wander/ is a SUBFOLDER of that default folder: the only thing keeping the exploration
+	# cue out of radio rotation is that the scan is NON-recursive. A track left FLAT in music/ is shuffled in, and
+	# so would be all of wander/ the day the scan recursed. The station themes live in music/station/ for the
+	# same reason.
 	#
-	# Asserted against Radio's REAL scan rather than against the playlist's contents, because the playlist ships
-	# empty: a contents-only check would pass vacuously and the rule would quietly stop being enforced exactly
-	# while nobody is looking. Built off-tree with no add_child, per the house rule — radio.gd's _ready touches
-	# global_transform and builds a look-at outline.
+	# wander/ ships holding only its README, so it cannot reveal a recursive scan on its own. station/ is the
+	# sibling subfolder that DOES hold audio, so it is the witness: the scanner finds its tracks when pointed
+	# straight at it, and the default scan must still return nothing from any subfolder. Built off-tree with no
+	# add_child, per the house rule — radio.gd's _ready touches global_transform and builds a look-at outline.
 	var radio = load("res://scripts/components/radio.gd").new()
-	var scanned: PackedStringArray = radio._scan_audio_folder("res://assets/audio/music")
+	var music_dir: String = radio.music_folder
+	var scanned: PackedStringArray = radio._scan_audio_folder(music_dir)
+	var witness: PackedStringArray = radio._scan_audio_folder(music_dir.path_join("station"))
 	radio.free()
+	assert_eq(WANDER_DIR.get_base_dir(), music_dir,
+		"wander/ sits directly under the folder every radio scans by default — the reason the non-recursion matters")
+	assert_false(scanned.is_empty(), "control: the default radio folder holds tracks, so the check below is not vacuous")
+	assert_false(witness.is_empty(),
+		"control: station/ holds audio the scanner finds when pointed straight at it — what a recursive scan would leak")
 	for path in scanned:
-		assert_false(path.begins_with(WANDER_DIR),
-			"Radio's non-recursive scan of res://assets/audio/music returned '%s' — a wandering track has " % path
-			+ "leaked into the flat music folder and every in-world radio will now shuffle it")
-	# And the positive half: whatever IS authored must resolve into the wander folder.
+		assert_eq(path.get_base_dir(), music_dir,
+			"Radio's default scan returned '%s' from a SUBFOLDER — the scan has gone recursive, and every " % path
+			+ "in-world radio will now shuffle the wandering and station cues")
+	# And the placement half: whatever IS authored must resolve into the wander folder. Vacuous while the playlist
+	# ships empty; it re-arms the moment a track is authored.
 	var cfg: WanderMusicSettings = GameSettings.wander_music
 	for track in cfg.tracks:
 		if track == null or track.resource_path.is_empty():
@@ -266,10 +277,22 @@ func test_dialogue_outranks_a_station_and_a_radio() -> void:
 	# Order matters for the READOUT, not for the outcome (any owner suppresses), and the readout is how anyone
 	# will ever debug "why is it quiet". Pin the precedence so the answer stays the most informative one.
 	var bed := _make_bed()
+	var listener := Node3D.new()
+	add_child_autofree(listener)
+	bed.listener = listener
+	var radio := StubRadio.new()
+	add_child_autofree(radio)
+	radio.add_to_group(Groups.MUSIC)
+	radio.global_position = listener.global_position + Vector3(2.0, 0.0, 0.0)  # well inside audible_radius
 	bed.dialogue = true
 	bed.station = true
 	assert_eq(bed._scan_owner(), WanderMusic.OWNER_DIALOGUE,
-		"a conversation hosting a station screen should report the conversation, not the terminal")
+		"a conversation hosting a station screen, beside a playing radio, should report the conversation")
+	bed.dialogue = false
+	assert_eq(bed._scan_owner(), WanderMusic.OWNER_STATION,
+		"with the conversation over, an open terminal still outranks the radio playing beside it")
+	bed.station = false
+	assert_eq(bed._scan_owner(), WanderMusic.OWNER_RADIO, "control: the radio alone does own the moment")
 
 
 # --- 4. Pacing: the calm clock and the rest window ---------------------------------------------------------
@@ -351,25 +374,39 @@ func test_a_null_listener_hears_no_radio() -> void:
 
 func test_alert_level_collapses_the_pair_worst_first() -> void:
 	# The pair and the collapsed tier must not disagree — MusicDirector reads the pair, the wandering bed reads
-	# the tier, and they are complements of each other.
+	# the tier, and they are complements of each other. The mixed crowd needs live NPCs, so the collapse is driven
+	# with literal pairs through Soundscape.collapse, the half of alert_level that decides the order.
+	assert_eq(Soundscape.collapse({"combat": true, "caution": true}), Soundscape.Alert.COMBAT,
+		"one shooter plus one searcher is a FIGHT: the mixed crowd must collapse to COMBAT, never CAUTION")
+	assert_eq(Soundscape.collapse({"combat": true, "caution": false}), Soundscape.Alert.COMBAT, "a lone fight is COMBAT")
+	assert_eq(Soundscape.collapse({"combat": false, "caution": true}), Soundscape.Alert.CAUTION,
+		"a crowd that is only hunting is CAUTION")
+	assert_eq(Soundscape.collapse({"combat": false, "caution": false}), Soundscape.Alert.CALM,
+		"nobody fighting or hunting is CALM")
 	assert_eq(Soundscape.alert_level(get_tree()), Soundscape.Alert.CALM,
 		"an empty npc group is CALM, matching scan()'s two false flags")
-	assert_gt(Soundscape.Alert.COMBAT, Soundscape.Alert.CAUTION, "COMBAT must outrank CAUTION in the enum order")
-	assert_gt(Soundscape.Alert.CAUTION, Soundscape.Alert.CALM, "CAUTION must outrank CALM")
 
 
 # --- 6. The extractions must not have changed any answer ---------------------------------------------------
 
-func test_station_music_still_picks_exactly_as_it_did_before_the_picker_moved() -> void:
-	# The picker moved to MusicPlaylist so the wandering bed could reuse it instead of copying it. StationMusic
-	# kept the NAME as a delegation; this pins that the delegation is not merely present but identical.
-	for count in [1, 2, 3, 5]:
-		for last in [-1, 0, 1, 99]:
-			for roll in [0.0, 0.17, 0.5, 0.83, 0.999]:
-				assert_eq(StationMusic.pick_next_index(count, last, roll),
-					MusicPlaylist.pick_next_index(count, last, roll),
-					"StationMusic.pick_next_index must delegate identically (count=%d last=%d roll=%.3f)"
-					% [count, last, roll])
+func test_the_bed_never_repeats_a_track_and_never_picks_a_cleared_slot() -> void:
+	# The bed re-picks on every rise: one of the authored tracks, never the one it just played, and never a slot a
+	# designer cleared. Driven through the bed's own _pick_stream so the null-slot skip AND the slot -> playlist index
+	# remap are in the path, starting from a `last` that was edited out of the playlist (the whole list is fair game).
+	var a := _silent_stream()
+	var b := _silent_stream()
+	var cfg := _install_playlist([a, null, b] as Array[AudioStream])
+	cfg.continuous = false  # non-looping WAVs come back as-is, so a pick can be compared by identity
+	var bed := _make_bed()
+	bed._rng.seed = 20260917  # deterministic rolls
+	bed._last_index = 9       # a track since removed from the playlist
+	var previous: AudioStream = null
+	for i in 40:
+		var picked: AudioStream = bed._pick_stream(cfg)
+		assert_true(picked == a or picked == b,
+			"pick %d must be one of the two authored tracks — never the cleared slot, never nothing" % i)
+		assert_true(picked != previous, "pick %d repeated the track that just played" % i)
+		previous = picked
 
 func test_the_picker_never_repeats_when_it_has_a_choice() -> void:
 	for last in [0, 1, 2]:
@@ -429,12 +466,21 @@ func test_the_bed_rests_silent_stopped_and_claiming_nothing() -> void:
 
 func test_the_bed_is_authored_in_the_game_scene() -> void:
 	# The whole feature is one authored node. A refactor that drops it leaves every test above green and the
-	# game silent — this is the only check that would notice.
+	# game silent — this is the only check that would notice. Read as TEXT on purpose: loading game.tscn as a
+	# PackedScene drags in the Player prefab, and nothing here may instantiate it.
 	var text := FileAccess.get_file_as_string("res://scenes/game.tscn")
-	assert_true(text.contains("res://scripts/components/wander_music.gd"),
-		"scenes/game.tscn must author a WanderMusic node — without it the exploration bed never exists in game")
-	assert_true(text.contains('name="WanderMusic"'),
+	var script_ref := RegEx.create_from_string(
+		r'\[ext_resource[^\]]*path="res://scripts/components/wander_music\.gd"[^\]]*id="([^"]+)"').search(text)
+	assert_true(script_ref != null,
+		"scenes/game.tscn must reference wander_music.gd — without it the exploration bed never exists in game")
+	var node := RegEx.create_from_string(
+		r'\[node name="WanderMusic"[^\]]*parent="([^"]*)"[^\]]*\]\n((?:.+\n)*)').search(text)
+	assert_true(node != null,
 		"the node should still be called WanderMusic — the debug command finds it by TYPE, but the docs and the "
 		+ "scene tree both name it")
-	assert_true(text.contains('parent="Player"'),
+	if script_ref == null or node == null:
+		return
+	assert_eq(node.get_string(1), "Player",
 		"the WanderMusic node should hang off Player beside the combat score's Music player")
+	assert_true(node.get_string(2).contains('script = ExtResource("%s")' % script_ref.get_string(1)),
+		"the WanderMusic node must carry wander_music.gd as its script, or it is a bare node and the bed never plays")

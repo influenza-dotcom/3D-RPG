@@ -12,10 +12,12 @@ extends GutTest
 ## authored rail selector carried `focus_mode = 0` and _make_row stripped every runtime row to FOCUS_NONE, so
 ## the card had NO focusable control at all — ui navigation had nowhere to start and a pad player could not
 ## install, buy, flip the rail, or reach anything. The scene half and the runtime half are pinned separately
-## below.
+## below; the runtime half (and the commit routing / disarm exits) runs a private IN-TREE instance of the scene
+## opened for a bare off-tree ChipInstaller + Player (the test_chip_install idiom — no Player._ready runs).
 
 const SCENE := "res://scenes/ui/chip_install_screen.tscn"
 const SCREEN_SOURCE := "res://scripts/ui/chip_install_screen.gd"
+const PLAYER_PATH := "res://scripts/player/player.gd"
 
 ## Every unique name chip_install_screen.gd binds in _bind_ui — a rename in the editor breaks the bind at
 ## boot, so pin the roster here where it fails loudly instead.
@@ -38,7 +40,8 @@ func test_scene_instantiates_with_every_bound_unique_name() -> void:
 	var inst: Node = scene.instantiate()
 	assert_not_null(inst, "it instantiates (empty-PackedScene reimport transients aside)")
 	assert_true(inst is CanvasLayer, "root is the CanvasLayer the autoload expects")
-	assert_not_null(inst.get_script(), "the root carries chip_install_screen.gd")
+	assert_true(inst.get_script() != null and String(inst.get_script().resource_path) == SCREEN_SOURCE,
+		"the root carries chip_install_screen.gd (the script whose _bind_ui reads these names)")
 	for n in BOUND:
 		assert_not_null(inst.get_node_or_null("%" + n), "%%%s exists (the script binds it in _bind_ui)" % n)
 	inst.free()
@@ -106,36 +109,112 @@ func test_every_authored_button_is_reachable_by_a_pad() -> void:
 	inst.free()
 
 
+# ---------------------------------------------------------------------------------------------------
+# THE LIVE CARD — a private in-tree instance of the authored scene, opened for real
+# ---------------------------------------------------------------------------------------------------
+
+## open_install grabs the mouse and the till reads the shared GameState banking fields; all restored per test.
+var _prev_mouse_mode: Input.MouseMode
+var _prev_account: float
+var _prev_method: String
+
+
+func before_each() -> void:
+	_prev_mouse_mode = Input.mouse_mode
+	_prev_account = GameState.account
+	_prev_method = GameState.payment_method
+	GameState.account = 0.0          # a stale positive account would fund an install the wallet couldn't cover
+	GameState.payment_method = "debit"
+
+
+func after_each() -> void:
+	Input.mouse_mode = _prev_mouse_mode
+	GameState.account = _prev_account
+	GameState.payment_method = _prev_method
+
+
+## A private screen: the authored scene added to the tree so _ready/_bind_ui run — never the ChipInstallScreen autoload.
+func _live_screen() -> Node:
+	var screen: Node = (load(SCENE) as PackedScene).instantiate()
+	add_child_autofree(screen)
+	return screen
+
+
+## An off-tree mechanic with a hand-built (empty) stock, the test_chip_install idiom.
+func _mechanic() -> ChipInstaller:
+	var m := ChipInstaller.new()
+	m.stock = CharacterInventory.new()
+	m.install_mult = 0.5
+	m.buy_mult = 1.25
+	m.min_fee = 10
+	return m
+
+
+## A bare off-tree Player with a backpack and cash (its _ready never runs).
+func _customer(money: float) -> Node:
+	var p: Node = load(PLAYER_PATH).new()
+	p.set(&"inventory", CharacterInventory.new())
+	p.set(&"money", money)
+	return p
+
+
+## A real, installable upgrade chip (the grapple ability resolves through the registry).
+func _grapple_chip() -> Item:
+	var it := Item.new()
+	it.id = &"chip_grapple"
+	it.display_name = "Test Chip"
+	it.category = Item.Category.MISC
+	it.value = 400.0
+	it.installs_ability = &"grapple"
+	return it
+
+
+## The row Buttons the LAST rebuild put in `list` (rows queued for deletion belong to an older build).
+func _live_rows(list: Node) -> Array:
+	return list.get_children().filter(func(c: Node) -> bool: return c is Button and not c.is_queued_for_deletion())
+
+
+func _close_and_free(screen: Node, m: ChipInstaller, p: Node) -> void:
+	if screen.is_open():
+		screen.close()  # disconnects the bag / stock / unlock signals before their sources are freed
+	m.stock.free()
+	m.free()
+	(p.get(&"inventory") as Node).free()
+	p.free()
+
+
 func test_the_pad_landing_spot_is_seeded_when_the_card_opens() -> void:
-	# The other half of parity is RUNTIME (rows built in _fill/_make_row, focus grabbed in open_install on a live
-	# viewport), which a unit test must not run — this autoload's _ready binds real chrome and open_install wants
-	# a live ChipInstaller and Player. So it is pinned by SOURCE, the tests/test_payment_rail_selector.gd idiom.
-	#
-	# Every offset below is guarded before it is sliced or compared: find() answers -1 for a needle that has been
-	# renamed away and a bad substr yields "", over which a contains() check quietly reads as "absent" — a pin
-	# that retires itself in silence is worse than no pin.
-	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
-	assert_gt(src.length(), 0, "chip_install_screen.gd must be readable")
-	assert_true(src.contains("btn.focus_mode = Control.FOCUS_ALL"),
-		"_make_row must build the install rows FOCUS_ALL — the rows ARE the pad path, and a control a pad can never land on is not a path")
-	assert_true(src.contains("_first_focus = row_btn"),
-		"the first row built must be recorded as the screen's landing spot (re-recorded every _rebuild — the old rows are freed)")
-	var open_at := src.find("func open_install(")
-	assert_gt(open_at, -1, "func open_install( no longer present — the pin is stale")
-	assert_eq(src.rfind("func open_install("), open_at,
-		"open_install must be defined exactly ONCE, or the body sliced below is not the one that runs")
-	var open_end := src.find("\nfunc ", open_at + 1)
-	assert_gt(open_end, open_at, "open_install's body must end at the next function — the pin is stale")
-	var body := src.substr(open_at, open_end - open_at)
-	var shown := body.find("_root.visible = true")
-	assert_gt(shown, -1, "_root.visible = true no longer present in open_install — the pin is stale")
-	var grabbed := body.find("_first_focus.grab_focus()")
-	assert_gt(grabbed, -1,
-		"open_install must SEED focus on the first install row — with no focus owner, ui navigation has nowhere to start and every control is pad-unreachable")
-	assert_gt(grabbed, shown,
-		"and it must grab AFTER the card is shown — grab_focus on a hidden Control does nothing, so seeding first would leave the pad with no owner anyway")
-	assert_true(body.contains("_rail_btn.grab_focus()"),
-		"and when the mechanic offers NOTHING (both lists empty — hint Labels only), the rail selector — the one authored Button — must take the seed instead")
+	# The runtime half of parity: _fill/_make_row build the rows FOCUS_ALL and open_install seeds focus on the first
+	# one once the card is up. With no focus owner, ui navigation has nowhere to start and a pad cannot install.
+	var screen := _live_screen()
+	var m := _mechanic()
+	var p := _customer(1000.0)
+	(p.get(&"inventory") as CharacterInventory).add(_grapple_chip(), 1)
+	screen.open_install(m, p)
+	assert_true(screen.is_open(), "a real installer serving a player carrying a chip opens")
+	var rows := _live_rows(screen.get_node("%CarriedList"))
+	assert_eq(rows.size(), 1, "the carried chip gets one install row")
+	if rows.size() == 1:
+		assert_eq((rows[0] as Button).focus_mode, Control.FOCUS_ALL,
+			"install rows must take focus — the rows ARE the pad path, and a control a pad can never land on is not a path")
+		assert_eq(screen.get_viewport().gui_get_focus_owner(), rows[0],
+			"open_install must SEED focus on the first install row — with no focus owner every control is pad-unreachable")
+	_close_and_free(screen, m, p)
+
+
+func test_an_empty_card_seeds_the_rail_selector_instead() -> void:
+	# Nothing carried, nothing stocked: both lists hold hint Labels only, so the one authored Button — the rail
+	# selector — must take the seed, or the card opens with no focus owner at all.
+	var screen := _live_screen()
+	var m := _mechanic()
+	var p := _customer(1000.0)
+	screen.open_install(m, p)
+	assert_true(screen.is_open(), "an installer with nothing to offer still opens")
+	assert_eq(_live_rows(screen.get_node("%CarriedList")).size() + _live_rows(screen.get_node("%StockList")).size(), 0,
+		"control: the card really has no install rows to seed")
+	assert_eq(screen.get_viewport().gui_get_focus_owner(), screen.get_node("%RailButton"),
+		"with no rows, the rail selector takes the pad landing spot")
+	_close_and_free(screen, m, p)
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -186,10 +265,10 @@ func test_the_first_press_arms_the_row_and_states_the_price() -> void:
 	assert_eq((rec["name"] as Label).text, chip.label(), "at rest the row is just the chip's name")
 	s._on_row_pressed(chip, false)
 	assert_eq(s._armed_item, chip, "the FIRST press ARMS the row — it must never reach the till")
-	assert_eq((rec["name"] as Label).text, PlayerText.chip_install_confirm(200.0),
-		"...and the caption becomes the confirm, which states what a second press will actually cost")
-	assert_eq((rec["price"] as Label).text, "",
-		"the price column blanks while armed — the money phrase is inside the confirm caption, and two of it on one row reads as two charges")
+	assert_eq((rec["name"] as Label).text, chip.label(),
+		"...the NAME stays put — the moment the player is about to spend is the moment the row must still say what it is")
+	assert_eq((rec["price"] as Label).text, PlayerText.chip_install_confirm(200.0),
+		"...and the PRICE cell becomes the confirm, which states what a second press will actually cost (the money phrase once)")
 	_free_rows([rec])
 	s.free()
 
@@ -202,10 +281,14 @@ func test_the_second_press_spends_the_arm() -> void:
 	var rec := _row_rec(chip, false, 200.0)
 	s._rows = [rec]
 	s._on_row_pressed(chip, false)
+	assert_eq((rec["price"] as Label).text, PlayerText.chip_install_confirm(200.0),
+		"precondition: the armed row's PRICE cell carries the confirm caption, so the repaint below has a caption to take back")
+	assert_ne(Zorkmids.money_text(200.0), PlayerText.chip_install_confirm(200.0),
+		"control: the resting price and the confirm caption read differently, so the cell text below can tell the two states apart")
 	s._on_row_pressed(chip, false)
 	assert_null(s._armed_item, "the confirm press spends the arm")
-	assert_eq((rec["name"] as Label).text, chip.label(),
-		"and the row repaints back to its resting caption — a confirm caption left on a disarmed row is a lie about the next click")
+	assert_eq((rec["price"] as Label).text, Zorkmids.money_text(200.0),
+		"and the row's PRICE cell repaints back to its resting price — a confirm caption left on a disarmed row is a lie about the next click (with no installer wired this is the REFUSED-commit path, which keeps the same rows)")
 	_free_rows([rec])
 	s.free()
 
@@ -219,9 +302,12 @@ func test_moving_to_another_row_disarms_the_first() -> void:
 	var rec_b := _row_rec(b, true, 350.0)
 	s._rows = [rec_a, rec_b]
 	s._on_row_pressed(a, false)
+	assert_eq((rec_a["price"] as Label).text, PlayerText.chip_install_confirm(200.0),
+		"precondition: row A is armed and its PRICE cell shows the confirm caption")
 	s._disarm_unless(b, true)
 	assert_null(s._armed_item, "crossing onto another row drops the arm")
-	assert_eq((rec_a["name"] as Label).text, a.label(), "and the row that was armed repaints to its name")
+	assert_eq((rec_a["price"] as Label).text, Zorkmids.money_text(200.0),
+		"and the row that was armed repaints its PRICE cell back to the resting price — a confirm caption left behind would still promise the next click a commit")
 	s._on_row_pressed(a, false)
 	s._disarm_unless(a, false)
 	assert_eq(s._armed_item, a, "staying on the SAME row keeps the arm — a re-hover is not a change of mind")
@@ -239,33 +325,78 @@ func test_pressing_a_different_row_moves_the_arm_instead_of_committing() -> void
 	s._on_row_pressed(b, true)
 	assert_eq(s._armed_item, b, "the press lands on the row it was made on")
 	assert_true(s._armed_is_buy, "...including WHICH list that row lives in — carried and stock rows are never confused")
-	assert_eq((rec_a["name"] as Label).text, a.label(), "the previously armed row stands down")
-	assert_eq((rec_b["name"] as Label).text, PlayerText.chip_install_confirm(350.0), "and the new one arms")
+	assert_eq((rec_a["price"] as Label).text, Zorkmids.money_text(float(rec_a["charge"])), "the previously armed row stands down to its price")
+	assert_eq((rec_b["price"] as Label).text, PlayerText.chip_install_confirm(350.0), "and the new one arms")
 	_free_rows([rec_a, rec_b])
 	s.free()
 
-func test_the_row_press_is_routed_through_the_confirm_and_both_exits_disarm() -> void:
-	# Three source pins for the halves a bare instance cannot reach. (1) The wiring: a row connected straight to
-	# _buy/_install would be the one-click charge again, whatever the arm state machine above does. (2) _rebuild
-	# needs a live installer + player, so its disarm is pinned here — it matters because a rebuild means the
-	# wallet, the bag, the stock or the RAIL just moved, and the total an armed row is quoting may now be stale.
-	# (3) close() is pinned by source rather than called, because its tail restores the CAPTURED mouse mode —
-	# a real input-state change no unit test should make on the machine running it.
-	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
-	assert_gt(src.length(), 0, "chip_install_screen.gd must be readable")
-	assert_true(src.contains("btn.pressed.connect(_on_row_pressed.bind(item, is_buy))"),
-		"every row press must go through the two-stage commit, never straight at _buy/_install")
-	assert_false(src.contains("btn.pressed.connect((_buy if is_buy else _install).bind(item))"),
-		"the old one-click wiring must be gone, not merely bypassed")
-	var at := src.find("func _rebuild(")
-	assert_gt(at, -1, "func _rebuild( no longer present — the pin is stale")
-	var end := src.find("\nfunc ", at + 1)
-	assert_gt(end, at, "_rebuild's body must end at the next function — the pin is stale")
-	assert_true(src.substr(at, end - at).contains("_armed_item = null"),
-		"_rebuild must disarm: the rows carrying the armed quote are about to be freed, and the quote itself may be stale")
-	var close_at := src.find("func close(")
-	assert_gt(close_at, -1, "func close( no longer present — the pin is stale")
-	var close_end := src.find("\nfunc ", close_at + 1)
-	assert_gt(close_end, close_at, "close()'s body must end at the next function — the pin is stale")
-	assert_true(src.substr(close_at, close_end - close_at).contains("_armed_item = null"),
-		"close() must disarm — walking away from the card IS a cancel, and an arm that survived it would fire on the next open")
+func test_a_row_press_only_arms_and_the_second_press_on_it_installs() -> void:
+	# The WIRING half the bare instance above cannot reach: the row Button's own `pressed` must run through the
+	# two-stage commit. A row connected straight at _install would spend the money and destroy the chip on ONE click.
+	var screen := _live_screen()
+	var m := _mechanic()
+	var p := _customer(1000.0)
+	var chip := _grapple_chip()
+	(p.get(&"inventory") as CharacterInventory).add(chip, 1)
+	screen.open_install(m, p)
+	var rows := _live_rows(screen.get_node("%CarriedList"))
+	assert_eq(rows.size(), 1, "the carried chip gets one install row")
+	if rows.size() == 1:
+		(rows[0] as Button).pressed.emit()
+		assert_eq(screen._armed_item, chip, "the first press on the row ARMS it")
+		assert_eq(float(p.get(&"money")), 1000.0, "...and charges nothing")
+		assert_true((p.get(&"inventory") as CharacterInventory).has(chip), "...and the chip is still in the bag")
+		(rows[0] as Button).pressed.emit()
+		assert_lt(float(p.get(&"money")), 1000.0, "the second press on the SAME row pays the installer")
+		assert_false((p.get(&"inventory") as CharacterInventory).has(chip), "...and consumes the chip")
+		assert_true(p.call(&"has_mechanic", &"grapple"), "...and the ability comes online")
+		assert_null(screen._armed_item, "the confirm press spends the arm")
+	_close_and_free(screen, m, p)
+
+
+func test_a_rebuild_disarms_so_a_stale_arm_cannot_be_spent_by_one_click() -> void:
+	# Every bag / stock / rail change funnels into _rebuild, and the total the armed row was quoting may now be stale.
+	# If the arm survived, the rebuilt row for the SAME chip would install on its very next single press.
+	var screen := _live_screen()
+	var m := _mechanic()
+	var p := _customer(1000.0)
+	var chip := _grapple_chip()
+	var bag := p.get(&"inventory") as CharacterInventory
+	bag.add(chip, 1)
+	screen.open_install(m, p)
+	var rows := _live_rows(screen.get_node("%CarriedList"))
+	assert_eq(rows.size(), 1, "the carried chip gets one install row")
+	if rows.size() == 1:
+		(rows[0] as Button).pressed.emit()
+		assert_eq(screen._armed_item, chip, "the row is armed before the bag changes")
+		var trinket := Item.new()
+		trinket.id = &"test_trinket"
+		bag.add(trinket, 1)  # the bag's `changed` is bound -> _rebuild
+		assert_null(screen._armed_item, "a rebuild drops the arm")
+		var rebuilt := _live_rows(screen.get_node("%CarriedList"))
+		assert_eq(rebuilt.size(), 1, "the rebuild re-lists the chip")
+		if rebuilt.size() == 1:
+			(rebuilt[0] as Button).pressed.emit()
+			assert_eq(float(p.get(&"money")), 1000.0, "one press on the rebuilt row only re-arms it — nothing is charged")
+			assert_true(bag.has(chip), "...and the chip is not consumed")
+	_close_and_free(screen, m, p)
+
+
+func test_closing_the_card_disarms_the_armed_row() -> void:
+	# Walking away from the card IS a cancel: an arm that survived close() is pending money on a screen that is gone.
+	var screen := _live_screen()
+	var m := _mechanic()
+	var p := _customer(1000.0)
+	var chip := _grapple_chip()
+	(p.get(&"inventory") as CharacterInventory).add(chip, 1)
+	screen.open_install(m, p)
+	var rows := _live_rows(screen.get_node("%CarriedList"))
+	assert_eq(rows.size(), 1, "the carried chip gets one install row")
+	if rows.size() == 1:
+		(rows[0] as Button).pressed.emit()
+		assert_eq(screen._armed_item, chip, "the row is armed before the card closes")
+	screen.close()
+	assert_false(screen.is_open(), "the card closed")
+	assert_null(screen._armed_item, "close() drops the arm")
+	assert_eq(float(p.get(&"money")), 1000.0, "closing an armed card charges nothing")
+	_close_and_free(screen, m, p)

@@ -2,20 +2,60 @@ extends GutTest
 
 ## The two dev-only seams the AI debug commands act through (2026-08-18, loop iteration 2):
 ##  * NPC.DEBUG_NOTARGET_META — the ghost gate at the top of NPC._treats_as_enemy (the ONE predicate targeting
-##    acquires/keeps by and the per-frame Perception.is_hostile writer), read by DebugActionsWorld `notarget`.
+##    acquires/keeps by and the per-frame Perception.is_hostile writer), written by DebugActionsWorld `notarget`.
 ##  * DebugInspector.target() / hit_point() — the physics-tick cache the per-NPC verbs (`brain`, `npc <verb>`)
 ##    resolve their actor and point through, never a fresh raycast.
-## An NPC's _ready is never run here (CLAUDE.md) — the gate is pinned by SOURCE SCAN because _treats_as_enemy's
-## fall-through calls is_hostile_to → _protectee, which read components only _ready builds. The inspector IS
+## An NPC's _ready is never run here (CLAUDE.md). The gate is driven on an NPC built off-tree via load().new(), the
+## tests/test_npc_vs_npc.gd idiom: _treats_as_enemy -> is_hostile_to -> _protectee read only plain fields (disposition,
+## faction, _provoked, _guarding, _leader) plus the Reputation autoload, so the whole predicate is callable with no
+## child built. The `notarget` writer is
+## driven through DebugActionsWorld.run() with NO tree in ctx (so the live-NPC holder scan is skipped) and a Player
+## double, and its effect is read back through that same NPC gate, never through the literal. The inspector IS
 ## constructed off-tree (no _ready), which is exactly the "before the first tick" state its accessors promise; its
 ## cache is then poked directly (white-box, the members are the contract) to drive the three lifecycles a physics
 ## tick cannot be made to produce here: a target parked OUT of the tree (NpcPool.reclaim), a target FREED (an NPC's
 ## queue_free landing), and a miss (_clear_target).
 
 const InspectorScript := preload("res://scripts/components/debug_inspector.gd")
+const WorldActions := preload("res://scripts/components/debug_actions_world.gd")
+const GroupsScript := preload("res://scripts/world/groups.gd")
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
-const WORLD_ACTIONS_PATH := "res://scripts/components/debug_actions_world.gd"
+
+## Authored noise values on the Player double: deliberately NOT player.gd's shipped defaults, so a restore that
+## re-applies a default (or the zero `notarget on` wrote) cannot pass by coincidence.
+const AUTHORED_MOVE_NOISE := 2.5
+const AUTHORED_GUN_NOISE := 17.5
+
+
+## An NPC off-tree (no _ready). Unaligned + HOSTILE is the shipped default: it is hostile to the player.
+func _hostile_npc() -> NPC:
+	var npc: NPC = load(NPC_PATH).new()
+	npc.disposition = Disposition.Kind.HOSTILE
+	return npc
+
+
+## A stand-in for the player: a plain Node in the Player group (is_hostile_to only checks the group + is_hostile()).
+func _player_stub() -> Node:
+	var p := Node.new()
+	p.add_to_group(GroupsScript.PLAYER)
+	return p
+
+
+## A Player double that also carries the two AUTHORED noise exports `notarget` banks and zeroes.
+func _noisy_player_double() -> Node:
+	var scr := GDScript.new()
+	scr.source_code = "extends Node\nvar noise_move_per_speed: float = %s\nvar noise_gunfire_radius: float = %s\n" % [
+		str(AUTHORED_MOVE_NOISE), str(AUTHORED_GUN_NOISE)]
+	scr.reload()
+	var p: Node = scr.new()
+	p.add_to_group(GroupsScript.PLAYER)
+	return p
+
+
+func _notarget(ctx: Dictionary, word: String) -> PackedStringArray:
+	var args := PackedStringArray() if word.is_empty() else PackedStringArray([word])
+	return WorldActions.run("notarget", ctx, args)
 
 
 func test_inspector_accessors_are_null_and_inf_before_the_first_tick() -> void:
@@ -53,66 +93,97 @@ func test_inspector_target_refuses_off_tree_and_freed_bodies_and_hit_point_outli
 	insp.free()
 
 
-func test_notarget_meta_gate_leads_treats_as_enemy() -> void:
-	var src := FileAccess.get_file_as_string(NPC_PATH)
-	assert_false(src.is_empty(), "npc.gd must be readable")
-	assert_true(src.contains("const DEBUG_NOTARGET_META := &\"debug_notarget\""),
-		"the ghost meta name is a const on NPC (the reader must not hand-type the string)")
-	var fn := src.find("func _treats_as_enemy(node: Node) -> bool:")
-	assert_gt(fn, -1, "_treats_as_enemy exists")
-	# The window is THIS function only: from its signature to the next top-level `func`, so a match can never come
-	# from a neighbour, and a gate that drifted below the function is a real miss, not a find in someone else's body.
-	var next_fn := src.find("\nfunc ", fn + 1)
-	var body := src.substr(fn, (next_fn - fn) if next_fn > fn else -1)
-	var gate := body.find("node.has_meta(DEBUG_NOTARGET_META)")
-	var hostile := body.find("if is_hostile_to(node):")
-	assert_gt(gate, -1, "the ghost gate is inside _treats_as_enemy")
-	assert_gt(hostile, -1, "the normal hostility test is still there")
-	assert_lt(gate, hostile, "the ghost gate comes FIRST — a ghost must never be engaged via the protectee branch either")
-	# The gate must validity-check before the meta read: has_meta on a null/freed instance crashes.
-	var gate_line_start := body.rfind("\n", gate) + 1
-	var gate_line_end := body.find("\n", gate)
-	var gate_line := body.substr(gate_line_start, (gate_line_end - gate_line_start) if gate_line_end > gate_line_start else -1)
-	assert_true(gate_line.contains("is_instance_valid(node)"), "the gate reads the meta only on a valid instance: %s" % gate_line)
-	assert_true(gate_line.strip_edges().begins_with("if "), "the gate is a live statement, not a comment mentioning it: %s" % gate_line)
-	# "FIRST" means first STATEMENT: nothing but comments/blank lines may sit between the signature and the gate,
-	# or a later edit could slip a return path in front of it and this test would still pass on ordering alone.
-	var lines_before := body.substr(0, gate_line_start).split("\n")
-	for i in range(1, lines_before.size()):  # 0 = the signature line itself
-		var stripped := lines_before[i].strip_edges()
-		assert_true(stripped.is_empty() or stripped.begins_with("#"),
-			"only comments precede the ghost gate inside _treats_as_enemy, found: %s" % lines_before[i])
-	# And the gate short-circuits FALSE — the whole point is "never an enemy", not "always one".
-	var after_gate := body.substr(gate_line_end if gate_line_end > -1 else gate)
-	assert_true(after_gate.strip_edges().begins_with("return false"), "the ghost gate returns false: %s" % after_gate.substr(0, 40))
+func test_notarget_meta_makes_a_hostile_npc_refuse_that_body_only_while_it_is_set() -> void:
+	var npc := _hostile_npc()
+	var player := _player_stub()
+	# CONTROL: without the meta, a hostile NPC engages the player — so a false below is the gate, not the setup.
+	assert_true(npc._treats_as_enemy(player), "a hostile NPC must engage an un-ghosted player (control)")
+
+	player.set_meta(NPC.DEBUG_NOTARGET_META, true)
+	assert_false(npc._treats_as_enemy(player),
+		"a player carrying the ghost meta must never be engaged — otherwise `notarget on` still gets you shot")
+	assert_true(npc.is_hostile_to(player),
+		"the ghost meta must NOT touch is_hostile_to: shooting a ghost still provokes and sours the faction")
+
+	player.remove_meta(NPC.DEBUG_NOTARGET_META)
+	assert_true(npc._treats_as_enemy(player),
+		"clearing the meta makes the player a target again — the gate reads the meta live, it does not latch")
+
+	# null is a normal call (no target); the gate must not read a meta off it, and null is never an enemy.
+	assert_false(npc._treats_as_enemy(null), "a null node is never an enemy, and reading it raises no engine error")
+	npc.free()
+	player.free()
 
 
-func test_notarget_reader_uses_the_same_literal_and_actually_writes_it() -> void:
-	# The seam is only alive while something WRITES the meta the NPC gate READS, under the SAME literal. Pin both
-	# halves from source: the writer declares its own StringName const with the NPC's literal (it deliberately does
-	# not import NPC.DEBUG_NOTARGET_META, to stay free of a compile-time NPC dependency) and calls set_meta /
-	# remove_meta / has_meta through THAT const — a comment that merely mentions the name must not satisfy this.
-	var npc_src := FileAccess.get_file_as_string(NPC_PATH)
-	var world := FileAccess.get_file_as_string(WORLD_ACTIONS_PATH)
-	assert_false(npc_src.is_empty(), "npc.gd must be readable")
-	assert_false(world.is_empty(), "debug_actions_world.gd must be readable")
-	var literal := _string_name_const_literal(npc_src, "DEBUG_NOTARGET_META")
-	assert_eq(literal, "debug_notarget", "NPC.DEBUG_NOTARGET_META is a &\"...\" const with the ghost literal")
-	var re := RegEx.new()
-	re.compile("const (\\w+) := &\"%s\"" % literal)
-	var m := re.search(world)
-	assert_not_null(m, "debug_actions_world.gd declares a StringName const carrying the NPC's literal \"%s\"" % literal)
-	if m == null:
-		return
-	var reader_const := m.get_string(1)
-	assert_true(world.contains("set_meta(%s, " % reader_const), "`notarget on` writes the meta through %s" % reader_const)
-	assert_true(world.contains("remove_meta(%s)" % reader_const), "`notarget off` clears the meta through %s" % reader_const)
-	assert_true(world.contains("has_meta(%s)" % reader_const), "the toggle reads the current state through %s" % reader_const)
+func test_notarget_ghost_is_not_engaged_through_the_bodyguard_branch_either() -> void:
+	# A bodyguard with NO faction quarrel with the raider still engages it because the raider is hostile to its
+	# charge (_treats_as_enemy's protectee branch). A ghosted raider must be refused BEFORE that branch runs.
+	var bodyguard: NPC = load(NPC_PATH).new()
+	bodyguard.disposition = Disposition.Kind.NEUTRAL
+	var raider := _hostile_npc()
+	var charge := Node3D.new()
+	charge.add_to_group(GroupsScript.PLAYER)  # the raider (unaligned HOSTILE) is hostile to anyone in the Player group
+	bodyguard.guard(charge)
+	assert_false(bodyguard.is_hostile_to(raider), "setup: the bodyguard has no personal quarrel with the raider")
+	assert_true(bodyguard._treats_as_enemy(raider),
+		"CONTROL: the bodyguard engages a raider hostile to its charge through the protectee branch")
+
+	raider.set_meta(NPC.DEBUG_NOTARGET_META, true)
+	assert_false(bodyguard._treats_as_enemy(raider),
+		"a ghost must not be engaged via the protectee branch — the gate has to run before it, not only before is_hostile_to")
+	bodyguard.free()
+	raider.free()
+	charge.free()
 
 
-## The literal inside `const NAME := &"..."`, or "" when the const is not declared that way.
-static func _string_name_const_literal(src: String, const_name: String) -> String:
-	var re := RegEx.new()
-	re.compile("const %s := &\"([^\"]*)\"" % const_name)
-	var m := re.search(src)
-	return m.get_string(1) if m != null else ""
+func test_notarget_command_ghosts_the_player_for_the_npc_gate_and_off_clears_it() -> void:
+	# The writer (debug console) and the reader (NPC gate) live in different files with separately spelled
+	# literals; this drives the command and reads its effect through the real gate, so any drift in either
+	# spelling, or a writer that stops setting / clearing the meta, shows up as an NPC still engaging the ghost.
+	var npc := _hostile_npc()
+	var player := _player_stub()
+	var ctx := {&"player": player, &"state": {}}
+	assert_true(npc._treats_as_enemy(player), "control: before `notarget`, the hostile NPC engages the player")
+
+	var on_lines := _notarget(ctx, "on")
+	assert_false(on_lines.is_empty(), "`notarget on` always explains itself (never an empty console reply)")
+	assert_false(npc._treats_as_enemy(player), "after `notarget on`, no NPC may engage the player")
+
+	_notarget(ctx, "off")
+	assert_true(npc._treats_as_enemy(player), "after `notarget off`, hostiles engage the player again")
+
+	# A bare `notarget` toggles from the CURRENT state of the body, both ways.
+	_notarget(ctx, "")
+	assert_false(npc._treats_as_enemy(player), "a bare `notarget` while visible turns the ghost ON")
+	_notarget(ctx, "")
+	assert_true(npc._treats_as_enemy(player), "a bare `notarget` while ghosted turns the ghost OFF")
+	npc.free()
+	player.free()
+
+
+func test_notarget_zeroes_the_players_noise_once_and_off_restores_the_authored_values() -> void:
+	var player := _noisy_player_double()
+	var ctx := {&"player": player, &"state": {}}
+
+	_notarget(ctx, "on")
+	var move_on: float = player.get(&"noise_move_per_speed")
+	var gun_on: float = player.get(&"noise_gunfire_radius")
+	assert_almost_eq(move_on, 0.0, 0.0001, "a ghost's footsteps must be silent, or the noise scan still pulls hostiles to you")
+	assert_almost_eq(gun_on, 0.0, 0.0001, "a ghost's gunfire must be silent too")
+
+	_notarget(ctx, "on")  # a repeated `on` must not bank the zero it already wrote over the authored values
+	_notarget(ctx, "off")
+	var move_off: float = player.get(&"noise_move_per_speed")
+	var gun_off: float = player.get(&"noise_gunfire_radius")
+	assert_almost_eq(move_off, AUTHORED_MOVE_NOISE, 0.0001,
+		"`notarget off` restores the AUTHORED footstep noise even after a repeated `on` — never leaves the player silent")
+	assert_almost_eq(gun_off, AUTHORED_GUN_NOISE, 0.0001, "`notarget off` restores the AUTHORED gunfire radius")
+
+	# The bank is spent on `off`: a designer retune between two ghost sessions is what the next `off` restores.
+	player.set(&"noise_move_per_speed", 4.0)
+	_notarget(ctx, "on")
+	_notarget(ctx, "off")
+	var move_retuned: float = player.get(&"noise_move_per_speed")
+	assert_almost_eq(move_retuned, 4.0, 0.0001,
+		"a second ghost session restores the value current when it began, not the first session's stale bank")
+	player.free()

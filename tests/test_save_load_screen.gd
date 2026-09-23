@@ -18,6 +18,8 @@ const TMP_MISSING := "user://test_saveloadscreen_definitely_absent.cfg"
 
 
 func after_each() -> void:
+	if SaveLoadScreen.is_open():  # the Back-press test opens the live autoload; never leak an open modal
+		SaveLoadScreen.close()
 	for f in [TMP_SAVE, TMP_MISSING]:
 		if FileAccess.file_exists(f):
 			DirAccess.remove_absolute(f)
@@ -81,24 +83,32 @@ func test_player_text_consts_exist_and_are_nonempty() -> void:
 
 func test_slot_label_template_substitutes() -> void:
 	# The {n} token substitutes via TextFormat.subst (replace-based — a literal '%' in a reworded template can
-	# never error) and the composed label carries the number, with no unfilled token left visible.
-	var label := PlayerText.save_slot_label(2)
-	assert_eq(label, TextFormat.subst(PlayerText.SAVE_LOAD_SLOT, {"n": 2}), "save_slot_label IS the whole SAVE_LOAD_SLOT template")
-	assert_true(label.contains("2"), "the slot number lands in the label")
-	assert_false(label.contains("{n}"), "the {n} token was substituted, not left visible")
+	# never error). What the ROW needs from it: the number lands, no unfilled token stays visible, two slots never
+	# read alike, and the number is the ONLY thing that differs — the rest is one whole template's wording, never a
+	# label assembled from parts.
+	var two := PlayerText.save_slot_label(2)
+	var three := PlayerText.save_slot_label(3)
+	assert_true(two.contains("2"), "the slot number lands in the label")
+	assert_false(two.contains("{") or two.contains("}"), "no unfilled {token} is left visible on the row: '%s'" % two)
+	assert_ne(two, three, "two slot rows never read alike")
+	assert_eq(two.replace("2", "#"), three.replace("3", "#"),
+		"only the number differs between slot labels — the surrounding wording is one whole template")
 
 
 func test_slot_caption_selects_whole_templates() -> void:
 	# TWO whole templates selected on has-level (THE RULE: selection between templates, never a fragment
 	# spliced around a dangling separator when the level name is blank).
-	var full := PlayerText.save_slot_caption("Downtown", "2026-07-29 12:00:00")
-	assert_eq(full, TextFormat.subst(PlayerText.SAVE_SLOT_CAPTION, {"level": "Downtown", "time": "2026-07-29 12:00:00"}),
-		"a resolvable level name selects the level+time template")
+	var when := "2026-07-29 12:00:00"
+	var full := PlayerText.save_slot_caption("Downtown", when)
 	assert_true(full.contains("Downtown"), "the level name lands in the caption")
-	assert_true(full.contains("2026-07-29 12:00:00"), "the time lands in the caption")
-	var bare := PlayerText.save_slot_caption("", "2026-07-29 12:00:00")
-	assert_eq(bare, TextFormat.subst(PlayerText.SAVE_SLOT_CAPTION_NO_LEVEL, {"time": "2026-07-29 12:00:00"}),
-		"a blank level name selects the time-only whole template (no orphaned separator)")
+	assert_true(full.contains(when), "the time lands in the caption")
+	assert_false(full.contains("{") or full.contains("}"), "no unfilled {token} is left visible: '%s'" % full)
+	var bare := PlayerText.save_slot_caption("", when)
+	assert_true(bare.contains(when), "a level-less save still shows its time")
+	assert_eq(bare, bare.strip_edges(),
+		"a blank level name selects the time-only template — no orphaned separator/padding where the level would sit: '%s'" % bare)
+	assert_false(bare.contains("{") or bare.contains("}"), "no unfilled {level} token on a level-less save: '%s'" % bare)
+	assert_lt(bare.length(), full.length(), "the time-only caption is shorter — it does not reserve the level's slot")
 
 
 # --- The code-built chrome (driven on the LIVE autoload, whose _ready already ran _bind_ui) ------------------
@@ -121,7 +131,11 @@ func test_a_back_button_is_pinned_under_the_status_line() -> void:
 	assert_eq(back.text, PlayerText.BACK, "captioned from PlayerText.BACK, like every sibling screen's exit")
 	assert_eq(back.custom_minimum_size.x, float(MenuStyle.skin.dialog_button_min_width),
 		"it wears the shared dialog button width, so the row matches every other menu's")
-	assert_true(back.pressed.is_connected(SaveLoadScreen.close), "pressing it closes the screen")
+	# Pressing it must CLOSE the screen — driven, not read off the connection list. Menu mode needs no player.
+	SaveLoadScreen.open(false)
+	assert_true(SaveLoadScreen.is_open(), "precondition: the slot menu opens in menu mode with no player")
+	back.pressed.emit()
+	assert_false(SaveLoadScreen.is_open(), "pressing Back closes the screen — a mouse-only player is never stranded on it")
 	assert_eq(String(back.get_meta(&"_snd_semantic", "click")), "",
 		"its generic click is MUTED — close() already fires play_back() for both the mouse and the Escape path")
 

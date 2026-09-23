@@ -11,7 +11,9 @@ extends GutTest
 ##      original animated path and rely on those defaults reproducing the old single symmetric flail.
 ##   2. Re-gate the strike behind `animate_arms` and the player's hands go dead again, with no error.
 ##
-## Built OFF-TREE (.new() without add_child, so _ready never runs) — no model import, no host, no autoloads.
+## Built OFF-TREE (.new() without add_child, so _ready never runs) — no model import. The pose tests hang the swap
+## under a bare Node3D host with Node3D arm stubs and drive _animate_limbs directly, so the NPC contract is checked
+## on the arms it actually writes rather than on the export defaults.
 
 const SWAP_SCRIPT := preload("res://scripts/components/body_model_swap.gd")
 
@@ -20,17 +22,95 @@ func _swap() -> BodyModelSwap:
 
 # --- The NPC no-regression contract -----------------------------------------------------------------
 
-func test_strike_defaults_reproduce_the_original_npc_flail() -> void:
-	# Every one of these defaults exists to make the new code path a NO-OP for NPCs. If a default changes,
-	# every punching NPC changes with it — which is why they are pinned by value, not by range.
+## A DEFAULT-tuned swap (every strike knob left alone, which is what enemy.tscn ships) wearing the shipped NPC arm
+## placement from enemy.tscn, parented under `host` (a bare Node3D unless the test needs a gun) and given two bare
+## Node3D arm stubs — all _animate_limbs needs off-tree. Never an NPC (CLAUDE.md), never in the tree.
+func _npc_rig(host: Node3D) -> BodyModelSwap:
 	var s := _swap()
-	assert_eq(s.arm_strike_pitch, -120.0, "the NPC flail pitch is the shipped default")
-	assert_eq(s.arm_strike_duration, 1.0, "the NPC flail duration is the shipped default")
-	assert_null(s.arm_strike_curve, "no curve by default — NPCs keep the legacy smoothstep envelope")
-	assert_eq(s.arm_strike_thrust, Vector3.ZERO, "no thrust by default — the NPC flail is rotation-only")
-	assert_false(s.arm_strike_alternate, "NPCs punch two-fisted; alternation is opt-in")
-	assert_eq(s.arm_strike_offhand_scale, 1.0, "off-hand matches the lead by default — one symmetric flail")
-	s.free()
+	s.arm_scale = 0.35
+	s.arm_position = Vector3(-0.27, 0.155, -0.05)
+	s.arm_rotation = Vector3(90, 0, 0)
+	host.add_child(s)
+	for side in ["_arm_left", "_arm_right"]:
+		var stub := Node3D.new()
+		s.add_child(stub)
+		s.set(side, stub)
+	return s
+
+
+## Where the arm's HAND points from its shoulder (the arm model's hand lies down its local +Z).
+func _hand_dir(arm: Node3D) -> Vector3:
+	return (arm.transform.basis * Vector3(0, 0, 1)).normalized()
+
+
+## A host whose gun is drawn, so the swap raises the arms onto its hold pose (duck-typed by name).
+class _ArmedHost extends Node3D:
+	func is_holding_gun() -> bool:
+		return true
+
+
+func test_a_default_rig_throws_one_mirrored_rotation_only_flail_up_toward_the_target() -> void:
+	# The NPC no-regression contract, observed on the POSE rather than read off the defaults: every NPC punch is
+	# a TWO-FISTED symmetric swing (both arms move as mirror images), ROTATION-ONLY (the shoulders never leave
+	# their sockets), thrown UP and toward the side the NPC points its gun (its target) — the whole authored
+	# strike pitch at the instant of the punch. A default retuned in the script (off-hand scale, thrust, curve,
+	# sign of the pitch) or a strike branch that breaks the mirror silently re-shapes every punching NPC.
+	var host := Node3D.new()
+	var s := _npc_rig(host)
+	var left: Node3D = s._arm_left
+	var right: Node3D = s._arm_right
+	s._animate_limbs(0.016, false)
+	var rest_left := left.transform
+	var rest_dir := _hand_dir(left)
+	s.strike()
+	s._animate_limbs(0.001, false)
+	for p in [Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(0, 1, 0)]:
+		var l: Vector3 = left.transform * p
+		var r: Vector3 = right.transform * p
+		assert_almost_eq(r.distance_to(Vector3(-l.x, l.y, l.z)), 0.0, 0.0001,
+			"the right fist mid-punch must be the exact mirror of the left (probe %s) — one two-fisted flail, not a lead and a lagging off-hand" % p)
+	assert_almost_eq(left.transform.origin.distance_to(rest_left.origin), 0.0, 0.0001,
+		"the NPC flail is rotation-only: the shoulder stays exactly where it rests while the fist swings")
+	var strike_dir := _hand_dir(left)
+	assert_almost_eq(rad_to_deg(rest_dir.angle_to(strike_dir)), absf(s.arm_strike_pitch), 0.5,
+		"on the frame of the punch the arm has already swung through the whole arm_strike_pitch (no wind-up without a curve)")
+	assert_gt(strike_dir.y, rest_dir.y, "the flail swings the fist UP from its hang")
+	var armed := _ArmedHost.new()
+	var gun_rig := _npc_rig(armed)
+	gun_rig._animate_limbs(10.0, false)  # one long frame settles the eased hold pose
+	var hold_dir := _hand_dir(gun_rig._arm_left)
+	assert_gt(strike_dir.z * hold_dir.z, 0.0,
+		"the punch lands on the same side the NPC holds its gun (its target) — never thrown backward over its shoulder")
+	host.free()
+	armed.free()
+
+
+func test_a_default_rig_eases_the_flail_home_over_arm_strike_duration() -> void:
+	# The legacy envelope an NPC punch rides with no curve authored: strongest the instant it is thrown, then
+	# shrinking every frame, still moving three quarters of the way through arm_strike_duration and back on the
+	# EXACT rest pose once the duration has elapsed (a residue would leave every NPC's arms a little raised).
+	var host := Node3D.new()
+	var s := _npc_rig(host)
+	var left: Node3D = s._arm_left
+	s._animate_limbs(0.016, false)
+	var rest := left.transform
+	var rest_dir := _hand_dir(left)
+	s.strike()
+	var swing := []
+	var step := s.arm_strike_duration * 0.25
+	s._animate_limbs(0.001, false)
+	swing.append(rad_to_deg(rest_dir.angle_to(_hand_dir(left))))
+	for i in 3:
+		s._animate_limbs(step, false)
+		swing.append(rad_to_deg(rest_dir.angle_to(_hand_dir(left))))
+	for i in range(1, swing.size()):
+		assert_lt(swing[i], swing[i - 1],
+			"the flail must shrink as it recovers (sample %d: %.2f deg after %.2f deg) — full on the punch, easing home" % [i, swing[i], swing[i - 1]])
+	assert_gt(swing[swing.size() - 1], 0.0, "three quarters through arm_strike_duration the arm is still on its way home")
+	s._animate_limbs(step, false)
+	assert_true(left.transform.is_equal_approx(rest),
+		"once arm_strike_duration has elapsed the arm is back on its exact rest pose (got %s, rest %s)" % [left.transform, rest])
+	host.free()
 
 func test_the_legacy_envelope_is_unchanged_without_a_curve() -> void:
 	# strike_amplitude(t, null) must be exactly the old `smoothstep(0.0, 1.0, _strike_t)` expression.

@@ -5,16 +5,18 @@ extends GutTest
 ## .tscn scenes a designer edits; the script binds chrome by %unique name and applies the skin-driven look
 ## on top. These pin the silent-when-broken seams: the autoload points at the SCENE, every %node the
 ## script binds exists, no text is authored in the scene (strings belong to PlayerText / l10n, never a
-## .tscn), and the screen-specific layout discipline (PANEL_MARGIN band, edge-pinned header halves,
-## scroll-with-centered-body) survives the conversion. Behaviour (open/level-up) is in-tree -> playtest.
+## .tscn), and the screen-specific layout promises (PANEL_MARGIN border, header halves that hold still as the wallet
+## grows, a short stat list centred in its scroll) — MEASURED on an open card, not read off the scene's layout flags.
+## Pricing/credit behaviour is tests/test_level_up_credit.gd.
 ##
 ## ⭐AND IT PINS CONTROLLER PARITY (the atm_screen must-not-recur rule, both halves): the authored RailButton
-## must NOT carry `focus_mode = 0`, the code-built stat/perk rows must set FOCUS_ALL, and open_level_up must
-## SEED focus on the first row once the panel is visible — with no focus owner, ui navigation has nowhere to
-## start and every row on the panel is pad-unreachable.
+## must NOT carry `focus_mode = 0`, and — DRIVEN on a private in-tree instance with a real LevelUp station and a
+## detached Player — the code-built stat/perk rows take focus, open_level_up SEEDS focus on the first row once the
+## panel is visible, and a rebuild that frees the focused row hands the cursor to the fresh first row. With no focus
+## owner, ui navigation has nowhere to start and every row on the panel is pad-unreachable.
 
 const SCENE := "res://scenes/ui/level_up_screen.tscn"
-const SCREEN_SOURCE := "res://scripts/ui/level_up_screen.gd"
+const PLAYER_PATH := "res://scripts/player/player.gd"
 
 ## Every unique name level_up_screen.gd binds in _bind_ui — a rename in the editor breaks the bind at boot,
 ## so pin the roster here where it fails loudly instead.
@@ -55,48 +57,72 @@ func test_scene_authors_no_text() -> void:
 	inst.free()
 
 
-func test_bound_chrome_keeps_the_layout_contracts() -> void:
-	# The screen-specific discipline survives the scene conversion: the PANEL_MARGIN anchor band, the
-	# edge-pinned half-row header labels (ellipsis-trimmed so money-length changes never slide them), and
-	# the scroll whose EXPAND_FILL centered body is what actually centers the short six-stat list.
-	var inst: Node = (load(SCENE) as PackedScene).instantiate()
-	for full in ["Root", "Dim"]:
-		var c := inst.get_node("%" + full) as Control
-		assert_eq(c.anchor_right, 1.0, "%s spans the screen (anchor_right)" % full)
-		assert_eq(c.anchor_bottom, 1.0, "%s spans the screen (anchor_bottom)" % full)
-	assert_false((inst.get_node("%Root") as Control).visible, "the screen ships hidden until open_level_up")
-	# The modal inset band — authored anchors must match the script's PANEL_MARGIN pin.
-	var margin: float = load("res://scripts/ui/level_up_screen.gd").PANEL_MARGIN
-	var panel := inst.get_node("%Root/Panel") as PanelContainer
-	assert_not_null(panel, "Root/Panel is the anchor-band PanelContainer")
-	# almost_eq: Control anchors are float32 in the engine, so the authored 0.12 reads back ~0.119999997.
-	assert_almost_eq(panel.anchor_left, margin, 0.0001, "Panel's left anchor is the shared PANEL_MARGIN inset")
-	assert_almost_eq(panel.anchor_top, margin, 0.0001, "Panel's top anchor is the shared PANEL_MARGIN inset")
-	assert_almost_eq(panel.anchor_right, 1.0 - margin, 0.0001, "Panel's right anchor mirrors PANEL_MARGIN")
-	assert_almost_eq(panel.anchor_bottom, 1.0 - margin, 0.0001, "Panel's bottom anchor mirrors PANEL_MARGIN")
-	# Edge-pinned header halves: each label takes half the row so neither MOVES as the money string grows.
-	for n in ["LevelLabel", "MoneyLabel"]:
-		var l := inst.get_node("%" + n) as Label
-		assert_eq(l.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "%s takes half the header row (edge-pinned pair)" % n)
-		assert_eq(l.text_overrun_behavior, TextServer.OVERRUN_TRIM_ELLIPSIS, "%s trims a pathological amount within its half" % n)
-	assert_eq((inst.get_node("%MoneyLabel") as Label).horizontal_alignment, HORIZONTAL_ALIGNMENT_RIGHT,
-		"the wallet half hugs the panel's RIGHT edge")
-	# Scroll + centered body: the scroll expands to leftover height; the body fills its viewport with
-	# ALIGNMENT_CENTER so the short stat list floats centered while a long perk list scrolls.
-	var scroll := inst.get_node("%VBox").get_node("Scroll") as ScrollContainer
-	assert_not_null(scroll, "VBox/Scroll hosts the stats + perks list")
-	assert_eq(scroll.horizontal_scroll_mode, ScrollContainer.SCROLL_MODE_DISABLED, "width is anchor-fixed; only length varies")
-	assert_eq(scroll.size_flags_vertical, Control.SIZE_EXPAND_FILL, "the scroll expands to all leftover panel height")
-	var body := inst.get_node("%Body") as VBoxContainer
-	assert_eq(body.size_flags_vertical, Control.SIZE_EXPAND_FILL, "Body fills the scroll viewport so centering can work")
-	assert_eq(body.alignment, BoxContainer.ALIGNMENT_CENTER, "short content centers INSIDE the scroll viewport")
-	assert_eq((inst.get_node("%VBox") as VBoxContainer).alignment, BoxContainer.ALIGNMENT_CENTER,
-		"the chrome VBox keeps the centered-card alignment (inert while the scroll expands, load-bearing if it's removed)")
-	# The dynamic containers the rebuilds fill must ship EMPTY — rows are runtime-built per stat/perk.
-	for n in ["Rows", "Perks"]:
-		assert_eq((inst.get_node("%" + n) as VBoxContainer).get_child_count(), 0,
-			"%s ships empty (rows are built at runtime from the station/player)" % n)
-	inst.free()
+## THE CARD'S LAYOUT PROMISES, measured on a laid-out OPEN card (a private in-tree instance, a real LevelUp station, a
+## bare Player that never enters the tree) instead of read back off the .tscn's layout flags — so a designer may
+## re-author the layout any way that keeps what the player sees:
+##  * the dim covers the whole screen and the card floats inside it with an even border on every side, at the
+##    PANEL_MARGIN fraction level_up_screen.gd documents for the authored anchors;
+##  * the level and wallet readouts own a half of the header each, so a wallet grown to a pathological length is
+##    trimmed inside its half and slides NEITHER readout (nor widens the card);
+##  * a short stat list floats vertically CENTRED in the scroll's viewport rather than hugging its top.
+func test_the_open_card_keeps_its_layout_promises() -> void:
+	var screen := _screen()
+	var lv := _station(50)
+	lv.available_perks = [] as Array[Perk]  # stats only: the short list the centring exists for
+	var player: Node = load(PLAYER_PATH).new()
+	player.set(&"money", 100.0)
+	var root := screen.get_node("%Root") as Control
+	assert_false(root.visible, "control: the card is hidden until open_level_up")
+	screen.open_level_up(lv, player)
+	await wait_process_frames(2)  # containers sort on the frames after the card turns visible
+	assert_true(screen.is_open() and root.visible, "a valid station with a live player opens the card")
+	# The dim + the inset card.
+	var full := Rect2(Vector2.ZERO, screen.get_viewport().get_visible_rect().size)
+	assert_eq((screen.get_node("%Dim") as Control).get_global_rect(), full,
+		"the dim covers the whole screen, so everything behind the card is dimmed evenly")
+	var panel := screen.get_node("%Root/Panel") as Control
+	var card: Rect2 = panel.get_global_rect()
+	var margin: float = screen.PANEL_MARGIN
+	var gaps := {
+		"left": card.position.x - full.position.x, "right": full.end.x - card.end.x,
+		"top": card.position.y - full.position.y, "bottom": full.end.y - card.end.y,
+	}
+	for side in gaps:
+		var along: float = full.size.x if side == "left" or side == "right" else full.size.y
+		assert_almost_eq(float(gaps[side]), along * margin, 1.0,
+			"the card keeps a PANEL_MARGIN border on its %s side (card %s on screen %s) — content outgrowing the band would eat it" % [side, card, full])
+	# The header halves hold still while the wallet grows.
+	var level_label := screen.get_node("%LevelLabel") as Label
+	var money_label := screen.get_node("%MoneyLabel") as Label
+	var level_rect: Rect2 = level_label.get_global_rect()
+	var money_rect: Rect2 = money_label.get_global_rect()
+	assert_almost_eq(level_rect.size.x, money_rect.size.x, 1.0, "the level and wallet readouts split the header row into equal halves")
+	player.set(&"money", 1.0e40)  # a pathological wallet
+	screen._rebuild()  # the re-stamp every raise / rail flip runs
+	await wait_process_frames(2)
+	var natural: float = money_label.get_theme_font(&"font").get_string_size(
+		money_label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, money_label.get_theme_font_size(&"font_size")).x
+	assert_gt(natural, money_rect.size.x,
+		"control: the grown wallet string (%.0f px) is wider than its half (%.0f px), so a label sized to its text WOULD push the row" % [natural, money_rect.size.x])
+	assert_eq(level_label.get_global_rect(), level_rect, "the level readout does not slide when the wallet grows")
+	assert_eq(money_label.get_global_rect(), money_rect, "the wallet readout keeps its half, trimmed inside it, instead of growing")
+	assert_eq(panel.get_global_rect(), card, "...and the card itself does not widen")
+	# The short stat list centres in the scroll viewport.
+	var scroll := screen.get_node("%VBox").get_node_or_null(^"Scroll") as Control
+	var rows := screen.get_node("%Rows") as Control
+	assert_true(scroll != null, "precondition: the stat list lives in a scroll inside the chrome VBox")
+	if scroll != null:
+		var view: Rect2 = scroll.get_global_rect()
+		var list: Rect2 = rows.get_global_rect()
+		var top_gap: float = list.position.y - view.position.y
+		var bottom_gap: float = view.end.y - list.end.y
+		assert_gt(top_gap + bottom_gap, 2.0,
+			"precondition: six stat rows (%.0f px) are shorter than the scroll viewport (%.0f px), so there is slack to centre" % [list.size.y, view.size.y])
+		assert_almost_eq(top_gap, bottom_gap, 1.0,
+			"the short stat list floats CENTRED in the scroll viewport (top gap %.1f, bottom gap %.1f), not parked against its top" % [top_gap, bottom_gap])
+	screen.close()
+	lv.free()
+	player.free()
 
 
 func test_every_authored_button_is_reachable_by_a_pad() -> void:
@@ -120,32 +146,119 @@ func test_every_authored_button_is_reachable_by_a_pad() -> void:
 	inst.free()
 
 
+## open_level_up grabs the mouse (ModalMenu.grab_mouse) and close() hands back what it found; restored here as well so
+## a failed assert between the two can never leave the machine's cursor mode changed. GameState.account is read by
+## the station's solvency gate (owes_the_ledger), so a balance left by another suite must not dim the card here.
+var _prev_mouse_mode: Input.MouseMode
+var _prev_account: float
+
+
+func before_each() -> void:
+	_prev_mouse_mode = Input.mouse_mode
+	_prev_account = GameState.account
+	GameState.account = 0.0
+
+
+func after_each() -> void:
+	Input.mouse_mode = _prev_mouse_mode
+	GameState.account = _prev_account
+
+
+## A private, IN-TREE instance of the authored scene (its own _ready binds the chrome — never the LevelUpScreen
+## autoload), with nothing holding focus yet.
+func _screen() -> Node:
+	var screen: Node = (load(SCENE) as PackedScene).instantiate()
+	add_child_autofree(screen)
+	screen.get_viewport().gui_release_focus()
+	return screen
+
+
+## A real LevelUp station that never enters the tree (its _ready is not run), pricing every raise at `cost`, with one
+## authored perk on offer so the perk rows are built too.
+func _station(cost: int) -> LevelUp:
+	var lv := LevelUp.new()
+	lv.base_cost = cost
+	lv.cost_per_level = 0.0
+	var perk := Perk.new()
+	perk.id = &"test_pad_perk"
+	perk.display_name = "Pad Perk"
+	lv.available_perks = [perk] as Array[Perk]
+	return lv
+
+
+## The live row Buttons in a %Rows / %Perks container (anything queued for deletion belongs to a stale build).
+func _row_buttons(container: Node) -> Array[Button]:
+	var out: Array[Button] = []
+	for row in container.get_children():
+		if row.is_queued_for_deletion():
+			continue
+		for c in row.get_children():
+			if c is Button:
+				out.append(c)
+	return out
+
+
 func test_the_pad_landing_spot_is_seeded_when_the_panel_opens() -> void:
-	# The other half of parity is RUNTIME (rows built in _rebuild, focus grabbed in open_level_up on a live
-	# viewport), which a unit test must not run — this autoload's _ready binds real chrome and open_level_up
-	# wants a live LevelUp station and Player. So it is pinned by SOURCE, the test_atm_screen_scene.gd /
-	# test_payment_rail_selector.gd idiom.
-	#
-	# Every offset below is guarded before it is sliced or compared: find() answers -1 for a needle that has
-	# been renamed away and a bad substr yields "", over which a contains() check quietly reads as "absent" — a
-	# pin that retires itself in silence is worse than no pin.
-	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
-	assert_gt(src.length(), 0, "level_up_screen.gd must be readable")
-	assert_true(src.contains("btn.focus_mode = Control.FOCUS_ALL"),
-		"_rebuild/_perk_row must build the rows FOCUS_ALL — the rows ARE the pad path, and a control a pad can never land on is not a path")
-	assert_true(src.contains("_first_focus = btn"),
-		"the first stat row built must be recorded as the screen's landing spot")
-	var open_at := src.find("func open_level_up(")
-	assert_gt(open_at, -1, "func open_level_up( no longer present — the pin is stale")
-	assert_eq(src.rfind("func open_level_up("), open_at,
-		"open_level_up must be defined exactly ONCE, or the body sliced below is not the one that runs")
-	var open_end := src.find("\nfunc ", open_at + 1)
-	assert_gt(open_end, open_at, "open_level_up's body must end at the next function — the pin is stale")
-	var body := src.substr(open_at, open_end - open_at)
-	var shown := body.find("_root.visible = true")
-	assert_gt(shown, -1, "_root.visible = true no longer present in open_level_up — the pin is stale")
-	var grabbed := body.find("_first_focus.grab_focus()")
-	assert_gt(grabbed, -1,
-		"open_level_up must SEED focus on the first stat row — with no focus owner, ui navigation has nowhere to start and every row is unreachable")
-	assert_gt(grabbed, shown,
-		"and it must grab AFTER the panel is shown — grab_focus on a hidden Control does nothing, so seeding first would leave the pad with no owner anyway")
+	# ⭐THE RUNTIME HALF OF CONTROLLER PARITY, driven: open_level_up on a real station for a bare Player that never
+	# enters the tree. The player is BROKE, so every stat row is a disabled can't-afford row — the case that most
+	# needs the pad to still land somewhere (a disabled row keeps its focus, so navigation walks the dimmed rungs).
+	var screen := _screen()
+	var viewport := screen.get_viewport()
+	var lv := _station(50)
+	var player: Node = load(PLAYER_PATH).new()
+	player.set(&"money", 0.0)
+	assert_null(viewport.gui_get_focus_owner(), "control: nothing on the hidden card holds focus before it opens")
+	screen.open_level_up(lv, player)
+	assert_true(screen.is_open(), "a valid station with a live player opens")
+	var stat_rows := _row_buttons(screen.get_node("%Rows"))
+	assert_eq(stat_rows.size(), screen.STAT_ORDER.size(), "one raise row per stat")
+	for b in stat_rows:
+		assert_eq(b.focus_mode, Control.FOCUS_ALL,
+			"every stat row must take focus — the rows ARE the pad path, and a control a pad can never land on is not a path")
+	var perk_rows := _row_buttons(screen.get_node("%Perks"))
+	assert_eq(perk_rows.size(), 1, "the station's one authored perk gets a row")
+	for b in perk_rows:
+		assert_eq(b.focus_mode, Control.FOCUS_ALL, "the perk picks must be pad-reachable too, not just the stat rows")
+	if stat_rows.is_empty():
+		return
+	assert_true(stat_rows[0].disabled, "fixture: a broke player's first row is a can't-afford row")
+	assert_eq(viewport.gui_get_focus_owner(), stat_rows[0],
+		"open_level_up must SEED focus on the first stat row once the panel is visible — with no focus owner, ui navigation has nowhere to start and every row is unreachable")
+	screen.close()
+	assert_false(screen.is_open(), "the panel closes again")
+	lv.free()
+	player.free()
+
+
+func test_a_rebuild_hands_focus_to_the_fresh_first_row_but_never_steals_it() -> void:
+	# Every raise / perk pick / rail flip funnels through _rebuild, which frees the row that HELD focus — a pad left
+	# with a dying owner has nowhere to navigate from. Only a dying owner is replaced: a control OUTSIDE the rows
+	# keeps its place (the player parked on the rail selector).
+	var screen := _screen()
+	var viewport := screen.get_viewport()
+	var lv := _station(0)   # free raises, so the rows are live
+	var player: Node = load(PLAYER_PATH).new()
+	screen.open_level_up(lv, player)
+	var before := _row_buttons(screen.get_node("%Rows"))
+	assert_gt(before.size(), 1, "fixture: the card built its stat rows")
+	if before.size() < 2:
+		screen.close()
+		lv.free()
+		player.free()
+		return
+	before[1].grab_focus()   # the pad moved down a row, then the player raised that stat
+	screen._rebuild()
+	var after := _row_buttons(screen.get_node("%Rows"))
+	var owner := viewport.gui_get_focus_owner()
+	assert_false(before.has(owner), "focus must not stay on a row the rebuild just freed")
+	assert_eq(owner, after[0] if not after.is_empty() else null,
+		"the rebuild re-seats the pad cursor on the fresh first stat row")
+	var elsewhere := Button.new()   # any focusable outside %Rows / %Perks
+	add_child_autofree(elsewhere)
+	elsewhere.grab_focus()
+	screen._rebuild()
+	assert_eq(viewport.gui_get_focus_owner(), elsewhere,
+		"control: a live owner outside the rows keeps focus — the re-seat only replaces a DYING owner")
+	screen.close()
+	lv.free()
+	player.free()

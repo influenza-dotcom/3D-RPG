@@ -3,8 +3,9 @@ extends GutTest
 ## HUD ghosting (scripts/ui/hud_ghost.gd): the maths and the masks behind the CRT phosphor persistence that
 ## sits behind the HUD. Mostly pure statics off-tree — the decay curve and its frame-rate independence, the
 ## latency lag, the clamp order of the accessibility dial, and the two visibility-layer bits the capture is
-## built on — plus one in-tree pair at the bottom that pins WHERE the display rect is seated in the layer's
-## draw order, because that seat is the one thing here a static assertion cannot reach and it has broken once.
+## built on — plus two in-tree checks at the bottom: WHERE the display rect is seated in the layer's draw order
+## (the one thing here a static assertion cannot reach, and it has broken once), and the aim-cluster exclusion
+## driven through the real UI._build_ghost / set_scoped.
 ##
 ## ⭐ WHAT THIS FILE CANNOT COVER: the look. Headless never compiles shaders, so both canvas shaders in the
 ## component load clean whatever they contain, and no assertion can see a trail anyway. The rendered evidence
@@ -13,6 +14,8 @@ extends GutTest
 
 ## Loaded BY PATH (not the class_name) — the editor class-cache cascade guard.
 const GHOST := preload("res://scripts/ui/hud_ghost.gd")
+## The shipped HUD skin MenuStyle.hud preloads — the resource _refresh_ramp reads ghost_gradient from.
+const HUD_SKIN_TRES := "res://resources/ui/hud_skin.tres"
 
 const DT := 1.0 / 60.0
 
@@ -58,9 +61,17 @@ func test_set_ghosted_moves_an_item_between_the_two_bits() -> void:
 	item.free()
 
 func test_set_ghosted_is_null_safe() -> void:
-	# Callers flag optional overlays (a scope rect, an untyped drop-in) without guarding each one.
+	# Callers flag optional overlays (a scope rect, an untyped drop-in) without guarding each one — ui.gd's
+	# _build_ghost hands over `get_node_or_null(^"BloodSplatter") as CanvasItem` in the SAME run of calls that
+	# later drops the crosshair out. A GDScript error stops only the function it happens in, so an unguarded null
+	# would not stop that run — it would print a script error on every HUD build, which GUT's error tracker
+	# fails here. The real item flagged straight after the null proves the same run still lands its opt-outs.
+	var later := ColorRect.new()
 	GHOST.set_ghosted(null, false)
-	assert_true(true, "flagging a missing overlay is a no-op, not a crash")
+	GHOST.set_ghosted(later, false)
+	assert_eq(later.visibility_layer, GHOST.UNCAPTURED_LAYER,
+		"a missing overlay in the middle of an exclusion run must not stop the opt-outs after it from landing")
+	later.free()
 
 # --- persistence decay --------------------------------------------------------------------------------
 
@@ -187,11 +198,34 @@ func test_the_freshest_stop_is_saturated() -> void:
 	assert_gt(fresh.s, 0.5,
 		"the fresh end must be a saturated colour; a near-white one makes the trail look like a dimmed copy")
 
-func test_the_skin_ships_with_no_authored_ramp() -> void:
-	var skin := HudSkin.new()
-	assert_null(skin.ghost_gradient,
-		"the slot ships null so the shipped ramp is the default look — an artist opts IN by authoring one")
+## The ramp a player actually gets is gradient_for(the SHIPPED skin's slot) — the exact call _refresh_ramp makes on
+## MenuStyle.hud — not default_gradient() by name. The three tests above hold the fallback ramp to the contract; this
+## one holds whatever the shipped skin RESOLVES to, so a broken fallback and an artist's ramp authored into
+## hud_skin.tres answer to the same rules (it spans the age range, travels in hue, starts saturated).
+func test_the_shipped_skin_resolves_to_a_ramp_that_keeps_the_contract() -> void:
+	var skin: Resource = load(HUD_SKIN_TRES)
+	assert_true(skin is HudSkin, "precondition: %s loads as the HudSkin MenuStyle.hud preloads" % HUD_SKIN_TRES)
+	if not (skin is HudSkin):
+		return
+	var authored: Gradient = skin.get(&"ghost_gradient")
+	var g := GHOST.gradient_for(authored)
+	assert_true(g != null, "the shipped skin must resolve to a ramp — a null one blanks the ghost's colour")
+	if g == null:
+		return
+	assert_gte(g.offsets.size(), 3,
+		"the ramp the shipped skin paints needs 3+ stops — a two-stop ramp is a tint, the feature is a hue TRAVEL")
+	assert_almost_eq(g.offsets[0], 0.0, 0.0001, "the painted ramp starts at age 0, or the oldest slice flat-fills")
+	assert_almost_eq(g.offsets[g.offsets.size() - 1], 1.0, 0.0001,
+		"the painted ramp reaches age 1, or the freshest slice flat-fills")
+	var fresh: Color = g.sample(1.0)
+	var old: Color = g.sample(0.0)
+	assert_gt(absf(fresh.h - old.h), 0.15,
+		"the painted ramp's fresh and oldest ends must differ in HUE — otherwise the trail is a dimmed copy, not a gradient")
+	assert_gt(fresh.s, 0.5,
+		"the painted ramp's fresh end must be saturated — a near-white freshest pixel makes the whole trail read as a pale copy")
 	skin = null
+	authored = null
+	g = null
 
 # --- the shipped knobs --------------------------------------------------------------------------------
 
@@ -282,25 +316,44 @@ func test_with_no_screen_space_pass_the_display_still_sits_under_every_readout()
 # --- the aim cluster leaves the capture (user call) -------------------------------------------------------
 
 func test_the_aim_cluster_is_permanently_out_of_the_capture() -> void:
-	# ⭐ RULE 4, PINNED AT THE SOURCE. The crosshair and the stamina ring are excluded from the ghost — an
-	# echo at the aim point read as a second, blurred reticle rather than as character (user call). It has
-	# to be a source pin: UI._build_ghost needs a viewport and the full autoload-wired _ready to run, so
-	# there is no off-tree instance whose visibility_layer this could read (the test_dialogue.gd idiom).
-	var src := FileAccess.get_file_as_string("res://scripts/ui/ui.gd")
-	assert_true(src.length() > 0, "ui.gd source readable")
-	assert_true(src.contains("HUD_GHOST_SCRIPT.set_ghosted(crosshair, false)"),
+	# ⭐ RULE 4, DRIVEN ON THE REAL HUD SCRIPT. The crosshair and the stamina ring are excluded from the ghost — an
+	# echo at the aim point read as a second, blurred reticle rather than as character (user call).
+	# UI._build_ghost needs an IN-TREE layer, but UI._ready builds the whole autoload-wired HUD, so the layer
+	# enters the tree as a plain CanvasLayer and only THEN takes ui.gd: a node that is already ready never gets
+	# _ready again, so nothing but the members set below exists. Processing is disabled first so the per-frame
+	# HUD drive never ticks on that half-built instance.
+	var layer := CanvasLayer.new()
+	layer.process_mode = Node.PROCESS_MODE_DISABLED
+	add_child_autofree(layer)
+	layer.set_script(load("res://scripts/ui/ui.gd"))
+	var ui = layer
+	var screen_pass := ColorRect.new()   # stands in for ui.tscn's post-process ColorRect, which _build_ghost looks up by name
+	screen_pass.name = "ColorRect"
+	ui.add_child(screen_pass)
+	var reticle := ColorRect.new()
+	ui.add_child(reticle)
+	ui.crosshair = reticle
+	var ring := Control.new()
+	ui.add_child(ring)
+	ui._stamina_ring = ring
+	var readout := Control.new()         # any ordinary instrument readout: the control that must KEEP ghosting
+	ui.add_child(readout)
+	ui._build_ghost()
+	if ui._ghost == null or layer.get_node_or_null(^"HudGhost") == null:
+		pending("no viewport to build into — build() degrades to a no-op and the exclusion block never runs")
+		return
+	assert_eq(reticle.visibility_layer, GHOST.UNCAPTURED_LAYER,
 		"UI._build_ghost must drop the reticle out of the capture — rule 4, the aim point does not ghost")
-	assert_true(src.contains("HUD_GHOST_SCRIPT.set_ghosted(_stamina_ring as CanvasItem, false)"),
+	assert_eq(ring.visibility_layer, GHOST.UNCAPTURED_LAYER,
 		"...and the stamina ring wrapped around it, or half the aim cluster still trails")
+	assert_eq(readout.visibility_layer, GHOST.CAPTURED_LAYER,
+		"control: an ordinary readout on the same layer still ghosts — the exclusion is the aim cluster, not the HUD")
 	# ⭐ THE REGRESSION THIS REALLY GUARDS. set_scoped used to own the reticle's membership per transition
-	# (`set_ghosted(crosshair, not scoped)`): correct while scoped, and the `not scoped` arm opts the
-	# reticle straight back IN, so the cursor would silently start ghosting again the first time the player
-	# left ADS. Any future per-transition owner has the same shape and the same bug.
-	# Scanned over CODE lines only — ui.gd's own "do not reintroduce this" note quotes the very call this
-	# forbids, and a whole-file `contains` would fail on the warning that exists to prevent the bug.
-	for line in src.split("\n"):
-		var code := line.strip_edges()
-		if code.begins_with("#"):
-			continue
-		assert_false(code.contains("set_ghosted(crosshair, not scoped)"),
-			"nothing may opt the reticle back into the capture on unscope — the exclusion is permanent")
+	# (`set_ghosted(crosshair, not scoped)`): correct while scoped, and the `not scoped` arm opts the reticle
+	# straight back IN, so the cursor would silently start ghosting again the first time the player left ADS.
+	# Any future per-transition owner has the same shape and the same bug, so walk the reticle in and out of ADS.
+	ui.set_scoped(true)
+	assert_eq(reticle.visibility_layer, GHOST.UNCAPTURED_LAYER, "scoping in leaves the reticle out of the capture")
+	ui.set_scoped(false)
+	assert_eq(reticle.visibility_layer, GHOST.UNCAPTURED_LAYER,
+		"nothing may opt the reticle back into the capture on unscope — the exclusion is permanent")

@@ -1,12 +1,14 @@
 extends GutTest
 
 ## "Stranger until introduced": GameState.reveal_name / name_is_revealed / public_name + the [world].known_names
-## save/load round-trip + the New-Game wipe, DialogueLine.reveals_name, and the reveal-on-talk seam (opening ANY
-## conversation with a real character ends their Stranger status — see the two source pins at the foot of this
-## file; the per-line reveals_name flag is now redundant for a character speaker). Uses a FRESH GameState instance
-## (load().new()), never the autoload, so it can't touch the user's real user://gamestate.cfg — same isolation
-## pattern as test_story_flags.gd. The DISPLAY consumers (dialogue speaker label via DialogueManager, Talkable
-## look-at readout, corpse loot header, death card, takedown prompt, cripple toast) are thin `public_name(...)`
+## save/load round-trip + the New-Game wipe, and the reveal-on-talk seam (opening ANY
+## conversation with a real character ends their Stranger status — driven through a real DialogueManager.start() in
+## the middle of this file; the per-line reveals_name flag is now redundant for a character speaker). The ledger tests
+## use a FRESH GameState instance (load().new()), never the autoload, so they can't touch the user's real
+## user://gamestate.cfg — same isolation pattern as test_story_flags.gd. The reveal-on-talk test cannot: start() writes
+## the LIVE GameState, so it snapshots and restores known_names (and with no player in the tree the reveal's coalesced
+## autosave has nobody to save, so no file is written). The DISPLAY consumers (dialogue speaker label via
+## DialogueManager, Talkable look-at readout, corpse loot header, death card, takedown prompt, cripple toast) are thin `public_name(...)`
 ## wiring over this surface and are playtest-verified per the in-tree-behaviour convention. The critical INVARIANT
 ## pinned here: masking is DISPLAY-only — identity/quest matching (notify_kill/notify_talk) keys on the STABLE
 ## identity, never the shown name.
@@ -26,9 +28,37 @@ const GAMESTATE_PATH := "res://managers/GameState.gd"
 const DIALOGUE_MANAGER_PATH := "res://scripts/dialogue/dialogue_manager.gd"
 const TMP_SAVE := "user://test_stranger_names.cfg"
 
+## Unmistakable test-only names, so the live-ledger reveal test can never collide with a real introduction.
+const TALK_CHARACTER_NAME := "Test Stranger Marcus Vell"
+const TALK_CHARACTER_ID := &"test_stranger_marcus_vell"
+const TALK_TERMINAL_NAME := "Test Stranger Relay Terminal"
+const TALK_NOTE_NAME := "Test Stranger Pinned Note"
+
+var _prev_known_names: Dictionary = {}
+var _prev_mouse_mode: Input.MouseMode
+var _prev_paused: bool = false
+var _prev_music_db: float = 0.0
+var _prev_stranger_names_enabled: bool = true
+
+func before_each() -> void:
+	_prev_known_names = GameState.known_names.duplicate()
+	_prev_mouse_mode = Input.mouse_mode
+	_prev_paused = get_tree().paused
+	_prev_stranger_names_enabled = GameState.stranger_names_enabled
+	var music := AudioServer.get_bus_index(&"music")
+	_prev_music_db = AudioServer.get_bus_volume_db(music) if music >= 0 else 0.0
+
 func after_each() -> void:
 	if FileAccess.file_exists(TMP_SAVE):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_SAVE))
+	# The reveal-on-talk test drives real conversations: put back every global they touch.
+	GameState.known_names = _prev_known_names
+	Input.mouse_mode = _prev_mouse_mode
+	get_tree().paused = _prev_paused
+	GameState.stranger_names_enabled = _prev_stranger_names_enabled
+	var music := AudioServer.get_bus_index(&"music")
+	if music >= 0:
+		AudioServer.set_bus_volume_db(music, _prev_music_db)
 
 func test_unknown_name_masks_to_stranger() -> void:
 	var gs = load(GAMESTATE_PATH).new()
@@ -112,29 +142,82 @@ func test_reset_for_new_game_clears_known_names() -> void:
 	assert_eq(gs.public_name("Marcus"), PlayerText.STRANGER, "after New Game the once-known NPC is a Stranger again")
 	gs.free()
 
-func test_dialogue_line_reveals_name_defaults_inert() -> void:
+## A conversation partner that is a real CHARACTER, shaped by the same duck-typed markers DialogueManager keys on:
+## resolved_disposition() (what makes a speaker Stranger-masked at all — every NPC has it, a terminal does not) and
+## identity_key() (NPC.identity_key: NpcData.id, blank for an id-less NPC).
+class FakeCharacter extends Node:
+	var id: StringName = &""
+	func resolved_disposition() -> int:
+		return 0
+	func identity_key() -> StringName:
+		return id
+
+## Open a one-line conversation on a FRESH DialogueManager in the test tree (never the autoload). Its _ready builds the
+## view / ducker / music bed / face light start() needs; start() then runs synchronously up to its intro-beat timer,
+## which is exactly the window the reveal must land in (before the box paints its first speaker label).
+func _open_conversation(speaker: Node, speaker_name: String) -> Node:
 	var line := DialogueLine.new()
-	assert_false(line.reveals_name, "a line does NOT reveal the speaker's name unless the designer ticks it")
-	line = null
+	line.text = "..."
+	var convo := DialogueResource.new()
+	convo.lines = [line]
+	var manager: Node = load(DIALOGUE_MANAGER_PATH).new()
+	add_child_autofree(manager)
+	manager.start(convo, speaker, null, speaker_name)
+	return manager
 
 ## THE feature: talking to someone AT ALL ends their Stranger status. start() reveals a real character speaker as
-## the conversation opens — before the box paints its first speaker label — so no authored line has to be ticked
-## reveals_name for the player to learn who they just met. Source-pinned like the rest of the DialogueManager
-## contract (it is an autoload with NO class_name, so the start() flow can't be driven from a unit test — see the
-## header of test_dialogue.gd). The `speaker`/`speaker_name` PARAMETER names also pin that this lives in start(),
-## not in the legacy per-line reveal in _show_line (which reads the `_speaker` members).
-func test_start_reveals_the_speaker_on_any_conversation() -> void:
-	var src := FileAccess.get_file_as_string(DIALOGUE_MANAGER_PATH)
-	var expected := "if _speaker_is_character():\n\t\t\tGameState.reveal_name(_speaker_name, _speaker_identity(speaker, speaker_name))"
-	assert_string_contains(src, expected)
+## the conversation opens — so no authored line has to be ticked reveals_name for the player to learn who they just
+## met — and it is gated to real CHARACTERS: an inanimate DialogueNPC (terminal / sign) or a speaker-less note was
+## never Stranger-masked, so it must never land in the known-names ledger either (the three conversations share one
+## setup, so the terminal and the note are the control cases for the character).
+func test_opening_a_conversation_introduces_a_character_but_never_a_terminal_or_note() -> void:
+	var marcus := FakeCharacter.new()
+	marcus.id = TALK_CHARACTER_ID
+	var terminal := Node.new()
+	# Masking ON (the shipped default): with it off name_is_revealed() is true for everyone and the controls prove nothing.
+	GameState.stranger_names_enabled = true
+	assert_false(GameState.name_is_revealed(TALK_CHARACTER_NAME, TALK_CHARACTER_ID), "setup: the character starts un-introduced")
+	assert_false(GameState.name_is_revealed(TALK_TERMINAL_NAME), "setup: the terminal starts un-recorded")
+	assert_false(GameState.name_is_revealed(TALK_NOTE_NAME), "setup: the note starts un-recorded")
+	var talks: Array[Node] = [
+		_open_conversation(marcus, TALK_CHARACTER_NAME),
+		_open_conversation(terminal, TALK_TERMINAL_NAME),
+		_open_conversation(null, TALK_NOTE_NAME),
+	]
+	assert_true(GameState.name_is_revealed(TALK_CHARACTER_NAME, TALK_CHARACTER_ID),
+		"opening a conversation with a character must introduce them at once — still masked here means the player reads 'Stranger' on someone they are talking to")
+	assert_true(GameState.known_names.has(String(TALK_CHARACTER_ID)),
+		"the introduction is keyed by the STABLE identity (NpcData.id), so a quest or a save matches it even if the display name changes")
+	assert_eq(GameState.public_name(TALK_CHARACTER_NAME), TALK_CHARACTER_NAME,
+		"...and the string-only display surfaces (look-at, corpse header, death card) show the real name too")
+	assert_false(GameState.name_is_revealed(TALK_TERMINAL_NAME),
+		"a terminal / sign speaker (no resolved_disposition) must never enter the known-names ledger")
+	assert_false(GameState.name_is_revealed(TALK_NOTE_NAME),
+		"a speaker-less note's cosmetic title must never enter the known-names ledger")
+	for manager in talks:
+		manager.abort()
+	# Keep the managers alive past the intro timer so start()'s continuation returns on the ended conversation
+	# instead of resuming on a freed instance.
+	await wait_seconds(GameSettings.dialogue.dialogue_intro_delay + 0.15)
+	marcus.free()
+	terminal.free()
 
-## ...and it is gated to real CHARACTERS: an inanimate DialogueNPC (terminal / sign) or a null-speaker note was
-## never Stranger-masked, so it must never land in the known-names ledger either. The gate is the same
-## resolved_disposition() marker every other masked surface keys on.
-func test_speaker_is_character_gate_still_marks_only_npcs() -> void:
-	var src := FileAccess.get_file_as_string(DIALOGUE_MANAGER_PATH)
-	var expected := "func _speaker_is_character() -> bool:\n\treturn _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&\"resolved_disposition\")"
-	assert_string_contains(src, expected)
+func test_speaker_is_character_gate_marks_only_live_characters() -> void:
+	# The gate the reveal (and the Stranger mask on the speaker label) keys on, driven on an off-tree manager.
+	var manager = load(DIALOGUE_MANAGER_PATH).new()
+	assert_false(manager._speaker_is_character(), "no speaker at all (a note) is not a character")
+	var terminal := Node.new()
+	manager._speaker = terminal
+	assert_false(manager._speaker_is_character(), "a terminal / sign (no resolved_disposition) is not a character")
+	var marcus := FakeCharacter.new()
+	manager._speaker = marcus
+	assert_true(manager._speaker_is_character(), "a speaker carrying resolved_disposition() is a character")
+	marcus.free()
+	assert_false(manager._speaker_is_character(),
+		"a character freed mid-conversation (shot during the intro beat) must read as no character, never crash the label paint")
+	manager._speaker = null
+	terminal.free()
+	manager.free()
 
 # --- Job titles: an un-introduced NPC with a JOB reads as the job, not "Stranger" ------------------------------
 
@@ -208,7 +291,7 @@ func test_every_service_station_answers_its_pinned_job_title() -> void:
 	for path in JOB_COMPONENTS:
 		var c = load(path).new()  # off-tree (no add_child -> no _ready), like test_dialogue_speaker_contracts
 		assert_true(c.has_method(&"job_title"), "%s exposes job_title()" % path)
-		assert_eq(c.job_title(), JOB_COMPONENTS[path], "%s answers its PlayerText.JOB_* const" % path)
+		assert_eq(c.job_title(), JOB_COMPONENTS[path], "%s must read as its PlayerText.JOB_* title to an un-introduced player (a weapon bench is a Gunsmith, a healer a Healer) — a wrong or blank title shows the wrong trade, or 'Stranger', over a service NPC" % path)
 		c.free()
 	for path in NOT_JOBS:
 		var c = load(path).new()

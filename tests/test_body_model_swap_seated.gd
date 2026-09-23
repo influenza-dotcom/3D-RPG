@@ -114,11 +114,20 @@ func test_seated_arm_pitch_raises_off_the_measured_reach() -> void:
 	bms.free()
 
 func test_seated_arm_pitch_stays_authored_without_a_probe() -> void:
+	# A measurable arm (0.6 m) and an authored pitch (-30) SHALLOWER than the seat clamp's floor, so the clamp has
+	# something to raise whenever it can resolve a seat plane. CONTROL: with the probe hit cached, the same rig raises
+	# the arms off -30. Then the probe goes away (off-tree, so no capsule bottom either): no seat plane can be
+	# resolved, and the authored pitch must stand rather than be clamped against a plane that isn't there.
 	var bms = _shipped_seated_swap()
+	bms.seated_arm_pitch = -30.0
+	bms.arm_scale = 1.0
+	bms._arm_reach = 0.6
+	var probed: float = bms._seated_arm_pitch_eff()
+	assert_lt(probed, -31.0,
+		"control: with a probed seat plane this rig's clamp raises the arms steeper than the authored -30 (got %.2f)" % probed)
 	bms._seat_ground_valid = false
-	bms.seated_arm_pitch = -25.0
-	assert_almost_eq(bms._seated_arm_pitch_eff(), -25.0, 0.0001,
-		"no probe (editor / snap off) -> the authored seated_arm_pitch, unclamped")
+	assert_almost_eq(bms._seated_arm_pitch_eff(), -30.0, 0.0001,
+		"no probe and no capsule to stand in for it -> no seat plane, so the authored seated_arm_pitch stands, unclamped")
 	bms.free()
 
 func test_seated_arms_hold_a_drawn_gun_instead_of_resting_in_the_lap() -> void:
@@ -174,23 +183,47 @@ func test_lower_arms_puts_a_seated_armed_speaker_hands_in_its_lap() -> void:
 	bms.arm_scale = 1.0
 	bms._arm_reach = 0.6
 	host.gun_out = true
+	# CONTROL: this sitter really is holding its gun up — left to the gait it would pitch the arms onto the -65 hold
+	# (already steeper than the floor clamp, so it survives unclamped).
+	assert_almost_eq(bms._seated_arm_pitch_eff(), -65.0, 0.001,
+		"precondition: with the gun drawn the seated gait would hold the weapon at arm_hold_pitch")
 	bms.lower_arms()
-	assert_almost_eq(bms._mode_pitch, bms._seated_pitch_clamped(bms.seated_arm_pitch), 0.001,
-		"a seated ARMED speaker still drops to the clamped lap pitch, not the weapon hold")
+	# The lap pose, derived from the shipped rig's geometry (see test_seated_arm_pitch_raises_off_the_measured_reach):
+	# 0.43 m of room under the shoulder for a 0.6 m reach means the -25 lap rest must raise to acos(0.43 / 0.6) =
+	# 44.22 degrees so the hands clear the floor.
+	assert_almost_eq(bms._mode_pitch, -44.22, 0.01,
+		"a seated ARMED speaker drops its hands to the floor-cleared lap pitch, not the -65 weapon hold")
 	host.free()
 
 func test_posture_offset_public_seam_matches_the_applied_offset() -> void:
 	# The seam host-owned nodes glue themselves to the visible body with (NPC._sync_weapon_anchor keeps the
-	# held gun on it). It must report EXACTLY what the parts are placed with, or the gun drifts off the hands.
+	# held gun on it). It must report EXACTLY how far the parts actually MOVE when the host sits, or the gun
+	# drifts off the hands. So measure the parts: stub every swapped part (a bare Node3D is all the placement
+	# writers need off-tree), place them standing, sit the host, place them again, and compare each part's travel
+	# with what the seam reports.
 	var npc = load(NPC_PATH).new()
 	var bms = _shipped_seated_swap()
 	npc.add_child(bms)
-	npc.sitting = true
-	assert_eq(bms.posture_offset(), bms._posture_offset(),
-		"posture_offset() is the public read of the same offset every swapped part rides")
-	assert_almost_eq(bms.posture_offset().y, -0.675, 0.0001, "and it carries the ground-snapped seated drop")
+	var parts := {}
+	for part in ["_body", "_head", "_arm_left", "_leg_left"]:
+		var stub := Node3D.new()
+		bms.add_child(stub)
+		bms.set(part, stub)
+		parts[part] = stub
 	npc.sitting = false
 	assert_eq(bms.posture_offset(), Vector3.ZERO, "standing -> no offset, so the gun sits at its authored anchor")
+	bms._apply_posture_transforms()
+	var standing := {}
+	for part in parts:
+		standing[part] = (parts[part] as Node3D).position
+	npc.sitting = true
+	bms._apply_posture_transforms()
+	var seam: Vector3 = bms.posture_offset()
+	assert_almost_eq(seam.y, -0.675, 0.0001, "sitting, the seam carries the ground-snapped seated drop")
+	for part in parts:
+		var travel: Vector3 = (parts[part] as Node3D).position - (standing[part] as Vector3)
+		assert_almost_eq(travel.distance_to(seam), 0.0, 0.0001,
+			"%s moved %s when the host sat, but posture_offset() reports %s — a gun glued to the seam would float off the body" % [part, travel, seam])
 	npc.free()
 
 func test_editor_preview_seat_plane_comes_from_the_host_capsule() -> void:
@@ -232,13 +265,22 @@ class _SeatHost extends Node3D:
 
 func test_seated_snap_off_keeps_the_authored_drop() -> void:
 	# seated_snap_to_ground OFF means "I'm authoring this drop myself" — neither the probe nor the capsule-bottom
-	# estimate may override it, or a deliberately hand-placed pose (legs dangling off a ledge) snaps flat.
+	# estimate may override it, or a deliberately hand-placed pose (legs dangling off a ledge) snaps flat. This pins
+	# the PROBE half: a sitter already holding a probed seat (-0.675) whose snap is then switched off must let the
+	# authored drop back in on the next physics tick. (The capsule half is the last assert of
+	# test_editor_preview_seat_plane_comes_from_the_host_capsule.) The host is off-tree, so a tick with the snap ON
+	# never re-rays — which makes that the CONTROL: the same tick leaves the probed drop alone.
+	var host := _SeatHost.new()
 	var bms = _shipped_seated_swap()
-	bms._seat_ground_valid = false
+	host.add_child(bms)
+	bms._physics_process(0.016)
+	assert_almost_eq(bms._seated_drop_y(), -0.675, 0.0001,
+		"control: with the snap ON a physics tick keeps the probed drop that lands the hip on the surface")
 	bms.seated_snap_to_ground = false
+	bms._physics_process(0.016)
 	assert_almost_eq(bms._seated_drop_y(), bms.seated_visual_offset.y, 0.0001,
-		"snap off -> the authored seated_visual_offset.y stands, in the editor and at runtime alike")
-	bms.free()
+		"snap OFF -> the next tick drops the probed seat, and the authored seated_visual_offset.y stands")
+	host.free()
 
 ## Minimal duck-typed host for the seated gun-hold gates: BodyModelSwap reads these off its PARENT by name, so a
 ## bare Node3D with them is all the pose needs (and it never runs NPC._ready — see CLAUDE.md).

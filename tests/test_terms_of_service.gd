@@ -27,10 +27,13 @@ func test_body_is_a_long_wall_of_text() -> void:
 	assert_gt(tos.body.length(), 800, "the agreement is a long wall of text, not a placeholder")
 	tos = null
 
-func test_require_scroll_defaults_on() -> void:
-	# The wall-of-text dark pattern (must scroll to the end before Agree unlocks) ships ON by default.
+func test_require_scroll_defaults_off() -> void:
+	# The scroll-to-the-end gate (and its footnote) shipped as friction, not as the joke: OFF by default, and the
+	# two footnote strings ship blank so the screen paints no "scroll to continue" line at all.
 	var tos := TermsOfService.new()
-	assert_true(tos.require_scroll, "the player must scroll to the end before agreeing, by default")
+	assert_false(tos.require_scroll, "Agree is live at once — nobody is made to scroll a joke to its end")
+	assert_eq(tos.scroll_hint_unread, "", "no unread footnote")
+	assert_eq(tos.scroll_hint_read, "", "no read footnote")
 	tos = null
 
 func test_load_default_returns_a_valid_document() -> void:
@@ -52,24 +55,39 @@ func test_tos_not_accepted_by_default() -> void:
 	assert_false(fresh.tos_accepted, "the Terms are not accepted by default (the gate shows on first launch)")
 	fresh.free()
 
-func test_accept_tos_records_consent() -> void:
-	# accept_tos() flips the flag. On a bare instance _loaded is false, so the save_settings() call inside is a
-	# no-op — this asserts the in-memory contract without writing the real user://settings.cfg.
+func test_consent_is_one_way_and_the_replay_toggle_never_grants_or_revokes_it() -> void:
+	# The dev replay toggle (debug_always_show_tos) is INDEPENDENT of the recorded consent: StartMenu ORs it into the
+	# gate check, so it must neither stand in for consent nor erase it. On a bare instance _loaded is false, so every
+	# save_settings() inside these setters is a no-op — the real user://settings.cfg is never written.
 	var fresh = load("res://managers/Settings.gd").new()
-	assert_false(fresh.tos_accepted, "starts unaccepted")
+	fresh.set_debug_always_show_tos(true)
+	fresh.set_debug_always_show_tos(false)
+	assert_false(fresh.tos_accepted,
+		"flipping the replay toggle is not consent — a player who never clicked Agree still gets the gate")
 	fresh.accept_tos()
-	assert_true(fresh.tos_accepted, "accept_tos records consent")
+	assert_true(fresh.tos_accepted, "Agree records consent")
+	assert_false(fresh.debug_always_show_tos, "…without arming the replay, so the gate doesn't come back next launch")
+	fresh.set_debug_always_show_tos(true)
+	fresh.set_debug_always_show_tos(false)
+	assert_true(fresh.tos_accepted, "cycling the replay toggle keeps the recorded consent — it never un-accepts")
+	fresh.accept_tos()
+	assert_true(fresh.tos_accepted, "accepting again is harmless — consent stays recorded")
 	fresh.free()
 
-func test_debug_always_show_tos_default_off_and_toggles() -> void:
-	# The replay toggle defaults OFF and is enabled only via the debug Options row. Its getter/setter names are also
-	# cross-checked against the SettingsCatalog row by tests/test_settings_catalog.gd.
+func test_replay_toggle_ships_off_and_a_release_build_drops_it_but_keeps_consent() -> void:
+	# The toggle's getter/setter names are cross-checked against the SettingsCatalog row by
+	# tests/test_settings_catalog.gd; tests/test_settings.gd pins that a release build clears both debug toggles.
 	var fresh = load("res://managers/Settings.gd").new()
-	assert_false(fresh.debug_always_show_tos, "the TOS-replay toggle defaults OFF")
+	assert_false(fresh.debug_always_show_tos,
+		"SHIP DECISION: the TOS-replay toggle defaults OFF — a fresh install shows the gate once, not every launch")
+	fresh.accept_tos()
 	fresh.set_debug_always_show_tos(true)
-	assert_true(fresh.debug_always_show_tos, "the TOS-replay debug toggle can be enabled")
-	fresh.set_debug_always_show_tos(false)
-	assert_false(fresh.debug_always_show_tos, "the TOS-replay debug toggle can be disabled")
+	fresh._sanitize_debug_flags(true)
+	assert_true(fresh.debug_always_show_tos, "control: a debug build keeps the replay exactly as persisted")
+	fresh._sanitize_debug_flags(false)
+	assert_false(fresh.debug_always_show_tos, "a release build drops a persisted replay toggle")
+	assert_true(fresh.tos_accepted,
+		"…but never the player's recorded consent — a release boot must not re-show the gate to someone who already agreed")
 	fresh.free()
 
 

@@ -1,11 +1,26 @@
 extends GutTest
 
 ## M2: the NPC host-facade contract (see scripts/npc/README.md). Components attach to an NPC and read/write host
-## members; the 9 Node-typed ones do so DYNAMICALLY (no compile signal on a host rename), so these pin the seam:
-## every component's `host` defaults null (bound by NPC._build_components at spawn, never at construction), the public
-## write seams (_set_target, set_last_attacker) exist on NPC, and NpcTargeting routes its _last_attacker writes through
-## the setter rather than poking the private. Components are built by NPC via .new(); a bare .new() with no add_child
-## runs only _init (no _ready), so it's safe headless.
+## members; the Node-typed ones do so DYNAMICALLY (no compile signal on a host rename), so these DRIVE each seam
+## against a host and assert what the player would see:
+##   - every component's `host` defaults null (bound by NPC._build_components at spawn, never at construction), and
+##     the public write seams (_set_target, set_last_attacker) exist on NPC;
+##   - NpcTargeting keeps a live, in-range attacker locked, and releases the lock THROUGH host.set_last_attacker
+##     (then falls back to the nearest foe) once the attacker leaves range;
+##   - the has-target distraction feeler (P0-4) pulls a still-UNAWARE guard to a decoy, but never re-points a guard
+##     that is already investigating something; the facade is inert until the child exists;
+##   - the bark facade round-trips into NpcVoice.emit and its HOST-owned one-bubble-at-a-time latch;
+##   - WeaponStance only tops up a partial clip out of combat when a reload would actually load rounds (C5).
+## NPCs are built off-tree via load(...).new() WITHOUT _ready (CLAUDE.md); the children _build_components would
+## make are wired by hand (a real Perception + NpcDistraction, a senses double that reports the test's decoy).
+## Only plain stand-ins (a targeting host, foes, NoiseSources, an NpcVoice for its reaction timer) enter the tree.
+## Not covered here: NpcVoice._speak handing the HOST to SpeechTts as the bark source (needs a live Flite synth —
+## Settings.tts_enabled + a native TextToSpeech3D — which a headless unit run must not start), and NPC.reset_for_reuse
+## cascading into NpcDistraction.reset_for_reuse (its first line reads global_position, so it needs an in-tree NPC;
+## the component's own reset is pinned in tests/test_npc_pool.gd).
+
+const NPC_PATH := "res://scripts/npc/npc.gd"
+const DISTRACTION_PATH := "res://scripts/npc/npc_distraction.gd"
 
 const COMPONENTS := [
 	"res://scripts/npc/npc_targeting.gd",
@@ -26,6 +41,105 @@ const COMPONENTS := [
 	"res://scripts/npc/npc_distraction.gd",
 ]
 
+var _saved_reaction_time: float = 0.0
+var _saved_reaction_jitter: float = 0.0
+
+
+func before_each() -> void:
+	_saved_reaction_time = GameSettings.npc_ai.hearing_reaction_time
+	_saved_reaction_jitter = GameSettings.npc_ai.hearing_reaction_jitter
+
+
+func after_each() -> void:
+	GameSettings.npc_ai.hearing_reaction_time = _saved_reaction_time
+	GameSettings.npc_ai.hearing_reaction_jitter = _saved_reaction_jitter
+
+
+# --- stand-ins -------------------------------------------------------------------------------------------------
+
+## The NPC as NpcTargeting sees it (its `host` is Node-typed, every read dynamic). Records every value routed
+## through the public set_last_attacker seam, in order.
+class _TargetingHost extends Node3D:
+	var sight_range: float = 10.0
+	var _target: Node3D = null
+	var _last_attacker = null
+	var foes: Array = []
+	var lock_writes: Array = []
+
+	func _protectee() -> Node3D:
+		return null
+
+	func _treats_as_enemy(node) -> bool:
+		return foes.has(node)
+
+	func set_last_attacker(node: Node) -> void:
+		lock_writes.append(node)
+		_last_attacker = node
+
+	func _set_target(node: Node3D) -> void:
+		_target = node
+
+
+## Senses that hear exactly the decoy the test hands them and see no bodies. The real scans are live group scans +
+## LOS rays from the host's transform, which an off-tree NPC does not have.
+class _DecoySenses extends NpcSenses:
+	var decoy: NoiseSource = null
+
+	func loudest_noise() -> NoiseSource:
+		return decoy
+
+	func nearest_visible_corpse() -> Corpse:
+		return null
+
+
+## A weapon hub that counts reload() requests and is never mid-reload. The real reload()/is_busy() run Attack's
+## Timers, which only exist once weapon.tscn is instantiated in-tree.
+class _CountingWeapon extends Weapon:
+	var reloads: int = 0
+
+	func reload() -> void:
+		reloads += 1
+
+	func is_busy() -> bool:
+		return false
+
+
+func _react_instantly() -> void:
+	# A heard noise normally ARMS a reaction (hearing_reaction_time); zero it so the reaction lands on this scan and
+	# the test can read where the guard is investigating. Restored in after_each.
+	GameSettings.npc_ai.hearing_reaction_time = 0.0
+	GameSettings.npc_ai.hearing_reaction_jitter = 0.0
+
+
+func _decoy(at: Vector3) -> NoiseSource:
+	var n := NoiseSource.new()
+	n.radius = 8.0
+	add_child_autofree(n)
+	n.global_position = at
+	return n
+
+
+## An off-tree hostile guard (the NPC default disposition) wired the way _build_components would wire it.
+func _guard(senses: NpcSenses):
+	var npc = load(NPC_PATH).new()
+	npc.hp = 100.0  # seeded from max_hp in Character._ready, which never runs here
+	npc.hearing_initiates_opt_in = true  # listens to the noise channel whatever the global default is
+	npc._perception = Perception.new()
+	npc._senses = senses
+	var d = load(DISTRACTION_PATH).new()
+	d.host = npc
+	npc._distraction = d
+	return npc
+
+
+func _free_guard(npc, distraction, senses: NpcSenses) -> void:
+	npc._perception.free()
+	distraction.free()
+	senses.free()
+	npc.free()
+
+
+# --- surface pins ----------------------------------------------------------------------------------------------
 
 func test_components_host_defaults_null() -> void:
 	# host is bound by NPC._build_components at spawn — a bare .new() must leave it null (a non-null default would
@@ -38,74 +152,192 @@ func test_components_host_defaults_null() -> void:
 
 
 func test_npc_exposes_the_write_seams() -> void:
-	var npc = load("res://scripts/npc/npc.gd").new()
+	var npc = load(NPC_PATH).new()
 	assert_true(npc.has_method("_set_target"), "NPC._set_target binds the combat target (the NpcTargeting seam)")
 	assert_true(npc.has_method("set_last_attacker"), "NPC.set_last_attacker is the M2 write seam for the _last_attacker lock")
 	npc.free()
 
 
-func test_targeting_routes_last_attacker_through_the_setter() -> void:
-	# NpcTargeting must clear the attacker-lock via host.set_last_attacker(null), NOT a raw host._last_attacker = poke,
-	# so the write seam stays greppable + rename-safe (the host is Node-typed there — no compile signal otherwise).
-	var src := FileAccess.get_file_as_string("res://scripts/npc/npc_targeting.gd")
-	assert_true(src.contains("host.set_last_attacker("), "NpcTargeting should clear the lock via host.set_last_attacker(...)")
-	assert_false(src.contains("host._last_attacker ="), "NpcTargeting must not WRITE host._last_attacker directly (route through the setter; the read at :42 is fine)")
+# --- NpcTargeting: the sticky attacker lock --------------------------------------------------------------------
+
+func test_targeting_stays_locked_on_an_attacker_still_in_range() -> void:
+	var host := _TargetingHost.new()
+	add_child_autofree(host)
+	var attacker := Node3D.new()
+	add_child_autofree(attacker)
+	attacker.global_position = Vector3(5, 0, 0)
+	var nearer := Node3D.new()
+	add_child_autofree(nearer)
+	nearer.add_to_group(Groups.NPC)
+	nearer.global_position = Vector3(2, 0, 0)
+	host.foes = [attacker, nearer]
+	host._last_attacker = attacker
+	var tg := NpcTargeting.new()
+	tg.host = host
+	tg._acquire_target()
+	assert_eq(host._target, attacker,
+		"an NPC that was shot keeps fighting whoever shot it while they're in range, not whichever foe is nearest")
+	assert_eq(host._last_attacker, attacker, "the attacker lock survives a re-acquire while the attacker is engageable")
+	assert_eq(host.lock_writes.size(), 0, "nothing writes the lock while it is still valid")
+	tg.free()
 
 
-func test_distraction_sensing_runs_in_both_branches() -> void:
-	# P0-4: a hostile locks the player as a proximity target while still perception-UNAWARE, so noise/corpse sensing
-	# must run in the HAS-target branch too (not just _react_unaware) or thrown decoys / hidden bodies do nothing in
-	# range. This is the same both-branches shape as _react_music. Pin it by source (the scan is in-tree/LOS-driven).
-	var src := FileAccess.get_file_as_string("res://scripts/npc/npc.gd")
-	assert_true(src.contains("func _scan_distractions("), "the shared throttled scan is extracted")
-	assert_true(src.contains("func _react_distraction("), "the has-target distraction feeler exists")
-	assert_true(src.contains("_react_distraction(delta)"), "the has-target branch calls _react_distraction (the P0-4 regression guard)")
-	assert_true(src.contains("Perception.State.UNAWARE"), "_react_distraction self-gates on UNAWARE like _react_music")
+func test_targeting_releases_an_out_of_range_attacker_through_the_setter() -> void:
+	var host := _TargetingHost.new()
+	add_child_autofree(host)
+	var attacker := Node3D.new()
+	add_child_autofree(attacker)
+	attacker.global_position = Vector3(30, 0, 0)  # fled well past sight_range (10)
+	var nearer := Node3D.new()
+	add_child_autofree(nearer)
+	nearer.add_to_group(Groups.NPC)
+	nearer.global_position = Vector3(2, 0, 0)
+	host.foes = [attacker, nearer]
+	host._last_attacker = attacker
+	var tg := NpcTargeting.new()
+	tg.host = host
+	tg._acquire_target()
+	assert_eq(host._target, nearer,
+		"once the attacker fled out of sight_range the NPC re-targets the nearest foe instead of chasing a ghost")
+	assert_eq(host._last_attacker, null, "the stale attacker lock is released, or it would pull the NPC back later")
+	assert_eq(host.lock_writes, [null],
+		"the release goes through host.set_last_attacker(null) exactly once (the M2 write seam), not a raw poke")
+	tg.free()
 
 
-func test_react_distraction_is_null_safe_off_tree() -> void:
-	# A bare NPC (.new(), no _ready) has no _perception; the early-return guard must make _react_distraction inert.
-	var npc = load("res://scripts/npc/npc.gd").new()
-	assert_true(npc.has_method("_react_distraction"), "NPC exposes _react_distraction")
-	assert_true(npc.has_method("_scan_distractions"), "NPC exposes _scan_distractions")
-	npc._react_distraction(0.1)  # must not error with _perception null (short-circuit guard)
+# --- NpcDistraction behind NPC._react_distraction (P0-4) -------------------------------------------------------
+
+func test_unaware_guard_is_pulled_to_a_decoy_through_the_facade() -> void:
+	_react_instantly()
+	var senses := _DecoySenses.new()
+	senses.decoy = _decoy(Vector3(6, 0, 3))
+	var npc = _guard(senses)
+	var d = npc._distraction
+	var p: Perception = npc._perception
+	npc._react_distraction(0.1)
+	assert_eq(p.state, Perception.State.INVESTIGATING,
+		"a hostile holding the player as a proximity target but still UNAWARE must fall for a thrown decoy (P0-4)")
+	assert_eq(p.last_known_position, senses.decoy.global_position, "the guard investigates where the decoy landed")
+	_free_guard(npc, d, senses)
+
+
+func test_investigating_guard_is_not_re_pointed_by_a_decoy() -> void:
+	_react_instantly()
+	var senses := _DecoySenses.new()
+	senses.decoy = _decoy(Vector3(6, 0, 3))
+	var npc = _guard(senses)
+	var d = npc._distraction
+	var p: Perception = npc._perception
+	var trail := Vector3(-4, 0, 9)
+	p.investigate_point(trail, false)  # already hunting the player's last known position
+	npc._react_distraction(0.1)
+	assert_eq(p.state, Perception.State.INVESTIGATING, "the guard keeps investigating")
+	assert_eq(p.last_known_position, trail,
+		"a guard already on the player's trail ignores the decoy — the lure only works on a guard that hasn't noticed anything")
+	_free_guard(npc, d, senses)
+
+
+func test_react_distraction_is_inert_until_the_distraction_child_exists() -> void:
+	_react_instantly()
+	var senses := _DecoySenses.new()
+	senses.decoy = _decoy(Vector3(6, 0, 3))
+	var npc = _guard(senses)
+	var d = npc._distraction
+	var p: Perception = npc._perception
+	npc._distraction = null  # a bare NPC before _build_components
+	npc._react_distraction(0.1)
+	assert_eq(p.state, Perception.State.UNAWARE, "with no distraction child the facade does nothing (and does not crash)")
+	assert_eq(p.last_known_position, Vector3.ZERO, "no investigation point is written without the child")
+	npc._distraction = d  # control: the very same guard, once built, does react
+	npc._react_distraction(0.1)
+	assert_eq(p.state, Perception.State.INVESTIGATING, "control: the built guard reacts to the same decoy")
+	_free_guard(npc, d, senses)
+
+
+# --- NPC._emit_bark -> NpcVoice.emit ---------------------------------------------------------------------------
+
+func test_bark_facade_round_trips_into_npc_voice_and_the_host_latch() -> void:
+	var npc = load(NPC_PATH).new()
+	var voice := NpcVoice.new()
+	voice.host = npc
+	add_child_autofree(voice)  # emit() awaits a SceneTree timer; the off-tree host makes it bail before any bubble / TTS
+	npc._voice = voice
+	var idle_latch: int = npc._bark_until_msec
+	npc._emit_bark("", null)
+	assert_eq(npc._bark_until_msec, idle_latch, "an unauthored (empty) line stays silent and blocks nothing")
+	var asked_at := Time.get_ticks_msec()
+	npc._emit_bark("Halt!", null)
+	var armed: int = npc._bark_until_msec
+	assert_gt(armed, asked_at,
+		"a bark requested on the NPC reaches NpcVoice.emit, which blocks further barks on the HOST while its bubble shows")
+	npc._emit_bark("Hands where I can see them, nice and slow, right now!", null)
+	assert_eq(npc._bark_until_msec, armed,
+		"a second bark in the same beat is dropped (one bubble at a time) instead of stacking or extending the first")
+	await wait_seconds(0.15)  # let both reaction-delay coroutines unwind at emit()'s lifecycle guard
+	npc._voice = null
 	npc.free()
 
 
-func test_bark_emission_facade_round_trips_through_npc_voice() -> void:
-	# The bark EMISSION body moved onto NpcVoice.emit; NPC._emit_bark is now the 1-line facade forwarding into it.
-	# Pin BOTH sides by source (the emit body awaits a tree timer -> in-tree only, so it can't be driven here):
-	# the facade must forward (npc.gd), and NpcVoice._speak must keep the HOST as the SpeechTts source identity —
-	# NPC._on_died stops OUR bark via SpeechTts.stop_bark_from(self) keyed on the NPC node; passing the child there
-	# would never match and dead NPCs would keep talking. Mirrors the contains("host.set_last_attacker(") idiom above.
-	var npc_src := FileAccess.get_file_as_string("res://scripts/npc/npc.gd")
-	assert_true(npc_src.contains("_voice.emit("), "NPC._emit_bark forwards into NpcVoice.emit (the facade round-trip seam)")
-	var voice_src := FileAccess.get_file_as_string("res://scripts/npc/npc_voice.gd")
-	assert_true(voice_src.contains("func emit("), "NpcVoice owns the bark emission body (emit)")
-	assert_true(voice_src.contains("SpeechTts.speak_bark(host.global_position"), "the TTS speaks from the HOST's position")
-	assert_true(voice_src.contains(", host)"), "the TTS source identity is the HOST NPC (stop_bark_from(self) in _on_died must keep matching)")
+# --- WeaponStance.reconcile: out-of-combat reload (C5) ---------------------------------------------------------
+
+## An armed townsperson (NEUTRAL, so it holsters between fights) that fought earlier, now out of combat with its gun
+## still drawn and a PARTIAL clip, carrying `spare_clips` pistol clips.
+func _stood_down_gunman(spare_clips: int) -> Dictionary:
+	var gun := WeaponData.new()
+	gun.max_ammo = 10
+	gun.caliber = &"pistol"
+	var npc = load(NPC_PATH).new()
+	npc.disposition = Disposition.Kind.NEUTRAL
+	npc.inventory = CharacterInventory.new()
+	var gun_item := Item.new()
+	gun_item.category = Item.Category.WEAPON
+	gun_item.weapon = gun
+	npc.inventory.equipped_item = gun_item
+	if spare_clips > 0:
+		npc.inventory.add(ItemDb.ammo_item_for(&"pistol"), spare_clips)
+	var w := _CountingWeapon.new()
+	w.inventory = Inventory.new()
+	w.inventory.equipped_weapon = gun
+	w.ammo = Ammo.new()
+	w.ammo.character = npc
+	w.ammo.current_weapon = gun
+	w.ammo.current_ammo = 4
+	w.attack = Attack.new()
+	w.attack.holstered = false
+	npc._weapon = w
+	var stance := WeaponStance.new()
+	stance.host = npc
+	stance._has_engaged = true
+	return {"npc": npc, "weapon": w, "stance": stance}
 
 
-func test_npc_builds_distraction_by_script_path_not_by_bare_type() -> void:
-	# npc.gd is a @tool root: naming a newly-added class_name at parse time can fail its parse in the live editor
-	# (the new-classname reimport cascade) — the same reason CrippleCallout / NpcHomeReturn are built by path
-	# (mirrors tests/test_npc_home_return.gd's leash pin).
-	var src := FileAccess.get_file_as_string("res://scripts/npc/npc.gd")
-	assert_true(src.contains("res://scripts/npc/npc_distraction.gd"),
-		"NPC builds the distraction brain by script path")
-	assert_false(src.contains("NpcDistraction.new()"),
-		"NPC must NOT name the class at parse time — build it via load(path).new()")
-	assert_true(src.contains("_distraction.host = self"),
-		"the host is bound on the code-built instance")
-	assert_true(src.contains("_distraction.call(&\"reset_for_reuse\")"),
-		"pool reuse resets the distraction scan state with the other stateful children")
+func _free_gunman(g: Dictionary) -> void:
+	var w: _CountingWeapon = g["weapon"]
+	var npc = g["npc"]
+	g["stance"].free()
+	w.attack.free()
+	w.ammo.free()
+	w.inventory.free()
+	npc._weapon = null
+	w.free()
+	npc.inventory.free()
+	npc.free()
 
 
-func test_weapon_stance_gates_out_of_combat_reload_on_supply() -> void:
-	# C5: the out-of-combat auto-reload branch must gate on _has_reload_supply() — otherwise a partial-clip gun with an
-	# EMPTY reserve dry-clicks reload() every frame (SFX spam) and never reaches the holster branch. Source-string pin
-	# (the reconcile() draw/holster loop is in-tree -> playtest); has_reload_supply's own truth table is covered by
-	# tests/test_ammo_reserve.gd. Mirrors the contains("host.set_last_attacker(") idiom above.
-	var src := FileAccess.get_file_as_string("res://scripts/npc/weapon_stance.gd")
-	assert_true(src.contains("func _has_reload_supply()"), "WeaponStance exposes the _has_reload_supply() gate helper")
-	assert_true(src.contains("current_ammo < max_ammo and _has_reload_supply()"), "the out-of-combat reload branch gates on _has_reload_supply() before drawing/reloading (C5)")
+func test_stance_holsters_instead_of_dry_reloading_with_no_spare_clips() -> void:
+	var g := _stood_down_gunman(0)
+	var w: _CountingWeapon = g["weapon"]
+	g["stance"].reconcile()
+	assert_eq(w.reloads, 0,
+		"a partial clip with an EMPTY reserve must not call reload() — it would dry-click every frame (C5)")
+	assert_true(w.attack.holstered, "with nothing to reload and the stand-down elapsed, the NPC puts the gun away")
+	_free_gunman(g)
+
+
+func test_stance_tops_up_a_partial_clip_when_spare_clips_exist() -> void:
+	var g := _stood_down_gunman(2)
+	var w: _CountingWeapon = g["weapon"]
+	g["stance"].reconcile()
+	assert_eq(w.reloads, 1, "control: with spare clips in the backpack the partial clip is topped up out of combat")
+	assert_false(w.attack.holstered, "the gun stays out while it reloads")
+	_free_gunman(g)

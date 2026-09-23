@@ -1,17 +1,33 @@
 extends GutTest
 
 ## NoiseSource -- the shared &"noise" distraction channel (stealth Slice 0a / 4). The pure audible() range
-## gate carries the unit coverage; the live group scan + investigate routing (NPC._react_unaware) is in-tree
-## and playtest-verified. Also checks the one-shot decay/lifetime self-management vs the persistent mode.
+## gate carries the unit coverage, and the group scan itself (NpcSenses.loudest_noise) is driven with a bare
+## listener host; the investigate routing (NPC._react_unaware) is in-tree and playtest-verified. Also checks the
+## one-shot decay/lifetime self-management vs the persistent mode.
 
 
-func test_group_and_defaults() -> void:
-	assert_eq(NoiseSource.GROUP, &"noise", "the scan group tag is the canonical &\"noise\"")
+## The NPC side of the channel, stripped to what NpcSenses.loudest_noise() reads off its host: a position in the tree
+## and a Perception (null = no wall occlusion, distance-only hearing).
+class Listener extends Node3D:
+	var _perception = null
+
+
+func test_a_fresh_source_is_heard_by_no_npc_until_its_radius_is_driven() -> void:
+	# Drives the REAL scan an unaware NPC runs (NpcSenses.loudest_noise over the source group), so this covers the
+	# default AND the group wiring: a freshly dropped source must be silent, and driving it must make it heard.
+	var npc := Listener.new()
+	add_child_autofree(npc)
+	var senses := NpcSenses.new()
+	senses.host = npc
 	var s := NoiseSource.new()
-	assert_eq(s.radius, 0.0, "a fresh source is silent (radius 0) until driven")
-	assert_eq(s.decay, 0.0, "default decay 0 -> constant radius")
-	assert_eq(s.lifetime, 0.0, "default lifetime 0 -> persistent (externally driven), never self-frees")
-	s.free()
+	add_child_autofree(s)
+	s.global_position = Vector3(1.0, 0.0, 0.0)  # a metre from the NPC
+	assert_eq(senses.loudest_noise(), null,
+		"a default-constructed NoiseSource is SILENT: an NPC a metre away must not hear it until its owner drives radius")
+	s.radius = 5.0
+	assert_eq(senses.loudest_noise(), s,
+		"once its radius is driven the same source IS the loudest noise reaching that NPC (control: the scan sees it)")
+	senses.free()
 
 func test_ready_joins_the_scan_group() -> void:
 	var s := NoiseSource.new()
@@ -29,7 +45,11 @@ func test_audible_is_a_range_gate() -> void:
 func test_audible_includes_edge_and_guards_silence() -> void:
 	var src := Vector3.ZERO
 	assert_true(NoiseSource.audible(5.0, src, Vector3(5.0, 0.0, 0.0)), "exactly at the radius edge still counts (<=)")
-	assert_false(NoiseSource.audible(0.0, src, Vector3(0.1, 0.0, 0.0)), "radius 0 (silent) -> never heard, even point-blank")
+	# The silence guard only shows at distance ZERO: anywhere farther, 'distance <= 0' already refuses a radius-0 source.
+	assert_true(NoiseSource.audible(0.5, src, src),
+		"control: a listener standing ON a sounding source hears it, so distance 0 is not refused on its own")
+	assert_false(NoiseSource.audible(0.0, src, src),
+		"radius 0 (silent) -> never heard, even by a listener standing exactly on the source")
 
 
 # --- one-shot fade/expiry vs persistent ---

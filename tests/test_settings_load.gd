@@ -131,9 +131,16 @@ func test_player_feedback_settings() -> void:
 	assert_gt(r.damage_thud_cooldown_ms, 0, "player_feedback.damage_thud_cooldown_ms must be > 0")
 	assert_gt(r.death_sequence_time, 0.0, "player_feedback.death_sequence_time must be > 0")
 	assert_gt(r.spawn_fade_in_time, 0.0, "player_feedback.spawn_fade_in_time must be > 0")
-	# Toast colours moved off player.gd's SNEAK_HIT_COLOR / CRIPPLE_TOAST_COLOR consts (byte-identical defaults).
-	assert_eq(r.sneak_toast_color, Color(0.4, 1.0, 0.45), "sneak toast ships green (was SNEAK_HIT_COLOR)")
-	assert_eq(r.cripple_toast_color, Color(1.0, 0.42, 0.38), "cripple toast ships red (was CRIPPLE_TOAST_COLOR)")
+	# Toast colour LANGUAGE, not the exact bytes: a sneak hit is a win cue, a crippled limb is a warning, and the
+	# player tells them apart by hue at a glance. Any green/red retune passes; swapping or greying them does not.
+	var sneak := r.sneak_toast_color
+	var cripple := r.cripple_toast_color
+	assert_true(sneak.g > sneak.r and sneak.g > sneak.b,
+		"SHIP DECISION: the \"Sneak Attack!\" toast reads GREEN (green channel dominant) — it is a reward cue, got %s" % sneak)
+	assert_true(cripple.r > cripple.g and cripple.r > cripple.b,
+		"SHIP DECISION: the limb-cripple toast reads RED (red channel dominant) — it is a warning, got %s" % cripple)
+	assert_gt(sneak.a, 0.0, "the sneak toast must not be fully transparent")
+	assert_gt(cripple.a, 0.0, "the cripple toast must not be fully transparent")
 	# Out-of-combat recovery (2026-08-18): the passive health regen + the low-HP heartbeat duck, both gated on
 	# is_out_of_combat(). These are the SHIPPED values, so the bounds guard what a designer can author.
 	assert_gte(r.combat_calm_grace, 5.0,
@@ -188,15 +195,31 @@ func test_silent_takedown_settings() -> void:
 func test_npc_bark_settings() -> void:
 	var r := load("res://resources/tuning/NpcBarkSettings.tres") as NpcBarkSettings
 	assert_not_null(r, "NpcBarkSettings.tres must load as an NpcBarkSettings")
-	# PARITY: the bark-cadence tuning ships EXACTLY the npc.gd consts (which stay as the terminal fallback + test
-	# anchors), so the resource extraction is byte-identical until a designer tunes it.
-	assert_eq(r.bark_distance, NPC.BARK_DISTANCE, "bark_distance mirrors NPC.BARK_DISTANCE")
-	assert_eq(r.bark_cooldown_ms, NPC.BARK_COOLDOWN_MS, "bark_cooldown_ms mirrors NPC.BARK_COOLDOWN_MS")
+	# The cadence dials are DESIGNER-tunable (no parity with npc.gd's fallback consts is required); what must hold is
+	# that no dial silently switches a voice feature off or turns it into per-frame spam.
+	assert_gt(r.bark_distance, 0.0,
+		"npc_bark.bark_distance must be > 0 — NpcVoice drops every bark whose NPC is farther than this from the player")
+	assert_gt(r.bark_cooldown_ms, 0, "npc_bark.bark_cooldown_ms must be > 0 or an NPC can bark every frame")
 	assert_gt(r.enemy_bark_cooldown_ms, 0, "enemy_bark_cooldown_ms must be positive")
 	assert_lt(r.enemy_bark_cooldown_ms, r.bark_cooldown_ms, "enemy_bark_cooldown_ms makes hostile NPCs bark more often than generic NPC chatter")
-	assert_eq(r.greet_cooldown_ms, NPC.GREET_COOLDOWN_MS, "greet_cooldown_ms mirrors NPC.GREET_COOLDOWN_MS")
-	assert_eq(r.death_witness_radius, NPC.DEATH_WITNESS_RADIUS, "death_witness_radius mirrors NPC.DEATH_WITNESS_RADIUS")
-	assert_eq(r.hurt_bark_hp_frac, NPC.HURT_BARK_HP_FRAC, "hurt_bark_hp_frac mirrors NPC.HURT_BARK_HP_FRAC")
-	assert_eq(r.alert_cooldown_ms, NPC.ALERT_COOLDOWN_MS, "alert_cooldown_ms mirrors NPC.ALERT_COOLDOWN_MS")
-	assert_eq(r.aim_cooldown_ms, NPC.AIM_COOLDOWN_MS, "aim_cooldown_ms mirrors NPC.AIM_COOLDOWN_MS")
-	assert_eq(r.aim_sfx_delay, NPC.AIM_SFX_DELAY, "aim_sfx_delay mirrors NPC.AIM_SFX_DELAY")
+	assert_gt(r.greet_cooldown_ms, 0,
+		"npc_bark.greet_cooldown_ms must be > 0 — glancing to-and-fro across an NPC would re-greet every frame")
+	assert_gt(r.death_witness_radius, 0.0,
+		"npc_bark.death_witness_radius must be > 0 or no NPC ever notices the player killing someone beside it")
+	# Wounded-ally cry fires when 0 < hp <= max_hp * frac: at 0 it can never fire, at 1 it fires on the first scratch.
+	assert_gt(r.hurt_bark_hp_frac, 0.0, "npc_bark.hurt_bark_hp_frac must be > 0 or a wounded ally never cries out")
+	assert_lt(r.hurt_bark_hp_frac, 1.0, "npc_bark.hurt_bark_hp_frac must be < 1 so the cry means WOUNDED, not merely hit")
+	assert_gt(r.alert_cooldown_ms, 0,
+		"npc_bark.alert_cooldown_ms must be > 0 — a swarm spotting you at once has to collapse to ONE \"!\" sting")
+	assert_gt(r.aim_cooldown_ms, 0,
+		"npc_bark.aim_cooldown_ms must be > 0 so a lock-on and the first shot landing together play ONE charge sting")
+	assert_gt(r.aim_sfx_delay, 0.0,
+		"npc_bark.aim_sfx_delay must be > 0 — the charge sting plays a beat AFTER the shot; at 0 the two blur together")
+	# The first "still around here somewhere..." mutter waits search_bark_delay of searching; a hostile gives a
+	# stationary search up after its forget_time. The delay has to fit inside a hostile's default attention span.
+	var forget_default: Variant = (load("res://scripts/npc/npc.gd") as Script).get_property_default_value(&"forget_time")
+	assert_true(forget_default is float, "fixture: NPC.forget_time is an exported float with a script default")
+	assert_gte(r.search_bark_delay, 0.0, "npc_bark.search_bark_delay must be >= 0 (0 = mutter at once)")
+	if forget_default is float:
+		assert_lt(r.search_bark_delay, float(forget_default),
+			"npc_bark.search_bark_delay must stay under a hostile's default forget_time (%s s), or a default hostile gives up a stationary search before it ever mutters" % forget_default)

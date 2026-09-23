@@ -2,13 +2,26 @@ extends GutTest
 ## Smoke tests for the OptionsMenu autoload — it builds its tabbed UI at startup, and open/close toggles
 ## cleanly with no player present (the start-menu path; in-game it additionally freezes the player).
 
+## The glyph test below paints a sentinel through the SHARED skin; snapshot the shipped glyphs so no later test (or
+## suite) inherits it, and repaint the Options tree if the sentinel ever landed in it.
+var _shipped_prev_glyph := ""
+var _shipped_next_glyph := ""
+
+func before_each() -> void:
+	_shipped_prev_glyph = MenuStyle.skin.cycler_prev_glyph
+	_shipped_next_glyph = MenuStyle.skin.cycler_next_glyph
+
 func after_each() -> void:
 	if OptionsMenu.is_open():
 		OptionsMenu.close()
+	if MenuStyle.skin.cycler_prev_glyph != _shipped_prev_glyph or MenuStyle.skin.cycler_next_glyph != _shipped_next_glyph:
+		MenuStyle.skin.cycler_prev_glyph = _shipped_prev_glyph
+		MenuStyle.skin.cycler_next_glyph = _shipped_next_glyph
+		OptionsMenu._rebuild_tabs()  # repaint the hidden tree with the shipped glyphs (open()'s own rebuild, minus its sting)
 
 func test_autoload_and_tabs_built() -> void:
 	assert_not_null(OptionsMenu, "OptionsMenu autoload should be registered")
-	assert_eq(OptionsMenu._tabs.get_tab_count(), 5, "Video/Audio/Game/Controls/Accessibility tabs should be built")
+	assert_eq(OptionsMenu._tabs.get_tab_count(), 6, "Video/Audio/Game/HUD/Accessibility/Controls tabs should be built")
 
 func test_menu_style_sounds_route_to_sfx_bus() -> void:
 	assert_eq(MenuStyle._hover_player.bus, &"sfx",
@@ -53,22 +66,69 @@ func test_choice_rows_are_in_canvas_cyclers_not_popups() -> void:
 		"no OptionButton may exist in the Options tree — choice rows are in-canvas cyclers (a native popup escapes the retro viewport)")
 	OptionsMenu.close()
 
-func test_menu_skin_cycler_glyph_defaults() -> void:
-	# The cycler arrow glyphs are MenuSkin designer @exports whose defaults live in the .gd, so the shipped
-	# menu_skin.tres needed no edit. Plain ASCII on purpose — the pixel font renders guillemets as tofu.
-	# MenuSkin is the ONE glyph home (the character creator's part cyclers read the same exports).
-	var s := MenuSkin.new()
-	assert_eq(s.cycler_prev_glyph, "<", "cycler prev glyph defaults to plain ASCII <")
-	assert_eq(s.cycler_next_glyph, ">", "cycler next glyph defaults to plain ASCII >")
-	s = null  # Resource (RefCounted) — release per the project test idiom
+## Every button in the built Options tree whose caption is exactly `text`.
+func _buttons_painting(text: String) -> Array[Button]:
+	var out: Array[Button] = []
+	for n in OptionsMenu._root.find_children("*", "Button", true, false):
+		if (n as Button).text == text:
+			out.append(n as Button)
+	return out
 
-func test_every_tab_page_shows_a_real_scrollbar_paid_for_out_of_its_gutter() -> void:
+func test_choice_cyclers_paint_their_arrows_from_the_skin() -> void:
+	# MenuSkin is the ONE glyph home: the cycler arrows are a designer @export (an RTL locale swaps the pair in its
+	# own menu_skin.tres), never a literal in options_menu.gd. Driven, not read back: repaint the tree with a sentinel
+	# pair on the live skin and every choice row must pick it up — both arrows, on the same rows.
+	MenuStyle.skin.cycler_prev_glyph = "[prev]"
+	MenuStyle.skin.cycler_next_glyph = "[next]"
+	OptionsMenu._rebuild_tabs()  # the rebuild open() runs on every open: every tab from the live catalog + the live skin
+	var prevs := _buttons_painting("[prev]")
+	var nexts := _buttons_painting("[next]")
+	assert_gt(prevs.size(), 0, "the choice cyclers paint the skin's prev glyph — a designer's glyph edit must reach the Options rows")
+	assert_eq(nexts.size(), prevs.size(), "every cycler that paints the skin's prev arrow paints its next arrow too")
+	for b in prevs:
+		var row := b.get_parent()
+		assert_eq(row.get_child(row.get_child_count() - 1), _buttons_painting_in(row, "[next]"),
+			"the skin's next arrow closes the SAME row its prev arrow opens (%s)" % row.name)
+
+func _buttons_painting_in(row: Node, text: String) -> Button:
+	for c in row.get_children():
+		if c is Button and (c as Button).text == text:
+			return c as Button
+	return null
+
+func test_shipped_cycler_glyphs_are_distinct_and_renderable() -> void:
+	# The arrows default to plain ASCII because a pixel font once painted guillemets as tofu. The requirement behind
+	# that choice, not the choice: whatever pair ships (the .tres AND the .gd defaults a locale skin falls back to)
+	# must be two DIFFERENT glyphs — or a cycler cannot say which way it steps — that the font the Options Buttons
+	# actually paint with can render. Read off the tree _ready built (no open(): nothing here needs the modal up).
+	var arrows := _buttons_painting(String(MenuStyle.skin.cycler_prev_glyph))
+	assert_gt(arrows.size(), 0, "precondition: the Options tree paints the shipped prev arrow on a cycler row")
+	if arrows.is_empty():
+		return
+	var font: Font = arrows[0].get_theme_font(&"font")
+	assert_true(font != null, "precondition: the cycler arrow resolves a theme font")
+	if font == null:
+		return
+	var defaults := MenuSkin.new()
+	for pair in [[MenuStyle.skin, "the shipped menu_skin.tres"], [defaults, "MenuSkin's .gd defaults"]]:
+		var prev := String(pair[0].cycler_prev_glyph)
+		var next := String(pair[0].cycler_next_glyph)
+		assert_ne(prev, "", "%s: the prev arrow is not blank" % pair[1])
+		assert_ne(next, "", "%s: the next arrow is not blank" % pair[1])
+		assert_ne(prev, next, "%s: the two arrows differ, or a cycler cannot show which way it steps" % pair[1])
+		for glyph in [prev, next]:
+			for i in glyph.length():
+				assert_true(font.has_char(glyph.unicode_at(i)),
+					"%s: '%s' must be a glyph the menu font renders — a missing one paints as tofu on every cycler row" % [pair[1], glyph])
+	defaults = null  # Resource (RefCounted) — release per the project test idiom
+
+func test_every_tab_page_reserves_a_real_scrollbar_gutter() -> void:
 	# THE PAGE MUST ADMIT IT SCROLLS. Controls runs 44 rebind rows and Accessibility 33 settings through a
 	# ~245px page. Both scrolled; neither said so, because the themed bar was drawn ZERO px wide (see
 	# MenuStyle's scrollbar block) — the audit screenshot shows four bindings, a fifth sliced through, and a
 	# bare right edge. Two halves are pinned here, and the SECOND is the one that bites:
-	#   (a) the bar exists, is always up (not AUTO — every tab must reserve the same rail), and has a width
-	#       a mouse can actually hit;
+	#   (a) the bar exists (AUTO: it paints only on a page that really overflows, i.e. Controls — a full-height
+	#       track on a six-row Audio page read as a defect), and has a width a mouse can actually hit;
 	#   (b) that width is BOUGHT from the page's own right margin, not added to the page. The Accessibility
 	#       two-up columns clear the panel by ~17px, and a page minimum wider than the card's anchor band
 	#       GROWS THE WHOLE CARD (tests/test_menu_layout_stability.gd) — so the two horizontal insets plus the
@@ -83,8 +143,8 @@ func test_every_tab_page_shows_a_real_scrollbar_paid_for_out_of_its_gutter() -> 
 		assert_not_null(page, "tab %d's page is the ScrollContainer _add_tab built" % i)
 		if page == null:
 			continue
-		assert_eq(page.vertical_scroll_mode, ScrollContainer.SCROLL_MODE_SHOW_ALWAYS,
-			"%s shows its scrollbar before the player wheels" % page.name)
+		assert_eq(page.vertical_scroll_mode, ScrollContainer.SCROLL_MODE_AUTO,
+			"%s shows a scrollbar only when it overflows" % page.name)
 		assert_eq(page.get_v_scroll_bar().get_combined_minimum_size().x, float(width),
 			"%s's bar is skin.scrollbar_width wide — visible AND grabbable" % page.name)
 		# By TYPE, not by index: a ScrollContainer's own two bars are (internal) children as well.
@@ -130,3 +190,53 @@ func test_release_build_drops_debug_only_rows() -> void:
 			i += 1
 		assert_eq(spec, cat.specs[i], "the surviving rows keep catalog order")
 		i += 1
+
+
+## The built row whose label column reads exactly `label_text`: the HBoxContainer _row emitted, whose
+## child 0 is that Label and whose child 1 is the control (for a cycler, the prev/value/next box).
+func _labelled_row(label_text: String) -> HBoxContainer:
+	for n in OptionsMenu._root.find_children("*", "Label", true, false):
+		if (n as Label).text == label_text:
+			return n.get_parent() as HBoxContainer
+	return null
+
+func test_language_row_is_greyed_out_while_english_is_the_only_catalog() -> void:
+	# No `.po` is listed under Project Settings -> Localization -> Translations yet, so the Language chooser has
+	# exactly ONE true value. A live cycler there would offer "System" and "English" — two captions painting the
+	# same English — and buzz (play_denied) on every step, which reads as a broken language menu. So the row is
+	# built GREYED at the source locale's own name: the player can read "English, and that is all there is" off
+	# the menu itself. Gated on the same count check _emit_language uses, so the day a catalog ships this test
+	# goes QUIET instead of red — and the live-cycler branch below is what test_choice_rows_* already covers.
+	if Localization.available_locales().size() > 1:
+		pass_test("a translation catalog ships — the Language row is live, so there is nothing to grey out")
+		return
+	OptionsMenu.open()
+	var row := _labelled_row("Language")
+	assert_not_null(row, "the Game tab still emits a Language row — greyed is VISIBLE, not dropped")
+	if row == null:
+		OptionsMenu.close()
+		return
+	var cycler := row.get_child(1) as HBoxContainer
+	var value_btn := cycler.get_child(1) as Button
+	assert_eq(value_btn.text, Localization.locale_label(Localization.source_locale()),
+		"the greyed row states the one language this build speaks, by the engine's own name for it")
+	for i in cycler.get_child_count():
+		assert_true((cycler.get_child(i) as Button).disabled,
+			"every surface of the Language cycler is disabled, so the theme paints all three greyed (child %d)" % i)
+	assert_eq(value_btn.focus_mode, Control.FOCUS_NONE, "and D-pad nav walks past the dead row")
+	for i in cycler.get_child_count():  # MenuStyle wires its own press SOUND to every button; only the step must be absent
+		assert_false(_connects_to(cycler.get_child(i).pressed, &"_cycle_option"),
+			"no cycle step is wired to a row that cannot change (child %d)" % i)
+	assert_false(_connects_to(value_btn.gui_input, &"_on_cycler_gui_input"),
+		"nor the keyboard path: a disabled Button stops emitting `pressed` but still forwards gui_input, which would keep cycling the dead row")
+	assert_eq(row.get_child(0).get_theme_color(&"font_color"), MenuStyle.skin.disabled_text_color,
+		"the NAME greys with the control — a live-looking label beside a dead cycler reads as a bug, not a limitation")
+	OptionsMenu.close()
+
+## True when `sig` has a connection whose target method is `method` — the connection-level twin of "this
+## button still steps the cycler", used where MenuStyle's own sound connection makes a bare emptiness check lie.
+func _connects_to(sig: Signal, method: StringName) -> bool:
+	for c in sig.get_connections():
+		if (c["callable"] as Callable).get_method() == method:
+			return true
+	return false

@@ -1,29 +1,34 @@
 extends GutTest
 
-## NpcData — the data-driven NPC archetype profile (roadmap keystone #1). Pure Resource, tested OFF-TREE:
-## NpcData.new() for the default-parity check; the stamp path uses an off-tree NPC (load().new(), so _ready
-## never runs) and calls npc._apply_profile() directly. This guards the two contracts the keystone rests on:
-## a fresh profile reproduces the NPC's own defaults, and a profile is stamped onto the NPC (with no profile
-## being a strict no-op, so every existing inline-authored scene is unaffected).
+## NpcData — the data-driven NPC archetype profile (roadmap keystone #1). Tested OFF-TREE: every stamp runs on an
+## off-tree NPC (load().new(), so _ready never runs) through npc._apply_profile() directly. This guards the contracts
+## the keystone rests on: a blank profile stamps back the NPC's own defaults (the one deliberate exception is the
+## archetype HP baseline), a profile is stamped onto the NPC (no profile being a strict no-op, so every existing
+## inline-authored scene is unaffected), the full stamp and the additive merge agree on which fields a profile owns,
+## and the profile's loot / carried items / BarkSet reach the systems that consume them.
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
 
 
-func test_npcdata_defaults_match_npc_export_defaults() -> void:
-	# A fresh profile must reproduce npc.gd's own export defaults, so assigning a "blank" profile is a no-op
-	# in effect — otherwise migrating a scene to a profile would silently shift its stats.
+func test_a_blank_profile_stamps_back_every_npc_default() -> void:
+	# The migration contract: pointing an inline-authored NPC at a BLANK profile must not silently retune it, so every
+	# field the stamp writes has to default to what npc.gd defaults to. Driven through the real (full-clobber) stamp
+	# against a second untouched NPC, so a default that drifts on EITHER side fails here.
+	var reference = load(NPC_PATH).new()
+	var n = load(NPC_PATH).new()
 	var d := NpcData.new()
-	assert_eq(d.disposition, Disposition.Kind.HOSTILE,
-		"default disposition HOSTILE — a fresh profile is a plain enemy, matching npc.gd")
-	assert_eq(d.threat_response, 0, "default threat_response 0 == ThreatResponse.FIGHT")
-	assert_almost_eq(d.max_hp, 10.0, 0.0001, "default max_hp 10.0 — NpcData's own authored NPC baseline (an NpcData-spawned NPC stamps this at spawn; Character's bare code default is a separate 4.0)")
-	assert_almost_eq(d.move_speed, 4.0, 0.0001, "default move_speed 4.0 matches npc.gd")
-	assert_almost_eq(d.sight_range, 25.0, 0.0001, "default sight_range 25.0 matches npc.gd")
-	assert_almost_eq(d.friendly_aggro_threshold, 8.0, 0.0001, "default friendly_aggro_threshold 8.0 matches npc.gd")
-	assert_true(d.show_laser, "default show_laser true matches npc.gd")
-	assert_eq(d.weapon_data, null, "no weapon by default (a civilian profile)")
-	assert_eq(d.faction, null, "no faction by default")
-	assert_false(d.sitting, "default sitting false matches npc.gd")
+	n.profile = d
+	n._apply_profile()
+	for f in NPC.PROFILE_STAMPED_FIELDS:
+		if f == &"max_hp":
+			# The one deliberate difference: NpcData authors its own HP baseline (npc_data.gd) while Character's bare
+			# code default is a separate, lower number. So no parity here, but a blank profile's HP must be a live body.
+			assert_gt(n.max_hp, 0.0, "a blank profile must spawn a living NPC, not one already at 0 HP")
+			continue
+		assert_eq(n.get(f), reference.get(f),
+			"a blank profile changed '%s' from the npc.gd default — migrating a scene onto a profile would silently retune it" % f)
+	reference.free()
+	n.free()
 	d = null
 
 
@@ -88,7 +93,7 @@ func test_apply_profile_clobber_overwrites_inline() -> void:
 
 func test_apply_profile_additive_keeps_inline_overrides() -> void:
 	# flag ON: a field the instance overrode inline WINS; a field left at the npc default takes the profile value.
-	# (npc default max_hp is 4.0 and sight_range 25.0 -- see test_npcdata_defaults_match_npc_export_defaults.)
+	# (npc default max_hp is 4.0 and sight_range 25.0; a blank profile's parity is test_a_blank_profile_stamps_back_every_npc_default.)
 	var n = load(NPC_PATH).new()
 	n.max_hp = 99.0  # an inline override (!= the npc default 4.0)
 	# leave sight_range untouched (== the npc default 25.0)
@@ -127,42 +132,132 @@ func test_profile_stamped_fields_all_resolve_on_npc_and_npcdata() -> void:
 	d = null
 
 
-func test_stamp_profile_full_matches_stamped_array_both_ways() -> void:
-	# M7: three lists must stay in lockstep — NpcData exports, _stamp_profile_full's `X = profile.X` assignments, and
-	# PROFILE_STAMPED_FIELDS (which the additive-merge snapshot/restore iterates). The test above pins array -> property;
-	# THIS pins _stamp_profile_full <-> PROFILE_STAMPED_FIELDS by SET-EQUALITY. A field added to NpcData + the stamp body
-	# but forgotten in the array compiles + passes the full-clobber path, yet silently DROPS the inline override on the
-	# additive-merge path (no signal). Both directions catch it.
-	var src := FileAccess.get_file_as_string(NPC_PATH)
-	var start := src.find("func _stamp_profile_full")
-	assert_gt(start, -1, "_stamp_profile_full should exist in npc.gd")
-	var body_end := src.find("\nfunc ", start + 1)
-	var body := src.substr(start, body_end - start) if body_end > start else src.substr(start)
-	var re := RegEx.new()
-	re.compile("(?m)^\\t(\\w+) = profile\\.\\w+")  # every `<field> = profile.<field>` assignment in the stamp body
-	var stamped := {}
-	for m in re.search_all(body):
-		stamped[m.get_string(1)] = true
-	assert_gt(stamped.size(), 50, "sanity: the stamp body should assign ~55 fields (guards against a regex that matched nothing)")
+## The script properties NpcData and the NPC both declare: every field a profile COULD stamp.
+func _shared_profile_props(profile: NpcData, npc_props: Dictionary) -> Array[Dictionary]:
+	var shared: Array[Dictionary] = []
+	for p in profile.get_property_list():
+		if (int(p.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE) != 0 and npc_props.has(String(p.name)):
+			shared.append(p)
+	return shared
+
+
+## A copy that later in-place edits can't reach, so a before/after comparison sees real changes only.
+func _snapshot(v: Variant) -> Variant:
+	if v is Array or v is Dictionary:
+		return v.duplicate()
+	return v
+
+
+## A Resource of the exported class `type_name` (a project script class or an engine class), or null.
+func _resource_of(type_name: String) -> Variant:
+	for g in ProjectSettings.get_global_class_list():
+		if String(g["class"]) == type_name:
+			return load(String(g["path"])).new()
+	if ClassDB.can_instantiate(type_name):
+		return ClassDB.instantiate(type_name)
+	if ClassDB.is_parent_class("PlaceholderTexture2D", type_name):
+		return PlaceholderTexture2D.new()  # an abstract texture slot (popup_positive: Texture)
+	return null
+
+
+## A value of the same type as `v` that is guaranteed to differ from it: the probe the stamp-set tests push through a
+## profile or an inline edit. `prop` is NpcData's property-list entry (its class_name picks the Resource to build).
+func _differing_value(v: Variant, prop: Dictionary) -> Variant:
+	match typeof(v):
+		TYPE_BOOL:
+			return not v
+		TYPE_INT:
+			return 1 if v == 0 else 0  # an enum's first two members (disposition, threat_response)
+		TYPE_FLOAT:
+			return v + 1.25
+		TYPE_STRING:
+			return v + "_probe"
+		TYPE_STRING_NAME:
+			return StringName(String(v) + "_probe")
+		TYPE_COLOR:
+			return Color.WHITE if v != Color.WHITE else Color.BLACK
+		TYPE_VECTOR3:
+			return v + Vector3(1.0, 2.0, 3.0)
+		TYPE_DICTIONARY:
+			return {} if not v.is_empty() else {0: 1.5}
+		TYPE_ARRAY:
+			var out: Array = v.duplicate()  # keeps the element type (item_stacks is Array[ItemStack])
+			if out.is_empty():
+				var element_script = out.get_typed_script()
+				if element_script != null:
+					out.append(element_script.new())
+				else:
+					# An untyped or builtin/engine-class-typed shared array (Array[StringName], Array[Texture2D]): one
+					# converted element still differs from the empty default, instead of a null-call crash in the probe.
+					out.append(type_convert(1, out.get_typed_builtin()) if out.is_typed() else 1)
+			else:
+				out.clear()
+			return out
+		TYPE_NIL:
+			return _resource_of(String(prop.get("class_name", "")))
+		TYPE_OBJECT:
+			return null
+	return v
+
+
+func test_full_stamp_writes_exactly_the_profile_stamped_fields() -> void:
+	# PROFILE_STAMPED_FIELDS is what the additive merge snapshots and restores, so it must be the SAME set the full
+	# stamp writes. Driven, not read: every property NpcData and the NPC share gets a profile value that differs from
+	# the NPC's own, the full stamp runs, and the fields that actually changed must be exactly the listed ones.
+	var n = load(NPC_PATH).new()
+	var d := NpcData.new()
+	var before := {}
+	for p in _shared_profile_props(d, _prop_names(n)):
+		var field := String(p.name)
+		before[field] = _snapshot(n.get(field))
+		d.set(field, _differing_value(n.get(field), p))
+		assert_ne(d.get(field), before[field], "probe setup: the profile's '%s' must differ from the NPC's before stamping" % field)
+	n.profile = d
+	n._apply_profile()
+	var written := {}
+	for field in before:
+		if n.get(field) != before[field]:
+			written[field] = true
 	var listed := {}
 	for f in NPC.PROFILE_STAMPED_FIELDS:
 		listed[String(f)] = true
-	for f in stamped:
-		assert_true(listed.has(f), "_stamp_profile_full stamps '%s' but PROFILE_STAMPED_FIELDS omits it -> the additive merge silently clobbers an inline override" % f)
-	for f in listed:
-		assert_true(stamped.has(f), "PROFILE_STAMPED_FIELDS lists '%s' but _stamp_profile_full doesn't stamp it (stale array entry)" % f)
+	for field in written:
+		assert_true(listed.has(field),
+			"the full stamp writes '%s' but PROFILE_STAMPED_FIELDS omits it -> the additive merge clobbers an inline override of it" % field)
+	for field in listed:
+		assert_true(written.has(field),
+			"PROFILE_STAMPED_FIELDS lists '%s' but the full stamp never writes it -> a profile's '%s' is silently ignored" % [field, field])
+	n.free()
+	d = null
+
+
+func test_additive_merge_keeps_an_inline_override_on_every_shared_field() -> void:
+	# profile_fills_blanks_only ON: whatever an instance edited inline must survive its profile, on EVERY field a
+	# profile could stamp. A field the stamp writes but the merge forgets to snapshot fails here as the bug a designer
+	# would see: a seated townsperson standing back up, a hand-tuned HP reverting to the archetype's.
+	var n = load(NPC_PATH).new()
+	var d := NpcData.new()
+	var inline := {}
+	for p in _shared_profile_props(d, _prop_names(n)):
+		var field := String(p.name)
+		var default_value: Variant = _snapshot(n.get(field))
+		n.set(field, _differing_value(n.get(field), p))
+		inline[field] = _snapshot(n.get(field))
+		assert_ne(inline[field], default_value, "probe setup: the inline edit of '%s' must move it off the npc.gd default" % field)
+		d.set(field, _differing_value(inline[field], p))
+		assert_ne(d.get(field), inline[field], "probe setup: the profile's '%s' must differ from the inline edit" % field)
+	for f in NPC.PROFILE_STAMPED_FIELDS:
+		assert_true(inline.has(String(f)), "probe setup: the stamped field '%s' must be among the inline-edited fields" % f)
+	n.profile = d
+	n.profile_fills_blanks_only = true
+	n._apply_profile()
+	for field in inline:
+		assert_eq(n.get(field), inline[field], "the additive merge overwrote the inline override on '%s' with the profile's value" % field)
+	n.free()
+	d = null
 
 
 # --- BarkSet (per-archetype bark lines carried by NpcData.bark_set) ----------------------------------
-
-func test_barkset_categories_default_empty() -> void:
-	# Empty means "use the NPC's built-in default lines" — a fresh BarkSet overrides nothing.
-	var b := BarkSet.new()
-	assert_eq(b.spot.size(), 0, "BarkSet.spot defaults empty -> the NPC's default contact lines are used")
-	assert_eq(b.death_ally.size(), 0, "BarkSet.death_ally defaults empty")
-	assert_eq(b.greet.size(), 0, "BarkSet.greet defaults empty")
-	b = null
-
 
 func test_bark_pool_prefers_override_else_fallback() -> void:
 	# Per-category resolution (static): a non-empty override wins; an empty override falls back to the default.
@@ -182,40 +277,89 @@ func test_pick_bark_draws_from_the_resolved_pool() -> void:
 	assert_eq(NPC._pick_bark(empty, empty), "", "no lines anywhere -> empty string (safe)")
 
 
-func test_npcdata_can_carry_a_bark_set() -> void:
+func test_a_profile_bark_set_is_what_the_npc_voice_speaks_from() -> void:
+	# NpcData.bark_set reaches the NPC through _build_components, which hands it to the NpcVoice child every bark picks
+	# its line from. Off-tree (no _ready): _build_components is called directly, as tests/test_npc.gd does.
+	var raider_barks := BarkSet.new()
+	var pardon: Array[String] = ["raider pardon line"]
+	raider_barks.pardon = pardon
 	var d := NpcData.new()
-	assert_null(d.bark_set, "NpcData.bark_set defaults null -> the NPC uses its built-in default lines")
-	d.bark_set = BarkSet.new()
-	assert_not_null(d.bark_set, "a profile can carry a BarkSet to override bark lines per archetype")
+	d.bark_set = raider_barks
+	var n = load(NPC_PATH).new()
+	n.profile = d
+	n._build_components()
+	assert_true(n._voice._bark_set == raider_barks, "a profiled NPC's voice speaks from the profile's BarkSet")
+	# A real consumer of the voice's BarkSet: the holster-pardon pool resolves through _voice._bark_set.
+	assert_eq(n._pardon_lines(false), pardon, "the profiled NPC's pardon pool is the archetype's line")
+	n.free()
+	# Control: a profile that carries NO BarkSet leaves the voice on the shipped default lines, never on null.
+	var plain := NpcData.new()
+	var m = load(NPC_PATH).new()
+	m.profile = plain
+	m._build_components()
+	assert_true(m._voice._bark_set == load("res://resources/barks/default_barks.tres"),
+		"a profile without a BarkSet keeps the shared default_barks lines")
+	m.free()
 	d = null
+	plain = null
+	raider_barks = null
 
 
 # --- Authored profile round-trip ---------------------------------------------------------------------
 
+## The property keys an authored .tres sets in its [resource] block, mapped to their raw value text.
+func _authored_resource_keys(path: String) -> Dictionary:
+	var keys := {}
+	var in_resource := false
+	for line in FileAccess.get_file_as_string(path).split("\n"):
+		var trimmed := line.strip_edges()
+		if trimmed.begins_with("["):
+			in_resource = trimmed == "[resource]"
+			continue
+		var eq := trimmed.find(" = ")
+		if in_resource and eq > 0:
+			keys[trimmed.substr(0, eq)] = trimmed.substr(eq + 3)
+	keys.erase("script")
+	return keys
+
+
 func test_authored_default_profile_tres_loads_and_keeps_defaults() -> void:
-	# End-to-end: an authored .tres deserializes as NpcData, its set fields (incl. a referenced faction) load,
-	# and UNSET fields keep their defaults — so a profile changes only what it explicitly authors.
-	var d = load("res://resources/characters/DefaultCharacterRes.tres")
-	assert_not_null(d, "DefaultCharacterRes.tres loads (a copy-able archetype template)")
+	# End-to-end: the copy-able archetype template deserializes as NpcData, every value it AUTHORS arrives (a
+	# referenced faction included), and every stamped field it leaves UNSET keeps the NpcData default, so a profile
+	# changes only what it explicitly authors. The authored set is read from the template's own [resource] block,
+	# so retuning a value never breaks this. A value this line parser can't evaluate on its own (any Ext/SubResource
+	# reference, bare or inside a typed array; a multi-line dictionary) is only checked to have loaded.
+	const TEMPLATE := "res://resources/characters/DefaultCharacterRes.tres"
+	var d = load(TEMPLATE)
 	assert_true(d is NpcData, "DefaultCharacterRes.tres deserializes as an NpcData")
-	assert_eq(d.display_name, "Default", "authored display_name loads from the .tres")
-	assert_almost_eq(d.max_hp, 14.0, 0.0001, "authored max_hp loads")
-	assert_almost_eq(d.move_speed, 4.5, 0.0001, "authored move_speed loads")
-	assert_almost_eq(d.miss_chance, 0.15, 0.0001, "authored miss_chance loads")
-	assert_almost_eq(d.outline_width, 2.0, 0.0001, "authored outline_width loads")
-	assert_not_null(d.faction, "an authored faction reference (townsfolk.tres) loads as a Faction")
-	assert_eq(d.disposition, Disposition.Kind.HOSTILE, "an UNSET field keeps its NpcData default (HOSTILE)")
-	assert_eq(d.weapon_data, null, "unset weapon_data stays null (no weapon authored)")
+	var authored := _authored_resource_keys(TEMPLATE)
+	assert_gt(authored.size(), 0, "sanity: the parser found the template's [resource] block and at least one authored key")
+	var live_props := _prop_names(d)
+	for key: String in authored:
+		assert_true(live_props.has(key),
+			"the template authors '%s' but NpcData no longer declares it (a stale key silently drops on load)" % key)
+		var text: String = authored[key]
+		if text.contains("Resource("):
+			# Checked BEFORE str_to_var, which would try to load a resource id as a res:// path and push engine errors.
+			assert_true(d.get(key) != null, "the authored reference '%s' loads, not null (%s)" % [key, text])
+			continue
+		var parsed: Variant = str_to_var(text)
+		if typeof(parsed) == TYPE_NIL and text != "null":
+			continue  # a multi-line or otherwise unparseable literal: the line parser only saw its first line
+		if typeof(parsed) == TYPE_FLOAT:
+			var loaded: float = d.get(key)
+			var written: float = parsed
+			assert_almost_eq(loaded, written, 0.0001, "the authored '%s' loads as written (%s)" % [key, text])
+		else:
+			assert_eq(d.get(key), parsed, "the authored '%s' loads as written (%s)" % [key, text])
+	var fresh := NpcData.new()
+	for f in NPC.PROFILE_STAMPED_FIELDS:
+		if not authored.has(String(f)):
+			assert_eq(d.get(f), fresh.get(f), "the template leaves '%s' unset, so it keeps the NpcData default" % f)
+	fresh = null
 
 
 # --- Carried inventory (item_stacks: the DETERMINISTIC items the NPC holds, vs the random loot table) ---
-
-func test_npcdata_item_stacks_default_empty() -> void:
-	var d := NpcData.new()
-	assert_eq(d.item_stacks.size(), 0,
-		"a fresh profile carries no extra items by default (just its weapon + ammo)")
-	d = null
-
 
 func test_apply_profile_stamps_item_stacks() -> void:
 	var n = load(NPC_PATH).new()

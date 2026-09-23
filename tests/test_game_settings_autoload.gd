@@ -8,7 +8,8 @@ extends GutTest
 ## already-registered autoload; a second `.new()` would preload the same table for nothing.
 ##
 ## tests/test_autoload_order.gd smoke-checks nine slots are non-null; this file pins the FULL table + the class
-## and path of each slot, plus the one runtime flag (allow_timescale_changes) — read, never mutated.
+## and path of each slot, that every value a .tres authors is the value the registry serves, plus the one runtime
+## flag (allow_timescale_changes) — read, never mutated.
 
 const SCRIPT_PATH := "res://managers/GameSettings.gd"
 const TUNING_DIR := "res://resources/tuning/"
@@ -144,11 +145,51 @@ func test_allow_timescale_changes_is_a_bool_that_ships_true() -> void:
 	fresh.free()
 
 
-func test_spot_values_are_parsed_not_defaults() -> void:
-	# A .tres that failed to parse yields a bare script instance with code defaults; these authored numbers
-	# prove the files were actually read (kept to fields every group is guaranteed to carry).
-	assert_gt(GameSettings.effects.blood_drop_count, 0, "effects.blood_drop_count must be a positive authored count")
-	assert_gt(GameSettings.effects.blood_drop_per_frame, 0, "effects.blood_drop_per_frame must be positive (0 would rain nothing)")
-	assert_gt(GameSettings.hud.minimap_scan_fade_m, 0.0, "hud.minimap_scan_fade_m must be positive (the scanner rim fade width)")
-	assert_gt(GameSettings.player_movement.max_speed, 0.0, "player_movement.max_speed must be positive")
-	assert_gte(GameSettings.audio.global_pitch_spread, 0.0, "audio.global_pitch_spread must be non-negative (vary_pitch treats <= 0 as off)")
+## Field types whose value can be compared across two independent loads of the same .tres. Object-typed fields
+## (Curves, the underwriting rows) are skipped: a cache-bypassing reload mints fresh sub-resources, so they would
+## differ by identity even when the file reached the registry intact.
+const COMPARABLE_TYPES := [TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STRING, TYPE_STRING_NAME, TYPE_VECTOR2,
+	TYPE_VECTOR3, TYPE_COLOR]
+
+## Slots the Settings autoload legitimately overwrites at boot with the player's own Options (FOV and mouse
+## sensitivity onto `camera`, the shake-scale product onto `screen_shake` — managers/Settings.gd), so their live
+## value is SUPPOSED to differ from the file.
+const OPTIONS_OVERLAID_SLOTS := [&"camera", &"screen_shake"]
+
+
+## Most of the tuning .tres files author nothing (their @export defaults ARE the tuning), so "is the value
+## positive" cannot tell a parsed file from a bare script instance. What CAN: every field a .tres actually
+## authors (its parsed value differs from a bare instance of the same script) must read back from the registry
+## as the AUTHORED value. A slot built from code, or pointed at a copy that dropped the designer's edits, serves
+## the script default there and fails by name. The closing count proves at least one shipped file authors
+## something, so the sweep can never pass vacuously.
+func test_authored_tres_values_reach_the_registry_not_code_defaults() -> void:
+	var authored := 0
+	for slot in SLOTS:
+		if slot in OPTIONS_OVERLAID_SLOTS:
+			continue
+		var live: Resource = GameSettings.get(slot)
+		if live == null:
+			continue  # test_every_slot_is_present_and_the_right_class names the missing slot
+		if live.resource_path.is_empty():
+			fail_test("GameSettings.%s was not loaded from its .tres (empty resource_path) — a designer's edits there never reach the game" % slot)
+			continue
+		var parsed := ResourceLoader.load(live.resource_path, "", ResourceLoader.CACHE_MODE_IGNORE)
+		var bare: Resource = (live.get_script() as Script).new()
+		for p in parsed.get_property_list():
+			if int(p.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE == 0 or int(p.usage) & PROPERTY_USAGE_STORAGE == 0:
+				continue
+			if not (int(p.type) in COMPARABLE_TYPES):
+				continue
+			var from_file: Variant = parsed.get(p.name)
+			var script_default: Variant = bare.get(p.name)
+			if from_file == script_default:
+				continue  # not authored in the file: registry and code agree by construction
+			authored += 1
+			assert_eq(live.get(p.name), from_file,
+				"GameSettings.%s.%s must serve the value %s authors (%s), not the script default (%s)" % [
+					slot, p.name, live.resource_path, str(from_file), str(script_default)])
+		bare = null
+		parsed = null
+	assert_gt(authored, 0,
+		"at least one shipped tuning .tres must author a non-default value (NpcAiSettings.tres / SearchSettings.tres do) — zero means the sweep compared nothing")

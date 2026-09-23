@@ -56,14 +56,25 @@ func test_marks_path_is_a_user_file_separate_from_the_scratch_and_the_saves() ->
 	var path := String(PlayerActions.MARKS_PATH)
 	assert_true(path.begins_with("user://"), "bookmarks live under user:// (never a project file), got %s" % path)
 	assert_ne(path, SCRATCH, "the scratch path must never be the real one")
-	assert_string_contains(path, "debug_marks")
 	assert_false(path.contains("gamestate") or path.contains("save"),
 		"the marks file must never collide with a save path (the Saves tab / recovery ladder must not see it): %s" % path)
 
 
-func test_value_keys_are_the_documented_four() -> void:
-	var keys: PackedStringArray = PlayerActions.MARKS_VALUE_KEYS
-	assert_eq(keys, PackedStringArray(["x", "y", "z", "yaw"]), "the on-disk mark shape is {x, y, z, yaw}")
+## The file is documented as HAND-EDITABLE: a developer types `spot={"x": 1, "y": 2, "z": 3, "yaw": 0.5}` under a
+## level section. So a row written by hand in exactly that {x, y, z, yaw} shape — NOT through marks_write, and with
+## a bare int where a float is expected, as a person would type it — must read back as a usable mark.
+func test_a_hand_written_mark_in_the_documented_shape_reads_back() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value(LEVEL_A, "door", {"x": 1, "y": 2.5, "z": -3, "yaw": 0.5})
+	var back := _round_trip(cfg)
+	var here: Dictionary = PlayerActions.marks_read(back, LEVEL_A)
+	assert_true(here.has("door"), "a hand-typed {x, y, z, yaw} row must be read as a mark — `goto door` would say it does not exist")
+	if here.has("door"):
+		var m: Dictionary = here["door"]
+		assert_eq(m[&"pos"], Vector3(1.0, 2.5, -3.0), "the hand-typed x/y/z (ints included) become the warp position")
+		assert_eq(float(m[&"yaw"]), 0.5, "the hand-typed yaw becomes the warp facing")
+	back = null
+	cfg = null
 
 
 # --- mark_key ---------------------------------------------------------------------------------------------
@@ -112,7 +123,7 @@ func test_on_disk_shape_is_a_dictionary_of_four_floats_under_the_level_section()
 	var raw = back.get_value(LEVEL_A, "spot")
 	assert_true(raw is Dictionary, "the value is a Dictionary")
 	var d: Dictionary = raw
-	for k in PlayerActions.MARKS_VALUE_KEYS:
+	for k in ["x", "y", "z", "yaw"]:  # the documented hand-edit shape, spelled out (not read back from the const)
 		assert_true(d.has(k), "value carries \"%s\"" % k)
 	assert_eq(d.size(), 4, "and nothing else")
 	assert_eq(float(d["x"]), 1.0, "x")
@@ -188,19 +199,26 @@ func test_erasing_the_last_mark_drops_the_level_section() -> void:
 
 # --- levels listing ---------------------------------------------------------------------------------------
 
+## The levels are written in an order that is NEITHER sorted NOR reverse-sorted (TestLevel, alive, SampleWasteland),
+## so the file's own section order cannot pass for the sort: only a real sort yields Sample < Test < alive
+## (String order is by code point, so upper-case 'S' and 'T' come before lower-case 'a').
 func test_levels_lists_every_level_with_marks_sorted() -> void:
+	var level_c := "res://resources/levels/SampleWasteland.tres"
 	var cfg := ConfigFile.new()
 	assert_true(PlayerActions.marks_levels(cfg).is_empty(), "empty file -> no levels")
 	PlayerActions.marks_write(cfg, LEVEL_B, "b1", Vector3.ZERO, 0.0)
 	PlayerActions.marks_write(cfg, LEVEL_A, "a1", Vector3.ZERO, 0.0)
 	PlayerActions.marks_write(cfg, LEVEL_A, "a2", Vector3.ZERO, 0.0)
+	PlayerActions.marks_write(cfg, level_c, "c1", Vector3.ZERO, 0.0)
 	var back := _round_trip(cfg)
+	assert_eq(back.get_sections(), PackedStringArray([LEVEL_B, LEVEL_A, level_c]),
+		"fixture sanity: the file keeps the unsorted write order, so the listing below can only be sorted by marks_levels")
 	var levels: PackedStringArray = PlayerActions.marks_levels(back)
-	assert_eq(levels.size(), 2, "two levels have marks")
-	assert_eq(levels[0], LEVEL_B, "sorted (String order: 'T' < 'a')")
-	assert_eq(levels[1], LEVEL_A, "sorted")
+	assert_eq(levels, PackedStringArray([level_c, LEVEL_B, LEVEL_A]),
+		"`marks` lists the levels in sorted order, whatever order they were first marked in")
 	assert_eq(PlayerActions.marks_read(back, LEVEL_A).size(), 2, "level A's marks are its own")
 	assert_eq(PlayerActions.marks_read(back, LEVEL_B).size(), 1, "level B's marks are its own")
+	assert_eq(PlayerActions.marks_read(back, level_c).size(), 1, "level C's marks are its own")
 	back = null
 	cfg = null
 
@@ -211,5 +229,6 @@ func test_null_configfile_is_tolerated_by_every_helper() -> void:
 	assert_eq(PlayerActions.marks_read(null, LEVEL_A).size(), 0, "read")
 	assert_false(PlayerActions.marks_erase(null, LEVEL_A, "x"), "erase")
 	assert_true(PlayerActions.marks_levels(null).is_empty(), "levels")
-	PlayerActions.marks_write(null, LEVEL_A, "x", Vector3.ZERO, 0.0)  # must not throw
-	pass_test("marks_write on a null ConfigFile is a no-op")
+	# marks_write returns nothing to assert on: a null dereference inside it is a script error, which GUT's error
+	# tracker fails this test on — so the call itself is the check.
+	PlayerActions.marks_write(null, LEVEL_A, "x", Vector3.ZERO, 0.0)

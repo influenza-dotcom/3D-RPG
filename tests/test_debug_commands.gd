@@ -2,10 +2,12 @@ extends GutTest
 
 ## The in-game debug tools' PURE core (DebugCommands): registry hygiene, the line parser, validation,
 ## completion and help rendering — plus the registry<->actions dispatch-parity pin. The IMPURE halves
-## (DebugActionsPlayer/DebugActionsWorld run(), the console/menu UIs) are deliberately NOT driven here:
+## (DebugActionsPlayer/DebugActionsWorld run(), the console/menu UIs) are deliberately NOT driven through run():
 ## their commands write real autoload state (GameState.account, WorldClock, saves), so exercising them
-## blind under GUT would cheat the test profile. Construct checks confirm they compile; behaviour is
-## play-verified.
+## blind under GUT would cheat the test profile. What IS driven here is the off-tree-safe glue the UIs share:
+## the player freeze/thaw pair, noclip's flight gate over a hand-built (never _ready) Player, and the menu's
+## meta-row forwarding to a duck-typed console. The console itself is driven in test_debug_console_exec.gd and
+## the inspector in test_debug_ai_seams.gd.
 
 const Commands := preload("res://scripts/components/debug_commands.gd")
 
@@ -13,10 +15,28 @@ const Commands := preload("res://scripts/components/debug_commands.gd")
 # (the cascade debug_overlay.gd:9-11 documents).
 const PlayerActions := preload("res://scripts/components/debug_actions_player.gd")
 const WorldActions := preload("res://scripts/components/debug_actions_world.gd")
-const ConsoleScript := preload("res://scripts/components/debug_console.gd")
 const MenuScript := preload("res://scripts/components/debug_menu.gd")
 const NoclipScript := preload("res://scripts/components/debug_noclip.gd")
-const InspectorScript := preload("res://scripts/components/debug_inspector.gd")
+const PLAYER_PATH := "res://scripts/player/player.gd"
+
+
+## A console as the menu sees it: found through console_path by `echo`, answering forwarded meta rows.
+class MetaConsoleStub extends Node:
+	var calls: Array = []
+	func echo(_lines: PackedStringArray) -> void:
+		pass
+	func run_meta(cmd: String, args: PackedStringArray) -> PackedStringArray:
+		calls.append([cmd, args])
+		return PackedStringArray(["stub answered " + cmd])
+
+
+## An older console with no run_meta: the menu must fall back to ONE typed line through run_line.
+class LineConsoleStub extends Node:
+	var lines := PackedStringArray()
+	func echo(_lines: PackedStringArray) -> void:
+		pass
+	func run_line(line: String) -> void:
+		lines.append(line)
 
 
 # --- registry hygiene ---------------------------------------------------------------------------------------
@@ -54,7 +74,7 @@ func test_categories_are_ordered_and_complete() -> void:
 	var cats := Commands.categories()
 	for row in Commands.COMMANDS:
 		assert_true(cats.has(String(row["category"])), "categories() must surface every row's category")
-	# The menu builds pages in this order; Meta last keeps the cheats in front.
+	# The menu builds pages in this order and opens on the first one, so the player cheats lead.
 	assert_eq(String(cats[0]), "Player", "Player leads the page order")
 
 
@@ -68,25 +88,47 @@ func test_find_is_case_and_padding_tolerant() -> void:
 
 ## ⭐Every &"player"/&"world" row must have a case in its module's `match cmd:` or the command is silently dead
 ## in BOTH front-ends. run() can't be probed live here (commands write real autoload state), so this pins the
-## dispatch by source text: a match arm is exactly the quoted command name. If this fails after a rename, the
-## registry row and the module case drifted — fix the module, not this test.
+## dispatch by source text: a match arm is a `"name":` (or `"a", "b":`) pattern line inside run()'s body — NOT any
+## quoted mention of the name, which a help string or an error message elsewhere in the module would satisfy.
+## If this fails after a rename, the registry row and the module case drifted — fix the module, not this test.
+func _run_arms(src: String, module: String) -> Dictionary:
+	var start := src.find("static func run(")
+	assert_gt(start, -1, "%s defines static func run(" % module)
+	if start < 0:
+		return {}
+	var end := src.find("\nstatic func ", start + 1)
+	var body := src.substr(start, (end - start) if end > 0 else -1)
+	var line_rx := RegEx.new()
+	line_rx.compile("\\n\\t\\t(\"[a-z0-9_]+\"(?:\\s*,\\s*\"[a-z0-9_]+\")*)\\s*:")
+	var word_rx := RegEx.new()
+	word_rx.compile("\"([a-z0-9_]+)\"")
+	var out := {}
+	for m in line_rx.search_all(body):
+		for w in word_rx.search_all(m.get_string(1)):
+			out[w.get_string(1)] = true
+	return out
+
+
 func test_every_registry_row_has_a_dispatch_case() -> void:
 	var player_src := FileAccess.get_file_as_string("res://scripts/components/debug_actions_player.gd")
 	var world_src := FileAccess.get_file_as_string("res://scripts/components/debug_actions_world.gd")
 	assert_false(player_src.is_empty(), "player actions module must be readable")
 	assert_false(world_src.is_empty(), "world actions module must be readable")
+	var player_arms := _run_arms(player_src, "debug_actions_player.gd")
+	var world_arms := _run_arms(world_src, "debug_actions_world.gd")
+	assert_gt(player_arms.size(), 10, "the arm scan finds run()'s match arms in the player module (a scan that finds none proves nothing)")
+	assert_gt(world_arms.size(), 10, "the arm scan finds run()'s match arms in the world module")
 	for row in Commands.COMMANDS:
 		var n := String(row["name"])
-		var quoted := "\"%s\"" % n
 		match row["mod"]:
 			&"player":
-				assert_true(player_src.contains(quoted),
-					"'%s' (mod player) has no match arm in debug_actions_player.gd — the command is dead" % n)
+				assert_true(player_arms.has(n),
+					"'%s' (mod player) has no match arm in debug_actions_player.gd run() — the command is dead" % n)
 			&"world":
-				assert_true(world_src.contains(quoted),
-					"'%s' (mod world) has no match arm in debug_actions_world.gd — the command is dead" % n)
+				assert_true(world_arms.has(n),
+					"'%s' (mod world) has no match arm in debug_actions_world.gd run() — the command is dead" % n)
 			&"meta":
-				pass  # handled inside the console; its construct test below covers compilation
+				pass  # handled inside the console; test_debug_console_exec.gd pins its _run_meta arms
 
 
 func test_action_modules_expose_the_contract_surface() -> void:
@@ -298,31 +340,136 @@ func test_help_for_flags_danger() -> void:
 	assert_eq(Commands.help_for({}).size(), 0, "help_for an empty row is empty, never a crash")
 
 
-# --- construct checks (compilation proof for the impure halves) ----------------------------------------------
+# --- off-tree glue the impure halves share ---------------------------------------------------------------------
 
-func test_debug_ui_components_construct_off_tree() -> void:
-	# .new() without add_child never runs _ready, so no UI is built and no autoload is touched — this is purely
-	# "the file parses and the class constructs", the same bar test_debug_overlay.gd sets.
-	var console = (ConsoleScript as GDScript).new()
-	assert_not_null(console, "DebugConsole constructs")
-	console.free()
-	var menu = (MenuScript as GDScript).new()
-	assert_not_null(menu, "DebugMenu constructs")
-	menu.free()
-	var noclip = (NoclipScript as GDScript).new()
-	assert_not_null(noclip, "DebugNoclip constructs")
-	noclip.free()
-	var inspector = (InspectorScript as GDScript).new()
-	assert_not_null(inspector, "DebugInspector constructs")
-	inspector.free()
+## Both UIs freeze the player on open (or every click on a panel button also pulls the trigger) and thaw it on close
+## through this pair. Driven over a hand-built Player (never _ready, never in the tree), whose physics bit and meta
+## are plain state off-tree.
+func test_suspend_and_restore_player_round_trip_and_thaw_a_body_revived_under_the_console() -> void:
+	var p = load(PLAYER_PATH).new()
+	p.hp = p.max_hp
+	p.set_physics_process(true)
+	var snap: Dictionary = PlayerActions.suspend_player(p)
+	assert_true(bool(snap.get(&"valid", false)), "a live Player is suspended")
+	assert_false(p.is_physics_processing(), "suspend switches the body's own step off, so panel clicks cannot fire the weapon")
+	assert_true(p.has_meta(PlayerActions.SUSPEND_META), "and marks the body as held by a debug surface")
+	PlayerActions.restore_player(p, snap)
+	assert_true(p.is_physics_processing(), "restore hands the running step back — closing the console never leaves you frozen")
+	assert_false(p.has_meta(PlayerActions.SUSPEND_META), "and clears the held mark")
 
+	p.set_physics_process(false)  # frozen by something else (a cutscene lock) while alive
+	PlayerActions.restore_player(p, PlayerActions.suspend_player(p))
+	assert_false(p.is_physics_processing(), "a body already frozen while ALIVE is handed back frozen, exactly as found")
 
-func test_restore_player_tolerates_junk() -> void:
-	# The one shared helper safe to drive off-tree: restore with no player / an empty snapshot must be a no-op,
-	# because _exit_tree teardown can run after the player is already freed.
-	PlayerActions.restore_player(null, {})
-	PlayerActions.restore_player(null, {&"valid": true})
+	p.hp = 0.0  # the console opened over a corpse: die() had the step off
+	var corpse: Dictionary = PlayerActions.suspend_player(p)
+	p.hp = p.max_hp  # `revive` ran while the console was open
+	PlayerActions.restore_player(p, corpse)
+	assert_true(p.is_physics_processing(),
+		"a corpse revived under the console is handed back RUNNING — writing the corpse's frozen snapshot back would strand a living player")
+	p.hp = 0.0
+	p.set_physics_process(false)
+	var still_dead: Dictionary = PlayerActions.suspend_player(p)
+	PlayerActions.restore_player(p, still_dead)
+	assert_false(p.is_physics_processing(), "control: a corpse that is STILL dead at close stays frozen (only a revive thaws)")
+	p.hp = p.max_hp
+
+	# Junk snapshots and non-players: teardown can run after the player is gone or with nothing captured.
+	p.set_physics_process(false)
+	p.set_meta(PlayerActions.SUSPEND_META, true)
+	PlayerActions.restore_player(p, {})
+	assert_false(p.is_physics_processing(), "an empty snapshot writes nothing back, even onto a real Player")
+	assert_true(p.has_meta(PlayerActions.SUSPEND_META), "and leaves the held mark for the surface that owns it")
+	p.remove_meta(PlayerActions.SUSPEND_META)
+	PlayerActions.restore_player(null, {&"valid": true, &"physics": true})  # must not error (GUT fails on engine errors)
 	var not_a_player := Node.new()
+	assert_false(bool(PlayerActions.suspend_player(not_a_player).get(&"valid", true)), "a node that is not a Player is never suspended")
+	assert_false(not_a_player.has_meta(PlayerActions.SUSPEND_META), "and is never marked")
 	PlayerActions.restore_player(not_a_player, {&"valid": true, &"physics": true})
+	assert_false(not_a_player.is_physics_processing(), "restore never writes a snapshot onto a node that is not a Player")
 	not_a_player.free()
-	assert_true(true, "restore_player is null/junk-safe on every teardown path")
+	p.free()
+
+
+## Noclip flies the REAL body by switching its physics step off. Off-tree nothing arms it (the release-build state:
+## _ready never ran); armed, it must fly only a live player, hand back exactly the step it found, and never
+## resurrect a body that died mid-flight.
+func test_noclip_flies_only_a_live_player_once_armed_and_hands_the_step_back_as_found() -> void:
+	var host := Node.new()
+	var p = load(PLAYER_PATH).new()
+	p.name = "Body"
+	host.add_child(p)
+	var noclip = (NoclipScript as GDScript).new()
+	host.add_child(noclip)
+	noclip.player_path = NodePath("../Body")
+	p.hp = p.max_hp
+	p.set_physics_process(true)
+
+	assert_false(noclip.set_enabled(true), "an unarmed noclip (release build / never readied) refuses to fly")
+	assert_false(noclip.is_enabled(), "and reports not flying")
+	assert_true(p.is_physics_processing(), "and never touched the body")
+
+	noclip.set(&"_armed", true)  # what _ready does in a debug build
+	p.set(&"_continuous_fall_time", 3.5)  # banked mid-fall when noclip went on
+	assert_true(noclip.set_enabled(true), "armed with a live player, flight starts")
+	assert_true(noclip.is_enabled(), "and reports flying")
+	assert_false(p.is_physics_processing(), "flying switches the body's own step off (no gravity, no move_and_slide)")
+	assert_almost_eq(float(p.get(&"_continuous_fall_time")), 0.0, 0.0001, "a flight hands back a fresh fall budget, never a part-spent one")
+	assert_false(noclip.set_enabled(false), "switching off reports not flying")
+	assert_true(p.is_physics_processing(), "and hands the running step back")
+	assert_gt(int(p.get(&"_ground_snap_frames_left")), 0, "switching off arms the ground snap so a flight ends in a landing")
+
+	p.set_physics_process(false)  # already frozen (e.g. the console is open) when flight starts
+	assert_true(noclip.set_enabled(true), "a frozen but live body can still be flown")
+	noclip.set_enabled(false)
+	assert_false(p.is_physics_processing(), "stopping restores the frozen step it found instead of thawing it")
+
+	p.set_physics_process(true)
+	assert_true(noclip.set_enabled(true), "flying again")
+	p.hp = 0.0  # shot while flying
+	noclip.set_enabled(false)
+	assert_false(p.is_physics_processing(), "a body killed mid-flight is NOT handed its step back — die()'s cinematic owns it")
+
+	p.set_physics_process(true)
+	assert_false(noclip.set_enabled(true), "a corpse is never flown")
+	assert_false(noclip.is_enabled(), "and the refusal reports not flying")
+	assert_true(p.is_physics_processing(), "and leaves the corpse's step bit untouched")
+	host.free()
+
+
+## `exec` and `bind` need the console's exec queue / key table, so the menu forwards them to a duck-typed console
+## and paints what comes back. Driven off-tree: the console is wired through console_path to a sibling stub.
+func test_menu_forwards_console_only_meta_rows_and_says_so_when_there_is_no_console() -> void:
+	var host := Node.new()
+	var menu = (MenuScript as GDScript).new()
+	host.add_child(menu)
+
+	var help: PackedStringArray = menu.call(&"_run_meta", "help", PackedStringArray())
+	assert_eq(help, Commands.help_lines(), "`help` is answered by the menu itself — it needs no console")
+	var none: PackedStringArray = menu.call(&"_run_meta", "exec", PackedStringArray(["repro.cfg"]))
+	assert_eq(none.size(), 1, "with no console, exec answers one line: %s" % [none])
+	assert_true(none[0].begins_with("exec:") and none[0].contains("DebugConsole"),
+		"and it names the missing console instead of silently doing nothing: %s" % [none])
+
+	var console := MetaConsoleStub.new()
+	console.name = "Console"
+	host.add_child(console)
+	menu.set(&"console_path", NodePath("../Console"))
+	var answered: PackedStringArray = menu.call(&"_run_meta", "bind", PackedStringArray(["F6", "god; noclip on"]))
+	assert_eq(answered, PackedStringArray(["stub answered bind"]), "the console's own lines come back to be painted on the menu strip")
+	assert_eq(console.calls.size(), 1, "the row is forwarded exactly once")
+	if console.calls.size() == 1:
+		assert_eq(String(console.calls[0][0]), "bind", "as the same command")
+		assert_eq(console.calls[0][1], PackedStringArray(["F6", "god; noclip on"]), "with the widget argv untouched (no re-tokenising)")
+
+	var line_console := LineConsoleStub.new()
+	line_console.name = "OldConsole"
+	host.add_child(line_console)
+	menu.set(&"console_path", NodePath("../OldConsole"))
+	var fallback: PackedStringArray = menu.call(&"_run_meta", "bind", PackedStringArray(["F6", "god; noclip on"]))
+	assert_eq(line_console.lines.size(), 1, "a console with no run_meta gets ONE typed line")
+	if line_console.lines.size() == 1:
+		assert_eq(Commands.tokenize(line_console.lines[0]), PackedStringArray(["bind", "F6", "god; noclip on"]),
+			"which the console's tokenizer splits back into the argv the widgets produced: %s" % line_console.lines[0])
+	assert_eq(fallback.size(), 1, "and the menu says where the result went: %s" % [fallback])
+	host.free()

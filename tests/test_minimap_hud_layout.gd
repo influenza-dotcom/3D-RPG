@@ -25,15 +25,26 @@ func test_quest_tracker_top_returns_to_the_bare_inset_when_off() -> void:
 			"map OFF returns the tracker to the historical literal 8.0 — no hole where the map used to be")
 
 func test_quest_tracker_top_tracks_the_live_knobs() -> void:
-	# Derived, not hardcoded: a designer nudging the box size or inset must move the tracker with it, or the
-	# two drift into each other with no error.
+	# Derived, not hardcoded: a designer nudging the box size, inset or gap must move the tracker by exactly that
+	# much, or the two drift into each other with no error. Each knob is nudged alone against the same baseline.
+	var base := UI.quest_tracker_top_for(true, 8.0, 108.0, 6.0, 8.0)
+	assert_almost_eq(UI.quest_tracker_top_for(true, 8.0, 118.0, 6.0, 8.0) - base, 10.0, 0.0001,
+			"a map 10 px taller pushes the tracker down 10 px")
+	assert_almost_eq(UI.quest_tracker_top_for(true, 12.0, 108.0, 6.0, 8.0) - base, 4.0, 0.0001,
+			"a map inset 4 px further down pushes the tracker down 4 px")
+	assert_almost_eq(UI.quest_tracker_top_for(true, 8.0, 108.0, 9.0, 8.0) - base, 3.0, 0.0001,
+			"a 3 px wider map/tracker gap pushes the tracker down 3 px")
+	assert_almost_eq(UI.quest_tracker_top_for(true, 8.0, 108.0, 6.0, 30.0), base, 0.0001,
+			"the map-OFF bare top plays no part while the map is up")
+	assert_almost_eq(UI.quest_tracker_top_for(false, 8.0, 108.0, 6.0, 30.0), 30.0, 0.0001,
+			"...and it is the whole answer once the map is off")
+	# On the shipped knobs: turning the map on must move the tracker DOWN, never up.
 	var h := HudSettings.new()
-	var want: float = h.minimap_inset.y + h.minimap_size.y + h.minimap_tracker_gap
-	assert_almost_eq(UI.quest_tracker_top_for(true, h.minimap_inset.y, h.minimap_size.y,
-			h.minimap_tracker_gap, h.minimap_tracker_bare_top), want, 0.0001,
-			"the shipped knobs compose to the shipped tracker top")
-	assert_gt(want, h.minimap_tracker_bare_top,
-			"the map-on top must be BELOW the map-off top, or the reflow is backwards")
+	var map_on := UI.quest_tracker_top_for(true, h.minimap_inset.y, h.minimap_size.y,
+			h.minimap_tracker_gap, h.minimap_tracker_bare_top)
+	var map_off := UI.quest_tracker_top_for(false, h.minimap_inset.y, h.minimap_size.y,
+			h.minimap_tracker_gap, h.minimap_tracker_bare_top)
+	assert_gt(map_on, map_off, "the map-on top must be BELOW the map-off top, or the reflow is backwards")
 	h = null
 
 

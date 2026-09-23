@@ -1,12 +1,53 @@
 extends GutTest
 
-## Wave 1 (resource extraction): the NPC's default bark lines now live in resources/barks/default_barks.tres (the
-## authored default an unprofiled NPC resolves to), and BarkSet gained music-reaction categories. Both ship
-## BYTE-IDENTICAL to the npc.gd line consts — the consts stay as the terminal fallback + the test anchor.
+## The NPC's default bark lines live in resources/barks/default_barks.tres: the BarkSet an NPC with no profile BarkSet
+## (NpcData.bark_set) speaks from, so filling a category there gives every such NPC that line. A profile's own BarkSet
+## replaces it, and each EMPTY category of whichever set is in charge falls back to the npc.gd *_LINES const. Since the
+## AI-text scrub every const ships EMPTY, so authored bark text lives only in BarkSet .tres files.
+## Covers: the default file loads and is what a profile-less NPC resolves; a fresh BarkSet overrides no category; the
+## pardon pool's fleeing-variant fallback and the music pool's per-tier routing (npc.gd _pardon_lines / _music_lines,
+## tested nowhere else); and a pardon with no authored line staying silent (NpcVoice.bark_pardon). The empty-category
+## fallback onto an npc.gd const is not re-checked through _pardon_lines / _music_lines: every const ships empty, so
+## that fallback is indistinguishable from the override there; _bark_pool's fallback is driven with a non-empty
+## default in test_a_fresh_bark_set_overrides_no_category.
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
 const MQ := preload("res://scripts/components/music_quality.gd")
 const DEFAULT_BARKS := "res://resources/barks/default_barks.tres"
+
+## The shared (cached) default_barks instance the authoring test writes into, and the arrays it replaced, so
+## after_each puts them back: every NpcVoice in this process speaks from that one resource.
+var _shared_defaults: BarkSet = null
+var _saved_pardon: Array[String] = []
+var _saved_music_great: Array[String] = []
+
+
+## Stand-in for the NPC members NpcVoice.bark_pardon reads, recording what it says and every bubble it clears.
+class PardonHost extends Node3D:
+	var _dead := false
+	var hp := 10.0
+	var player: Node3D = null
+	var emitted: Array = []
+	var cleared := 0
+
+	func _find_talkable():
+		return null
+
+	func _real_player():
+		return player
+
+	func _clear_bark_bubble() -> void:
+		cleared += 1
+
+	func _emit_bark(line: String, _voice) -> void:
+		emitted.append(line)
+
+
+func after_each() -> void:
+	if _shared_defaults != null:
+		_shared_defaults.pardon = _saved_pardon
+		_shared_defaults.music_great = _saved_music_great
+		_shared_defaults = null
 
 
 func test_default_barks_loads_as_a_bark_set() -> void:
@@ -14,53 +55,50 @@ func test_default_barks_loads_as_a_bark_set() -> void:
 	assert_not_null(b, "default_barks.tres loads as a BarkSet")
 
 
-func test_default_barks_match_the_npc_consts() -> void:
-	# Parity: the authored default ships EXACTLY the built-in lines, so an unprofiled NPC is byte-identical.
-	var b := load(DEFAULT_BARKS) as BarkSet
-	if b == null:
+func test_lines_authored_in_default_barks_reach_an_npc_with_no_profile() -> void:
+	# The supported route for shared barks (REMEDIATION_PLAN "Do not fill the empty bark arrays"): author a category in
+	# default_barks.tres and every NPC without its own BarkSet says it. Authored here on the loaded, cached instance
+	# (the one NpcVoice preloads) and restored in after_each.
+	_shared_defaults = load(DEFAULT_BARKS) as BarkSet
+	if _shared_defaults == null:
+		fail_test("default_barks.tres must load as a BarkSet")
 		return
-	assert_eq(b.spot, NPC.BARK_LINES, "default_barks.spot == BARK_LINES (the detection pool)")
-	assert_eq(b.hurt, NPC.HURT_LINES, "default_barks.hurt == HURT_LINES")
-	assert_eq(b.flee, NPC.FLEE_LINES, "default_barks.flee == FLEE_LINES")
-	assert_eq(b.check_body, NPC.CHECK_BODY_LINES, "default_barks.check_body == CHECK_BODY_LINES")
-	assert_eq(b.greet, NPC.GREET_LINES, "default_barks.greet == GREET_LINES")
-	assert_eq(b.aggro, NPC.AGGRO_LINES, "default_barks.aggro == AGGRO_LINES")
-	assert_eq(b.pardon, NPC.PARDON_LINES, "default_barks.pardon == PARDON_LINES (the holster pardon)")
-	assert_eq(b.pardon_fleeing, NPC.PARDON_FLEEING_LINES,
-		"default_barks.pardon_fleeing == PARDON_FLEEING_LINES (pardoned mid-run)")
-	assert_eq(b.music_great, NPC.MUSIC_GREAT_LINES, "default_barks.music_great == MUSIC_GREAT_LINES")
-
-
-func test_npc_voice_defaults_to_the_authored_default() -> void:
-	# An unprofiled NPC's NpcVoice resolves its bark_set to default_barks (not an empty BarkSet), so the detection
-	# pool is the authored default — still byte-identical to BARK_LINES.
-	var v := NpcVoice.new()
-	assert_eq(v._bark_set.spot, NPC.BARK_LINES, "an unprofiled NpcVoice resolves spot to the authored default (== BARK_LINES)")
-	v.free()
-
-
-func test_bark_set_music_fields_default_empty() -> void:
-	# A fresh BarkSet's music categories are empty -> each inherits the NPC's MUSIC_*_LINES default (the
-	# inherit-or-override rule), so adding a profile's BarkSet without music lines changes nothing.
-	var b := BarkSet.new()
-	assert_eq(b.music_awful.size(), 0, "BarkSet.music_awful defaults empty -> inherits MUSIC_AWFUL_LINES")
-	assert_eq(b.music_great.size(), 0, "BarkSet.music_great defaults empty")
-	b = null
-
-
-func test_pardon_lines_layers_override_over_default() -> void:
-	# The ordinary category behaves like every other: BarkSet.pardon overrides PARDON_LINES when filled.
+	_saved_pardon = _shared_defaults.pardon
+	_saved_music_great = _shared_defaults.music_great
+	var pardon_lines: Array[String] = ["Fine. Walk away."]
+	var great_lines: Array[String] = ["Now THAT is a song."]
+	_shared_defaults.pardon = pardon_lines
+	_shared_defaults.music_great = great_lines
 	var n = load(NPC_PATH).new()
-	var v := NpcVoice.new()
+	var v := NpcVoice.new()  # as NPC._build_components leaves it when the NPC has no NpcData.bark_set
 	n._voice = v
-	v._bark_set = BarkSet.new()  # empty override -> the consts
-	assert_eq(n._pardon_lines(false), NPC.PARDON_LINES,
-		"an empty pardon override -> the PARDON_LINES default")
-	var calm: Array[String] = ["Alright... easy, now."]
-	v._bark_set.pardon = calm
-	assert_eq(n._pardon_lines(false), calm, "a filled pardon override wins over the default")
+	assert_eq(n._pardon_lines(false), pardon_lines,
+		"a pardon line authored in default_barks.tres must reach an NPC that has no profile BarkSet")
+	assert_eq(n._pardon_lines(true), pardon_lines,
+		"...and still cover that NPC when the pardon catches it mid-run (its fleeing variant is unauthored)")
+	assert_eq(n._music_lines(MQ.Tier.GREAT), great_lines,
+		"a music comment authored in default_barks.tres must reach an NPC that has no profile BarkSet")
+	n._voice = null
 	v.free()
 	n.free()
+
+
+func test_a_fresh_bark_set_overrides_no_category() -> void:
+	# The inherit-or-override rule: an EMPTY category means "use the NPC's default lines", so giving an archetype a new
+	# BarkSet profile without filling a category must leave that category's default in charge.
+	var fresh := BarkSet.new()
+	var npc_default: Array[String] = ["the NPC's own default line"]
+	var checked: Array[String] = []
+	for p in fresh.get_property_list():
+		if (int(p.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE) == 0 or int(p.type) != TYPE_ARRAY:
+			continue
+		var category: Array[String] = fresh.get(p.name)
+		assert_eq(NPC._bark_pool(npc_default, category), npc_default,
+			"a fresh BarkSet must not override '%s': an archetype given a profile keeps that category's default lines" % p.name)
+		checked.append(String(p.name))
+	for expected in ["spot", "check_body", "pardon", "pardon_fleeing", "music_awful", "music_meh", "music_good", "music_great"]:
+		assert_has(checked, expected, "the BarkSet category '%s' must be among the categories checked" % expected)
+	fresh = null
 
 
 func test_pardon_fleeing_overrides_the_standing_line_but_falls_back_to_it() -> void:
@@ -86,26 +124,73 @@ func test_pardon_fleeing_overrides_the_standing_line_but_falls_back_to_it() -> v
 	n.free()
 
 
-func test_pardon_categories_default_empty() -> void:
-	# Speech ships UNAUTHORED: both new pools are empty by default, so an unprofiled NPC stays SILENT on a pardon
-	# until a designer fills a BarkSet (_emit_bark drops an empty line, and bark_pardon early-returns).
-	var b := BarkSet.new()
-	assert_eq(b.pardon.size(), 0, "BarkSet.pardon defaults empty -> inherits PARDON_LINES")
-	assert_eq(b.pardon_fleeing.size(), 0, "BarkSet.pardon_fleeing defaults empty -> falls back to pardon")
-	assert_eq(NPC.PARDON_LINES.size(), 0, "the PARDON_LINES const ships empty (unauthored speech is silent)")
-	assert_eq(NPC.PARDON_FLEEING_LINES.size(), 0, "...and so does PARDON_FLEEING_LINES")
-	b = null
+func test_pardon_consts_ship_unauthored() -> void:
+	# SHIP DECISION (the AI-text scrub, see REMEDIATION_PLAN "Do not fill the empty bark arrays"): bark text is authored
+	# content that belongs in a BarkSet .tres (pardon / pardon_fleeing), never in the npc.gd consts.
+	assert_eq(NPC.PARDON_LINES.size(), 0,
+		"PARDON_LINES ships EMPTY: a pardoned NPC says nothing until a designer authors BarkSet.pardon")
+	assert_eq(NPC.PARDON_FLEEING_LINES.size(), 0,
+		"PARDON_FLEEING_LINES ships EMPTY too: the runner's variant is authored in BarkSet.pardon_fleeing")
 
 
-func test_music_lines_layers_override_over_default() -> void:
-	# npc._music_lines layers _voice._bark_set.music_* over the MUSIC_*_LINES consts (override-or-default).
+func test_a_pardon_with_no_authored_line_stays_silent() -> void:
+	var none: Array[String] = []
+	var quiet := _pardon_host()
+	_pardon_voice(quiet).bark_pardon(none)
+	assert_eq(quiet.emitted, [], "a pardon with no authored line (the shipped default) must say nothing")
+	assert_eq(quiet.cleared, 0,
+		"...and must not wipe the bubble the NPC is still showing (often its flee line) for a line it never says")
+	var calm: Array[String] = ["Alright... easy, now."]
+	var vocal := _pardon_host()
+	_pardon_voice(vocal).bark_pardon(calm)
+	assert_eq(vocal.emitted, ["Alright... easy, now."], "control: the same pardoned NPC with an authored line says it")
+	assert_eq(vocal.cleared, 1, "control: ...replacing whatever bubble was showing, so the payoff line always lands")
+
+
+func test_each_music_tier_speaks_from_its_own_category() -> void:
+	# A jukebox comment is keyed to how GOOD the song is (MusicQuality tier), so an NPC with every music category
+	# authored must answer each tier with that tier's line: a crossed wire here has a raider praise an awful playlist.
 	var n = load(NPC_PATH).new()
 	var v := NpcVoice.new()
 	n._voice = v
-	v._bark_set = BarkSet.new()  # empty override -> the consts
-	assert_eq(n._music_lines(MQ.Tier.GREAT), NPC.MUSIC_GREAT_LINES, "empty music override -> the MUSIC_GREAT_LINES default")
-	var custom: Array[String] = ["Banger!"]
-	v._bark_set.music_great = custom
-	assert_eq(n._music_lines(MQ.Tier.GREAT), custom, "a non-empty music_great override wins over the default")
+	v._bark_set = BarkSet.new()
+	var awful: Array[String] = ["Turn that off."]
+	var meh: Array[String] = ["It's music, I guess."]
+	var good: Array[String] = ["Not bad at all."]
+	var great: Array[String] = ["Now THAT is a song."]
+	v._bark_set.music_awful = awful
+	v._bark_set.music_meh = meh
+	v._bark_set.music_good = good
+	v._bark_set.music_great = great
+	assert_eq(n._music_lines(MQ.Tier.AWFUL), awful, "an AWFUL song gets the music_awful line")
+	assert_eq(n._music_lines(MQ.Tier.MEH), meh, "a MEH song gets the music_meh line")
+	assert_eq(n._music_lines(MQ.Tier.GOOD), good, "a GOOD song gets the music_good line")
+	assert_eq(n._music_lines(MQ.Tier.GREAT), great, "a GREAT song gets the music_great line")
+	# An unauthored tier must not borrow a neighbour's comment: with music_good left empty, a GOOD song may not be
+	# answered with the MEH or GREAT line (the npc.gd consts behind it ship empty, so today it is silence).
+	var none: Array[String] = []
+	v._bark_set.music_good = none
+	var unauthored: Array[String] = n._music_lines(MQ.Tier.GOOD)
+	for other: Array[String] in [awful, meh, great]:
+		assert_false(unauthored.has(other[0]),
+			"an unauthored music_good must not answer a GOOD song with another tier's line '%s'" % other[0])
 	v.free()
 	n.free()
+
+
+## An in-tree PardonHost (the earshot check reads global_position) with the listening player 1 m away.
+func _pardon_host() -> PardonHost:
+	var h := PardonHost.new()
+	add_child_autofree(h)
+	var listener := Node3D.new()
+	add_child_autofree(listener)
+	listener.global_position = h.global_position + Vector3(1.0, 0.0, 0.0)
+	h.player = listener
+	return h
+
+
+func _pardon_voice(h: Node) -> NpcVoice:
+	var v := NpcVoice.new()
+	v.host = h
+	autofree(v)
+	return v

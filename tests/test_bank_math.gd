@@ -11,8 +11,10 @@ extends GutTest
 ## rates the baseline), so anything about RATINGS uses the live resource via _live_eco(). `.new()` is correct
 ## only for pinning script-default knobs.
 
-const CREDIT_FLOOR := -5   ## StatBudget.STAT_MIN
-const CREDIT_CEIL := 10    ## StatBudget.STAT_MAX
+const StatBudgetScript := preload("res://scripts/ui/stat_budget.gd")
+const CREDIT_FLOOR: int = StatBudgetScript.STAT_MIN  ## the allocator's bounds — the same ones the cart and Player forward
+const CREDIT_CEIL: int = StatBudgetScript.STAT_MAX
+const IMPLANT_CHOICE_PATH := "res://scripts/ui/implant_choice.gd"
 
 
 func _live_eco() -> EconomySettings:
@@ -79,17 +81,28 @@ func test_negative_interest_knobs_cannot_pay_a_debtor() -> void:
 		"a NEGATIVE savings rate is floored to 0 — deposits can never silently drain")
 
 
-func test_banking_knob_defaults() -> void:
-	# The shipped economy — the feature's authored contract. These are SCRIPT defaults, so .new() is correct.
-	var s := EconomySettings.new()
-	assert_eq(s.bank_debt_interest_rate, 0.02, "debt compounds at 2%/in-game-day")
-	assert_eq(s.bank_savings_interest_rate, 0.005, "savings grow at 0.5%/in-game-day — a 4:1 spread")
-	assert_eq(s.bank_noncash_fee_fraction, 0.03,
-		"the non-cash purchase fee ships at 3% — THE counterweight that keeps pocket cash worth carrying")
-	assert_eq(s.bank_min_transaction, 0.0, "terminals process any amount out of the box")
-	assert_eq(s.credit_limit_per_level, 0.0,
-		"the per-level credit growth ships OFF, so the live line is byte-identically the creation formula")
-	s = null
+func test_shipped_banking_keeps_its_counterweights() -> void:
+	# The SHIPPED economy (the live resource), pinned as the design rules the numbers exist to serve rather than
+	# the numbers themselves, so a retune that keeps the rules passes and one that breaks them fails.
+	var eco := _live_eco()
+	assert_gt(eco.bank_noncash_fee_fraction, 0.0,
+		"SHIP DECISION: the non-cash fee ships ON — at 0 the account strictly dominates pocket cash (safe, spendable, interest-bearing) and carrying cash stops being a choice")
+	assert_lt(eco.bank_noncash_fee_fraction, 1.0,
+		"…and stays a fraction: a fee of 100%+ would bill more in service charge than the purchase itself")
+	assert_gt(eco.bank_savings_interest_rate, 0.0,
+		"SHIP DECISION: savings interest ships ON (0 is the documented off-switch)")
+	assert_lt(eco.bank_debt_interest_rate, 1.0,
+		"a per-IN-GAME-DAY rate of 1.0+ would double a debt every dawn — the per-real-day misreading the knob's UNIT note warns about")
+	# Dust suppression must only swallow DUST: a balance the size of one credit quote step has to accrue on both sides.
+	var step := eco.credit_limit_step
+	assert_lt(EconomySettings.bank_interest_for(-step, eco.bank_debt_interest_rate, eco.bank_savings_interest_rate,
+			eco.bank_interest_min_posting), 0.0,
+		"a %s-zorkmid debt must accrue interest at dawn — min_posting may not silence a real balance" % step)
+	assert_gt(EconomySettings.bank_interest_for(step, eco.bank_debt_interest_rate, eco.bank_savings_interest_rate,
+			eco.bank_interest_min_posting), 0.0,
+		"…and %s zorkmids of savings must earn something" % step)
+	assert_lte(eco.bank_min_transaction, Zorkmids.QUANTUM,
+		"SHIP DECISION: terminals process any amount out of the box — even the smallest coin can be deposited or withdrawn")
 
 
 # --- The live credit line ----------------------------------------------------------------------------------
@@ -117,31 +130,67 @@ func test_credit_line_never_shrinks_below_the_rated_limit() -> void:
 		"a net-negative sheet keeps its full rated limit — the growth term floors at zero, never subtracts")
 
 
-func test_credit_limit_for_sheet_chains_the_whole_rating() -> void:
-	# New Game's cart and the live in-run line MUST quote the same number for the same sheet, or the player is
-	# told two different things about the same file.
+func test_live_credit_line_quotes_exactly_the_new_game_cart() -> void:
+	# New Game's implant cart (ImplantChoice._compute_credit) and the live in-run line (Player.credit_limit ->
+	# credit_limit_for_sheet with the sheet's total level) MUST quote the same number for the same fresh sheet, or
+	# the player is told two different things about the same file. Driven through the REAL cart code, not a
+	# re-typed copy of its chain. The builds carry a POSITIVE total level on purpose: the per-level growth term
+	# ships OFF, and that ship decision is exactly what keeps the two quotes identical.
 	var eco := _live_eco()
-	var build := _sheet({&"gunplay": 10, &"strength": 10, &"endurance": -5, &"agility": -5,
-		&"streetwise": -5, &"larceny": -5})
-	var score := EconomySettings.credit_score_for(build, eco, CREDIT_FLOOR, CREDIT_CEIL)
-	var direct := EconomySettings.credit_limit_for(score, eco.credit_score_min, eco.credit_score_max,
-			eco.credit_limit_max, eco.credit_limit_step, eco.credit_limit_curve)
-	assert_eq(EconomySettings.credit_limit_for_sheet(build, eco, CREDIT_FLOOR, CREDIT_CEIL, 0), direct,
-		"the one-call chain equals rating -> limit -> line computed by hand, so the two surfaces can't drift")
+	var builds := [
+		_sheet({&"gunplay": 10, &"strength": 10, &"endurance": 5}),
+		_sheet({&"gunplay": 10, &"strength": 10, &"endurance": -5, &"agility": -5, &"streetwise": -5, &"larceny": -5}),
+		_sheet({&"gunplay": 5, &"endurance": -5}),
+		_sheet({&"streetwise": 8, &"larceny": 7, &"agility": 6, &"gunplay": 2}),
+	]
+	var cart: Control = load(IMPLANT_CHOICE_PATH).new()  # off-tree: _ready never runs, only the rating seam is used
+	for build in builds:
+		var total := 0
+		for stat in build:
+			total += int(build[stat])
+		cart.present_build(build)
+		cart._compute_credit()
+		var quoted: float = cart._credit_limit
+		assert_eq(EconomySettings.credit_limit_for_sheet(build, eco, CREDIT_FLOOR, CREDIT_CEIL, total), quoted,
+			"SHIP DECISION (per-level growth OFF): a fresh sheet at total level %d is quoted the same line in-run as the New Game cart offered" % total)
+	cart.free()
+
+
+func test_credit_limit_for_sheet_honours_career_and_record() -> void:
+	# The one-call chain must actually FORWARD the career and the record — a wrapper that drops either would quote
+	# every player the creation number forever.
+	var build := _sheet({&"gunplay": 5, &"endurance": -5})  # a MEDIOCRE build: headroom both ways, far below the cap
+	var growing := _live_eco().duplicate() as EconomySettings
+	growing.credit_limit_per_level = 25.0
+	var at_zero := EconomySettings.credit_limit_for_sheet(build, growing, CREDIT_FLOOR, CREDIT_CEIL, 0)
+	assert_lt(at_zero + 1000.0, growing.credit_limit_lifetime_max, "fixture: the grown line stays under the lifetime ceiling")
+	assert_eq(EconomySettings.credit_limit_for_sheet(build, growing, CREDIT_FLOOR, CREDIT_CEIL, 40), at_zero + 1000.0,
+		"with growth on, 40 total levels at 25 zm/level add exactly 1000 zm to the same sheet's line")
+	var eco := _live_eco()
+	var spotless := EconomySettings.credit_limit_for_sheet(build, eco, CREDIT_FLOOR, CREDIT_CEIL, 0, eco.credit_standing_max)
+	var delinquent := EconomySettings.credit_limit_for_sheet(build, eco, CREDIT_FLOOR, CREDIT_CEIL, 0, -eco.credit_standing_max)
+	assert_gt(spotless, delinquent,
+		"the same sheet quotes a bigger line with a spotless payment record than with arrears — paying your debts must raise your credit")
 	assert_eq(EconomySettings.credit_limit_for_sheet(build, null, CREDIT_FLOOR, CREDIT_CEIL, 0), 0.0,
 		"a null economy degrades to no credit rather than crashing the New Game flow")
+	growing = null
 
 
 # --- STANDING: the earned half of the score ----------------------------------------------------------------
 
 func test_standing_defaults_to_zero_so_new_game_rates_the_build_alone() -> void:
-	# ⭐A fresh character has NO payment history. The 4-arg call (what the implant screen uses) must equal the
-	# 5-arg call with zero standing, or New Game would silently score against a record nobody has yet.
+	# ⭐A fresh character has NO payment history. The call without a record (what the implant screen makes) must
+	# rate the BUILD ALONE — the same score an economy with the record switched off gives — or New Game would
+	# silently score against a record nobody has yet.
 	var eco := _live_eco()
-	var build := _sheet({&"gunplay": 5, &"endurance": -5})
-	assert_eq(EconomySettings.credit_score_for(build, eco, CREDIT_FLOOR, CREDIT_CEIL),
-		EconomySettings.credit_score_for(build, eco, CREDIT_FLOOR, CREDIT_CEIL, 0.0),
-		"omitting standing is exactly the same as passing zero — the creation screen's contract")
+	var record_off := eco.duplicate() as EconomySettings
+	record_off.credit_weight_standing = 0.0
+	for build in [_sheet({&"gunplay": 5, &"endurance": -5}), _sheet({&"gunplay": 10, &"strength": 10, &"endurance": 5}),
+			_sheet({&"larceny": -5, &"streetwise": -5})]:
+		assert_eq(EconomySettings.credit_score_for(build, eco, CREDIT_FLOOR, CREDIT_CEIL),
+			EconomySettings.credit_score_for(build, record_off, CREDIT_FLOOR, CREDIT_CEIL, eco.credit_standing_max),
+			"omitting standing rates the build alone, exactly as if the record did not count — the creation screen's contract")
+	record_off = null
 
 
 func test_standing_moves_the_score_both_ways() -> void:

@@ -15,17 +15,17 @@ extends GutTest
 ##   2. THE DRIVER. An off-tree Player (load().new(), never instantiated, never added to the tree — the
 ##      test_landing / test_fists_view_model idiom) driven a frame at a time, because the three behaviours worth
 ##      pinning are stateful: the instant rise, the eased release, and the snap to EXACTLY zero.
-##   3. THE SEAMS, by source text. Headless runs a DUMMY rasterizer and NEVER compiles a .gdshader, so a shader
-##      with a hard syntax error load()s clean and passes every behavioural test in the suite — and worse,
-##      set_shader_parameter to a uniform that does not exist is SILENTLY DISCARDED, so renaming `fall_grey` in
-##      the shader would turn the whole feature into a dead write with no error anywhere. Same reasoning, and
-##      the same pin shapes, as test_color_quantization.gd.
+##   3. THE SEAMS. What the player PUSHES is driven for real: an off-tree Player handed a ShaderMaterial of the
+##      real post_process.gdshader (ShaderMaterial records every set_shader_parameter even on the dummy
+##      rasterizer), through a fall, a landing, a conversation and a respawn reset. What the SHADER does with it
+##      stays a source pin, because headless NEVER compiles a .gdshader and set_shader_parameter to a uniform that
+##      does not exist is SILENTLY DISCARDED. Those pins read the shader with every comment stripped, so a
+##      commented-out line cannot keep them green.
 ##
 ## Deliberately NOT covered: what it LOOKS like. That is a windowed playtest — jump off something high.
 
 const SHADER_PATH := "res://resources/shaders/post_process.gdshader"
 const PLAYER_PATH := "res://scripts/player/player.gd"
-const FEEDBACK_PATH := "res://resources/tuning/PlayerFeedbackSettings.gd"
 
 ## The shipped player's fall-damage profile (character.gd's @export defaults — Player.tscn overrides neither), so
 ## the numbers below read as the real game rather than as arbitrary fixtures.
@@ -34,6 +34,37 @@ const PER_SPEED := 0.5
 const FULL_HP := 4.0
 ## ...which puts the lethal landing at 16 + 4/0.5 = 24 m/s.
 const LETHAL_SPEED := 24.0
+## The uniform name is the contract between player.gd and the shader; both sides are checked against it below.
+const FALL_UNIFORM := "fall_grey"
+const DT := 1.0 / 60.0
+
+var _saved_time_scale: float = 1.0
+var _saved_dialogue: DialogueResource = null
+var _saved_suspended: bool = false
+var _saved_grey_max: float = 1.0
+var _saved_release_rate: float = 0.0
+var _saved_void_lead: float = 0.0
+
+
+func before_each() -> void:
+	_saved_time_scale = Engine.time_scale
+	_saved_dialogue = DialogueManager._active
+	_saved_suspended = DialogueManager._suspended
+	_saved_grey_max = GameSettings.player_feedback.fall_grey_max
+	_saved_release_rate = GameSettings.player_feedback.fall_grey_release_rate
+	_saved_void_lead = GameSettings.player_feedback.fall_grey_void_lead
+
+
+func after_each() -> void:
+	# _reset_screen_post_process writes Engine.time_scale; the dialogue gate and the feedback knobs are
+	# process-global too. Restored here so a failed assert can never leak them into a later file.
+	Engine.time_scale = _saved_time_scale
+	DialogueManager._active = _saved_dialogue
+	DialogueManager._suspended = _saved_suspended
+	GameSettings.player_feedback.fall_grey_max = _saved_grey_max
+	GameSettings.player_feedback.fall_grey_release_rate = _saved_release_rate
+	GameSettings.player_feedback.fall_grey_void_lead = _saved_void_lead
+	_saved_dialogue = null
 
 
 func _read(path: String) -> String:
@@ -55,6 +86,57 @@ func _falling_player(fall_speed: float, hp: float = FULL_HP):
 	p.fall_damage_per_speed = PER_SPEED
 	p.velocity = Vector3(0.0, -fall_speed, 0.0)
 	return p
+
+
+## Hand an off-tree Player the post-process overlay its @onready would have resolved: a ColorRect carrying a
+## ShaderMaterial of the REAL post_process.gdshader. Returns the material so the pushed uniforms can be read back.
+func _give_post_rect(p) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = load(SHADER_PATH)
+	var rect := ColorRect.new()
+	rect.material = mat
+	autofree(rect)
+	p._post_rect = rect
+	return mat
+
+
+## The value the player last pushed into `uniform` on `mat`, or -1.0 when nothing was ever pushed under that name.
+func _pushed(mat: ShaderMaterial, uniform: String = FALL_UNIFORM) -> float:
+	var v: Variant = mat.get_shader_parameter(uniform)
+	return float(v) if (v is float or v is int) else -1.0
+
+
+## post_process.gdshader with every `//` and `/* */` comment removed, so a pin can only be satisfied by live code.
+func _shader_code() -> String:
+	var block := RegEx.new()
+	block.compile("(?s)/\\*.*?\\*/")
+	var line := RegEx.new()
+	line.compile("//[^\\n]*")
+	return line.sub(block.sub(_read(SHADER_PATH), "", true), "", true)
+
+
+func _squash(s: String) -> String:
+	var ws := RegEx.new()
+	ws.compile("\\s+")
+	return ws.sub(s, " ", true).strip_edges()
+
+
+## The whitespace-squashed body of the live `if (<uniform> > 0...) { ... }` pass in `code`, or "" when there is none.
+func _gated_pass(code: String, uniform: String) -> String:
+	var gate := RegEx.new()
+	gate.compile("if\\s*\\(\\s*" + uniform + "\\s*>\\s*0(\\.0)?\\s*\\)\\s*\\{")
+	var m := gate.search(code)
+	if m == null:
+		return ""
+	var depth := 1
+	for i in range(m.get_end(), code.length()):
+		if code[i] == "{":
+			depth += 1
+		elif code[i] == "}":
+			depth -= 1
+			if depth == 0:
+				return _squash(code.substr(m.get_end(), i - m.get_end()))
+	return ""
 
 
 # =============================================================================================================
@@ -176,17 +258,21 @@ func test_the_driver_reads_the_fall_off_the_host() -> void:
 func test_fall_immunity_silences_the_impact_channel_but_not_the_void() -> void:
 	var p = _falling_player(LETHAL_SPEED * 2.0)
 	assert_eq(p._fall_grey_target(), 1.0, "baseline: without the implant this fall is lethal and reads fully grey")
-	# The impact channel is gated on has_mechanic(&"fall_immunity"); an actor that simply cannot take fall damage
-	# (per_speed 0) is the same silence by a different route, and is the one an off-tree test can stage directly.
-	p.fall_damage_per_speed = 0.0
+	p.unlock_mechanic(&"fall_immunity")
+	assert_true(p.has_mechanic(&"fall_immunity"), "precondition: the FallImmunity implant installed and active on the player")
 	assert_eq(p._fall_grey_target(), 0.0,
-		"a landing that cannot cost HP must not tint the screen at all — the impact channel is silent")
+		"with the fall-immunity implant active the landing costs nothing, so the impact channel must not tint the screen at all")
+	# Control: the silence belongs to the ACTIVE implant, not to having once installed it.
+	p.set_mechanic_active(&"fall_immunity", false)
+	assert_eq(p._fall_grey_target(), 1.0,
+		"switching the implant OFF in the Implants tab makes the landing lethal again, so the full-grey warning must come straight back")
+	p.set_mechanic_active(&"fall_immunity", true)
 	# ...and now the void timer starts running out underneath that silence.
 	var limit: float = GameSettings.player_movement.max_continuous_fall_time
 	var lead: float = GameSettings.player_feedback.fall_grey_void_lead
 	p._continuous_fall_time = limit
 	assert_eq(p._fall_grey_target(), 1.0,
-		"the continuous-fall death ignores fall-damage immunity, so an actor who takes no impact damage must STILL be shown a completely grey frame as that timer runs out — otherwise the one death they can still die has no warning")
+		"the continuous-fall death ignores fall immunity, so an immune player must STILL be shown a completely grey frame as that timer runs out — otherwise the one death they can still die has no warning")
 	p._continuous_fall_time = limit - lead * 0.5
 	assert_almost_eq(p._fall_grey_target(), 0.5, 0.001, "...ramping, not popping")
 	p.free()
@@ -260,85 +346,199 @@ func test_a_lethal_fall_ships_at_completely_grey() -> void:
 
 
 # =============================================================================================================
-# 3. The seams — source-text pins, because headless never compiles a .gdshader
+# 3. The seams — the push driven for real; the shader side pinned on comment-stripped source
 # =============================================================================================================
 
-## The uniform player.gd writes into. set_shader_parameter on a name that does not exist is silently discarded,
-## so renaming this in the shader turns the whole feature into a dead write with no error anywhere.
-func test_the_shader_declares_the_uniform_the_player_pushes() -> void:
-	var src := _read(SHADER_PATH)
-	assert_true(src.contains("uniform float fall_grey"),
-		"post_process.gdshader must declare `uniform float fall_grey` — player.gd pushes it every physics frame, and a push to a missing uniform is dropped in silence, so a rename here makes the screen simply stop greying with nothing in the log")
-	assert_true(src.contains("uniform float fall_grey : hint_range(0.0, 1.0) = 0.0;"),
-		"...defaulting to 0, so an UN-DRIVEN material (computerroom.tscn's CRT wall, this shader on a bare quad in the editor) is untouched by a feature that only the player drives")
+## The value player.gd moves has to land on a uniform post_process.gdshader actually declares. set_shader_parameter
+## on a name that does not exist is silently discarded, so a rename on EITHER side turns the whole feature into a
+## dead write with no error anywhere — this drives the push and checks the name against the live declaration.
+func test_the_player_pushes_the_drain_into_a_uniform_the_shader_declares() -> void:
+	var decl := RegEx.new()
+	decl.compile("uniform\\s+float\\s+" + FALL_UNIFORM
+		+ "\\s*:\\s*hint_range\\(\\s*([-\\d.]+)\\s*,\\s*([-\\d.]+)\\s*\\)\\s*=\\s*([-\\d.]+)\\s*;")
+	var m := decl.search(_shader_code())
+	assert_true(m != null,
+		"post_process.gdshader must declare a LIVE (uncommented) `uniform float fall_grey : hint_range(..) = ..;` — player.gd pushes that name every physics frame, and a push to a missing uniform is dropped in silence")
+	if m != null:
+		assert_eq(float(m.get_string(3)), 0.0,
+			"...defaulting to 0, so an UN-DRIVEN material (computerroom.tscn's CRT wall, this shader on a bare quad in the editor) is untouched by a feature only the player drives")
+		assert_eq([float(m.get_string(1)), float(m.get_string(2))], [0.0, 1.0],
+			"...ranged 0..1, the exact span the driver writes (0 = full colour, 1 = the lethal fall's completely grey frame)")
+	var p = _falling_player(20.0)
+	var mat := _give_post_rect(p)
+	p._update_fall_grey(DT)
+	assert_almost_eq(_pushed(mat), 0.5, 0.001,
+		"a 20 m/s fall at 4 HP must land 0.5 on the shader's `fall_grey` uniform — the value moving with nothing reading it is the classic half-wiring")
+	p.velocity = Vector3.ZERO
+	p._update_fall_grey(DT)
+	var eased: float = p._fall_grey
+	assert_lt(eased, 0.5, "precondition: the release has begun on the first grounded frame")
+	assert_eq(_pushed(mat), eased,
+		"the push must follow the release down every frame, not only write on the way up — otherwise the landing freezes the screen at the mid-fall grey")
+	p.free()
 
-## The mix has to reach TRUE grayscale, and it has to be a desaturation ONLY. `hurt`, `low_hp` and the death
-## cinematic all already darken and close a vignette; this one must not, or the three cues stop being
-## distinguishable from each other at the moment they matter most.
+## KEPT AS A SHADER PIN (headless never compiles a .gdshader). The mix has to reach TRUE grayscale, and it has to be
+## a desaturation ONLY. `hurt`, `low_hp` and the death cinematic all already darken and close a vignette; this one
+## must not, or the three cues stop being distinguishable from each other at the moment they matter most.
 func test_the_shader_pass_is_a_pure_drain_to_exact_grayscale() -> void:
-	var src := _read(SHADER_PATH)
-	assert_true(src.contains("final_color = mix(final_color, vec3(fg_lum), clamp(fall_grey, 0.0, 1.0));"),
-		"the fall pass must be a plain luminance mix — at 1.0 that is EXACT grayscale, which is what 'completely grey means this kills you' requires; anything else (a partial mix, a tint, a multiply) breaks the top of the range")
-	assert_true(src.contains("float fg_lum = dot(final_color, vec3(0.299, 0.587, 0.114));"),
-		"...off the same luma weights every other drain in this shader uses, so a frame greyed by a fall and a frame greyed by death are the same grey")
-	assert_true(src.contains("if (fall_grey > 0.0) {"),
-		"the pass must stay behind a `> 0.0` gate — the driver snaps to exactly 0 when you are not falling, so this branch is what makes a grounded frame genuinely free")
+	var code := _shader_code()
+	var fall := _gated_pass(code, FALL_UNIFORM)
+	assert_ne(fall, "",
+		"the fall pass must sit behind a live `if (fall_grey > 0.0) {` gate — the driver snaps to exactly 0 when you are not falling, so this branch is what makes a grounded frame genuinely free")
+	var lum := RegEx.new()
+	lum.compile("float (\\w+) = dot\\(final_color, (vec3\\([^)]*\\))\\);")
+	var fall_lum := lum.search(fall)
+	assert_true(fall_lum != null, "the fall pass must read the frame's luminance (`float <lum> = dot(final_color, vec3(..));`) before mixing toward it")
+	if fall_lum == null:
+		return
+	var mix_at := fall.find("final_color = mix(final_color, vec3(%s), clamp(fall_grey, 0.0, 1.0));" % fall_lum.get_string(1))
+	assert_gt(mix_at, fall_lum.get_end() - 1,
+		"the fall pass must be a plain luminance mix at the FULL clamp, AFTER the luma it mixes toward — at 1.0 that is EXACT grayscale, which is what 'completely grey means this kills you' requires; a partial mix (low_hp's * 0.8), a tint or a multiply breaks the top of the range")
+	assert_eq(fall.count(";"), 2,
+		"the fall pass must be exactly the luma read and the mix — a third statement (a vignette, a darken, a tint) makes it read like hurt / low_hp: " + fall)
+	var death_lum := lum.search(_gated_pass(code, "death_bw"))
+	assert_true(death_lum != null, "the death cinematic's grayscale pass must still read luminance the same way")
+	if death_lum != null:
+		assert_eq(fall_lum.get_string(2), death_lum.get_string(2),
+			"the fall drain must use the SAME luma weights as the death cinematic, so a frame greyed by a fall and the death_bw frame that takes it over are the same grey")
 
-## Placement in the chain. It must sit with the sustained world grades (after low_hp, before daltonization and
-## contrast and grain), NOT with the death cinematic at the end — a warning is part of the picture, an override
-## is not. Checked by ORDER of the marker comments, since that is the only thing a text pin can see.
+## KEPT AS A SHADER PIN. Placement in the chain: with the sustained world grades (after low_hp, before
+## daltonization and grain), NOT with the death cinematic at the end — a warning is part of the picture, an override
+## is not. Ordered by the passes' live CODE, so moving a pass while leaving its comment behind is caught.
 func test_the_fall_pass_sits_with_the_world_grades_not_with_the_death_override() -> void:
-	var src := _read(SHADER_PATH)
-	var low_hp_at := src.find("--- 4b. Low HP")
-	var fall_at := src.find("--- 4b-2. Fall warning")
-	var cb_at := src.find("--- 4c. Colorblind correction")
-	var death_at := src.find("--- 6. Death cinematic")
-	# Named up front so a renamed marker fails as "the marker is gone", not as a baffling ordering comparison
-	# against -1. These comments are the only handle a source pin has on where a pass sits in the chain.
-	assert_gt(low_hp_at, -1, "the `4b. Low HP` step marker must still be in post_process.gdshader")
-	assert_gt(fall_at, -1, "the `4b-2. Fall warning` step marker must still be in post_process.gdshader")
-	assert_gt(cb_at, -1, "the `4c. Colorblind correction` step marker must still be in post_process.gdshader")
-	assert_gt(death_at, -1, "the `6. Death cinematic` step marker must still be in post_process.gdshader")
-	assert_gt(fall_at, low_hp_at,
+	var code := _shader_code()
+	var at := {}
+	for uniform in ["low_hp", FALL_UNIFORM, "colorblind_mode", "death_bw"]:
+		var gate := RegEx.new()
+		gate.compile("if\\s*\\(\\s*" + uniform + "\\s*>\\s*0(\\.0)?\\s*\\)")
+		var hits := gate.search_all(code)
+		assert_eq(hits.size(), 1, "post_process.gdshader must run exactly one live `if (%s > 0..)` pass" % uniform)
+		at[uniform] = hits[0].get_start() if hits.size() > 0 else -1
+	var grain := RegEx.new()
+	grain.compile("final_color\\s*\\+=\\s*noise\\s*\\*\\s*grain_amount")
+	var grain_m := grain.search(code)
+	assert_true(grain_m != null, "the film grain must still be layered onto final_color")
+	var grain_at := grain_m.get_start() if grain_m != null else -1
+	assert_gt(at[FALL_UNIFORM], at["low_hp"],
 		"the fall drain must run AFTER the low-HP drain, so a wounded player's fall greys out an already-drained frame instead of the two passes fighting over the same pixels")
-	assert_lt(fall_at, cb_at,
-		"...and BEFORE daltonization/contrast/grain, like low_hp: this is a world colour grade, so the accessibility passes get the last word and the grain still lays over it")
-	assert_lt(fall_at, death_at,
+	assert_lt(at[FALL_UNIFORM], at["colorblind_mode"],
+		"...and BEFORE daltonization, like low_hp: this is a world colour grade, so the accessibility passes get the last word")
+	assert_lt(at[FALL_UNIFORM], grain_at, "...and before the grain, which still lays over the greyed frame")
+	assert_lt(at[FALL_UNIFORM], at["death_bw"],
 		"...and well before the death cinematic, which is the pass that IS allowed to override everything — that ordering is what makes a fall death continuous, the frame already fully grey when death_bw takes it over")
 
-## The push site and the two drive sites. Each is a silent failure if it goes: no push = a dead uniform; no call
-## from _physics_process = a value that never moves; no call from the dialogue-frozen early-out = a conversation
-## opened mid-fall that holds the whole chat in grayscale.
-func test_the_player_drives_and_pushes_the_uniform() -> void:
-	var src := _read(PLAYER_PATH)
-	assert_true(src.contains('mat.set_shader_parameter("fall_grey", _fall_grey)'),
-		"player.gd must push `fall_grey` onto the post-process material — the accumulator moving with nothing reading it is the classic half-wiring")
-	# Anchored on the preceding newline so the one-tab pin cannot be satisfied by the two-tab call below it.
-	assert_true(src.contains("\n\t_update_fall_grey(delta)\n"),
-		"_update_fall_grey must be called from the physics step — it is the only thing that moves the value, and die()'s set_physics_process(false) is exactly why it must be driven from there rather than by a self-ticking node")
-	assert_true(src.contains("\n\t\t_update_fall_grey(delta)\n"),
-		"...and from the dialogue-frozen early-out too (the indented call): that branch returns before the main driver, so without it a conversation opened mid-fall would hold the entire chat in grayscale")
+## A conversation opened mid-fall freezes the player (velocity zeroed) in the one _physics_process branch that
+## returns before the main driver. That branch must still drive the warning, or the whole chat is held in grayscale.
+func test_a_conversation_opened_mid_fall_drains_the_grey_instead_of_holding_it() -> void:
+	var p = _falling_player(LETHAL_SPEED)
+	var mat := _give_post_rect(p)
+	p._update_fall_grey(DT)
+	assert_eq(p._fall_grey, 1.0, "precondition: fully grey mid-lethal-fall when the conversation opens")
+	DialogueManager._active = DialogueResource.new()
+	DialogueManager._suspended = false
+	var in_dialogue := DialogueManager.is_active()
+	p._physics_process(DT)
+	var first_frame: float = p._fall_grey
+	var frozen: Vector3 = p.velocity
+	for _i in range(179):
+		p._physics_process(DT)
+	var settled: float = p._fall_grey
+	DialogueManager._active = _saved_dialogue  # restore BEFORE asserting — the dialogue gate is process-global
+	DialogueManager._suspended = _saved_suspended
+	assert_true(in_dialogue, "precondition: the staged conversation reads as active")
+	assert_eq(frozen, Vector3.ZERO, "precondition: the dialogue branch froze the fall")
+	assert_lt(first_frame, 1.0, "the grey must start easing out on the first frozen frame — a frozen player is not falling")
+	assert_eq(settled, 0.0,
+		"three seconds into the conversation the grey must be gone EXACTLY — otherwise the whole chat is held in grayscale")
+	assert_eq(_pushed(mat), 0.0, "...and the shader must have been told, not just the accumulator")
+	p.free()
 
-## The respawn reset. A fall DEATH deliberately freezes the uniform at full grey (die() stops the physics step,
-## and the death cinematic takes the frame over from there) — so nothing writes it back down, and the fresh life
-## would fade up into a permanently grey world.
+## KEPT AS A SOURCE PIN: the live branch of Player._physics_process runs coyote_time, gravity and input over
+## components only _ready builds, so it cannot be driven off-tree (CLAUDE.md). It is the only thing that moves the
+## value during play. Scoped to that function body, comments stripped, and required at the function's TOP level with
+## no top-level `return` ahead of it — a call nested in a branch or parked after an early return fails.
+func test_the_live_physics_step_drives_the_warning() -> void:
+	var lines := _read(PLAYER_PATH).split("\n")
+	var start := lines.find("func _physics_process(delta: float) -> void:")
+	assert_gt(start, -1, "player.gd must still define `func _physics_process(delta: float) -> void:`")
+	if start < 0:
+		return
+	var strip := RegEx.new()
+	strip.compile("\\s*#.*$")
+	var call_line := -1
+	var early_return := -1
+	for i in range(start + 1, lines.size()):
+		var raw: String = lines[i]
+		if raw != "" and not raw.begins_with("\t") and not raw.begins_with("#"):
+			break  # the next top-level declaration ends the function body
+		var code := strip.sub(raw, "")
+		if code == "\treturn" and early_return < 0 and call_line < 0:
+			early_return = i
+		if code == "\t_update_fall_grey(delta)" and call_line < 0:
+			call_line = i
+	assert_gt(call_line, -1,
+		"Player._physics_process must call _update_fall_grey(delta) at its top level — it is the only thing that moves the value, and die()'s set_physics_process(false) is exactly why it must be driven from there rather than by a self-ticking node")
+	assert_eq(early_return, -1, "...with no top-level `return` ahead of that call, or the warning never runs")
+
+## The respawn reset. A fall DEATH deliberately freezes the warning at full grey (die() stops the physics step and
+## the death cinematic takes the frame over), so nothing writes it back down — the fresh life would fade up into a
+## grey world. _reset_screen_post_process is driven here from exactly that frozen state.
 func test_the_respawn_clears_the_frozen_grey() -> void:
-	var src := _read(PLAYER_PATH)
-	assert_true(src.contains('mat.set_shader_parameter("fall_grey", 0.0)'),
-		"_reset_screen_post_process must clear the uniform — a fall death leaves it pinned at 1.0 with the physics step off, so a CHECKPOINT_RESPAWN would fade back up into a completely grey world with no way out of it")
-	assert_true(src.contains("\n\t_fall_grey = 0.0\n"),
+	var p = _falling_player(LETHAL_SPEED)
+	var mat := _give_post_rect(p)
+	p._update_fall_grey(DT)
+	assert_eq(_pushed(mat), 1.0, "precondition: a lethal fall froze the uniform at full grey")
+	p._reset_screen_post_process()
+	assert_eq(_pushed(mat), 0.0,
+		"_reset_screen_post_process must clear the uniform — a fall death leaves it pinned at 1.0 with the physics step off, so a CHECKPOINT_RESPAWN would fade back up into a completely grey world")
+	assert_eq(p._fall_grey, 0.0,
 		"...and the accumulator with it, or the first live frame's release would ease down from the dead life's value")
+	p.velocity = Vector3.ZERO
+	p._update_fall_grey(DT)
+	assert_eq(_pushed(mat), 0.0, "the fresh life's first grounded frame must be in full colour, not a fading-out grey")
+	p.free()
+	# The accumulator is cleared even when there is no overlay to write to (the reset's early-out comes after it).
+	var bare = _falling_player(LETHAL_SPEED)
+	bare._update_fall_grey(DT)
+	bare._reset_screen_post_process()
+	assert_eq(bare._fall_grey, 0.0, "with no post-process overlay wired the accumulator must still be cleared on respawn")
+	bare.free()
 
-## The knobs exist and are the designer's surface. A knob that is documented but not @exported is not a knob —
-## and each is RANGED, so the inspector cannot author a negative drain (which the shader would apply backwards,
-## pushing colour out of the frame instead of draining it) or a peak past 1.
-func test_the_designer_knobs_are_exported_and_ranged() -> void:
-	var src := _read(FEEDBACK_PATH)
-	var ranged := RegEx.new()
-	ranged.compile("(?m)^@export_range\\(\\s*0\\.0\\s*,[^)]*\\)\\s*var\\s+(fall_grey_\\w+)")
-	var found := {}
-	for m in ranged.search_all(src):
-		found[m.get_string(1)] = true
+## The knobs are the designer's inspector surface and each is RANGED from 0, so the inspector cannot author a
+## negative drain (which the shader would apply backwards) or a peak past 1. The driver must also hold that line
+## for a value that arrives out of range anyway (a hand-edited .tres, a debug command).
+func test_the_designer_knobs_are_ranged_and_the_driver_clamps_them_anyway() -> void:
+	var fb = GameSettings.player_feedback  # untyped autoload -> Variant; the knob writes below are dynamic
+	var props := {}
+	for prop in fb.get_property_list():
+		props[prop["name"]] = prop
 	for knob in ["fall_grey_max", "fall_grey_release_rate", "fall_grey_void_lead"]:
-		assert_true(found.has(knob),
-			"PlayerFeedbackSettings must declare `%s` as an @export_range starting at 0.0 — the fall warning's tuning belongs on the inspector page with the rest of the hit/death feel, and the floor at 0 is what stops a designer authoring a negative the shader would apply backwards" % knob)
+		assert_true(props.has(knob), "PlayerFeedbackSettings must still carry `%s`" % knob)
+		if not props.has(knob):
+			continue
+		var info: Dictionary = props[knob]
+		assert_true((int(info["usage"]) & PROPERTY_USAGE_EDITOR) != 0,
+			"`%s` must be @exported — the fall warning's tuning belongs on the inspector page with the rest of the hit/death feel" % knob)
+		assert_eq(int(info["hint"]), PROPERTY_HINT_RANGE, "`%s` must be an @export_range, not a free-form float" % knob)
+		assert_eq(float(String(info["hint_string"]).split(",")[0]), 0.0,
+			"`%s` must be ranged from 0.0 — a negative is a drain the shader would apply backwards" % knob)
+	if props.has("fall_grey_max"):
+		assert_eq(float(String(props["fall_grey_max"]["hint_string"]).split(",")[1]), 1.0,
+			"fall_grey_max tops out at 1.0 — past that is no longer a grayscale mix")
+	var p = _falling_player(LETHAL_SPEED)
+	fb.fall_grey_max = 2.0
+	var over: float = p._fall_grey_target()
+	fb.fall_grey_max = -1.0
+	var under: float = p._fall_grey_target()
+	fb.fall_grey_max = _saved_grey_max
+	fb.fall_grey_release_rate = -5.0
+	p._update_fall_grey(DT)
+	p.velocity = Vector3.ZERO
+	p._update_fall_grey(DT)
+	var negative_rate_release: float = p._fall_grey
+	fb.fall_grey_release_rate = _saved_release_rate  # restore BEFORE asserting — shared across the suite
+	assert_eq(over, 1.0, "a peak authored past 1 must still cap the lethal fall at exactly full grey")
+	assert_eq(under, 0.0, "a negative peak must read as the feature OFF, never as colour pushed out of the frame")
+	assert_eq(negative_rate_release, 0.0,
+		"a negative release rate must cut straight back to colour on the landing frame, never run the ease backwards")
+	p.free()

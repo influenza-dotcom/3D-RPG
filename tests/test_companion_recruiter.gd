@@ -4,13 +4,23 @@ extends GutTest
 ## dialogue companion button. DialogueManager binds following() as the BEHAVIOUR key (never the label text), paints
 ## label_for() as display only, and calls apply() to invoke the speaker's follow contract (stop_following, or
 ## start_following(player) with the player resolved from the PLAYER group). Every read is has_method-guarded
-## duck typing, so a rename on the NPC silently drops the button with no compile error — this file pins the
-## contract with test doubles: the "Wait here"-beats-"Follow me" priority, the empty label for a speaker without
-## the contract, the null guard, the PlayerText-const labels, and that apply() dispatches to the matching method
-## (and is a harmless no-op on a partial implementation). The FREED-speaker half of the guard is not reachable
-## from a test — see the KNOWN GAP below — so it is pinned on the CALLER instead.
+## duck typing, so a rename on the NPC silently drops the button with no compile error — this file drives the
+## statics with recording doubles: the "Wait here"-beats-"Follow me" priority, the empty label for a speaker
+## without the contract, the null guard, and that apply() dispatches only to the half of the contract a speaker
+## actually implements.
+##
+## THE FREED SPEAKER. The statics' `speaker` parameter is typed `Node`, so a freed node is rejected at the call
+## boundary before their own is_instance_valid can run — only the CALLER can refuse it. So that half is driven
+## on a throwaway DialogueManager (the tests/test_dialogue.gd idiom: load(path).new(), a conversation seated
+## directly, no start()): a speaker freed under a live conversation must leave the response menu with its
+## Goodbye exit and turn a stale companion-button press into a silent no-op. Each refusal has a live-speaker
+## control beside it. GUT 9.6 fails a test on any engine error, and the refusals also assert a zero engine-error
+## count explicitly, because a boundary rejection and a clean early return leave the same fields behind.
 
-## A speaker exposing the whole follow contract, with switchable answers and call recording.
+const DIALOGUE_MANAGER_PATH := "res://scripts/dialogue/dialogue_manager.gd"
+
+## A speaker exposing the whole follow contract, with call recording. start/stop flip is_following() the way
+## a real NPC's follow state does, so a recruit -> dismiss cycle can be driven end to end.
 class _Companion extends Node:
 	var following_now: bool = false
 	var recruitable: bool = false
@@ -23,19 +33,97 @@ class _Companion extends Node:
 		return recruitable
 	func stop_following() -> void:
 		stop_calls += 1
+		following_now = false
 	func start_following(leader: Node3D) -> void:
 		start_calls += 1
 		start_leader = leader
+		following_now = true
 
 ## A speaker with NO follow contract (a terminal, a car, a hostile NPC) — reads as not-following, gets no button.
 class _Inert extends Node:
 	pass
 
-## A PARTIAL implementation: only can_recruit(). The label still shows, and apply() must have nothing to call
-## without erroring — the has_method guards are the whole reason a partial speaker is safe.
+## A PARTIAL implementation: only can_recruit(). The label still shows, and apply() must have nothing to call.
 class _RecruitOnly extends Node:
 	func can_recruit() -> bool:
 		return true
+
+## Half a contract: can be dismissed, has no way to start following.
+class _StopOnly extends Node:
+	var stop_calls: int = 0
+	func is_following() -> bool:
+		return true
+	func stop_following() -> void:
+		stop_calls += 1
+
+## The other half: can be recruited, has no way to stop.
+class _StartOnly extends Node:
+	var start_calls: int = 0
+	func can_recruit() -> bool:
+		return true
+	func start_following(_leader: Node3D) -> void:
+		start_calls += 1
+
+
+var _prior_tts_enabled: bool
+var _prior_auto_advance: bool
+var _prior_mouse_mode: Input.MouseMode
+
+
+func before_each() -> void:
+	_prior_tts_enabled = Settings.tts_enabled
+	_prior_auto_advance = GameSettings.dialogue.auto_advance
+	_prior_mouse_mode = Input.mouse_mode
+	# The recruit acknowledgement is a spoken line: no native TTS engine headless, and no auto-advance timer
+	# left pointing at a throwaway manager.
+	Settings.tts_enabled = false
+	GameSettings.dialogue.auto_advance = false
+
+
+func after_each() -> void:
+	Settings.tts_enabled = _prior_tts_enabled
+	GameSettings.dialogue.auto_advance = _prior_auto_advance
+	Input.mouse_mode = _prior_mouse_mode
+	# Response rows are detached then queue_free'd by clear_choices(); let them go before the orphan count.
+	await wait_process_frames(1)
+
+
+## A fresh in-tree DialogueManager seated on a one-line conversation with `speaker`, box open, intro over.
+## Untyped: the manager is an autoload script with no class_name.
+func _manager_on_a_line(speaker: Node):
+	var m = load(DIALOGUE_MANAGER_PATH).new()
+	add_child_autofree(m)
+	var line := DialogueLine.new()
+	line.text = "Need something?"
+	var convo := DialogueResource.new()
+	convo.lines.append(line)
+	m._active = convo
+	m._index = 0
+	m._intro_playing = false
+	m._speaker = speaker
+	m._view.open()
+	return m
+
+
+## The labels of the unnumbered service rows the manager painted (companion / stations / exchange).
+func _service_rows(m) -> PackedStringArray:
+	var out := PackedStringArray()
+	for child in m._view._choices_box.get_children():
+		if child is Button:
+			out.append((child as Button).text)
+	return out
+
+
+func _service_row(m, text: String) -> Button:
+	for child in m._view._choices_box.get_children():
+		if child is Button and (child as Button).text == text:
+			return child as Button
+	return null
+
+
+func _exit_row_up(m) -> bool:
+	var exit_button = m._view._exit_button
+	return exit_button != null and is_instance_valid(exit_button)
 
 
 # --- following() — the behaviour predicate -----------------------------------------------------------------
@@ -47,63 +135,95 @@ func test_following_is_false_for_null_and_inert_speakers() -> void:
 		"a speaker without is_following() reads as not-following (the terminal / car case), never as an error")
 
 
-func test_following_mirrors_the_speakers_is_following() -> void:
+func test_following_keys_a_recruit_then_dismiss_round_trip() -> void:
+	# DialogueManager feeds following() straight into apply() as was_following. If the predicate stopped
+	# reading the speaker's live answer, an idle companion would be DISMISSED instead of recruited.
 	var c: _Companion = autofree(_Companion.new())
-	c.following_now = false
+	c.recruitable = true
 	assert_false(CompanionRecruiter.following(c), "an idle companion reads as not-following")
+	assert_eq(CompanionRecruiter.label_for(c), PlayerText.DIALOGUE_OPTION_FOLLOW, "an idle recruitable companion offers Follow me")
+	CompanionRecruiter.apply(c, CompanionRecruiter.following(c), get_tree())
+	assert_eq(c.start_calls, 1, "pressing Follow me on an idle companion recruits it")
+	assert_eq(c.stop_calls, 0, "and never dismisses it")
+	assert_true(CompanionRecruiter.following(c), "once recruited, the companion reads as following")
+	assert_eq(CompanionRecruiter.label_for(c), PlayerText.DIALOGUE_OPTION_WAIT_HERE, "and the button flips to Wait here")
+	CompanionRecruiter.apply(c, CompanionRecruiter.following(c), get_tree())
+	assert_eq(c.stop_calls, 1, "pressing Wait here on a following companion dismisses it")
+	assert_eq(c.start_calls, 1, "and does not recruit it a second time")
+	assert_false(CompanionRecruiter.following(c), "a dismissed companion reads as not-following again")
+	assert_eq(CompanionRecruiter.label_for(c), PlayerText.DIALOGUE_OPTION_FOLLOW, "and the button flips back to Follow me")
+
+
+# --- the freed speaker: the caller's guard, driven on a real DialogueManager -------------------------------
+
+func test_reveal_menu_offers_the_companion_row_and_pressing_it_dismisses() -> void:
+	# CONTROL for the freed-speaker refusal below: the same seating with a live speaker gets the button, and the
+	# row is bound to the behaviour predicate, so pressing it dismisses and the menu re-paints flipped.
+	var c: _Companion = autofree(_Companion.new())
 	c.following_now = true
-	assert_true(CompanionRecruiter.following(c), "a mid-follow companion reads as following — this is apply()'s was_following key")
+	c.recruitable = true
+	var m = _manager_on_a_line(c)
+	m._reveal_menu()
+	assert_true(_exit_row_up(m), "the response menu pins its Goodbye exit")
+	var wait_row := _service_row(m, PlayerText.DIALOGUE_OPTION_WAIT_HERE)
+	assert_true(wait_row != null, "a following companion gets a Wait-here row in the response menu (rows: %s)" % [_service_rows(m)])
+	if wait_row == null:
+		return
+	wait_row.pressed.emit()
+	assert_eq(c.stop_calls, 1, "pressing Wait here dismisses the companion")
+	assert_eq(c.start_calls, 0, "and never recruits it")
+	assert_true(_service_rows(m).has(PlayerText.DIALOGUE_OPTION_FOLLOW),
+		"the re-painted menu offers Follow me, so the player can take the dismissal back (rows: %s)" % [_service_rows(m)])
+	assert_false(_service_rows(m).has(PlayerText.DIALOGUE_OPTION_WAIT_HERE), "and no stale Wait-here row survives the re-paint")
+	assert_true(_exit_row_up(m), "the re-painted menu still has its Goodbye exit")
 
 
-## KNOWN GAP: a FREED speaker can never reach these statics' bodies. GDScript type-checks an Object argument
-## against the `Node` PARAMETER before the function runs and raises "Invalid type in function 'following'/'apply'
-## ... (previously freed) is not a subclass of the expected argument class" — the same family as the lambda-capture
-## trap, where the engine validates at the boundary and an in-body guard cannot suppress it. So the
-## `not is_instance_valid(speaker)` half of the guards in companion_recruiter.gd (lines 14, 28, 44) is live for
-## NULL only; a genuinely freed speaker errors at the call site regardless of what the callee does. The protection
-## that actually works is the CALLER validating first, which is what the three tests below pin: BOTH call sites
-## (DialogueManager._on_companion_pressed before apply(), _reveal_menu before label_for()) do exactly that, and
-## the null path still behaves.
-func test_null_speaker_is_guarded_on_every_entry_point() -> void:
-	assert_false(CompanionRecruiter.following(null), "following(null) is false, never an error")
-	assert_eq(CompanionRecruiter.label_for(null), "", "label_for(null) offers no button")
-	CompanionRecruiter.apply(null, true, get_tree())
-	CompanionRecruiter.apply(null, false, get_tree())
-	assert_true(true, "apply(null, ...) is a no-op in both directions (the death-abort path's null speaker)")
+func test_reveal_menu_with_a_freed_speaker_still_pins_the_goodbye_exit() -> void:
+	# A debug-console reload frees the scene (speaker included) under a live conversation; the box is
+	# autoload-owned and survives. A menu that stopped part-built would leave a paused world with no way out.
+	var doomed := _Companion.new()
+	doomed.recruitable = true
+	var m = _manager_on_a_line(doomed)
+	doomed.free()
+	m._reveal_menu()
+	assert_true(_exit_row_up(m),
+		"a freed speaker must not stop the response menu before its Goodbye exit is added — that is a soft-lock behind the box")
+	assert_false(_service_rows(m).has(PlayerText.DIALOGUE_OPTION_FOLLOW), "a freed speaker gets no Follow-me row")
+	assert_false(_service_rows(m).has(PlayerText.DIALOGUE_OPTION_WAIT_HERE), "a freed speaker gets no Wait-here row")
+	assert_engine_error_count(0, "the freed speaker must never reach CompanionRecruiter's typed Node parameter")
 
 
-func test_the_caller_validates_the_speaker_before_handing_it_to_apply() -> void:
-	# Because the freed case dies at the parameter boundary (see the KNOWN GAP above), the ONLY working guard is
-	# the caller's. DialogueManager._on_companion_pressed must bail on an invalid speaker BEFORE calling apply()
-	# — a stale companion button can fire after the speaker died mid-conversation.
-	var src := FileAccess.get_file_as_string("res://scripts/dialogue/dialogue_manager.gd")
-	var guard := src.find("if _speaker == null or not is_instance_valid(_speaker):")
-	var call_site := src.find("CompanionRecruiter.apply(")
-	assert_gt(guard, -1, "DialogueManager carries the speaker-validity guard")
-	assert_gt(call_site, -1, "DialogueManager is the caller of CompanionRecruiter.apply()")
-	assert_lt(guard, call_site,
-		"the validity guard runs BEFORE apply() — a freed speaker must never be passed at all (the callee cannot save it)")
+func test_companion_press_on_a_live_speaker_recruits_and_acknowledges() -> void:
+	# CONTROL for the stale-press refusal below: the same press with the speaker alive gets past the guard.
+	var c: _Companion = autofree(_Companion.new())
+	c.recruitable = true
+	var m = _manager_on_a_line(c)
+	m._reveal_menu()
+	var follow_row := _service_row(m, PlayerText.DIALOGUE_OPTION_FOLLOW)
+	assert_true(follow_row != null, "a recruitable idle speaker gets a Follow-me row (rows: %s)" % [_service_rows(m)])
+	if follow_row == null:
+		return
+	follow_row.pressed.emit()
+	assert_eq(c.start_calls, 1, "pressing Follow me recruits the speaker")
+	assert_true(m._pending_end, "the recruit acknowledgement ends the conversation on the next advance")
+	assert_false(_exit_row_up(m), "the response menu gives way to the spoken acknowledgement line")
 
 
-## The label_for() / following() call site carries the SAME exposure as apply()'s, and it is REACHABLE.
-## DialogueManager clears `_speaker` only in _finish(), so anything that frees the speaker's node under a live
-## conversation leaves _reveal_menu() holding a freed handle with `_active` still set — the debug console is
-## PROCESS_MODE_ALWAYS and deliberately does NOT refuse over a conversation, so its `reload` / `load` /
-## `sandbox off` frees the whole scene (speaker included) while the autoload-owned dialogue box stays up. The
-## boundary error is not a cosmetic log either: it ABORTS the calling function, so an unguarded _reveal_menu()
-## would stop part-built — no station options and no Goodbye button, i.e. a paused world behind a dead box.
-## Pinned on the SOURCE for the reason in the KNOWN GAP above: the freed argument cannot be handed to the
-## static from a test at all, so there is no way to exercise the bad path directly.
-func test_reveal_menu_validates_the_speaker_before_reading_the_companion_label() -> void:
-	var src := FileAccess.get_file_as_string("res://scripts/dialogue/dialogue_manager.gd")
-	var body_start := src.find("func _reveal_menu()")
-	assert_gt(body_start, -1, "DialogueManager still has _reveal_menu(), the companion button's paint site")
-	var label_call := src.find("CompanionRecruiter.label_for(", body_start)
-	assert_gt(label_call, -1, "_reveal_menu() is the caller of CompanionRecruiter.label_for()")
-	var guard := src.find("is_instance_valid(_speaker)", body_start)
-	assert_gt(guard, -1, "_reveal_menu() carries a speaker-validity guard of its own")
-	assert_lt(guard, label_call,
-		"the guard runs BEFORE label_for() — a freed speaker must never reach the typed `Node` parameter, because the callee's own is_instance_valid can never fire")
+func test_a_stale_companion_press_after_the_speaker_is_freed_does_nothing() -> void:
+	var doomed := _Companion.new()
+	doomed.recruitable = true
+	var m = _manager_on_a_line(doomed)
+	m._reveal_menu()
+	var follow_row := _service_row(m, PlayerText.DIALOGUE_OPTION_FOLLOW)
+	assert_true(follow_row != null, "setup: the live speaker painted a Follow-me row (rows: %s)" % [_service_rows(m)])
+	if follow_row == null:
+		doomed.free()
+		return
+	doomed.free()
+	follow_row.pressed.emit()
+	assert_false(m._pending_end, "a press on a dead speaker's button must not queue the recruit acknowledgement's end")
+	assert_true(_exit_row_up(m), "the response menu stays up, Goodbye included, so the player can still leave")
+	assert_engine_error_count(0, "the stale press must bail before the freed speaker reaches CompanionRecruiter.apply()")
 
 
 # --- label_for() — display only, priority dismiss > recruit > nothing ---------------------------------------
@@ -176,15 +296,19 @@ func test_apply_recruit_calls_start_following_with_the_player_group_node() -> vo
 	assert_eq(c.start_leader, player, "the leader handed to start_following is the first node in the PLAYER group")
 
 
-func test_apply_recruit_without_a_player_still_calls_start_following() -> void:
-	var expected: Node = get_tree().get_first_node_in_group(Groups.PLAYER)
+func test_apply_recruit_without_a_player_hands_a_null_leader() -> void:
+	assert_null(get_tree().get_first_node_in_group(Groups.PLAYER),
+		"setup: no node is in the PLAYER group (a leaked player from another test would make this case meaningless)")
 	var c: _Companion = autofree(_Companion.new())
 	CompanionRecruiter.apply(c, false, get_tree())
-	assert_eq(c.start_calls, 1, "start_following() is still invoked; the NPC decides what a missing leader means")
-	assert_eq(c.start_leader, expected, "the leader is whatever the PLAYER group resolves to (null when no player is in the tree)")
+	assert_eq(c.start_calls, 1, "start_following() is still invoked with no player; the NPC decides what a missing leader means")
+	assert_null(c.start_leader, "with no player in the tree the leader is null, never some other node")
+	assert_engine_error_count(0, "a recruit with no player to follow must not raise")
 
 
-func test_apply_is_a_no_op_on_null_inert_and_partial_speakers() -> void:
+func test_apply_on_null_inert_and_recruit_only_speakers_raises_nothing() -> void:
+	# There is nothing on these speakers to call, so the observable is the error log: an unguarded call on a
+	# missing method is a "Nonexistent function" script error, which a player never sees but a broken button is.
 	CompanionRecruiter.apply(null, true, get_tree())
 	CompanionRecruiter.apply(null, false, get_tree())
 	var inert: _Inert = autofree(_Inert.new())
@@ -193,5 +317,19 @@ func test_apply_is_a_no_op_on_null_inert_and_partial_speakers() -> void:
 	var partial: _RecruitOnly = autofree(_RecruitOnly.new())
 	CompanionRecruiter.apply(partial, true, get_tree())
 	CompanionRecruiter.apply(partial, false, get_tree())
-	assert_true(true, "apply() on a null / contract-less / partial speaker must not call anything or raise (has_method guards)")
+	assert_engine_error_count(0,
+		"apply() on a null / contract-less / can_recruit-only speaker must skip every call it has no method for")
 
+
+func test_apply_calls_only_the_half_of_the_contract_a_partial_speaker_implements() -> void:
+	var stop_only: _StopOnly = autofree(_StopOnly.new())
+	CompanionRecruiter.apply(stop_only, false, get_tree())
+	assert_eq(stop_only.stop_calls, 0, "a recruit never falls back to stop_following() on a speaker that cannot start")
+	CompanionRecruiter.apply(stop_only, true, get_tree())
+	assert_eq(stop_only.stop_calls, 1, "the half it does implement still works: a dismiss reaches stop_following()")
+	var start_only: _StartOnly = autofree(_StartOnly.new())
+	CompanionRecruiter.apply(start_only, true, get_tree())
+	assert_eq(start_only.start_calls, 0, "a dismiss never falls back to start_following() on a speaker that cannot stop")
+	CompanionRecruiter.apply(start_only, false, get_tree())
+	assert_eq(start_only.start_calls, 1, "the half it does implement still works: a recruit reaches start_following()")
+	assert_engine_error_count(0, "the missing half of a partial contract is skipped, not called")

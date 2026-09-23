@@ -220,17 +220,66 @@ func test_ring_cap_applies_to_record() -> void:
 
 # --- construct off-tree + gates ------------------------------------------------------------------------------------
 
-func test_ticker_constructs_off_tree_with_the_documented_defaults() -> void:
+## The logical UI canvas every HUD element lays out on (792x444 at 16:9; see menu_style.gd's canvas note).
+const CANVAS := Vector2i(792, 444)
+
+
+func test_default_column_fits_the_canvas_below_the_top_right_hud_stack() -> void:
 	var t = TickerScript.new()
-	assert_not_null(t, "the drop-in compiles + constructs off-tree (no _ready until added to a tree)")
-	assert_eq(t.max_lines, 300, "ring default 300 lines (a full session of quest/rep/rent history, not a screen's worth)")
-	assert_eq(t.visible_lines, 6, "six rows on screen by default")
-	assert_eq(t.line_seconds, 6.0, "a row lives 6 s before it hides (it stays in the ring)")
-	assert_eq(t.corner, TickerScript.ScreenCorner.TOP_RIGHT, "defaults to the top-right column under the minimap/clock/tracker stack")
-	assert_eq(t.margin, Vector2i(8, 216), "margin.y 216 clears minimap (8..116) + clock (119..141) + a two-line tracker; x 8 lines up with that stack")
-	assert_eq(t.column_width, 300, "column width = HudSettings.quest_tracker_width so the left edge lands at x 484 with it")
-	assert_false(t.force_in_release, "release builds must not carry a debug surface unless a QA build ticks this")
-	assert_true(t.log_money and t.log_xp, "the noisy channels ship ON — the export exists to mute them, not to hide events by default")
+	var hud := GameSettings.hud
+	# A rendered row is never taller than twice its font size, so this bounds the column's real height from above.
+	var col_size := Vector2i(int(t.column_width), int(t.visible_lines) * int(t.font_size) * 2)
+	var anchor: Vector2 = TickerScript.corner_anchor(t.corner)
+	var offsets: Rect2i = TickerScript.corner_offsets(t.corner, t.margin, col_size)
+	var column := Rect2i(Vector2i(int(anchor.x * CANVAS.x), int(anchor.y * CANVAS.y)) + offsets.position, offsets.size)
+	assert_true(Rect2i(Vector2i.ZERO, CANVAS).encloses(column), "the default event column lies entirely on the 792x444 canvas: %s" % column)
+	# The top-right stack: the minimap box, then the clock line under it (HudSettings' fallback box — the numbers the
+	# shipped hud_minimap.tscn is authored from).
+	var stack_w := int(maxf(hud.minimap_size.x, hud.clock_size.x))
+	var stack_h := int(hud.minimap_size.y + hud.clock_map_gap + hud.clock_size.y)
+	var stack := Rect2i(CANVAS.x - int(hud.minimap_inset.x) - stack_w, int(hud.minimap_inset.y), stack_w, stack_h)
+	assert_false(column.intersects(stack), "the event column must not paint over the minimap + clock rows of the top-right stack: column %s vs stack %s" % [column, stack])
+	# The stack's third row: the objective tracker, right-aligned under the clock (ui.gd builds it clock_tracker_gap
+	# below the clock, quest_tracker_width wide, at rep_toast_font_size). Bound it as two wrapped lines, each at most
+	# twice its font size tall -- a column that clears the clock but lands on the tracker still hides the objective.
+	var tracker_w := int(roundf(hud.quest_tracker_width))
+	var tracker := Rect2i(CANVAS.x - int(hud.minimap_inset.x) - tracker_w, stack.end.y + int(hud.clock_tracker_gap),
+		tracker_w, 2 * 2 * int(hud.rep_toast_font_size))
+	assert_false(column.intersects(tracker), "the event column must not paint over a two-line quest tracker under the clock: column %s vs tracker %s" % [column, tracker])
+	assert_eq(int(t.column_width), int(roundf(hud.quest_tracker_width)),
+		"the column is as wide as the quest tracker (HudSettings.quest_tracker_width), so both left edges line up")
+	# Knob ordering the column relies on.
+	assert_lte(int(t.visible_lines), int(t.max_lines), "the column shows a window of the ring, never more rows than the ring keeps")
+	assert_gt(float(t.line_seconds), 0.0, "rows hide after a lifetime by default (0 would pin every event on screen forever)")
+	assert_true(float(t.fade_seconds) > 0.0 and float(t.fade_seconds) <= float(t.line_seconds),
+		"the fade is a soft tail INSIDE a row's lifetime (%.2f of %.2f s), not a pop and not a ramp longer than the row lives" % [float(t.fade_seconds), float(t.line_seconds)])
+	assert_eq(int(t.max_lines), TickerScript.DEFAULT_MAX_LINES,
+		"a never-authored ticker's ring cap equals the static cap the console dumps with before any ticker was mounted")
+	# Ship decision: a release export carries no debug surface unless a QA build deliberately ticks this.
+	assert_false(t.force_in_release, "SHIP DECISION: the event ticker stays out of release builds by default")
+	t.free()
+
+
+func test_a_muted_channel_records_nothing_and_leaves_the_others_recording() -> void:
+	var t = TickerScript.new()
+	t._on_money_changed(125.0, 25.0)
+	t._on_xp_changed(40.0, 2)
+	var heard := TickerScript.lines()
+	assert_eq(heard.size(), 2, "with its channels on, each event lands one line in the ring: %s" % [heard])
+	if heard.size() == 2:
+		assert_true(heard[0].contains("money:") and heard[0].contains("125.00"), "the money line carries the channel and the new total: %s" % heard[0])
+		assert_true(heard[1].contains("xp:") and heard[1].contains("lvl 2"), "the xp line carries the channel and the level: %s" % heard[1])
+	TickerScript.clear()
+	t.log_money = false
+	t.log_xp = false
+	t._on_money_changed(150.0, 25.0)
+	t._on_xp_changed(50.0, 2)
+	assert_eq(TickerScript.lines().size(), 0, "a muted channel's events are NOT recorded — the ring is the log, muting is not a display filter")
+	t._on_rent_notice(250.0)
+	var rent := TickerScript.lines()
+	assert_eq(rent.size(), 1, "muting money and xp leaves every other channel recording")
+	if rent.size() == 1:
+		assert_true(rent[0].contains("rent:"), "and the line that landed is the rent one: %s" % rent[0])
 	t.free()
 
 

@@ -93,12 +93,63 @@ func test_budget_override_can_forbid_the_climb() -> void:
 		assert_true(s.one_way_down, "with max_climb lowered under the delta, the link becomes one-way-down")
 
 
-func test_plan_is_deterministic() -> void:
-	var a := Planner.plan(_two_quads(0, 2, 0.0, 3, 5, 1.0))
-	var b := Planner.plan(_two_quads(0, 2, 0.0, 3, 5, 1.0))
-	assert_eq(a.size(), b.size(), "same mesh -> same link count (idempotent regeneration)")
-	for i in a.size():
-		assert_eq(String(a[i].key), String(b[i].key), "stable, sorted keys")
+## Three one-poly islands in a row: a middle floor A (x 0..2, y 0), a 1 m ledge B to its +x side (a climbable
+## TWO-WAY link) and a 3.5 m cliff C to its -x side (a drop-only ONE-WAY link). `order` lists the polygons in any
+## permutation of [A, B, C] — the geometry is identical, only the bake's polygon order (and therefore every island
+## root id and rim index) changes.
+func _ledge_and_cliff(order: Array = [0, 1, 2]) -> NavigationMesh:
+	var quads := [
+		[Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(2, 0, 1), Vector3(0, 0, 1)],            # A: the middle floor
+		[Vector3(3, 1, 0), Vector3(5, 1, 0), Vector3(5, 1, 1), Vector3(3, 1, 1)],            # B: 1 m up, 1 m to +x
+		[Vector3(-3, 3.5, 0), Vector3(-1, 3.5, 0), Vector3(-1, 3.5, 1), Vector3(-3, 3.5, 1)],  # C: 3.5 m up, 1 m to -x
+	]
+	var nm := NavigationMesh.new()
+	var verts := PackedVector3Array()
+	for q in order:
+		var base := verts.size()
+		verts.append_array(PackedVector3Array(quads[q]))
+		nm.add_polygon(PackedInt32Array([base, base + 1, base + 2, base + 3]))
+	nm.vertices = verts
+	return nm
+
+
+func _keys(specs: Array) -> PackedStringArray:
+	var out := PackedStringArray()
+	for s in specs:
+		out.append(String(s.key))
+	return out
+
+
+func test_plan_returns_its_links_sorted_by_key() -> void:
+	# The generator names each NavLink node after its key and regenerates in plan() order, so the doc contract is
+	# "sorted by key". This mesh is scanned ledge-first (the +x ledge's rims come before the -x cliff's), so the
+	# links are FOUND in tw, dn order — only the final sort puts the dn link first.
+	var specs := Planner.plan(_ledge_and_cliff())
+	assert_eq(specs.size(), 2, "one two-way link up the 1 m ledge and one drop-only link off the 3.5 m cliff")
+	var kinds := {}
+	for s in specs:
+		kinds[bool(s.one_way_down)] = true
+	assert_eq(kinds.size(), 2, "the pair covers both link kinds, so the ordering below is between different keys")
+	var keys := _keys(specs)
+	for i in range(1, keys.size()):
+		assert_true(keys[i - 1] < keys[i],
+			"plan() output must be strictly ascending by key (got %s) — regenerated node names and order depend on it" % str(keys))
+
+
+func test_plan_keys_survive_a_rebake_that_reorders_polygons() -> void:
+	# A re-bake of the SAME geometry can list its polygons in a different order, which renumbers every island root
+	# and rim index. The keys are position-derived precisely so regeneration reproduces the same node names; a key
+	# built from island ids (or an unsorted result) would rename or reshuffle every link on each bake.
+	var baseline := Planner.plan(_ledge_and_cliff([0, 1, 2]))
+	assert_eq(baseline.size(), 2, "the baseline bake plans its two links")
+	for order in [[2, 1, 0], [1, 2, 0]]:
+		var rebaked := Planner.plan(_ledge_and_cliff(order))
+		assert_eq(_keys(rebaked), _keys(baseline),
+			"polygon order %s must reproduce the same keys in the same order as the original bake" % str(order))
+		if rebaked.size() == baseline.size():
+			for i in baseline.size():
+				assert_eq(bool(rebaked[i].one_way_down), bool(baseline[i].one_way_down),
+					"link %s keeps its direction when the bake lists polygons as %s" % [baseline[i].key, str(order)])
 
 
 # --- Stair detection (the optional physics `probe`). The generator supplies a real raycast probe; here we inject a

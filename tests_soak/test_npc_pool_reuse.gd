@@ -39,6 +39,13 @@ func test_pooled_npcs_reuse_and_reset_cleanly() -> void:
 		"killing then re-spawning pooled NPCs must hand back the SAME instances (reuse, not re-instancing):\n%s" % report.summary())
 	assert_true(report.pool_stable(),
 		"the pool must own a constant number of bodies across kill/respawn cycles (no leak, no unbounded growth):\n%s" % report.summary())
+	# The harness records an acquire that came back null (a bucket that stopped re-banking after cycle 0). Without
+	# this assert that run still passes: `acquired` is empty, so the reuse loop never runs and never sets
+	# reused_all_same false, and the pool count is unchanged either way.
+	assert_true(report.notes.is_empty(),
+		"the pool must hand back a full fleet on EVERY cycle - a null acquire means reclaim stopped re-banking:
+%s"
+			% report.summary())
 	assert_true(report.reset_clean,
 		"a re-acquired pooled NPC must be a pristine post-_ready combatant (reset_for_reuse worked):\n%s" % report.summary())
 

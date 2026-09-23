@@ -33,11 +33,19 @@ func _stackable(max_stack: int) -> Item:
 	return it
 
 
-func test_authored_item_weight_loads() -> void:
-	assert_almost_eq(PISTOL_ITEM.weight, 1.5, 0.0001,
-		"a weapon item's authored weight loads from its .tres")
-	assert_almost_eq(Item.new().weight, 1.0, 0.0001,
-		"a fresh Item defaults to weight 1.0")
+func test_an_unweighed_item_still_counts_toward_the_carry_load() -> void:
+	# total_weight() is what the carrier compares to carry_capacity for encumbrance. An item a designer never
+	# weighed is generic junk, which item.gd places between light ammo and heavy weapons, so its DEFAULT weight must
+	# still load the bag: a weightless default would let every unauthored item ride for free. Asserted as a
+	# relation (heavier than an empty bag), never as the shipped number, so retuning the default stays free.
+	var inv := CharacterInventory.new()
+	var empty_load := inv.total_weight()
+	var junk := Item.new()  # every field left at its script default
+	inv.add(junk, 1)
+	assert_gt(inv.total_weight(), empty_load,
+		"an item nobody weighed must still add to the carry load, or unauthored loot could never encumber the player")
+	inv.free()
+	junk = null
 
 
 func test_total_weight_sums_item_weight_times_count() -> void:

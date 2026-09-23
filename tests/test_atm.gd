@@ -8,9 +8,9 @@ extends GutTest
 ## no third verb and no second ledger, which is why "pay off your debt" needs no code of its own and why you
 ## can never hold death-safe savings WHILE owing.
 ##
-## The components are driven off-tree (`.new()`, never `_ready`) with a bare Player as the host. ONE pair of
-## tests breaks that rule and says why at the call site: the terminal's applause needs a real `StationSpeaker`,
-## which only exists once `Atm._ready` has run in the tree.
+## The components are driven off-tree (`.new()`, never `_ready`) with a bare Player as the host. The applause
+## and panel-voice tests break that rule and say why at the call site: the terminal's voice is a real
+## `StationSpeaker`, which only exists once `Atm._ready` has run in the tree.
 ##
 ## ⭐TWO DIFFERENT GameStates, and the line between them is load-bearing:
 ##   • `Atm` / `LedgerAccrual` / `CreditWatch` all read and write the GameState AUTOLOAD by name, so the
@@ -137,9 +137,11 @@ func test_overpaying_a_debt_leaves_the_remainder_banked() -> void:
 ## speaker builds its AudioStreamPlayer3Ds in ITS `_ready` — so a `.new()` terminal has no voice to test. The
 ## Atm is parented to a throwaway Node3D rather than straight to the GUT scene so `_build_outline`'s host-mesh
 ## walk stays inside an empty two-node subtree instead of crawling the test runner's tree.
-func _atm_with_a_voice() -> Variant:
+## `standalone` false builds the teller-hosted flavour instead (the data-only Atm a talking NPC carries).
+func _atm_with_a_voice(standalone: bool = true) -> Variant:
 	var host := Node3D.new()
 	var atm = _atm()
+	atm.standalone = standalone
 	host.add_child(atm)
 	add_child_autofree(host)  # tree entry is what fires both _ready chains, in order
 	return atm
@@ -282,9 +284,24 @@ func test_the_terminal_chirps_through_the_shared_drop_in_and_survives_having_no_
 	assert_false(StationSpeaker.chirp(atm), "an off-tree terminal has no speaker — chirp() reports it, it doesn't crash")
 	assert_null(StationSpeaker.find_speaker(atm), "…and there is nothing to find on it")
 	assert_false(StationSpeaker.chirp(null), "a null station is a no-op too (the refuse paths call through freely)")
-	assert_true(FileAccess.get_file_as_string("res://scripts/components/atm.gd").contains("StationSpeaker.ensure(self)"),
-		"a standalone terminal must build its own default voice at _ready — a bare atm.tscn dropped in a level chirps with zero authoring")
 	atm.free()
+
+
+func test_a_standalone_terminal_builds_its_own_voice_but_a_teller_hosted_one_stays_mute() -> void:
+	# A bare terminal dropped in a level must answer the player with ZERO authoring: entering the tree builds its own
+	# panel speaker, so the AtmScreen's chirp actually plays (and suppresses the generic UI sting). The CONTROL is
+	# the same Atm with `standalone` off — the data-only terminal a talking teller carries — which must build no
+	# speaker at all, because a person who beeps at you when you ask to bank is a bug.
+	var kiosk = _atm_with_a_voice(true)
+	assert_true(StationSpeaker.find_speaker(kiosk) != null,
+		"a standalone terminal builds its own panel speaker when it enters the tree — no hand-placed StationSpeaker needed")
+	assert_true(StationSpeaker.chirp(kiosk),
+		"…and the screen-open chirp really plays out of it, so the kiosk answers you instead of the flat UI sting")
+	var teller_terminal = _atm_with_a_voice(false)
+	assert_null(StationSpeaker.find_speaker(teller_terminal),
+		"a teller-hosted terminal (standalone off) gets no speaker — the NPC is the voice, not a beeping panel")
+	assert_false(StationSpeaker.chirp(teller_terminal),
+		"…so its chirp reports false and the screen falls back to the ordinary UI sting")
 
 
 # --- STANDING: the earned half of the credit score ---------------------------------------------------------
@@ -397,29 +414,66 @@ func test_interest_refuses_to_move_a_doomed_or_dead_balance() -> void:
 
 # --- THE ANNOUNCER -----------------------------------------------------------------------------------------
 
+## A bare off-tree Player (the _player idiom) that records every toast it is handed. A toast is the announcer's
+## only output, so "silent" and "announced" are OBSERVED here rather than inferred from the watch's private latch.
+class _ToastPlayer extends Player:
+	var toasts: Array[String] = []
+
+	func notify_toast(text: String, _color: Color) -> void:
+		toasts.append(text)
+
+
+func _toast_player() -> _ToastPlayer:
+	var p := _ToastPlayer.new()
+	p.money = 0.0
+	p.max_hp = 100.0
+	p.hp = 100.0
+	return p
+
+
 func test_the_first_reading_primes_silently() -> void:
 	# ⭐A spawn, a level change and a load all start here. None of them may announce the score the player
-	# already had — only a movement DURING play is worth a toast.
-	var p = _player(0.0)
+	# already had — only a movement DURING play is worth a toast. The CONTROL is the next reading after a real
+	# movement, which must toast: it proves the silence of the first reading was the prime, not a deaf double.
+	var p := _toast_player()
 	var watch = load(WATCH_PATH).new()
 	p.add_child(watch)
 	assert_eq(watch._last_score, -1, "it starts unprimed")
+	var current: int = int(p.credit_rating()["score"])
 	watch._check()
-	assert_gt(watch._last_score, 0, "the first check adopts the current score")
+	assert_eq(p.toasts.size(), 0,
+		"the first reading must not toast — a spawn, level change or load would otherwise announce the score you already had")
+	assert_eq(watch._last_score, current, "…it adopts the current score as the baseline instead")
+	GameState.add_credit_standing(GameSettings.economy.credit_standing_max)  # a spotless record: a real in-run movement
+	watch._check()
+	assert_eq(p.toasts.size(), 1,
+		"control: a genuine movement after priming DOES toast exactly once (toasts: %s)" % [p.toasts])
 	p.free()
 
 
 func test_a_movement_under_the_threshold_is_not_announced() -> void:
-	# A single headshot is a fraction of a point at the shipped rates; announcing per event would be either
-	# silent or a spam wall, so the announcer only speaks when the INTEGER score moves.
-	var p = _player(0.0)
+	# min_announce_delta is the "worth interrupting the player for" floor. The movement is MEASURED off the real
+	# rating (never a local copy of the score formula), then the floor is set one point above it (refused) and
+	# exactly at it (announced), so the same movement sits on both sides of the gate.
+	var p := _toast_player()
 	var watch = load(WATCH_PATH).new()
 	p.add_child(watch)
-	watch._check()
+	watch._check()  # prime on a clean record
 	var primed: int = watch._last_score
-	GameState.add_credit_standing(GameSettings.economy.credit_standing_per_headshot)
+	GameState.add_credit_standing(GameSettings.economy.credit_standing_max)
+	var moved: int = int(p.credit_rating()["score"]) - primed
+	assert_gt(moved, 0, "precondition: a spotless record must raise the score, or there is no movement to gate")
+	watch.min_announce_delta = moved + 1
 	watch._check()
-	assert_eq(watch._last_score, primed, "one headshot does not move the announced score")
+	assert_eq(p.toasts.size(), 0,
+		"a %d-point movement under a %d-point min_announce_delta must not toast" % [moved, moved + 1])
+	assert_eq(watch._last_score, primed,
+		"…and must not be adopted either, so the unannounced points still count toward the movement the next reading measures")
+	watch.min_announce_delta = moved
+	watch._check()
+	assert_eq(p.toasts.size(), 1,
+		"control: the same movement AT the threshold toasts exactly once, so the silence above was the threshold")
+	assert_eq(watch._last_score, primed + moved, "…and the announced score becomes the new baseline")
 	p.free()
 
 

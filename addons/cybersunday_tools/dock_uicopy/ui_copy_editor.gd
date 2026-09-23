@@ -3,8 +3,8 @@ extends VBoxContainer
 
 ## UI COPY — edit the player-facing strings that live in `scripts/ui/player_text.gd`, without opening GDScript.
 ##
-## Why this tab exists: 347 of the game's player-facing lines — HUD labels, prompts, toasts, menu wording, the
-## whole ATM and gunsmith-bench vocabulary — are constants in one 1,860-line script, and 87 of them are still
+## Why this tab exists: ~520 of the game's player-facing lines — HUD labels, prompts, toasts, menu wording, the
+## whole ATM and gunsmith-bench vocabulary — are constants in one ~2,300-line script, and ~190 of them are still
 ## marked `[PH]`. The Text tab next door cannot reach them: it edits fields on `.tres` resources. So the single
 ## largest body of unwritten copy in the project was reachable only by editing code, which the authoring guide's
 ## first page promises a designer never has to do.
@@ -17,10 +17,11 @@ extends VBoxContainer
 ## lines are never reordered, and any line that is not a `const NAME := "..."` declaration is copied through
 ## untouched.
 ##
-## What it deliberately cannot do: the ~200 prose literals written inline inside function bodies. Those sit in
+## What it deliberately cannot do: a prose literal written inline inside a function body. Those sit in
 ## ternaries, match arms and multi-line call expressions where a line-based rewrite would corrupt code. **List
-## code-only lines** shows them so a writer can see what is still stuck and name the function to ask about,
-## rather than being quietly told the file holds 347 lines when it holds ~550.
+## code-only lines** shows them so a writer can see what is stuck and name the function to ask about. As of
+## 2026-09-15 that list is EMPTY — every template was lifted to a constant declared directly above its function
+## — and `tests/test_devtools_ui_copy.gd` pins it at zero, so anything it shows is a regression to report.
 ##
 ## The `[PH]` marker is a SOURCE-side authorship signal, never player-visible (a runtime Translation scrubs it).
 ## The tab shows it exactly as authored, and deleting it is how a writer says "this line is written now" — so the

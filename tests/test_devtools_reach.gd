@@ -33,7 +33,7 @@ extends GutTest
 const Reach := preload("res://addons/cybersunday_tools/dock_reach/reach_scan.gd")
 const ReachView := preload("res://addons/cybersunday_tools/dock_reach/reach_view.gd")
 ## The audit panel's quote-aware, length-preserving `#` masker — the same primitive every scanner in this plugin
-## masks with. The source-scan tests below run it over reach_view.gd first, because that file's own docstring says
+## masks with. The read-only lint below runs it over every dock_reach script first, because reach_view.gd's docstring says
 ## "No ResourceSaver, no FileAccess.WRITE, no ProjectSettings.save anywhere below": an UNMASKED grep would read
 ## those words and fail the read-only test on the very comment that promises the contract.
 const ScanWiring := preload("res://addons/cybersunday_tools/panel_audit/scan_wiring.gd")
@@ -423,12 +423,33 @@ func test_block_node_name_reads_only_a_node_header() -> void:
 
 func test_quest_start_sites_ignores_quest_id_STRING_fields() -> void:
 	# The reference-vs-string distinction is the entire reason this module exists instead of another
-	# scan_wiring.QUEST_ID_FIELDS entry: an id string is not a start site, and `quest` must not match
-	# `required_quest_id` (nor `start_quest` match `start_quest_on_choice` — each field is anchored and independent).
-	var text := "[resource]\nid = &\"clear_the_block\"\nprereq_quest_id = &\"recover_package\"\n" \
-		+ "required_quest_id = &\"recover_package\"\ncomplete_quest_id = &\"recover_package\"\n"
-	var sites := Reach.quest_start_sites(text)
-	assert_eq(sites.size(), 0, "an id STRING field starts nothing: %s" % str(sites))
+	# scan_wiring.QUEST_ID_FIELDS entry: a quest id STRING starts nothing, even under a real start-field name. Two
+	# independent guards make that true, and each one is exercised on its own here, with a control:
+	#   1. THE VALUE — a start field only counts when it holds an ExtResource REFERENCE, so `quest = &"recover_package"`
+	#      is matched as a field and still yields no site.
+	#   2. THE NAME — each field is matched anchored and exactly, so a real quest REFERENCE under a field whose name
+	#      merely CONTAINS a start-field name (a Quest's own next_quest, the chain path inherit_chained_starts handles)
+	#      is not reported as a QuestStarter.quest site.
+	var row := "[ext_resource type=\"Resource\" path=\"res://resources/quests/recover_the_package.tres\" id=\"9_quest\"]\n"
+	var strings := "[gd_scene format=3]\n" + row \
+		+ "[node name=\"QuestBoard\" type=\"Area3D\" parent=\"Objects\"]\nquest = &\"recover_package\"\n" \
+		+ "[node name=\"WalkIn\" type=\"Area3D\" parent=\"Objects\"]\nstart_quest = &\"recover_package\"\n" \
+		+ "[sub_resource type=\"Resource\" id=\"Choice_1\"]\nstart_quest_on_choice = &\"recover_package\"\n" \
+		+ "required_quest_id = &\"recover_package\"\nprereq_quest_id = &\"clear_the_block\"\n"
+	var from_strings := Reach.quest_start_sites(strings)
+	assert_eq(from_strings.size(), 0, "a quest id STRING starts nothing, even under a start-field name: %s" % str(from_strings))
+	# CONTROL for guard 1: the same block and the same field, holding the REFERENCE instead, IS a site — so the empty
+	# result above came from the string VALUE, not from a block the field matcher never reached.
+	var reference := "[gd_scene format=3]\n" + row \
+		+ "[node name=\"QuestBoard\" type=\"Area3D\" parent=\"Objects\"]\nquest = ExtResource(\"9_quest\")\n"
+	var from_reference := Reach.quest_start_sites(reference)
+	assert_eq(from_reference.size(), 1, "control: the same field holding an ExtResource IS a start site: %s" % str(from_reference))
+	# Guard 2: a reference that really is there, under a field that only CONTAINS `quest`.
+	var chained := "[gd_resource type=\"Resource\" script_class=\"Quest\" format=3]\n" + row \
+		+ "[resource]\nnext_quest = ExtResource(\"9_quest\")\n"
+	var from_chain := Reach.quest_start_sites(chained)
+	assert_eq(from_chain.size(), 0,
+		"next_quest is the Quest chain, not QuestStarter.quest: start fields are matched by their exact name: %s" % str(from_chain))
 
 
 func test_quest_start_sites_discards_an_array_element_type_in_a_start_field() -> void:
@@ -585,23 +606,72 @@ func test_build_report_counts_verdicts_levels_dialogue_and_skips() -> void:
 	assert_eq(str(root_row.get("declared_by", "")), "res://scripts/items/item_db.gd", "and which file declared it")
 
 
+## Every StringName anywhere under `v` — a key or a value, at any depth — as "where: &value" lines; [] when there is none.
+func _string_names_in(v: Variant, where: String, out: Array) -> Array:
+	match typeof(v):
+		TYPE_STRING_NAME:
+			out.append("%s: &\"%s\"" % [where, str(v)])
+		TYPE_ARRAY:
+			var a := v as Array
+			for i in a.size():
+				_string_names_in(a[i], "%s[%d]" % [where, i], out)
+		TYPE_DICTIONARY:
+			var d := v as Dictionary
+			for k in d:
+				if typeof(k) == TYPE_STRING_NAME:
+					out.append("%s key: &\"%s\"" % [where, str(k)])
+				_string_names_in(d[k], "%s.%s" % [where, str(k)], out)
+	return out
+
+
 func test_build_report_values_are_plain_strings_not_stringnames() -> void:
 	# JSON.stringify does NOT fail on a StringName — it silently COERCES it into a quoted String and the document
 	# re-parses fine, so a round-trip guard is blind to exactly the bug it looks like it is catching. The only real
-	# check is the TYPE itself, which is why nothing here is wrapped in String() first.
-	var found := {"quests": ["res://q/one.tres"], "levels_authored": ["res://scenes/levels/a.tscn"],
-		"dialogue": ["res://d/a.tres"]}
-	var report := Reach.build_report({"reached": {}, "depth_of": {}, "parent_of": {}, "via": {}}, found)
-	var quest := (report["quests"] as Array)[0] as Dictionary
-	assert_eq(typeof(quest["path"]), TYPE_STRING, "a quest path is a String, not a StringName")
-	assert_eq(typeof(quest["verdict"]), TYPE_STRING, "so is its verdict")
-	var level := (report["levels"] as Array)[0] as Dictionary
-	assert_eq(typeof(level["path"]), TYPE_STRING, "so is a level path")
-	assert_eq(typeof(level["reachable"]), TYPE_BOOL, "and reachability is a plain bool")
+	# check is the TYPE itself — and a type check only means something when a StringName is actually OFFERED. build_report
+	# is a pure function of whatever its caller hands it, and its contract is a StringName-free report WHATEVER arrives,
+	# so every path, verb, label and folder in this fixture is offered as a StringName (the lookup KEYS of the closure's
+	# own maps stay Strings, the way closure() builds them), and the whole report is then walked for one that rode through.
+	var cl := {
+		"reached": {"res://scenes/levels/a.tscn": true, "res://d/a.tres": true},
+		"depth_of": {"res://scenes/levels/a.tscn": 1, "res://d/a.tres": 2},
+		"parent_of": {"res://scenes/levels/a.tscn": &"", "res://d/a.tres": &"res://scenes/levels/a.tscn"},
+		"via": {"res://scenes/levels/a.tscn": &"root", "res://d/a.tres": &"ref"},
+		"folder_roots": {&"res://resources/items": &"res://scripts/items/item_db.gd"},
+		"unread": [&"res://scenes/half_written.tscn"],
+	}
+	var found := {
+		"levels_wired": [&"res://scenes/levels/a.tscn"],
+		"levels_authored": [&"res://scenes/levels/a.tscn", &"res://scenes/levels/b.tscn"],
+		"quests": [&"res://q/one.tres"],
+		"quest_sites": {&"res://q/one.tres": [{"file": &"res://scenes/levels/a.tscn", "field": &"quest",
+			"label": &"QuestStarter.quest", "node": &"QuestBoard"}]},
+		"quest_next": {&"res://q/one.tres": &"res://q/two.tres"},
+		"dialogue": [&"res://d/a.tres"],
+		"skipped": [&"res://scenes/locked.tscn"],
+	}
+	# CONTROL: the fixture really offers StringNames, and the walker really finds them — including the survey's skipped
+	# list, one of the two caller lists build_report copies straight through instead of rebuilding row by row.
+	var offered: Array = _string_names_in(found, "found", []) + _string_names_in(cl, "cl", [])
+	assert_has(offered, "found.skipped[0]: &\"res://scenes/locked.tscn\"", "control: the walker sees an offered StringName: %s" % str(offered))
+	assert_has(offered, "cl.unread[0]: &\"res://scenes/half_written.tscn\"", "control: ...in the closure's unread list too")
+
+	var report := Reach.build_report(cl, found)
+	assert_eq(_string_names_in(report, "report", []), [],
+		"no StringName may ride through into the report — every id is str()'d at construction")
+	# ...and the walk was over a populated report, not an empty shell that is trivially StringName-free.
+	assert_eq((report["skipped"] as Array).size(), 2, "both unreadable files are reported: %s" % str(report["skipped"]))
+	assert_eq((report["quests"] as Array).size(), 2, "one.tres and its chained two.tres are both rostered")
+	assert_eq((report["levels"] as Array).size(), 2, "the wired and the authored level are both rostered")
+	assert_eq((report["folder_roots"] as Array).size(), 1, "the folder-scan root is reported")
+	var one := _row_for(report["quests"], "path", "res://q/one.tres")
+	assert_eq(str(one.get("verdict", "")), Reach.VERDICT_OK, "the StringName-offered site still resolves against the reached level")
+	var dlg := _row_for(report["dialogue"], "path", "res://d/a.tres")
+	assert_eq(typeof(dlg.get("via")), TYPE_STRING, "the dialogue row's via tag, offered as &\"ref\", is a String")
+	assert_eq(typeof(dlg.get("reachable")), TYPE_BOOL, "and reachability is a plain bool")
 
 
 # ================================================================================================================
-# THE TAB ITSELF — construct smoke + the two contracts a future edit could silently break
+# THE TAB ITSELF — construct smoke, then its behaviour driven on the constructed Control (off-tree and mounted)
 # ================================================================================================================
 
 func test_reach_view_constructs() -> void:
@@ -653,60 +723,238 @@ func test_reach_view_site_rows_name_the_node_and_the_file() -> void:
 	assert_eq(ReachView._count(5, "hop", "hops"), "5 hops", "plural — never a hand-rolled (s)")
 
 
-func test_reach_view_double_click_opens_a_scene_as_a_scene() -> void:
-	# A site row's file is the .tscn HOLDING the starter, so a double-click must land the designer IN that scene
-	# (open_scene_from_path), not merely show a PackedScene in the Inspector. Source-scanned like the other tab
-	# contracts: the handler needs a live editor. The Scan button and its "Scanning..." feedback are pinned beside it
-	# — Rescan/Refresh mean other things elsewhere in the panel, and a long walk with no feedback reads as a hang.
-	var src := FileAccess.get_file_as_string("res://addons/cybersunday_tools/dock_reach/reach_view.gd")
-	assert_ne(src, "", "reach_view.gd source should be readable")
-	assert_true(src.contains("EditorInterface.open_scene_from_path("), "a .tscn row opens as the edited scene")
-	assert_true(src.contains("EditorInterface.edit_resource("), "any other file keeps the Inspector / script editor route")
-	assert_true(src.contains("EditorInterface.select_file("), "and the file is revealed in the FileSystem dock")
-	assert_true(src.contains("text = \"Scan\""), "the one verb on this tab is Scan")
-	assert_false(src.contains("\"Rescan\""), "Rescan is retired — it is not a panel verb")
-	assert_true(src.contains("\"Scanning...\""), "the walk announces itself before it holds the main thread")
-	assert_true(src.contains("await get_tree().process_frame"), "and yields one frame so that announcement paints")
+## A Reach tab whose PROJECT WALK is swapped for a recorder, so WHEN the walk runs -- the "Scanning..." announcement,
+## the one-frame yield, the fold of a second request, the first-reveal latch -- can be driven in the tree without
+## reading res://. Everything else is the shipped tab: _init, rescan(), _on_visibility_changed and the Scan button's
+## connection run unmodified, and rescan()'s call to _run_scan() dispatches through the instance, so it lands here. It
+## records what the tab looked like at the moment the walk STARTED, because "the announcement paints before the walk
+## holds the editor's main thread" is a statement about that moment.
+class RecordingReachView:
+	extends "res://addons/cybersunday_tools/dock_reach/reach_view.gd"
+	var walks := 0
+	var status_at_walk := ""
+	var scan_disabled_at_walk := false
+	var frame_at_walk := -1
+
+	func _run_scan() -> void:
+		walks += 1
+		status_at_walk = _status.text
+		scan_disabled_at_walk = _scan_btn.disabled
+		frame_at_walk = Engine.get_process_frames()
 
 
-func test_reach_view_bounds_its_own_height() -> void:
+## A report as big as a badly-orphaned project: `n` quests and `n` levels, every file name far wider than the bottom
+## panel. Built by the real build_report, so _render paints exactly the rows a real scan would.
+func _bulk_report(n: int) -> Dictionary:
+	var long_name := "a_level_file_name_a_designer_typed_far_wider_than_the_bottom_panel_".repeat(6)
+	var quests: Array = []
+	var levels: Array = []
+	for i in n:
+		quests.append("res://resources/quests/%s%d.tres" % [long_name, i])
+		levels.append("res://scenes/levels/%s%d.tscn" % [long_name, i])
+	var cl := {"reached": {}, "depth_of": {}, "parent_of": {}, "via": {}, "folder_roots": {}, "unread": []}
+	return Reach.build_report(cl, {"quests": quests, "levels_authored": levels, "dialogue": []})
+
+
+func test_reach_view_scan_button_is_the_tabs_one_verb_and_walks_on_press() -> void:
+	# The one verb on this tab is Scan -- Rescan / Refresh mean other things elsewhere in the panel -- and pressing it
+	# must actually walk. Off-tree rescan() never yields (a bare construction stays await-free), so one press is one
+	# walk with no frame to wait for.
+	var v := RecordingReachView.new()
+	assert_eq(v._scan_btn.text, "Scan", "the tab's one button reads Scan, never Rescan / Refresh (those mean other things in the panel)")
+	assert_eq(v.walks, 0, "control: nothing has walked before the press")
+	v._scan_btn.pressed.emit()
+	assert_eq(v.walks, 1, "pressing Scan walks the project")
+	assert_false(v._scan_btn.disabled, "the button is usable again once the walk is done")
+	v._scan_btn.pressed.emit()
+	assert_eq(v.walks, 2, "a press after the first walk finished walks again -- it is not folded into a walk that is over")
+	v.free()
+
+
+func test_reach_view_announces_the_scan_and_yields_a_frame_before_walking() -> void:
+	# The walk is synchronous on the editor's main thread (~380 files), so an in-tree scan must say "Scanning..." and
+	# grey the button, give the editor ONE frame to paint that, and only then walk -- a long walk with no feedback reads
+	# as a hang. A second request landing inside that frame (a Check Reach handoff racing a click) is folded into the
+	# queued walk: the walk reads disk after the yield, so it is just as fresh.
+	var v := RecordingReachView.new()
+	v.hide()  # a background tab, so mounting it cannot trip the first-reveal walk and muddy the count
+	add_child_autofree(v)
+	var frame_before := Engine.get_process_frames()
+	v.rescan()
+	assert_eq(v.walks, 0, "in the tree the walk waits a frame -- walking now would hold the editor before 'Scanning...' could paint")
+	assert_eq(v._status.text, ReachView.MSG_SCANNING, "the status announces the scan the moment it is requested")
+	assert_ne(v._status.text, ReachView.MSG_IDLE, "...in words that differ from the idle prompt")
+	assert_true(v._scan_btn.disabled, "the Scan button greys while a walk is queued")
+	v.rescan()  # a second request inside the yield
+	await wait_process_frames(3)
+	assert_eq(v.walks, 1, "a request inside the yield is folded into the queued walk, not run as a second walk")
+	assert_gt(v.frame_at_walk, frame_before, "the walk ran on a LATER frame than the request, so the announcement had a frame to paint")
+	assert_eq(v.status_at_walk, ReachView.MSG_SCANNING, "the walk started while the status still read 'Scanning...'")
+	assert_true(v.scan_disabled_at_walk, "and while the Scan button was still greyed")
+	assert_false(v._scan_btn.disabled, "the button comes back once the walk is done")
+
+
+func test_reach_view_double_click_only_hands_a_project_file_to_the_editor() -> void:
+	# Headings, a path outside res:// and a file deleted since the scan must never reach the editor handoff, and the
+	# deleted file must SAY so rather than fail silently. The handoff itself (open_scene_from_path for a .tscn,
+	# edit_resource otherwise, then select_file) needs a running editor -- EditorInterface has no instance under GUT --
+	# so that last step is the Reach acceptance row in docs/CYBER_SUNDAY_PLUGIN_QA.md; everything before it is driven here.
+	var v = ReachView.new()
+	var root: TreeItem = v._tree.create_item()
+	v._on_activated()
+	assert_eq(v._status.text, ReachView.MSG_IDLE, "a double-click with no row selected does nothing")
+	var heading: TreeItem = v._row(root, "Quests: 0 of 2 can be started by a player", ReachView.COLOR_HEAD)
+	heading.select(0)
+	v._on_activated()
+	assert_eq(v._status.text, ReachView.MSG_IDLE, "a heading names no file, so double-clicking it does nothing")
+	var outside: TreeItem = v._row(root, "notes.tscn", ReachView.COLOR_DIM, "user://notes.tscn")
+	outside.select(0)
+	v._on_activated()
+	assert_eq(v._status.text, ReachView.MSG_IDLE, "a path outside res:// is never handed to the editor")
+	assert_false(v._status.has_theme_color_override("font_color"), "...and nothing is reported as an error for it")
+	# CONTROL: a res:// row DOES get past every guard to the open step -- here it stops at the file-exists check.
+	var gone: TreeItem = v._row(root, "WARN zz_deleted_since_the_scan.tscn", ReachView.COLOR_WARN,
+		"res://scenes/levels/zz_deleted_since_the_scan.tscn")
+	gone.select(0)
+	v._on_activated()
+	var said: String = v._status.text
+	assert_true(said.contains("zz_deleted_since_the_scan.tscn"), "a row whose file is gone names that file in the status: %s" % said)
+	assert_false(said.contains("res://"), "by file name, the way every row reads: %s" % said)
+	assert_true(said.contains("press Scan again"), "and says what to do about it: %s" % said)
+	assert_true(v._status.has_theme_color_override("font_color"), "tinted as an error, so it reads as a failure rather than a report line")
+	v.free()
+
+
+func test_reach_view_file_rows_carry_their_path_and_say_how_a_double_click_opens_them() -> void:
+	# A site row's file is the .tscn HOLDING the starter, and the double-click lands the designer IN that scene; the row
+	# tooltip is where the tab promises that. Every file row carries the path it opens as metadata (what _on_activated
+	# reads) and on its tooltip (the row text only names the file); a heading carries neither.
+	var v = ReachView.new()
+	var root: TreeItem = v._tree.create_item()
+	var scene_row: TreeItem = v._row(root, "QuestStarter.quest on node \"QuestStarter\" in SliceTestLevel.tscn", ReachView.COLOR_WARN, SLICE_LEVEL)
+	assert_eq(scene_row.get_metadata(0), SLICE_LEVEL, "the row carries the scene a double-click opens")
+	var scene_tip := scene_row.get_tooltip_text(0)
+	assert_true(scene_tip.contains(SLICE_LEVEL), "the res:// path is one hover away: %s" % scene_tip)
+	assert_true(scene_tip.contains("Double-click to open this scene."),
+		"a .tscn row promises to open AS A SCENE, landing the designer in the level that holds the starter: %s" % scene_tip)
+	var res_row: TreeItem = v._row(root, "WARN old_man.tres", ReachView.COLOR_WARN, OLD_MAN)
+	var res_tip := res_row.get_tooltip_text(0)
+	assert_true(res_tip.contains(OLD_MAN), "a resource row carries its path too: %s" % res_tip)
+	assert_true(res_tip.contains("Double-click to open it."), "a .tres opens in the Inspector: %s" % res_tip)
+	assert_false(res_tip.contains("scene"), "a .tres is never promised as a scene: %s" % res_tip)
+	var heading: TreeItem = v._row(root, "Levels: 1 of 6 are loaded from the boot scene", ReachView.COLOR_HEAD)
+	assert_eq(heading.get_tooltip_text(0), heading.get_text(0), "a heading's tooltip is just its text -- no path, no double-click promise")
+	assert_eq(heading.get_metadata(0), null, "and it carries no file for a double-click to open")
+	v.free()
+
+
+func test_reach_view_findings_never_grow_the_panel() -> void:
 	# A TabContainer's minimum is the CURRENT tab's minimum, and the editor's bottom splitter keeps whatever height it
-	# grew to — so one tall tab, once shown, leaves the panel tall for every tab after it, and this plugin has TWICE
-	# shipped a tab that pushed the panel past the bottom of the screen that way. Source-scanned rather than
-	# measured: an off-tree Control has no layout pass to measure, and what must not regress is the STRUCTURE (a
-	# small floor + no horizontal growth).
-	var src := FileAccess.get_file_as_string("res://addons/cybersunday_tools/dock_reach/reach_view.gd")
-	assert_ne(src, "", "reach_view.gd source should be readable")
-	assert_true(src.contains("ScrollContainer.SCROLL_MODE_DISABLED"),
-		"a long res:// path must never widen the bottom panel — horizontal scrolling stays disabled")
-	assert_true(src.contains("custom_minimum_size = Vector2(0, BODY_MIN_HEIGHT)"),
-		"the scrolled body carries the tab's only vertical minimum")
-	assert_lte(ReachView.BODY_MIN_HEIGHT, 120.0, "the body floor stays small (mirrors content_dock / stats_view)")
+	# grew to -- so one tall tab, once shown, leaves the panel tall for every tab after it, and this plugin has TWICE
+	# shipped a tab that pushed the panel past the bottom of the screen that way. Measured in the tree (a container
+	# skips children that are not visible in the tree, so an off-tree minimum is always zero): the tab's minimum with
+	# 800 over-wide rows must be exactly its minimum with two, and the scrolled body contributes only its small floor.
+	var v := RecordingReachView.new()  # the recorder: mounting shows the tab, and that reveal must not walk res://
+	add_child_autofree(v)
+	await wait_process_frames(2)
+	v._render(_bulk_report(1), 15, 378)
+	var few: Vector2 = v.get_combined_minimum_size()
+	v._render(_bulk_report(400), 15, 378)
+	var many: Vector2 = v.get_combined_minimum_size()
+	assert_gt(v._tree.get_root().get_child_count(), 0, "sanity: the render painted rows into the Tree")
+	assert_gte(few.y, ReachView.BODY_MIN_HEIGHT, "sanity: the measurement is live (it includes the body floor), not an off-tree zero")
+	assert_eq(many.y, few.y, "800 findings must not make the tab taller than 2 do -- the bottom panel would keep that height for every tab")
+	assert_eq(many.x, few.x, "rows far wider than the panel must not widen the tab")
+	var scroll := v._tree.get_parent() as ScrollContainer
+	assert_true(scroll != null, "the Tree sits inside a ScrollContainer, the body's height fence")
+	assert_eq(scroll.get_combined_minimum_size().y, ReachView.BODY_MIN_HEIGHT,
+		"with 800 rows in it the body still asks for only its floor, BODY_MIN_HEIGHT")
+	assert_eq(scroll.horizontal_scroll_mode, ScrollContainer.SCROLL_MODE_DISABLED, "the body never scrolls sideways; the Tree scrolls its own long rows")
+	assert_lte(ReachView.BODY_MIN_HEIGHT, 120.0, "the body floor stays small (the same ceiling test_devtools_refs holds the Refs tab to)")
+
+
+## The write surfaces a READ-ONLY tab must never name, as [label, RegEx] pairs matched over comment-MASKED code: saving
+## a resource; any file handle at all (the tab reads through ScanCache.text_of, so no handle that could be opened for
+## WRITE ever exists in it); a file-system mutation on a DirAccess (the tab only LISTS folders); a project-settings
+## write; an editor scene save; an undo-able scene edit; sending a file to the trash. Call SHAPES rather than bare
+## words, so `remove_child(` / `_tree.clear()` / `ProjectSettings.get_setting(` stay legal.
+const READ_ONLY_WRITE_SURFACES := [
+	["ResourceSaver", "\\bResourceSaver\\b"],
+	["FileAccess", "\\bFileAccess\\b"],
+	["DirAccess mutation", "\\b(make_dir|make_dir_recursive|make_dir_absolute|make_dir_recursive_absolute|remove|remove_absolute|rename|rename_absolute|copy|copy_absolute|create_link)\\s*\\("],
+	["ProjectSettings write", "\\bProjectSettings\\s*\\.\\s*(save|save_custom|set_setting|set|clear|set_initial_value|set_order)\\s*\\("],
+	["editor save", "\\b(save_scene|save_scene_as|save_all_scenes|mark_scene_as_unsaved)\\s*\\("],
+	["undo-able edit", "\\b(get_editor_undo_redo|EditorUndoRedoManager|UndoRedo)\\b"],
+	["trash", "\\bmove_to_trash\\s*\\("],
+]
+
+
+## Every write surface in `source`, as "label: matched text" lines. Comments are masked first with the audit panel's
+## shared masker, so a docstring PROMISING "no ResourceSaver" is not read as a violation of that promise.
+func _write_surfaces(source: String) -> Array:
+	var code := ScanWiring._mask_comments(source)
+	var out: Array = []
+	for entry in READ_ONLY_WRITE_SURFACES:
+		var pair := entry as Array
+		var re := RegEx.create_from_string(str(pair[1]))
+		for m in re.search_all(code):
+			out.append("%s: %s" % [str(pair[0]), m.get_string()])
+	return out
 
 
 func test_reach_view_is_read_only() -> void:
-	# Read-only tabs must STAY read-only unless the UI label and the authoring docs make a write explicit. Reach
-	# reports; it writes nothing, which is also why the plugin's preview/confirm/report-changed-paths write contract
-	# does not apply to it and cannot be got wrong. Scanned over MASKED source: the file's own docstring names all
-	# three of these as things it does not do, and a raw grep would trip on the promise instead of a violation.
-	var code := ScanWiring._mask_comments(FileAccess.get_file_as_string("res://addons/cybersunday_tools/dock_reach/reach_view.gd"))
-	assert_ne(code, "", "reach_view.gd source should be readable")
-	assert_false(code.contains("ResourceSaver"), "Reach must never save a resource")
-	assert_false(code.contains("FileAccess"), "Reach must never touch a file directly — reads go through ScanCache")
-	assert_false(code.contains("ProjectSettings.save"), "Reach reads project settings; it never writes them")
+	# Read-only tabs must STAY read-only unless the UI label and the authoring docs make a write explicit (CLAUDE.md,
+	# CYBER SUNDAY plugin work). Reach reports; it writes nothing, which is also why the plugin's preview / confirm /
+	# report-changed-paths write contract does not apply to it and cannot be got wrong. "Never writes" is not something
+	# a driven test can observe — a write on a branch no fixture reaches still ships — so this is a POLICY LINT over
+	# EVERY script the tab is made of: the glue, the pure module the glue delegates every decision to, and any script
+	# added to the folder later.
+	var dir := "res://addons/cybersunday_tools/dock_reach"
+	var scripts: Array = []
+	for f in DirAccess.get_files_at(dir):
+		if str(f).get_extension() == "gd":
+			scripts.append(dir.path_join(str(f)))
+	assert_has(scripts, dir.path_join("reach_view.gd"), "the lint covers the tab's editor glue: %s" % str(scripts))
+	assert_has(scripts, dir.path_join("reach_scan.gd"), "and the pure module every scan decision lives in: %s" % str(scripts))
+	# CONTROL: the lint catches a real write in code, and does not catch the same words inside a comment.
+	var violation := "func _cache(report: Resource) -> void:\n\tResourceSaver.save(report, \"res://reach_cache.tres\")\n" \
+		+ "\tvar d := DirAccess.open(\"res://\")\n\td.remove(\"reach_cache_old.tres\")\n"
+	var caught := _write_surfaces(violation)
+	assert_eq(caught.size(), 2, "control: a ResourceSaver.save and a DirAccess remove() are both caught: %s" % str(caught))
+	var promise := "## No ResourceSaver, no FileAccess.WRITE, no ProjectSettings.save anywhere below.\nfunc _noop() -> void:\n\tpass\n"
+	assert_eq(_write_surfaces(promise), [], "control: a docstring promising no writes is masked, not flagged")
+	for path in scripts:
+		var source := FileAccess.get_file_as_string(str(path))
+		assert_ne(source, "", "%s should be readable" % str(path))
+		var found := _write_surfaces(source)
+		assert_eq(found, [], "%s must stay read-only, but its code names a write surface: %s" % [str(path), str(found)])
 
 
-func test_reach_view_scans_lazily_on_first_reveal() -> void:
-	# cyber_panel builds EVERY tab eagerly on each plugin reload, so without a latch a plugin toggle would fan out a
-	# full res:// walk for a tab nobody clicked. This tab is not in tests/test_devtools_lazy_reveal.gd's LAZY_DOCKS
-	# (that list is the PL6 conversion set), so it pins its own latch here — same substrings, same contract.
-	var src := FileAccess.get_file_as_string("res://addons/cybersunday_tools/dock_reach/reach_view.gd")
-	assert_ne(src, "", "reach_view.gd source should be readable")
-	assert_true(src.contains("var _revealed"), "the tab declares a _revealed first-reveal latch")
-	assert_true(src.contains("visibility_changed.connect(_on_visibility_changed)"), "connected to the lazy handler")
-	assert_true(src.contains("func _on_visibility_changed"), "which is defined")
-	assert_true(src.contains("is_visible_in_tree() and not _revealed"), "and guards the scan on the first in-tree reveal")
-	assert_true(src.contains("_revealed = true"), "latching so the walk runs once, not on every visibility flip")
+func test_reach_view_walks_the_project_on_its_first_reveal_only() -> void:
+	# cyber_panel builds EVERY tab eagerly on each plugin reload, so the walk must wait for the designer to open this
+	# tab -- and then run once, not on every tab switch. This tab is not in tests/test_devtools_lazy_reveal.gd's DOCKS
+	# table (that is the PL6 conversion set), so it drives its own latch here, through the real visibility_changed wiring.
+	var v := RecordingReachView.new()
+	assert_eq(v.walks, 0, "building the tab (what cyber_panel does on every plugin reload) must not walk res://")
+	assert_false(v._revealed, "construction is not a reveal, so the first-reveal latch is still down")
+	assert_eq(v._status.text, ReachView.MSG_IDLE, "an unopened tab shows the idle prompt")
+	v.hide()
+	add_child_autofree(v)
+	v._on_visibility_changed()  # a background tab in the tree gets a visibility pass
+	await wait_process_frames(2)
+	assert_eq(v.walks, 0, "a tab that is in the tree but hidden has not been opened, so it must not walk")
+	assert_false(v._revealed, "and a hidden visibility pass must not spend the latch")
+	v.show()  # the TabContainer switching to Reach: visibility_changed fires through the real connection
+	await wait_process_frames(2)
+	assert_eq(v.walks, 1, "the first time the designer opens Reach, it walks (otherwise they open an idle tab)")
+	assert_true(v._revealed, "and the latch is spent")
+	v.hide()
+	v.show()
+	await wait_process_frames(2)
+	assert_eq(v.walks, 1, "switching away and back must not re-walk the project")
+	v._scan_btn.pressed.emit()
+	await wait_process_frames(2)
+	assert_eq(v.walks, 2, "control: the latch only gates the automatic reveal -- Scan still walks on demand")
 
 
 # ================================================================================================================

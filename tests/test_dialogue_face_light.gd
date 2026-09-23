@@ -31,6 +31,8 @@ class _VisualHeadSpeaker extends Node3D:
 class _Headless extends Node3D:
 	pass
 
+const DIALOGUE_MANAGER_PATH := "res://scripts/dialogue/dialogue_manager.gd"
+
 var _saved_enabled: bool
 var _saved_distance: float
 var _saved_height: float
@@ -257,23 +259,54 @@ func test_straight_down_pose_skips_look_at_without_an_error() -> void:
 
 # --- the DialogueManager seam ----------------------------------------------------------------------------------
 
-func test_dialogue_manager_owns_one_face_light_and_drives_it_by_push() -> void:
-	var src := FileAccess.get_file_as_string("res://scripts/dialogue/dialogue_manager.gd")
-	assert_true(src.contains("DialogueFaceLight.new()"), "DialogueManager builds the face light itself (code-built child)")
-	assert_true(src.contains("_face_light.begin("), "DialogueManager pushes begin(speaker) when the speaker is known")
-	assert_true(src.contains("_face_light.end("), "DialogueManager pushes end() when the conversation finishes")
-	var light_src := FileAccess.get_file_as_string("res://scripts/dialogue/dialogue_face_light.gd")
-	# The name is all over the light's DOC COMMENTS (they explain the push-driven seam and cite
-	# DialogueManager.start / ._finish as the callers), so the scan has to look at CODE lines only —
-	# what the contract forbids is the light CALLING the autoload, not naming it in prose.
-	var code_lines: Array[String] = []
-	for raw in light_src.split("
-"):
-		var line: String = raw.strip_edges()
-		if line.begins_with("#"):
-			continue
-		code_lines.append(line)
-	var code := "
-".join(code_lines)
-	assert_false(code.contains("DialogueManager"),
-		"no CODE line in the light reaches back into the DialogueManager autoload (one-way dependency, no parse cycle) — the name appears only in its doc comments")
+## Driven for real on a FRESH DialogueManager in the test tree (never the autoload): its _ready builds the view /
+## ducker / music bed / face light, start() runs synchronously up to its intro-beat timer (the window the push
+## lands in), and abort() is the death-abort path through _finish(). No speaker name is passed, so GameState's
+## talk / name-reveal ledgers are never touched; the world pause and the cursor mode _finish() writes are restored.
+func test_a_conversation_lights_its_speakers_face_and_the_end_releases_the_light() -> void:
+	var prior_paused := get_tree().paused
+	var prior_mouse := Input.mouse_mode
+	# start() arms the fresh manager's MusicDucker on the SHARED "music" bus and abort() fades it to the Settings
+	# level, not to whatever the bus held before this test -- snapshot it so a full run gets its bus back.
+	var music_bus := AudioServer.get_bus_index(MusicDucker.MUSIC_BUS)
+	var prior_music_db: float = AudioServer.get_bus_volume_db(music_bus) if music_bus >= 0 else 0.0
+	var manager = load(DIALOGUE_MANAGER_PATH).new()
+	add_child_autofree(manager)
+	var lights: Array[DialogueFaceLight] = []
+	for child in manager.get_children():
+		if child is DialogueFaceLight:
+			lights.append(child as DialogueFaceLight)
+	assert_eq(lights.size(), 1, "DialogueManager must build exactly ONE face light child (one light retargeted per speaker, never one per conversation)")
+	if lights.size() != 1:
+		return
+	var light: DialogueFaceLight = lights[0]
+	_step(light, 5)
+	assert_false(light._spot.visible, "control: with no conversation the manager's face light stays dark")
+
+	var spk := _make_head_speaker()
+	var line := DialogueLine.new()
+	line.text = "..."
+	var convo := DialogueResource.new()
+	convo.lines = [line]
+	manager.start(convo, spk)
+	light._process(0.1)
+	assert_true(light._pose_latched and light._spot.visible,
+		"start() must push the speaker into the face light: a conversation with a headed NPC lights its face")
+	var expected := _expected_light_pos(spk.head)
+	assert_true(light._spot.global_position.is_equal_approx(expected),
+		"the light keys the face of the speaker start() was handed; got %s want %s" % [str(light._spot.global_position), str(expected)])
+
+	manager.abort()
+	assert_false(light._pose_latched, "the conversation's end must release the light's latch so the next talk re-places it")
+	_step(light, 40)
+	assert_false(light._spot.visible,
+		"after the conversation ends the face light fades out and hides -- it must not linger on an NPC that is no longer talking")
+	assert_lt(light._energy, 0.01, "the envelope eased back to ~0 once released")
+
+	# Outlast start()'s intro timer so its continuation returns on the ended conversation instead of a freed manager.
+	await wait_seconds(GameSettings.dialogue.dialogue_intro_delay + 0.15)
+	get_tree().paused = prior_paused
+	Input.mouse_mode = prior_mouse
+	# Restored AFTER the wait so the ducker's restore tween has already landed and cannot overwrite it.
+	if music_bus >= 0:
+		AudioServer.set_bus_volume_db(music_bus, prior_music_db)

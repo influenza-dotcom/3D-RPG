@@ -1,14 +1,40 @@
 extends GutTest
 
-## GUT smoke-test suite. Each test guards a load-bearing invariant, and its assert
-## message states WHY that invariant matters — so this file doubles as executable
-## documentation of cross-system contracts (e.g. enemy blast damp, weapon-data shape,
-## the on_nearby_death trauma/freeze behaviour). Run via the GUT panel or CLI.
+## GUT smoke-test suite: a cross-system grab bag. Most tests DRIVE real code (BulletTime's time_scale ownership, the
+## Bunnyhop chain, ScreenShakeArea falloff, the on_nearby_death shake/freeze gates, the blast damp, the explosion
+## flash, the decal basis, the Settings clamps) and the rest pin authored scene/resource wiring. Every assert message
+## says what the PLAYER loses when it breaks. Run via the GUT panel or CLI.
 
-## Concrete stand-in for the now-@abstract Character base, so tests that only probe
-## Character's shared API (via has_method) can still instantiate one.
+## Concrete stand-in for the now-@abstract Character base, so tests can build one in-tree and drive Character's
+## shared code (apply_velocity's blast damp, the gore notify) without a Player's or NPC's _ready.
 class _ConcreteCharacter extends Character:
 	pass
+
+## A stand-in for anything in the Player group that a death nearby should reach: records every distance it is told.
+class _DeathWitness extends Node3D:
+	var heard: Array[float] = []
+
+	func on_nearby_death(distance: float) -> void:
+		heard.append(distance)
+
+## The slice of the Player a Slide ability reads: the steering input and the stamina purse (always affordable here).
+class _SlideHost extends Node:
+	var input_dir: Vector2 = Vector2.ZERO
+
+	func spend_stamina(_amount: float) -> bool:
+		return true
+
+## The slice of a Player that a Landing touchdown's DUST channel reaches. Off-tree (no prefab, no _ready): it records
+## the intensity of every puff it is asked for instead of raycasting a particle into a world it doesn't have, and
+## skips the fall-damage bill (test_upgrades drives that half of on_land).
+class _DustLedgerPlayer extends Player:
+	var puffs: Array[float] = []
+
+	func spawn_dust(intensity: float = 1.0) -> void:
+		puffs.append(intensity)
+
+	func _apply_fall_damage(_fall_speed: float) -> void:
+		pass
 
 const PLAYER_SCENE = preload("res://scenes/player/Player.tscn")
 const ENEMY_SCENE = preload("res://scenes/characters/enemy.tscn")
@@ -36,6 +62,20 @@ const MELEE = preload("res://resources/weapons/melee.tres")
 func after_each() -> void:
 	FreezeFrame.cancel()
 	Engine.time_scale = 1.0
+	# The slide test holds Crouch through Input; the explosion-flash test retunes a shared GameSettings knob.
+	Input.action_release(&"Crouch")
+	if _saved_flash_energy_per_radius >= 0.0:
+		GameSettings.effects.explosion_flash_energy_per_radius = _saved_flash_energy_per_radius
+		_saved_flash_energy_per_radius = -1.0
+	if _saved_land_sfx_min_impact >= 0.0:
+		GameSettings.audio.land_sfx_min_impact_to_play = _saved_land_sfx_min_impact
+		_saved_land_sfx_min_impact = -1.0
+
+
+## explosion_flash_energy_per_radius as it was before a test retuned it (-1 = untouched), restored in after_each.
+var _saved_flash_energy_per_radius: float = -1.0
+## land_sfx_min_impact_to_play as it was before the landing-dust test parked it out of reach (-1 = untouched).
+var _saved_land_sfx_min_impact: float = -1.0
 
 
 func test_player_scene_loads() -> void:
@@ -43,11 +83,34 @@ func test_player_scene_loads() -> void:
 	assert_true(PLAYER_SCENE is PackedScene, "Player.tscn must be a PackedScene")
 
 
-func test_enemy_instantiates_with_overridden_blast_damp() -> void:
+## Drive Character.apply_velocity for ONE frame of a live blast on an in-tree base Character carrying `divisor` (<= 0 =
+## keep the script default) and return the velocity the blast leaves behind. No collision shape and no floor, so the
+## slide eats none of it: what remains is exactly what the blast damp let the body keep.
+func _velocity_left_by_one_blast_frame(divisor: float = -1.0) -> Vector3:
+	var c := _ConcreteCharacter.new()
+	if divisor > 0.0:
+		c.blast_damp_divisor = divisor
+	add_child_autofree(c)
+	c.velocity = Vector3.ZERO
+	c.explosion_velocity = Vector3(10.0, 0.0, 0.0)
+	c.apply_velocity()
+	return c.velocity
+
+
+func test_enemy_scene_keeps_none_of_a_blast_after_the_push_frame() -> void:
+	# enemy.tscn overrides Character's blast damp so a knockback SHOVES an NPC on the frame it lands and leaves no carried
+	# velocity behind — an enemy that kept a share of every live blast frame would sail off across the map. The divisor
+	# is read off the authored scene WITHOUT entering the tree (NPC._ready must not run headless) and driven through the
+	# base Character's apply_velocity, which does the same per-frame give-back as npc.gd's.
 	var enemy: Character = ENEMY_SCENE.instantiate()
-	add_child_autofree(enemy)
-	assert_eq(enemy.blast_damp_divisor, 1.0,
-		"enemy.tscn must override blast_damp_divisor to 1.0 so enemies don't fly off after knockback")
+	var enemy_divisor: float = enemy.blast_damp_divisor
+	enemy.free()
+	var enemy_left := _velocity_left_by_one_blast_frame(enemy_divisor)
+	assert_almost_eq(enemy_left.length(), 0.0, 0.001,
+		"an enemy built from enemy.tscn must keep NO velocity once a blast frame has moved it (kept %s) — otherwise every live blast frame adds drift and knocked-back enemies fly off" % enemy_left)
+	var default_left := _velocity_left_by_one_blast_frame()
+	assert_gt(default_left.length(), 0.01,
+		"control: the same blast frame on a Character with the script-default damp DOES leave carried velocity, so the enemy's zero comes from its scene override and not from apply_velocity doing nothing")
 
 func test_enemy_body_placeholder_removed_and_mesh_retargeted() -> void:
 	# REGRESSION: the vestigial Man.glb "Body" node was removed from enemy.tscn. The root's `mesh` export used to
@@ -79,12 +142,15 @@ func test_enemy_scene_wires_hurt_and_death_voice() -> void:
 	enemy.free()
 
 
-func test_character_default_blast_damp() -> void:
-	var character_script: Script = load("res://scripts/player/character.gd")
-	var character: Character = character_script.new()
-	assert_eq(character.blast_damp_divisor, 1.12,
-		"Character.blast_damp_divisor default must be 1.12 (player-style horizontal retention)")
-	character.free()
+func test_a_blast_carries_a_default_character_on_by_only_a_fraction() -> void:
+	# Character's default damp is the PLAYER-style retention: after the frame a blast moves you, part of the impulse
+	# stays in your velocity (you keep flying with the shove) but strictly less than the blast itself, so the carry bleeds
+	# off instead of snowballing. A divisor of 1 would keep nothing; below 1 it would fling the body back at the blast.
+	var left := _velocity_left_by_one_blast_frame()
+	assert_gt(left.x, 0.0,
+		"a default Character must keep part of a blast's velocity after the push frame, in the blast's direction (kept %s)" % left)
+	assert_lt(left.x, 10.0,
+		"...but strictly less than the 10 m/s blast itself, or the carried shove would grow frame over frame (kept %s)" % left)
 
 
 func test_all_weapons_load() -> void:
@@ -182,24 +248,65 @@ func test_bullet_time_fire_while_ready_is_noop() -> void:
 		"Firing while READY must not transition to EXHAUSTED")
 
 
-func test_allow_timescale_changes_default_true() -> void:
-	assert_true(GameSettings.allow_timescale_changes,
-		"GameSettings.allow_timescale_changes must default to true")
+func test_time_scale_juice_ships_enabled_and_freeze_frame_honours_it() -> void:
+	# The flag is a runtime var that tests and the debug console clear, so the SHIPPED value is read off a FRESH
+	# GameSettings instance (no _ready, nothing loaded beyond its preloads) rather than the live autoload.
+	var fresh: Node = load("res://managers/GameSettings.gd").new()
+	assert_true(fresh.get(&"allow_timescale_changes") == true,
+		"SHIP DECISION: GameSettings ships with allow_timescale_changes ON — off silently deletes every hit-stop and the scoped bullet time from the game")
+	fresh.free()
+	# Control for test_freeze_frame_respects_global_disable: with the flag at its shipped value (and the player's hitstop
+	# accessibility toggle on) the SAME freeze call does stamp Engine.time_scale, so that test cannot pass vacuously.
+	var prior_allowed := GameSettings.allow_timescale_changes
+	var prior_hitstop: bool = Settings.hitstop_enabled
+	GameSettings.allow_timescale_changes = true
+	Settings.hitstop_enabled = true
+	Engine.time_scale = 1.0
+	FreezeFrame.freeze(0.001, 0.1, 0.05)
+	var frozen_scale: float = Engine.time_scale
+	GameSettings.allow_timescale_changes = prior_allowed
+	Settings.hitstop_enabled = prior_hitstop
+	assert_almost_eq(frozen_scale, 0.1, 0.0001,
+		"with time-scale changes allowed, FreezeFrame.freeze must slam Engine.time_scale to its scale at once — the hit-stop the player feels")
+
+
+## One BulletTime tick from READY in the state that DOES slow the world: scoped, airborne (a bare in-tree
+## CharacterBody3D that never moved reports is_on_floor() == false) and scoped-in WHILE airborne, with a 0.1 s
+## wall-clock step. Returns [Engine.time_scale right after the tick, whether the tick went ACTIVE, whether it claimed
+## time-scale ownership], with Engine.time_scale and the global flag put back before it returns.
+func _bullet_time_airborne_scope_tick(allowed: bool) -> Array:
+	var prior_allowed := GameSettings.allow_timescale_changes
+	GameSettings.allow_timescale_changes = allowed
+	Engine.time_scale = 1.0
+	var bt := BulletTime.new()
+	add_child_autofree(bt)
+	var body := CharacterBody3D.new()
+	add_child_autofree(body)
+	bt.character = body
+	bt._is_scoped = true
+	bt._scope_entered_in_air = true
+	bt._last_us = Time.get_ticks_usec() - 100_000
+	bt._process(0.016)
+	var result := [Engine.time_scale, bt.is_active(), bt._managing_time_scale]
+	Engine.time_scale = 1.0
+	GameSettings.allow_timescale_changes = prior_allowed
+	return result
 
 
 func test_bullet_time_respects_global_disable() -> void:
-	var prior := Engine.time_scale
-	Engine.time_scale = 1.0
-	GameSettings.allow_timescale_changes = false
-	var bt := BulletTime.new()
-	add_child_autofree(bt)
-	bt._state = BulletTime.State.ACTIVE
-	bt._last_us = Time.get_ticks_usec() - 100_000
-	bt._process(0.016)
-	assert_eq(Engine.time_scale, 1.0,
-		"BulletTime must not write to Engine.time_scale while disabled")
-	GameSettings.allow_timescale_changes = true
-	Engine.time_scale = prior
+	# CONTROL first: with time-scale changes allowed, this exact tick goes ACTIVE and pulls Engine.time_scale down, so
+	# the disabled half cannot pass merely because nothing would have written time_scale anyway.
+	var allowed := _bullet_time_airborne_scope_tick(true)
+	assert_true(allowed[1], "precondition: a scoped, airborne, scoped-in-the-air tick must enter ACTIVE")
+	assert_lt(allowed[0], 1.0,
+		"control: with time-scale changes allowed that tick must slow Engine.time_scale — the slow-mo the player dives for")
+	var disabled := _bullet_time_airborne_scope_tick(false)
+	assert_true(disabled[1],
+		"precondition: with the flag off the same tick must still go ACTIVE and reach the time-scale write, or the asserts below prove nothing")
+	assert_eq(disabled[0], 1.0,
+		"with GameSettings.allow_timescale_changes off, BulletTime must not write Engine.time_scale at all")
+	assert_false(disabled[2],
+		"…nor claim time-scale ownership, or once the flag came back it would ease a scale it never lowered back to 1.0 over FreezeFrame's")
 
 
 func test_freeze_frame_respects_global_disable() -> void:
@@ -213,16 +320,26 @@ func test_freeze_frame_respects_global_disable() -> void:
 	Engine.time_scale = prior
 
 
-func test_preload_manager_prewarm_api() -> void:
-	# Boot-time warmers that move the first-kill hitch (the Flite voice extraction + process-wide voice cache,
-	# and the GPU-particle death shaders) off the combat frame. Assert the API exists and _prewarm_tts is safe to call (no-ops without voices, e.g.
-	# on the headless test renderer) so a typo/regression here is caught.
-	assert_true(PreloadManager.has_method("_prewarm_tts"),
-		"PreloadManager must expose _prewarm_tts — boot-time Flite voice extraction + voice-cache warm-up")
-	assert_true(PreloadManager.has_method("_prewarm_gpu_particles"),
-		"PreloadManager must expose _prewarm_gpu_particles — boot-time death-effect shader warm-up")
-	PreloadManager._prewarm_tts()  # must not crash (headless: no voices -> early return)
-	assert_true(true, "PreloadManager._prewarm_tts() ran without error")
+func test_preload_manager_tts_prewarm_runs_clean_and_leaks_nothing() -> void:
+	# Boot-time warmers that move the first-kill hitch (the Flite voice extraction + process-wide voice cache, and the
+	# GPU-particle death shaders) off the combat frame. PreloadManager._ready dispatches both BY NAME
+	# (call_deferred(&"_prewarm_tts") / call_deferred(&"_prewarm_gpu_particles")), so a rename still parses and only
+	# silently drops the warm-up in a real build: that is what the two name pins guard.
+	assert_true(PreloadManager.has_method(&"_prewarm_tts"),
+		"PreloadManager must expose _prewarm_tts — _ready call_deferreds it by name for the boot-time Flite voice warm-up")
+	assert_true(PreloadManager.has_method(&"_prewarm_gpu_particles"),
+		"PreloadManager must expose _prewarm_gpu_particles — _ready call_deferreds it by name for the boot-time death-effect shader warm-up")
+	# Driven for real: the headless renderer skips the native engine half, and the pass must leave nothing behind — the
+	# throwaway VoiceManager node it builds is freed. (An engine error anywhere in the call also fails this test.)
+	# That VoiceManager is built OFF-tree, so a leak shows up as an ORPHAN node: OBJECT_NODE_COUNT only counts nodes
+	# inside the SceneTree and would stay flat even if the free were dropped.
+	var prior_offloading := VoiceManager._voice_offloading_started
+	var orphans_before := Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)
+	PreloadManager._prewarm_tts()
+	var orphans_after := Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)
+	VoiceManager._voice_offloading_started = prior_offloading
+	assert_eq(orphans_after, orphans_before,
+		"the boot TTS prewarm must free the VoiceManager node it builds — otherwise every launch leaks a node nobody can see")
 
 
 func test_bunnyhop_default_chain_zero() -> void:
@@ -333,13 +450,37 @@ func test_dust_constants_present() -> void:
 		"Min impact gate must be below 1.0 so reasonable landings still puff dust")
 
 
-func test_dust_intensity_curve_matches_thud_dynamic_range() -> void:
-	var min_intensity := GameSettings.effects.dust_land_base_intensity + GameSettings.effects.dust_land_min_impact_to_spawn * GameSettings.effects.dust_land_impact_bonus
-	var max_intensity := GameSettings.effects.dust_land_base_intensity + 1.0 * GameSettings.effects.dust_land_impact_bonus
-	assert_lt(min_intensity, max_intensity * 0.5,
-		"Light landings should produce noticeably smaller dust than heavy ones (>2x dynamic range)")
-	assert_almost_eq(max_intensity, 1.0, 0.01,
-		"At full impact, dust intensity should reach 1.0 (max scale)")
+func test_landing_dust_grows_from_a_small_puff_to_the_full_puff_with_impact() -> void:
+	# Driven through the real Landing.on_land on an off-tree host, so the sizes compared are the intensities production
+	# hands spawn_dust, never a local copy of the curve. DustSpawner scales the dust prefab by that intensity and clamps
+	# its particle amount_ratio at 1.0, so 1.0 is the full authored puff. The land SFX reads global_position (an error
+	# off-tree), so its gate is parked above any 0..1 impact for this test and restored in after_each.
+	_saved_land_sfx_min_impact = GameSettings.audio.land_sfx_min_impact_to_play
+	GameSettings.audio.land_sfx_min_impact_to_play = 2.0
+	var divisor: float = GameSettings.player_movement.landing_impact_divisor
+	var gate: float = GameSettings.effects.dust_land_min_impact_to_spawn
+	var host := _DustLedgerPlayer.new()
+	var landing := Landing.new()
+	landing.host = host
+	var stutter_fall := -gate * 0.5 * divisor  # a step-down at half the dust gate
+	landing.on_land(stutter_fall, Vector3(0.0, stutter_fall, 0.0))
+	var stutter_puffs := host.puffs.size()
+	var light_fall := -gate * 1.01 * divisor  # the lightest landing that clears the gate
+	landing.on_land(light_fall, Vector3(0.0, light_fall, 0.0))
+	var hard_fall := -2.0 * divisor  # twice the fall speed that already counts as a full-impact landing
+	landing.on_land(hard_fall, Vector3(0.0, hard_fall, 0.0))
+	var puffs: Array = host.puffs.duplicate()
+	landing.free()
+	host.free()
+	assert_eq(stutter_puffs, 0,
+		"a stutter landing under dust_land_min_impact_to_spawn must kick up no dust")
+	assert_eq(puffs.size(), 2,
+		"the lightest landing past the dust gate and a hard fall must each kick up exactly one puff")
+	if puffs.size() == 2:
+		assert_lt(puffs[0], puffs[1] * 0.5,
+			"a light landing must puff well under half the dust of a hard fall (%.3f vs %.3f) — the puff has to read how far you fell, like the thud does" % [puffs[0], puffs[1]])
+		assert_almost_eq(puffs[1], 1.0, 0.01,
+			"a full-impact landing must puff the full authored dust (intensity 1.0: the prefab's own scale and the amount_ratio ceiling), no bigger and no smaller")
 
 
 func test_falling_air_constants_present() -> void:
@@ -457,46 +598,42 @@ func test_muzzle_smoke_node_present_and_connected() -> void:
 		"GunMesh.setup must hand MuzzleSmoke the player's Inventory — without it the per-weapon muzzle_smoke_scale / has_muzzle_flash gate can never be read")
 
 
-func _orient_basis_for_normal(normal: Vector3) -> Basis:
-	var up := normal
-	var ref := Vector3.FORWARD if abs(up.dot(Vector3.FORWARD)) < 0.99 else Vector3.RIGHT
-	var right := ref.slide(up).normalized()
-	var back := right.cross(up).normalized()
-	return Basis(right, up, back)
+## Decal orientation: every splat in the game (bullet holes, blood drops, wound + gib splats, the death splat, the
+## destroy scorch, paint) takes its basis from Projectile.decal_basis_for_normal, so these call THAT — never a local
+## copy of the math, which is how an earlier version of these tests stayed green while production went left-handed.
+## A left-handed basis (the cross product flipped) mirrors every stamp; on walls that was the original bug.
+func _assert_decal_basis_stands_on(normal: Vector3, surface: String) -> void:
+	var b := Projectile.decal_basis_for_normal(normal)
+	assert_gt(b.determinant(), 0.0,
+		surface + " decals must get a RIGHT-handed basis (determinant > 0) — a left-handed one mirrors the stamp")
+	for axis in [b.x, b.y, b.z]:
+		assert_almost_eq((axis as Vector3).length(), 1.0, 0.001,
+			surface + " decal basis axes must be unit length — a scaled axis stretches the projected stamp")
+	assert_almost_eq(b.x.dot(b.y), 0.0, 0.001, surface + " decal basis X and Y must be orthogonal (no shear)")
+	assert_almost_eq(b.y.dot(b.z), 0.0, 0.001, surface + " decal basis Y and Z must be orthogonal (no shear)")
+	assert_almost_eq(b.z.dot(b.x), 0.0, 0.001, surface + " decal basis Z and X must be orthogonal (no shear)")
+	assert_almost_eq(b.y, normal, Vector3.ONE * 0.001,
+		surface + " decal basis Y must BE the surface normal — a Decal projects along its -Y, into the surface")
 
 
-func test_decal_orient_floor_is_right_handed() -> void:
-	assert_gt(_orient_basis_for_normal(Vector3(0, 1, 0)).determinant(), 0.0,
-		"Floor decals must use a right-handed basis (positive determinant)")
+func test_decal_basis_floor() -> void:
+	_assert_decal_basis_stands_on(Vector3.UP, "Floor")
 
 
-func test_decal_orient_ceiling_is_right_handed() -> void:
-	assert_gt(_orient_basis_for_normal(Vector3(0, -1, 0)).determinant(), 0.0,
-		"Ceiling decals must use a right-handed basis")
+func test_decal_basis_ceiling() -> void:
+	_assert_decal_basis_stands_on(Vector3.DOWN, "Ceiling")
 
 
-func test_decal_orient_east_wall_is_right_handed() -> void:
-	assert_gt(_orient_basis_for_normal(Vector3(1, 0, 0)).determinant(), 0.0,
-		"East-facing wall decals must use a right-handed basis (this was the bug)")
+func test_decal_basis_east_wall() -> void:
+	_assert_decal_basis_stands_on(Vector3.RIGHT, "East-facing wall")
 
 
-func test_decal_orient_north_wall_is_right_handed() -> void:
-	assert_gt(_orient_basis_for_normal(Vector3(0, 0, -1)).determinant(), 0.0,
-		"North-facing wall decals must use a right-handed basis")
+func test_decal_basis_north_wall() -> void:
+	_assert_decal_basis_stands_on(Vector3.FORWARD, "North-facing wall")
 
 
-func test_decal_orient_diagonal_slope_is_right_handed() -> void:
-	var n := Vector3(0.5, 0.5, 0.5).normalized()
-	assert_gt(_orient_basis_for_normal(n).determinant(), 0.0,
-		"Diagonal slope decals must use a right-handed basis")
-
-
-func test_decal_orient_y_axis_matches_normal() -> void:
-	var n := Vector3(1, 0, 0)
-	var basis := _orient_basis_for_normal(n)
-	assert_almost_eq(basis.y.x, 1.0, 0.001)
-	assert_almost_eq(basis.y.y, 0.0, 0.001)
-	assert_almost_eq(basis.y.z, 0.0, 0.001)
+func test_decal_basis_diagonal_slope() -> void:
+	_assert_decal_basis_stands_on(Vector3(0.5, 0.5, 0.5).normalized(), "Diagonal slope")
 
 
 func test_blood_splatter_interface() -> void:
@@ -543,23 +680,61 @@ func test_player_on_nearby_death_shakes_screen() -> void:
 		"on_nearby_death at distance 0 must inject trauma into the player's screen_shake")
 
 
+## The trauma ONE nearby death at `distance` adds to a calm camera, read synchronously (ScreenShake decays it per frame).
+func _death_trauma_at(player: Node, distance: float) -> float:
+	var shake: ScreenShake = player.screen_shake
+	shake.trauma = 0.0
+	player.on_nearby_death(distance)
+	return shake.trauma
+
+
 func test_player_on_nearby_death_decays_with_distance() -> void:
 	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
 	var instance := player_scene.instantiate()
 	add_child_autofree(instance)
 	await wait_physics_frames(2)
-	var shake: ScreenShake = instance.screen_shake
-	shake.trauma = 0.0
-	instance.on_nearby_death(GameSettings.screen_shake.death_shake_range + 1.0)
-	assert_eq(shake.trauma, 0.0,
-		"Beyond DEATH_SHAKE_RANGE the screen must not shake at all")
+	var shake_range: float = GameSettings.screen_shake.death_shake_range
+	# Both in-range samples sit at or past the middle of the range, where the shipped death_shake_amount stays under
+	# ScreenShake's trauma ceiling, so the falloff is compared on unclamped values and a flat full-strength shake
+	# would read as two EQUAL (ceiling) values.
+	var mid := _death_trauma_at(instance, shake_range * 0.5)
+	var far := _death_trauma_at(instance, shake_range * 0.95)
+	var edge := _death_trauma_at(instance, shake_range)
+	var beyond := _death_trauma_at(instance, shake_range + 1.0)
+	assert_gt(far, 0.0,
+		"a death near the edge of death_shake_range must still shake the screen, just gently")
+	assert_lt(far, mid,
+		"the death shake must fall off with distance: a kill at 95%% of the range (%.3f) must shake less than one at half of it (%.3f)" % [far, mid])
+	assert_almost_eq(edge, 0.0, 0.0001,
+		"the falloff must reach nothing AT the range edge, so walking across it is not a visible jump in shake")
+	assert_eq(beyond, 0.0,
+		"beyond death_shake_range the screen must not shake at all")
 
 
-func test_character_notifies_player_on_gore() -> void:
-	var c := _ConcreteCharacter.new()
-	add_child_autofree(c)
-	assert_true(c.has_method("_notify_nearby_players_of_death"),
-		"Character.gore() must notify nearby players (used by the on-camera blood splatter)")
+func test_a_dying_character_tells_players_in_range_how_far_away_it_died() -> void:
+	# Character.gore() -> _notify_nearby_players_of_death is how a kill reaches the camera: every Player-group node close
+	# enough gets on_nearby_death(distance) (the blood splatter + death shake fall off with that distance), and a player
+	# beyond both the splatter and the shake range hears nothing.
+	var dying := _ConcreteCharacter.new()
+	add_child_autofree(dying)
+	dying.global_position = Vector3.ZERO
+	var near_d: float = minf(GameSettings.effects.blood_splatter_range, GameSettings.screen_shake.death_shake_range) * 0.5
+	var near := _DeathWitness.new()
+	add_child_autofree(near)
+	near.add_to_group(Groups.PLAYER)
+	near.global_position = Vector3(near_d, 0.0, 0.0)
+	var far := _DeathWitness.new()
+	add_child_autofree(far)
+	far.add_to_group(Groups.PLAYER)
+	far.global_position = Vector3(0.0, 0.0, GameSettings.effects.blood_splatter_range + GameSettings.screen_shake.death_shake_range + 5.0)
+	dying._notify_nearby_players_of_death()
+	assert_eq(near.heard.size(), 1,
+		"a player inside the splatter/shake range must be told about the death exactly once — otherwise no blood hits the lens and the camera never shakes")
+	if near.heard.size() == 1:
+		assert_almost_eq(near.heard[0], near_d, 0.001,
+			"the player must be handed its real distance to the body, which the splatter and shake fall off with")
+	assert_eq(far.heard.size(), 0,
+		"a player beyond both the blood-splatter and death-shake ranges must not be told — a kill across the map must not shake your screen")
 
 
 func test_player_has_on_nearby_death() -> void:
@@ -629,21 +804,54 @@ func test_shake_multiplier_falloff_is_monotonic() -> void:
 		"near (25% of radius) must shake MORE than far (75% of radius) — the falloff decreases with distance")
 
 
-func test_explosion_light_sized_in_ready() -> void:
-	var scene := load("res://scenes/effects/explosion_area.tscn") as PackedScene
-	var inst = scene.instantiate()
-	add_child_autofree(inst)
-	await wait_physics_frames(2)
-	var light: OmniLight3D = inst.get_node("OmniLight3D")
-	assert_not_null(light, "ExplosionArea must have an OmniLight3D child")
-	# The flash radius is sized in _ready (regression: it used to only get set on body entry) and FLOORED at
-	# explosion_min_flash_radius so even a small blast lights the area — the scene wires collision_shape (a real
-	# blast), so the full-size branch applies: maxf(explosion_radius, min_flash). light_energy tracks that floored radius.
-	var expected_flash: float = maxf(inst.explosion_radius, GameSettings.effects.explosion_min_flash_radius)
-	assert_almost_eq(light.omni_range, expected_flash, 0.001,
-		"OmniLight3D.omni_range must be sized in _ready, floored at explosion_min_flash_radius")
-	assert_almost_eq(light.light_energy, expected_flash * GameSettings.effects.explosion_flash_energy_per_radius, 0.001,
-		"OmniLight3D.light_energy must equal the floored flash radius * explosion_flash_energy_per_radius after _ready")
+## Spawn explosion_area.tscn in-tree with its radius (and, for `cosmetic`, the light-only spark setup: no push collider,
+## no force, no damage) applied BEFORE it enters the tree, because _ready reads them once to size the flash.
+func _spawn_explosion(radius: float, cosmetic: bool = false) -> Explosion:
+	var blast: Explosion = (load("res://scenes/effects/explosion_area.tscn") as PackedScene).instantiate()
+	blast.explosion_radius = radius
+	if cosmetic:
+		blast.collision_shape = null
+		blast.max_explosion_force = 0.0
+		blast.deals_damage = false
+	add_child_autofree(blast)
+	return blast
+
+
+func test_explosion_light_reaches_the_blast_edge_from_ready() -> void:
+	# REGRESSION: the flash light used to be sized only when a body entered the blast, so a rocket into empty air lit the
+	# scene with whatever omni_range the prefab happened to be authored with. It is sized the moment the blast exists.
+	var floor_r: float = GameSettings.effects.explosion_min_flash_radius
+	var light: OmniLight3D = _spawn_explosion(floor_r * 2.0).get_node("OmniLight3D")
+	assert_almost_eq(light.omni_range, floor_r * 2.0, 0.001,
+		"a real blast's flash must light exactly as far as its explosion_radius, set in _ready before any body enters")
+	assert_gt(light.light_energy, 0.0, "a real blast's flash must actually be lit")
+
+
+func test_a_small_forceful_blast_is_floored_but_a_cosmetic_spark_stays_tiny() -> void:
+	var floor_r: float = GameSettings.effects.explosion_min_flash_radius
+	var small_light: OmniLight3D = _spawn_explosion(floor_r * 0.25).get_node("OmniLight3D")
+	assert_almost_eq(small_light.omni_range, floor_r, 0.001,
+		"a forceful blast smaller than explosion_min_flash_radius must still light out to that floor — a small grenade in a dark room has to read")
+	var spark_r: float = GameSettings.effects.explosion_spark_radius
+	assert_lt(spark_r, floor_r, "precondition: the hit-spark radius sits below the flash floor, or this control proves nothing")
+	var spark_light: OmniLight3D = _spawn_explosion(spark_r, true).get_node("OmniLight3D")
+	assert_gt(spark_light.omni_range, 0.0, "a cosmetic spark still flashes")
+	assert_true(spark_light.omni_range <= spark_r,
+		"a cosmetic hit spark / paint splat (no push, no force) must light only its own tiny radius (got %.2f m for a %.2f m spark) — flooring it floods the room on every bullet hit" % [spark_light.omni_range, spark_r])
+
+
+func test_explosion_flash_brightness_scales_with_reach_and_honours_the_energy_knob() -> void:
+	var floor_r: float = GameSettings.effects.explosion_min_flash_radius
+	var small_light: OmniLight3D = _spawn_explosion(floor_r * 2.0).get_node("OmniLight3D")
+	var big_light: OmniLight3D = _spawn_explosion(floor_r * 4.0).get_node("OmniLight3D")
+	assert_gt(big_light.light_energy, small_light.light_energy, "a bigger blast must flash brighter")
+	assert_almost_eq(big_light.light_energy / small_light.light_energy, big_light.omni_range / small_light.omni_range, 0.001,
+		"flash brightness is authored PER METRE of reach (explosion_flash_energy_per_radius), so twice the reach must be twice the energy")
+	_saved_flash_energy_per_radius = GameSettings.effects.explosion_flash_energy_per_radius
+	GameSettings.effects.explosion_flash_energy_per_radius = _saved_flash_energy_per_radius * 2.0
+	var retuned_light: OmniLight3D = _spawn_explosion(floor_r * 2.0).get_node("OmniLight3D")
+	assert_almost_eq(retuned_light.light_energy, small_light.light_energy * 2.0, 0.01,
+		"doubling explosion_flash_energy_per_radius must double the same blast's flash — it is the designer's live brightness dial")
 
 
 func test_bullet_time_does_not_clobber_external_time_scale() -> void:
@@ -741,53 +949,26 @@ func test_player_freeze_frame_gated_by_distance() -> void:
 	GameSettings.allow_timescale_changes = prior_allowed
 
 
-func test_flash_light_uses_export_not_relative_path() -> void:
-	var content := _read_file("res://scenes/player/flash_light.gd")
-	assert_false('"../LightPosition"' in content,
-		"flash_light.gd must not contain the brittle ../LightPosition NodePath")
-	assert_true("@export var light_position" in content,
-		"flash_light.gd must expose light_position as an @export so the scene wires it")
-
-
-func test_flash_light_uses_delta_based_lerp() -> void:
-	var content := _read_file("res://scenes/player/flash_light.gd")
-	assert_true("@export var follow_rate" in content,
-		"flash_light.gd must expose the follow rate as an @export (designer-tunable, exp-based smoothing)")
-	assert_true("exp(-follow_rate" in content,
-		"flash_light.gd must use exp-based frame-rate-independent smoothing")
-
-
-func test_player_scene_wires_flashlight_light_position() -> void:
-	# The camera rig (FlashLight + LightPosition) was extracted into camera_rig.tscn, which
-	# Player.tscn instances — so the node_paths wiring lives there now, not inlined in Player.tscn.
-	var content := _read_file("res://scenes/player/camera_rig.tscn")
-	assert_true('light_position = NodePath("../LightPosition")' in content,
-		"camera_rig.tscn must wire FlashLight.light_position to ../LightPosition via node_paths")
-
-
-func test_enemy_has_hitstop_handlers() -> void:
-	var content := _read_file("res://scripts/npc/npc.gd")
-	assert_true("func _on_damaged" in content,
-		"npc.gd must define _on_damaged (the damaged-signal handler wired in enemy.tscn)")
-	assert_true("func _on_died" in content,
-		"npc.gd must define _on_died (the kill-beat freeze, wired to the died signal)")
-
-
-func test_ray_cast_has_no_stale_inline_comments() -> void:
-	var content := _read_file("res://scripts/components/ray_cast.gd")
-	assert_false("# distance in front of camera" in content,
-		"ray_cast.gd must not contain the `# distance in front of camera` comment")
-	assert_false("# Connect the joint" in content,
-		"ray_cast.gd must not contain the `# Connect the joint` comment")
-
-
-# File is scripts/components/Throwable.gd (the old misspelled "Interactible.gd" is gone).
-func test_interactable_is_data_driven() -> void:
-	var content := _read_file("res://scripts/components/Throwable.gd")
-	assert_true("class_name Throwable" in content,
-		"Throwable.gd must declare class_name Throwable")
-	assert_true("ThrowableData" in content,
-		"Throwable.gd must read its config from an ThrowableData resource")
+func test_enemy_scene_signal_wiring_resolves_and_reaches_the_death_and_voice_handlers() -> void:
+	# enemy.tscn AUTHORS its damaged/died connections (npc.gd's handlers + the Damage/Death voice nodes); none are made in
+	# code. Scene connections exist right after instantiate(), so this reads them without running NPC._ready. Two ways it
+	# breaks silently: a handler renamed away (every hit/death then logs an engine error and skips that reaction), and a
+	# connection deleted in the Node dock (the enemy still dies, it just stops crediting the kill / crying out).
+	var enemy: Character = ENEMY_SCENE.instantiate()
+	for sig: StringName in [&"damaged", &"died"]:
+		for conn: Dictionary in enemy.get_signal_connection_list(sig):
+			var cb: Callable = conn["callable"]
+			assert_true(cb.is_valid(),
+				"enemy.tscn connects `%s` to %s, which no longer exists — every emit would error and skip that reaction" % [sig, cb])
+	assert_true(enemy.died.is_connected(Callable(enemy, &"_on_died")),
+		"enemy.tscn must connect died -> _on_died: kill quests, kill XP, witness barks and the death noise all run from it")
+	var damage_node := enemy.get_node_or_null("Damage")
+	assert_true(damage_node != null and enemy.damaged.is_connected(Callable(damage_node, &"_on_enemy_damaged")),
+		"enemy.tscn must connect damaged -> Damage._on_enemy_damaged, or NPCs stop grunting when hit")
+	var death_node := enemy.get_node_or_null("Death")
+	assert_true(death_node != null and enemy.died.is_connected(Callable(death_node, &"_on_enemy_died")),
+		"enemy.tscn must connect died -> Death._on_enemy_died, or NPCs die without their death cry")
+	enemy.free()
 
 
 func test_inventory_equip_same_weapon_does_not_emit() -> void:
@@ -860,14 +1041,6 @@ func test_ram_settings_present() -> void:
 		"Ram requires a positive minimum speed so ordinary movement doesn't body-check enemies")
 
 
-func test_attack_has_scope_gating() -> void:
-	var content := _read_file("res://scripts/combat/attack.gd")
-	assert_true("func can_enter_scope" in content,
-		"Attack.can_enter_scope() is the seam ScopeIn asks before (re-)entering ADS")
-	assert_false("_do_launch_attack" in content,
-		"The scoped-attack dash launch is GONE from Attack — the air dash is its own key on the AirDash ability, and a weapon must never launch the player again")
-
-
 func test_scope_in_has_force_unscope() -> void:
 	# Not add_child'd: ScopeIn._process dereferences `camera`, which is null on a bare
 	# instance — has_method() works without entering the tree.
@@ -877,20 +1050,32 @@ func test_scope_in_has_force_unscope() -> void:
 	si.free()
 
 
-func test_player_has_slide_and_bounce_systems() -> void:
-	# Slide tuning + its trigger moved onto the Slide ABILITY node; the pinball bounce stays on the Player.
-	var slide := _read_file("res://scripts/components/abilities/slide.gd")
-	for field in ["slide_min_speed", "slide_friction", "slide_jump_mult"]:
-		assert_true("var %s" % field in slide,
-			"slide.gd must declare the %s tuning export" % field)
-	assert_true("func try_start" in slide,
-		"slide.gd must have the slide trigger try_start")
-	var content := _read_file("res://scripts/player/player.gd")
-	for field in ["ram_bounce_min_speed", "ram_bounce_factor", "ram_thud_sound"]:
-		assert_true("var %s" % field in content,
-			"player.gd must declare the %s tuning export" % field)
-	assert_true("func _check_bounce" in content,
-		"player.gd must have the pinball _check_bounce")
+func test_slide_starts_only_on_a_fast_crouched_coasting_landing() -> void:
+	# The Slide ability's trigger, driven off-tree (Player.landing calls try_start with the pre-move velocity). Each
+	# refusal below is the SAME fast landing with exactly one condition taken away, and the final start is the control.
+	var host := _SlideHost.new()
+	var sl := Slide.new()
+	sl.setup(host)
+	var fast := Vector3(sl.slide_min_speed + 1.0, -6.0, 0.0)
+	Input.action_press(&"Crouch")
+	sl.try_start(Vector3(sl.slide_min_speed * 0.5, -6.0, 0.0))
+	assert_false(sl.is_active(), "a crouched landing slower than slide_min_speed must not slide — a crouch-walk touchdown is not a slide")
+	host.input_dir = Vector2(0.0, 1.0)
+	sl.try_start(fast)
+	assert_false(sl.is_active(), "holding a move key must not start a slide (steering would end it next frame and just click the sfx)")
+	host.input_dir = Vector2.ZERO
+	Input.action_release(&"Crouch")
+	sl.try_start(fast)
+	assert_false(sl.is_active(), "a fast landing WITHOUT crouch held must not slide")
+	Input.action_press(&"Crouch")
+	sl.slide_min_speed = fast.length() * 2.0
+	sl.try_start(fast)
+	assert_false(sl.is_active(), "slide_min_speed is the designer's live gate: raising it above the landing speed must refuse the slide")
+	sl.slide_min_speed = fast.x - 1.0
+	sl.try_start(fast)
+	assert_true(sl.is_active(), "control: a fast landing with crouch held and no steering must start the slide")
+	sl.free()
+	host.free()
 
 
 func test_post_process_shader_has_contrast_uniform() -> void:
@@ -941,35 +1126,74 @@ func test_post_process_dither_is_folded_into_one_quantisation() -> void:
 		"the dead post-posterize dither form (`+ d / steps` applied after quantising) must not come back — that is the no-op this replaced")
 
 
-func test_bayer_recursion_reproduces_the_canonical_matrices() -> void:
-	# A GDScript mirror of the recursion post_process.gdshader's bayer() implements, so the ALGORITHM is
-	# pinned by an executable assertion rather than only by the shader's own comment. It is a spec, not the
-	# shader itself (nothing headless can run GLSL) — its job is to fail loudly if someone "simplifies" the
-	# recursion in either place into something that is no longer a Bayer matrix.
-	assert_eq(_bayer_cells(1), [0, 2, 3, 1],
+func test_the_shaders_own_bayer_recurrence_builds_a_true_dither_matrix() -> void:
+	# Headless never compiles shaders, so this lifts the two lines of post_process.gdshader's bayer() that DEFINE the
+	# matrix — the per-bit recurrence `v = ...;` and the `return` that turns v into a threshold — out of the shader text
+	# and evaluates THEM with Expression over every cell. Only the loop around them (coordinate bits walked LOW to HIGH,
+	# as the shader's own loop does) lives here, so an edit to either shader expression changes what is asserted.
+	var body := _shader_function_body("res://resources/shaders/post_process.gdshader", "float bayer(ivec2")
+	var step_expr := _regex_group(body, "\\n\\s*v\\s*=\\s*([^;]+);")
+	var return_expr := _regex_group(body, "\\breturn\\s+([^;]+);")
+	assert_ne(step_expr, "", "post_process.gdshader's bayer() must build its value with a `v = ...;` recurrence line")
+	assert_ne(return_expr, "", "post_process.gdshader's bayer() must return a threshold")
+	if step_expr == "" or return_expr == "":
+		return
+	assert_eq(_shader_bayer_cells(step_expr, 1), [0, 2, 3, 1],
 		"order 1 must be the canonical 2x2 Bayer matrix")
-	assert_eq(_bayer_cells(2), [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5],
-		"order 2 must reproduce the exact 4x4 table post_process.gdshader used to spell out by hand")
-	# The property that MAKES it a dither matrix: every threshold 0..N*N-1 appears exactly once, so the
-	# thresholds spread evenly across one quantisation step. A duplicate or a gap biases the pattern.
-	var eight := _bayer_cells(3)
-	eight.sort()
-	assert_eq(eight, range(64), "order 3 must be a permutation of 0..63 — every threshold used exactly once")
+	assert_eq(_shader_bayer_cells(step_expr, 2), [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5],
+		"order 2 must reproduce the classic 4x4 table the shader used to spell out by hand")
+	for order: int in [1, 2, 3]:
+		var size := 1 << order
+		var cells := _shader_bayer_cells(step_expr, order)
+		var sorted_cells := cells.duplicate()
+		sorted_cells.sort()
+		assert_eq(sorted_cells, range(size * size),
+			"order %d must use every threshold 0..%d exactly once — a duplicate or a gap biases the dither pattern" % [order, size * size - 1])
+		var total := 0.0
+		var all_inside := true
+		for v: int in cells:
+			var t: float = _eval_shader_expr(return_expr, ["v", "size"], [v, size])
+			total += t
+			all_inside = all_inside and t > 0.0 and t < 1.0
+		assert_true(all_inside, "order %d thresholds must all sit strictly inside (0, 1)" % order)
+		assert_almost_eq(total / float(size * size), 0.5, 0.000001,
+			"order %d thresholds must average exactly 0.5 — any offset darkens or lightens every dithered frame" % order)
 
 
-## Row-major cells of the order-`order` Bayer matrix, by the same recursion as the shader:
-##   M_2N = [[4*M_N + 0, 4*M_N + 2], [4*M_N + 3, 4*M_N + 1]], i.e. offset(xb, yb) = 2*(xb ^ yb) + yb
-## walked LOW bit to HIGH with v = v*4 + offset.
-func _bayer_cells(order: int) -> Array:
+## The text of the shader function starting at `signature`, up to its closing brace at column 0 ("" when missing).
+func _shader_function_body(path: String, signature: String) -> String:
+	var src := _read_file(path)
+	var start := src.find(signature)
+	if start < 0:
+		return ""
+	var end := src.find("\n}", start)
+	return src.substr(start, end - start) if end > start else ""
+
+
+func _regex_group(text: String, pattern: String) -> String:
+	var m := RegEx.create_from_string(pattern).search(text)
+	return m.get_string(1).strip_edges() if m != null else ""
+
+
+## Evaluate one GLSL expression lifted from the shader (int/float arithmetic, `^`, float() casts) with Expression.
+func _eval_shader_expr(expr: String, names: Array, values: Array) -> Variant:
+	var e := Expression.new()
+	var err := e.parse(expr, PackedStringArray(names))
+	assert_eq(err, OK, "the shader expression `%s` must evaluate as plain arithmetic: %s" % [expr, e.get_error_text()])
+	if err != OK:
+		return 0
+	return e.execute(values)
+
+
+## Row-major cells of the order-`order` matrix: the shader's loop (bit k of x and y, LOW to HIGH) around ITS `v = ...` line.
+func _shader_bayer_cells(step_expr: String, order: int) -> Array:
 	var size := 1 << order
 	var cells := []
 	for y in size:
 		for x in size:
 			var v := 0
 			for k in order:
-				var xb := (x >> k) & 1
-				var yb := (y >> k) & 1
-				v = v * 4 + 2 * (xb ^ yb) + yb
+				v = int(_eval_shader_expr(step_expr, ["v", "xb", "yb"], [v, (x >> k) & 1, (y >> k) & 1]))
 			cells.append(v)
 	return cells
 

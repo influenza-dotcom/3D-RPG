@@ -37,6 +37,13 @@ func test_navsandbox_clean_bake_no_stranded_no_leak() -> void:
 
 	assert_true(report.nav_ready,
 		"NavSandbox's clean baked navmesh should sync headless within the timeout — if false, a reimport may be in flight; re-run")
+	# LIVENESS FIRST: "no NPC stranded" only means something if the wave actually spawned and walked. Half the wave
+	# is the bar (an NPC may idle at a wander point for a while); a silent no-op on the `wanders` export, a brain
+	# that never ticks, or a wave that never spawned all report zero strands and would otherwise pass green.
+	assert_true(report.roamed(harness.npc_count, int(ceil(harness.npc_count / 2.0))),
+		"the soak wave must actually roam before a clean strand verdict means anything (spawned and moved >= %.1f m):
+%s"
+			% [report.MOVED_EPS, report.summary()])
 	assert_false(report.has_stranded(),
 		"no NPC should strand on the clean NavSandbox bake; a strand here means a bad-bake island:\n%s" % report.summary())
 	assert_false(report.is_leaking(),

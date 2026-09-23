@@ -79,6 +79,8 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 		"the roster scroll is vertical-only — rows fit the width")
 	assert_eq(scroll.size_flags_vertical, Control.SIZE_EXPAND_FILL, "the roster scroll takes the panel's slack")
 	assert_true(scroll.is_ancestor_of(inst.get_node("%ChipList")), "the roster rows live inside the scroll")
+	assert_eq((inst.get_node("%ChipList") as GridContainer).columns, 3,
+		"the roster is THREE columns — eleven chips in one column overflowed the card and painted a scrollbar")
 	assert_eq((inst.get_node("%Buttons") as Control).get_parent(), inst.get_node("%Column"),
 		"Back/Begin stay pinned in the column, outside the scroll")
 	assert_eq((inst.get_node("%Tally") as Control).get_parent(), inst.get_node("%Column"),

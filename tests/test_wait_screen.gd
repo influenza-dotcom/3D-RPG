@@ -51,13 +51,53 @@ func test_waiting_is_allowed_while_merely_noticed() -> void:
 	assert_false(WAIT.hostile_blocks(StealthStatus.Level.DETECTED),
 			"a meter that has merely STARTED filling is a guard glancing over, not a hunt — refusing here would make waiting impossible anywhere patrolled")
 
-func test_the_refusal_threshold_tracks_the_stealth_ladder() -> void:
-	# Derived, not a hardcoded 2: if someone reorders StealthStatus.Level (its header invites swapping
-	# CAUTION and DETECTED), this test still describes "CAUTION and worse".
-	for lvl in [StealthStatus.Level.HIDDEN, StealthStatus.Level.DETECTED, StealthStatus.Level.CAUTION,
-			StealthStatus.Level.DANGER]:
-		assert_eq(WAIT.hostile_blocks(lvl), lvl >= StealthStatus.Level.CAUTION,
-				"level %d blocks iff it is CAUTION or worse" % lvl)
+## A stand-in NPC reporting a fixed Perception.State toward ONE target and UNAWARE toward anyone else — the duck
+## type StealthStatus.of_player aggregates. Keyed on the target so a refusal that asks the NPCs about the wrong
+## node (or about nobody) reads as a calm world instead of agreeing by accident. RefCounted, never in the tree.
+class _AwareNpc:
+	var _state: int
+	var _target: Object
+	func _init(s: int, target: Object) -> void:
+		_state = s
+		_target = target
+	func awareness_of(who: Node) -> int:
+		return _state if who == _target else Perception.State.UNAWARE
+
+## The refusal the screen's own rule (WaitScreen.refusal_for, what _blocked_reason applies to the live tree) gives
+## for a grounded player on a running clock with NPCs in these awareness states around them.
+func _refusal_with(states: Array, cfg: WaitSettings) -> int:
+	var player := Node.new()  # a bare Node has no is_on_floor, so the airborne clause reads it as grounded
+	var npcs: Array = []
+	for s in states:
+		npcs.append(_AwareNpc.new(s, player))
+	var got: int = WAIT.refusal_for(600.0, player, npcs, cfg)
+	player.free()
+	return got
+
+func test_an_npc_hunting_you_refuses_the_wait_but_a_glance_does_not() -> void:
+	# The rule in the terms the player lives it — what the NPCs around you are DOING — driven through the screen's
+	# own refusal rule, so dropping the hunt check, asking the NPCs about the wrong node, reading the wrong field
+	# off the stealth aggregate, or a reordered Level ladder all show up here as a changed answer.
+	var cfg := WaitSettings.new()
+	cfg.hostile_awareness_blocks = true
+	assert_eq(_refusal_with([], cfg), WaitScreen.Block.NONE, "an empty world never refuses a wait")
+	assert_eq(_refusal_with([Perception.State.UNAWARE, Perception.State.UNAWARE], cfg), WaitScreen.Block.NONE,
+			"nobody aware of you -> the wait is allowed")
+	assert_eq(_refusal_with([Perception.State.DETECTING], cfg), WaitScreen.Block.NONE,
+			"a guard whose meter is merely filling is a glance, not a hunt -> the wait is allowed")
+	assert_eq(_refusal_with([Perception.State.INVESTIGATING], cfg), WaitScreen.Block.HOSTILE,
+			"a guard SEARCHING for you -> refused as a hunt; they have not lost interest yet")
+	assert_eq(_refusal_with([Perception.State.ALERTED], cfg), WaitScreen.Block.HOSTILE,
+			"a guard fighting you -> refused as a hunt; waiting is never a combat exit")
+	assert_eq(_refusal_with([Perception.State.UNAWARE, Perception.State.DETECTING, Perception.State.INVESTIGATING], cfg),
+			WaitScreen.Block.HOSTILE,
+			"one hunter among idle and glancing NPCs still refuses — the WORST awareness decides, not the majority")
+	# Control: the same fighting guard with the designer's switch off lets the wait through, so the refusals above
+	# come from the hunt check itself and not from anything else about this setup.
+	cfg.hostile_awareness_blocks = false
+	assert_eq(_refusal_with([Perception.State.ALERTED], cfg), WaitScreen.Block.NONE,
+			"hostile_awareness_blocks = false turns the hunt refusal off — a guard fighting you no longer blocks the wait")
+	cfg = null
 
 
 func test_a_frozen_clock_refuses_the_wait() -> void:
@@ -71,8 +111,21 @@ func test_a_frozen_clock_refuses_the_wait() -> void:
 			"a frozen clock refuses the wait outright — time genuinely does not pass on that level")
 
 func test_a_running_clock_does_not_refuse_on_the_frozen_path() -> void:
-	assert_ne(WaitScreen._blocked_reason(), WaitScreen.Block.CLOCK_FROZEN,
-			"the shipped running clock must not trip the frozen guard")
+	# The CONTROL for the guard above: the same call with a running day and nothing else in play (no Player in
+	# the tree, so no hostile/airborne check applies) must come back NONE — the guard keys on the frozen clock
+	# alone, not on anything else about this setup.
+	# The shipped default comes first: a fresh WorldClock (script default, no level override) must run, or every
+	# level would freeze and the guard above would refuse T everywhere.
+	var fresh: Node = load("res://managers/WorldClock.gd").new()
+	var shipped: float = fresh.day_length_seconds
+	fresh.free()
+	assert_gt(shipped, 0.0,
+			"SHIP DECISION: the day/night clock ships RUNNING - a 0 default would freeze every level and make T refuse everywhere")
+	var prev: float = WorldClock.day_length_seconds
+	WorldClock.day_length_seconds = 600.0
+	var running: int = WaitScreen._blocked_reason()
+	WorldClock.day_length_seconds = prev
+	assert_eq(running, WaitScreen.Block.NONE, "a running clock does not refuse the wait — the frozen guard trips only on a stopped day")
 
 func test_every_refusal_has_its_own_sentence() -> void:
 	# Whole templates per reason, never a shared stem with the cause appended (the TextFormat fragment rule) —
@@ -88,16 +141,43 @@ func test_every_refusal_has_its_own_sentence() -> void:
 # --- tuning defaults ----------------------------------------------------------------------------------
 
 func test_wait_settings_ship_sane() -> void:
-	var w := WaitSettings.new()
-	assert_eq(w.max_hours, 24, "up to a full day, the Fallout default")
-	assert_eq(w.min_hours, 1, "whole hours")
-	assert_between(w.default_hours, w.min_hours, w.max_hours, "the opening selection is inside its own range")
-	assert_gt(w.hp_per_hour, 0.0, "the shipped trickle is on (0 would be the strict New Vegas rule)")
-	assert_lt(w.hp_per_hour * float(w.max_hours), 100.0,
-			"a full 24-hour wait must not out-heal a Bonfire rest, or fires stop being worth finding")
-	assert_false(w.heals_limbs, "limb damage stays the Healer's and the Bonfire's job")
-	assert_true(w.hostile_awareness_blocks, "waiting ships refused mid-hunt")
-	w = null
+	# Held for BOTH the script defaults and the shipped WaitSettings.tres the screen actually reads.
+	for src in [WaitSettings.new(), GameSettings.wait]:
+		var w: WaitSettings = src
+		assert_between(w.default_hours, w.min_hours, w.max_hours, "the opening selection is inside its own range")
+		assert_gt(w.hp_per_hour, 0.0, "SHIP DECISION: the trickle is on (0 would be the strict New Vegas rule)")
+		assert_lt(w.hp_per_hour * float(w.max_hours), 100.0,
+				"the longest wait must not out-heal a Bonfire rest, or fires stop being worth finding")
+		assert_false(w.heals_limbs, "SHIP DECISION: waiting never mends limbs — that stays the Healer's and the Bonfire's job")
+		assert_true(w.hostile_awareness_blocks, "SHIP DECISION: waiting is refused mid-hunt (the Fallout rule)")
+
+func test_the_hour_stepper_clamps_a_mis_authored_range() -> void:
+	# A designer can type anything into the inspector; the stepper must still offer a sane span. A 0-hour floor
+	# would let the player "wait" no time at all, and a ceiling below the floor would leave no valid choice.
+	var cfg: WaitSettings = GameSettings.wait
+	var prev_min := cfg.min_hours
+	var prev_max := cfg.max_hours
+	cfg.min_hours = 0
+	cfg.max_hours = 0
+	var lo_bad: int = WaitScreen._min_hours()
+	var hi_bad: int = WaitScreen._max_hours()
+	cfg.min_hours = 3   # the control: a sane authored range comes through untouched
+	cfg.max_hours = 12
+	var lo_ok: int = WaitScreen._min_hours()
+	var hi_ok: int = WaitScreen._max_hours()
+	cfg.min_hours = 5   # an inverted span: the ceiling must lift to THIS floor, not to the hard 1-hour minimum
+	cfg.max_hours = 2
+	var lo_inv: int = WaitScreen._min_hours()
+	var hi_inv: int = WaitScreen._max_hours()
+	cfg.min_hours = prev_min   # restored BEFORE asserting, so a failure cannot leak a broken shipped resource
+	cfg.max_hours = prev_max
+	assert_eq(lo_bad, 1, "an authored 0-hour floor is raised to one hour — a wait always passes some time")
+	assert_eq(hi_bad, 1, "a ceiling below the floor is lifted to the floor — the stepper always has one valid choice")
+	assert_eq(lo_ok, 3, "a sane authored floor is honoured as-is")
+	assert_eq(hi_ok, 12, "a sane authored ceiling is honoured as-is")
+	assert_eq(lo_inv, 5, "an authored floor above the ceiling is honoured")
+	assert_eq(hi_inv, 5,
+			"a ceiling below an authored floor of 5 is lifted to that floor, not to 1 - the stepper keeps exactly one valid choice")
 
 func test_wait_settings_are_registered_on_gamesettings() -> void:
 	assert_not_null(GameSettings.wait, "GameSettings.wait resolves the authored WaitSettings.tres")

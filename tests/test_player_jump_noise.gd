@@ -19,6 +19,16 @@ const PLAYER_SCRIPT_PATH := "res://scripts/player/player.gd"
 const NOISE_EMITTER_SCRIPT_PATH := "res://scripts/player/noise_emitter.gd"
 const LANDING_SCRIPT_PATH := "res://scripts/player/landing.gd"
 
+var _prev_land_cutoff: float
+
+
+func before_each() -> void:
+	_prev_land_cutoff = GameSettings.audio.land_sfx_min_impact_to_play
+
+
+func after_each() -> void:
+	GameSettings.audio.land_sfx_min_impact_to_play = _prev_land_cutoff
+
 
 func _emitter(p) -> Node:
 	var e = load(NOISE_EMITTER_SCRIPT_PATH).new()
@@ -98,11 +108,26 @@ func test_a_landing_too_soft_to_thump_is_also_too_soft_to_hear() -> void:
 	p.free()
 
 
-func test_the_landing_gate_shares_the_land_sfx_cutoff() -> void:
-	var emitter_src := FileAccess.get_file_as_string(NOISE_EMITTER_SCRIPT_PATH)
-	assert_string_contains(emitter_src, "GameSettings.audio.land_sfx_min_impact_to_play")
-	var landing_src := FileAccess.get_file_as_string(LANDING_SCRIPT_PATH)
-	assert_string_contains(landing_src, "GameSettings.audio.land_sfx_min_impact_to_play")
+## ...and the noise gate FOLLOWS that knob when a designer retunes it, rather than a private copy that only happens
+## to equal today's value. Retuned well above the shipped cutoff: a landing just under the new value is silent even
+## though it would have rung at the old one, and one at the new value is heard.
+func test_the_landing_gate_follows_a_retuned_land_sfx_cutoff() -> void:
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	var e = _emitter(p)
+	var shipped: float = GameSettings.audio.land_sfx_min_impact_to_play
+	var retuned := clampf(shipped + 0.4, 0.3, 0.9)
+	GameSettings.audio.land_sfx_min_impact_to_play = retuned
+	e.land(retuned - 0.05)
+	e.tick(1.0 / 60.0)
+	var under: float = p.noise_radius
+	e.land(retuned)
+	e.tick(1.0 / 60.0)
+	var at: float = p.noise_radius
+	assert_eq(under, 0.0,
+		"with land_sfx_min_impact_to_play raised to %s, a %s landing plays no thump, so no NPC may hear one — the noise gate must read the live audio knob, not its own threshold" % [retuned, retuned - 0.05])
+	assert_gt(at, 0.0, "at the retuned cutoff the thump plays again, so it must also be heard")
+	e.free()
+	p.free()
 
 
 ## ⭐THE PROPERTY WHOSE FAILURE IS INVISIBLE. An idle NPC only walks the &"noise" group every
@@ -185,9 +210,19 @@ func test_going_silent_clears_every_channel_at_once() -> void:
 	p.free()
 
 
+## The CALL SITE of the above, and the one piece here that can only be pinned by source: Player.die() cannot run in a
+## unit test (it aborts DialogueManager, cancels FreezeFrame, resets the global music duck and starts the in-tree death
+## cinematic, none of which an off-tree Player survives — CLAUDE.md's no-_ready rule covers the same prefab). So the
+## scan is scoped to die()'s own body: a call that moved into any other function goes red here.
 func test_die_actually_calls_silence() -> void:
-	var player_src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
-	assert_string_contains(player_src, "_noise.silence()")
+	# Normalize line endings so the "\nfunc " body anchors survive a CRLF write to player.gd.
+	var player_src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH).replace("\r\n", "\n")
+	var start := player_src.find("\nfunc die() -> void:")
+	assert_gt(start, -1, "player.gd must still define die()")
+	var end := player_src.find("\nfunc ", start + 1)
+	var body := player_src.substr(start, end - start) if end > start else player_src.substr(start)
+	assert_true(body.contains("_noise.silence()"),
+		"Player.die() must silence the NoiseEmitter itself — it stops the physics tick, so without this a dead player's last radius (a fall death's full landing thud) rings at the body forever")
 
 
 ## The impact channel must never SHRINK what an enemy hears: it is folded in with maxf against the gunfire spike

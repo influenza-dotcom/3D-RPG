@@ -2,9 +2,10 @@ extends GutTest
 
 ## Radial stamina ring (scripts/ui/stamina_ring.gd) + the ring/bar accessibility mode switch in ui.gd.
 ## Covers the PURE parts off-tree — arc/angle math, the fill->sweep mapping, the continuous fill->low colour blend (no snap threshold),
-## the idle fade target, the shipped HudSettings defaults, the Settings toggle, and the mode routing on
-## a bare UI (no _ready, no scene tree). The on-screen look (the ring hugging the live crosshair, the
-## annulus fit against the combat arcs) is playtest territory.
+## the idle fade target, the relations the shipped HudSettings ring knobs must hold (annulus fit between the hit ticks
+## and the aim arcs, under-the-reticle left-to-right shape, invisible-at-rest / outlined ship decisions), the Settings
+## toggle, and the mode routing on a bare UI (no _ready, no scene tree). The on-screen look (the ring hugging the
+## live crosshair as it is actually painted) is playtest territory.
 ##
 ## ALSO the SPEND CHIP (scripts/ui/stamina_chip.gd) — the white shard left behind by stamina you just
 ## spent, which BOTH readouts paint from one shared tracker: the tracker's hold/slide state machine, and the
@@ -66,14 +67,30 @@ func test_ring_color_blends_continuously_with_the_fill_level() -> void:
 	# The exact colour objects matter (assert_eq(Color) needs exact endpoints) — use two sentinels.
 	var fill_col := Color(0.18, 0.75, 0.95, 0.92)
 	var low_col := Color(0.95, 0.78, 0.25, 1.0)
-	# Exact lerp endpoints (assert_eq(Color) needs exact values — the memory rule): the expected mid-blend
-	# is computed with the SAME lerp the implementation uses, so equality is bit-exact.
 	assert_eq(RING.ring_color(1.0, fill_col, low_col), fill_col,
 		"a full pool wears the pure fill colour (blue end of the gradient)")
 	assert_eq(RING.ring_color(0.0, fill_col, low_col), low_col,
 		"an empty pool wears the pure low colour (yellow end)")
-	assert_eq(RING.ring_color(0.5, fill_col, low_col), low_col.lerp(fill_col, 0.5),
-		"half stamina blends halfway — a continuous gradient, no threshold snap (user call)")
+	# Half stamina sits on the channel-wise MIDPOINT of the two endpoints — spelled out per channel, not
+	# re-derived through Color.lerp, so a curved or snapped blend cannot agree with its own oracle.
+	var mid: Color = RING.ring_color(0.5, fill_col, low_col)
+	assert_almost_eq(mid.r, (fill_col.r + low_col.r) * 0.5, 0.0001, "half stamina blends halfway (red channel)")
+	assert_almost_eq(mid.g, (fill_col.g + low_col.g) * 0.5, 0.0001, "half stamina blends halfway (green channel)")
+	assert_almost_eq(mid.b, (fill_col.b + low_col.b) * 0.5, 0.0001, "half stamina blends halfway (blue channel)")
+	assert_almost_eq(mid.a, (fill_col.a + low_col.a) * 0.5, 0.0001, "half stamina blends halfway (alpha channel)")
+	# NO THRESHOLD SNAP (user call): walk the pool up from empty in 1% steps. Every step may move each channel by at
+	# most its own 1% share of the endpoint gap — a snap threshold anywhere on the gauge jumps far past that.
+	var prev: Color = RING.ring_color(0.0, fill_col, low_col)
+	var worst_overshoot := 0.0
+	for i in range(1, 101):
+		var c: Color = RING.ring_color(float(i) / 100.0, fill_col, low_col)
+		worst_overshoot = maxf(worst_overshoot, absf(c.r - prev.r) - absf(fill_col.r - low_col.r) / 100.0)
+		worst_overshoot = maxf(worst_overshoot, absf(c.g - prev.g) - absf(fill_col.g - low_col.g) / 100.0)
+		worst_overshoot = maxf(worst_overshoot, absf(c.b - prev.b) - absf(fill_col.b - low_col.b) / 100.0)
+		worst_overshoot = maxf(worst_overshoot, absf(c.a - prev.a) - absf(fill_col.a - low_col.a) / 100.0)
+		prev = c
+	assert_lt(worst_overshoot, 0.0001,
+		"a 1% change in stamina never jumps the colour further than 1% of the gradient — the blend is continuous, no threshold snap")
 	assert_eq(RING.ring_color(2.0, fill_col, low_col), fill_col,
 		"overfull clamps to the fill end rather than extrapolating past it")
 
@@ -89,8 +106,6 @@ func test_alpha_target_holds_lit_at_full_while_holding() -> void:
 	assert_almost_eq(RING.alpha_target(1.0, 0.25, false), 0.25, 0.0001,
 		"once the hold expires a full pool falls back to the idle alpha")
 
-# --- shipped defaults ---------------------------------------------------------------------------------
-
 func test_outline_span_pads_both_tips_along_the_sweep() -> void:
 	# Positive sweep (to > from): the pad extends BELOW from and ABOVE to.
 	var p := RING.outline_span(Vector2(1.0, 2.0), 0.1)
@@ -101,34 +116,82 @@ func test_outline_span_pads_both_tips_along_the_sweep() -> void:
 	assert_almost_eq(n.x, 2.1, 0.0001, "negative-sweep outline starts a pad early (the other way)")
 	assert_almost_eq(n.y, 0.9, 0.0001, "…and ends a pad late (the other way)")
 
+# --- shipped defaults (relations to the neighbours + stated ship decisions, not literal pins) -----------
 
-func test_hud_settings_ring_defaults_fit_the_crosshair_annulus() -> void:
-	var h := HudSettings.new()
-	assert_almost_eq(h.stamina_ring_radius, 14.0, 0.001,
-		"radius 14 hugs the reticle just outside the body hit ticks' ~11px pop (user call: 23 was too big)")
-	assert_almost_eq(h.stamina_ring_thickness, 2.0, 0.001, "stroke 2 — ambient status, thinner than the combat arcs")
-	assert_almost_eq(h.stamina_ring_start_deg, 180.0, 0.001, "gauge starts at the LEFT (canvas 180 deg)")
-	assert_almost_eq(h.stamina_ring_sweep_deg, -180.0, 0.001,
-		"signed sweep -180: left -> bottom -> right, a half-ring under the reticle")
-	assert_almost_eq(h.stamina_ring_idle_alpha, 0.0, 0.001,
-		"a full ring is FULLY INVISIBLE at rest (user call) — the knob can raise a faint ghost ring back")
-	assert_gt(h.stamina_ring_fade_speed, 0.0, "the idle fade must actually ease")
-	assert_almost_eq(h.stamina_ring_full_hold, 0.4, 0.001,
-		"a full pool lingers ~0.4 s (a split second) after topping up before the idle fade starts (user call)")
-	assert_almost_eq(h.stamina_ring_outline_width, 1.0, 0.001, "a 1px contrast outline keeps the thin arc legible over bright scenes")
-	assert_eq(h.stamina_ring_outline_color, Color(0.0, 0.0, 0.0, 0.9), "the outline is near-black (user call)")
-	h = null
+## Both the script defaults (a fresh HudSettings) and the SHIPPED .tres the HUD actually reads, so an
+## inspector override on HudSettings.tres is held to the same relations as the code default.
+func _ring_knob_sources() -> Array:
+	return [HudSettings.new(), GameSettings.hud]
 
-func test_settings_stamina_ring_default_on_and_toggles() -> void:
-	# The RING is the shipped default readout; the corner bar is the accessibility OPT-IN. A fresh
+func test_hud_settings_ring_fits_between_the_hit_ticks_and_the_aim_arcs() -> void:
+	# The annulus budget stamina_ring.gd's header documents, asserted as RELATIONS to the same-centre
+	# neighbours' own knobs (MenuStyle.hud, the HUD skin) rather than as the ring's literal numbers: the whole
+	# painted stroke (outline included) must sit OUTSIDE a body hit-tick at full pop and INSIDE the red
+	# aim-warning arcs' inner edge. Any retune that keeps that fit passes; one that collides fails.
+	var skin = MenuStyle.hud  # untyped on purpose: HudSkin's class_name may not be cached yet (the hitmarker idiom)
+	var body_tick_reach: float = skin.hitmarker_gap + skin.hitmarker_pop_px + skin.hitmarker_tick_length
+	var aim_arc_inner_edge: float = minf(skin.aim_arc_base_radius, skin.aim_arc_max_radius) - skin.aim_arc_thickness * 0.5
+	for src in _ring_knob_sources():
+		var h: HudSettings = src
+		assert_gt(h.stamina_ring_thickness, 0.0, "the ring has a visible stroke")
+		assert_lt(h.stamina_ring_thickness, skin.aim_arc_thickness,
+			"the stamina ring draws THINNER than the red aim-warning arcs — the combat cue must out-weigh the resource gauge")
+		var half_stroke := h.stamina_ring_thickness * 0.5 + maxf(h.stamina_ring_outline_width, 0.0)
+		assert_gt(h.stamina_ring_radius - half_stroke, body_tick_reach,
+			"the ring's inner edge (outline included) clears a body hit-tick at full pop — a hit confirm must not paint over the gauge")
+		assert_lt(h.stamina_ring_radius + half_stroke, aim_arc_inner_edge,
+			"the ring's outer edge (outline included) stays inside the aim-warning arcs — past it the gauge kisses the red 'you're being aimed at' cue")
+
+func test_hud_settings_gauge_is_a_left_to_right_meter_under_the_reticle() -> void:
+	# SHIP DECISION (stamina_ring_start_deg / _sweep_deg docs): the gauge hugs the UNDERSIDE of the reticle and
+	# fills left-to-right like a meter. Sampled through the real arc math, so any start/sweep pair with that
+	# shape passes — only a gauge that climbs over the aim point or fills backwards fails.
+	for src in _ring_knob_sources():
+		var h: HudSettings = src
+		var sweep := h.stamina_ring_sweep_deg
+		assert_true(absf(sweep) > 0.0 and absf(sweep) <= 360.0,
+			"the sweep spans something and never laps itself (|sweep| %.1f)" % sweep)
+		var above := 0
+		for i in 11:
+			var tip: float = RING.arc_angles(float(i) / 10.0, h.stamina_ring_start_deg, sweep).y
+			if sin(tip) < -0.001:  # y-down canvas: negative sine is ABOVE the centre
+				above += 1
+		assert_eq(above, 0, "no part of the gauge rises above the reticle — it hugs the underside")
+		var empty_end: float = RING.arc_angles(0.0, h.stamina_ring_start_deg, sweep).y
+		var full_end: float = RING.arc_angles(1.0, h.stamina_ring_start_deg, sweep).y
+		assert_lt(cos(empty_end), cos(full_end), "an empty pool sits LEFT of a full one — the gauge fills left to right")
+
+func test_hud_settings_ring_rests_invisible_lingers_and_is_outlined() -> void:
+	for src in _ring_knob_sources():
+		var h: HudSettings = src
+		assert_true(h.stamina_ring_idle_alpha >= 0.0 and h.stamina_ring_idle_alpha <= 0.001,
+			"SHIP DECISION (user call): a full ring rests FULLY INVISIBLE — the idle alpha must sit at or under _draw's 0.001 paint cut-off, or a ghost ring stays stamped on the aim point")
+		assert_gt(h.stamina_ring_fade_speed, 0.0, "the idle fade must actually ease")
+		assert_gt(h.stamina_ring_full_hold, 0.0,
+			"SHIP DECISION (user call): a refill LINGERS lit for a split second before fading — 0 would blink the gauge out the instant the last point returns")
+		assert_gt(h.stamina_ring_outline_width, 0.0, "SHIP DECISION: the thin arc ships with a contrast outline so it stays legible over bright scenes")
+		assert_gt(h.stamina_ring_outline_color.a, 0.0, "the outline is actually painted")
+		assert_lt(h.stamina_ring_outline_color.get_luminance(), minf(h.stamina_fill.get_luminance(), h.stamina_low.get_luminance()),
+			"the outline is DARKER than both ends of the fill gradient — a rim no darker than the fill gives it no contrast")
+
+func test_settings_ring_ships_on_and_the_options_setter_swaps_the_hud_readout() -> void:
+	# SHIP DECISION: the RING is the default readout; the corner bar is the accessibility OPT-IN. A fresh
 	# Settings (var default, no cfg load) must agree.
 	var fresh = load("res://managers/Settings.gd").new()
 	assert_true(fresh.stamina_ring_enabled, "the crosshair stamina ring is the shipped DEFAULT (bar = opt-in)")
 	fresh.free()
+	# The Options toggle goes through the setter and ui.gd picks it up on its next poll — no rebuild, no restart.
+	var ui := _bare_ui_with_both_widgets()
+	Settings.stamina_ring_enabled = true  # known start (before_each/after_each restore the real value)
 	Settings.set_stamina_ring_enabled(false)
-	assert_false(Settings.stamina_ring_enabled, "the classic corner bar can be opted back in")
+	ui._apply_stamina_mode()
+	assert_true(ui._stamina_bar.visible, "switching the ring OFF in Options brings the classic corner bar back on the next HUD poll")
+	assert_false(ui._stamina_ring.visible, "…and takes the ring off the crosshair")
 	Settings.set_stamina_ring_enabled(true)
-	assert_true(Settings.stamina_ring_enabled, "and the ring re-enabled")
+	ui._apply_stamina_mode()
+	assert_true(ui._stamina_ring.visible, "switching it back ON restores the ring")
+	assert_false(ui._stamina_bar.visible, "…and hides the corner bar again")
+	ui.free()
 
 # --- the mode switch on a bare UI (off-tree — _ready never runs) -------------------------------------
 

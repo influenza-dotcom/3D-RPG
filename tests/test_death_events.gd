@@ -7,11 +7,24 @@ extends GutTest
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
 
-func test_npc_data_death_gates_default_on() -> void:
+func test_attaching_an_untouched_profile_changes_no_death_beat() -> void:
+	# The NpcData death gates are OPT-OUTS: a designer who gives an NPC a fresh profile (for its loadout, barks, loot)
+	# and never opens the Death group must get exactly the death a profile-less NPC gets. Compared against the
+	# profile-less verdicts of the same NPC, not against literals.
+	var e = load(NPC_PATH).new()
+	e.faction = Faction.new()
+	var bare_sours: bool = e.death_sours_faction()
+	var bare_pauses: bool = e.death_pauses_game()
+	var bare_freezes: bool = e.death_freezes()
 	var d := NpcData.new()
-	assert_true(d.sours_faction_on_death, "sours_faction_on_death must default ON so a profiled kill still sours the faction")
-	assert_true(d.pause_on_kill, "pause_on_kill must default ON so a profiled NPC keeps the kill-beat hitstop")
-	assert_true(d.freeze_on_death, "freeze_on_death must default ON so a profiled NPC still plays the freeze-then-explode pop")
+	e.profile = d
+	assert_eq(e.death_sours_faction(), bare_sours,
+		"a fresh profile must not turn a factioned kill into a free kill: the faction sours exactly as without a profile")
+	assert_eq(e.death_pauses_game(), bare_pauses,
+		"a fresh profile keeps the kill-beat hitstop a profile-less NPC plays")
+	assert_eq(e.death_freezes(), bare_freezes,
+		"a fresh profile keeps the freeze-then-explode pop a profile-less NPC plays")
+	e.free()
 	d = null
 
 func test_death_pauses_game_profile_less_defaults_true() -> void:

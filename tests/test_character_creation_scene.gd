@@ -15,7 +15,7 @@ const HOST_SCRIPT := "res://scripts/ui/start_menu.gd"
 
 ## Every unique name character_creation.gd binds in _bind_ui — a rename in the editor breaks the bind at
 ## boot, so pin the roster here where it fails loudly instead.
-const BOUND := ["Dim", "Column", "Title", "NameLabel", "NameEdit", "NameHint",
+const BOUND := ["Dim", "Column", "Title", "NameLabel", "NameEdit",
 	"Tabs", "StatsTab", "PointsLabel", "StatScroll", "StatGrid",
 	"LookTab", "LookControls",
 	"ShirtTab", "ShirtRow", "SideRow", "CanvasFrame", "ShirtMid", "ToolsRow", "SizeRow", "SizeLabel",
@@ -24,13 +24,23 @@ const BOUND := ["Dim", "Column", "Title", "NameLabel", "NameEdit", "NameHint",
 
 
 func test_host_points_at_the_authored_scene() -> void:
-	# The conversion contract: StartMenu preloads the SCENE (root carries the script) — a bare-script .new()
-	# would silently skip the authored layout and _bind_ui would null-deref the moment New Game is clicked.
-	var host_src := FileAccess.get_file_as_string(HOST_SCRIPT)
-	assert_true(host_src.contains("preload(\"%s\")" % SCENE),
-		"StartMenu preloads the authored character-creation scene")
-	assert_false(host_src.contains("preload(\"%s\")" % SCRIPT_PATH),
-		"StartMenu no longer preloads the bare script")
+	# The conversion contract: StartMenu instances the SCENE (root carries the script) on New Game — a bare-script
+	# .new() would silently skip the authored layout and _bind_ui would null-deref the moment New Game is clicked.
+	# Read from the COMPILED host (its constant map), so a preload left in a comment or dead text proves nothing.
+	var host: GDScript = load(HOST_SCRIPT)
+	assert_true(host != null, "start_menu.gd compiles")
+	if host == null:
+		return
+	var consts := host.get_script_constant_map()
+	var screen_const: Variant = consts.get("CharacterCreationScreen")
+	assert_true(screen_const is PackedScene, "StartMenu.CharacterCreationScreen (what _on_new_game instantiates) is a PackedScene")
+	if screen_const is PackedScene:
+		assert_eq((screen_const as PackedScene).resource_path, SCENE,
+			"StartMenu.CharacterCreationScreen is the authored character-creation scene")
+	for key in consts:
+		var v: Variant = consts[key]
+		assert_false(v is Script and (v as Script).resource_path == SCRIPT_PATH,
+			"StartMenu.%s must not hold the bare character_creation.gd — the screen comes from the scene" % key)
 	var scene: PackedScene = load(SCENE)
 	assert_not_null(scene, "the authored scene loads")
 	var inst: Node = scene.instantiate()
@@ -83,11 +93,6 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 		"the name LineEdit opts out of automatic Control-text translation")
 	assert_false(edit.context_menu_enabled, "the engine right-click menu stays off (untranslatable English)")
 
-	# The "name required" hint hides by ALPHA, never `visible`: a VBox drops a hidden child from layout, so
-	# the whole tab block would jump on the first keystroke. The scene must ship it visible (slot reserved).
-	assert_true((inst.get_node("%NameHint") as Control).visible,
-		"the name hint ships visible — the script hides it with self_modulate alpha, keeping its layout slot")
-
 	# The tabs fill the slack between the pinned name row and the pinned Back/Begin row.
 	var tabs := inst.get_node("%Tabs") as TabContainer
 	assert_eq(tabs.size_flags_vertical, Control.SIZE_EXPAND_FILL, "the tab block takes the vertical slack")
@@ -98,14 +103,14 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 	assert_eq(tabs.get_tab_idx_from_control(inst.get_node("%LookTab") as Control), 1, "Look is the second tab")
 	assert_eq(tabs.get_tab_idx_from_control(inst.get_node("%ShirtTab") as Control), 2, "Shirt is the third tab")
 
-	# The stat grid scrolls vertically ONLY (rows are width-fitted) and carries the 5 authored columns
-	# (name | − | value | + | effect).
+	# The stat grid scrolls vertically ONLY (rows are width-fitted) and carries 8 authored columns: two stats per
+	# grid row (name | − | value | + | name | − | value | +), so all six fit the tab with no scrollbar.
 	var scroll := inst.get_node("%StatScroll") as ScrollContainer
 	assert_eq(scroll.horizontal_scroll_mode, ScrollContainer.SCROLL_MODE_DISABLED,
 		"the stat scroll is vertical-only — rows fit the width")
 	assert_eq(scroll.size_flags_vertical, Control.SIZE_EXPAND_FILL, "the stat scroll takes the tab's slack")
-	assert_eq((inst.get_node("%StatGrid") as GridContainer).columns, 4,
-		"the stat grid keeps its 4 columns (name-rail | - | value | +) — the effect column moved into the name/value hover tip")
+	assert_eq((inst.get_node("%StatGrid") as GridContainer).columns, 8,
+		"the stat grid keeps its 8 columns (two name-rail | - | value | + clusters per row) — six stats on three rows, no scroll")
 
 	# ONE card size for every tab. A TabContainer's minimum is the CURRENT page's minimum unless this is on,
 	# so the (fatter) Shirt page handed the container a fatter minimum and Godot grew the whole panel past its

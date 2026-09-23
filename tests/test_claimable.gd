@@ -41,12 +41,14 @@ func test_already_claimed_gate() -> void:
 
 
 func test_defaults_ask_for_name_on() -> void:
-	# Off-tree field reads — Claimable.new() with no add_child runs no _ready.
+	# Off-tree field reads — Claimable.new() with no add_child runs no _ready. Both are ship decisions, not tuning.
 	var c = Claimable.new()
 	assert_true(c.ask_for_name,
-		"claiming opens the name box by default (the requested behaviour)")
-	assert_eq(c.prompt_verb, "[PH] Befriend",
-		"the default prompt verb is 'Befriend' (friendlier than 'Claim' for adopting a stray)")
+		"ship decision: claiming opens the name box by default (the requested behaviour)")
+	# Pinned to the PlayerText const, never to its copy: the words are still being authored (and get translated),
+	# so the contract is that a stock Claimable says the shared BEFRIEND verb rather than a raw literal of its own.
+	assert_eq(c.prompt_verb, PlayerText.PROMPT_BEFRIEND,
+		"ship decision: a stock Claimable prompts with PlayerText's Befriend verb (friendlier than 'Claim' for adopting a stray)")
 	c.free()
 
 
@@ -217,18 +219,42 @@ func test_is_claimed_reflects_claim() -> void:
 
 
 func test_preset_defaults_off() -> void:
-	# Off-tree field reads — a bare Claimable spawns unclaimed (the preset restore is opt-in, set by WorldItem).
-	var c = Claimable.new()
-	assert_false(c.preset_claimed, "a Claimable spawns unclaimed by default (no drop-restore)")
-	assert_eq(c.preset_claim_name, "", "no preset name by default")
-	c.free()
+	# Ship decision: the drop-restore is OPT-IN (WorldItem.build switches it on for a re-dropped befriended prop), so a
+	# Claimable placed in a level spawns as an unclaimed stray the player still has to befriend. Driven through the real
+	# _ready and the deferred claim it queues: a stock Claimable given a couple of frames in the tree is still a stray,
+	# while the identical spawn with ONLY preset_claimed switched on befriends itself in those same frames.
+	var stray_host := _DogHost.new()
+	add_child_autofree(stray_host)
+	var stray = _make_claimable()
+	stray_host.add_child(stray)
+	var preset_host := _DogHost.new()
+	add_child_autofree(preset_host)
+	var preset = _make_claimable()
+	preset.preset_claimed = true
+	preset_host.add_child(preset)
+	await wait_process_frames(2)  # _ready defers _apply_preset_claim; let that flush run
+	assert_false(stray.is_claimed(),
+		"ship decision: a stock Claimable spawns unclaimed — befriending is the player's act, not the level's")
+	assert_eq(stray_host.display_name, "", "...so its host keeps its own (blank) name")
+	assert_null(stray_host.outline_color, "...wears no blue claimed rim")
+	var stray_follows := 0
+	for child in stray_host.get_children():
+		if child is PropFollow:
+			stray_follows += 1
+	assert_eq(stray_follows, 0, "...and gets no PropFollow, so it does not trail the player")
+	# CONTROL: the same spawn and frames with the preset flag on DO befriend — so the stray verdict above is real.
+	assert_true(preset.is_claimed(),
+		"control: a preset_claimed Claimable befriends itself within the same frames")
+	# A stock preset carries no stashed name, so the restore falls back to the host's resolved name like a blank claim.
+	assert_eq(preset_host.display_name, "Dog",
+		"a preset restore with the default (blank) preset_claim_name names the host by its resolved name, not a leftover")
 
 
 func test_preset_claim_befriends_with_stashed_name() -> void:
 	# The drop-restore path: a Claimable with preset_claimed on auto-befriends itself with the stashed name, so a
 	# dropped dog stays yours (named, following, blue rim) without a re-befriend. _ready DEFERS this call; here we
-	# invoke it directly so the check stays synchronous (the suite has no async tests). The deferred flush that _ready
-	# also queues just re-runs claim(), which no-ops on the already-claimed object.
+	# invoke it directly so the check stays synchronous (test_preset_defaults_off drives the real deferred flush). The
+	# deferred flush that _ready also queues just re-runs claim(), which no-ops on the already-claimed object.
 	var host := _DogHost.new()
 	add_child_autofree(host)
 	var c = _make_claimable()

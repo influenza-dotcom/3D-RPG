@@ -1,10 +1,13 @@
 extends GutTest
 
 ## Disk autosave (GameState): the save PROFILE — capture off a player, make_stats back into a sheet, the
-## ConfigFile round-trip, and the New-Game reset. Tested on FRESH off-tree GameState instances (load().new(),
-## never the autoload singleton) and a TEMP save path, so a test run touches neither the real GameState nor the
-## user's actual user://gamestate.cfg. The Player-side apply (stats before super, money/unlock/teleport after) is
-## in-tree behaviour, playtested.
+## ConfigFile round-trip, and the New-Game reset. Most tests run on FRESH off-tree GameState instances (load().new(),
+## never the autoload singleton) and a TEMP save path, so nothing here writes the user's actual user://gamestate.cfg.
+## A few tests drive real consumers that read LIVE autoloads, and change those autoloads in memory only: the gone-bit
+## CanDestroy restore and the two Player _restore_saved_inventory end-to-end tests swap GameState fields and put the
+## saved values back; the Reputation round-trip resets the Reputation autoload before and after; the weapon-mod test
+## mints parts into ItemDb._by_id, which after_each erases. Suspect these first if a test goes red only in a full run.
+## The Player-side apply (stats before super, money/unlock/teleport after) is in-tree behaviour, playtested.
 
 const GAMESTATE_PATH := "res://managers/GameState.gd"
 const PLAYER_PATH := "res://scripts/player/player.gd"
@@ -147,18 +150,30 @@ func test_reset_for_new_game_clears_world_objects() -> void:
 	gs.free()
 
 func test_world_object_gone_bit_coerces_through_as_bool() -> void:
-	# F-C45: CanPickUp / CanDestroy (and now MoneyPickUp / UpgradePickup) read their "gone" bit via GameState.as_bool
-	# instead of bare truthiness — a hand-edited / legacy gamestate.cfg could store a STRING under the key, and a bare
-	# non-empty-String test reads true (or bool(<String>) would crash). as_bool degrades non-numeric junk to the
-	# fallback, so a String-valued gone bit does NOT falsely despawn a fresh pickup. Mirrors the flag coercion at :521.
-	var gs = load(GAMESTATE_PATH).new()
-	gs.record_object_state("res://levels/a.tres", "id:crate1", {"gone": "true"})  # String, not a real bool
-	assert_false(gs.as_bool(gs.object_state("res://levels/a.tres", "id:crate1").get("gone", false)),
-		"a String-valued gone bit degrades to false (never bool(<String>)), so the pickup/prop still spawns")
-	gs.record_object_state("res://levels/a.tres", "id:crate2", {"gone": true})   # a well-typed bool still reads true
-	assert_true(gs.as_bool(gs.object_state("res://levels/a.tres", "id:crate2").get("gone", false)),
-		"a well-typed bool gone bit still reads true — behaviour-preserving for real saves")
-	gs.free()
+	# F-C45: CanPickUp / CanDestroy / MoneyPickUp / UpgradePickup read their "gone" bit via GameState.as_bool instead
+	# of bare truthiness — a hand-edited / legacy gamestate.cfg can store a STRING under the key, and a bare test reads
+	# any non-empty String as true, so the object would despawn on load. Driven through a real consumer: a CanDestroy
+	# restores in its _ready from the LIVE GameState autoload (like the Player restore end-to-end tests below), so its
+	# ledger and level path are swapped for a test level here and put back before any assert runs.
+	var saved_level: String = GameState.current_level_path
+	var saved_objects: Dictionary = GameState.world_objects
+	const LEVEL := "res://__test_gone_bit_level.tres"
+	GameState.current_level_path = LEVEL
+	GameState.world_objects = {LEVEL: {"id:junk_gone": {"gone": "true"}, "id:real_gone": {"gone": true}}}
+	var junk := CanDestroy.new()
+	junk.save_id = &"junk_gone"  # String-valued gone bit, as a hand-edited save would hold it
+	add_child_autofree(junk)
+	var real := CanDestroy.new()
+	real.save_id = &"real_gone"  # control: a well-typed bool from a real save, same level, same restore path
+	add_child_autofree(real)
+	var junk_despawned := junk.is_queued_for_deletion()
+	var real_despawned := real.is_queued_for_deletion()
+	GameState.current_level_path = saved_level
+	GameState.world_objects = saved_objects
+	assert_false(junk_despawned,
+		"a String-valued gone bit must degrade to 'not gone' (as_bool's fallback), so the prop still spawns on load")
+	assert_true(real_despawned,
+		"control: a real bool gone bit under the same level + id scheme DOES despawn the prop — the restore path is live")
 
 func test_legacy_persuasion_stat_folds_into_streetwise_on_v1_load() -> void:
 	# F-C43: the 2026-07-09 stat overhaul renamed "persuasion" to "streetwise". A <v2 save stored points under
@@ -295,8 +310,6 @@ func test_holster_forgiveness_tutorial_state_is_seen_and_reminder_is_one_shot() 
 		"the reminder is consume-once, so a HUD rebuild or later spawn does not repeat it")
 	gs.free()
 
-const START_MENU_PATH := "res://scripts/ui/start_menu.gd"
-
 func test_profile_active_cleared_by_reset() -> void:
 	# P0-2: reset_for_new_game drops the in-memory-authoritative flag; character creation re-sets it.
 	var gs = load(GAMESTATE_PATH).new()
@@ -318,14 +331,69 @@ func test_profile_active_set_by_disk_load() -> void:
 	gs.free()
 	gs2.free()
 
-func test_profile_active_wired_into_death_and_creation_paths() -> void:
-	# P0-2 is an in-tree apply (Player._ready can't run in a unit test), so pin the wiring by source: the
-	# CHECKPOINT_FRESH death branch must promote loaded from profile_active, and character creation must set it.
-	var player_src := FileAccess.get_file_as_string(PLAYER_PATH)
-	assert_true(player_src.contains("GameState.profile_active"), "player.gd death path reads profile_active")
-	assert_true(player_src.contains("GameState.loaded = true"), "player.gd CHECKPOINT_FRESH promotes loaded")
-	var menu_src := FileAccess.get_file_as_string(START_MENU_PATH)
-	assert_true(menu_src.contains("GameState.profile_active = true"), "character creation marks the run authoritative")
+func test_checkpoint_fresh_death_promotes_loaded_inside_the_profile_active_gate() -> void:
+	# P0-2's death half is an in-tree apply that cannot be driven headless: Player._on_death_sequence_done bails
+	# off-tree, and in-tree its CHECKPOINT_FRESH arm calls get_tree().reload_current_scene() (which would reload
+	# the GUT runner) on a Player whose _ready must never run in a unit test. So the wiring is pinned by source —
+	# but scoped to that ONE match arm, with comments stripped, and in order: the promotion must sit inside the
+	# profile_active gate AND before the reload, or the fresh Player boots with loaded=false and reseeds a default
+	# build. (The creation half — StartMenu stamping profile_active — is DRIVEN in test_implant_choice.gd's
+	# test_stamp_bills_the_cart_into_debt_after_the_reset, so it is not re-grepped here.)
+	var arm := _match_arm_code(FileAccess.get_file_as_string(PLAYER_PATH), "func _on_death_sequence_done",
+		"PlayerFeedbackSettings.DeathMode.RELOAD_CHECKPOINT_FRESH:")
+	assert_false(arm.is_empty(), "player.gd's _on_death_sequence_done must still have a RELOAD_CHECKPOINT_FRESH arm")
+	var gate := arm.find("if GameState.profile_active:")
+	var promote := arm.find("GameState.loaded = true")
+	var reload := arm.find("reload_current_scene()")
+	assert_gte(gate, 0, "the CHECKPOINT_FRESH death arm must gate on GameState.profile_active (a dev boot has no run to keep)")
+	assert_gt(promote, gate, "the CHECKPOINT_FRESH death arm must promote GameState.loaded AFTER (inside) the profile_active gate")
+	assert_gt(reload, promote,
+		"the promotion must land BEFORE reload_current_scene() — the fresh Player reads `loaded` as it boots, so a later write is lost")
+	var gate_indent := _indent_of_line_at(arm, gate)
+	assert_gt(_indent_of_line_at(arm, promote), gate_indent,
+		"GameState.loaded = true must be INDENTED under the profile_active gate, not a sibling statement that promotes every death")
+
+
+## The CODE of one `match` arm (from the line holding `arm_label` up to the next line at the same indent), inside
+## the function whose declaration line starts with `func_decl`. Comments are stripped line-by-line first, so a
+## token mentioned only in prose cannot satisfy a wiring pin. "" when the function or the arm is missing.
+func _match_arm_code(src: String, func_decl: String, arm_label: String) -> String:
+	var lines := src.split("\n")
+	var start := -1
+	for i in lines.size():
+		if lines[i].begins_with(func_decl):
+			start = i + 1
+			break
+	if start < 0:
+		return ""
+	var out := PackedStringArray()
+	var arm_indent := -1
+	for i in range(start, lines.size()):
+		var line := lines[i]
+		if not line.is_empty() and not line.begins_with("\t") and not line.begins_with("#"):
+			break  # left the function body
+		var hash_at := line.find("#")
+		var code: String = (line.substr(0, hash_at) if hash_at >= 0 else line).rstrip(" \t")
+		if code.strip_edges().is_empty():
+			continue
+		var indent := code.length() - code.lstrip("\t").length()
+		if arm_indent < 0:
+			if code.strip_edges() == arm_label:
+				arm_indent = indent
+				out.append(code)
+			continue
+		if indent <= arm_indent:
+			break  # the next arm (or the end of the match)
+		out.append(code)
+	return "\n".join(out)
+
+
+func _indent_of_line_at(text: String, pos: int) -> int:
+	var line_start := text.rfind("\n", pos) + 1
+	var i := line_start
+	while i < text.length() and text[i] == "\t":
+		i += 1
+	return i - line_start
 
 func test_new_game_arms_clock_apply() -> void:
 	# New Game arms the flag too (with time_of_day reset to noon) so the Player pushes noon onto the WorldClock

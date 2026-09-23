@@ -2,10 +2,28 @@ extends GutTest
 
 ## Death-meaning knob + the editable death card (ML-2). The death_mode enum is branched in
 ## Player._on_death_sequence_done (CHECKPOINT_RESPAWN = today's Dark-Souls revive / RELOAD_LAST_SAVE /
-## RELOAD_CHECKPOINT_FRESH); the card's text is a designer-editable death_message (default "You were killed.")
-## on the player_feedback tuning resource, NOT a hardcoded string. The branch + the in-scene card draw are
-## in-tree behaviour (reload / shader overlay) and playtested; here we pin the data contract: the default mode
-## is the non-destructive one, the message default matches the requested copy, and the enum has all three modes.
+## RELOAD_CHECKPOINT_FRESH); the card's text is a designer-editable death_message on the player_feedback tuning
+## resource, NOT a hardcoded string. The in-scene card draw and the reload itself are in-tree behaviour (a Player's
+## _ready cannot run under GUT) and playtested. Driven off-tree here: the card line read from the LIVE resource, the
+## killer-name ladder, and the click-to-skip against a real Tween. Pinned: the enum's serialized ordinals, the shipped
+## default mode (a ship decision), and the RELOAD_LAST_SAVE routing, which only exists inside the tree.
+
+## Live player_feedback fields a test below writes, restored after every test so no other file sees the edit.
+const FEEDBACK_FIELDS_TOUCHED := ["death_message", "death_skip_enabled", "death_skip_speed"]
+var _feedback_before := {}
+
+
+func before_each() -> void:
+	var fb: PlayerFeedbackSettings = GameSettings.player_feedback
+	_feedback_before.clear()
+	for field in FEEDBACK_FIELDS_TOUCHED:
+		_feedback_before[field] = fb.get(field)
+
+
+func after_each() -> void:
+	var fb: PlayerFeedbackSettings = GameSettings.player_feedback
+	for field in _feedback_before:
+		fb.set(field, _feedback_before[field])
 
 
 func test_death_mode_enum_has_three_modes() -> void:
@@ -15,24 +33,73 @@ func test_death_mode_enum_has_three_modes() -> void:
 	assert_eq(PlayerFeedbackSettings.DeathMode.size(), 3, "exactly three death modes")
 
 
-func test_defaults_preserve_todays_behaviour_and_copy() -> void:
-	var s := PlayerFeedbackSettings.new()
-	assert_eq(s.death_mode, PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN,
-		"the default death mode is the non-destructive in-place revive (today's behaviour)")
-	assert_eq(s.death_message, "[PH] You were killed.", "the death card default copy matches the requested line")
-	assert_eq(s.death_stranger_killer, "a stranger",
-		"an un-introduced killer reads as the indefinite 'a stranger' — the proper-noun 'Stranger' placeholder is wrong mid-sentence")
-	assert_gt(s.death_message_size, 0, "the card font size is positive")
-	s = null
+func test_an_unmet_killer_reads_by_the_live_in_sentence_stranger_form() -> void:
+	# The death card is a SENTENCE ("You were killed by ___."), so an un-introduced killer must read by an indefinite,
+	# lowercase form — never the label-case "Stranger" placeholder the hover/corpse/loot labels use ("killed by
+	# Stranger." is the bug this knob exists to fix). Driven through _compose_death_message against the LIVE
+	# player_feedback resource, so the slot wiring (stranger form vs. unknown-killer fallback) and the shipped copy
+	# are both on the line. The shipped death MODE is pinned by the .tres test below; the unattributed line by
+	# test_an_unattributed_death_reads_the_designers_live_death_message.
+	var fb: PlayerFeedbackSettings = GameSettings.player_feedback
+	var stranger_form := fb.death_stranger_killer
+	assert_ne(stranger_form.strip_edges(), "", "the shipped stranger form is authored (a blank one reads 'You were killed by .')")
+	assert_eq(stranger_form, stranger_form.to_lower(), "the shipped stranger form is lowercase — it sits mid-sentence: '%s'" % stranger_form)
+	assert_true(stranger_form.begins_with("a ") or stranger_form.begins_with("an "),
+		"the shipped stranger form carries its own indefinite article, so the line stays grammatical: '%s'" % stranger_form)
+	assert_gt(fb.death_message_size, 0, "the shipped card font size is positive — a zero size paints no card at all")
+	var prev_mask: bool = GameState.stranger_names_enabled
+	GameState.stranger_names_enabled = true
+	var p = load("res://scripts/player/player.gd").new()
+	var k := StubNpcKiller.new()   # UNALIGNED (faction null) and job-less, so the ladder falls through to the stranger form
+	k.display_name = "Zz Unmet Stranger Form Card Tester"  # unique — never revealed by any test
+	p._credit_attacker = k
+	var masked: String = p._compose_death_message()
+	assert_true(masked.contains(stranger_form),
+		"an un-introduced killer is named by the live stranger form on the card: %s" % masked)
+	assert_false(masked.contains(PlayerText.STRANGER),
+		"the label-case '%s' placeholder never reaches the death sentence: %s" % [PlayerText.STRANGER, masked])
+	assert_false(masked.contains(k.display_name), "the unmet killer's real name stays hidden: %s" % masked)
+	# CONTROL: the same killer with the stranger mask OFF is named outright, so the form above is the mask's doing.
+	GameState.stranger_names_enabled = false
+	var named: String = p._compose_death_message()
+	assert_true(named.contains(k.display_name) and not named.contains(stranger_form),
+		"with names unmasked the card names the killer instead of the stranger form: %s" % named)
+	GameState.stranger_names_enabled = prev_mask
+	p._credit_attacker = null
+	k.free()
+	p.free()
 
 
-func test_live_tuning_resource_exposes_the_card_fields() -> void:
-	# The live .tres (GameSettings.player_feedback) carries the new fields with their defaults — what the Player
-	# reads in _show_death_card / _on_death_sequence_done.
+func test_shipped_death_mode_is_the_in_place_revive() -> void:
+	# The LIVE .tres (GameSettings.player_feedback) is what the Player branches on in _on_death_sequence_done -- the
+	# effective value, whether the .tres authors death_mode or inherits the script default.
 	var fb = GameSettings.player_feedback
 	assert_true(fb is PlayerFeedbackSettings, "player_feedback is a PlayerFeedbackSettings")
-	assert_eq(fb.death_message, "[PH] You were killed.", "the editable death message defaults through the live resource")
-	assert_eq(fb.death_mode, PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN, "the live default mode is CHECKPOINT_RESPAWN")
+	assert_eq(fb.death_mode, PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN,
+		("SHIP DECISION: death is the non-destructive in-place revive. A shipped resource flipped to RELOAD_LAST_SAVE "
+		+ "would make every death throw away everything the player did since the last autosave"))
+
+
+func test_an_unattributed_death_reads_the_designers_live_death_message() -> void:
+	# A fall, a stray blast or a self-inflicted death has no killer to name, so the card shows death_message -- read
+	# from the LIVE tuning resource at the moment of death, so a designer's Inspector edit reaches the card. Off-tree:
+	# _compose_death_message only reads the killer credit and that resource.
+	var fb: PlayerFeedbackSettings = GameSettings.player_feedback
+	fb.death_message = "Zz designer-authored death line"   # restored in after_each
+	var p = load("res://scripts/player/player.gd").new()
+	assert_eq(p._compose_death_message(), "Zz designer-authored death line",
+		"with nobody credited for the kill the card shows the designer's death_message, not a line baked into the Player")
+	# CONTROL: a credited killer composes the killed-by line instead, so the equality above really is the unattributed
+	# branch reading the resource rather than every death echoing death_message.
+	var hazard := Node.new()   # no display_name: the card falls back to death_unknown_killer
+	p._credit_attacker = hazard
+	var killed_by: String = p._compose_death_message()
+	assert_ne(killed_by, "Zz designer-authored death line", "a death with a credited killer does not read the generic line")
+	assert_true(killed_by.contains(fb.death_unknown_killer),
+		"it names the killer instead -- here the unknown-killer fallback: %s" % killed_by)
+	p._credit_attacker = null
+	hazard.free()
+	p.free()
 
 
 func test_player_exposes_death_card_hooks() -> void:
@@ -63,9 +130,21 @@ func test_player_exposes_the_death_skip_seams() -> void:
 
 func test_the_skip_refuses_when_no_cinematic_is_running() -> void:
 	# _unhandled_input fires on every event in normal play; with no death tween there is nothing to skip and
-	# the click must fall through to the game rather than being swallowed.
+	# the click must fall through to the game rather than being swallowed. The skip is ENABLED and ARMED with its
+	# watch window already over, so the missing tween is the only thing left to refuse it.
+	var fb: PlayerFeedbackSettings = GameSettings.player_feedback
+	fb.death_skip_enabled = true   # restored in after_each
 	var p = load("res://scripts/player/player.gd").new()
-	assert_false(p._try_skip_death_beat(), "a click outside the death cinematic must not be consumed")
+	p._death_skip_ready_msec = Time.get_ticks_msec()
+	assert_false(p._try_skip_death_beat(), "an armed click with no death cinematic running must not be consumed")
+	assert_true(p._death_skip_ready_msec >= 0, "...and a refused click does not spend the arm")
+	# CONTROL: the SAME armed player with a cinematic tween running accepts the click, so the refusal above is the
+	# missing tween and not the arm or the setting.
+	var fired: Array = []
+	var cinematic := _paused_cinematic(fired)
+	p._death_tween = cinematic
+	assert_true(p._try_skip_death_beat(), "with a cinematic running the same armed click is consumed")
+	cinematic.kill()
 	p.free()
 
 func test_arming_the_skip_uses_a_future_wall_clock_deadline() -> void:
@@ -104,15 +183,81 @@ func test_only_a_click_or_accept_skips_the_cinematic() -> void:
 	walk = null
 	p.free()
 
+
+## A stand-in for the death cinematic with the shape _run_death_sequence builds: ONE tween whose beats each end in a
+## callback (the world-reset cue on the black frame, the card, the death-mode branch), here three one-second beats that
+## log their names. PAUSED, so only custom_step advances it: the test owns the clock, and custom_step applies the
+## tween's speed scale exactly as the tree's own per-frame step does. The caller kills it.
+func _paused_cinematic(fired: Array) -> Tween:
+	var tw := create_tween()
+	tw.pause()
+	for beat in ["covered", "card", "done"]:
+		tw.tween_interval(1.0)
+		tw.tween_callback(func() -> void: fired.append(beat))
+	return tw
+
+
 func test_the_skip_speeds_the_cinematic_up_rather_than_cutting_it_short() -> void:
-	# THE invariant. The cinematic is ONE tween whose callbacks fire the world-reset cue on the black frame,
-	# the card, and the death-mode branch that respawns or reloads. A skip that killed the tween and jumped to
-	# the end would have to re-implement all three — and would silently drop whichever beat is added next.
-	var src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
-	assert_true(src.contains("_death_tween.set_speed_scale("),
-		"the skip must scale the cinematic tween, so every callback in the chain still fires in order")
-	assert_false(src.contains("_death_tween.kill()"),
-		"killing the death tween would skip its callbacks: the world-reset cue, the card and the respawn branch")
+	# THE invariant. The cinematic is ONE tween whose callbacks fire the world-reset cue on the black frame, the card,
+	# and the death-mode branch that respawns or reloads. A skip that killed the tween and jumped to the end would have
+	# to re-implement all three -- and would silently drop whichever beat is added next. So a skip must SCALE the tween:
+	# nothing fires on the click, the beats arrive death_skip_speed times sooner, and every one still fires, in order.
+	var fb: PlayerFeedbackSettings = GameSettings.player_feedback
+	fb.death_skip_enabled = true   # restored in after_each
+	fb.death_skip_speed = 4.0
+	var p = load("res://scripts/player/player.gd").new()
+	var fired: Array = []
+	var cinematic := _paused_cinematic(fired)
+	var unskipped_fired: Array = []
+	var unskipped := _paused_cinematic(unskipped_fired)
+	p._death_tween = cinematic
+	p._death_skip_ready_msec = Time.get_ticks_msec()   # armed, and its watch window already over
+	assert_true(p._try_skip_death_beat(), "an armed click during the cinematic is consumed")
+	assert_true(cinematic.is_valid(), "the skip leaves the cinematic tween alive -- a killed tween never fires the rest of its chain")
+	assert_eq(fired, [], "nothing fires on the click itself: a skip that jumped to the end would run every beat on this frame")
+	assert_eq(p._death_skip_ready_msec, -1, "the click spends this beat's skip, so a mashed second click cannot spend the next beat too")
+	cinematic.custom_step(0.3)
+	unskipped.custom_step(0.3)
+	assert_eq(unskipped_fired, [], "control: 0.3 s into an unskipped cinematic no one-second beat has ended yet")
+	assert_eq(fired, ["covered"], "the skipped cinematic runs at death_skip_speed (4x here): 0.3 s covered the first 1.2 s of beats")
+	cinematic.custom_step(0.5)
+	assert_eq(fired, ["covered", "card", "done"],
+		"every beat still fires, exactly once and in order -- the world-reset cue, the card, then the death-mode branch")
+	cinematic.kill()
+	unskipped.kill()
+	p.free()
+
+
+func test_the_card_hands_the_cinematic_back_to_its_authored_pace_and_rearms_the_skip() -> void:
+	# TWO BEATS, ONE RULE: the first click fast-forwards TO the card, not THROUGH it. When the card reaches full opacity
+	# the cinematic drops back to its authored pace (so the card can be read) and the skip re-arms for the card's own
+	# beat. A designer who blanked the death line left nothing to read, so there the skip runs straight on.
+	var fb: PlayerFeedbackSettings = GameSettings.player_feedback
+	fb.death_skip_enabled = true   # restored in after_each
+	fb.death_skip_speed = 4.0
+	var p = load("res://scripts/player/player.gd").new()
+	var fired: Array = []
+	var cinematic := _paused_cinematic(fired)
+	p._death_tween = cinematic
+	p._death_card_text = "You were killed."
+	p._death_skip_ready_msec = Time.get_ticks_msec()
+	assert_true(p._try_skip_death_beat(), "the first click is consumed")
+	var shown_at := Time.get_ticks_msec()
+	p._on_death_card_shown()
+	cinematic.custom_step(0.3)
+	assert_eq(fired, [], "once the card is up the cinematic runs at its authored pace again: 0.3 s does not end a one-second beat")
+	assert_gte(p._death_skip_ready_msec, shown_at,
+		"and the skip is re-armed for the card's own beat (-1 would mean the card could never be clicked away)")
+	# CONTROL: the same sequence with a BLANK card keeps the fast-forward, so the pace drop above is the card's doing.
+	p._death_card_text = ""
+	p._death_skip_ready_msec = Time.get_ticks_msec()
+	assert_true(p._try_skip_death_beat(), "a click on the next beat is consumed")
+	p._on_death_card_shown()
+	cinematic.custom_step(0.3)
+	assert_eq(fired, ["covered"], "with no card to stop for, the skip keeps fast-forwarding instead of parking on a blank screen")
+	cinematic.kill()
+	p.free()
+
 
 ## Duck-typed stand-in for an NPC killer: a display_name plus the resolved_disposition method that
 ## _killer_display_name uses as its "is a real person" gate (so the Stranger mask applies), plus the
@@ -244,11 +389,30 @@ func test_shipped_factions_author_an_in_sentence_member_noun() -> void:
 		"the requested line: 'You were killed by a raider.'")
 
 
-func test_faction_member_noun_defaults_blank_so_it_is_opt_in() -> void:
-	# A faction that never authors one behaves exactly as before this feature — an unnamed faction is not a
-	# wrong faction. Pins the default alongside the rest of the Faction schema.
-	var f := Faction.new()
-	assert_eq(f.member_noun, "", "member_noun is opt-in; blank keeps the old anonymous wording")
+func test_a_faction_that_never_authors_a_member_noun_keeps_the_anonymous_wording() -> void:
+	# member_noun is OPT-IN: a faction nobody gave a noun (a fresh .tres, a half-authored one) reads exactly as before
+	# the feature. The faction here never has member_noun ASSIGNED -- its default is the thing under test, and the
+	# ladder treats any non-blank value as authored, so a non-blank default would name every such killer by it.
+	var prev_mask: bool = GameState.stranger_names_enabled
+	GameState.stranger_names_enabled = true
+	var p = load("res://scripts/player/player.gd").new()
+	var fresh := Faction.new()
+	fresh.id = &"zz_fresh_faction"
+	fresh.display_name = "Zz Fresh Faction"
+	var nameless := StubNpcKiller.new()   # no display_name
+	nameless.faction = fresh
+	assert_eq(p._killer_display_name(nameless, "someone", "a stranger"), "someone",
+		"a nameless member of a faction with no authored noun keeps the unknown-killer fallback")
+	var unmet := StubNpcKiller.new()
+	unmet.display_name = "Zz Unmet Fresh Faction Tester"  # unique -- never revealed by any other test
+	unmet.faction = fresh
+	assert_eq(p._killer_display_name(unmet, "someone", "a stranger"), "a stranger",
+		"an un-introduced member of a faction with no authored noun keeps 'a stranger'")
+	GameState.stranger_names_enabled = prev_mask
+	nameless.free()
+	unmet.free()
+	fresh = null
+	p.free()
 
 
 func test_reload_last_save_routes_through_the_autosave_freeze_seam() -> void:
@@ -259,12 +423,46 @@ func test_reload_last_save_routes_through_the_autosave_freeze_seam() -> void:
 	# checkpoint it had just loaded — silently destroying the save it was reverting to. The branch must route
 	# through GameState.load_autosave() (-> _load_and_reload), which arms the _reload_pending freeze that
 	# autosave() checks (latch behaviour: test_world_snapshot.gd; seam behaviour: test_debug_sandbox.gd).
-	# The branch itself needs a tree + the autoloads, so the routing is a SOURCE-TEXT pin: if it fails after
-	# a refactor, re-route through the latch seam and re-pin the new spelling — never satisfy it by restoring
-	# a bare load.
+	# KEPT AS A SOURCE PIN because it cannot be driven: _on_death_sequence_done returns before the branch unless the
+	# Player is in the tree, and a Player's _ready must never run under GUT. Scoped to the RELOAD_LAST_SAVE arm and to
+	# CODE (comments dropped), so a load_autosave() call elsewhere cannot satisfy it and the comment explaining the race
+	# cannot trip it. If it fails after a refactor, re-route through the latch seam and re-pin the new spelling — never
+	# satisfy it by restoring a bare load.
 	assert_true(GameState.has_method(&"load_autosave"), "the death-reload seam exists on GameState")
 	var src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
-	assert_true(src.contains("GameState.load_autosave()"),
+	var death_done := _between(src, "func _on_death_sequence_done(", "\nfunc ")
+	var reload_arm := _code_only(_between(death_done, "DeathMode.RELOAD_LAST_SAVE:", "DeathMode.RELOAD_CHECKPOINT_FRESH:"))
+	assert_ne(reload_arm.strip_edges(), "", "the RELOAD_LAST_SAVE arm of _on_death_sequence_done was found (re-pin if the branch moved)")
+	assert_true(reload_arm.contains("GameState.load_autosave()"),
 		"the RELOAD_LAST_SAVE death branch loads the checkpoint through load_autosave() (arms _reload_pending)")
-	assert_false(src.contains("GameState.load_from_disk"),
-		"no direct GameState.load_from_disk in player.gd — outside _load_and_reload the loaded profile has no autosave-freeze protection")
+	assert_false(_code_only(src).contains("load_from_disk("),
+		"no direct load_from_disk call in player.gd — outside _load_and_reload the loaded profile has no autosave-freeze protection")
+
+
+## The text between the first `from` and the next `to` after it ("" when `from` is missing; to the end when `to` is).
+func _between(text: String, from: String, to: String) -> String:
+	var at := text.find(from)
+	if at < 0:
+		return ""
+	var begin := at + from.length()
+	var stop := text.find(to, begin)
+	return text.substr(begin) if stop < 0 else text.substr(begin, stop - begin)
+
+
+## `text` with every `#` comment removed (a `#` inside a double-quoted string is kept). Only lines that contain a `#`
+## are walked character by character, so a whole-script pass stays cheap.
+func _code_only(text: String) -> String:
+	var lines := text.split("\n")
+	for i in lines.size():
+		var line := lines[i]
+		if not line.contains("#"):
+			continue
+		var in_string := false
+		for c in line.length():
+			var ch := line[c]
+			if ch == "\"" and (c == 0 or line[c - 1] != "\\"):
+				in_string = not in_string
+			elif ch == "#" and not in_string:
+				lines[i] = line.substr(0, c)
+				break
+	return "\n".join(lines)

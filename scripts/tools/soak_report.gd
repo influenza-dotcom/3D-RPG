@@ -32,6 +32,15 @@ var leak_slack: int = 12
 var orphan_baseline: int = 0
 var orphan_final: int = 0
 
+## LIVENESS, so "no NPC stranded" can never mean "no NPC moved". `wanderers_seen` is how many wave NPCs the
+## sampler actually read, `wanderers_moved` how many travelled at least MOVED_EPS from where they spawned, and
+## `farthest_wander` the best distance any of them managed. A wave that stood still (a renamed `wanders` export,
+## a brain that never ticks) reports zero strands, so without these the headline assert is unfalsifiable.
+const MOVED_EPS := 0.5
+var wanderers_seen: int = 0
+var wanderers_moved: int = 0
+var farthest_wander: float = 0.0
+
 var notes: Array = []
 
 
@@ -54,6 +63,13 @@ func is_leaking() -> bool:
 
 ## A run is OK only if it actually exercised the navmesh (nav_ready), no NPC stranded, and spawning didn't leak.
 ## nav_ready=false is deliberately NOT ok() — an inconclusive run must not read as green.
+## Did the wave actually WALK? `expected` NPCs must have been sampled and at least `min_movers` of them must have
+## travelled MOVED_EPS from their spawn point. This is the proof that a clean "stranded: none" was earned by NPCs
+## roaming the navmesh rather than by a wave that never moved (or never spawned) at all.
+func roamed(expected: int, min_movers: int) -> bool:
+	return wanderers_seen >= expected and wanderers_moved >= min_movers
+
+
 func ok() -> bool:
 	return nav_ready and not has_stranded() and not is_leaking()
 
@@ -70,6 +86,8 @@ func summary() -> String:
 				% [str(s.get("name", "?")), p.x, p.y, p.z, int(s.get("cycles", 0))])
 	else:
 		lines.append("  stranded: none  (peak cycles=%d / threshold %d)" % [peak_stranded_cycles, STRANDED_THRESHOLD])
+	lines.append("  roamed: %d/%d wanderers moved >= %.1f m (farthest %.1f m)"
+		% [wanderers_moved, wanderers_seen, MOVED_EPS, farthest_wander])
 	lines.append("  leak: baseline_nodes=%d  post_wave=%s  slack=%d  orphans %d->%d  -> %s"
 		% [node_baseline, str(leak_post_wave_nodes), leak_slack, orphan_baseline, orphan_final, str(is_leaking())])
 	for n in notes:

@@ -3,16 +3,21 @@ extends GutTest
 ## Item model + ItemDb registry — GUT unit suite (Phase A of the inventory feature).
 ##
 ## COVERS:
-##   - Item SOURCE defaults via Item.new() (NOT a .tres): category MISC, max_stack 1,
-##     empty id/display_name, null weapon, is_weapon() false, generic label().
+##   - (Item's bare defaults are not pinned as literals: the ones behaviour rests on are driven —
+##     empty id/display_name through the label() ladder below, MISC through the is_weapon()
+##     truth table (a WeaponData on a bare Item is still not a weapon), and max_stack 1
+##     through tests/test_character_inventory.gd, where
+##     pistol_item.tres authors no max_stack and two pistols still take two stacks.)
 ##   - Item.is_weapon(): true ONLY when category==WEAPON AND weapon!=null (a WEAPON item
 ##     with no WeaponData, and a non-WEAPON item carrying one, are both non-weapons).
 ##   - Item.label() priority ladder: display_name > id > "Item".
 ##   - pistol_item.tres wiring: loads as an Item, WEAPON category, wraps the SAME pistol
 ##     WeaponData the rig uses (cached by path), equippable, labelled "Pistol".
-##   - ItemDb autoload: all 7 weapon-items registered; weapon_item_for() round-trips a
-##     WeaponData to its item; distinct weapons -> distinct items; null and an
-##     unregistered WeaponData both resolve to null.
+##   - ItemDb autoload: the resources/items/ folder scan registers every item (a >= floor);
+##     weapon_item_for() round-trips a WeaponData to its item; distinct weapons -> distinct
+##     items; null and an unregistered WeaponData both resolve to null.
+##   - Weight/value: registered items stay in sane ranges, an acquired weapon keeps its
+##     template's weight, and an unpriced Item fails closed at a merchant's till.
 ##
 ## Conventions match test_combat_data.gd: extends GutTest, func test_*() -> void,
 ## class_name Item used directly. Item extends Resource (RefCounted), so instances are
@@ -27,27 +32,8 @@ const MELEE_ITEM := preload("res://resources/items/melee_item.tres")
 
 
 # ---------------------------------------------------------------------------
-# Item — source defaults (Item.new(), NOT a .tres).
+# Item — label() and is_weapon(), driven from a bare Item.new() (NOT a .tres).
 # ---------------------------------------------------------------------------
-
-func test_item_defaults() -> void:
-	var it := Item.new()
-	assert_eq(it.category, Item.Category.MISC,
-		"A fresh Item defaults to MISC — only an authored weapon/consumable .tres picks a real category")
-	assert_eq(it.max_stack, 1,
-		"max_stack defaults to 1 (unstackable) — stackables must opt in by raising it")
-	assert_eq(it.id, &"",
-		"id defaults to the empty StringName until an authored .tres names it")
-	assert_eq(it.display_name, "",
-		"display_name defaults empty — label() then falls back to id, then a generic")
-	assert_true(it.weapon == null,
-		"weapon defaults null — only WEAPON-category items carry a WeaponData")
-	assert_false(it.is_weapon(),
-		"A default MISC item with no weapon is not equippable")
-	assert_eq(it.max_stack, 1,
-		"max_stack defaults to 1 (a single, unstackable item)")
-	it = null
-
 
 func test_item_label_fallback_ladder() -> void:
 	var it := Item.new()
@@ -136,7 +122,7 @@ func test_item_db_weapon_item_for_unknown_is_null() -> void:
 		"weapon_item_for(null) must return null — no weapon, no item")
 	var stray := WeaponData.new()
 	assert_true(ItemDb.weapon_item_for(stray) == null,
-		"An unregistered WeaponData (not one of the 7 authored .tres) has no item — returns null")
+		"An unregistered WeaponData (not one of the authored weapon .tres) has no item — returns null")
 	stray = null
 
 
@@ -196,11 +182,6 @@ func test_weapons_have_distinct_magazines() -> void:
 # Item weight (carry-capacity feature) — defaults, authored values, duplication.
 # ---------------------------------------------------------------------------
 
-func test_item_default_weight() -> void:
-	assert_almost_eq(Item.new().weight, 1.0, 0.0001,
-		"a fresh Item defaults to weight 1.0 (a generic item)")
-
-
 func test_all_registered_items_have_sane_weight() -> void:
 	for it in ItemDb.all_items():
 		assert_true(it.weight >= 0.0 and it.weight < 100.0,
@@ -208,20 +189,33 @@ func test_all_registered_items_have_sane_weight() -> void:
 
 
 func test_make_weapon_item_preserves_weight() -> void:
+	# A looted / seeded weapon is a duplicate of the registry template, so it must carry the template's LIVE weight
+	# rather than the Item class default. A sentinel on the template makes that observable whatever the pistol is
+	# tuned to (the shared template is restored before any assert can fail).
 	var template := ItemDb.weapon_item_for(PISTOL)
+	var authored_weight := template.weight
+	template.weight = 7.25
 	var acquired := ItemDb.make_weapon_item(PISTOL)
-	assert_almost_eq(acquired.weight, template.weight, 0.0001,
-		"a duplicated (looted / seeded) weapon item keeps the template's authored weight")
-	assert_almost_eq(acquired.weight, 1.5, 0.0001,
-		"the pistol item weighs its authored 1.5")
+	template.weight = authored_weight
+	assert_almost_eq(acquired.weight, 7.25, 0.0001,
+		"a duplicated (looted / seeded) weapon item keeps the template's weight, so a gun weighs the same however you got it")
 	acquired = null
 
 
-func test_authored_item_value_loads() -> void:
-	assert_eq(PISTOL_ITEM.value, 50,
-		"a weapon item's authored trade value (zorkmids) loads from its .tres")
-	assert_eq(Item.new().value, 0,
-		"a fresh Item defaults to value 0 (worthless until authored)")
+func test_an_unpriced_item_cannot_be_traded_until_a_value_is_authored() -> void:
+	# Item.value defaults to worthless ON PURPOSE (item.gd: "0 = worthless (can't sell)"): an item a designer forgot
+	# to price must FAIL CLOSED at every till, never sell for free money or be handed over for nothing.
+	var m := Merchant.new()  # off-tree: _ready never runs; pricing is pure maths on the item
+	var unpriced := Item.new()
+	assert_eq(m.buy_price(unpriced), 0.0,
+		"an item nobody priced has no buy price, so a shop can never list unauthored stock")
+	assert_eq(m.sell_price(unpriced), 0.0,
+		"...and no sell price, so the player can't turn unauthored loot into zorkmids")
+	unpriced.value = 10.0
+	assert_gt(m.buy_price(unpriced), 0.0,
+		"control: the same item with a value authored IS priced, so the zeros above came from the unpriced default")
+	m.free()
+	unpriced = null
 
 
 func test_all_registered_items_have_sane_value() -> void:

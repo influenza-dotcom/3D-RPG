@@ -1,8 +1,28 @@
 extends GutTest
-# Test: load every .tres in res://resources/weapons/ and verify its WeaponData
-# fields exist with the right types.
+# Content contracts for the shipped weapon roster: every .tres in res://resources/weapons/ loads as a WeaponData with
+# its fields at the declared types, and the roster-wide authoring rules hold (weight classes, the knife's hand and
+# throw pose, the held/thrown flags, the agility floors). Relations and driven poses rather than tuning literals, so a
+# balance retune stays green and a weapon that breaks the rule goes red.
 
 const WEAPONS_DIR := "res://resources/weapons/"
+## The knife's world Item: the drop tests below build it through the real WorldItem.build path.
+const KNIFE_ITEM := "res://resources/items/melee_item.tres"
+## Axis conventions of the imported MODELS (facts about the meshes, documented on WeaponData.npc_hold_rotation and
+## thrown_face_rotation_degrees): the knife's BLADE points down its view-model root's -X (the reverse of a gun's +X
+## barrel), and an NPC's hand anchor faces +Z.
+const KNIFE_BLADE_AXIS := Vector3.LEFT
+const NPC_HAND_FORWARD := Vector3.BACK
+## How much SHORTER (as a fraction of the box) the posed knife may be than its hand-tuned drop collider. Loose on
+## purpose: a little air inside the box is harmless, but a model re-posed far smaller than the box it was tuned against
+## is the wrong scale.
+const COLLIDER_FIT_TOLERANCE := 0.15
+## How much LONGER (as a fraction of the box) the posed knife may be than that collider. Tight on purpose: any blade
+## past the box is a blade the physics can't see, so this only absorbs mesh-bounds rounding, not a scale drift.
+const COLLIDER_POKE_SLACK := 0.03
+## The long guns, heaviest first: each must slow you while drawn, and each more than the next.
+const LONG_GUNS_HEAVIEST_FIRST: Array[String] = ["shotgun", "sniper_wep", "smg"]
+## Everything else you can draw, bare fists included: none of it may slow you.
+const UNPENALISED_WEAPONS: Array[String] = ["pistol", "melee", "rock_weapon", "spray_paint", "fists"]
 
 func test_all_weapon_tres_have_required_fields() -> void:
 	var files := _list_tres()
@@ -106,60 +126,74 @@ func _check_field(obj: Object, field: String, expected_type: int, src: String) -
 	assert_eq(actual_type, expected_type,
 		"%s.%s has type %d, expected %d" % [src, field, actual_type, expected_type])
 
-# --- move_speed_multiplier weights ("heavier weapons slow you while drawn") ---
-# These pin the per-weapon move_speed_multiplier values set this session. The
-# weight comes from weapon_data.gd where `move_speed_multiplier` defaults to 1.0
-# (no penalty); heavier guns set it lower. assert_almost_eq tolerates the float
-# round-trip through the .tres. Reuses the existing `load(path) as WeaponData` idiom.
+func _weapon(wep: String) -> WeaponData:
+	return load(WEAPONS_DIR + wep + ".tres") as WeaponData
 
-# Shotgun is the heaviest — it slows the holder the most (0.82).
-func test_shotgun_move_speed_multiplier_is_heaviest() -> void:
-	var w := load("res://resources/weapons/shotgun.tres") as WeaponData
-	assert_not_null(w, "shotgun.tres must load as a WeaponData")
-	assert_almost_eq(w.move_speed_multiplier, 0.82, 0.0001,
-		"shotgun is the heaviest weapon and should slow the holder to 0.82")
+# --- move_speed_multiplier: "heavier weapons slow you while drawn" ---
+# GroundMovement.compute_target_speed (the player) and WeaponStance.current_move_speed (an NPC) MULTIPLY the wielder's
+# speed by the drawn weapon's move_speed_multiplier. The numbers themselves are balance and free to retune; what these
+# pin is the WEIGHT CLASS each weapon ships in. Together they make the shotgun the heaviest thing you can draw, and the
+# last test says so outright.
 
-# Sniper is heavy but lighter than the shotgun (0.85).
-func test_sniper_move_speed_multiplier_is_heavy() -> void:
-	var w := load("res://resources/weapons/sniper_wep.tres") as WeaponData
-	assert_not_null(w, "sniper_wep.tres must load as a WeaponData")
-	assert_almost_eq(w.move_speed_multiplier, 0.85, 0.0001,
-		"sniper should slow the holder to 0.85")
+# Zero does not slow you, it roots you in place the moment the weapon comes out, and a negative value turns your
+# movement keys around. Walks the disk rather than a hand list, so a NEW weapon .tres is caught the day it lands.
+func test_no_weapon_roots_or_reverses_its_wielder_while_drawn() -> void:
+	var files := _list_tres()
+	assert_gt(files.size(), 0, "there must be weapons to check")
+	for path in files:
+		var w := load(path) as WeaponData
+		if w == null:
+			continue  # the field-type sweep above already fails a .tres that isn't a WeaponData
+		assert_gt(w.move_speed_multiplier, 0.0,
+			"%s authors move_speed_multiplier %.3f: drawing it would freeze (0) or reverse (<0) whoever holds it" % [path, w.move_speed_multiplier])
 
-# SMG carries only a light movement penalty (0.93).
-func test_smg_move_speed_multiplier_is_light_penalty() -> void:
-	var w := load("res://resources/weapons/smg.tres") as WeaponData
-	assert_not_null(w, "smg.tres must load as a WeaponData")
-	assert_almost_eq(w.move_speed_multiplier, 0.93, 0.0001,
-		"smg should slow the holder only slightly, to 0.93")
+# The long guns carry a real penalty that grows with the gun: the shotgun slows you most, the sniper less, the SMG
+# only a little. A retune that keeps that order stays green; a sniper retuned heavier than the shotgun goes red.
+func test_long_guns_slow_you_more_the_heavier_they_are() -> void:
+	var heavier := ""
+	var heavier_mult := 0.0
+	for wep in LONG_GUNS_HEAVIEST_FIRST:
+		var w := _weapon(wep)
+		assert_not_null(w, "%s.tres must load as a WeaponData" % wep)
+		if w == null:
+			return
+		assert_lt(w.move_speed_multiplier, 1.0,
+			"%s is a long gun and must slow you while drawn, but authors move_speed_multiplier %.3f" % [wep, w.move_speed_multiplier])
+		if heavier != "":
+			assert_lt(heavier_mult, w.move_speed_multiplier,
+				"%s (%.3f) must slow you MORE than %s (%.3f): the weight order is shotgun, then sniper, then SMG" % [heavier, heavier_mult, wep, w.move_speed_multiplier])
+		heavier = wep
+		heavier_mult = w.move_speed_multiplier
 
-# Pistol is light: it leaves move_speed_multiplier at the 1.0 default (no penalty).
-func test_pistol_move_speed_multiplier_is_unchanged_default() -> void:
-	var w := load("res://resources/weapons/pistol.tres") as WeaponData
-	assert_not_null(w, "pistol.tres must load as a WeaponData")
-	assert_almost_eq(w.move_speed_multiplier, 1.0, 0.0001,
-		"pistol is light and should keep the 1.0 default (no movement penalty)")
+# The pistol, knife, rock launcher and spray can carry no movement penalty, and neither do bare fists: they are the
+# unarmed fallback, and being unarmed must never be slower than having your gun holstered. A value above 1.0 (a
+# speed-up) is allowed, a value below it is not.
+func test_light_weapons_and_bare_fists_never_slow_you() -> void:
+	for wep in UNPENALISED_WEAPONS:
+		var w := _weapon(wep)
+		assert_not_null(w, "%s.tres must load as a WeaponData" % wep)
+		if w == null:
+			continue
+		assert_gte(w.move_speed_multiplier, 1.0,
+			"%s must not slow you while drawn (only the long guns do), but authors move_speed_multiplier %.3f" % [wep, w.move_speed_multiplier])
 
-# Melee leaves move_speed_multiplier at the 1.0 default (no penalty).
-func test_melee_move_speed_multiplier_is_unchanged_default() -> void:
-	var w := load("res://resources/weapons/melee.tres") as WeaponData
-	assert_not_null(w, "melee.tres must load as a WeaponData")
-	assert_almost_eq(w.move_speed_multiplier, 1.0, 0.0001,
-		"melee should keep the 1.0 default (no movement penalty)")
-
-# Rock launcher leaves move_speed_multiplier at the 1.0 default (no penalty).
-func test_rock_weapon_move_speed_multiplier_is_unchanged_default() -> void:
-	var w := load("res://resources/weapons/rock_weapon.tres") as WeaponData
-	assert_not_null(w, "rock_weapon.tres must load as a WeaponData")
-	assert_almost_eq(w.move_speed_multiplier, 1.0, 0.0001,
-		"rock_weapon should keep the 1.0 default (no movement penalty)")
-
-# Spray paint leaves move_speed_multiplier at the 1.0 default (no penalty).
-func test_spray_paint_move_speed_multiplier_is_unchanged_default() -> void:
-	var w := load("res://resources/weapons/spray_paint.tres") as WeaponData
-	assert_not_null(w, "spray_paint.tres must load as a WeaponData")
-	assert_almost_eq(w.move_speed_multiplier, 1.0, 0.0001,
-		"spray_paint should keep the 1.0 default (no movement penalty)")
+# Walks the disk rather than the two weight-class lists above, so a NEWLY authored weapon heavier than the shotgun is
+# caught even before anyone files it into a class.
+func test_shotgun_is_the_heaviest_weapon_you_can_draw() -> void:
+	var shotgun := _weapon("shotgun")
+	assert_not_null(shotgun, "shotgun.tres must load as a WeaponData")
+	if shotgun == null:
+		return
+	var files := _list_tres()
+	assert_gt(files.size(), 1, "there must be weapons besides the shotgun to compare against")
+	for path in files:
+		if path == WEAPONS_DIR + "shotgun.tres":
+			continue
+		var w := load(path) as WeaponData
+		if w == null:
+			continue  # the field-type sweep above already fails a .tres that isn't a WeaponData
+		assert_lt(shotgun.move_speed_multiplier, w.move_speed_multiplier,
+			"the shotgun (%.3f) must slow you more than %s (%.3f): it is the heaviest weapon in the game" % [shotgun.move_speed_multiplier, path, w.move_speed_multiplier])
 
 # Fists are the unarmed fallback NPCs use with nothing equipped. The actual values are the designer's to
 # tune, so this just pins that it LOADS and is functional — positive damage / reach / cadence (the wind-up
@@ -175,64 +209,211 @@ func test_fists_loads_as_a_usable_melee_weapon() -> void:
 # The knife's view_model (knife.tscn) bakes a first-person-only pose in its ROOT (scale 1.585, a Z-tilt, a
 # forward offset for the player's gun camera). An NPC hangs the SAME scene off its hand anchor; without the
 # override it inherited that baked scale + offset and only corrected yaw, so the knife floated ~0.45 m off the
-# hand, oversized. These pin the authored hand pose that fixes it: override ON, +90° Y so the blade (which
-# points -X, the reverse of a gun's +X barrel) faces the NPC's +Z forward, and native size (scale 1.0). See
-# npc.gd _build_weapon_mesh.
-func test_knife_opts_into_npc_hold_override() -> void:
-	var w := load("res://resources/weapons/melee.tres") as WeaponData
+# hand, oversized. The override is what fixes it, and its pose has to put the blade (mesh -X) down the hand's +Z
+# forward, upright. Posed here the way npc.gd _build_weapon_mesh poses it (rotation_degrees on the model root), so
+# any Euler triple that lands the blade forward passes and a gun's -90 yaw copied onto the knife does not.
+func test_knife_blade_points_forward_in_an_npc_hand() -> void:
+	var w := _weapon("melee")
 	assert_not_null(w, "melee.tres must load as a WeaponData")
+	if w == null:
+		return
 	assert_true(w.is_melee, "the knife is a melee weapon")
 	assert_true(w.npc_hold_override, "the knife MUST override the NPC hand-hold — its view_model bakes an FP-only root pose")
-	# +90° Y (not the guns' -90°): the knife blade points -X, so it needs the opposite yaw to face +Z forward.
-	assert_almost_eq(w.npc_hold_rotation.y, 90.0, 0.001, "knife NPC yaw must be +90° so the blade points forward (+Z)")
-	assert_almost_eq(w.npc_hold_rotation.x, 0.0, 0.001, "knife NPC hold has no pitch")
-	assert_almost_eq(w.npc_hold_rotation.z, 0.0, 0.001, "knife NPC hold has no roll")
-	assert_almost_eq(w.npc_hold_scale, 1.0, 0.001, "knife NPC hold keeps the model's native size")
+	var mount := Node3D.new()
+	mount.rotation_degrees = w.npc_hold_rotation
+	var blade := mount.basis * KNIFE_BLADE_AXIS
+	var up := mount.basis * Vector3.UP
+	mount.free()
+	assert_almost_eq(blade.dot(NPC_HAND_FORWARD), 1.0, 0.001,
+		"npc_hold_rotation %s points the knife's blade along %s, not the NPC's +Z forward: enemies would hold it handle-first or sideways" % [w.npc_hold_rotation, blade])
+	assert_almost_eq(up.dot(Vector3.UP), 1.0, 0.001,
+		"npc_hold_rotation %s tips the knife off upright (model up now %s): the blade would be held rolled or pitched" % [w.npc_hold_rotation, up])
 	# ...and the NPC-hand readability boost is what makes it READ at NPC viewing distance. It rides on top of
 	# npc_hold_scale (which the ground drop and the character preview also read), so the held knife can be
 	# enlarged for the hand WITHOUT resizing the dropped/thrown copy — whose dropped_collision_size is
-	# hand-tuned to the native 0.44 m blade.
+	# hand-tuned to the native blade (pinned against the real mesh by the drop test below).
 	assert_gt(w.npc_held_display_scale, 1.0,
 		"the knife must still get an NPC-hand size boost, or it vanishes into a 0.75 m arm")
 
-# The override is opt-in: every weapon EXCEPT the knife has a CLEAN view_model root — identity (the AK) or a
-# centered uniform scale with no offset/tilt (the pistol's 0.001) — and mounts correctly via the rotation-only
-# weapon_mesh_rotation. None may set the override, or the fix would perturb its (working) hold. An accidental
-# future override on any of these would silently break that weapon's NPC hold, so pin the whole non-knife roster off.
-func test_non_knife_weapons_do_not_override_npc_hold() -> void:
-	for wep in ["pistol", "shotgun", "smg", "sniper_wep", "rock_weapon", "spray_paint", "fists"]:
-		var path := "res://resources/weapons/%s.tres" % wep
+## Bounds of every MeshInstance3D under `node`, in the DROP's local space (the walk Throwable._collect_visual_aabb
+## does). An empty dictionary means nothing renders.
+func _visual_bounds(node: Node, xf: Transform3D, state: Dictionary) -> Dictionary:
+	if node is MeshInstance3D:
+		var mi := node as MeshInstance3D
+		if mi.mesh != null:
+			var box := xf * mi.mesh.get_aabb()
+			state["aabb"] = box if not state.has("aabb") else (state["aabb"] as AABB).merge(box)
+	for child in node.get_children():
+		var child_xf := xf
+		if child is Node3D:
+			child_xf = xf * (child as Node3D).transform
+		_visual_bounds(child, child_xf, state)
+	return state
+
+## The knife dropped through the real WorldItem.build path (case 3: its view model, re-posed by the npc_hold_* fields),
+## or null after failing the test. Off-tree: Throwable._ready never runs. The caller frees it.
+func _build_knife_drop() -> Throwable:
+	var item := load(KNIFE_ITEM) as Item
+	assert_not_null(item, "%s must load as an Item" % KNIFE_ITEM)
+	if item == null:
+		return null
+	var drop := WorldItem.build(item, 1)
+	if not (drop is Throwable):
+		fail_test("dropping the knife must build a Throwable (WorldItem.build case 3), got %s" % drop)
+		if is_instance_valid(drop):
+			drop.free()
+		return null
+	return drop as Throwable
+
+# The drop re-poses the knife at NATIVE size, which is the size its hand-tuned dropped_collision_size (a slender box
+# long in local Z, the axis a throw noses along) was measured against. Measured from the real posed mesh bounds: a
+# knife dropped at its baked FP scale, or with the NPC display boost, pokes out of its own collider and clips walls
+# with a blade the physics can't see.
+func test_dropped_knife_model_fills_its_hand_tuned_collider() -> void:
+	var w := _weapon("melee")
+	var drop := _build_knife_drop()
+	if w == null or drop == null:
+		if drop != null:
+			drop.free()
+		return
+	var visual := drop.get_node_or_null(^"Visual") as Node3D
+	assert_true(visual != null, "the knife drop wraps its view model in a 'Visual' child")
+	if visual != null:
+		var state := _visual_bounds(visual, visual.transform, {})
+		assert_true(state.has("aabb"), "the dropped knife has renderable bounds")
+		if state.has("aabb"):
+			var size := (state["aabb"] as AABB).size
+			var box := w.dropped_collision_size
+			assert_gt(size.z, maxf(size.x, size.y),
+				"the posed knife must lie along local Z, the axis its throw noses along (posed bounds %s)" % size)
+			# One-sided on purpose: poking OUT of the box is the bug, sitting a little inside it is not.
+			assert_lte(size.z, box.z * (1.0 + COLLIDER_POKE_SLACK),
+				"the dropped knife is %.3f m long but its dropped_collision_size is only %.3f m: the blade pokes out of the collider the physics sees" % [size.z, box.z])
+			assert_gte(size.z, box.z * (1.0 - COLLIDER_FIT_TOLERANCE),
+				"the dropped knife is %.3f m long inside a %.3f m collider: the model was re-posed far smaller than the box it was tuned against" % [size.z, box.z])
+	drop.free()
+
+# The override exists for ONE authoring situation, documented on WeaponData.npc_hold_override: a view_model whose ROOT
+# bakes a first-person-only pose — an offset, a tilt or a non-uniform scale (the knife's 1.585 scale, Z-tilt and
+# forward offset). npc.gd's default mount only corrects yaw, so a baked root floats off the hand without it. A CLEAN
+# root — identity (the AK) or a centred uniform scale (the pistol's 0.001) — mounts right via weapon_mesh_rotation, and
+# the override would DISCARD that root (the pistol's load-bearing 0.001 replaced by npc_hold_scale). So the flag must
+# match the model, both ways. Measured off each weapon's real view-model root and walked from disk, so a gun re-imported
+# with a baked root, or a NEW weapon authored from the wrong template, goes red without anyone updating a list.
+func test_npc_hold_override_is_on_exactly_where_the_view_model_root_bakes_a_pose() -> void:
+	var measured := 0
+	for path in _list_tres():
 		var w := load(path) as WeaponData
-		assert_not_null(w, "%s must load as a WeaponData" % path)
-		assert_false(w.npc_hold_override,
-			"%s mounts correctly via rotation-only weapon_mesh_rotation — it must NOT set npc_hold_override" % wep)
+		if w == null:
+			continue  # the field-type sweep above already fails a .tres that isn't a WeaponData
+		var vm := w.held_view_model()
+		if vm == null:
+			continue  # nothing is mounted in an NPC's hand (bare fists' rig is first-person-only), so nothing to correct
+		var root := vm.instantiate()
+		var root3 := root as Node3D
+		assert_true(root3 != null, "%s's view_model root must be a Node3D for an NPC hand to mount it" % path)
+		if root3 == null:
+			if root != null:
+				root.free()
+			continue
+		var xf := root3.transform
+		root.free()
+		var root_scale := xf.basis.get_scale()
+		var offset := not xf.origin.is_zero_approx()
+		var tilted := not xf.basis.orthonormalized().is_equal_approx(Basis.IDENTITY)
+		var squashed := maxf(absf(root_scale.x - root_scale.y), absf(root_scale.x - root_scale.z)) > absf(root_scale.x) * 0.001
+		var baked := offset or tilted or squashed
+		measured += 1
+		assert_eq(w.npc_hold_override, baked,
+			"%s's view_model root is %s (offset %s, tilted %s, non-uniform scale %s), so npc_hold_override must be %s: a baked root without it floats off an NPC's hand, and a clean root with it loses the scale it mounts at" % [path, xf, offset, tilted, squashed, baked])
+	assert_gt(measured, 0, "precondition: at least one weapon on disk has a view model an NPC can hold")
 
 # The held pose is game-wide too, for the same reason the streak is: a weapon in your HANDS that ignores where you
-# are looking reads as a bug, not as flavour. Every weapon must have `held_faces_aim` on, and every weapon whose
-# model follows the project's barrel-is-+X convention must carry the matching +90 front correction — the value that
-# swings that +X onto the aim's -Z (the NPC hand mount's `weapon_mesh_rotation` default of -90 is the same
-# convention mirrored for an NPC's +Z forward). Both are DEFAULTS on WeaponData, so this catches a resource that
-# turned one off by hand as much as one authored from a stale template. The knife is the documented exception on
-# the rotation only: its blade points -X, so it needs 180 (pinned separately below by its own throw test), and it
-# is excluded here rather than special-cased so a NEW weapon that quietly picks 180 gets caught.
-func test_every_weapon_is_held_pointing_down_your_aim() -> void:
-	for wep in ["melee", "pistol", "shotgun", "smg", "sniper_wep", "rock_weapon", "spray_paint", "fists"]:
-		var path := "res://resources/weapons/%s.tres" % wep
+# are looking reads as a bug, not as flavour. DRIVEN, not read off the resource: every weapon on disk with a model to
+# hold is dropped through the real WorldItem.build (which stamps held_faces_aim and thrown_face_rotation_degrees onto
+# the Throwable), posed by the real Throwable.face_carrier for a look that is both pitched and yawed, and its business
+# end is MEASURED on the posed model — a gun's barrel from its own Muzzle marker (NodeFinder, the lookup npc.gd fires
+# from), the knife's blade from its documented -X blade axis. Whatever the authored numbers, that end must lie along the
+# look. The control strips the mesh-front correction off the same drop, which must NOT land it there, so the check is
+# known to measure the correction. Bare fists hold no model (their rig is first-person-only), so there is nothing to pose.
+func test_every_weapon_you_can_hold_points_its_business_end_down_your_aim() -> void:
+	# 25 degrees up and 70 degrees round from world forward, so neither a level-only pose nor an axis that merely
+	# happens to line up with world -Z can pass.
+	var carrier := Transform3D(Basis.from_euler(Vector3(deg_to_rad(25.0), deg_to_rad(70.0), 0.0)), Vector3(0.0, 1.0, 1.5))
+	var look := (-carrier.basis.z).normalized()
+	var measured := 0
+	for path in _list_tres():
 		var w := load(path) as WeaponData
-		assert_not_null(w, "%s must load as a WeaponData" % path)
-		assert_true(w.held_faces_aim,
-			"%s must point its business end down your look while carried — held_faces_aim is on for every weapon" % wep)
-	for wep in ["pistol", "shotgun", "smg", "sniper_wep", "rock_weapon", "spray_paint", "fists"]:
-		var w := load("res://resources/weapons/%s.tres" % wep) as WeaponData
-		assert_almost_eq(w.thrown_face_rotation_degrees.y, 90.0, 0.001,
-			"%s's barrel points mesh +X, so its front correction must be +90 to lie along the aim's -Z" % wep)
-		assert_almost_eq(w.thrown_face_rotation_degrees.x, 0.0, 0.001, "%s's front correction has no pitch" % wep)
-		assert_almost_eq(w.thrown_face_rotation_degrees.z, 0.0, 0.001, "%s's front correction has no roll" % wep)
+		if w == null or w.held_view_model() == null:
+			continue  # the field-type sweep fails a non-WeaponData; a first-person-only rig (bare fists) is never held as a model
+		var item := Item.new()
+		item.category = Item.Category.WEAPON
+		item.weapon = w
+		var drop := WorldItem.build(item, 1) as Throwable
+		item = null
+		if drop == null:
+			fail_test("%s's view model must drop as a Throwable (WorldItem.build case 3)" % path)
+			continue
+		var visual := drop.get_node_or_null(^"Visual") as Node3D
+		var muzzle: Node3D = NodeFinder.find_first_by_name(visual, "muzzle") if visual != null else null
+		var is_knife: bool = path == WEAPONS_DIR + "melee.tres"
+		if visual == null or (muzzle == null and not is_knife):
+			# A ranged weapon needs the marker: without it an NPC's shots leave its hand, not the barrel. A melee model
+			# other than the knife has no documented business-end axis to measure, so it is left out rather than guessed.
+			assert_true(visual != null and w.is_melee,
+				"%s drops with no Visual child, or is a ranged weapon whose dropped model has no Muzzle marker to find the barrel by" % path)
+			drop.free()
+			continue
+		add_child_autofree(drop)  # face_carrier reads global transforms and calls look_at: an engine error off-tree
+		drop.global_transform = Transform3D.IDENTITY
+		drop.face_carrier(carrier)
+		assert_gt(_business_end_along(visual, muzzle, look), 0.7,
+			"%s held for a pitched, yawed look must point its business end down that look (within ~45 degrees): held_faces_aim, the reversed carry pose and its front correction together are what put it there" % path)
+		drop.face_carrier_rotation_degrees = Vector3.ZERO
+		drop.global_transform = Transform3D.IDENTITY
+		drop.face_carrier(carrier)
+		assert_lt(_business_end_along(visual, muzzle, look), 0.7,
+			"control: the same %s drop with its mesh-front correction stripped must NOT point down the look, or the check above proves nothing" % path)
+		measured += 1
+	assert_gt(measured, 1, "precondition: the knife and at least one gun were posed and measured")
 
-func test_knife_keeps_its_blade_front_correction() -> void:
-	var w := load("res://resources/weapons/melee.tres") as WeaponData
-	assert_almost_eq(w.thrown_face_rotation_degrees.y, 180.0, 0.001,
-		"the knife's blade points mesh -X, which npc_hold_rotation maps to the drop's +Z — the TAIL of the aim — so it needs 180, not the guns' 90")
+
+## How squarely the posed weapon's business end lies along `look` (1 = dead on): the direction from the model's origin to
+## its Muzzle marker for a gun, or the knife's blade axis when there is no marker.
+func _business_end_along(visual: Node3D, muzzle: Node3D, look: Vector3) -> float:
+	var end: Vector3
+	if muzzle != null:
+		end = muzzle.global_position - visual.global_position
+	else:
+		end = visual.global_basis * KNIFE_BLADE_AXIS
+	return end.normalized().dot(look)
+
+# The knife's front correction, driven: WorldItem.build re-poses the dropped model with npc_hold_rotation (blade onto
+# the drop's +Z, the TAIL of the aim) and stamps thrown_face_rotation_degrees onto the Throwable, whose
+# travel_facing_basis noses the body along its flight. Whatever the authored numbers, the BLADE must lead on every
+# throw, straight, pitched or sideways. The control re-stamps the guns' default correction on the same drop, which
+# must NOT lead with the blade, so the check is known to be measuring the correction and not something always true.
+func test_thrown_knife_leads_with_its_blade() -> void:
+	var drop := _build_knife_drop()
+	if drop == null:
+		return
+	var visual := drop.get_node_or_null(^"Visual") as Node3D
+	assert_true(visual != null, "the knife drop wraps its view model in a 'Visual' child")
+	if visual == null:
+		drop.free()
+		return
+	var blade_in_body := (visual.transform.basis * KNIFE_BLADE_AXIS).normalized()
+	for dir: Vector3 in [Vector3.FORWARD, Vector3(0.4, 0.5, -1.0).normalized(), Vector3.RIGHT, Vector3(-0.3, -0.6, 0.2).normalized()]:
+		var blade := (drop.travel_facing_basis(dir) * blade_in_body).normalized()
+		assert_gt(blade.dot(dir), 0.999,
+			"a knife thrown along %s flies with its blade along %s: it must lead with the point, not the handle or the flat" % [dir, blade])
+	var gun_default := WeaponData.new()
+	drop.face_carrier_rotation_degrees = gun_default.thrown_face_rotation_degrees
+	gun_default = null
+	var uncorrected := (drop.travel_facing_basis(Vector3.FORWARD) * blade_in_body).normalized()
+	assert_lt(uncorrected.dot(Vector3.FORWARD), 0.5,
+		"control: with a gun's default front correction the same knife drop must NOT lead with its blade, or the check above proves nothing")
+	drop.free()
 
 # The in-flight streak is game-wide: EVERY weapon draws a white tracer through the arc of a real throw, not just
 # the blade it shipped for. This pins the whole roster ON — the inverse of what it pinned before — because the
@@ -240,7 +421,7 @@ func test_knife_keeps_its_blade_front_correction() -> void:
 # authored from a stale template) just quietly throws bare, and nothing else in the suite would notice. The one
 # WHITE assert covers the colour drifting per weapon, which would break the "every throw looks like a throw" read
 # the effect exists for. `fists` is in the roster even though there is no fists Item to drop: it costs nothing,
-# and it keeps this list identical to the hold-override roster above rather than subtly different.
+# and it keeps this list identical to the scoped-throw roster below rather than subtly different.
 func test_every_weapon_streaks_when_thrown() -> void:
 	for wep in ["melee", "pistol", "shotgun", "smg", "sniper_wep", "rock_weapon", "spray_paint", "fists"]:
 		var path := "res://resources/weapons/%s.tres" % wep

@@ -7,7 +7,9 @@ extends GutTest
 ## Nothing here can HEAR a filter, so the tests pin the four things that break silently and are invisible in a
 ## playtest until someone happens to A/B them:
 ##   1. The registry SET — which screens play the bed. It must stay exactly the set that answers with a
-##      StationSpeaker chirp; a new screen row that forgets the key would crash the gate outright.
+##      StationSpeaker chirp, so the expected set is DERIVED from the screens' chirp call sites (a scan, because a
+##      screen's real open() needs a live station + player) and each screen's answer is read off the live gate; a
+##      new screen row that forgets the key would crash the gate outright.
 ##   2. The bus resolves, and the AUTHORED bus name in the tuning resource is a real bus (a typo drops the bed
 ##      onto the fallback with only a warning). Chain PARITY with `speaker` lives in test_audio_bus_hygiene.gd.
 ##   3. The no-immediate-repeat picker — pure and static precisely so it can be proven with no RNG, no audio
@@ -21,28 +23,49 @@ extends GutTest
 
 const STATION_MUSIC_SCRIPT := preload("res://managers/StationMusic.gd")
 
+
+func after_each() -> void:
+	for s in InputManager._modal_screens():
+		s.set(&"_is_open", false)
+
+
+## True when a screen's script answers its open with the machine's panel chirp: a live (uncommented) call to
+## StationSpeaker.chirp(. That call site IS the design rule's definition of a station screen, so the expected
+## radio set is read from it rather than transcribed from the registry it is meant to check.
+func _screen_chirps(screen: Object) -> bool:
+	var script := screen.get_script() as Script
+	if script == null:
+		return false
+	for line in FileAccess.get_file_as_string(script.resource_path).split("\n"):
+		if line.split("#")[0].contains("StationSpeaker.chirp("):
+			return true
+	return false
+
 # --- The registry set: which screens count -----------------------------------------------------------
 
-func test_the_station_music_set_is_exactly_the_screens_with_a_panel_speaker() -> void:
+func test_the_station_radio_plays_under_exactly_the_screens_that_chirp() -> void:
 	# THE design rule, and the reason the flag lives in the registry beside blocks_tabs rather than in a
 	# hand-written list next to the bed: the music plays through a clone of the StationSpeaker's filter chain,
 	# so it must play under exactly the screens that answer with a StationSpeaker chirp. If those two sets ever
-	# drift, a machine chirps and then plays nothing (or plays music without ever having spoken).
-	var expected: Array = [ShopScreen, LevelUpScreen, RespecScreen, HealScreen, AtmScreen, ChipInstallScreen,
-			WeaponBenchScreen, ChessScreen]
-	InputManager._ensure_modal_reg()
-	var actual: Array = []
-	for e in InputManager._modal_reg:
-		if e.station_music:
-			actual.append(e.screen)
-	assert_eq(actual.size(), expected.size(),
-		"the station-radio set has %d screens but should have %d — if you added a station screen, say so in "
-		% [actual.size(), expected.size()]
-		+ "this test too; if you added a NON-station screen, it should be station_music = false")
-	for screen in expected:
-		assert_true(actual.has(screen),
-			"a station screen is missing its `station_music = true` registry row — it will chirp at you and "
-			+ "then sit in silence")
+	# drift, a machine chirps and then plays nothing (or plays music without ever having spoken). Both directions
+	# are checked per screen, through the live gate StationMusic polls — so a NEW chirping screen that forgets its
+	# flag fails here by name, which a transcribed expected list could never catch.
+	var chirping := 0
+	for screen in InputManager._modal_screens():
+		var chirps := _screen_chirps(screen)
+		if chirps:
+			chirping += 1
+		screen.set(&"_is_open", true)
+		var radio_plays := InputManager.any_station_music_open()
+		screen.set(&"_is_open", false)
+		if chirps:
+			assert_true(radio_plays,
+				"%s answers its open with StationSpeaker.chirp() but opening it does not start the station radio — its registry row needs station_music = true, or the machine chirps and then sits in silence" % screen.name)
+		else:
+			assert_false(radio_plays,
+				"%s never chirps, yet opening it starts the station radio — a shop theme under a screen with no panel speaker (set its row's station_music = false)" % screen.name)
+	assert_gt(chirping, 0,
+		"no registered screen calls StationSpeaker.chirp( — the call-site scan broke, so the parity above checked nothing")
 
 func test_every_registry_row_carries_the_station_music_key() -> void:
 	# A row that omits the key throws on `e.station_music` the first time any station screen opens — i.e. the
@@ -193,4 +216,30 @@ func test_a_bare_instance_skips_null_playlist_slots() -> void:
 	var live: Array[int] = bed._playable_indices(cfg)
 	assert_eq(live, [1] as Array[int], "only the non-null slot is playable, got %s" % str(live))
 	cfg = null
+	bed.free()
+
+func test_the_pick_remembers_the_real_playlist_index_across_cleared_rows() -> void:
+	# _pick_stream rolls over the LIVE (non-null) slots, then must remember the PLAYLIST index it played: the
+	# never-twice-in-a-row memory is keyed on cfg.tracks, so a live-slot / playlist-index mix-up either replays the
+	# same tune or hands back an empty row — silence — the moment a designer clears one.
+	var bed = STATION_MUSIC_SCRIPT.new()
+	var cfg := StationMusicSettings.new()
+	var tune_a := AudioStreamMP3.new()
+	tune_a.loop = true  # already looping, so LoopableStream hands the authored stream back as-is and identity is comparable
+	var tune_b := AudioStreamMP3.new()
+	tune_b.loop = true
+	cfg.tracks = [null, tune_a, null, tune_b] as Array[AudioStream]
+	bed._last_index = 3  # tune_b just played
+	assert_same(bed._pick_stream(cfg), tune_a,
+		"with tune_b (playlist row 3) just played and only two live rows, the next pick must be tune_a")
+	assert_eq(bed._last_index, 1, "...and the bed must remember tune_a's PLAYLIST row (1), not its live-slot position (0)")
+	for pick in 6:
+		var prev: int = bed._last_index
+		var got: AudioStream = bed._pick_stream(cfg)
+		assert_true(got == tune_a or got == tune_b,
+			"pick %d landed on an empty playlist row — the machine would play silence" % pick)
+		assert_ne(bed._last_index, prev, "with two live tracks the bed must alternate — pick %d replayed row %d" % [pick, prev])
+	cfg = null
+	tune_a = null
+	tune_b = null
 	bed.free()

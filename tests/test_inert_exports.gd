@@ -1,8 +1,9 @@
 extends GutTest
 
-## Rank 25 (wire/warn the inert progression exports): Quest.reward_reputation now grants standing,
-## Perk.validate() warns on unknown stat keys, GoapProfile.validate() gates on override rows AND the goals[]
-## allow-list (goals[] is now enforced — see npc._build_goap_goals / GoapProfile.pursues), and Cutscene.auto_end is gone.
+## Progression exports that used to be inert, now wired or warned: Quest.reward_reputation grants standing (and
+## an unresolvable faction id is skipped without eating the rest of the reward), Perk.validate() warns on unknown
+## stat keys, GoapProfile.validate() gates on override rows AND the goals[] allow-list (goals[] is enforced — see
+## npc._build_goap_goals / GoapProfile.pursues), and Cutscene.auto_end is gone.
 
 const Factions = preload("res://scripts/faction/factions.gd")
 
@@ -18,12 +19,26 @@ func test_quest_reward_reputation_grants_standing() -> void:
 	Reputation.restore(snapshot)
 	q = null
 
+## A typo'd faction id in a quest's reward table must be SKIPPED, not fatal and not contagious: no phantom pool
+## is minted for it, the standing already earned elsewhere is untouched, and a real faction listed AFTER the typo
+## in the same reward still pays (an early-out on the first unresolvable id would silently eat it). Unknown id
+## first on purpose — Dictionary iteration follows insertion order. No live player exists here, so the raiders
+## delta lands unscaled by streetwise.
 func test_quest_reward_reputation_ignores_unknown_faction() -> void:
+	var fac: Faction = Factions.by_id("raiders")
 	var snapshot := Reputation.all_standings()
+	Reputation.restore({"townsfolk": 7.0})  # standing already earned before this quest completes
 	var q := Quest.new()
-	q.reward_reputation = {"no_such_faction": 5.0}
-	QuestTracker._grant_quest_rewards(q)  # must not crash on an unresolvable faction id
-	assert_true(true, "an unknown faction id is skipped, not fatal")
+	q.reward_reputation = {"no_such_faction": 5.0, "raiders": 2.0}
+	QuestTracker._grant_quest_rewards(q)
+	var after := Reputation.all_standings()
+	assert_false(after.has(&"no_such_faction") or after.has("no_such_faction"),
+		"an unresolvable faction id must not mint a reputation pool of its own")
+	assert_almost_eq(float(after.get(&"townsfolk", 0.0)), 7.0, 0.0001,
+		"a skipped faction id must leave every existing standing exactly where it was")
+	assert_almost_eq(Reputation.get_reputation(fac), 2.0, 0.0001,
+		"the real faction listed after the typo must still be paid in full — one bad id may not void the rest of the reward")
+	assert_eq(after.size(), 2, "exactly the pre-existing pool plus the one real reward faction — nothing else was touched")
 	Reputation.restore(snapshot)
 	q = null
 

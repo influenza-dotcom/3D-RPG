@@ -160,8 +160,8 @@ func test_absent_build_fails_open_to_the_full_cap() -> void:
 		"the verdict line paints through the ONE composer, selected by the band key")
 	assert_eq((s.get_node("%Reason") as Label).text, PlayerText.implant_choice_reason(s._credit_reason),
 		"…and the filed reason likewise")
-	assert_eq((s.get_node("%Hint") as Label).text, PlayerText.IMPLANT_CHOICE_HINT,
-		"the hint stays the STANDING explainer — build-specific numbers live on the verdict line, not here")
+	assert_false((s.get_node("%Hint") as Label).visible,
+		"no standing explainer above the verdict — the Ledger's two lines are the whole preamble")
 
 
 func test_a_fully_dumped_build_rates_low_and_greys_rows_that_no_longer_fit() -> void:

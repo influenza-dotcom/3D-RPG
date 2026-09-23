@@ -120,17 +120,24 @@ func test_id_rows_empty_known_still_surfaces_the_current_id() -> void:
 	assert_eq(String(bare[0].get("label", "")), PickerRows.NONE_LABEL, "…and that single row is '(none)', not a blank-labelled ghost")
 
 
-func test_id_rows_is_idempotent() -> void:
-	# Every dock rebuilds its rows from scratch on rescan/load rather than patching them, so two identical calls
-	# must be indistinguishable — otherwise a rebuild could shuffle indices out from under a queued item_selected.
+func test_id_rows_rebuilds_are_equal_and_independent() -> void:
+	# Every dock rebuilds its rows from scratch on rescan/load rather than patching them, so two identical calls must
+	# describe the same rows in the same order -- otherwise a rebuild could shuffle indices out from under a queued
+	# item_selected. And the rows are Dictionaries (shared by reference), so a rebuild must hand out FRESH ones: a
+	# dock that annotates or extends one rebuild must never find that edit waiting in the next.
 	var known := PackedStringArray(["raider", "corpo"])
 	var first := PickerRows.id_rows(known, "ghost_faction")
 	var second := PickerRows.id_rows(known, "ghost_faction")
-	# assert_eq on two Arrays compares BY VALUE (comparator.gd:53-60) and prints a deep diff when it fails, which
-	# assert_true(first == second) cannot do — same verdict, far better failure output.
 	assert_eq(first, second, "two identical id_rows() calls produce EQUAL arrays (Godot 4 compares Array/Dictionary by value)")
-	assert_eq(_values(first), _values(second), "every row holds the same value across a rebuild — indices are stable")
-	assert_eq(_labels(first), _labels(second), "…and the same label, so a rebuild can't re-order the visible list")
+	first[1]["label"] = "tampered"
+	first[0]["value"] = "not_blank_any_more"
+	first.append({"label": "a caller's extra row", "value": "extra"})
+	var third := PickerRows.id_rows(known, "ghost_faction")
+	assert_eq(_labels(third), PackedStringArray([PickerRows.NONE_LABEL, "raider", "corpo", "ghost_faction" + PickerRows.OFF_DISK_SUFFIX]),
+		"a later rebuild is untouched by edits to an earlier one -- no shared row Dictionaries, no cached Array")
+	assert_eq(_values(third), PackedStringArray(["", "raider", "corpo", "ghost_faction"]), "…including row 0's blank value, which resolve_pick keys 'clear' on")
+	assert_eq(_labels(second), PackedStringArray([PickerRows.NONE_LABEL, "raider", "corpo", "ghost_faction" + PickerRows.OFF_DISK_SUFFIX]),
+		"…and a sibling rebuild taken BEFORE the edit did not share the edited rows either")
 
 
 # ── index_of: value -> row index, with row 0 as the harmless fallback ──────────────────────────────────────
@@ -383,8 +390,18 @@ func test_apply_on_empty_rows_selects_nothing() -> void:
 	assert_eq(btn.custom_minimum_size.x, PickerRows.PICKER_MIN_WIDTH, "…including the width floor, so an empty picker still occupies its row properly")
 
 
-func test_apply_tolerates_a_null_button() -> void:
-	# The docks build their widgets lazily, so a refresh can land before the OptionButton exists. apply() guards on
-	# null rather than letting the dock crash mid-rebuild; an engine error here would fail the run under GUT anyway.
-	PickerRows.apply(null, PickerRows.id_rows(PackedStringArray(["raider"]), ""), "raider")
-	pass_test("apply(null, ...) returns quietly instead of erroring — a lazily-built dock can refresh before its widget exists")
+func test_apply_on_a_null_button_raises_nothing_and_leaves_the_rows_for_the_real_widget() -> void:
+	# The docks build their widgets lazily, so a refresh can land before the OptionButton exists. apply() must return
+	# quietly -- a `null.clear()` is a script error, and it would abort the dock's rebuild half-way -- and it must not
+	# consume the rows, because the same model is pushed again once the widget is built.
+	var rows := PickerRows.id_rows(PackedStringArray(["raider"]), "")
+	var untouched := rows.duplicate(true)
+	PickerRows.apply(null, rows, "raider")
+	assert_engine_error_count(0, "apply(null, ...) raises no engine or script error -- a lazily-built dock can refresh before its widget exists")
+	assert_eq(rows, untouched, "the null path leaves the row model exactly as it was handed over")
+	# Control: the SAME call against a real widget does fill and select, so the silence above is the null guard at
+	# work rather than an apply() that does nothing at all.
+	var btn: OptionButton = autofree(OptionButton.new())
+	PickerRows.apply(btn, rows, "raider")
+	assert_eq(btn.item_count, 2, "the same rows fill a real widget: '(none)' + raider")
+	assert_eq(btn.selected, 1, "…and point it at 'raider', the value the null call was asked for")

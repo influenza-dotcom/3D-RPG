@@ -324,17 +324,7 @@ func _place() -> void:
 	var picked: Node = sel[0] if not sel.is_empty() else null
 	var parent := _parent_for(sel, root)
 	var pos := _viewport_focus()
-	var ur := EditorInterface.get_editor_undo_redo()
-	ur.create_action("Place %s" % _item_label(it))
-	ur.add_do_method(parent, "add_child", node)
-	ur.add_do_reference(node)
-	ur.add_do_method(PlaceOps, "own_recursive", node, root)  # own the whole built subtree so every node saves (the ONE tested static)
-	# A pickup the designer places gets a unique save_id, the primary key of its "collected" bit (see WorldSaveId), so
-	# a designer never types one. Undo removes the node, id and all.
-	ur.add_do_method(PlaceOps, "stamp_save_ids", node, root)
-	ur.add_do_property(node, "global_position", pos)  # drop it in front of the editor camera, not at the origin
-	ur.add_undo_method(parent, "remove_child", node)
-	ur.commit_action()
+	_record_place(EditorInterface.get_editor_undo_redo(), _item_label(it), parent, node, root, pos)
 	_last_placed = node
 	EditorInterface.get_selection().clear()
 	EditorInterface.get_selection().add_node(node)
@@ -347,6 +337,25 @@ func _place() -> void:
 	if picked != null and is_instance_valid(picked) and parent != picked:
 		where = "beside %s, %s" % [picked.name, where]
 	_set_status("Placed %s (%s) %s -- selected; drag to fine-tune, then save the scene." % [_item_label(it), kind, where])
+
+
+## Record and commit the ONE undoable Place action on `ur` -- in `_place` that is the editor's EditorUndoRedoManager.
+## `ur` is a plain Object because that manager cannot exist headless: tests/test_devtools_placer.gd hands in a
+## recorder that replays the do / undo lists the way the editor does. The do list ORDER is load-bearing: add_child
+## first (an owner must be an ancestor, and a node must be in the tree to take a global position), then the whole
+## subtree is owned to the scene root through PlaceOps.own_recursive -- the ONE tested owner static, never a
+## hand-copied twin -- so every built node saves while a nested prefab keeps its own internals, then the drop point.
+static func _record_place(ur: Object, label: String, parent: Node, node: Node, root: Node, pos: Vector3) -> void:
+	ur.create_action("Place %s" % label)
+	ur.add_do_method(parent, "add_child", node)
+	ur.add_do_reference(node)
+	ur.add_do_method(PlaceOps, "own_recursive", node, root)  # own the whole built subtree so every node saves (the ONE tested static)
+	# A pickup the designer places gets a unique save_id, the primary key of its "collected" bit (see WorldSaveId), so
+	# a designer never types one. Undo removes the node, id and all.
+	ur.add_do_method(PlaceOps, "stamp_save_ids", node, root)
+	ur.add_do_property(node, "global_position", pos)  # drop it in front of the editor camera, not at the origin
+	ur.add_undo_method(parent, "remove_child", node)
+	ur.commit_action()
 
 
 ## Where a new item goes: under the node selected in the Scene tree, or the scene root -- EXCEPT when that selection

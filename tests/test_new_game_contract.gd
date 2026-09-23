@@ -9,6 +9,22 @@ extends GutTest
 
 const GAME_SCENE := "res://scenes/game.tscn"
 const ABILITY_REGISTRY := "res://scripts/components/abilities/ability_registry.gd"
+## A StartMenu whose boot is swapped for a recorder: _on_continue runs for REAL up to the boot, and the recorder
+## captures GameState.loaded at the instant the boot begins — exactly what the fresh Player._ready would read.
+const CONTINUE_SPY_SOURCE := "extends \"res://scripts/ui/start_menu.gd\"\n\nvar boots: Array = []\n\nfunc _start_game(_show_quote := false) -> void:\n\tboots.append(GameState.loaded)\n"
+
+var _prev_loaded: bool
+var _prev_profile: bool
+
+
+func before_each() -> void:
+	_prev_loaded = GameState.loaded
+	_prev_profile = GameState.profile_active
+
+
+func after_each() -> void:
+	GameState.loaded = _prev_loaded
+	GameState.profile_active = _prev_profile
 
 
 func test_new_game_starts_with_zero_abilities() -> void:
@@ -40,24 +56,44 @@ func test_new_game_starts_with_zero_abilities() -> void:
 ## AND read the wallet from GameState.money via the profile_active branch rather than re-seeding it (or a
 ## menu-and-back Continue / no-save death reload would hand back money the run had already spent). The debt
 ## itself needs no branch there at all — nothing in _ready touches `account`, which is precisely why the goods
-## and the bill that bought them cannot separate. The behaviour can't run under GUT (Player._ready is forbidden
-## in unit tests — it instantiates weapons/nav/audio), so pin the SOURCE contract instead (the test_game_save
-## profile_active grep idiom).
+## and the bill that bought them cannot separate.
+##
+## KEPT AS A SOURCE PIN, deliberately: every branch here is INLINE in Player._ready, which a unit test may never run
+## (it instantiates weapons / nav / audio — CLAUDE.md), and there is no pure helper to call instead. So the scan is
+## scoped to _ready's own body and pins the exact gate expressions IN ORDER, not bare tokens anywhere in the file.
 func test_fresh_boot_applies_a_seeded_unlock_set() -> void:
-	var src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
-	assert_true(src.contains("not GameState.unlocks.is_empty()"),
-		"player.gd keeps the fresh-boot escape hatch that applies a seeded GameState.unlocks (the purchased implant cart)")
-	# ...and the escape hatch must span BOTH implant lists. `unlocks` is only the ACTIVE projection, so a run
-	# whose implants are ALL switched off (Implants tab) reaches this branch with an EMPTY unlocks and a
-	# populated disabled_unlocks — and this boot mode is reached mid-run (Options -> Main Menu -> Continue
-	# never loads from disk, so `loaded` stays false). Gating on unlocks alone fell through to
-	# _seed_unlocks() and permanently UNINSTALLED those implants at the next capture().
-	assert_true(src.contains("not GameState.disabled_unlocks.is_empty()"),
-		"player.gd's fresh-boot escape hatch also fires for a profile whose implants are all switched OFF (else they're uninstalled for good)")
-	assert_true(src.contains("set_disabled_unlocks(GameState.disabled_unlocks)"),
-		"...and restores them switched-off rather than dropping them")
-	assert_true(src.contains("elif GameState.profile_active:"),
-		"player.gd keeps the created-run CASH branch (it reads GameState.money instead of re-seeding it, so an in-memory run never gets refunded what it spent)")
+	# Normalize line endings: the scan matches "\n\t..." anchors, so a CRLF write must not read as a lost branch.
+	var src := FileAccess.get_file_as_string("res://scripts/player/player.gd").replace("\r\n", "\n")
+	var start := src.find("\nfunc _ready() -> void:")
+	assert_gt(start, -1, "player.gd must still define _ready")
+	var end := src.find("\nfunc ", start + 1)
+	var body := src.substr(start, end - start) if end > start else src.substr(start)
+	# The escape hatch must span BOTH implant lists, joined by OR. `unlocks` is only the ACTIVE projection, so a run
+	# whose implants are ALL switched off (Implants tab) reaches this branch with an EMPTY unlocks and a populated
+	# disabled_unlocks — and this boot mode is reached mid-run (Options -> Main Menu -> Continue never loads from disk).
+	# Gating on unlocks alone (or AND-ing the two) fell through to _seed_unlocks() and permanently UNINSTALLED them.
+	var disk := body.find("\n\tif GameState.loaded:\n")
+	var hatch := body.find("not GameState.unlocks.is_empty() or not GameState.disabled_unlocks.is_empty()")
+	assert_gt(disk, -1, "_ready still branches the unlock restore on GameState.loaded")
+	assert_gt(hatch, disk,
+		"on a loaded=false boot, _ready applies a seeded implant set when EITHER list is non-empty — the purchased cart, or a run whose implants are all switched OFF")
+	var apply_on := body.find("set_unlocks(GameState.unlocks)", hatch)
+	var apply_off := body.find("set_disabled_unlocks(GameState.disabled_unlocks)", hatch)
+	var seed_at := body.find("_seed_unlocks()", hatch)
+	assert_true(apply_on > hatch and apply_off > apply_on and seed_at > apply_off,
+		"inside the hatch: restore the active implants, THEN re-disable the switched-off ones, and only otherwise take the fresh-game seed (on=%d off=%d seed=%d)" % [apply_on, apply_off, seed_at])
+	# The created-run CASH branch: read GameState.money rather than re-seeding it, so an in-memory run never gets
+	# refunded what it spent.
+	var cash := body.find("\n\telif GameState.profile_active:\n")
+	assert_gt(cash, -1, "_ready keeps the created-run CASH branch")
+	assert_gt(body.find("money = GameState.money", cash), cash,
+		"...and that branch reads the live wallet from GameState.money instead of the starting-money knob")
+	# The other end of the Continue promotion below: `loaded` is what routes the backpack to the SAVED bag.
+	var bag := body.find("if GameState.loaded and GameState.has_inventory:")
+	assert_gt(bag, -1, "_ready routes the backpack on GameState.loaded — that is what the Continue promotion buys")
+	assert_true(body.find("_restore_saved_inventory()", bag) > bag
+			and body.find("_seed_starting_inventory()", bag) > body.find("_restore_saved_inventory()", bag),
+		"a loaded boot RESTORES the saved bag, and only otherwise seeds the authored starting loadout")
 
 
 ## ⭐CONTINUE ON AN IN-MEMORY RUN. The same loaded=false boot mode as above, reached the other way: a New-Game
@@ -67,26 +103,25 @@ func test_fresh_boot_applies_a_seeded_unlock_set() -> void:
 ## — so the fresh Player re-seeded the authored starting loadout OVER the live bag and skipped perks / xp / level
 ## / reputation / status effects, silently discarding the run before the next autosave wrote the wreckage to disk.
 ## StartMenu._on_continue promotes `loaded` for a profile_active run, in the ONE caller that knows it is RESUMING.
-##
-## The contract is made inside Player._ready, which a unit test may never run (CLAUDE.md), so this is the sanctioned
-## source pin (test_payment_rail_selector's idiom): assert the promotion exists, sits behind the profile_active
-## gate, and happens BEFORE the boot — a promotion after _start_game() would be read too late to matter.
+## Driven for real through a spy subclass that only replaces the boot.
 func test_continue_promotes_an_in_memory_run_onto_the_saved_path() -> void:
-	var menu := FileAccess.get_file_as_string("res://scripts/ui/start_menu.gd")
-	var fn := menu.find("func _on_continue(")
-	assert_gte(fn, 0, "start_menu.gd must still carry the Continue handler")
-	var fn_end := menu.find("\nfunc ", fn + 1)
-	assert_gte(fn_end, 0, "...with another function after it, so the slice below is that handler alone")
-	var body := menu.substr(fn, fn_end - fn)  # scope the greps to _on_continue: a match anywhere else proves nothing
-	var gate := body.find("if GameState.profile_active:")
-	assert_gte(gate, 0, "_on_continue must gate the promotion on profile_active — a bare dev boot has no run to resume")
-	var promote := body.find("GameState.loaded = true")
-	assert_gte(promote, 0, "_on_continue must promote loaded, or Continue on an in-memory run reseeds a default build over it")
-	var boot := body.find("_start_game()")
-	assert_gte(boot, 0, "_on_continue still boots through _start_game")
-	assert_true(gate < promote and promote < boot,
-		"the promotion must sit INSIDE the profile_active gate and BEFORE the boot — Player._ready reads `loaded` as it comes up")
-	# The other end of the same contract: `loaded` is what routes the backpack to the SAVED bag instead of the seed.
-	var player_src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
-	assert_true(player_src.contains("GameState.loaded and GameState.has_inventory"),
-		"player.gd still routes the backpack on GameState.loaded — that is what the Continue promotion buys")
+	var spy_script := GDScript.new()
+	spy_script.source_code = CONTINUE_SPY_SOURCE
+	assert_eq(spy_script.reload(), OK, "the Continue spy (a StartMenu with a recording boot) must compile")
+	var menu = spy_script.new()  # never added to the tree: no _ready, no menu build — only the handler runs
+	# Control: a bare dev boot has no run to resume, so Continue must NOT pretend a save was loaded.
+	GameState.profile_active = false
+	GameState.loaded = false
+	menu._on_continue()
+	# The case that lost runs: a created run still in memory, never loaded from disk.
+	GameState.profile_active = true
+	GameState.loaded = false
+	menu._on_continue()
+	var boots: Array = menu.boots
+	assert_eq(boots.size(), 2, "each Continue press must boot exactly once (got %s)" % str(boots))
+	assert_true(boots.size() == 2 and boots[0] == false,
+		"control: with no created profile the boot sees loaded=false — a dev boot takes the fresh seed, never a phantom save (got %s)" % str(boots))
+	assert_true(boots.size() == 2 and boots[1] == true,
+		"Continue on an in-memory created run must boot with loaded=true ALREADY set — Player._ready reads it as it comes up, so a promotion after the boot (or none) re-seeds a default build over the live run (got %s)" % str(boots))
+	menu.free()
+	spy_script = null

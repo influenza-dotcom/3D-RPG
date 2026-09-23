@@ -1,50 +1,61 @@
 extends GutTest
 
-## Unit tests for the "Enemies" subsystem: perception.gd, death.gd, and damage.gd (all under
-## res://scripts/npc/; the old enemy.gd / ranged_enemy.gd pair folded into npc.gd).
+## Unit tests for the "Enemies" subsystem: perception.gd, death.gd and damage.gd (all under res://scripts/npc/),
+## plus the enemy-facing slice of npc.gd. The old enemy.gd / ranged_enemy.gd pair folded into npc.gd, so every
+## "Enemy" / "RangedEnemy" below IS an NPC built from that one script.
 ##
 ## WHAT THIS COVERS
-##  - Perception (class_name Perception): exported defaults + State enum shape, the
-##    just_spotted signal's existence and its NON-emission with no target, and every
-##    state-machine transition that is reachable with target==null (so sense() never
-##    touches physics). Specifically: UNAWARE stays UNAWARE; alert_to() forces ALERTED;
-##    ALERTED -> INVESTIGATING when unseen; INVESTIGATING -> UNAWARE on forget timeout;
-##    DETECTING meter draining to UNAWARE; and can_see()/can_hear() false guard paths.
-##  - Enemy / RangedEnemy: exported SCRIPT defaults + inherited Character API + AI
-##    method/constant surface, all via load(path).new() WITHOUT add_child so _ready()
-##    never runs.
-##  - death.gd / damage.gd: type identity + handler method presence, plus death.gd's death_cry export
-##    DECLARATION (the scenes wire it by name; its value is pinned in test_smoke.gd).
+##  - Perception (class_name Perception): the State enum shape and every state-machine transition reachable with
+##    target == null (UNAWARE stays UNAWARE, alert_to forces ALERTED, ALERTED -> INVESTIGATING when unseen,
+##    INVESTIGATING -> UNAWARE on the forget timeout, DETECTING draining to UNAWARE, refresh_investigation). And
+##    IN-TREE, with a real Node3D target in an otherwise empty world (an empty world is a clear line of sight, so only
+##    the cone and the range decide): the shipped defaults behaving as a fair sensor (a cone ahead, a finite range, a
+##    reaction window before ALERTED), the pursuit grace that keeps an ALERTED enemy chasing after LOS breaks, and a
+##    zero grace giving up at once on a target that is still live.
+##  - NPC, built off-tree via load(path).new() WITHOUT add_child so _ready() never runs: the defaults that are SHIP
+##    decisions (civilian by default, laser telegraph + hearing on), the tuning invariants the design needs (a view
+##    cone, a reaction window, neutral rate factor, air control weaker than ground), is_off_guard driven through a
+##    real code-built Perception, aim_error_spread against a DIALLED GameSettings cone (and the off-tree Player's
+##    zero cone under the same dial), the aim-ray reach relation,
+##    the Locomotor hop/launch statics npc.gd forwards, and the AI method surface (has_method is sanctioned here:
+##    an NPC's _ready cannot run headless, and NpcCombat / GOAP call these duck-typed).
+##  - enemy.tscn as scene DATA (instantiate() without the tree): the authored hit/death signal rows resolve to real
+##    handlers, and the headshot zone + eye line sit inside the prefab's own capsule.
+##  - death.gd / damage.gd: type identity, plus death.gd's death_cry export DECLARATION (the scenes wire it by name;
+##    its value is pinned in test_smoke.gd).
 ##  - death.gd's _on_enemy_died() DRIVEN FOR REAL, end to end: an in-tree Character whose crit latches were
 ##    set through the real take_damage, a real Death child, and an assertion that the crowd cheer actually
 ##    lands in the tree on an all-headshot kill and stays silent on a body shot. Plus the gore splash's
 ##    self-free, and the enemy.tscn `died` -> Death connection that fires the whole thing.
 ##
 ## WHAT THIS DELIBERATELY SKIPS (and why)
-##  - Perception.can_see()/can_hear() POSITIVE paths and just_spotted EMISSION: reaching
-##    them requires a valid target Node3D plus a live physics World3D
-##    (get_world_3d().direct_space_state.intersect_ray) / target.noise_radius math. Off a
-##    real scene get_world_3d() is null and intersect_ray errors. We keep target unset in
-##    every Perception test and drive transitions by setting state/detection directly, so
-##    sense() only ever exercises the guard-only / float-math arms.
-##  - Enemy/RangedEnemy apply_velocity / _physics_process / _ready / _act_alerted /
-##    _move_toward / _aim_* / _on_spotted / _on_died / _on_damaged INVOCATION: these need
-##    an in-tree CharacterBody3D under physics, instantiate weapon.tscn, add_child a
-##    muzzle/weapon/NavigationAgent3D, read GameSettings.physics_damage.*, write
-##    Engine.time_scale (FreezeFrame), mutate a shared static cooldown, or play real audio.
-##    We assert their PRESENCE (has_method) but never call them.
-##  - damage.gd's _on_enemy_damaged INVOCATION: still has_method only (it needs a real hurt-cry stream and
-##    a live wielder). death.gd's _on_enemy_died is NO LONGER skipped — see the invocation tests below. It
-##    turned out to need nothing but an in-tree Character parent, and while it went untested death.gd could
-##    have stopped calling _play_applause() entirely with the whole suite still green.
-##  - enemy.tscn blast_damp_divisor==1.0 (the SCENE override) and Character's script-default
-##    1.12 on a base Character: already covered by test_smoke.gd. Here we assert ENEMY's own
-##    SCRIPT default (1.12, inherited) without instantiating the scene.
+##  - The Perception hostility gate and hearing POSITIVES: tests/test_hostility.gd and
+##    tests/test_perception_hearing_buffer.gd own them.
+##  - NPC apply_velocity / _physics_process / _ready / _act_alerted / _move_toward / _aim_* / _on_spotted /
+##    _on_died / _on_damaged INVOCATION: these need an in-tree CharacterBody3D under physics, instantiate
+##    weapon.tscn, add_child a muzzle/weapon/NavigationAgent3D, read GameSettings.physics_damage.*, write
+##    Engine.time_scale (FreezeFrame), mutate a shared static cooldown, or play real audio. Their presence is pinned
+##    (method surface + the enemy.tscn connection rows) but they are never called.
+##  - damage.gd's _on_enemy_damaged INVOCATION (it needs a real hurt-cry stream); its WIRING is pinned by the
+##    enemy.tscn connection test. death.gd's _on_enemy_died is NO LONGER skipped — see the invocation tests below:
+##    while it went untested death.gd could have stopped calling _play_applause() with the whole suite still green.
+##  - enemy.tscn's blast_damp_divisor == 1.0 SCENE override: covered by test_smoke.gd.
+
+## The shipped GameSettings.npc_ai.aim_error_deg, restored after every test (the aim-error test dials it).
+var _saved_aim_error_deg: float = 0.0
+
+
+func before_each() -> void:
+	_saved_aim_error_deg = GameSettings.npc_ai.aim_error_deg
+
+
+func after_each() -> void:
+	GameSettings.npc_ai.aim_error_deg = _saved_aim_error_deg
 
 
 # ---------------------------------------------------------------------------
-# Perception — exported defaults + State enum (pure: no _ready/_init/@onready,
-# no autoloads, so a bare .new() never errors). Instantiate WITHOUT add_child.
+# Perception — State enum + shipped defaults. Perception has no _ready, so a bare .new() never errors; the
+# off-tree tests keep target unset (sense() never reaches physics), the in-tree ones use an empty world.
 # ---------------------------------------------------------------------------
 
 func test_perception_state_enum_has_four_ordered_members() -> void:
@@ -62,25 +73,58 @@ func test_perception_state_enum_has_four_ordered_members() -> void:
 		"State.INVESTIGATING must be 3 (wary-at-last-known-spot state)")
 
 
-func test_perception_construction_initial_state_and_defaults() -> void:
-	var p := Perception.new()  # no add_child: Perception has no _ready; nothing to trip on
+func test_fresh_perception_starts_unaware_and_stays_wary_after_losing_you() -> void:
+	var p := Perception.new()  # no add_child: target-less, so sense() only runs the float-math arms
 	assert_eq(p.state, Perception.State.UNAWARE,
 		"A fresh Perception must start UNAWARE — an enemy isn't born already alerted")
 	assert_eq(p.detection, 0.0,
 		"The awareness meter must start empty (0.0) so a glimpse isn't an instant alert")
-	assert_eq(p.sight_range, 25.0,
-		"sight_range default 25.0 m defines how far the enemy can see; designers tune from this")
-	assert_eq(p.fov_degrees, 110.0,
-		"fov_degrees default 110.0 sets the full horizontal view-cone the target must be inside")
-	assert_eq(p.time_to_detect, 1.0,
-		"time_to_detect default 1.0 s is the player's reaction window before full ALERTED")
-	assert_eq(p.forget_time, 4.0,
-		"forget_time default 4.0 s is how long it stays wary before giving up to UNAWARE")
-	assert_eq(p.eye_height, 1.4,
-		"eye_height default 1.4 m is where sight/LOS rays originate (the enemy's 'eyes')")
 	assert_true(p.hearing,
-		"hearing defaults true so enemies react to gunfire/fast movement out of the box")
+		"SHIP DECISION: hearing is on by default, so an enemy reacts to gunfire / running outside its view cone out of the box")
+	# The default forget_time must buy a real search: lose the target, then keep looking past the next frame.
+	p.alert_to(Vector3.ZERO)  # -> ALERTED
+	p.sense(0.016)            # unseen (no target) -> INVESTIGATING, the default forget_time armed
+	p.sense(0.016)            # one more unseen frame
+	assert_eq(p.state, Perception.State.INVESTIGATING,
+		"with the default forget_time an enemy that loses you keeps searching past the next frame — it must not forget you instantly")
 	p.free()
+
+
+func test_default_perception_sees_a_cone_ahead_within_range_after_a_reaction_window() -> void:
+	# The shipped Perception defaults must add up to a FAIR sensor: a view CONE (sneaking up from behind works), a
+	# finite sight_range (distance is cover), and a reaction window before a sighting becomes a lock. In-tree because
+	# can_see() raycasts; the world is empty, so the ray is always clear and only the cone + range decide. The target
+	# rides at eye level so the distances below are exactly the distances the range gate measures.
+	var p := Perception.new()
+	add_child_autofree(p)
+	var target := Node3D.new()
+	add_child_autofree(target)
+	p.target = target
+	target.global_position = Vector3(0.0, p.eye_height, 5.0)  # dead ahead: +Z is the model's front
+	assert_true(p.can_see(),
+		"control: a target 5 m dead ahead in a clear world must be seen with the default range and cone")
+	# Off-axis on purpose: an EXACTLY-behind point (0, eye, -5) measures 180.000005 degrees through float32
+	# Vector3.angle_to, so even an all-round 360-degree fov would refuse it and this check could never catch a cone
+	# widened to all-round vision. (3, eye, -4) is still 5 m away and ~143 degrees off the facing: plainly behind.
+	target.global_position = Vector3(3.0, p.eye_height, -4.0)
+	assert_false(p.can_see(),
+		"the default fov is a CONE, not all-round vision: the same target 5 m BEHIND (diagonally) must be unseen")
+	target.global_position = Vector3(0.0, p.eye_height, p.sight_range - 0.5)
+	assert_true(p.can_see(), "a target just inside the default sight_range, dead ahead, must still be seen")
+	target.global_position = Vector3(0.0, p.eye_height, p.sight_range + 0.5)
+	assert_false(p.can_see(), "a target just beyond the default sight_range must be unseen — distance is cover")
+	# Reaction window: coming into view only NOTICES (DETECTING); another frame in view still hasn't locked on; a full
+	# detection time of continuous sight does.
+	target.global_position = Vector3(0.0, p.eye_height, 5.0)
+	p.sense(0.016)
+	assert_eq(p.state, Perception.State.DETECTING,
+		"a target coming into view is NOTICED first (DETECTING) — never an instant ALERTED")
+	p.sense(0.016)
+	assert_eq(p.state, Perception.State.DETECTING,
+		"one more frame in view must not lock on: the default time_to_detect gives the player a reaction window")
+	p.sense(p.time_to_detect * 2.0)
+	assert_eq(p.state, Perception.State.ALERTED,
+		"a sighting held past the full detection time does lock on — the window is finite, not a blind spot")
 
 
 func test_perception_refresh_investigation_holds_the_giveup_clock() -> void:
@@ -103,8 +147,9 @@ func test_perception_refresh_investigation_holds_the_giveup_clock() -> void:
 
 # ---------------------------------------------------------------------------
 # Perception — just_spotted signal + safe (target-less) transition logic.
-# Every test keeps target unset so can_see()/can_hear() return at their
-# is_instance_valid(target) guards and sense() never reaches physics.
+# The off-tree tests keep target unset so can_see()/can_hear() return at their
+# is_instance_valid(target) guards and sense() never reaches physics; the two pursuit-grace
+# tests are the in-tree exceptions (they need a live target to lose sight of).
 # ---------------------------------------------------------------------------
 
 func test_perception_just_spotted_does_not_fire_without_target() -> void:
@@ -226,16 +271,37 @@ func test_pursuit_grace_keeps_alerted_after_los_loss_then_downgrades() -> void:
 		"the downgrade arms the full forget_time search clock, exactly as the old instant give-up did")
 
 
+## An in-tree Perception with `grace` s of pursuit grace, locked on (ALERTED) to a LIVE target dead ahead for one seen
+## tick (which re-arms the grace clock), then the target swung behind it (out of the view cone, still 5 m away and
+## still valid) and ONE short unseen tick sensed. Returns the state that tick lands in. An empty world = clear LOS, so
+## the cone alone decides "seen".
+func _state_after_one_unseen_tick(grace: float) -> Perception.State:
+	var p := Perception.new()
+	add_child_autofree(p)
+	p.pursuit_grace_time = grace
+	var target := Node3D.new()
+	add_child_autofree(target)
+	target.global_position = Vector3(0.0, p.eye_height, 5.0)  # dead ahead (+Z = model front), in range
+	p.target = target
+	p.state = Perception.State.ALERTED
+	p.detection = 1.0
+	p.sense(0.016)
+	assert_eq(p.state, Perception.State.ALERTED,
+		"precondition (grace %s s): a seen ALERTED tick stays ALERTED and re-arms the pursuit grace" % grace)
+	target.global_position = Vector3(3.0, p.eye_height, -4.0)  # behind, off-axis: out of the cone, same 5 m
+	p.sense(0.016)
+	return p.state
+
+
 func test_pursuit_grace_zero_preserves_instant_giveup() -> void:
 	# Regression guard: pursuit_grace_time = 0 must reproduce the OLD behaviour — one unseen tick from ALERTED lands
-	# straight in INVESTIGATING (no coast). Uses a null target so can_see() is trivially false with no world needed.
-	var p := Perception.new()
-	p.pursuit_grace_time = 0.0
-	p.alert_to(Vector3.ZERO)  # -> ALERTED, no target
-	p.sense(0.016)
-	assert_eq(p.state, Perception.State.INVESTIGATING,
+	# straight in INVESTIGATING (no coast), even though the target is still live and the seen tick before it just
+	# re-armed the grace clock. The target must be LIVE for this to mean anything: with a null target the ALERTED arm
+	# drops to INVESTIGATING through its is_instance_valid(target) check whatever the grace is.
+	assert_eq(_state_after_one_unseen_tick(0.5), Perception.State.ALERTED,
+		"control: with a 0.5 s grace the same live target lost for one 16 ms tick keeps the enemy ALERTED, so the drop below comes from the zero grace, not from losing the target")
+	assert_eq(_state_after_one_unseen_tick(0.0), Perception.State.INVESTIGATING,
 		"with grace 0, losing an ALERTED target drops to INVESTIGATING on the first unseen tick (legacy contract)")
-	p.free()
 
 
 func test_perception_detecting_meter_drains_to_unaware_when_unseen() -> void:
@@ -265,99 +331,141 @@ func test_perception_can_see_and_can_hear_false_without_target() -> void:
 
 
 # ---------------------------------------------------------------------------
-# Enemy — exported SCRIPT defaults + inherited Character API. Loaded via
-# load(path).new() WITHOUT add_child so Character._ready() never runs.
-# (Does NOT duplicate test_smoke's enemy.tscn blast_damp==1.0 scene test.)
+# enemy.tscn as scene DATA — instantiate() WITHOUT add_child, so no _ready runs
+# (the node paths and exported values resolve at instantiate time).
 # ---------------------------------------------------------------------------
 
-func test_enemy_script_defaults_and_inherited_character_api() -> void:
-	var n = load("res://scripts/npc/npc.gd").new()  # no add_child: skip _ready entirely
-	assert_eq(n.blast_damp_divisor, 1.12,
-		"Enemy's SCRIPT default blast_damp_divisor must be the inherited 1.12 (the .tscn's 1.0 override is tested in test_smoke)")
-	assert_eq(n.max_hp, 4.0,
-		"Enemy max_hp default 4.0 (inherited from Character's 2026-06 retune) sets baseline enemy health")
-	assert_eq(n.head_local_y, 0.4,
-		"head_local_y default 0.4 (inherited) defines the headshot zone used by attacker crit math")
-	assert_true(n.has_method("apply_velocity"),
-		"Enemy must override apply_velocity() to add knockback friction on top of the blast tail")
-	assert_true(n.has_method("_on_damaged"),
-		"Enemy must define _on_damaged (wired to Character's `damaged` signal in enemy.tscn)")
-	assert_true(n.has_method("_on_died"),
-		"Enemy must define _on_died (wired to Character's `died` signal for the kill freeze-frame)")
-	n.free()
+func test_enemy_scene_hit_and_death_rows_resolve_to_real_handlers() -> void:
+	# The prefab wires its hit / death reactions as [connection] rows that name a method BY STRING. Rename a handler
+	# on either script, or drop a row, and nothing fails to parse: the NPC just stops reacting (no hurt cry, no kill
+	# freeze-frame, no death splash). Resolve every row against the instantiated nodes, then require the three rows
+	# the hit/death reactions hang off (died -> Death._on_enemy_died has its own test below).
+	var packed := load("res://scenes/characters/enemy.tscn") as PackedScene
+	assert_true(packed != null, "enemy.tscn must load")
+	if packed == null:
+		return
+	var state := packed.get_state()
+	var root := packed.instantiate()
+	var wired: Array[String] = []
+	for i in state.get_connection_count():
+		var source := root.get_node_or_null(state.get_connection_source(i))
+		var target := root.get_node_or_null(state.get_connection_target(i))
+		var sig := state.get_connection_signal(i)
+		var method := state.get_connection_method(i)
+		assert_true(source != null and source.has_signal(sig),
+			"enemy.tscn row `%s` -> %s: the source node %s must exist and declare that signal" % [sig, method, state.get_connection_source(i)])
+		assert_true(target != null and target.has_method(method),
+			"enemy.tscn row `%s` -> %s: the target node %s must exist and actually define that handler, or the reaction silently never runs" % [sig, method, state.get_connection_target(i)])
+		wired.append("%s:%s->%s" % [sig, state.get_connection_target(i), method])
+	assert_has(wired, "damaged:.->_on_damaged",
+		"enemy.tscn must connect `damaged` to the NPC's own _on_damaged (the hit reaction: turn toward the shooter)")
+	assert_has(wired, "died:.->_on_died",
+		"enemy.tscn must connect `died` to the NPC's own _on_died (kill freeze-frame, witness barks, loot corpse, XP)")
+	assert_has(wired, "damaged:Damage->_on_enemy_damaged",
+		"enemy.tscn must connect `damaged` to the Damage node's _on_enemy_damaged, or every hit lands with no hurt cry")
+	root.free()
 
 
-func test_enemy_is_off_guard_default_false() -> void:
-	# Enemy does not override is_off_guard(); the base Character returns false. A plain Enemy
-	# (no Perception) must therefore not be an ambush target — only RangedEnemy wires perception.
-	var n = load("res://scripts/npc/npc.gd").new()  # no add_child
+func test_enemy_head_zone_and_eye_line_sit_inside_the_capsule_head() -> void:
+	# head_local_y and eye_height are both measured UP from the NPC origin, which on this prefab is the CAPSULE CENTRE,
+	# not the feet. Both must land in the upper half of the prefab's OWN capsule: a head zone below the centre turns
+	# chest hits into headshots and one above the crown makes headshots impossible; an eye line above the crown is the
+	# old 1.4 bug (NPCs saw and heard over cover their heads were visibly behind). The eyes sit in the head, so the eye
+	# line is above the base of the head zone.
+	var packed := load("res://scenes/characters/enemy.tscn") as PackedScene
+	assert_true(packed != null, "enemy.tscn must load")
+	if packed == null:
+		return
+	var enemy := packed.instantiate() as NPC
+	assert_true(enemy != null, "enemy.tscn's root must be an NPC")
+	if enemy == null:
+		return
+	var col := enemy.get_node_or_null(^"CollisionShape3D") as CollisionShape3D
+	var cap: CapsuleShape3D = col.shape as CapsuleShape3D if col != null else null
+	assert_true(cap != null, "enemy.tscn must carry its CollisionShape3D capsule (the body every hit and ray measures)")
+	if cap != null:
+		var centre_y := col.position.y
+		var crown_y := centre_y + cap.height * 0.5
+		assert_gt(enemy.head_local_y, centre_y,
+			"the headshot zone must start ABOVE the capsule centre, or a chest hit counts as a headshot")
+		assert_lt(enemy.head_local_y, crown_y,
+			"the headshot zone must start BELOW the capsule crown, or no hit on this body can ever be a headshot")
+		assert_gt(enemy.eye_height, enemy.head_local_y,
+			"the eye line must sit inside the head zone — eyes below the base of the skull would see from the chest")
+		assert_lt(enemy.eye_height, crown_y,
+			"the eye line must stay under the capsule crown, or the NPC sees and hears over cover its head is visibly behind")
+	enemy.free()
+
+
+# ---------------------------------------------------------------------------
+# NPC (the folded Enemy / RangedEnemy) — defaults, off-guard, aim cone, method
+# surface. Loaded via load(path).new() WITHOUT add_child: its real _ready()
+# instantiates weapon.tscn, add_childs a muzzle/weapon/nav, and calls get_tree()
+# — none of which is safe in a unit test.
+# ---------------------------------------------------------------------------
+
+func test_is_off_guard_until_its_perception_locks_on() -> void:
+	# Sneak-attack eligibility: an NPC is off guard while UNAWARE, DETECTING or INVESTIGATING, and loses it the moment
+	# it locks on (ALERTED). An NPC with no Perception yet (off-tree / before _ready) is never an ambush target.
+	var n = load("res://scripts/npc/npc.gd").new()  # no add_child: _ready never runs, so _perception starts null
 	assert_false(n.is_off_guard(),
-		"A base Enemy must report is_off_guard()==false (Character's default; no Perception to make it true)")
+		"an NPC with no Perception yet must NOT read as off guard — the null guard, not a free sneak-attack crit")
+	n._build_perception()  # the real code-built Perception child, configured from the NPC's exports (off-tree safe)
+	for s in [Perception.State.UNAWARE, Perception.State.DETECTING, Perception.State.INVESTIGATING]:
+		n._perception.state = s
+		assert_true(n.is_off_guard(),
+			"an NPC whose Perception is %s has not locked on yet, so it must be off guard (sneak-attack eligible)" % Perception.State.keys()[s])
+	n._perception.state = Perception.State.ALERTED
+	assert_false(n.is_off_guard(),
+		"once ALERTED (locked on and engaging) the NPC is no longer off guard — no more free sneak damage")
 	n.free()
 
 
-# ---------------------------------------------------------------------------
-# RangedEnemy — exported SCRIPT defaults, constants, off-guard guard, and AI
-# method surface. Loaded via load(path).new() WITHOUT add_child: its real
-# _ready() instantiates weapon.tscn, add_childs a muzzle/weapon/nav, and calls
-# get_tree() — none of which is safe in a unit test.
-# ---------------------------------------------------------------------------
-
-func test_ranged_enemy_exported_defaults() -> void:
+func test_npc_exported_defaults_ship_a_fair_civilian() -> void:
 	var n = load("res://scripts/npc/npc.gd").new()  # no add_child: _ready MUST NOT run
-	# Weapon group
+	# Ship decisions (player-facing on/off defaults).
 	assert_null(n.weapon_data,
-		"weapon_data must default null after the fold — a bare NPC is a civilian; ranged_enemy.tscn sets a weapon to make a combatant")
-	assert_eq(n.rate_of_fire_factor, 1.0,
-		"rate_of_fire_factor default 1.0 = the weapon's own attack_speed paces shots (no per-NPC cooldown)")
-	assert_eq(n.miss_chance, 0.0,
-		"miss_chance default 0.0 = an NPC never deliberately misses the player until tuned up")
-	assert_eq(n.fire_range, 30.0,
-		"fire_range default 30.0 m caps how far it will shoot (separate from sight range)")
-	assert_eq(n.target_height, 0.0,
-		"target_height default 0.0 aims dead-centre on the player capsule")
-	# Perception group (RangedEnemy's own exports, fed into its child Perception)
-	assert_eq(n.sight_range, 25.0,
-		"RangedEnemy sight_range default 25.0 m mirrors Perception's default")
-	assert_eq(n.fov_degrees, 110.0,
-		"RangedEnemy fov_degrees default 110.0 mirrors Perception's view cone")
-	assert_eq(n.time_to_detect, 1.0,
-		"RangedEnemy time_to_detect default 1.0 s is the reaction window")
-	assert_eq(n.forget_time, 4.0,
-		"RangedEnemy forget_time default 4.0 s is the wariness duration")
-	assert_eq(n.eye_height, 0.8,
-		"RangedEnemy eye_height default 0.8 m — measured UP from the NPC origin, which is the CAPSULE CENTRE (not the feet, unlike a bare Perception's 1.4 default), so this lands the eye just below the head crown instead of ~0.45 m above it")
-	assert_true(n.hearing,
-		"RangedEnemy hearing defaults true so it reacts to noise outside its cone")
-	assert_eq(n.turn_speed, 8.0,
-		"turn_speed default 8.0 controls how fast it rotates to face a target")
-	# Laser group
+		"SHIP DECISION: a bare NPC is a CIVILIAN (weapon_data null) — a combatant scene opts in by assigning a weapon")
 	assert_true(n.show_laser,
-		"show_laser defaults true so the telegraphing laser sight is on by default")
-	# Movement group
-	assert_eq(n.move_speed, 4.0,
-		"move_speed default 4.0 m/s sets walk/chase pace")
-	assert_eq(n.move_accel, 25.0,
-		"move_accel default 25.0 m/s^2 governs ground accel and knockback braking")
-	assert_eq(n.air_accel, 2.0,
-		"air_accel default 2.0 m/s^2 is low so a blast carries it before it recovers")
-	assert_eq(n.engage_range_fraction, 0.9,
-		"engage_range_fraction default 0.9 means it closes to 90% of effective range before holding")
-	assert_eq(n.jump_velocity, 4.5,
-		"jump_velocity default 4.5 m/s = a ~1 m ledge/nav-link hop (matches the Player); the old 10.0 launched NPCs ~5 m and read as bouncing")
+		"SHIP DECISION: the laser-sight telegraph is on by default, so an armed NPC visibly warns before it fires")
+	assert_true(n.hearing,
+		"SHIP DECISION: NPCs hear noise outside their view cone by default")
+	# Stealth fairness invariants the defaults must satisfy (these are copied onto the NPC's Perception).
+	assert_gt(n.time_to_detect, 0.0,
+		"time_to_detect must be > 0: a spotted player always gets a reaction window instead of an instant lock")
+	assert_gt(n.fov_degrees, 0.0, "fov_degrees must be > 0 or the NPC is blind")
+	assert_lt(n.fov_degrees, 360.0,
+		"fov_degrees must stay under 360: the view is a CONE, so approaching from behind can stay unseen")
+	assert_gt(n.forget_time, 0.0, "forget_time must be > 0 so an NPC that loses you searches before it gives up")
+	# Combat / movement invariants.
+	assert_true(n.miss_chance >= 0.0 and n.miss_chance <= 1.0,
+		"miss_chance is a per-shot probability and must sit in [0, 1]")
+	assert_true(n.engage_range_fraction > 0.0 and n.engage_range_fraction <= 1.0,
+		"engage_range_fraction must be in (0, 1]: the NPC closes to WITHIN its weapon's range before holding, never stands off out of range")
+	assert_lt(n.air_accel, n.move_accel,
+		"air_accel must be weaker than ground move_accel, so a blast carries the NPC before it recovers")
+	var gun := WeaponData.new()
+	gun.attack_speed = 0.7
+	assert_almost_eq(NPC.shot_interval_for(gun, n.rate_of_fire_factor, 0.0), gun.attack_speed, 0.0001,
+		"the default rate_of_fire_factor is NEUTRAL: an NPC fires at its weapon's own authored attack_speed until a designer dials difficulty")
+	assert_almost_eq(n.jump_velocity, GameSettings.player_movement.jump_velocity, 0.0001,
+		"the default NPC hop matches the Player's basic jump, so it vaults the same ledges you do (jump_velocity_for_climb scales it up for taller ones)")
 	n.free()
+	gun = null
 
 
 ## The stat half of "NPCs are not aimbots" (2026-08-25): aim_error_spread is the per-shot cone (radians)
 ## attack.gd adds to every ranged pellet an NPC fires. Base = GameSettings.npc_ai.aim_error_deg, scaled by
 ## the SAME CharacterStats.sway_mult formula the player's aim wander uses — so WHO the NPC is (its NpcData
-## stat sheet's gunplay) decides how well it shoots. Off-tree .new() per the header rule; expectations are
-## computed from the same live tuning the method reads, so re-tuning aim_error_deg can't break the test.
+## stat sheet's gunplay) decides how well it shoots. Off-tree .new() per the header rule. The base cone is
+## DIALLED to a known 10 degrees (after_each restores the shipped tuning), so the expectations are independent
+## numbers rather than the method's own formula re-typed.
 func test_npc_aim_error_spread_scales_with_gunplay() -> void:
-	var base_rad: float = deg_to_rad(maxf(GameSettings.npc_ai.aim_error_deg, 0.0))
+	GameSettings.npc_ai.aim_error_deg = 10.0
+	var base_rad := deg_to_rad(10.0)
 	var n = load("res://scripts/npc/npc.gd").new()  # no add_child: _ready MUST NOT run
 	assert_almost_eq(n.aim_error_spread(), base_rad, 0.000001,
-		"a sheetless NPC (stats null -> baseline gunplay 0, sway_mult 1.0) sprays the FULL base cone")
+		"a sheetless NPC (stats null -> baseline gunplay, sway_mult 1.0) sprays the FULL dialled cone")
 	var marksman := CharacterStats.new()
 	marksman.gunplay = 5  # sway_mult 0.6 — the same 8%-per-point steadiness the player's aim wander uses
 	n.stats = marksman
@@ -368,27 +476,41 @@ func test_npc_aim_error_spread_scales_with_gunplay() -> void:
 	n.stats = elite
 	assert_almost_eq(n.aim_error_spread(), 0.0, 0.000001,
 		"very high gunplay floors the cone at 0 — an elite is surgical, and the mult can never go negative")
+	n.stats = null
+	GameSettings.npc_ai.aim_error_deg = -5.0
+	assert_almost_eq(n.aim_error_spread(), 0.0, 0.000001,
+		"a negative aim_error_deg dial means NO cone — never a negative (inverted) spread")
 	n.free()
 	marksman = null
 	elite = null
 
 
-## The PLAYER side of the same seam must stay 0: its accuracy already runs through AimSway/bloom, so a
-## second cone would double-punish. Character's base is what the Player inherits (no override).
-func test_character_base_aim_error_spread_is_zero() -> void:
-	var c = load("res://scripts/player/character.gd").new()  # no add_child (Character._ready builds overlays)
-	assert_eq(c.aim_error_spread(), 0.0,
-		"Character.aim_error_spread base is 0.0 — only the NPC override adds the gunplay aim-error cone")
-	c.free()
+## The PLAYER side of the same seam must stay 0: its accuracy already runs through AimSway/bloom, so a second cone
+## would double-punish. Asked of a real Player (off-tree, never _ready'd), the class attack.gd actually calls, with
+## the base cone DIALLED to 10 degrees (after_each restores it): a cone that reached the Player, through its own
+## override or through the Character base it inherits, reads non-zero here. The NPC control shows the same dial
+## does produce a cone, so the Player's 0 is not just an undialled setting.
+func test_player_fires_with_no_aim_error_cone() -> void:
+	GameSettings.npc_ai.aim_error_deg = 10.0
+	var n = load("res://scripts/npc/npc.gd").new()  # no add_child: _ready MUST NOT run
+	assert_gt(n.aim_error_spread(), 0.0,
+		"control: with aim_error_deg dialled to 10 an NPC adds a real aim-error cone to its shots")
+	n.free()
+	var p = load("res://scripts/player/player.gd").new()  # no add_child: Player._ready MUST NOT run
+	assert_eq(p.aim_error_spread(), 0.0,
+		"the Player must add NO aim-error cone under the same dial: its accuracy already runs through AimSway / bloom, and a second cone would double-punish")
+	p.free()
 
 
-func test_ranged_enemy_constants() -> void:
-	# Constants need no instance — read straight off the class. These pin the laser cap and the
-	# shared alert-sting throttle window.
-	assert_eq(NPC.LASER_MAX_LENGTH, 60.0,
-		"LASER_MAX_LENGTH must be 60.0 m — the fallback laser reach when no weapon range applies")
-	assert_eq(NPC.ALERT_COOLDOWN_MS, 3000,
-		"ALERT_COOLDOWN_MS must be 3000 — the shared throttle so a swarm spotting you plays one sting")
+func test_unequipped_aim_ray_reaches_at_least_as_far_as_the_npc_sees() -> void:
+	# _aim_range() is the length of the clear-shot ray and of the laser. A shot only reads CLEAR when that ray's hit is
+	# the target's own collider, so a reach shorter than the NPC's sight would leave it staring at a target it can see
+	# with a ray that stops in mid-air: never a clear shot, a laser ending short of you. With nothing equipped there
+	# is no weapon range to scale from, so the fallback reach must still cover the sight range.
+	var n = load("res://scripts/npc/npc.gd").new()  # no add_child: _weapon stays null -> the fallback reach
+	assert_gte(n._aim_range(), n.sight_range,
+		"an NPC with no equipped weapon must still cast its aim ray at least sight_range far, or a target it can see is never a clear shot")
+	n.free()
 
 
 func test_jump_velocity_for_climb_scales_launch_to_target_height() -> void:
@@ -465,15 +587,6 @@ func test_collision_bottom_y_reads_capsule_bottom() -> void:
 		"the same bottom math must work when combat passes the target CollisionShape3D directly")
 
 
-func test_ranged_enemy_is_off_guard_false_before_ready() -> void:
-	# is_off_guard() is `_perception != null and ...`. Without _ready(), _perception is null, so
-	# the short-circuit must return false — proving a not-yet-initialised enemy isn't an exploit.
-	var n = load("res://scripts/npc/npc.gd").new()  # no add_child: _perception stays null
-	assert_false(n.is_off_guard(),
-		"RangedEnemy.is_off_guard() must be false while _perception is null (the null-guard short-circuit)")
-	n.free()
-
-
 func test_ranged_enemy_ai_method_surface_exists() -> void:
 	# Confirm the WeaponHost aim contract + AI hooks are present WITHOUT invoking them (each needs
 	# _player/_muzzle/_nav/_weapon and/or live physics, set up only in a real _ready).
@@ -502,10 +615,10 @@ func test_ranged_enemy_ai_method_surface_exists() -> void:
 
 
 # ---------------------------------------------------------------------------
-# death.gd / damage.gd — type identity + handler presence only. These scripts
-# have NO class_name, so load by path. Their handlers do audio + tree side
-# effects, so we assert has_method but NEVER call them. Bare AudioStreamPlayer3D
-# instances were never added to the tree, so .free() (not add_child_autofree).
+# death.gd / damage.gd — type identity + handler presence, then death.gd's
+# _on_enemy_died DRIVEN in-tree under a real Character. These scripts have NO
+# class_name, so load by path. The surface tests' bare AudioStreamPlayer3D
+# instances are never added to the tree, so .free() (not add_child_autofree).
 # ---------------------------------------------------------------------------
 
 func test_death_script_surface() -> void:

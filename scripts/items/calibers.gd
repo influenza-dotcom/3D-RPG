@@ -17,10 +17,10 @@ const ITEMS_DIR := "res://resources/items/"
 ## Runtime ammo resolution stays ItemDb's cached _by_caliber map; this folder scan is never on a hot path.
 ## Fields are read duck-typed (res.get) so the registry needs no compile-time dep on Item (no preload cycle).
 static func ids() -> PackedStringArray:
-	var out := PackedStringArray()
+	var loaded: Array[Resource] = []
 	var dir := DirAccess.open(ITEMS_DIR)
 	if dir == null:
-		return out
+		return PackedStringArray()
 	for file in dir.get_files():
 		var f := file.trim_suffix(".remap")  # exported builds may append .remap to packed resources
 		if not (f.ends_with(".tres") or f.ends_with(".res")):
@@ -28,6 +28,15 @@ static func ids() -> PackedStringArray:
 		var res := load(ITEMS_DIR.path_join(f))
 		if res == null:
 			continue
+		loaded.append(res)
+	return ids_of(loaded)
+
+## The collect step of ids(), over already-loaded resources: every ammo caliber (a caliber and no weapon),
+## distinct + sorted. Split from the folder walk so a test can feed the shapes shipped content never has
+## (a caliber two ammo items share, calibers out of order, a weapon Item that also carries a caliber).
+static func ids_of(resources: Array[Resource]) -> PackedStringArray:
+	var out := PackedStringArray()
+	for res in resources:
 		var cal: Variant = res.get("caliber")  # ammo Items carry one; a non-Item / non-ammo resource -> null or &""
 		var wep: Variant = res.get("weapon")   # a weapon Item sets this; ammo doesn't — so this excludes weapons
 		if cal == null or wep != null:

@@ -121,20 +121,57 @@ func test_code_fallback_catalog_stays_in_sync_with_the_shipped_parts() -> void:
 
 # --- 6-7: the field-name table ------------------------------------------------------------------------------
 
-func test_fields_for_covers_the_real_field_name_asymmetry() -> void:
-	# The two surfaces genuinely disagree, which is the whole reason this table exists.
-	assert_eq(PartLibrary.fields_for(PartLibrary.HOST_SWAP, PartLibrary.SLOT_BODIES)["scale"], &"body_model_scale",
-		"a BODY's scale is body_model_scale on BOTH surfaces")
-	assert_eq(PartLibrary.fields_for(PartLibrary.HOST_SWAP, PartLibrary.SLOT_HEADS)["scale"], &"head_scale",
-		"a HEAD's scale is head_scale on BodyModelSwap")
-	assert_eq(PartLibrary.fields_for(PartLibrary.HOST_LOOK, PartLibrary.SLOT_HEADS)["scale"], &"head_model_scale",
-		"...but head_model_scale on NpcLook -- the asymmetry fields_for exists to absorb")
-	assert_true(PartLibrary.fields_for(PartLibrary.HOST_LOOK, PartLibrary.SLOT_ARMS).is_empty(),
-		"NpcLook carries no arm model, so an arms pick on a look is a no-op by construction")
-	assert_true(PartLibrary.fields_for(PartLibrary.HOST_LOOK, PartLibrary.SLOT_LEGS).is_empty(),
-		"NpcLook carries no leg model either")
-	assert_true(PartLibrary.fields_for(&"not_a_surface", PartLibrary.SLOT_HEADS).is_empty(),
-		"an unknown surface yields no fields rather than a crash")
+func test_one_head_seat_lands_in_each_surfaces_own_fields() -> void:
+	# The two surfaces genuinely disagree on field names (a head's scale is head_scale on BodyModelSwap but
+	# head_model_scale on NpcLook). Stamp ONE synthetic part (no disk / import dependency) onto a real instance of each
+	# and read the seat back through each class's own fields: the stamp must absorb the asymmetry.
+	var head := CharacterPartOption.new()
+	head.id = &"probe_head"
+	head.model = BoxMesh.new()
+	head.scale = 0.37
+	head.position = Vector3(0.0, 0.45, 0.12)
+	head.rotation = Vector3(0.0, -90.0, 0.0)
+	var bms = load(BMS_PATH).new()
+	var look := NpcLook.new()
+	assert_true(PartLibrary.stamp_option(bms, PartLibrary.HOST_SWAP, PartLibrary.SLOT_HEADS, head), "a head stamps onto a BodyModelSwap")
+	assert_true(PartLibrary.stamp_option(look, PartLibrary.HOST_LOOK, PartLibrary.SLOT_HEADS, head), "a head stamps onto an NpcLook")
+	assert_eq(bms.head_model, head.model, "the swap's head_model is the part's model")
+	assert_almost_eq(bms.head_scale, 0.37, 0.0001, "the swap's seat scale lands in head_scale")
+	assert_eq(bms.head_position, head.position, "...and head_position")
+	assert_eq(bms.head_rotation, head.rotation, "...and head_rotation")
+	assert_eq(look.head_model, head.model, "the look's head_model is the part's model")
+	assert_almost_eq(look.head_model_scale, 0.37, 0.0001, "the look's seat scale lands in head_model_scale, its OWN name")
+	assert_eq(look.head_model_position, head.position, "...and head_model_position")
+	assert_eq(look.head_model_rotation, head.rotation, "...and head_model_rotation")
+
+	var body := CharacterPartOption.new()
+	body.id = &"probe_body"
+	body.model = BoxMesh.new()
+	body.scale = 1.7
+	assert_true(PartLibrary.stamp_option(bms, PartLibrary.HOST_SWAP, PartLibrary.SLOT_BODIES, body), "a body stamps onto a BodyModelSwap")
+	assert_true(PartLibrary.stamp_option(look, PartLibrary.HOST_LOOK, PartLibrary.SLOT_BODIES, body), "a body stamps onto an NpcLook")
+	assert_almost_eq(bms.body_model_scale, 1.7, 0.0001, "a BODY's scale is body_model_scale on the swap")
+	assert_almost_eq(look.body_model_scale, 1.7, 0.0001, "...and on the look too")
+
+	# Surfaces with no such slot refuse and write nothing.
+	var limb := CharacterPartOption.new()
+	limb.id = &"probe_limb"
+	limb.model = BoxMesh.new()
+	limb.scale = 9.0
+	assert_false(PartLibrary.stamp_option(look, PartLibrary.HOST_LOOK, PartLibrary.SLOT_ARMS, limb),
+		"NpcLook carries no arm model, so an arms stamp on a look reports failure")
+	assert_false(PartLibrary.stamp_option(look, PartLibrary.HOST_LOOK, PartLibrary.SLOT_LEGS, limb),
+		"...nor a leg model")
+	assert_false(PartLibrary.stamp_option(bms, &"not_a_surface", PartLibrary.SLOT_HEADS, limb),
+		"an unknown surface stamps nothing rather than crashing")
+	assert_eq(bms.head_model, head.model, "...and the refused stamp left the swap's head model alone")
+	assert_almost_eq(bms.head_scale, 0.37, 0.0001, "...and its head seat")
+	assert_almost_eq(look.head_model_scale, 0.37, 0.0001, "...and a refused limb stamp never lands on the look's head seat")
+	bms.free()
+	look = null
+	head = null
+	body = null
+	limb = null
 
 func test_every_field_name_the_table_returns_actually_exists() -> void:
 	# The highest-value guard here: renaming a seat field (head_scale -> head_size, say) would otherwise leave the

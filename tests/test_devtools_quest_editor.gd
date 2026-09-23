@@ -274,7 +274,14 @@ func test_save_and_form_are_greyed_with_nothing_open() -> void:
 
 func test_select_path_refuses_blank_and_unknown_paths_off_tree() -> void:
 	var d = QuestEditor.new()
-	assert_false(d.select_path(""), "a blank path is refused before any scan")
+	var status_before: String = d._status.text
+	var picker_rows_before: int = d._picker.item_count
+	assert_false(d.select_path(""), "a blank path (a handoff that names no file) is refused")
+	# The blank refusal must come BEFORE the scan: without that early return the call rescans the folder, which opens
+	# the first quest as a side effect, and then reports "Couldn't open : ..." for a file nobody asked for.
+	assert_eq(d._quest_path, "", "a blank handoff opens nothing -- the tab still has no quest open")
+	assert_eq(d._picker.item_count, picker_rows_before, "a blank handoff does not scan the quests folder into the picker")
+	assert_eq(d._status.text, status_before, "a blank handoff writes no 'Couldn't open' line naming an empty file")
 	assert_false(d.select_path("res://resources/quests/definitely_not_here.tres"), "a file that is not in the quests folder is refused")
 	assert_string_contains(d._status.text, "Couldn't open")
 	# The refusal rescanned (the tab had never scanned), so the picker and its parallel arrays must agree.
@@ -750,23 +757,37 @@ func test_normalize_leaves_a_zero_reward_count_alone() -> void:
 	q = null
 
 
-# --- size sanity (assert_lte / assert_gte, NOT le/ge) ---------------------------------------------------------
+# --- interleaved ops: each op must see the list the previous op left -------------------------------------------
+# The single-op tests above start from a fresh fixture; a designer clicks Add / Remove / Up / Down in any order on one
+# live list, so the index an op receives always refers to the list AFTER the last op. Exact order + ids, not bounds.
 
-func test_objective_count_bounds_after_ops() -> void:
-	var q := _quest_with(1)
-	QuestOps.add_objective(q)
-	QuestOps.add_objective(q)
-	assert_gte(q.objectives.size(), 1, "at least one objective remains")
-	assert_lte(q.objectives.size(), 3, "no more than the three we have")
+func test_interleaved_objective_ops_leave_an_exact_order_and_unique_ids() -> void:
+	var q := _quest_with(1)  # [obj_1/tgt_1]
+	assert_true(QuestOps.add_objective(q), "add #1")  # [obj_1, obj_2]
+	assert_true(QuestOps.add_objective(q), "add #2")  # [obj_1, obj_2, obj_3]
+	assert_true(QuestOps.remove_objective(q, 0), "remove the authored first objective")  # [obj_2, obj_3]
+	assert_true(QuestOps.move_objective(q, 1, -1), "move the LAST row up -- index 1 of the shortened list")  # [obj_3, obj_2]
+	assert_false(QuestOps.move_objective(q, 0, -1), "the new first row cannot move further up")
+	assert_true(QuestOps.add_objective(q), "add #3 reuses the freed id")  # [obj_3, obj_2, obj_1]
+	var ids := PackedStringArray()
+	for o in q.objectives:
+		ids.append(String(o.id))
+	assert_eq(ids, PackedStringArray(["obj_3", "obj_2", "obj_1"]),
+		"remove shifts later rows down, the move acts on the shifted index, and a new row appends with the lowest free id")
+	assert_eq(String(q.objectives[2].target_id), "", "the re-used obj_1 is a FRESH seeded row, not the removed tgt_1 objective coming back")
 	q = null
 
-func test_reward_count_bounds_after_ops() -> void:
-	var q := _quest_with_rewards(1)
-	QuestOps.add_reward(q)
-	QuestOps.remove_reward(q, 0)
-	QuestOps.move_reward(q, 0, 1)  # a no-op on a single-row list; must not grow or shrink it
-	assert_gte(q.rewards.size(), 1, "at least one reward row remains")
-	assert_lte(q.rewards.size(), 2, "no more rows than the two that were ever added")
+func test_interleaved_reward_ops_leave_an_exact_order() -> void:
+	var q := _quest_with_rewards(2)  # counts [1, 2]
+	assert_true(QuestOps.add_reward(q), "add a row")  # [1, 2, new]
+	var added: ItemStack = q.rewards[2]
+	assert_true(QuestOps.remove_reward(q, 0), "remove the first authored row")  # [2, new]
+	assert_true(QuestOps.move_reward(q, 1, -1), "move the added row up -- index 1 of the shortened list")  # [new, 2]
+	assert_false(QuestOps.move_reward(q, 0, -1), "the new first row cannot move further up")
+	assert_false(QuestOps.remove_reward(q, 2), "index 2 no longer exists after the remove")
+	assert_eq(q.rewards.size(), 2, "one add and one remove on two rows leaves two")
+	assert_same(q.rewards[0], added, "the added row now leads -- the move landed on the row the designer picked")
+	assert_eq(q.rewards[1].count, 2, "the surviving authored row (count 2) follows it; the count-1 row is the one removed")
 	q = null
 
 
@@ -1011,13 +1032,35 @@ func test_discard_resets_stages_and_their_objectives() -> void:
 	q = null
 
 
-func test_stage_widget_signals_emit_with_the_right_arity() -> void:
+## The other stage tests call the handlers directly; this one goes through the WIDGET SIGNALS a designer's click or
+## keystroke fires, so a handler that is never connected (or connected to the wrong signal, or with an argument count
+## the signal does not carry, which errors and fails the test) cannot pass. Each emit is the only thing that could
+## change what it checks.
+func test_stage_widget_signals_reach_their_write_through_handlers() -> void:
 	var d = QuestEditor.new()
-	d._stage_id_edit.text_submitted.emit("x")
-	d._stage_id_edit.focus_exited.emit()
-	d._stage_next_pick.item_selected.emit(0)
-	d._stage_flag_edit.text_changed.emit("x")
-	d._stage_journal.text_changed.emit()
+	var q := _staged_quest(["intro", "inside"])
+	d._show_quest(q, "res://resources/quests/probe_quest.tres")
+	assert_eq(d._stage_id_edit.text, "intro", "setup: opening the quest shows its first stage")
+	d._stage_list.item_selected.emit(1)
+	assert_eq(d._selected_stage_index(), 1, "clicking a stage row picks that stage")
+	assert_eq(d._stage_id_edit.text, "inside", "and shows its fields")
 	d._stage_list.item_selected.emit(0)
-	assert_false(d._dirty, "nothing open: every stage handler hit its guard and wrote nothing")
+	assert_eq(d._stage_id_edit.text, "intro", "clicking back shows the first stage again")
+	assert_false(d._dirty, "picking stages is not an edit")
+	d._stage_flag_edit.text_changed.emit(" met_fixer ")
+	assert_eq(q.stages[0].set_flag_on_enter, &"met_fixer", "typing a flag writes it to the picked stage, trimmed")
+	assert_true(d._dirty, "and marks the tab unsaved")
+	d._stage_journal.text = "A fixer wants the vault opened."
+	d._stage_journal.text_changed.emit()
+	assert_eq(q.stages[0].journal_text, "A fixer wants the vault opened.", "typing journal text writes it to the picked stage")
+	d._stage_next_pick.item_selected.emit(1)
+	assert_eq(q.stages[0].next_stage_id, &"inside", "picking a Next stage row links the picked stage to it")
+	d._stage_id_edit.text = "offer"
+	d._stage_id_edit.text_submitted.emit("offer")
+	assert_eq(q.stages[0].id, &"offer", "pressing Enter in the Stage id box renames the stage")
+	d._stage_id_edit.text = "opening"
+	d._stage_id_edit.focus_exited.emit()
+	assert_eq(q.stages[0].id, &"opening", "leaving the Stage id box renames the stage too")
+	assert_eq(q.stages[1].id, &"inside", "the other stage keeps its id")
 	d.free()
+	q = null

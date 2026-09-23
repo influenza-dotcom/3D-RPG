@@ -4,7 +4,7 @@ extends RefCounted
 ## Pure model for the UI Copy tab: read the player-facing string constants out of `scripts/ui/player_text.gd`,
 ## validate an edit against the contract its test enforces, and splice edited values back into the source.
 ##
-## WHY THIS EXISTS: roughly 200 of the project's unauthored `[PH]` strings live in that one 1,860-line script, and
+## WHY THIS EXISTS: roughly 200 of the project's unauthored `[PH]` strings live in that one ~2,300-line script, and
 ## the Text tab cannot see them — it edits fields on `.tres` resources. So the single largest body of player-facing
 ## copy in the game was reachable only by opening GDScript, which the authoring guide's first page promises a
 ## designer never has to do.
@@ -16,11 +16,14 @@ extends RefCounted
 ## declaration or is copied through untouched. `tests/test_devtools_ui_copy.gd` pins the proof that matters — a
 ## parse of the real file followed by a rewrite of every value back to itself is byte-identical.
 ##
-## WHAT IS DELIBERATELY OUT OF SCOPE (v1): the ~200 prose literals that sit INSIDE function bodies as arguments to
-## `TextFormat.subst` / `TextFormat.plural`, in ternaries and `match` arms. Those are position-dependent inside
-## multi-line call expressions where a line-based rewrite would corrupt code. They are listed read-only by the tab
-## so a writer can SEE them and ask for them to be lifted to constants, which is the refactor this file's own
-## header argues for anyway (a constant is what the deferred `tr()` sweep can wrap; an inline literal is not).
+## WHAT THE TAB STILL CANNOT EDIT: a prose literal that sits INSIDE a function body as an argument to
+## `TextFormat.subst` / `TextFormat.plural`, in a ternary or a `match` arm. Those are position-dependent inside
+## multi-line call expressions where a line-based rewrite would corrupt code, so `inline_literals` lists them
+## read-only. As of 2026-09-15 there are NONE: every one of the ~180 that used to live in code was lifted to a
+## `const NAME := "..."` declared directly above its function (after the function's ## doc block, so the doc
+## reaches the writer as the const's note), and `tests/test_devtools_ui_copy.gd` holds that count at zero. A new
+## inline literal is a regression the test names; lift it, never grow a baseline (a constant is what the deferred
+## `tr()` sweep can wrap; an inline literal is not).
 ##
 ## NO class_name on purpose — const-preloaded by path from the dock, mirroring `content_save_guard.gd`.
 ## Every string here is a DEVELOPER surface and must never be routed through `PlayerText`.
@@ -89,8 +92,8 @@ static func parse(text: String) -> Array:
 
 
 ## The `PREFIX_` a constant groups under — `OPTIONS_CB_NONE` -> "OPTIONS". This naming convention is the file's
-## real section structure: only five banner comments exist in 1,860 lines, but the prefixes cover all but nine
-## constants. A name with no underscore (BACK, CANCEL, STRANGER...) groups under "General".
+## real section structure: only a handful of banner comments exist in ~2,300 lines, but the prefixes cover nearly
+## every constant. A name with no underscore (BACK, CANCEL, ACQUIRED...) groups under "General".
 static func group_of(cname: String) -> String:
 	var idx := cname.find("_")
 	if idx <= 0:
@@ -197,15 +200,18 @@ static func apply(text: String, edits: Dictionary) -> Dictionary:
 	return {"text": "\n".join(lines), "count": count}
 
 
-## The prose literals that live INSIDE function bodies — read-only in v1. Returns
-## {"line" (0-based), "func_name", "text"} so the tab can show a writer what is still stuck in code and name the
-## function to ask about.
+## The prose literals that live INSIDE function bodies — read-only, and expected to be EMPTY (every template was
+## lifted to a const on 2026-09-15; the test pins zero). Returns {"line" (0-based), "func_name", "text"} so the
+## tab can show a writer anything that regresses back into code and name the function to ask about.
 static func inline_literals(text: String) -> Array:
 	var out: Array = []
 	var fn := RegEx.new()
 	fn.compile("^static func ([a-z_0-9]+)")
+	# PAIRED quotes, escapes honoured: a string token runs from one `"` to its own closing `"`. The old
+	# `"([^"]{12,})"` scan re-used a closing quote as the next opening one and reported `": title, "` — the
+	# text BETWEEN two dictionary keys — as a sentence, which is why the tab once counted ~200 code lines.
 	var lit := RegEx.new()
-	lit.compile("\"([^\"\\\\]{%d,})\"" % MIN_PROSE)
+	lit.compile("\"((?:[^\"\\\\]|\\\\.)*)\"")
 	var current := ""
 	var lines := text.split("\n")
 	for i in lines.size():
@@ -214,12 +220,22 @@ static func inline_literals(text: String) -> Array:
 		if fm != null:
 			current = fm.get_string(1)
 			continue
+		if not line.begins_with("\t"):
+			# A function body is its run of indented lines. Any other non-blank column-0 line — a `const`
+			# declared between two functions (where every lifted template lives), a doc block, a banner — ends
+			# it, so a constant is never attributed to the function above it as "still in code".
+			if line.strip_edges() != "":
+				current = ""
+			continue
 		if current == "" or line.strip_edges().begins_with("#"):
 			continue
 		for m in lit.search_all(line):
 			var body := m.get_string(1)
-			if not body.contains(" "):
-				continue  # a dictionary key or an id, not a sentence
+			if body.length() < MIN_PROSE or not body.contains(" "):
+				continue  # a dictionary key, an id or a format token, not a sentence
+			var after := m.get_end()
+			if after < line.length() and line[after] == ":":
+				continue  # a dictionary key or a match arm, however long
 			out.append({"line": i, "func_name": current, "text": body})
 	return out
 

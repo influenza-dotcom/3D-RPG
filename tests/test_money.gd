@@ -6,8 +6,8 @@ extends GutTest
 ## invariant matters, so this file doubles as executable documentation of the money grid.
 ##
 ## SCOPE — this file deliberately covers only the angles NOT already asserted elsewhere:
-##   * Zorkmids.QUANTUM's value and the fmt() display table (bare wholes, trimmed
-##     fractions, float-noise snap) — pinned NOWHERE else (no test references Zorkmids).
+##   * Zorkmids.QUANTUM's agreement with the readout (whole zorkmids on the grid, every coin
+##     visible) and the fmt() display table (bare wholes, trimmed fractions, float-noise snap).
 ##   * Character.add_money's per-mutation quantization (drift-free accumulation,
 ##     sub-quantum snapping, exact-zero spend-down), the is_zero_approx no-op guard,
 ##     and the money_changed(total, delta) parameter contract.
@@ -73,13 +73,16 @@ class _PayableKiller extends Node:
 ## Force the death settlement's in-place-revive gate OPEN / restore it. _bequeath_wallet does NOTHING unless
 ## Player._death_revives_in_place() is true (death_mode is not a RELOAD_* AND a respawn point is set) — see the
 ## reload test below for why. Both bits live on AUTOLOADS shared with every other suite, so each test that moves
-## them banks the old values and puts them back, pass or fail.
+## them banks the old values and puts them back, pass or fail. The loss FRACTION is banked too: the settlement
+## tests pin it to 1.0 themselves, because at a designer-tuned 0 every "nothing moved" assert would pass for the
+## wrong reason (and a retune must never break a test about WHERE the money goes).
 func _bank_respawn_state() -> Dictionary:
 	return {
 		"mode": GameSettings.player_feedback.death_mode,
 		"has": GameState.has_respawn,
 		"pos": GameState.respawn_position,
 		"yaw": GameState.respawn_yaw,
+		"fraction": GameSettings.economy.death_purse_loss_fraction,
 	}
 
 
@@ -88,15 +91,26 @@ func _restore_respawn_state(banked: Dictionary) -> void:
 	GameState.has_respawn = banked["has"]
 	GameState.respawn_position = banked["pos"]
 	GameState.respawn_yaw = banked["yaw"]
+	GameSettings.economy.death_purse_loss_fraction = banked["fraction"]
 
 
 # ---------------------------------------------------------------------------
 # Zorkmids — the quantum + the fmt() display table
 # ---------------------------------------------------------------------------
 
-func test_quantum_is_one_hundredth() -> void:
-	assert_eq(Zorkmids.QUANTUM, 0.01,
-		"QUANTUM is the smallest coin — the money grid EVERY transaction snaps to (Character.add_money, Merchant price rounding). Changing it re-grids every wallet and price in the economy, so it must be a deliberate decision, not drift")
+func test_the_smallest_coin_survives_the_readout_and_whole_zorkmids_sit_on_the_grid() -> void:
+	# QUANTUM is the grid every wallet and price snaps to (Character.add_money, Merchant rounding), and fmt() is how
+	# the player reads it. The two must agree: a grid finer than the readout resolves would show "0" for coins the
+	# wallet really holds, and a one-unit loot coin tile (one QUANTUM, see Zorkmids.ITEM_ID) would read as worthless.
+	assert_gt(Zorkmids.QUANTUM, 0.0, "the smallest coin is a positive amount")
+	assert_lt(Zorkmids.QUANTUM, 1.0, "the smallest coin is a FRACTION of a zorkmid, so cheap goods can price under 1 zm")
+	var coins_per_zorkmid := 1.0 / Zorkmids.QUANTUM
+	assert_almost_eq(coins_per_zorkmid, roundf(coins_per_zorkmid), 0.000001,
+		"a whole zorkmid is a whole number of coins, so whole-zorkmid prices and wallets land exactly on the grid")
+	for coins in [1, 3, 7, 50]:
+		var amount := float(coins) * Zorkmids.QUANTUM
+		assert_almost_eq(Zorkmids.fmt(amount).to_float(), amount, Zorkmids.QUANTUM * 0.01,
+			"fmt shows %d coin(s) as exactly that amount: the readout never rounds a coin the wallet holds away" % coins)
 
 
 func test_fmt_whole_amounts_print_bare() -> void:
@@ -239,9 +253,8 @@ func test_killer_pockets_the_whole_wallet_on_death() -> void:
 	# THE headline rule: death hands your zorkmids to whoever killed you, in full — it never destroys them. The
 	# killer holds them in their live wallet, which NpcMortality reads at THEIR death so LootableCorpse mints it as
 	# a coin tile in their loot bag (that copy is pinned in test_loot_drop.gd). Kill them, loot it back.
-	assert_eq(GameSettings.economy.death_purse_loss_fraction, 1.0,
-		"death_purse_loss_fraction ships at 1.0 — the killer takes the WHOLE purse, because you can go and take it back")
 	var banked := _bank_respawn_state()
+	GameSettings.economy.death_purse_loss_fraction = 1.0  # the whole-purse setting; partial fractions have their own test
 	GameSettings.player_feedback.death_mode = PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN
 	GameState.set_respawn(Vector3.ZERO, 0.0)
 	var p = load("res://scripts/player/player.gd").new()
@@ -277,6 +290,7 @@ func test_a_dead_killer_is_not_a_holder() -> void:
 	# ordinary play: kill someone, then fall off a ledge inside kill_credit_window_ms and _resolve_killer hands that
 	# same corpse back as your killer. So a dead killer must fall THROUGH to the ground spill.
 	var banked := _bank_respawn_state()
+	GameSettings.economy.death_purse_loss_fraction = 1.0
 	GameSettings.player_feedback.death_mode = PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN
 	GameState.set_respawn(Vector3.ZERO, 0.0)
 	var p = load("res://scripts/player/player.gd").new()
@@ -333,17 +347,41 @@ func test_unattributed_death_never_debits_without_a_bag_to_put_it_in() -> void:
 	# MoneyBag. That spawn needs a world, so an off-tree player (this one — CLAUDE.md forbids running Player._ready
 	# in a unit test) has nowhere to put it, _death_purse_anchor returns null, and the wallet is left ALONE rather
 	# than emptied into nothing. Same guard drop_money has always had. The in-tree spill itself is playtested.
+	#
+	# The debit of a real spill is DEFERRED (it lands with the bag, after the death frame), so the wallet is read only
+	# after a frame has flushed anything the settlement queued. And the two switches that could refuse the spill
+	# before the missing world does are forced ON: the spill itself, and the respawn-point rung of the anchor ladder
+	# (with a respawn set, that rung has an answer without any world at all).
 	var banked := _bank_respawn_state()
+	var was_drops: bool = GameSettings.economy.death_purse_drops_when_unclaimed
+	var was_void_rung: bool = GameSettings.economy.death_purse_drop_to_respawn_in_void
+	GameSettings.economy.death_purse_loss_fraction = 1.0
+	GameSettings.economy.death_purse_drops_when_unclaimed = true
+	GameSettings.economy.death_purse_drop_to_respawn_in_void = true
 	GameSettings.player_feedback.death_mode = PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN
 	GameState.set_respawn(Vector3.ZERO, 0.0)
 	var p = load("res://scripts/player/player.gd").new()
+	assert_true(p._death_purse_anchor() == null,
+		"precondition: an off-tree player has no anchor even with the respawn-point rung open — the bag has nowhere to go")
 	p.money = 101.0
 	p._bequeath_wallet(null)
+	await get_tree().process_frame  # flush any deferred spill: its debit would land here, not inside _bequeath_wallet
 	assert_eq(p.money, 101.0,
 		"nowhere to drop the bag -> the money stays in the wallet; we never debit before the purse is really in the world")
 	assert_eq(p._death_wallet_lost, 0.0,
 		"...and nothing is recorded, so the revive can never toast a loss that did not happen")
+	# CONTROL: the same player, settings and wallet, with somewhere for the purse to go (a live killer). The settlement
+	# runs and debits, so the untouched wallet above was the missing bag's doing — not a closed reload gate, a zero
+	# fraction or a broke wallet refusing first.
+	var killer := _PayableKiller.new()
+	p._bequeath_wallet(killer)
+	assert_eq(p.money, 0.0,
+		"control: with a holder for the purse, this same death settles and the wallet empties")
+	assert_eq(killer.money, 101.0, "control: ...into the holder, to the coin")
+	killer.free()
 	p.free()
+	GameSettings.economy.death_purse_drops_when_unclaimed = was_drops
+	GameSettings.economy.death_purse_drop_to_respawn_in_void = was_void_rung
 	_restore_respawn_state(banked)
 
 
@@ -354,6 +392,7 @@ func test_reload_death_modes_settle_nothing() -> void:
 	# destroying it. So _death_revives_in_place() gates the WHOLE settlement (it used to gate only the hand-off,
 	# which is exactly how the money got burnt).
 	var banked := _bank_respawn_state()
+	GameSettings.economy.death_purse_loss_fraction = 1.0
 	GameSettings.player_feedback.death_mode = PlayerFeedbackSettings.DeathMode.RELOAD_LAST_SAVE
 	GameState.set_respawn(Vector3.ZERO, 0.0)
 	var p = load("res://scripts/player/player.gd").new()
@@ -409,15 +448,27 @@ func test_player_death_to_reminder_eligible_npc_queues_holster_forgiveness_tutor
 
 
 func test_death_wallet_toasts_name_where_the_money_went() -> void:
-	# Both respawn toasts are single-[PH] placeholder lines carrying the amount via Zorkmids.fmt (mirrors
-	# chess_loss / long_range_kill). Pins the marker + format so the AI-text scrub stays consistent — and, more
-	# importantly, that the two DESTINATIONS read differently: the whole point of the feature is that the player
-	# is told where to go get their zorkmids back.
-	assert_eq(PlayerText.purse_taken("Test Killer", 50.5), "[PH] Robbed!  50.5 zm taken by Test Killer",
-		"the killer-took-it toast reads '[PH] Robbed!  <amount> zm taken by <killer>', one placeholder marker up front")
-	assert_eq(PlayerText.purse_dropped(50.5), "[PH] Purse dropped!  50.5 zm where you fell",
-		"the no-killer toast instead points at the GROUND, so a fall death reads as recoverable rather than as a penalty")
+	# The two revive toasts _finish_respawn_hud_restore picks between (off _death_wallet_to_killer). Their WORDING is
+	# placeholder copy that is expected to be rewritten, so nothing here pins it; what is pinned is what any wording
+	# has to carry: the exact amount, in the wallet readout's own format, who has it (for the killer toast), and a
+	# ground toast the player can tell apart from a killer toast — the whole point of the feature is that the
+	# player is told where to go get their zorkmids back.
+	var taken := PlayerText.purse_taken("Test Killer", 50.5)
+	var dropped := PlayerText.purse_dropped(50.5)
+	assert_true(taken.contains("Test Killer"),
+		"the killer toast names who has the purse, so the player knows who to hunt: %s" % taken)
+	for toast in [taken, dropped]:
+		assert_true(String(toast).contains(Zorkmids.money_text(50.5)),
+			"every wallet toast states the exact amount as the money readout writes it: %s" % toast)
+	assert_false(PlayerText.purse_taken("a stranger", 12.0).contains("12.0"),
+		"a whole amount reads bare like the HUD's wallet, never as a raw float: %s" % PlayerText.purse_taken("a stranger", 12.0))
+	# A designer may blank death_unknown_killer and an NPC can ship with a blank display_name, so a killer toast can
+	# carry an EMPTY name — it still must not read as the ground toast.
+	assert_ne(PlayerText.purse_taken("", 50.5), dropped,
+		"the ground toast is its own line, not a killer toast with the name missing")
 	# The killer name arrives pre-masked from Player._killer_display_name, so an unintroduced NPC renders as the
 	# lowercase indefinite form. It must sit MID-sentence for that to be grammatical.
-	assert_eq(PlayerText.purse_taken("a stranger", 12.0), "[PH] Robbed!  12 zm taken by a stranger",
-		"the masked 'a stranger' fallback reads grammatically because the name never opens the sentence")
+	var masked := PlayerText.display(PlayerText.purse_taken("a stranger", 12.0))
+	assert_true(masked.contains("a stranger"), "the masked name is in the toast: %s" % masked)
+	assert_false(masked.begins_with("a stranger"),
+		"the masked 'a stranger' fallback never opens the sentence, where its lowercase would read wrong: %s" % masked)

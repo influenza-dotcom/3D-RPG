@@ -23,16 +23,33 @@ class _LiveRadio extends Radio:
 	func _effects_frozen() -> bool: return false
 	func is_playing_music() -> bool: return true
 
+## Counts cursor steps so the track-finished skip loop's pass length is OBSERVED, not assumed.
+class _CountingPlaylist extends MusicPlaylist:
+	var advances: int = 0
+	func advance() -> String:
+		advances += 1
+		return super()
+
+## Paths that cannot decode: outside res:// with no file behind them, so Radio._load_stream answers null.
+const UNDECODABLE := ["user://__radio_test_missing_a.mp3", "user://__radio_test_missing_b.ogg", "user://__radio_test_missing_c.wav"]
+
 var _prev_music_folder: String
+var _prev_dialogue: DialogueResource
+var _prev_suspended: bool
 
 func before_each() -> void:
 	# Neutralize any player music-folder override so the folder tests deterministically exercise the radio's
 	# own curated res:// export. Set the var directly (not the persisting setter), restored in after_each.
 	_prev_music_folder = Settings.music_folder
 	Settings.music_folder = ""
+	_prev_dialogue = DialogueManager._active
+	_prev_suspended = DialogueManager._suspended
 
 func after_each() -> void:
 	Settings.music_folder = _prev_music_folder
+	DialogueManager._active = _prev_dialogue
+	DialogueManager._suspended = _prev_suspended
+	_prev_dialogue = null
 
 func _make() -> Radio:
 	return load(RADIO_SCRIPT).new()
@@ -58,9 +75,22 @@ func test_look_name_falls_back_to_generic_when_unnamed() -> void:
 	assert_eq(r.look_name(), "[PH] Turn on radio", "An unnamed radio uses a generic label")
 	r.free()
 
-func test_always_interactable() -> void:
+func test_a_radio_with_nothing_to_play_still_switches_on_and_off() -> void:
+	# A radio with no pinned track, no folder tracks and no fallback is silent, but it is still a switch: the look-at
+	# ray's gate (TalkHelpers.is_talkable_now) must offer it to Interact, and each Interact (start_talk) flips it,
+	# joining / leaving the MUSIC group NPCs listen on. Off-tree: click_player and audio_player are null (guarded).
 	var r := _make()
-	assert_true(r.can_be_talked_to(), "A radio can always be toggled")
+	r.music_folder = "res://does/not/exist"
+	r.fallback_audio = null
+	assert_gt(r._get_configuration_warnings().size(), 0, "precondition: this radio has nothing to play (the silent warning fires)")
+	assert_true(TalkHelpers.is_talkable_now(r), "the look-at ray offers a silent radio to Interact - it is still a switch")
+	r.start_talk(null)
+	assert_true(r.is_playing(), "Interact switches a silent radio ON")
+	assert_true(r.is_in_group(Groups.MUSIC), "...and a switched-on radio joins the MUSIC group NPCs react to")
+	assert_true(TalkHelpers.is_talkable_now(r), "a switched-on radio stays interactable, so it can be switched back off")
+	r.start_talk(null)
+	assert_false(r.is_playing(), "a second Interact switches it OFF again")
+	assert_false(r.is_in_group(Groups.MUSIC), "...and it leaves the MUSIC group, so NPCs stop hearing it")
 	r.free()
 
 func test_owns_a_playback_state() -> void:
@@ -69,32 +99,40 @@ func test_owns_a_playback_state() -> void:
 	assert_false(r._state.is_playing(), "and it starts switched off")
 	r.free()
 
-func test_export_defaults() -> void:
-	# Pin the designer-facing defaults so an accidental edit is caught (same idea as the tuning-default tests).
+func test_default_duck_tuning_is_coherent() -> void:
+	# The RELATIONS the duck brain needs, not the literals. (The ship decisions live below, on a default radio:
+	# plays through fights = test_precedence_default_does_not_feed_combat_into_duck, whose untouched poll timer shows
+	# the combat scan never runs; plays through conversations = test_dialogue_duck_is_opt_in.)
 	var r := _make()
-	assert_eq(r.poll_interval, 0.3, "combat scan interval default")
-	assert_eq(r.settle_cooldown, 3.0, "post-combat settle default")
-	assert_eq(r.fade_pause_time, 0.4, "duck-out time default")
-	assert_eq(r.fade_resume_time, 1.2, "ease-in time default")
-	assert_eq(r.silent_db, -60.0, "silent floor default")
-	assert_eq(r.fallback_volume_db, 0.0, "audible level default")
-	assert_false(r.combat_strict, "defaults to the broad hunt predicate, matching MusicDirector")
-	assert_false(r.duck_for_combat, "by default the radio takes precedence over the combat score (plays through a fight)")
-	assert_false(r.duck_for_dialogue, "by default the radio plays THROUGH dialogue (only the gentle music-bus duck applies), never hiding")
-	assert_true(r.show_music_note, "playing radios launch note particles by default")
-	assert_eq(r.note_glyph, "♪", "the default particle glyph is a music note")
-	assert_true(r.note_rainbow, "note particles cycle bright colors by default")
+	assert_gt(r.poll_interval, 0.0, "the combat scan runs on a real interval")
+	assert_gt(r.settle_cooldown, r.poll_interval,
+		"the post-combat linger outlasts one combat scan, or an opted-in radio flaps back up between two polls of the same fight")
+	assert_gt(r.fade_pause_time, 0.0, "the duck-out takes real time")
+	assert_gt(r.fade_resume_time, r.fade_pause_time, "the radio ducks OUT fast and eases back IN slower")
+	assert_gt(r.fallback_volume_db - r.silent_db, 40.0,
+		"the ducked floor sits far enough under the audible level to be effectively inaudible while the stream keeps running")
+	r.free()
+
+func test_default_note_and_bounce_ship_on_and_stay_proportioned() -> void:
+	var r := _make()
+	# Ship decisions: a playing radio is SEEN to play.
+	assert_true(r.show_music_note, "SHIP DECISION: playing radios launch note particles by default")
+	assert_true(r.note_rainbow, "SHIP DECISION: note particles cycle bright colors by default")
+	assert_true(r.vibration_enabled, "SHIP DECISION: playing radios bounce by default")
+	assert_false(r.note_glyph.strip_edges().is_empty(), "a blank glyph would launch invisible notes")
 	assert_gt(r.note_height, 0.0, "note particles spawn above the radio")
 	assert_gt(r.note_rise, 0.0, "note particles rise before disappearing")
 	assert_gt(r.note_spread, 0.0, "note particles drift outward from the radio")
 	assert_gt(r.note_emit_interval, 0.0, "note particles emit on a paced interval")
 	assert_gt(r.note_lifetime, 0.0, "note particles self-free after a short life")
-	assert_true(r.vibration_enabled, "playing radios bounce by default")
+	assert_true(r.note_fade_time <= r.note_lifetime, "a note fades out at the END of its life, never for longer than it lives")
 	assert_gt(r.vibration_visual_bounce, 0.0, "non-physics targets have a visible bounce amplitude")
 	assert_gt(r.vibration_visual_side, 0.0, "non-physics targets have a tunable side wobble")
 	assert_gt(r.vibration_rate, 0.0, "vibration rate must be positive")
-	assert_gt(r.vibration_impulse, 0.0, "rigid-body radios get a tiny upward impulse while music plays")
-	assert_gt(r.vibration_side_impulse, 0.0, "rigid-body vibration includes a small side jitter")
+	assert_gt(r.vibration_impulse, 0.0, "rigid-body radios get an upward hop while music plays")
+	assert_gt(r.vibration_side_impulse, 0.0, "rigid-body vibration includes a side jitter")
+	assert_lt(r.vibration_side_impulse, r.vibration_impulse,
+		"the side jitter stays small next to the upward hop, or a loose prop skates across the table instead of bouncing in place")
 	r.free()
 
 func test_playing_music_requires_a_live_audio_player() -> void:
@@ -109,11 +147,17 @@ func test_precedence_default_does_not_feed_combat_into_duck() -> void:
 	# combat into the duck state machine — it plays through the fight (MusicDirector mutes the bed instead).
 	# Force the "a scan saw a fight" flag, then tick: the no-duck branch clears it back to false. Off-tree the
 	# audio_player is null (guarded) and no NPCs are needed.
+	# _combat_now alone cannot prove the DEFAULT: off-tree the scan itself reads "no fight" (no tree), so an opted-in
+	# radio would land false too. The poll timer is the witness — the opt-in branch re-arms an expired timer to
+	# poll_interval (test_opt_in_combat_duck_still_scans), the default branch never touches it.
 	var r := _make()
 	r._state.set_playing(true)
 	r._combat_now = true  # pretend a prior scan saw a fight
+	r._poll_t = 0.0  # an expired poll: the scan branch, if it ran, would re-arm it
 	r._process(0.1)
 	assert_false(r._combat_now, "duck_for_combat off -> _process never arms combat (the radio plays through)")
+	assert_eq(r._poll_t, 0.0,
+		"SHIP DECISION: a default radio plays through a fight - it never even runs the combat scan (duck_for_combat ships off)")
 	r.free()
 
 
@@ -148,24 +192,51 @@ func test_dialogue_duck_is_opt_in() -> void:
 	r.free()
 
 
-func test_dialogue_duck_feeds_on_engaged_not_active() -> void:
-	# Source-string contract -- the radio-side member of the is_engaged()-not-is_active() family (test_dialogue.gd
-	# pins Player.die() / _on_speaker_died / _push_quest_toast the same way). Radio._process runs the duck through
-	# the dialogue tree-pause (PROCESS_MODE_ALWAYS), so it TICKS during a sub-menu suspension (Trade / Heal /
-	# Level Up / Install) -- where is_active() reads false mid-conversation. Feeding is_active() would fade a
-	# duck_for_dialogue radio back UP mid-menu and re-duck it on resume, flapping across every suspension.
-	# Engaged-span is the conversation-scoped-audio semantic (DialogueMusicBed's "the conversation still EXISTS
-	# (is_engaged())" lifecycle).
-	var src := FileAccess.get_file_as_string(RADIO_SCRIPT)
-	assert_true(src.contains("_dialogue_suppresses(DialogueManager.is_engaged())"),
-		"Radio._process must feed the dialogue duck the ENGAGED span (is_engaged()), not is_active() -- a sub-menu suspension must hold a duck_for_dialogue radio ducked instead of fading it up mid-Trade")
+func test_dialogue_duck_holds_through_a_sub_menu_suspension() -> void:
+	# Radio._process ticks through the dialogue tree-pause, so it also ticks while a conversation is SUSPENDED behind
+	# a sub-menu (Trade / Heal / Level Up / Install) — where is_active() reads false mid-conversation. An opted-in
+	# radio must stay ducked for that whole span, or it fades back UP mid-Trade and re-ducks on resume. Driven by
+	# putting the DialogueManager autoload into the suspended state directly (restored in after_each): pausing the
+	# real tree inside GUT would freeze the runner.
+	var r := _make()
+	r.duck_for_dialogue = true
+	r._state.set_playing(true)
+	DialogueManager._active = null
+	r._process(0.1)
+	assert_true(r._state.wants_audible(), "CONTROL: no conversation -> an opted-in, switched-on radio sounds")
+	var convo := DialogueResource.new()
+	DialogueManager._active = convo
+	DialogueManager._suspended = true
+	assert_false(DialogueManager.is_active(), "precondition: a suspended conversation reads INACTIVE")
+	assert_true(DialogueManager.is_engaged(), "precondition: ...while it still EXISTS")
+	r._process(0.1)
+	assert_false(r._state.wants_audible(),
+		"a conversation suspended behind a sub-menu keeps a duck_for_dialogue radio ducked instead of fading it up mid-menu")
+	DialogueManager._active = null
+	DialogueManager._suspended = false
+	convo = null
+	r.free()
 
 # --- Folder playlist (Slice B) ---
 
-func test_music_source_defaults() -> void:
+func test_a_default_radio_plays_its_curated_folder_in_disk_order() -> void:
+	# Dropped in with no configuration, a radio is not silent, and it plays its folder in on-disk (name) order
+	# rather than a shuffle — walk the whole playlist and check the order it actually plays.
 	var r := _make()
-	assert_eq(r.music_folder, "res://assets/audio/music", "default curated music folder")
-	assert_false(r.shuffle, "shuffle off by default (on-disk order)")
+	assert_eq(r.music_folder, "res://assets/audio/music",
+		"tests/test_wander_music.gd's placement rule scans exactly this folder as every radio's default - move both together")
+	assert_eq(r._get_configuration_warnings().size(), 0, "a default radio has tracks to play (no silent-radio warning)")
+	r._load_playlist()
+	var n: int = r._playlist.size()
+	assert_gt(n, 1, "precondition: the curated folder holds several tracks, so an order is observable")
+	var played: Array[String] = []
+	for _i in n:
+		played.append(r._playlist.current())
+		r._playlist.advance()
+	for i in range(1, n):
+		assert_true(played[i - 1] < played[i],
+			"a default radio plays in name order: %s must come before %s" % [played[i - 1], played[i]])
+	assert_eq(r._playlist.current(), played[0], "and after the last track it loops back to the first")
 	r.free()
 
 func test_owns_a_playlist() -> void:
@@ -253,13 +324,27 @@ func test_pinned_track_clears_the_silent_warning() -> void:
 	assert_eq(r._get_configuration_warnings().size(), 0, "a pinned track clears the silent warning")
 	r.free()
 
-func test_playback_is_null_guarded_off_tree() -> void:
-	# No _ready off-tree -> audio_player is null. Driving playback must no-op, never crash.
+func test_a_switched_off_radio_ignores_track_finished() -> void:
+	# A track ending on a radio that is OFF must not roll the playlist (turn-off stops the stream; a stray
+	# `finished` must not skip the player's place). Off-tree audio_player is null, and the fallback below is a REAL
+	# stream, so _play_current and the ON control's skip loop both resolve a non-null stream: only their
+	# `audio_player` null guards stand between it and a Nil dereference, which is a tracked script error that fails
+	# the test.
 	var r := _make()
-	r._load_playlist()
-	r._play_current()       # audio_player null -> returns
-	r._on_track_finished()  # not playing -> returns
-	assert_true(true, "no crash driving playback off-tree")
+	var counting := _CountingPlaylist.new()
+	counting.set_tracks(PackedStringArray(UNDECODABLE), false, 0, true)
+	r._playlist = counting
+	r.fallback_audio = AudioStreamWAV.new()  # a REAL stream, so only the audio_player null guards stand between it and a Nil dereference off-tree
+	r._play_current()
+	r._on_track_finished()
+	assert_eq(counting.advances, 0, "switched off -> a finished track does not move the playlist cursor")
+	assert_eq(counting.current(), UNDECODABLE[0], "and the radio keeps its place on the first track")
+	r._state.set_playing(true)
+	r._on_track_finished()
+	assert_gt(counting.advances, 0, "CONTROL: switched on, the same signal does roll the playlist")
+	r._playlist = MusicPlaylist.new()
+	r.fallback_audio = null
+	counting = null
 	r.free()
 
 # --- User folder override + external loading (Slice C) ---
@@ -286,14 +371,21 @@ func test_load_stream_handles_empty_and_missing() -> void:
 	assert_null(r._load_external_stream("user://nope.ogg"), "missing external ogg -> null via the file-exists guard")
 	r.free()
 
-func test_track_finished_skip_loop_is_bounded_off_tree() -> void:
-	# The dead-track-skip in _on_track_finished must TERMINATE even when nothing can play (audio_player null
-	# off-tree): bounded by playlist size, it can't spin. Drives it with the radio "on" + a loaded playlist.
+func test_track_finished_gives_up_after_one_pass_over_undecodable_tracks() -> void:
+	# One bad file in the player's own folder must be SKIPPED, but a folder where NOTHING decodes must give up after
+	# exactly one pass instead of spinning within a frame. Three undecodable tracks, radio on, nothing to fall back to.
 	var r := _make()
+	r.fallback_audio = null
+	var counting := _CountingPlaylist.new()
+	counting.set_tracks(PackedStringArray(UNDECODABLE), false, 0, true)
+	r._playlist = counting
 	r._state.set_playing(true)
-	r._load_playlist()
-	r._on_track_finished()  # loops at most size() times, plays nothing (no audio_player), returns — no hang/crash
-	assert_true(true, "the dead-track-skip loop terminates off-tree")
+	r._on_track_finished()
+	assert_eq(counting.advances, UNDECODABLE.size(),
+		"an all-undecodable folder is tried exactly once per track, then the radio gives up for this beat")
+	assert_eq(counting.current(), UNDECODABLE[0], "one full pass wraps the cursor back to where it started")
+	r._playlist = MusicPlaylist.new()
+	counting = null
 	r.free()
 
 # --- Pause-freeze: only the audio duck runs through a tree-pause; notes + bounce freeze with the world ---

@@ -36,6 +36,7 @@ const SoakReportScript := preload("res://scripts/tools/soak_report.gd")
 
 var _spawned: Array[Node] = []
 var _peak_by_id: Dictionary = {}  ## instance_id -> { name, pos, cycles } peak _stranded_cycles seen this run
+var _move_by_id: Dictionary = {}  ## instance_id -> { start: Vector3, moved: float } farthest this NPC got from its spawn
 
 
 ## Run the full soak and return a SoakReport. Async: awaits physics frames throughout, so call as
@@ -46,6 +47,7 @@ func run_soak() -> RefCounted:
 	report.level_name = String(level.name) if level != null else "<none>"
 	report.npc_count = npc_count
 	_peak_by_id.clear()
+	_move_by_id.clear()
 
 	# Querying the nav map before its first sync ERRORS, and a bad/edited bake never readies — so gate the whole
 	# run on it and report INCONCLUSIVE rather than false-failing. See [[nav-map-query-before-sync]].
@@ -106,6 +108,8 @@ func _spawn_wave(anchor: Vector3) -> void:
 		if npc is Node3D:
 			(npc as Node3D).global_position = anchor + _scatter()
 		_spawned.append(npc)
+		if npc is Node3D:
+			_move_by_id[npc.get_instance_id()] = {"start": (npc as Node3D).global_position, "moved": 0.0}
 
 
 func _free_wave() -> void:
@@ -149,6 +153,13 @@ func _sample_stranded() -> void:
 			continue
 		var cycles := int(n.get(&"_stranded_cycles"))
 		var id := n.get_instance_id()
+		# Liveness alongside the strand counter: the farthest this body ever got from where it spawned. A wave that
+		# never moves reports no strands, so the test needs this to tell a clean bake from a dead one.
+		if n is Node3D and _move_by_id.has(id):
+			var mv: Dictionary = _move_by_id[id]
+			var start: Vector3 = mv.get("start", Vector3.ZERO)
+			mv["moved"] = maxf(float(mv.get("moved", 0.0)), start.distance_to((n as Node3D).global_position))
+			_move_by_id[id] = mv
 		var prev: Dictionary = _peak_by_id.get(id, {})
 		if cycles > int(prev.get("cycles", -1)):
 			var pos := (n as Node3D).global_position if n is Node3D else Vector3.ZERO
@@ -164,6 +175,16 @@ func _record_stranded(report: RefCounted) -> void:
 		if c >= SoakReportScript.STRANDED_THRESHOLD:
 			report.stranded.append(e)
 	report.peak_stranded_cycles = peak
+	var movers := 0
+	var farthest := 0.0
+	for id in _move_by_id:
+		var moved := float((_move_by_id[id] as Dictionary).get("moved", 0.0))
+		farthest = maxf(farthest, moved)
+		if moved >= SoakReportScript.MOVED_EPS:
+			movers += 1
+	report.wanderers_seen = _move_by_id.size()
+	report.wanderers_moved = movers
+	report.farthest_wander = farthest
 
 
 # --- navmesh + counts -------------------------------------------------------------------------------------------

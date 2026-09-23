@@ -72,17 +72,22 @@ func test_the_arm_mount_is_inherited_from_the_appearance_catalog() -> void:
 	_teardown(parts)
 
 
-func test_the_fp_offset_nudges_the_catalog_shoulder_without_replacing_it() -> void:
-	# The fp_torso_offset idiom: first-person-specific framing is a nudge ADDED to the authored mount, so a
-	# catalog retune still moves the arms and the nudge keeps meaning the same thing.
+func test_the_fp_offset_and_scale_mult_adjust_the_catalog_mount_without_replacing_it() -> void:
+	# The fp_torso_offset idiom: first-person-specific framing is a nudge ADDED to the authored mount (and a
+	# multiplier ON the authored scale), so a catalog retune still moves the arms and the knobs keep meaning the same
+	# thing. Both knobs ship neutral (+0, x1), so they are driven here with distinctive values: at the shipped x1 a
+	# mount that ignored the multiplier would be indistinguishable from one that honoured it.
 	var cat := _catalog()
 	var parts := _build()
 	var body = parts["body"]
 	var rig: BodyModelSwap = parts["rig"]
 	body.fp_body_arm_offset = Vector3(0.01, -0.2, 0.03)
+	body.fp_body_arm_scale_mult = 0.8
 	body._configure_fp_body_arms(rig)
 	assert_eq(rig.arm_position, cat.arm_position + Vector3(0.01, -0.2, 0.03),
 		"fp_body_arm_offset must ADD to the catalog's arm_position, never replace it")
+	assert_almost_eq(rig.arm_scale, cat.arm_scale * 0.8, 0.0001,
+		"fp_body_arm_scale_mult 0.8 must shorten the CATALOG's arm to 80% — the first-person diet rides on the shared scale, never replaces it")
 	_teardown(parts)
 
 
@@ -141,16 +146,77 @@ func test_the_toggle_and_a_whole_body_look_both_mount_nothing() -> void:
 func test_the_arms_dissolve_on_the_same_curve_as_the_torso_they_hang_off() -> void:
 	# BodyModelSwap gained arm_transparency for exactly one reason: the FP torso already fades out (the look-down
 	# dissolve, and fully on crouch), and arms that DON'T fade with it leave two limbs floating under the camera
-	# with no body — worse-looking than either extreme. Source-pinned because the driver is a per-frame write.
-	var rig := BodyModelSwap.new()
-	assert_eq(rig.arm_transparency, 0.0,
-		"arm_transparency must default to 0 — every existing NPC rig has to take the same zero-cost early-out body_transparency does")
-	rig.free()
-	var src := FileAccess.get_file_as_string(FP_BODY_SOURCE)
-	assert_true(src.contains("var arm_see := lerpf(see, 1.0, _fp_body_arm_hide_t)"),
-		"_update_fp_torso must build the arms' see-through from the torso's own `see`, so the two can never disagree — the hide term composes ON TOP of it")
-	assert_true(src.contains("_fp_arm_catalog_pos + fp_body_arm_offset - Vector3(0.0, sink, 0.0)"),
-		"and must sink the shoulders by the same crouch drop as the chest, or the arms detach as you crouch")
+	# with no body — worse-looking than either extreme. DRIVEN through the real per-frame _update_fp_torso on the real
+	# built rig (off-tree, the test_fp_torso idiom): the arms must read the chest's own value, the drawn-weapon hide
+	# must compose ON TOP of it (eased, never touching the chest), and the shoulders must keep the FP offset while
+	# they sink with the chest. (test_fp_torso pins the look/crouch curve itself; this file owns the ARMS on it.)
+	var npc_rig := BodyModelSwap.new()
+	assert_eq(npc_rig.arm_transparency, 0.0,
+		"a fresh BodyModelSwap's arms must be SOLID (0) — every NPC rig ships opaque and takes the zero-cost early-out body_transparency does")
+	npc_rig.free()
+	var parts := _build()
+	var body = parts["body"]
+	var host = parts["host"]
+	var head := Head.new()
+	var crouch := Crouch.new()
+	host.head = head
+	host.crouch = crouch
+	var ws := Weapon.new()
+	var atk := Attack.new()
+	ws.attack = atk
+	host.weapon_system = ws
+	atk.holstered = true
+	head.position.y = 0.4  # the standing Head height the build caches
+	body.fp_body_arm_offset = Vector3(0.02, -0.05, 0.01)
+	body.fp_torso_transparency = 0.25  # a distinctive chest ghost amount, so "same as the chest" can't pass by luck
+	body._build_first_person_legs()
+	var fp: BodyModelSwap = body._fp_legs
+	if fp == null or fp.body_model == null or fp.arm_model == null:
+		fail_test("the FP rig must build with a chest AND arms for this test to compare them")
+		_free_arm_rig(parts, head, crouch, ws, atk)
+		return
+	var dt := 1.0 / 60.0
+	head.rotation_degrees.x = -85.0  # looking fully down: the chest is revealed at its ghost amount
+	crouch.crouch_t = 0.5            # ...and half-way into a crouch, so the shared value is an in-between one
+	body._update_fp_torso(dt)
+	var chest := fp.body_transparency
+	assert_true(chest > 0.25 and chest < 1.0, "precondition: the chest is part-faded (see %s)" % chest)
+	assert_almost_eq(fp.arm_transparency, chest, 0.003,
+		"holstered, the body arms must dissolve on the CHEST's own value (%s) — never outliving or out-fading it" % chest)
+	var arm_pos_standing := fp.arm_position
+	var chest_pos_standing := fp.body_model_position
+	head.position.y = 0.4 - 0.3  # the camera lowered 0.3 m
+	body._update_fp_torso(dt)
+	assert_almost_eq(fp.arm_position.y - arm_pos_standing.y, fp.body_model_position.y - chest_pos_standing.y, 0.001,
+		"the shoulders must sink exactly as far as the chest, or the arms detach as you crouch")
+	assert_lt(fp.arm_position.y, arm_pos_standing.y, "control: the crouch drop really moved the shoulders down")
+	assert_almost_eq(fp.arm_position.x, _catalog().arm_position.x + 0.02, 0.0001,
+		"the crouch sink must keep the FP arm offset on top of the catalog shoulder, not replace it (x)")
+	assert_almost_eq(fp.arm_position.z, _catalog().arm_position.z + 0.01, 0.0001, "...(z)")
+	head.position.y = 0.4
+	# Draw the weapon: the hide term eases the arms toward invisible ON TOP of the chest's value.
+	atk.holstered = false
+	body._update_fp_torso(dt)
+	assert_true(fp.arm_transparency > chest + 0.003 and fp.arm_transparency < 1.0,
+		"one frame after drawing, the arms must be EASING out (see %s) — not popping, not ignoring the draw" % fp.arm_transparency)
+	for _i in range(120):
+		body._update_fp_torso(dt)
+	assert_almost_eq(fp.arm_transparency, 1.0, 0.003, "two seconds after drawing, the body arms must be gone — one pair of arms on screen")
+	assert_almost_eq(fp.body_transparency, chest, 0.003, "...while the CHEST keeps its own value — the hide is the arms' term alone")
+	atk.holstered = true
+	for _i in range(120):
+		body._update_fp_torso(dt)
+	assert_almost_eq(fp.arm_transparency, chest, 0.003,
+		"holstering again must bring the arms back onto the chest's curve, not leave them hidden or fully solid")
+	_free_arm_rig(parts, head, crouch, ws, atk)
+
+
+func _free_arm_rig(parts: Dictionary, head: Node, crouch: Node, ws: Node, atk: Node) -> void:
+	_teardown(parts)  # the host frees the FP rig _build_first_person_legs parented under it
+	head.free()
+	crouch.free()
+	ws.free()
+	atk.free()
 
 
 func test_the_body_arms_get_out_of_the_way_when_the_view_model_owns_your_hands() -> void:
@@ -189,42 +255,28 @@ func test_the_body_arms_get_out_of_the_way_when_the_view_model_owns_your_hands()
 	_teardown(parts)
 
 
-## The FP body rig exactly as _build_first_person_legs + _configure_fp_body_arms + _configure_fp_torso build it,
-## in-tree so the parts really instance and a real AABB can be measured off real transforms. Still NOT a Player —
-## a bare BodyModelSwap with three models and no _ready anywhere. Shared by the floor and stack tests below, which
-## ask two different questions of the same geometry.
-func _mirror_fp_rig() -> BodyModelSwap:
-	var cat := _catalog()
+## The FP body rig exactly as the PLAYER builds it: the real _build_first_person_legs on a bare off-tree Player host
+## (no _ready anywhere), which stamps the legs, the catalog arms and torso, fp_leg_offset and fp_body_scale. So a
+## regression in that assembly (a dropped scale write, a moved mount, a lost torso slice) moves what is measured
+## here, not just a retune of the knobs it reads. BodyModelSwap only instances its parts once it is in the tree, and
+## a Player in the tree would run its _ready, so the finished rig is then moved under this test: a plain Node, so the
+## rig's own transform is its world transform — the Player's local space, where _player_floor_y measures the floor.
+## Shared by the floor and stack tests below, which ask two different questions of the same geometry.
+func _production_fp_rig() -> BodyModelSwap:
+	var host = load(PLAYER_SOURCE).new()
 	var body = load(FP_BODY_SOURCE).new()
-	var rig := BodyModelSwap.new()
-	rig.animate_arms = false  # REST pose: the worst case for depth (a swing rotates the far end UP)
-	rig.animate_legs = false
-	rig.breathe = false
-	assert_eq(cat.leg_position, Vector3(0.095, -0.265, -0.02),
-		"_build_first_person_legs hardcodes this hip offset; if the catalog's leg_position diverges from it this test stops guarding the real rig")
-	rig.leg_scale = body.fp_leg_scale
-	rig.leg_position = cat.leg_position
-	rig.leg_rotation = cat.leg_rotation
-	rig.leg_model = cat.leg_model
-	rig.arm_scale = cat.arm_scale * body.fp_body_arm_scale_mult
-	rig.arm_position = cat.arm_position + body.fp_body_arm_offset
-	rig.arm_rotation = cat.arm_rotation
-	rig.arm_model = cat.arm_model
-	# The TORSO slice, which this mirror used to omit — and omitting it is exactly why no test could see the legs
-	# climb over the chest. The stack question is meaningless without the part the legs were stacking on top of.
-	var part := cat.body_option("")
-	if part == null:
-		part = cat.default_body()
-	assert_not_null(part, "the catalog must resolve a default body — it is the chest the FP rig wears")
-	if part != null:
-		rig.body_model_scale = part.scale
-		rig.body_model_rotation = part.rotation + Vector3(0.0, 180.0, 0.0)
-		rig.body_model_position = part.position + body.fp_torso_offset
-		rig.body_model = part.model
-	add_child_autofree(rig)
-	rig.position = body.fp_leg_offset
-	rig.scale = Vector3.ONE * body.fp_body_scale  # ⭐the whole-rig diet — every measurement below is in Player metres
+	body.host = host
+	body._build_first_person_legs()
+	var rig: BodyModelSwap = body._fp_legs
 	body.free()
+	if rig == null:
+		host.free()
+		return null
+	assert_true(rig.get_parent() == host, "precondition: _build_first_person_legs parents the FP body rig under the PLAYER")
+	host.remove_child(rig)
+	host.free()
+	add_child_autofree(rig)  # _ready -> _rebuild instances every part at the transforms production stamped
+	rig.process_mode = Node.PROCESS_MODE_DISABLED  # measure the REST pose _rebuild stamped; no gait/breath frame moves a part first
 	return rig
 
 
@@ -276,11 +328,14 @@ func test_no_limb_hangs_through_the_floor() -> void:
 	# free to move things as long as the body still stands on the floor.
 	var floor_y := _player_floor_y()
 	assert_ne(floor_y, INF, "Player.tscn must have a PlayerCollisionShape — it defines where the feet stand")
-	var rig := _mirror_fp_rig()
+	var rig := _production_fp_rig()
+	assert_true(rig != null, "_build_first_person_legs must build an FP body rig with the shipped knobs")
+	if rig == null:
+		return
 	for row in [["arm L", rig._arm_left], ["arm R", rig._arm_right], ["leg L", rig._leg_left],
 			["leg R", rig._leg_right], ["torso", rig._body]]:
 		var part: Node3D = row[1]
-		assert_not_null(part, "%s must have instanced — the mount is read off the catalog" % row[0])
+		assert_not_null(part, "%s must have instanced — the production build mounts every part" % row[0])
 		if part == null:
 			continue
 		var span := _y_span(part)
@@ -298,7 +353,10 @@ func test_the_hips_sit_under_the_chest() -> void:
 	# It survived because the only geometric pin here measured CLEARANCE, which is one-sided — it looks down, so a
 	# part mounted too HIGH passes it silently, and one mounted too LOW (the torso, which is what actually moved)
 	# passes it too. THIS is the other side. The frame probe prints the same comparison as its STACK line.
-	var rig := _mirror_fp_rig()
+	var rig := _production_fp_rig()
+	assert_true(rig != null, "_build_first_person_legs must build an FP body rig with the shipped knobs")
+	if rig == null:
+		return
 	assert_not_null(rig._leg_left, "the legs must instance — this test is about where they sit")
 	assert_not_null(rig._body, "the torso must instance, or there is nothing for the hips to sit under")
 	if rig._leg_left == null or rig._body == null:
@@ -318,9 +376,10 @@ func test_the_wall_pose_never_wipes_the_body_scale() -> void:
 	# while standing still, looking straight ahead. The user's report was "the body can be seen without looking
 	# down"; `fp_body_scale` had simply never survived past the first physics frame.
 	#
-	# ⭐Nothing else in this project could catch it: the frame probe and every other geometry test here BUILD
-	# THEIR OWN RIG and set the scale themselves, so they all measured a rig this call had never touched. The pin
-	# has to drive the real call. It runs on a bare component with a stub host — no Player._ready anywhere.
+	# ⭐Nothing else in this project could catch it: the frame probe builds its own rig and sets the scale itself,
+	# and the floor and stack tests here measure the rig _build_first_person_legs has JUST built, before any physics
+	# frame — none of them ever runs this call. The pin has to drive the real call. It runs on a bare component
+	# with a stub host — no Player._ready anywhere.
 	# A bare off-tree Player as the host (the _build() idiom — no _ready, so none of the rig/audio/nav setup
 	# runs). It answers all three reads this call makes: _shadow_wall_blend defaults 0.0 and a CharacterBody3D
 	# that has never moved reports is_on_wall() false, which lands us in the REST branch on purpose.

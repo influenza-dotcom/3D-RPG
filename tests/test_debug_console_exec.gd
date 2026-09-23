@@ -5,7 +5,7 @@ extends GutTest
 ## add_child'd, so _ready (the debug gate, the UI build, the autoexec poll, the binds load) never runs — this file
 ## proves the script parses and the helpers behave, the same bar tests/test_debug_commands.gd sets for the UI.
 ##
-## Disk: ONLY user://test_debug_binds_* scratch paths, removed in after_each. The console's real files
+## Disk: ONLY user://test_debug_binds_* / user://test_debug_exec_* scratch paths, removed in after_each. The console's real files
 ## (user://debug_binds.cfg, user://autoexec.cfg) are never read or written here. NEVER_WRITTEN is a res:// path
 ## the user://-only guard must refuse — it exists to prove nothing lands there (and is swept if a regression does).
 
@@ -17,10 +17,27 @@ const Commands := preload("res://scripts/components/debug_commands.gd")
 
 const TMP_BINDS := "user://test_debug_binds_tmp.cfg"
 const NEVER_WRITTEN := "res://tests/test_debug_binds_never_written.cfg"
+## Two scratch command files for the exec nesting tests (distinct lines so queue ORDER is observable).
+const TMP_EXEC_OUTER := "user://test_debug_exec_outer_tmp.cfg"
+const TMP_EXEC_INNER := "user://test_debug_exec_inner_tmp.cfg"
+
+
+## The real console with its two tree-bound edges stubbed: the scrollback append is RECORDED instead of needing the
+## built log (off-tree, the shipped _add_line drops every line because the log box was never built), and `keys`' walk
+## of the scene tree for OTHER drop-ins' toggle keys answers "none" (off-tree, get_tree() raises an engine error).
+## _run_meta's dispatch, the binds file read and every line the console composes are the shipped code.
+class _ConsoleSpy extends ConsoleScript:
+	var logged: PackedStringArray = PackedStringArray()
+
+	func _add_line(text: String, _color: Color) -> void:
+		logged.append(text)
+
+	func _toggle_key_pairs() -> Array:
+		return []
 
 
 func after_each() -> void:
-	for p in [TMP_BINDS, NEVER_WRITTEN]:
+	for p in [TMP_BINDS, NEVER_WRITTEN, TMP_EXEC_OUTER, TMP_EXEC_INNER]:
 		if FileAccess.file_exists(p):
 			DirAccess.remove_absolute(p)
 
@@ -137,6 +154,9 @@ func test_bind_key_from_word_accepts_enum_spelling_and_lowercase() -> void:
 func test_bind_key_from_word_refuses_junk_and_modifier_combos() -> void:
 	assert_eq(ConsoleScript.bind_key_from_word("notakey"), KEY_NONE, "an unknown word is KEY_NONE")
 	assert_eq(ConsoleScript.bind_key_from_word(""), KEY_NONE, "blank is KEY_NONE")
+	# The engine itself WOULD resolve a combo (to F6 | the Ctrl mask), so KEY_NONE here is the console's own refusal,
+	# not a lookup miss — a bind stored under a masked code could never match the raw keycode the fire path compares.
+	assert_ne(int(OS.find_keycode_from_string("Ctrl+F6")), KEY_NONE, "precondition: Godot parses 'Ctrl+F6' into a masked keycode")
 	assert_eq(ConsoleScript.bind_key_from_word("Ctrl+F6"), KEY_NONE, "modifier combos are refused (the fire path compares the raw keycode)")
 
 
@@ -149,23 +169,86 @@ func test_bind_key_round_trips_through_get_keycode_string() -> void:
 
 # --- the console off-tree: parses, exports present, binds file round-trip ------------------------------------
 
-func test_console_constructs_off_tree_with_scripting_exports() -> void:
+func test_console_off_tree_refuses_meta_until_enabled_and_keeps_its_files_under_user() -> void:
 	# .new() without add_child never runs _ready: no debug gate, no UI, no autoexec poll, no binds load.
 	var console = (ConsoleScript as GDScript).new()
-	assert_not_null(console, "DebugConsole constructs off-tree")
-	assert_true(bool(console.get("run_autoexec")), "autoexec is on by default (debug builds only, gated in _ready)")
-	assert_eq(String(console.get("autoexec_path")), "user://autoexec.cfg", "the default autoexec lives under user://")
-	assert_true(bool(console.get("mirror_to_stdout")), "the stdout mirror is on by default")
-	assert_eq(int(console.get("exec_depth_limit")), 4, "the exec nesting cap defaults to 4")
-	assert_eq(String(console.get("binds_path")), "user://debug_binds.cfg", "binds persist under user://")
+	# DebugMenu finds a console DUCK-TYPED (_search_console: echo + run_line) and forwards exec/bind through
+	# run_meta via has_method — renaming any of the three silently disconnects the menu from the console.
 	assert_true(console.has_method(&"run_line"), "run_line is the public typed-line entry (the menu's fallback route)")
 	assert_true(console.has_method(&"run_meta"), "run_meta is the public entry the menu forwards exec/bind through")
 	assert_true(console.has_method(&"echo"), "echo is the public entry the menu prints through")
+	# The default files must live under user:// — an exported build cannot write res://, and a dev build must never
+	# write a project file (the same rule _save_binds enforces on a hand-set path).
+	assert_true(String(console.get("binds_path")).begins_with("user://"), "binds persist under user://: %s" % String(console.get("binds_path")))
+	assert_true(ConsoleScript.resolve_exec_path(String(console.get("autoexec_path"))).begins_with("user://"),
+		"the default autoexec resolves under user://: %s" % String(console.get("autoexec_path")))
 	# Off-tree, _ready never ran, so the debug gate never opened: run_meta must refuse with a line, not act.
 	var refused: Variant = console.call(&"run_meta", "bind", PackedStringArray())
 	assert_true(refused is PackedStringArray, "run_meta always answers with lines")
 	assert_true((refused as PackedStringArray).size() == 1 and String((refused as PackedStringArray)[0]).contains("disabled"),
 		"an un-gated console says it is disabled instead of touching its binds: %s" % [refused])
+	# Control: the SAME call past the gate answers the bind listing, so the refusal above is the gate and nothing else.
+	console.set("_enabled", true)
+	var listed: PackedStringArray = console.call(&"run_meta", "bind", PackedStringArray())
+	assert_gt(listed.size(), 0, "an enabled console answers `bind` with lines")
+	assert_false(String(listed[0]).contains("disabled"), "past the gate the console lists its binds instead of refusing: %s" % [listed])
+	assert_true(String(listed[0]).begins_with("bind:"), "the listing is the bind command's own output: %s" % [listed])
+	console.free()
+
+
+func _write_exec(path: String, text: String) -> void:
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	assert_true(f != null, "scratch exec file %s opens for writing" % path)
+	if f != null:
+		f.store_string(text)
+		f.close()
+
+
+func _queued_lines(console: Object) -> PackedStringArray:
+	var out := PackedStringArray()
+	for entry in console.get("_exec_queue"):
+		out.append(String(entry["line"]))
+	return out
+
+
+func test_exec_depth_limit_refuses_only_past_the_cap() -> void:
+	# A file that execs itself must stop at exec_depth_limit, but every level UP TO the cap must still run.
+	_write_exec(TMP_EXEC_OUTER, "god on\nheal\n")
+	var console = (ConsoleScript as GDScript).new()
+	console.set("exec_depth_limit", 2)
+	var top: PackedStringArray = console.call(&"_exec_file", TMP_EXEC_OUTER, 1)
+	assert_true(top.size() == 1 and top[0].contains("queued"), "a top-level exec queues its file: %s" % [top])
+	var at_cap: PackedStringArray = console.call(&"_exec_file", TMP_EXEC_OUTER, 2)
+	assert_true(at_cap.size() == 1 and at_cap[0].contains("queued"), "a nested exec AT the cap still runs: %s" % [at_cap])
+	assert_eq(_queued_lines(console).size(), 4, "both files' lines are queued")
+	var past: PackedStringArray = console.call(&"_exec_file", TMP_EXEC_OUTER, 3)
+	assert_true(past.size() == 1 and past[0].contains("refused"), "one level past the cap is refused: %s" % [past])
+	assert_eq(_queued_lines(console).size(), 4, "and the refused file queued nothing")
+	# The cap is honoured whatever it is set to, and a 0/negative cap still lets a typed top-level exec run.
+	console.set("exec_depth_limit", 0)
+	var floor_top: PackedStringArray = console.call(&"_exec_file", TMP_EXEC_OUTER, 1)
+	assert_true(floor_top[0].contains("queued"), "a cap of 0 floors to 1: a typed exec is never refused: %s" % [floor_top])
+	var floor_nested: PackedStringArray = console.call(&"_exec_file", TMP_EXEC_OUTER, 2)
+	assert_true(floor_nested[0].contains("refused"), "…but any nesting under a floored cap is: %s" % [floor_nested])
+	console.free()
+
+
+func test_nested_exec_splices_in_front_and_a_top_level_exec_appends() -> void:
+	# A nested exec reads like a shell `source`: its lines run before the rest of the outer file. A second typed exec
+	# while one is still stepping runs AFTER it, never interleaved.
+	_write_exec(TMP_EXEC_OUTER, "god on\nheal\n")
+	_write_exec(TMP_EXEC_INNER, "clock\n")
+	var console = (ConsoleScript as GDScript).new()
+	console.call(&"_exec_file", TMP_EXEC_OUTER, 1)
+	console.call(&"_exec_file", TMP_EXEC_INNER, 2)
+	assert_eq(_queued_lines(console), PackedStringArray(["clock", "god on", "heal"]),
+		"the nested file's line runs next, ahead of the outer file's remaining lines")
+	console.call(&"_exec_file", TMP_EXEC_INNER, 1)
+	assert_eq(_queued_lines(console), PackedStringArray(["clock", "god on", "heal", "clock"]),
+		"a top-level exec queues behind everything already stepping")
+	var missing: PackedStringArray = console.call(&"_exec_file", "user://test_debug_exec_definitely_absent.cfg", 1)
+	assert_true(missing[0].contains("no such file"), "a missing file is reported: %s" % [missing])
+	assert_eq(_queued_lines(console).size(), 4, "and queues nothing")
 	console.free()
 
 
@@ -244,11 +327,32 @@ func test_load_binds_skips_junk_and_the_console_toggle_key() -> void:
 
 
 func test_load_binds_with_no_file_is_empty_and_quiet() -> void:
-	var console = (ConsoleScript as GDScript).new()
-	console.set("binds_path", "user://test_debug_binds_definitely_absent.cfg")
-	console.call(&"_load_binds")
-	var loaded: Dictionary = console.get("_binds")
-	assert_eq(loaded.size(), 0, "no file means no binds — the normal first-run state")
+	# A first run has no binds file yet. Loading must CLEAR whatever the console already held (a reload never keeps a
+	# stale key live) and say nothing — the warning line is reserved for a file that EXISTS but will not parse. The
+	# console is seeded so the clear is visible, and the spy records the scrollback an off-tree console would drop.
+	var console := _ConsoleSpy.new()
+	console.binds_path = "user://test_debug_binds_definitely_absent.cfg"
+	console._binds[KEY_F6] = "god"
+	console._load_binds()
+	assert_eq(console._binds.size(), 0, "no file means no binds — a stale bind from before the load is cleared: %s" % [console._binds])
+	assert_eq(console.logged.size(), 0, "a missing file is the normal first-run state and prints nothing: %s" % [console.logged])
+	# CONTROL: the same console pointed at a file that EXISTS but will not parse does warn (naming the file), so the
+	# silence above is the missing-file branch and not a console that can never print.
+	var f := FileAccess.open(TMP_BINDS, FileAccess.WRITE)
+	assert_true(f != null, "scratch binds file %s opens for writing" % TMP_BINDS)
+	if f != null:
+		f.store_string("[binds
+F6 = \"god
+")  # an unterminated section header: ConfigFile.load refuses it
+		f.close()
+	console.binds_path = TMP_BINDS
+	console._binds[KEY_F6] = "god"
+	console._load_binds()
+	assert_engine_error("ConfigFile parse error", "the engine itself reports the unparseable fixture (expected, consumed here)")
+	assert_eq(console._binds.size(), 0, "an unparseable file loads no binds either")
+	assert_eq(console.logged.size(), 1, "an existing file that will not load is reported, once: %s" % [console.logged])
+	if console.logged.size() == 1:
+		assert_true(console.logged[0].contains(TMP_BINDS), "the warning names the file to fix or delete: %s" % console.logged[0])
 	console.free()
 
 
@@ -258,27 +362,63 @@ func test_registry_carries_the_exec_and_bind_meta_rows() -> void:
 	var exec_row: Dictionary = Commands.find("exec")
 	assert_false(exec_row.is_empty(), "the registry has an `exec` row")
 	assert_eq(exec_row["mod"], &"meta", "exec is a meta row (the console answers it)")
-	assert_eq(int(exec_row["min_args"]), 1, "exec needs a file")
+	# _run_meta reads args[0] for exec unguarded, so validate() is what must refuse a bare `exec`.
+	assert_ne(Commands.validate(exec_row, PackedStringArray()), "", "a bare `exec` is refused (it needs a file)")
+	assert_eq(Commands.validate(exec_row, PackedStringArray(["repro.cfg"])), "", "`exec repro.cfg` runs")
 	var bind_row: Dictionary = Commands.find("bind")
 	assert_false(bind_row.is_empty(), "the registry has a `bind` row")
 	assert_eq(bind_row["mod"], &"meta", "bind is a meta row (the console answers it)")
-	assert_eq(int(bind_row["min_args"]), 0, "bare `bind` lists")
-	var kinds: Array = bind_row["args"]
-	assert_eq(kinds.size(), 2, "bind takes at most key + line")
+	assert_eq(Commands.validate(bind_row, PackedStringArray()), "", "a bare `bind` lists")
+	assert_eq(Commands.validate(bind_row, PackedStringArray(["F6"])), "", "`bind F6` clears")
+	assert_eq(Commands.validate(bind_row, PackedStringArray(["F6", "god; noclip on"])), "", "`bind F6 \"line\"` sets")
+	assert_ne(Commands.validate(bind_row, PackedStringArray(["F6", "god", "extra"])), "",
+		"a third token is refused — an unquoted chained line must not be silently truncated to its first word")
 	# `wait` is deliberately NOT a row: it is exec-only and handled before run_line.
 	assert_true(Commands.find("wait").is_empty(), "wait is exec-only, never a registry row")
 
 
-## Every `&"meta"` row must have a match arm in the console's _run_meta — pinned by SOURCE TEXT, the same idiom
-## tests/test_debug_commands.gd uses for the player/world modules (run_line cannot be driven off-tree: it needs
-## the built log). The menu now FORWARDS unknown meta rows to the console, so a missing arm here is the only place
-## a meta command can go dead — it would print the console's NO_HANDLER line from both surfaces.
+## Every `&"meta"` row must reach a real arm in the console's _run_meta. The menu FORWARDS any meta row it has no
+## answer for to run_meta, so a missing arm is the one place a meta command goes dead — it answers the console's
+## NO_HANDLER line on both surfaces. DRIVEN: each row runs through the public run_meta, past the debug gate, with the
+## smallest argv its registry row validates (a TEXT slot gets a file name that does not exist, so `exec` queues nothing).
 func test_console_has_a_meta_case_for_every_meta_row() -> void:
-	var src := FileAccess.get_file_as_string("res://scripts/components/debug_console.gd")
-	assert_false(src.is_empty(), "the console script must be readable")
+	var console := _ConsoleSpy.new()
+	console._enabled = true   # off-tree _ready never opened the debug gate
+	# CONTROL: a meta name with no arm DOES come back as the NO_HANDLER line, so the check below can tell the two apart.
+	var unknown := "zz_not_a_meta_row"
+	assert_eq(console.run_meta(unknown, PackedStringArray()), PackedStringArray([ConsoleScript.NO_HANDLER % [unknown, "meta"]]),
+		"a meta name with no arm answers the console's no-handler line")
+	var checked := 0
 	for row in Commands.COMMANDS:
 		if row["mod"] != &"meta":
 			continue
+		checked += 1
 		var n := String(row["name"])
-		assert_true(src.contains("\"%s\":" % n),
-			"meta row '%s' has no `\"%s\":` case in debug_console.gd _run_meta — the command is dead on both surfaces" % [n, n])
+		var argv := _smallest_valid_argv(row)
+		assert_eq(Commands.validate(row, argv), "",
+			"fixture: the probe argv %s satisfies meta row '%s' (extend _smallest_valid_argv for its argument kind)" % [argv, n])
+		var answer: PackedStringArray = console.run_meta(n, argv)
+		assert_false(answer.has(ConsoleScript.NO_HANDLER % [n, "meta"]),
+			"meta row '%s' has an arm in debug_console.gd _run_meta — without one the command is dead on both surfaces: %s" % [n, answer])
+	assert_gt(checked, 0, "the registry carries meta rows to check")
+	assert_eq(_queued_lines(console).size(), 0, "the probe never queued a command file (the exec probe names a file that does not exist)")
+	console.free()
+
+
+## `row`'s min_args arguments, one harmless word per slot kind: a TEXT slot names a user:// file that never exists.
+func _smallest_valid_argv(row: Dictionary) -> PackedStringArray:
+	var argv := PackedStringArray()
+	var kinds: Array = row["args"]
+	for i in int(row["min_args"]):
+		match int(kinds[i]):
+			Commands.Kind.NUMBER:
+				argv.append("1")
+			Commands.Kind.TOGGLE:
+				argv.append("off")
+			Commands.Kind.COMMAND:
+				argv.append("help")
+			Commands.Kind.VERB:
+				argv.append(String((row["verbs"] as Array)[0]))
+			_:
+				argv.append("test_debug_exec_definitely_absent.cfg")
+	return argv

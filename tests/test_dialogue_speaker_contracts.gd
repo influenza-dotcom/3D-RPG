@@ -8,31 +8,33 @@ extends GutTest
 ## open_dialogue_station(player) — discovered by a direct-children has_method scan of BOTH names
 ## (dialogue_manager.gd _station_options); the transaction SCREENS keep their own duck-typed reads of the same
 ## components (COMPONENT_CONTRACTS below). The cost of duck-typing is unchanged: a rename silently DROPS the
-## option / kills the screen with NO compile error. This file is the guard — labels, orders, reasons, and the
-## roster itself are pinned. Scripts are loaded + instantiated OFF-TREE (no add_child -> no _ready), so it's
+## option / kills the screen with NO compile error. This file is the guard — labels, reasons, the roster itself,
+## and the painted menu ORDER (driven through DialogueManager's own sort, not transcribed as numbers) are pinned.
+## Scripts are loaded + instantiated OFF-TREE (no add_child -> no _ready), so it's
 ## headless-safe; dialogue_station_option() reads only consts + autoload signal handles (GUT runs with autoloads,
 ## exactly as tests/test_dialogue_suspend_closed.gd already relies on).
 
 # THE STATION ROSTER — roster-as-spec for the dialogue-station contract. One row per dual-mode component: the
 # label (referenced as the PlayerText const, never a string literal — the pin is "the component paints THIS
-# authored const", not a copy of its text), the DIALOGUE_ORDER const value, _suspend_for_menu's reason string,
-# and whether the station suspends (carries a `closed` resume Signal) or is act-and-close (Bonfire only).
+# authored const", not a copy of its text), _suspend_for_menu's reason string, and whether the station suspends
+# (carries a `closed` resume Signal) or is act-and-close (Bonfire only). The DIALOGUE_ORDER numbers are NOT copied
+# here: only their relative order is player-visible, and that is proven through the real sort below.
 # The row order here IS the player-visible menu order; a NEW station adds one row here + one component —
 # DialogueManager itself needs no edit.
 const STATION_CONTRACTS := {
-	"res://scripts/components/merchant.gd": {"label": PlayerText.DIALOGUE_OPTION_TRADE, "order": 10, "reason": "trade", "suspends": true},
-	"res://scripts/components/healer.gd": {"label": PlayerText.DIALOGUE_OPTION_HEAL, "order": 20, "reason": "heal", "suspends": true},
-	"res://scripts/components/bonfire.gd": {"label": PlayerText.DIALOGUE_OPTION_REST, "order": 30, "reason": "", "suspends": false},
-	"res://scripts/components/level_up.gd": {"label": PlayerText.DIALOGUE_OPTION_LEVEL_UP, "order": 40, "reason": "level_up", "suspends": true},
-	"res://scripts/components/chip_installer.gd": {"label": PlayerText.DIALOGUE_OPTION_INSTALL, "order": 50, "reason": "install", "suspends": true},
-	"res://scripts/components/weapon_bench.gd": {"label": PlayerText.DIALOGUE_OPTION_MODIFY, "order": 55, "reason": "modify", "suspends": true},
-	"res://scripts/components/chess_match.gd": {"label": PlayerText.DIALOGUE_OPTION_PLAY_CHESS, "order": 60, "reason": "chess", "suspends": true},
-	"res://scripts/components/atm.gd": {"label": PlayerText.DIALOGUE_OPTION_BANK, "order": 70, "reason": "bank", "suspends": true},
+	"res://scripts/components/merchant.gd": {"label": PlayerText.DIALOGUE_OPTION_TRADE, "reason": "trade", "suspends": true},
+	"res://scripts/components/healer.gd": {"label": PlayerText.DIALOGUE_OPTION_HEAL, "reason": "heal", "suspends": true},
+	"res://scripts/components/bonfire.gd": {"label": PlayerText.DIALOGUE_OPTION_REST, "reason": "", "suspends": false},
+	"res://scripts/components/level_up.gd": {"label": PlayerText.DIALOGUE_OPTION_LEVEL_UP, "reason": "level_up", "suspends": true},
+	"res://scripts/components/chip_installer.gd": {"label": PlayerText.DIALOGUE_OPTION_INSTALL, "reason": "install", "suspends": true},
+	"res://scripts/components/weapon_bench.gd": {"label": PlayerText.DIALOGUE_OPTION_MODIFY, "reason": "modify", "suspends": true},
+	"res://scripts/components/chess_match.gd": {"label": PlayerText.DIALOGUE_OPTION_PLAY_CHESS, "reason": "chess", "suspends": true},
+	"res://scripts/components/atm.gd": {"label": PlayerText.DIALOGUE_OPTION_BANK, "reason": "bank", "suspends": true},
 }
 
 # The explicit spine of the roster order (a GDScript Dictionary does preserve insertion order, but the ordering
-# contract deserves its own explicit, greppable list): Trade, Heal, Rest, Level Up, Install, Modify, Play Chess,
-# Bank. Modify sits at 55, in the free slot between Install (50) and Play Chess (60) — chrome for your gear
+# contract deserves its own explicit, greppable list): THIS is the player-visible menu order — Trade, Heal, Rest,
+# Level Up, Install, Modify, Play Chess, Bank. Modify sits between Install and Play Chess — chrome for your gear
 # right after chrome for yourself.
 const STATION_ROSTER: Array[String] = [
 	"res://scripts/components/merchant.gd",
@@ -79,6 +81,8 @@ const SCREEN_CONTRACTS := {
 const SPEAKER_METHODS := ["set_in_dialogue", "note_speaking", "note_speaking_stop", "provoke", "is_following", "resolved_disposition", "head_world_position"]
 const PLAYER_METHODS := ["add_money", "notify_toast"]
 
+const DIALOGUE_MANAGER_PATH := "res://scripts/dialogue/dialogue_manager.gd"
+
 
 func test_station_contract_pairs_exist_and_match_roster() -> void:
 	# The load-bearing pin of the extraction: each dual-mode component must carry BOTH contract methods (the
@@ -96,7 +100,7 @@ func test_station_contract_pairs_exist_and_match_roster() -> void:
 		var opt: Dictionary = c.dialogue_station_option()
 		assert_false(opt.is_empty(), "%s must offer its option unconditionally on a bare instance — none of the shipped seven ever withholds ({} is the future-gating seam only)" % path)
 		assert_eq(str(opt.get("label", "")), str(expected.label), "%s: the option label must be the authored PlayerText const, verbatim (labels are never raw literals)" % path)
-		assert_eq(int(opt.get("order", -1)), int(expected.order), "%s: DIALOGUE_ORDER drives the player-visible menu order — a pinned UI contract, not a free knob" % path)
+		assert_eq(typeof(opt.get("order")), TYPE_INT, "%s: `order` must be an int — DialogueManager sorts the painted menu on it, and a missing order sorts as 0 (ahead of Trade)" % path)
 		assert_eq("closed" in opt, bool(expected.suspends), "%s: `closed` present iff the station suspends (absent = act-and-close; Bonfire is the only one)" % path)
 		assert_eq("reason" in opt, bool(expected.suspends), "%s: `reason` present iff `closed` is — reason-without-closed is the strand-risk shape DialogueManager warns on" % path)
 		if bool(expected.suspends):
@@ -105,25 +109,44 @@ func test_station_contract_pairs_exist_and_match_roster() -> void:
 		c.free()
 
 
-func test_station_orders_are_strictly_ascending_and_distinct() -> void:
-	# The executable ordering guarantee: the roster order IS the player-visible order (Trade < Heal < Rest <
-	# Level Up < Install < Play Chess < Bank), so each order const must be strictly greater than the previous —
-	# which also proves all seven distinct. A collision would fall to DialogueManager's child-index tie-break
-	# and silently reshuffle the menu by authored scene order; this test makes that loud instead.
-	var prev := -1
-	var prev_path := "(start)"
+func test_dialogue_paints_the_stations_in_roster_order_whatever_the_authored_child_order() -> void:
+	# The executable ordering guarantee, driven through the REAL sort: every roster station hangs under ONE speaker in
+	# REVERSE roster order (the worst authored scene order), and DialogueManager._station_options() — the list the
+	# dialogue box paints — must still come back Trade, Heal, Rest, Level Up, Install, Modify, Play Chess, Bank. The
+	# sort reads each component's own DIALOGUE_ORDER, so a station moved to the wrong slot comes out of place, and two
+	# stations sharing an order fall to the child-index tie-break and come out REVERSED under this child order.
+	# Off-tree .new() instances throughout (no _ready anywhere), the same idiom tests/test_stranger_names.gd uses.
+	var manager = load(DIALOGUE_MANAGER_PATH).new()
+	var speaker := Node.new()
+	var authored := STATION_ROSTER.duplicate()
+	authored.reverse()
+	for path: String in authored:
+		speaker.add_child(load(path).new())
+	manager._speaker = speaker
+	var painted: Array = manager._station_options()
+	var labels: Array[String] = []
+	var orders: Array[int] = []
+	for entry: Dictionary in painted:
+		labels.append(str(entry.label))
+		orders.append(int(entry.order))
+	var expected: Array[String] = []
 	for path: String in STATION_ROSTER:
-		var order := int(STATION_CONTRACTS[path].order)
-		assert_true(order > prev, "%s (order %d) must sort strictly after %s (order %d) — the Trade→Bank sequence is a pinned UI contract" % [path, order, prev_path, prev])
-		prev = order
-		prev_path = path
+		expected.append(str(STATION_CONTRACTS[path].label))
+	assert_eq(labels, expected,
+		"the dialogue menu must paint Trade, Heal, Rest, Level Up, Install, Modify, Play Chess, Bank regardless of the order the stations were authored under the speaker")
+	for i in range(1, orders.size()):
+		assert_true(orders[i] > orders[i - 1],
+			"%s (order %d) must sort strictly after %s (order %d): a shared order leaves the menu at the mercy of authored child order" % [labels[i], orders[i], labels[i - 1], orders[i - 1]])
+	manager._speaker = null
+	speaker.free()
+	manager.free()
 
 
 func test_station_roster_is_the_spec() -> void:
 	# Roster-as-spec (the README-roster idiom made executable): the set of scripts/components/*.gd sources that
 	# implement `func dialogue_station_option` must EQUAL the roster. Catches both drift directions — a renamed
 	# component drops out of the found set, and a NEW dual-mode component authored with the contract but never
-	# added to STATION_CONTRACTS fails here (the label/order/reason pins only guard what they know about).
+	# added to STATION_CONTRACTS fails here (the label/reason/order pins only guard what they know about).
 	var found := {}
 	var dir := DirAccess.open("res://scripts/components")
 	assert_not_null(dir, "the components folder must exist")

@@ -64,19 +64,52 @@ func test_the_rent_is_actually_armed() -> void:
 		"rent_amount must be > 0 to arm the collector; 0 is the component's documented off-switch")
 
 
-func test_rent_comes_due_at_least_as_often_as_the_authored_period() -> void:
+## A RentCollector carrying exactly what the shipping level authors (script defaults for anything it leaves out),
+## built OFF-TREE so neither the WorldClock connection nor a Player lookup runs — only the dawn schedule.
+func _shipped_collector(state: SceneState, idx: int) -> RentCollector:
+	var rc := RentCollector.new()
+	for p in range(state.get_node_property_count(idx)):
+		var prop := state.get_node_property_name(idx, p)
+		if prop == "script":
+			continue
+		rc.set(prop, state.get_node_property_value(idx, p))
+	return rc
+
+
+func test_the_shipped_rent_recurs_after_a_one_time_notice_dawn() -> void:
+	# Drives the level's own configuration through its notice dawn, its grace window and then THREE rent periods
+	# of dawns (the notice -> grace -> period schedule in RentCollector._consume_dawn), so whatever combination of
+	# period_days / grace_days the level authors — or leaves at the script default — is judged by the schedule the
+	# player actually lives. The horizon is sized from those same authored knobs, so a retune (weekly rent, a
+	# longer grace) still gets three periods to prove the rent recurs instead of tripping a hidden dawn cap.
 	var state := _level_state()
 	if state == null:
 		return
 	var idx := _node_index(state, "RentCollector")
+	assert_gte(idx, 0, "RentCollector must exist before its schedule can be driven")
 	if idx < 0:
 		return
-	var period: Variant = _node_prop(state, idx, "period_days")
-	# Unauthored is fine — the script default is 1 — but an authored value must be a sane day count.
-	if period == null:
-		return
-	assert_gte(int(period), 1,
-		"period_days must be >= 1 (the component floors it at 1 anyway, so a 0 here is an authoring mistake that silently reads as daily)")
+	var rc := _shipped_collector(state, idx)
+	var horizon := 1 + maxi(0, rc.grace_days) + 3 * maxi(1, rc.period_days)
+	watch_signals(rc)
+	var charge_dawns: Array[int] = []
+	var charged_before_notice := false
+	for dawn in range(1, horizon + 1):
+		if rc._consume_dawn():
+			charge_dawns.append(dawn)
+			if get_signal_emit_count(rc, "notice_served") == 0:
+				charged_before_notice = true
+	assert_signal_emit_count(rc, "notice_served", 1,
+		"the shipped collector states its terms exactly ONCE — a notice that repeats every dawn is a nag, one that never fires leaves 'what rent?' unanswered")
+	assert_false(charged_before_notice, "no charge may land before the notice has been served")
+	assert_false(charge_dawns.has(1),
+		"dawn 1 is the notice dawn — money moving on the same dawn the terms are first stated reads as a charge with no referent")
+	assert_gt(charge_dawns.size(), 1,
+		"within three rent periods after the notice dawn and grace window (%d dawns) the shipped rent must come due more than once — a debt clock that bills once (or never) puts no recurring pressure on an unpaid balance (charges on dawns %s)" % [horizon, charge_dawns])
+	for i in range(2, charge_dawns.size()):
+		assert_eq(charge_dawns[i] - charge_dawns[i - 1], charge_dawns[1] - charge_dawns[0],
+			"rent must come due on a steady cadence once the meter starts (charges on dawns %s)" % [charge_dawns])
+	rc.free()
 
 
 func test_the_charge_is_never_silent() -> void:

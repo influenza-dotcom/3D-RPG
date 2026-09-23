@@ -106,16 +106,30 @@ func test_align_to_null_restores_the_rest_spot() -> void:
 		"an unarmed / no-view-model equip (align_to(null)) restores the rest spot")
 
 
-func test_align_to_is_a_no_op_without_a_rig_muzzle() -> void:
-	var host: GunMesh = load(GUN_MESH_PATH).new()
-	var rig := MuzzleRig.new()
-	rig.host = host
-	var vm := Node3D.new()
-	rig.align_to(vm)
-	assert_true(true, "a host with no Sketchfab_Scene/PlayerMuzzle simply returns (no transform touched off-tree, no error)")
-	vm.free()
-	rig.free()
-	host.free()
+func test_align_to_on_a_rig_that_lost_its_player_muzzle_is_a_clean_no_op() -> void:
+	# Control: on an intact rig the same kind of view-model snaps the rig muzzle onto the weapon's marker.
+	var intact := _make_host()
+	var armed := _make_view_model(intact, Vector3(0.5, 0.0, 0.0), true)
+	intact._muzzle_rig.align_to(armed)
+	assert_true(_rig_muzzle(intact).global_position.is_equal_approx((armed.get_node("muzzle") as Node3D).global_position),
+		"control: an intact rig snaps its muzzle onto the weapon's marker")
+	# The guard: a rig model whose Sketchfab_Scene no longer carries PlayerMuzzle (a re-export / rename dropped it)
+	# has nothing to snap. Equipping must neither error (GUT fails this test on the null-muzzle write the guard
+	# prevents) nor touch anything else.
+	var broken := _make_host()
+	var sk := broken.get_node("Sketchfab_Scene")
+	var lost := sk.get_node("PlayerMuzzle")
+	sk.remove_child(lost)
+	lost.free()
+	var vm := _make_view_model(broken, Vector3(0.5, 0.0, 0.0), true)
+	var marker := vm.get_node("muzzle") as Node3D
+	var marker_before := marker.global_position
+	broken._muzzle_rig.align_to(vm)
+	assert_true(marker.global_position.is_equal_approx(marker_before),
+		"the weapon's own Muzzle marker is never dragged when the rig has no muzzle to snap")
+	assert_eq(sk.get_child_count(), 0, "align_to must not conjure a muzzle node onto a rig that lost it")
+	broken._muzzle_rig.align_to(null)  # the unarmed restore path writes the rest spot through the same lookup
+	assert_eq(sk.get_child_count(), 0, "the unarmed restore on a muzzle-less rig is equally inert")
 
 
 # --- equipped_marker() ---------------------------------------------------------------------------------------------

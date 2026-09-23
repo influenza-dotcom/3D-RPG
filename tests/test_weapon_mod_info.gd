@@ -71,13 +71,41 @@ func test_stat_label_uses_the_table_and_degrades_to_the_capitalized_id() -> void
 		"an unlisted property degrades to its capitalized id, never a blank row")
 	assert_eq(WeaponModInfo.stat_label(&""), "", "an empty property name has nothing to capitalize")
 
-func test_stat_labels_share_item_infos_gun_vocabulary() -> void:
-	# The five words a player already reads on a gun's tooltip — one vocabulary across the tooltip and the preview.
-	var expected := {&"damage": "Damage", &"attack_speed": "Rate", &"effective_range": "Range",
-		&"headshot_multiplier": "Headshot", &"max_ammo": "Clip"}
-	for prop in expected:
-		assert_eq(WeaponModInfo.stat_label(prop), expected[prop],
-			"'%s' must keep the ItemInfo._weapon_block word '%s'" % [prop, expected[prop]])
+func test_stat_labels_match_the_words_on_a_guns_own_tooltip() -> void:
+	# One vocabulary across the gun tooltip and the bench preview: the stats ItemInfo labels on a gun's tooltip must
+	# carry the SAME word here, so "Clip 10" on the gun and "Clip  10 → 12" on the bench read as one stat. Driven off
+	# ItemInfo's REAL tooltip text (split into columns on WeaponModInfo.JOIN, the gap both surfaces share), so renaming
+	# a word on EITHER side — or ItemInfo growing its own separator again — goes red.
+	var gun := _block()  # a plain gun: not melee, not spray, no caliber, max_ammo 10 -> the self-contained Clip column
+	gun.move_speed_multiplier = 0.9  # a non-1.0 weight class so the tooltip prints its Move column too
+	var item := Item.new()
+	item.id = &"test_mod_info_gun"
+	item.display_name = "Test Gun"
+	item.category = Item.Category.WEAPON
+	item.weapon = gun
+	var tip := ItemInfo.tooltip(item)
+	var columns := PackedStringArray()
+	for line in tip.split("\n"):
+		columns.append_array(String(line).split(WeaponModInfo.JOIN))
+	for prop in [&"damage", &"attack_speed", &"effective_range", &"headshot_multiplier", &"max_ammo", &"move_speed_multiplier"]:
+		var label := WeaponModInfo.stat_label(prop)
+		var found := false
+		for column in columns:
+			if String(column).begins_with(label + " "):
+				found = true
+		assert_true(found,
+			"'%s' reads '%s' on the bench preview but no column of the gun's own tooltip is labeled that — the player would see two words for one stat. Tooltip:\n%s" % [prop, label, tip])
+	# Control: the column scan really can miss. The capitalized-id degrade stat_label falls back to for an unlisted
+	# field ("Max Ammo") is NOT a tooltip word, so losing the table entry would fail the loop above.
+	var degrade := String(&"max_ammo").capitalize()
+	var degrade_found := false
+	for column in columns:
+		if String(column).begins_with(degrade + " "):
+			degrade_found = true
+	assert_false(degrade_found,
+		"the tooltip never prints the raw-id degrade '%s' — the scan must be able to tell it from the table word. Tooltip:\n%s" % [degrade, tip])
+	item = null
+	gun = null
 
 func test_every_stat_label_names_a_real_weapon_data_scalar() -> void:
 	# A label keyed to a field WeaponData no longer declares is dead vocabulary a designer can never reach — and
@@ -87,9 +115,45 @@ func test_every_stat_label_names_a_real_weapon_data_scalar() -> void:
 			"STAT_LABELS names '%s' but WeaponData declares no such property" % prop)
 		assert_false(String(WeaponModInfo.STAT_LABELS[prop]).is_empty(), "'%s' must carry a non-empty label" % prop)
 
-func test_the_three_scope_fields_all_read_zoom() -> void:
-	for prop in [&"scoped_fov_override", &"scoped_zoom_fov_max", &"scoped_zoom_fov_min"]:
-		assert_eq(WeaponModInfo.stat_label(prop), "Zoom", "'%s' is one concept to the player: Zoom" % prop)
+func test_the_three_scope_fields_share_one_label_and_nothing_else_does() -> void:
+	# The three scope fields are ONE concept to the player (how far the scope pulls in); they are three fields only
+	# because the wheel dial needs a min/max pair. So they must read as one authored word — and that shared word must
+	# be the ONLY collision in the table, or two different stats would paint indistinguishable preview rows.
+	var scope_props: Array[StringName] = [&"scoped_fov_override", &"scoped_zoom_fov_max", &"scoped_zoom_fov_min"]
+	var zoom := WeaponModInfo.stat_label(scope_props[0])
+	for prop in scope_props:
+		assert_true(WeaponModInfo.STAT_LABELS.has(prop),
+			"'%s' must have an authored label, not the capitalized-id degrade ('%s')" % [prop, String(prop).capitalize()])
+		assert_eq(WeaponModInfo.stat_label(prop), zoom, "'%s' must read the same word as scoped_fov_override" % prop)
+	var owners := {}
+	for prop in WeaponModInfo.STAT_LABELS:
+		var label := String(WeaponModInfo.STAT_LABELS[prop])
+		if not owners.has(label):
+			owners[label] = []
+		owners[label].append(prop)
+	for label in owners:
+		if label == zoom:
+			continue
+		assert_eq(owners[label].size(), 1,
+			"only the scope trio may share a label, but '%s' labels %s — the preview could not tell those stats apart" % [label, owners[label]])
+	# The loop above skips the scope word, so count its owners on their own: a fourth stat copy-pasted onto that word
+	# (e.g. next to the three adjacent scope lines) would otherwise slip through. The three scope fields all read it
+	# (checked above), so a count of exactly three means nobody else does.
+	assert_eq(owners.get(zoom, []).size(), scope_props.size(),
+		"only the three scope fields may read '%s', but it labels %s — a non-scope stat would paint an indistinguishable preview row" % [zoom, owners.get(zoom, [])])
+	# And the shared word is what the bench actually paints: a scope refit changing all three reads as three rows
+	# under that one label.
+	var before := _block()
+	var after := _block()
+	after.scoped_fov_override = 25.0
+	after.scoped_zoom_fov_max = 40.0
+	after.scoped_zoom_fov_min = 10.0
+	var rows := WeaponModInfo.change_rows(before, after)
+	assert_eq(rows.size(), 3, "three changed scope fields, three rows. Rows: %s" % [rows])
+	for r in rows:
+		assert_true(r.begins_with(zoom + "  "), "every scope row is painted under the shared label '%s'. Row: %s" % [zoom, r])
+	before = null
+	after = null
 
 func test_percent_stats_are_a_subset_of_the_mod_targetable_fields() -> void:
 	var ids := WeaponFields.ids()
@@ -119,7 +183,7 @@ func test_part_line_is_blank_for_null_and_for_a_non_part() -> void:
 	plain = null
 
 func test_part_line_leads_with_the_slot_and_joins_labeled_effects() -> void:
-	# The header's own example: "Barrel part  ·  Range +8  ·  Spread -25%  ·  Move -4%  ·  Hip Sway +10%".
+	# The header's own example: "Barrel part   Range +8   Spread -25%   Move -4%   Hip Sway +10%".
 	var part := _part(WeaponData.ModSlot.BARREL, [
 		_delta(&"effective_range", WeaponStatDelta.Op.ADD, 8.0),
 		_delta(&"pellet_spread", WeaponStatDelta.Op.MULT, 0.75),
@@ -127,12 +191,12 @@ func test_part_line_leads_with_the_slot_and_joins_labeled_effects() -> void:
 		_delta(&"hip_sway_mult", WeaponStatDelta.Op.MULT, 1.10),
 	])
 	var line := WeaponModInfo.part_line(part)
-	assert_eq(line, _slot_word(WeaponData.ModSlot.BARREL) + "  ·  Range +8  ·  Spread -25%  ·  Move -4%  ·  Hip Sway +10%",
+	assert_eq(line, _slot_word(WeaponData.ModSlot.BARREL) + "   Range +8   Spread -25%   Move -4%   Hip Sway +10%",
 		"slot first, then one labeled fragment per delta in authored order, joined with the ItemInfo glyph. Got: %s" % line)
 	part = null
 
 func test_part_line_uses_the_join_glyph_of_item_info() -> void:
-	assert_eq(WeaponModInfo.JOIN, "  ·  ", "the separator is U+00B7 with two spaces each side — ItemInfo's exact glyph")
+	assert_eq(WeaponModInfo.JOIN, "   ", "the separator is a three-space column gap, never a middle dot — ItemInfo lays weapon stats out with the same gap")
 
 func test_part_line_mult_always_reads_as_a_percent_even_off_the_percent_list() -> void:
 	# effective_range is NOT a percent stat, but a MULT is a ratio by construction — "Range -25%" is the truth
@@ -191,18 +255,18 @@ func test_part_line_drops_lines_that_move_nothing_measurable() -> void:
 func test_part_line_skips_null_and_unnamed_deltas() -> void:
 	var part := _part(WeaponData.ModSlot.SIGHT, [null, _delta(&"", WeaponStatDelta.Op.ADD, 5.0),
 		_delta(&"effective_range", WeaponStatDelta.Op.ADD, 8.0)])
-	assert_eq(WeaponModInfo.part_line(part), _slot_word(WeaponData.ModSlot.SIGHT) + "  ·  Range +8",
+	assert_eq(WeaponModInfo.part_line(part), _slot_word(WeaponData.ModSlot.SIGHT) + "   Range +8",
 		"a null entry and a blank property are skipped without a stray separator")
 	part = null
 
 func test_part_line_appends_the_gunplay_gate_last() -> void:
 	var part := _part(WeaponData.ModSlot.RECEIVER, [_delta(&"effective_range", WeaponStatDelta.Op.ADD, 8.0)], 3)
 	var line := WeaponModInfo.part_line(part)
-	var gate := "needs %s 3" % StatInfo.title(&"gunplay")
-	assert_true(line.ends_with("  ·  " + gate),
+	var gate := "Needs %s 3" % StatInfo.title(&"gunplay")
+	assert_true(line.ends_with("   " + gate),
 		"the requirement is the LAST fragment (a condition, not an effect) and names the stat via StatInfo.title. Got: %s" % line)
 	var ungated := _part(WeaponData.ModSlot.RECEIVER, [], 0)
-	assert_false(WeaponModInfo.part_line(ungated).contains("needs"), "min_gunplay 0 adds no gate fragment")
+	assert_false(WeaponModInfo.part_line(ungated).contains("Needs"), "min_gunplay 0 adds no gate fragment")
 	part = null
 	ungated = null
 
@@ -345,7 +409,7 @@ func test_compare_block_is_always_exactly_max_lines_lines() -> void:
 	b = null
 
 func test_compare_block_folds_overflow_into_the_last_body_line() -> void:
-	# Five changes in a 3-line block: the header, the first row, then rows 2..5 joined with "  ·  " — every change
+	# Five changes in a 3-line block: the header, the first row, then rows 2..5 joined with JOIN — every change
 	# is still reported, none silently truncated.
 	var a := _block()
 	var b := _block()

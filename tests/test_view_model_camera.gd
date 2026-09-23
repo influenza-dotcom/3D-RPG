@@ -2,15 +2,20 @@ extends GutTest
 
 ## Contract test for the FPS view-model render pass (res://scripts/camera/view_model_camera.gd).
 ##
-## SCOPE — only the side-effect-free pure static ViewModelCamera.build_default_environment. The live pass
-## (SubViewport + gun camera + composite container) reads get_world_3d() / get_viewport() and mutates the main
-## camera's cull_mask, so it's built in-tree and verified by playtest, NOT here (per the project's test policy).
+## SCOPE — the side-effect-free pure static ViewModelCamera.build_default_environment, the light_reach layer
+## stamping, and the composite container's attach to the UI (_attach_container, driven on an off-tree UI: its
+## draw order, HUD-ghost exemption and death-hide exemption). The rest of the live pass (SubViewport + gun
+## camera) reads get_world_3d() / get_viewport() and mutates the main camera's cull_mask, so it's built in-tree
+## and verified by playtest, NOT here (per the project's test policy).
 ##
 ## WHY this exists: the gun pass deliberately excludes the world's fog and its environment — so it carries its own
 ## small ambient FLOOR: a flat COLOUR ambient at the requested energy, with fog OFF (no fogging a gun at arm's
 ## length) and a CLEAR background (the pass is transparent + composited — it must never paint a sky). The floor is
 ## NOT the gun's lighting: that is the world's lights, which only reach the pass because ViewModelCamera.light_reach
 ## stamps VIEW_MODEL_LAYER onto them (tests below) — Godot culls lights per camera by the light's own `layers`.
+
+## The HUD-ghost drop-in, preloaded BY PATH (the class-cache cascade guard view_model_camera.gd uses for it too).
+const HudGhostScript := preload("res://scripts/ui/hud_ghost.gd")
 
 func test_build_default_environment_gives_a_flat_ambient_fill() -> void:
 	var env: Environment = ViewModelCamera.build_default_environment(null, Color(0.9, 0.91, 0.95), 0.75)
@@ -128,21 +133,47 @@ func test_the_death_hide_spares_a_flagged_child() -> void:
 	ui.free()
 
 func test_the_exempt_flag_round_trips() -> void:
+	# Judged by the sweep that reads the flag, not by how the flag is stored: un-flagging must hand the child back
+	# to the death hide. The sweep tests for the flag's PRESENCE, so an un-flag that left a `false` behind would
+	# keep the child exempt for good.
+	var ui := UI.new()
 	var item := Control.new()
-	assert_false(item.has_meta(UI.DEATH_HIDE_EXEMPT_META), "a plain HUD child is swept by default — nothing has to opt IN")
+	ui.add_child(item)
 	UI.set_death_hide_exempt(item, true)
-	assert_true(item.has_meta(UI.DEATH_HIDE_EXEMPT_META), "flagging sets the meta hide_hud_for_death reads")
 	UI.set_death_hide_exempt(item, false)
-	assert_false(item.has_meta(UI.DEATH_HIDE_EXEMPT_META), "…and un-flagging removes it, rather than leaving a false")
-	UI.set_death_hide_exempt(null, true)  # null-safe: a caller may flag an optional overlay unguarded
-	item.free()
+	UI.set_death_hide_exempt(null, true)  # null-safe: a caller may flag an optional overlay unguarded (an engine error fails this test)
+	ui.hide_hud_for_death()
+	assert_false(item.visible, "a child flagged and then un-flagged is swept by the death hide like any other readout")
+	assert_true(ui._death_hidden_hud.has(item), "…and remembered, so the revive shows it back")
+	# Control: the same child, flagged again, survives the same sweep, so the hide above is the un-flag's doing.
+	item.visible = true
+	UI.set_death_hide_exempt(item, true)
+	ui.hide_hud_for_death()
+	assert_true(item.visible, "control: the same child with the flag set is spared by the death hide")
+	ui.free()
 
-func test_the_pass_flags_its_own_composite() -> void:
-	# The CALL, not the bare name: _attach_container is the only place that can flag the container, and the
-	# flag is invisible in every headless test that does not build the live pass (SubViewport + gun camera +
-	# a real viewport), so nothing else would catch its removal.
-	var src := FileAccess.get_file_as_string("res://scripts/camera/view_model_camera.gd")
-	assert_true(src.contains("UI_SCRIPT.set_death_hide_exempt(_container, true)"),
-		"_attach_container must exempt the composite from UI.hide_hud_for_death(), or dying leaves the view model's outline drawing around a weapon that is no longer composited")
-	assert_true(src.contains("HUD_GHOST_SCRIPT.set_ghosted(_container, false)"),
-		"…and keep the ghost opt-out beside it — same node, same reason (it is not a HUD readout), and the two are meant to be read together")
+func test_the_pass_composite_survives_the_death_hide_and_skips_the_ghost() -> void:
+	# _attach_container is the one step of the live pass that needs no viewport or world: it only parents a
+	# SubViewportContainer on the HUD layer. Drive it against a real (off-tree) UI and play the death hide over it,
+	# so the flags are proven by what the sweep actually does, not by the call being spelled somewhere.
+	var ui := UI.new()
+	var post := ColorRect.new()
+	post.name = "ColorRect"  # the post-process rect hide_hud_for_death keeps (ui.tscn's child 0 before the pass)
+	ui.add_child(post)
+	var readout := Control.new()  # an ordinary HUD readout: the control case for both sweeps
+	ui.add_child(readout)
+	var vm := ViewModelCamera.new()
+	vm._sub_viewport = SubViewport.new()  # _build_pass creates this before attaching; nothing here renders it
+	vm._attach_container(ui)
+	var composite := ui.get_node_or_null(^"ViewModelComposite") as Control
+	assert_true(composite != null, "attaching the pass must parent the view-model composite on the HUD layer")
+	assert_eq(composite.get_index(), 0, "the composite sits UNDER the post-process rect, so the gun dithers with the world")
+	assert_ne(readout.visibility_layer & HudGhostScript.CAPTURED_LAYER, 0, "control: an ordinary HUD readout feeds the ghost capture")
+	assert_eq(composite.visibility_layer & HudGhostScript.CAPTURED_LAYER, 0,
+		"the composite must stay OUT of the ghost capture, or the whole weapon smears behind itself on every turn")
+	ui.hide_hud_for_death()
+	assert_false(readout.visible, "control: the death hide still sweeps an ordinary readout")
+	assert_true(composite.visible,
+		"the composite must SURVIVE the death hide, or dying leaves the view model's outline drawing around a weapon that is no longer composited")
+	ui.free()
+	vm.free()

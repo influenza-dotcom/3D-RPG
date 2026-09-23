@@ -84,15 +84,17 @@ static func _surface_area(mi: MeshInstance3D) -> float:
 	return total
 
 
-func test_quad_helper_front_faces_its_normal() -> void:
-	var mi := _quad(_map, Vector3.ZERO, Vector2(2, 2), UP, _mat("a"))
-	var arr := mi.mesh.surface_get_arrays(0)
-	var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
-	var ix: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
-	var a := v[ix[0]]
-	var b := v[ix[1]]
-	var c := v[ix[2]]
-	assert_gt((c - a).cross(b - a).dot(UP), 0.0, "clockwise-from-the-front winding: outward normal is (c-a)×(b-a)")
+## How many of `mi`'s triangles face `n` under Godot's clockwise-from-the-front winding (outward normal (c-a)×(b-a)).
+static func _tris_facing(mi: MeshInstance3D, n: Vector3) -> int:
+	var hits := 0
+	for s in mi.mesh.get_surface_count():
+		var arr := mi.mesh.surface_get_arrays(s)
+		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var ix: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+		for k in range(0, ix.size(), 3):
+			if (v[ix[k + 2]] - v[ix[k]]).cross(v[ix[k + 1]] - v[ix[k]]).dot(n) > 0.0:
+				hits += 1
+	return hits
 
 
 func test_same_facing_overlap_is_clipped_out_of_the_larger_face() -> void:
@@ -118,6 +120,9 @@ func test_same_facing_overlap_is_clipped_out_of_the_larger_face() -> void:
 func test_new_corners_interpolate_attributes_and_keep_winding() -> void:
 	var big := _quad(_map, Vector3.ZERO, Vector2(4, 4), UP, _mat("slab"))
 	_quad(_map, Vector3(0.5, 0, 0.25), Vector2(1, 1.5), UP, _mat("detail"))   # off-centre: every cut is a real cut
+	# BEFORE: every authored slab triangle front-faces UP, so "still faces UP" below means the pass PRESERVED the
+	# input winding (a fixture wound the other way would make the after-check meaningless).
+	assert_eq(_tris_facing(big, UP), _tri_count(big), "precondition: every authored slab triangle front-faces UP")
 	_cleaner().clean(_root)
 	var arr := big.mesh.surface_get_arrays(0)
 	var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]

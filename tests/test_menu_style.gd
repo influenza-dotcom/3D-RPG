@@ -1,10 +1,13 @@
 extends GutTest
 
-## MenuStyle.wallet_color — the ONE sign-based tint seam every menu wallet readout paints through
-## (the shop / level-up / chip-install headers and the implant-choice tally): gold while solvent,
-## danger the moment the balance goes NEGATIVE. Implants are bought on credit, so a run can legally
-## start in debt and every wallet label must show it. The HUD's top-left readout mirrors the same
-## rule through HudSettings.money_debt_color (ui.gd _stamp_money_readout).
+## MenuStyle's small shared seams, one section each:
+##  * wallet_color — the ONE sign-based tint seam every menu wallet readout paints through (the shop / level-up /
+##    chip-install headers and the implant-choice tally): gold while solvent, danger the moment the balance goes
+##    NEGATIVE. Implants are bought on credit, so a run can legally start in debt and every wallet label must show
+##    it. The HUD's top-left readout mirrors the same rule through HudSettings.money_debt_color (ui.gd).
+##  * the runtime "[PH]" scrub — PlayerText.display, the registered PlaceholderTranslation, and the cursor tooltip
+##    (an atr opt-out that must scrub by hand).
+##  * the scene-transition fade cover (change_scene_faded's black).
 
 func test_wallet_color_gold_while_solvent_danger_in_debt() -> void:
 	assert_eq(MenuStyle.wallet_color(12.5), MenuStyle.gold(),
@@ -48,18 +51,38 @@ func test_runtime_translation_scrubs_rendered_control_text_but_not_the_property(
 			found = true
 	assert_true(found, "the scrub is registered under the ACTIVE locale, so the server consults it")
 
-func test_tooltip_label_is_scrubbed_by_hand() -> void:
-	# The shared tooltip opts out of atr (it can carry a typed pet name), so it must scrub on assignment.
+func test_tooltip_paints_the_blurb_without_its_placeholder_marker() -> void:
+	# The shared cursor tip opts out of atr (it can carry a typed pet name), so the registered scrub never reaches it:
+	# it must scrub on assignment. Driven through the real hover path on the live autoload's tip (built by _ready).
+	var tip_label: Label = MenuStyle._tip_label
+	var tip_panel: PanelContainer = MenuStyle._tip_panel
+	assert_true(tip_label != null and tip_panel != null, "the MenuStyle autoload built its cursor tip")
+	if tip_label == null or tip_panel == null:
+		return
+	assert_eq(tip_label.auto_translate_mode, Node.AUTO_TRANSLATE_MODE_DISABLED,
+		"precondition: the tip opts out of atr, so the TranslationServer scrub cannot clean it for us")
 	var host := Control.new()
 	add_child_autofree(host)
 	MenuStyle.attach_tip(host, "[PH] A pinched muzzle.")
-	MenuStyle._tip_label.text = PlayerText.display(String(host.get_meta(&"_tip_text", "")))
-	assert_eq(MenuStyle._tip_label.text, "A pinched muzzle.", "the tip paints the blurb minus its marker")
+	host.mouse_entered.emit()
+	assert_true(tip_panel.visible, "hovering the host shows the tip")
+	assert_eq(tip_label.text, "A pinched muzzle.", "the tip paints the blurb minus its marker")
+	# Re-attaching while the tip is up (a row repainting under a still cursor) refreshes the SHOWN text in place —
+	# that path must scrub too.
+	MenuStyle.attach_tip(host, "[PH] A longer barrel.")
+	assert_eq(tip_label.text, "A longer barrel.", "a live re-attach repaints the shown tip, still without the marker")
+	# Unmarked copy is painted as authored (the scrub only removes the exact marker).
+	MenuStyle.attach_tip(host, "Rex the [PHONY]")
+	assert_eq(tip_label.text, "Rex the [PHONY]", "a typed name that merely looks like the marker survives intact")
+	host.mouse_exited.emit()
+	assert_false(tip_panel.visible, "leaving the host hides the tip again")
+
 # --- The scene-transition fade ------------------------------------------------------------------------
 
 ## Options -> Main Menu swaps scenes through black (MenuStyle.change_scene_faded). The cover is built ON THIS
 ## AUTOLOAD because it is the only node that survives change_scene_to_file — the scene being left is freed
-## mid-transition and the one being entered doesn't exist yet, so neither can own the black.
+## mid-transition and the one being entered doesn't exist yet, so neither can own the black. The press itself is
+## driven end to end (cover up, old scene held under it, room lands, cover lifts) in tests/test_computer_room.gd.
 ## NOTE: every test here leaves the cover the way a finished transition does — hidden, alpha 0 — because a
 ## visible STOP-filter rect at layer 200 would eat the mouse for every test that runs after this file.
 func test_scene_fade_cover_is_a_full_screen_black_rect_above_every_other_layer() -> void:
@@ -97,12 +120,7 @@ func test_scene_fade_tween_reaches_full_black_and_back() -> void:
 	await MenuStyle._tween_fade_cover(0.0, 0.0)
 	MenuStyle._fade_rect.visible = false
 
-## Source pin (the swap itself can't be run here — it would change the scene out from under the whole GUT run):
-## Main Menu must go through the faded swap, and the fade legs must stay perceptible. A sub-0.1s "fade" is the
-## instant cut with extra steps.
-func test_main_menu_swaps_through_black() -> void:
-	var src := FileAccess.get_file_as_string("res://scripts/ui/options_menu.gd")
-	assert_true(src.contains('MenuStyle.change_scene_faded("res://scenes/computerroom.tscn")'),
-		"Options -> Main Menu changes scene through the fade, never with a bare change_scene_to_file")
+## The legs must stay perceptible: a sub-0.15s "fade" is the instant cut with extra steps.
+func test_scene_fade_legs_are_long_enough_to_read_as_a_fade() -> void:
 	assert_true(MenuStyle.SCENE_FADE_OUT >= 0.15, "the fade to black is long enough to read as a fade")
 	assert_true(MenuStyle.SCENE_FADE_IN >= 0.15, "so is the fade up on the other side")

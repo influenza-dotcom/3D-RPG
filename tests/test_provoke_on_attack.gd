@@ -32,12 +32,16 @@ func _player_attacker() -> Node:
 	return a
 
 
-func test_defaults_enabled() -> void:
-	var p := ProvokeOnAttack.new()
-	assert_true(p.enabled, "ProvokeOnAttack defaults enabled so an auto-built instance keeps the old behaviour")
-	p.free()
+## Records the two barks react() may fire through host._voice.
+class StubVoice extends RefCounted:
+	var aggro_count: int = 0
+	var warn_count: int = 0
+	func bark_aggro() -> void: aggro_count += 1
+	func warn_attack() -> void: warn_count += 1
 
 func test_neutral_provokes_on_first_hit() -> void:
+	# An UNCONFIGURED ProvokeOnAttack.new() is exactly what npc.gd auto-adds when no drop-in is placed, so this also
+	# pins that the default instance is enabled (a neutral NPC you shoot still turns on you).
 	var p := ProvokeOnAttack.new()
 	var h := StubHost.new()
 	h._disposition = Disposition.Kind.NEUTRAL
@@ -109,6 +113,30 @@ func test_already_hostile_ignored() -> void:
 	p.free()
 	h = null
 
+
+func test_friendly_warns_while_forgiving_and_barks_once_it_turns() -> void:
+	var p := ProvokeOnAttack.new()
+	var h := StubHost.new()
+	var voice := StubVoice.new()
+	h._voice = voice
+	h._disposition = Disposition.Kind.FRIENDLY
+	h.friendly_aggro_threshold = 8.0
+	p.react(h, _player_attacker(), 3.0)
+	assert_eq(voice.warn_count, 1, "a forgiven friendly-fire hit says so (\"Cut that out!\") so the player knows to stop")
+	assert_eq(voice.aggro_count, 0, "...without the aggro bark, since it has not turned")
+	p.react(h, _player_attacker(), 5.0)  # 3 + 5 reaches the threshold
+	assert_eq(h.provoke_count, 1, "rig: the second hit crosses the threshold and provokes")
+	assert_eq(voice.aggro_count, 1, "the hit that turns the friendly barks the aggro line")
+	assert_eq(voice.warn_count, 1, "...and does not ALSO warn as if still forgiving")
+	var neutral := StubHost.new()
+	var neutral_voice := StubVoice.new()
+	neutral._voice = neutral_voice
+	p.react(neutral, _player_attacker(), 1.0)
+	assert_eq(neutral_voice.aggro_count, 1, "a NEUTRAL barks the aggro line on the first hit it turns on")
+	assert_eq(neutral_voice.warn_count, 0, "a neutral never plays the forgiving warning")
+	p.free()
+	h = null
+	neutral = null
 
 ## GUARD: the StubHost above masks the real contract — ProvokeOnAttack.react() accumulates host._player_aggression
 ## vs host.friendly_aggro_threshold on the REAL NPC. Assert the NPC still exposes both, so deleting _player_aggression

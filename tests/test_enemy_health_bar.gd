@@ -2,10 +2,11 @@ extends GutTest
 
 ## Top-centre enemy health bar (scripts/ui/enemy_health_bar.gd) + the damage seam that raises it.
 ## Covers the PURE parts off-tree — the fill fraction, the hold-then-fade opacity ramp, the chip-trail step,
-## the shipped HudSettings defaults and their layout invariant, and the Options toggle round-trip — plus the
-## METHOD-SURFACE contract of the push chain (Character.take_damage -> attacker.on_damaged_target ->
-## Player.on_damaged_target -> PlayerHud.show_enemy_health). The on-screen look (the bar clearing the stealth
-## badge, the shard reading as damage) is playtest territory.
+## the shipped HudSettings defaults and their layout invariant — plus the Options toggle driven on a real bar
+## (refuses a push while off, clears a live plate on the next poll) and the push chain driven hop by hop on
+## off-tree objects (Player.on_damaged_target -> PlayerHud.show_enemy_health / clear_enemy_health -> the bar).
+## Character.take_damage's own notify is pinned in test_door.gd. The on-screen look (the bar clearing the
+## stealth badge, the shard reading as damage) is playtest territory.
 
 ## Loaded BY PATH (not the class_name) so the suite parses even before the editor registers the new global
 ## class — the same cache-cascade guard the runtime wiring uses (player_hud.gd ENEMY_HEALTH_BAR_SCRIPT).
@@ -154,11 +155,32 @@ func test_toggle_defaults_on() -> void:
 		"the enemy health bar ships ON — the Options row is an opt-OUT declutter, like Show Detection Meter")
 	fresh.free()
 
-func test_toggle_round_trips() -> void:
-	Settings.set_enemy_health_bar_enabled(false)
-	assert_false(Settings.enemy_health_bar_enabled, "set_enemy_health_bar_enabled(false) hides the bar")
+## A live, in-tree bar (its _ready runs: hidden, ALWAYS-processed) plus a plain target to push hits for.
+func _live_bar() -> Control:
+	var bar: Control = BAR.new()
+	add_child_autofree(bar)
+	return bar
+
+func test_turning_the_option_off_keeps_the_bar_down_and_clears_a_live_plate() -> void:
+	var target: Node = autofree(Node.new())
+	var bar := _live_bar()
 	Settings.set_enemy_health_bar_enabled(true)
-	assert_true(Settings.enemy_health_bar_enabled, "and back on")
+	bar.show_for(target, 5.0, 10.0)
+	assert_true(bar.visible, "control: with the Options row ON a landed hit raises the bar")
+	# Control for the live poll below: the same frame with the row ON must leave the plate alone. The hit landed ~0 ms
+	# ago on the wall clock, well inside enemy_hp_hold_time, so only the OFF row may clear it.
+	bar._process(0.016)
+	assert_true(bar.visible,
+		"control: with the row ON, a frame inside the hold (enemy_hp_hold_time) keeps the plate up; only turning the row off may clear it")
+	# The player flips the row OFF mid-fight: the live poll must drop the plate that is already up.
+	Settings.set_enemy_health_bar_enabled(false)
+	bar._process(0.016)
+	assert_false(bar.visible, "turning the row off clears the plate on the next frame instead of leaving it stranded")
+	bar.show_for(target, 3.0, 10.0)
+	assert_false(bar.visible, "while the row is off a hit must not raise the bar — not even for one flickering frame")
+	Settings.set_enemy_health_bar_enabled(true)
+	bar.show_for(target, 3.0, 10.0)
+	assert_true(bar.visible, "turning the row back on lets the next hit raise the bar again")
 
 func test_toggle_is_an_options_row() -> void:
 	# The row is DATA (a SettingSpec in SettingsCatalog.tres), not hand-built UI — CLAUDE.md's settings rule.
@@ -167,7 +189,7 @@ func test_toggle_is_an_options_row() -> void:
 	for spec in catalog.specs:
 		if spec != null and spec.key == &"enemy_health_bar":
 			found = true
-			assert_eq(spec.tab, &"Accessibility", "the enemy health bar row lives on the Accessibility tab")
+			assert_eq(spec.tab, &"HUD", "the enemy health bar row lives on the HUD tab")
 			assert_eq(spec.getter, &"enemy_health_bar_enabled", "bound to the Settings field")
 			assert_eq(spec.setter, &"set_enemy_health_bar_enabled", "bound to the Settings setter")
 	assert_true(found, "SettingsCatalog.tres must carry an 'enemy_health_bar' spec — an Options row is not optional for a player-facing HUD element")
@@ -215,9 +237,30 @@ func test_player_exposes_the_damaged_target_hook() -> void:
 	var p = load("res://scripts/player/player.gd").new()
 	assert_true(p.has_method("on_damaged_target"),
 		"Player must expose on_damaged_target — the seam Character.take_damage notifies to raise the enemy bar")
-	p.on_damaged_target(null, 1.0, 10.0)  # safe off-tree (no HUD built -> no-op)
-	assert_true(true, "on_damaged_target must be safe with no UI")
 	p.free()
+
+func test_player_forwards_a_landed_hit_to_its_hud_bar_unless_dying() -> void:
+	# Off-tree Player (its _ready never runs) with a real PlayerHud + live bar injected where build() would put them.
+	Settings.set_enemy_health_bar_enabled(true)
+	var p = load("res://scripts/player/player.gd").new()
+	var target: Node = autofree(Node.new())
+	p.on_damaged_target(target, 3.0, 10.0, 7.0)  # no HUD yet: must no-op without an engine error (GUT fails on one)
+	var hud = load("res://scripts/player/player_hud.gd").new()
+	var bar := _live_bar()
+	hud._enemy_hp = bar
+	p._hud = hud
+	p.on_damaged_target(target, 3.0, 10.0, 7.0)
+	assert_true(bar.visible, "a hit the player lands raises the top-centre enemy bar")
+	assert_almost_eq(bar._frac, 0.3, 0.0001, "the bar fills to the target's post-hit HP (3 of 10)")
+	assert_almost_eq(bar._ghost, 0.7, 0.0001, "the chip shard starts at the PRE-hit HP (7 of 10), so the first hit shows its damage")
+	bar.clear_plate()
+	p._dying = true  # the kill that traded with our own death
+	p.on_damaged_target(target, 0.0, 10.0, 3.0)
+	assert_false(bar.visible,
+		"a push arriving while the player is dying must not raise a plate the death snapshot would restore stale on revive")
+	p._hud = null
+	p.free()
+	hud.free()
 
 func test_base_character_does_not_implement_the_hook() -> void:
 	# The gate is has_method, so an NPC attacker must NOT answer to it — otherwise an NPC-vs-NPC trade would
@@ -227,12 +270,24 @@ func test_base_character_does_not_implement_the_hook() -> void:
 		"only the Player implements on_damaged_target — the Character base must stay silent so NPC attackers no-op")
 	c.free()
 
-func test_player_hud_exposes_the_bar_facades() -> void:
+func test_player_hud_bar_facades_raise_and_reset_the_plate() -> void:
+	Settings.set_enemy_health_bar_enabled(true)
 	var hud = load("res://scripts/player/player_hud.gd").new()
-	assert_true(hud.has_method("show_enemy_health"),
-		"PlayerHud.show_enemy_health is the Player's forwarding target")
-	assert_true(hud.has_method("clear_enemy_health"),
-		"PlayerHud.clear_enemy_health must exist — Player.die() calls it BEFORE ui.hide_hud_for_death() takes its snapshot")
-	hud.clear_enemy_health()  # safe before build() (no bar yet -> no-op)
-	assert_true(true, "clear_enemy_health must be safe before build()")
+	var target: Node = autofree(Node.new())
+	# Before build() there is no bar: both facades must no-op without an engine error (GUT fails on one).
+	hud.show_enemy_health(target, 5.0, 10.0)
+	hud.clear_enemy_health()
+	var bar := _live_bar()
+	hud._enemy_hp = bar
+	hud.show_enemy_health(target, 8.0, 10.0)
+	hud.show_enemy_health(target, 4.0, 10.0)
+	assert_true(bar.visible, "show_enemy_health raises the bar")
+	assert_almost_eq(bar._ghost, 0.8, 0.0001,
+		"control: a repeat hit on the SAME live target keeps the shard standing where the volley started")
+	# Player.die() calls this BEFORE ui.hide_hud_for_death() takes its snapshot.
+	hud.clear_enemy_health()
+	assert_false(bar.visible, "clear_enemy_health drops the plate, so the death snapshot cannot remember it")
+	hud.show_enemy_health(target, 4.0, 10.0)
+	assert_almost_eq(bar._ghost, 0.4, 0.0001,
+		"the next life's first hit starts a CLEAN trail — it must not inherit the dead life's shard height")
 	hud.free()

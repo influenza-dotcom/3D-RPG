@@ -3,11 +3,9 @@ extends GutTest
 ## the grid is full, or the footprint is bigger than an empty grid; CharacterInventory._rehome_unplaced covers the
 ## free-cell case, so the strip handles the RESIDUAL) must be VISIBLE and takeable, not silently invisible: that's
 ## what lets a loot-only coin too big for a full corpse grid still be taken so the corpse drains and its ragdoll
-## fades. Two layers of coverage: (1) an OFF-TREE build proves an unplaced stack actually gets a strip tile + is
-## hit-tested (no _ready side effects — we never add_child the view, so no overlay / no mouse rig); (2) a
-## source-string contract for the in-tree, mouse-driven bits (the click routing) that a unit can't exercise.
-
-const VIEW_SRC := "res://scripts/ui/grid_inventory_view.gd"
+## fades. Everything is built OFF-TREE (no _ready side effects — we never add_child the view, so no overlay / no
+## mouse rig): an unplaced stack gets a strip tile, the strip is hit-tested, and mouse events fed straight into the
+## view's _gui_input prove the click routing (left-click takes, right-click drops, a cancelled press takes nothing).
 
 ## Build a bounded 1x1 bag carrying TWO 1x1 stacks: the second can't fit, so it's kept-but-unplaced (x<0). Seed
 ## with the grid OFF then enable_grid() too small — the documented "left unplaced (with a warning)" overflow path
@@ -99,18 +97,99 @@ func test_strip_inert_when_grid_off() -> void:
 	inv.free()
 
 
-func test_source_routes_strip_clicks_and_lays_out_the_strip() -> void:
-	# Source-string contract for the in-tree, mouse-driven parts a unit can't drive. Assert _sync_tiles no longer
-	# UNCONDITIONALLY skips x<0 (it now branches into the strip layout) and _gui_input routes strip clicks to the
-	# same activate_requested / drop_requested signals the host already wires (so no host change).
-	var src := FileAccess.get_file_as_string(VIEW_SRC)
-	assert_true(src.contains("if rx < 0 and not strip_active:"),
-		"_sync_tiles skips an unplaced row ONLY when the grid is off — no longer an unconditional continue")
-	assert_true(src.contains("_strip_rect(strip_idx)"),
-		"_sync_tiles lays unplaced stacks out into the overflow strip")
-	assert_true(src.contains("_strip_key_at_local(mb.position)"),
-		"_gui_input hit-tests the strip for both the left-click and right-click branches")
-	assert_true(src.contains('activate_requested.emit(srow["item"])'),
-		"a left-click on a strip tile emits activate_requested (take/equip) — same signal as a grid tile")
-	assert_true(src.contains("key = _strip_key_at_local(mb.position)"),
-		"a right-click on a strip tile routes into the existing drop_requested emit")
+# --- the click routing, driven through the view's real _gui_input (off-tree: accept_event is a no-op there) ----
+
+## A mouse-button event at a view-local position.
+func _mouse(button: MouseButton, pressed: bool, at: Vector2) -> InputEventMouseButton:
+	var ev := InputEventMouseButton.new()
+	ev.button_index = button
+	ev.pressed = pressed
+	ev.position = at
+	return ev
+
+## The centre of the tile _sync_tiles actually laid out for `key` — clicks land where the player SEES the tile,
+## so a layout that drifted away from the hit-test fails here too.
+func _tile_centre(view: GridInventoryView, key: int) -> Vector2:
+	var tile: Control = view._tiles.get(key)
+	assert_true(tile != null, "precondition: stack %d has a laid-out tile" % key)
+	return tile.position + tile.size * 0.5 if tile != null else Vector2(-100.0, -100.0)
+
+## [placed_key, placed_item, unplaced_item] for the fixture bag, read back from the bag itself.
+func _stacks(inv: CharacterInventory, unplaced_key: int) -> Array:
+	var placed_key := -1
+	var placed_item: Item = null
+	var unplaced_item: Item = null
+	for row in inv.placed_contents():
+		if int(row["key"]) == unplaced_key:
+			unplaced_item = row["item"]
+		elif int(row["x"]) >= 0:
+			placed_key = int(row["key"])
+			placed_item = row["item"]
+	return [placed_key, placed_item, unplaced_item]
+
+
+## Records every activate_requested / drop_requested the view emits, in order: {"taken": [item...], "dropped": [[item, key]...]}.
+func _record(view: GridInventoryView) -> Dictionary:
+	var events := {"taken": [], "dropped": []}
+	view.activate_requested.connect(func(item: Item) -> void: events["taken"].append(item))
+	view.drop_requested.connect(func(item: Item, key: int) -> void: events["dropped"].append([item, key]))
+	return events
+
+
+func test_left_click_on_a_strip_tile_takes_that_unplaced_stack() -> void:
+	var bag := _bag_with_one_unplaced()
+	var inv: CharacterInventory = bag[0]
+	var unplaced_key: int = bag[1]
+	var stacks := _stacks(inv, unplaced_key)
+	var view := GridInventoryView.new()
+	view.bind(inv)
+	var events := _record(view)
+	var at := _tile_centre(view, unplaced_key)
+	view._gui_input(_mouse(MOUSE_BUTTON_LEFT, true, at))
+	assert_eq(events["taken"].size(), 0, "the strip is click-only: nothing is taken on the PRESS, only on the release")
+	view._gui_input(_mouse(MOUSE_BUTTON_LEFT, false, at))
+	assert_eq(events["taken"], [stacks[2]],
+		"a click on the overflow tile takes/equips THAT stack — the coin too big for a full corpse grid is still takeable")
+	view.free()
+	inv.free()
+
+
+func test_a_strip_press_released_elsewhere_takes_nothing() -> void:
+	# Click-only: the release must land on the SAME strip tile. Dragging off it onto the grid must neither take the
+	# overflow stack nor fall through into activating the grid tile under the release.
+	var bag := _bag_with_one_unplaced()
+	var inv: CharacterInventory = bag[0]
+	var unplaced_key: int = bag[1]
+	var stacks := _stacks(inv, unplaced_key)
+	var view := GridInventoryView.new()
+	view.bind(inv)
+	var events := _record(view)
+	var grid_at := _tile_centre(view, int(stacks[0]))
+	view._gui_input(_mouse(MOUSE_BUTTON_LEFT, true, _tile_centre(view, unplaced_key)))
+	view._gui_input(_mouse(MOUSE_BUTTON_LEFT, false, grid_at))
+	assert_eq(events["taken"].size(), 0,
+		"a strip press released off its tile is a cancelled click, not a take of either stack")
+	# Control: the grid tile itself still activates on its own click, so the routing did not simply go dead.
+	view._gui_input(_mouse(MOUSE_BUTTON_LEFT, true, grid_at))
+	view._gui_input(_mouse(MOUSE_BUTTON_LEFT, false, grid_at))
+	assert_eq(events["taken"], [stacks[1]], "control: a plain click on the placed grid tile activates the placed stack")
+	view.free()
+	inv.free()
+
+
+func test_right_click_drops_the_exact_stack_under_the_cursor_on_the_strip_or_the_grid() -> void:
+	var bag := _bag_with_one_unplaced()
+	var inv: CharacterInventory = bag[0]
+	var unplaced_key: int = bag[1]
+	var stacks := _stacks(inv, unplaced_key)
+	var view := GridInventoryView.new()
+	view.bind(inv)
+	var events := _record(view)
+	view._gui_input(_mouse(MOUSE_BUTTON_RIGHT, true, _tile_centre(view, unplaced_key)))
+	assert_eq(events["dropped"], [[stacks[2], unplaced_key]],
+		"right-clicking the overflow tile drops THAT unplaced stack (its own key, so the host removes the right one)")
+	view._gui_input(_mouse(MOUSE_BUTTON_RIGHT, true, _tile_centre(view, int(stacks[0]))))
+	assert_eq(events["dropped"], [[stacks[2], unplaced_key], [stacks[1], int(stacks[0])]],
+		"control: right-clicking the placed grid tile still drops the placed stack, not the strip's")
+	view.free()
+	inv.free()

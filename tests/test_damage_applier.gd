@@ -15,6 +15,18 @@ class _ConcreteChar extends Character:
 	pass
 
 
+## A victim that has NOT noticed the attacker (what NPC.is_off_guard reports from its Perception).
+class _UnawareChar extends Character:
+	func is_off_guard() -> bool:
+		return true
+
+
+## Not a Character, but answers the same question "yes" — the type gate must still refuse it.
+class _OffGuardProp extends Node3D:
+	func is_off_guard() -> bool:
+		return true
+
+
 ## A concrete Character stub, in-tree and autofreed, at `hp_now` (max 1000 so every hit is non-lethal).
 func _char(hp_now: float = 1000.0) -> _ConcreteChar:
 	var c := _ConcreteChar.new()
@@ -56,12 +68,20 @@ func test_crit_for_non_character_never_crits() -> void:
 
 # --- off_guard_for: the type gate + pass-through ---
 
-func test_off_guard_for_gates_on_character() -> void:
+func test_off_guard_for_follows_the_victims_awareness_and_gates_on_character() -> void:
+	var unaware := _UnawareChar.new()
+	unaware.max_hp = 1000.0
+	add_child_autofree(unaware)
+	assert_true(DamageApplier.off_guard_for(unaware),
+		"a Character that hasn't noticed the attacker is open to the sneak-attack multiplier")
+	var alert := _char()  # base Character.is_off_guard() is false: the player is never an ambush target
+	assert_false(DamageApplier.off_guard_for(alert), "a Character that is on guard earns no sneak bonus")
+	var prop := _OffGuardProp.new()
+	assert_false(DamageApplier.off_guard_for(prop),
+		"a prop that answers is_off_guard() true is still not a Character — props/crates can't be snuck up on")
 	var crate := Node3D.new()
-	assert_false(DamageApplier.off_guard_for(crate), "non-Characters can't be snuck up on")
-	var c := _char()
-	assert_eq(DamageApplier.off_guard_for(c), c.is_off_guard(),
-		"for a Character it defers to the victim's own is_off_guard()")
+	assert_false(DamageApplier.off_guard_for(crate), "a plain non-Character can't be snuck up on")
+	prop.free()
 	crate.free()
 
 

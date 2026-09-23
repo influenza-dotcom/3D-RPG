@@ -5,9 +5,11 @@ extends GutTest
 ## scan_range_m(), which AbilityManager.scan_range reads by method name. Pinned on a bare `.new()` because that
 ## is what a runtime grant gets (AbilityManager._build -> load(script).new(), default exports — never the scene):
 ##   * ability_id &"bio_scanner" (the id the chip installs and the save serialises);
-##   * the SCRIPT default 22 m, and scan_range_m() returning it, clamped at 0 for a mis-authored negative;
+##   * a bare .new() grants a REAL reach (> 0 m — the tier's exact number is a designer knob, and the
+##     built-vs-authored agreement below is what keeps a scene-only retune honest), scan_range_m() honours the
+##     export, clamped at 0 for a mis-authored negative;
 ##   * the registry naming convention resolves the id to THIS script, the authored scene agrees with the script
-##     default, and the chip .tres installs this id.
+##     default, and the chip .tres installs the id this script answers with.
 ## The map-side gating (what the range actually draws) lives in tests/test_minimap_scan.gd.
 
 const SCRIPT_PATH := "res://scripts/components/abilities/bio_scanner.gd"
@@ -28,11 +30,11 @@ func test_is_an_ability_with_its_id() -> void:
 	a.free()
 
 
-func test_the_script_default_is_the_range_a_chip_install_grants() -> void:
+func test_a_bare_build_grants_a_real_range_and_honours_its_export() -> void:
 	var a = _bare()
-	assert_eq(a.scan_range, 22.0, "a bare .new() (what a paid install / save load builds) must grant 22 m — a scene-only value would install at 0 m")
-	assert_true(a.has_method(&"scan_range_m"), "AbilityManager.scan_range duck-types on scan_range_m()")
-	assert_eq(a.scan_range_m(), 22.0, "scan_range_m() reports the export")
+	assert_gt(a.scan_range_m(), 0.0, "a bare .new() (what a paid install / save load builds) must grant a real reach — a range authored only on the scene would install as a 0 m scanner and a map that stays blank")
+	a.scan_range = 13.5
+	assert_almost_eq(a.scan_range_m(), 13.5, 0.0001, "scan_range_m() — the number AbilityManager.scan_range duck-reads — must report the export, so a hand-placed retune reaches the map")
 	a.free()
 
 
@@ -67,4 +69,7 @@ func test_the_chip_installs_this_id() -> void:
 	assert_not_null(chip, "chip_bio_scanner.tres must load")
 	if chip == null:
 		return
-	assert_eq(chip.installs_ability, ID, "the Bio-Scanner chip must install &\"bio_scanner\"")
+	var bare = _bare()
+	assert_eq(chip.installs_ability, bare.ability_id(), "the Bio-Scanner chip must install the id this scanner answers with — a mismatch is a paid install that grants nothing")
+	assert_eq(AbilityRegistry.script_path_for(chip.installs_ability), SCRIPT_PATH, "...and that id must build THIS script at install time")
+	bare.free()

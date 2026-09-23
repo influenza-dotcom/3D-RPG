@@ -2,14 +2,16 @@ extends GutTest
 
 ## GUT suite for the single NPC class (scripts/npc/npc.gd). After the structural fold NPC is the ONE
 ## concrete non-player actor (Character -> NPC); the former Enemy / RangedEnemy classes are gone and
-## their behaviour lives here, data-driven (weapon_data null = civilian, set = combatant). These
-## asserts guard the class shape and that `NPC is Character` stays true, so every `is Character` /
-## `is NPC` runtime check across combat / effects / death keeps matching.
+## their behaviour lives here, data-driven (weapon_data null = civilian, set = combatant). Beyond the
+## class shape (`NPC is Character`, so every `is Character` / `is NPC` check keeps matching), the suite
+## DRIVES the NPC's off-tree-safe seams: the rim colour, the pickpocket hitbox, seated posture, the held
+## gun's anchor / aim pitch / world layer / muzzle FX, the anti-stuck steering, the punch knockback
+## immunity and the assist-thanks bark.
 ##
-## NPC is now concrete (instantiable), but we still build off-tree (load().new() WITHOUT add_child)
-## so _ready never runs — it spawns a Perception / NavigationAgent3D and calls get_tree(). The
-## @abstract REMOVAL is asserted by source-grepping npc.gd (no runtime abstract flag in GDScript),
-## the same _read_file pattern test_smoke.gd uses.
+## NPC is concrete (instantiable — every `load().new()` below would return null if the @abstract came
+## back), but we still build off-tree (load().new() WITHOUT add_child) so _ready never runs — it spawns
+## a Perception / NavigationAgent3D and calls get_tree(). Anything that needs a global transform hangs
+## on a small in-tree rig instead, never on the NPC itself.
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
 const EPS := 0.0001
@@ -44,52 +46,122 @@ func test_npc_script_loads() -> void:
 	assert_not_null(script, "npc.gd must load — it is the single non-player actor class")
 	assert_true(script is GDScript, "npc.gd must be a GDScript")
 
-func test_npc_is_concrete_not_abstract() -> void:
-	# The fold makes NPC the single CONCRETE class — the @abstract annotation must be GONE, or the
-	# enemy scenes that instance npc.gd would fail to load.
-	var content := _read_file(NPC_PATH)
-	assert_false("@abstract" in content,
-		"npc.gd must NOT be @abstract — NPC is now the single concrete class the enemy scenes instance")
-	assert_true("class_name NPC" in content,
-		"npc.gd must declare class_name NPC so `is NPC` checks and the scene scripts resolve globally")
-
 func test_npc_is_a_character_actor() -> void:
 	# The fold must keep NPC a Character / CharacterBody3D so combat / effects / death (`is Character`
 	# and `is NPC` checks in attack.gd, explosion_area.gd, player.gd) plus move_and_slide keep working.
-	# Off-tree (no add_child) so _ready never runs.
+	# Off-tree (no add_child) so _ready never runs. The instance existing at all is the CONCRETENESS check:
+	# an @abstract npc.gd refuses .new(), and every enemy scene that instances it would fail to load.
 	var n = load(NPC_PATH).new()
-	assert_true(n is NPC, "an npc.gd instance must be an NPC")
+	assert_true(n != null, "npc.gd must instantiate — NPC is the single concrete class the enemy scenes instance")
+	assert_true(n is NPC, "an npc.gd instance must be an NPC (class_name NPC resolves globally)")
 	assert_true(n is Character,
 		"NPC must stay a Character (NPC -> Character) so every `is Character` runtime check keeps matching")
 	assert_true(n is CharacterBody3D,
 		"NPC must stay a CharacterBody3D so move_and_slide / blast physics still apply")
 	n.free()
 
-func test_npc_outline_exports_default_to_combat_rim() -> void:
-	# NPC owns the combat outline (Phase 2). Defaults reproduce the old hardcoded Character rim,
-	# now actually reaching the shader. Off-tree so _ready -> _setup_outline never runs.
-	# The black rim is CORRECT next to the world's InkOutline ink because actors are EXCLUDED from that
-	# pass (the ACTOR_INK_MASK_LAYER stamp in _apply_overlay_to_meshes — pinned by test_ink_outline.gd);
-	# it briefly shipped transparent to dodge ink-doubling, which was the wrong fix.
+func test_npc_rim_colour_reads_the_attitude_and_a_neutral_wears_the_outline_color_export() -> void:
+	# _outline_color_for_disposition() is the one colour source for the rim's attitude AND the laser beam's tint
+	# (NpcLaser reads it directly). The black neutral rim is CORRECT next to the world's InkOutline ink because
+	# actors are EXCLUDED from that pass (ACTOR_INK_MASK_LAYER, pinned by test_ink_outline.gd); it briefly shipped
+	# transparent to dodge ink-doubling, which was the wrong fix. (outline_width is inert since the hull was
+	# retired — nothing reads it — so it is not asserted here; test_npc_data pins that NpcData still stamps it.)
+	# Off-tree so _ready -> _setup_outline never runs; the resolver reads only disposition / provoke / leader.
 	var n = load(NPC_PATH).new()
-	assert_true(n.has_outline, "NPC.has_outline must default true so combatants still get their outline")
-	assert_eq(n.outline_color, Color.BLACK, "NPC.outline_color must default black — the dark combat rim")
-	assert_eq(n.outline_width, 2.0,
-		"NPC.outline_width 2.0 is the intended combat rim thickness, fed to the shader's outline_width uniform")
+	assert_true(n.has_outline,
+		"SHIP DECISION: every NPC gets the combat rim unless a designer switches has_outline off on that instance")
+	n.disposition = Disposition.Kind.NEUTRAL
+	assert_eq(n._outline_color_for_disposition(), Color.BLACK,
+		"SHIP DECISION: an unprovoked NEUTRAL NPC reads the classic black rim (and its laser draws black) out of the box")
+	var authored := Color(0.2, 0.6, 0.9)
+	n.outline_color = authored
+	assert_eq(n._outline_color_for_disposition(), authored,
+		"a neutral NPC wears the designer's outline_color export — a per-instance tint must actually reach the rim/laser")
+	n.disposition = Disposition.Kind.HOSTILE
+	assert_eq(n._outline_color_for_disposition(), CBPalette.hostile(),
+		"a HOSTILE NPC reads the palette's hostile hue whatever outline_color says, so a threat is legible at a glance")
+	n.disposition = Disposition.Kind.FRIENDLY
+	assert_eq(n._outline_color_for_disposition(), CBPalette.friendly(),
+		"a FRIENDLY NPC reads the palette's friendly hue, never the neutral export")
+	n.disposition = Disposition.Kind.NEUTRAL
+	n._provoked = true
+	assert_eq(n._outline_color_for_disposition(), CBPalette.hostile(),
+		"a neutral the player PROVOKED re-tints hostile — the rim must warn that it is now shooting back")
+	var leader := Node3D.new()
+	n._leader = leader
+	assert_eq(n._outline_color_for_disposition(), NPC.OUTLINE_FOLLOWING,
+		"a recruited companion following the player wears the companion blue, overriding every attitude tint")
+	n._leader = null
+	leader.free()
 	n.free()
 
-func test_npc_display_name_defaults_empty() -> void:
-	# NPCs have a name (shown as the dialogue speaker label). Default empty => unnamed, label hidden.
+func test_an_unauthored_npc_shows_no_speaker_label() -> void:
+	# display_name is the dialogue speaker label (TalkHelpers.speaker_name falls back to it when a line leaves
+	# `speaker` blank). An NPC dropped into a level with nothing authored must read as UNNAMED — the label hides —
+	# rather than leaking something the player was never meant to read, like the scene node's name.
 	var n = load(NPC_PATH).new()
-	assert_eq(n.display_name, "",
-		"NPC.display_name must default empty so an unnamed NPC hides the dialogue speaker label")
+	n.name = &"RaiderGrunt"   # a placed NPC always carries a node name; the label must never fall back to it
+	assert_eq(TalkHelpers.speaker_name("", n), "",
+		"an NPC with no display_name authored must resolve to NO speaker name, so the dialogue label stays hidden")
+	n.display_name = "Marta"
+	assert_eq(TalkHelpers.speaker_name("", n), "Marta",
+		"control: the same NPC, once a designer names it, labels its lines with that name")
 	n.free()
 
-func test_npc_weapon_knockback_immunity_defaults_off() -> void:
-	var n = load(NPC_PATH).new()
-	assert_false(n.immune_to_weapon_knockback,
-		"immune_to_weapon_knockback must default false so existing enemies still take their weapon's recoil")
-	n.free()
+## A punch VICTIM: a real Character (NpcCombat._punch casts its target `as Character`) with the flag the punch reads.
+## Godot 4 never chains _ready / _physics_process to the parent without super(), so the in-tree body builds none of
+## Character's children and never moves; take_damage only counts, so the test watches the swat alone.
+class _PunchVictim:
+	extends Character
+	var immune_to_weapon_knockback: bool = false
+	var hits: int = 0
+	func _ready() -> void:
+		pass
+	func _physics_process(_delta: float) -> void:
+		pass
+	func take_damage(_amount: float, _was_crit: bool = false, _attacker: Node = null, _hit_pos: Vector3 = Vector3.INF) -> void:
+		hits += 1
+
+## The puncher: only the members NpcCombat._punch reads off its host.
+class _PunchHost:
+	extends Node3D
+	var _target: Node = null
+	func _aim_point() -> Vector3:
+		return Vector3.ZERO
+	func _find_body_swap() -> Node:
+		return null
+
+func test_a_stock_npc_is_swatted_by_a_punch_but_a_knockback_immune_one_holds_its_ground() -> void:
+	# immune_to_weapon_knockback lets a heavy / anchored NPC ignore weapon shoves; every other NPC must still be
+	# knocked back. The victim takes its flag from a freshly built NPC, so "a stock NPC gets swatted" is what runs.
+	var stock = load(NPC_PATH).new()
+	var stock_immune: bool = stock.immune_to_weapon_knockback
+	stock.free()
+	var host := _PunchHost.new()
+	add_child_autofree(host)
+	var combat := NpcCombat.new()
+	combat.host = host
+	var victim := _PunchVictim.new()
+	victim.immune_to_weapon_knockback = stock_immune
+	add_child_autofree(victim)
+	victim.position = Vector3(0.0, 0.0, 2.0)   # 2 m straight ahead (+Z) of the puncher
+	host._target = victim
+	combat._punch()
+	assert_eq(victim.hits, 1, "the punch lands on the target")
+	assert_gt(victim.explosion_velocity.z, 0.0,
+		"a stock NPC (immune_to_weapon_knockback at its default) is shoved AWAY from the puncher")
+	assert_almost_eq(victim.explosion_velocity.x, 0.0, EPS, "straight along the puncher -> victim line, not sideways")
+
+	var anchored := _PunchVictim.new()
+	anchored.immune_to_weapon_knockback = true
+	add_child_autofree(anchored)
+	anchored.position = Vector3(0.0, 0.0, 2.0)
+	host._target = anchored
+	combat._punch()
+	assert_eq(anchored.hits, 1, "an immune NPC still TAKES the hit — the flag waives the shove, never the damage")
+	assert_eq(anchored.explosion_velocity, Vector3.ZERO,
+		"a knockback-immune NPC gets no blast impulse at all, so an anchored heavy stays planted")
+	combat.free()
 
 func test_npc_build_components_adds_pickpocket_talkable_when_missing() -> void:
 	var n = load(NPC_PATH).new()
@@ -100,8 +172,11 @@ func test_npc_build_components_adds_pickpocket_talkable_when_missing() -> void:
 	var shape := t.get_node_or_null("CollisionShape3D") as CollisionShape3D
 	assert_not_null(shape, "the auto pickpocket Talkable needs a hitbox for PickupRay's talk-layer ray")
 	assert_true(shape.shape is BoxShape3D, "the auto pickpocket hitbox uses the same simple box shape as the component prefab")
-	assert_eq((shape.shape as BoxShape3D).size, NPC.PICKPOCKET_TALKABLE_SIZE,
-		"the auto pickpocket hitbox should cover the NPC body")
+	var size := (shape.shape as BoxShape3D).size
+	assert_true(size.x > 0.0 and size.y > 0.0 and size.z > 0.0,
+		"the auto pickpocket hitbox must be a real volume (got %s) — a flat box can never be hit by the look-at ray" % size)
+	assert_true(size.y > size.x and size.y > size.z,
+		"the hitbox is body-shaped, taller than it is wide (got %s), so aiming anywhere on a standing NPC reaches it" % size)
 	n.free()
 
 func test_npc_build_components_preserves_authored_talkable() -> void:
@@ -245,17 +320,16 @@ func test_weapon_anchor_grip_rises_with_the_hold_pitch() -> void:
 	var low_muzzle := Marker3D.new()
 	low.add_child(low_muzzle)
 	low._muzzle = low_muzzle
-	var low_swap = _swap_with_arms(low, Vector3(-0.27, 0.155, -0.05), -50.0)
+	_swap_with_arms(low, Vector3(-0.27, 0.155, -0.05), -50.0)
 	low._sync_weapon_anchor(0.016)
 	var high = load(NPC_PATH).new()
 	var high_muzzle := Marker3D.new()
 	high.add_child(high_muzzle)
 	high._muzzle = high_muzzle
-	var high_swap = _swap_with_arms(high, Vector3(-0.27, 0.155, -0.05), -90.0)
+	_swap_with_arms(high, Vector3(-0.27, 0.155, -0.05), -90.0)
 	high._sync_weapon_anchor(0.016)
 	assert_gt(high_muzzle.position.y, low_muzzle.position.y,
 		"raising arm_hold_pitch toward level (-90) lifts the grip, and the gun with it")
-	assert_true(low_swap != null and high_swap != null, "both rigs built a swap")
 	low.free()
 	high.free()
 
@@ -369,15 +443,44 @@ func test_held_model_fix_leaves_ink_outline_tint_duplicates_alone() -> void:
 # out AND perception has actually sensed the foe.
 
 func test_aim_pitch_is_zero_without_a_drawn_gun_or_a_sensed_foe() -> void:
-	# An off-tree NPC has no _weapon at all (is_holding_gun false) and no Perception (has_sensed_foe false),
-	# which is exactly the "nothing to point at" case the goal must refuse.
-	var n = load(NPC_PATH).new()
-	assert_false(n.is_holding_gun(), "off-tree: no weapon hub, so nothing is drawn")
-	assert_false(n.has_sensed_foe(), "off-tree: no perception, so no foe has been sensed")
+	# The NPC stays off-tree (no _ready); only its hand anchor and the foe live in a small in-tree rig, because the
+	# goal measures from the anchor's global position. Every gate is opened first (a drawn gun, a Perception that
+	# was alerted to a foe well above the barrel) so the CONTROL goal is a real upward pitch, and then each gate
+	# the name claims is closed ON ITS OWN — so a goal that stopped checking either one would stay pitched.
+	var rig := Node3D.new()
+	add_child_autofree(rig)
 	var muzzle := Marker3D.new()
-	n.add_child(muzzle)
+	rig.add_child(muzzle)
+	var foe := Node3D.new()
+	rig.add_child(foe)
+	foe.position = Vector3(0.0, 20.0, 20.0)  # 45 degrees up, far outside any point-blank band
+	var n = load(NPC_PATH).new()
 	n._muzzle = muzzle
-	assert_almost_eq(n._aim_pitch_goal(), 0.0, 0.0001, "no drawn gun / no sensed foe -> the barrel stays level")
+	n._target = foe
+	var perception := Perception.new()
+	n.add_child(perception)
+	n._perception = perception
+	var weapon := Weapon.new()
+	var attack := Attack.new()
+	weapon.add_child(attack)
+	weapon.attack = attack
+	n.add_child(weapon)
+	n._weapon = weapon
+	perception.alert_to(foe.position, foe)
+	assert_true(n.is_holding_gun() and n.has_sensed_foe(),
+		"precondition: the gun is out and perception has sensed the foe")
+	assert_gt(n._aim_pitch_goal(), 0.0, "control: a drawn gun on a sensed foe above the barrel pitches it UP")
+
+	attack.set_holstered(true)
+	assert_almost_eq(n._aim_pitch_goal(), 0.0, 0.0001,
+		"the same foe, still sensed, but the gun is HOLSTERED -> the barrel stays level (nothing is drawn to point)")
+	attack.set_holstered(false)
+	assert_gt(n._aim_pitch_goal(), 0.0, "control: drawing the gun again pitches it back up at the sensed foe")
+
+	perception.forget()
+	assert_true(n.is_holding_gun(), "precondition: the gun is still drawn")
+	assert_almost_eq(n._aim_pitch_goal(), 0.0, 0.0001,
+		"the gun is drawn and the foe still stands there, but perception FORGOT it -> level: the pitch is no tell for a foe it has not sensed")
 	n.free()
 
 func test_aim_pitch_eases_toward_its_goal_and_publishes_degrees() -> void:
@@ -438,9 +541,10 @@ func test_point_blank_beam_fade_is_full_off_tree() -> void:
 
 func test_npc_weapon_pitch_defaults_are_sane() -> void:
 	var n = load(NPC_PATH).new()
-	assert_true(n.weapon_in_hands, "NPCs carry their weapon in their hands by default")
-	assert_true(n.weapon_aim_pitch, "and point it at what they are aiming at by default")
-	assert_gt(n.weapon_aim_pitch_limit, 0.0, "the clamp must be a real angle or the barrel can fold through the chest")
+	assert_true(n.weapon_in_hands, "SHIP DECISION: NPCs carry their weapon in their hands by default")
+	assert_true(n.weapon_aim_pitch, "SHIP DECISION: and point it at what they are aiming at by default")
+	assert_true(n.weapon_aim_pitch_limit > 0.0 and n.weapon_aim_pitch_limit < 90.0,
+		"the pitch clamp must be a real angle short of vertical (got %s): at 90+ the barrel folds back through the chest" % n.weapon_aim_pitch_limit)
 	assert_gt(n.weapon_aim_pitch_speed, 0.0, "a zero ease rate would freeze the barrel level forever")
 	n.free()
 
@@ -558,30 +662,68 @@ func test_muzzle_fx_unscale_leaves_a_degenerate_anchor_alone() -> void:
 		"and the composed world scale stays finite, so the emitter is still a recoverable node")
 	n.free()
 
-func test_every_fx_hung_on_the_muzzle_anchor_cancels_its_scale() -> void:
-	# The regression this file cannot catch any other way: a FOURTH emitter added to _build_muzzle_fx
-	# without its _unscale_muzzle_fx line. Nothing would complain at runtime — it would simply be born the
-	# wrong size on every weapon, and per the section header no property assert can tell. So pair the two
-	# calls in TEXT. If the cancel ever moves somewhere else (a helper that adds AND unscales, say), retire
-	# this assert deliberately rather than loosening it — but keep the pairing guaranteed somehow.
-	var n = load(NPC_PATH).new()
-	assert_true(n.has_method("_unscale_muzzle_fx"),
-		"NPC must keep _unscale_muzzle_fx — it is the single seam that stops the held gun's display scale from resizing its muzzle effects")
-	n.free()
+func test_build_muzzle_fx_hangs_every_emitter_at_world_scale_one() -> void:
+	# The regression the unit tests above cannot see: a FOURTH emitter added to _build_muzzle_fx without its
+	# _unscale_muzzle_fx line (or a cancel handed the wrong node). Nothing would complain at runtime — it would
+	# simply be born the wrong size on every weapon. So drive the REAL builder over a real barrel chain and judge
+	# EVERY node it hangs on the anchor, whatever it is and however many there are. Two anchors: the gun's own
+	# Muzzle marker (baking a scale of its own on top of the mesh, like the spray can) and the mesh-root fallback
+	# for a model with no marker (the pistol's millimetre root x the display boost). The NPC stays off-tree; its
+	# weapon hub is a bare Weapon + Attack (the builder only reads `_weapon.attack` and connects its signals).
+	for with_marker in [true, false]:
+		var n = load(NPC_PATH).new()
+		var weapon := Weapon.new()
+		var attack := Attack.new()
+		weapon.attack = attack
+		n._weapon = weapon
+		var hand := Node3D.new()
+		add_child_autofree(hand)
+		var mesh := Node3D.new()
+		mesh.scale = Vector3.ONE * 2.6 if with_marker else Vector3.ONE * (0.001 * 2.6)
+		hand.add_child(mesh)
+		n._weapon_mesh = mesh
+		var anchor: Node3D = mesh
+		if with_marker:
+			var marker := Marker3D.new()
+			marker.scale = Vector3.ONE * 0.015
+			mesh.add_child(marker)
+			n._gun_muzzle = marker
+			anchor = marker
+		var label := "Muzzle marker anchor" if with_marker else "mesh-root fallback anchor"
+		n._build_muzzle_fx()
+		assert_gt(anchor.get_child_count(), 0, "%s: _build_muzzle_fx must hang its emitters on the barrel" % label)
+		for c in anchor.get_children():
+			var s: Vector3 = (c as Node3D).global_transform.basis.get_scale()
+			assert_true(absf(s.x - 1.0) < EPS and absf(s.y - 1.0) < EPS and absf(s.z - 1.0) < EPS,
+				"%s: '%s' must come out at WORLD scale 1.0 (got %s) — otherwise it inherits the gun's display scale, which on the pistol is ~0.0026x and invisible" % [label, c.name, s])
+		assert_true(attack.shell_drop != null and attack.shell_drop.get_parent() == anchor,
+			"%s: Attack's casing hook must point at the casing hung on THIS gun, so casing_size_scale resizes what the player sees" % label)
+		n._weapon = null
+		n.free()
+		attack.free()
+		weapon.free()
 
-	var src := _read_file(NPC_PATH)
-	var start := src.find("func _build_muzzle_fx()")
-	assert_gt(start, -1,
-		"npc.gd must still define _build_muzzle_fx — it is what parents the spark, smoke and casing to the barrel")
-	var end := src.find("\nfunc ", start + 1)
-	if end < 0:
-		end = src.length()
-	var body := src.substr(start, end - start)
-	var adds := body.count("anchor.add_child(")
-	var cancels := body.count("_unscale_muzzle_fx(")
-	assert_gt(adds, 0, "_build_muzzle_fx must still hang its emitters on the barrel anchor")
-	assert_eq(cancels, adds,
-		"every node added to the muzzle anchor needs its own _unscale_muzzle_fx right after it — %d add_child vs %d cancels means an emitter is inheriting the gun's display scale, which on the pistol is 0.00175x and invisible" % [adds, cancels])
+func test_build_muzzle_fx_builds_nothing_without_a_weapon_hub() -> void:
+	# The guard: with no Weapon there is no Attack to fire the effects, so nothing may be half-wired onto the barrel.
+	# Control: the same rig WITH a hub gets emitters (see the test above), so the empty anchor is the guard's doing.
+	var n = load(NPC_PATH).new()
+	var hand := Node3D.new()
+	add_child_autofree(hand)
+	var marker := Marker3D.new()
+	hand.add_child(marker)
+	n._gun_muzzle = marker
+	n._build_muzzle_fx()
+	assert_eq(marker.get_child_count(), 0, "no weapon hub -> no muzzle FX are built onto the barrel")
+	var weapon := Weapon.new()
+	var attack := Attack.new()
+	weapon.attack = attack
+	n._weapon = weapon
+	n._build_muzzle_fx()
+	assert_gt(marker.get_child_count(), 0, "control: the same barrel with a weapon hub does get its emitters")
+	n._weapon = null
+	n.free()
+	attack.free()
+	weapon.free()
 
 # --- Anti-stuck navigation (pathfinding fix: steer ALONG a wall instead of grinding into it) -----------
 # The full stuck-detection (is_on_floor + wall-vs-floor contact + speed-vs-intended) is in-tree physics
@@ -642,19 +784,117 @@ func test_locomotor_drive_move_to_off_tree_returns_false() -> void:
 		"and produces no steering")
 	loco.free()
 
-func test_npc_thanks_pool_ships_unauthored() -> void:
-	# THANKS_LINES is the pool the assist-thanks bark draws from. Speech is authored content: it ships
-	# EMPTY (= silent — _pick_bark returns "" and _emit_bark skips) until a designer fills BarkSet.thanks.
-	assert_true(NPC.THANKS_LINES is Array,
-		"NPC.THANKS_LINES must be an Array — thank_for_assist() picks a random line from it")
-	assert_eq(NPC.THANKS_LINES.size(), 0,
-		"THANKS_LINES ships unauthored (empty = silent)")
+# --- Assist thanks ("Hey, thanks!") ------------------------------------------------------------------------
+# NPC.thank_for_assist() -> NpcVoice.thank_for_assist() gates the speaker, resolves the line (BarkSet.thanks over
+# the THANKS_LINES fallback) and round-trips through NPC._emit_bark -> NpcVoice.emit. Only emit() is replaced here:
+# it is the awaited body (reaction delay -> bubble -> TTS) that needs a tree and a player. Everything upstream of
+# it is the real code, driven on an off-tree NPC.
+
+const THANKS_LINE := "Owe you one."
+
+## Records what the NPC was asked to say instead of floating a bubble.
+class _RecordingVoice:
+	extends NpcVoice
+	var said: Array[String] = []
+	var voices: Array[VoiceData] = []
+	func emit(line: String, voice: VoiceData) -> void:
+		said.append(line)
+		voices.append(voice)
+
+## A living, FRIENDLY off-tree NPC with a Talkable (the thanks needs one to speak through) and a recording voice
+## whose BarkSet carries `thanks`. Returns [npc, voice, talkable]; freeing the npc frees all three.
+func _thankful_npc(thanks: Array[String]) -> Array:
+	var n = load(NPC_PATH).new()
+	n.disposition = Disposition.Kind.FRIENDLY
+	n.hp = n.max_hp
+	var talkable := Talkable.new()
+	talkable.voice = VoiceData.new()
+	n.add_child(talkable)
+	var voice := _RecordingVoice.new()
+	voice.host = n
+	var barks := BarkSet.new()
+	barks.thanks = thanks
+	voice._bark_set = barks
+	n.add_child(voice)
+	n._voice = voice
+	return [n, voice, talkable]
+
+## A typed line pool for BarkSet.thanks: one line, or none for "".
+func _lines(line: String) -> Array[String]:
+	var out: Array[String] = []
+	if not line.is_empty():
+		out.append(line)
+	return out
+
+func test_assist_thanks_speaks_the_authored_line_in_the_talkables_voice() -> void:
+	var rig := _thankful_npc(_lines(THANKS_LINE))
+	var n = rig[0]
+	var voice: _RecordingVoice = rig[1]
+	var talkable: Talkable = rig[2]
+	n.thank_for_assist()
+	assert_true(voice.said.size() == 1 and voice.said[0] == THANKS_LINE,
+		"a friendly NPC the player just helped says the line its BarkSet authors for thanks (said %s)" % [voice.said])
+	assert_true(voice.voices.size() == 1 and voice.voices[0] == talkable.voice,
+		"and says it in its Talkable's voice, so the thanks sounds like the same person the player talks to")
+	n.free()
+
+func test_assist_thanks_with_nothing_authored_is_silent() -> void:
+	# Speech is authored content (a BarkSet .tres), never a code literal: with an EMPTY BarkSet the code-side
+	# fallback must contribute no words, and the emitter must turn that empty line into no bubble at all.
+	var rig := _thankful_npc(_lines(""))
+	var n = rig[0]
+	var voice: _RecordingVoice = rig[1]
+	n.thank_for_assist()
+	assert_true(voice.said.size() == 1 and voice.said[0] == "",
+		"SHIP DECISION: with no BarkSet line authored the thanks resolves to an empty line — no hardcoded speech in npc.gd (said %s)" % [voice.said])
+	var real = NpcVoice.new()
+	real.host = n
+	add_child_autofree(real)   # in-tree only for the control's reaction-delay timer below
+	n._bark_until_msec = -100000
+	real.emit("", null)
+	assert_eq(n._bark_until_msec, -100000,
+		"an empty line is dropped before the bubble latch, so an unauthored thanks shows no empty balloon and speaks nothing")
+	# Control: the same emitter DOES arm the one-bubble latch for a real line, so the untouched latch above is the
+	# empty-line guard's doing. hp 0 makes the post-delay lifecycle guard drop it before any bubble / TTS / player read.
+	n.hp = 0.0
+	real.emit(THANKS_LINE, null)
+	assert_gt(n._bark_until_msec, -100000, "control: a non-empty line arms the bubble latch")
+	await wait_seconds(0.2)   # let the reaction-delay coroutine run out (it bails on hp 0) before the NPC is freed
+	n.free()
+
+func test_assist_thanks_never_comes_from_a_hostile_dead_or_talkable_less_npc() -> void:
+	var control := _thankful_npc(_lines(THANKS_LINE))
+	control[0].thank_for_assist()
+	assert_eq((control[1] as _RecordingVoice).said.size(), 1,
+		"control: a living friendly NPC with a Talkable does thank the player")
+	control[0].free()
+
+	var hostile := _thankful_npc(_lines(THANKS_LINE))
+	hostile[0].disposition = Disposition.Kind.HOSTILE
+	hostile[0].thank_for_assist()
+	assert_eq((hostile[1] as _RecordingVoice).said.size(), 0,
+		"a HOSTILE NPC never thanks the player for an assist — it is still an enemy")
+	hostile[0].free()
+
+	var dead := _thankful_npc(_lines(THANKS_LINE))
+	dead[0]._dead = true
+	dead[0].thank_for_assist()
+	assert_eq((dead[1] as _RecordingVoice).said.size(), 0, "a dead NPC says nothing")
+	dead[0].free()
+
+	var mute := _thankful_npc(_lines(THANKS_LINE))
+	var t: Talkable = mute[2]
+	mute[0].remove_child(t)
+	t.free()
+	mute[0].thank_for_assist()
+	assert_eq((mute[1] as _RecordingVoice).said.size(), 0,
+		"an NPC with no Talkable has no voice to thank through, so it stays silent instead of erroring")
+	mute[0].free()
 
 func test_npc_has_assist_and_bark_methods() -> void:
-	# Assert the assist-thanks ENTRY POINT (thank_for_assist) and the unified bark EMITTER (_emit_bark,
-	# which every bark path routes through) both exist on an instance. has_method only — we do NOT drive
-	# them: _emit_bark awaits get_tree() and the thanks path needs a Talkable, so both need the tree.
-	# Off-tree (no add_child) so _ready never runs, matching this suite's construction idiom.
+	# Named-surface pin that NpcVoice's header points at: thank_for_assist is the assist-thanks entry point and
+	# _emit_bark the single emitter every NpcVoice trigger round-trips through. The test_assist_thanks_* tests above
+	# DRIVE both off-tree; this stays as the cheap has_method pin CLAUDE.md allows for NPC surfaces.
 	var n = load(NPC_PATH).new()
 	assert_true(n.has_method("thank_for_assist"),
 		"NPC must expose thank_for_assist() — the assist-thanks entry point called from _on_died")
@@ -684,11 +924,3 @@ func test_npc_head_look_range_expands_only_for_player_lock() -> void:
 	target.free()
 	p.free()
 	n.free()
-
-# Local source reader (mirrors test_smoke.gd's own _read_file — a file-local helper there, not a
-# shared GutTest method, so this suite defines its own copy).
-func _read_file(path: String) -> String:
-	var f := FileAccess.open(path, FileAccess.READ)
-	var s := f.get_as_text()
-	f.close()
-	return s

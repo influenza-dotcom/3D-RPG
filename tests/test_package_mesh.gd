@@ -22,13 +22,32 @@ func _package(freq: float = 1.5, amp: float = 0.5, spin: float = 2.0):
 	return p
 
 
-func test_exported_defaults() -> void:
+func test_an_untuned_package_visibly_spins_and_bobs_inside_its_amplitude() -> void:
+	# The drop-in's whole job is "spin endlessly and bob": a package placed with NO inspector tuning must do both
+	# out of the box, and the bob must stay inside the amplitude knob and come back round once per 1/frequency s.
 	var p = load(SCRIPT_PATH).new()
-	assert_eq(p.rotation_speed, 2.0, "2 rad/s spin")
-	assert_eq(p.bobbing_amplitude, 0.5, "0.5 m bob")
-	assert_eq(p.bobbing_frequency, 1.5, "1.5 bobs/s")
-	assert_true(p is Node3D, "a Node3D (it moves and rotates itself)")
-	p.free()
+	p.position = ORIGIN
+	add_child_autofree(p)  # defaults untouched
+	assert_gt(p.rotation_speed, 0.0, "an untuned package must spin — a 0 default makes the pickup a dead prop")
+	assert_gt(p.bobbing_amplitude, 0.0, "an untuned package must bob — a 0 default makes the pickup a dead prop")
+	assert_gt(p.bobbing_frequency, 0.0, "the bob needs a positive rate or it never moves")
+	var period: float = 1.0 / p.bobbing_frequency
+	var steps := 64
+	var dt := period / float(steps)
+	var highest := -INF
+	var lowest := INF
+	var sideways := 0.0
+	for i in steps:
+		p._process(dt)
+		highest = maxf(highest, p.position.y - ORIGIN.y)
+		lowest = minf(lowest, p.position.y - ORIGIN.y)
+		sideways = maxf(sideways, Vector2(p.position.x - ORIGIN.x, p.position.z - ORIGIN.z).length())
+	assert_eq(sideways, 0.0, "an untuned bob never drifts off the placed X/Z")
+	assert_almost_eq(highest, p.bobbing_amplitude, 0.01, "over one full period the bob rises to +amplitude")
+	assert_almost_eq(lowest, -p.bobbing_amplitude, 0.01, "…and sinks to -amplitude, never past it")
+	assert_almost_eq(p.position.y, ORIGIN.y, 0.001, "one 1/frequency period brings it back to the placed height")
+	assert_almost_eq(p.rotation.y, wrapf(p.rotation_speed * period, -PI, PI), 0.001,
+		"it turned rotation_speed rad/s about local Y for that period")
 
 
 func test_ready_captures_the_authored_position_as_the_bob_reference() -> void:

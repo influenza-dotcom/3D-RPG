@@ -5,10 +5,9 @@ extends GutTest
 ## Scope note (CLAUDE.md): the DRAG ITSELF is mouse-driven and in-tree, so it stays playtest-gated exactly like
 ## the overflow strip's click routing. What IS unit-testable is every piece the drop depends on — the new
 ## CharacterInventory API (can_place_new / stack_keys / repack), the view's landing-cell helpers
-## (can_accept_footprint / place_transferred) built OFF-TREE with no add_child so _ready never runs, and
+## (can_accept_footprint / place_transferred) and its cross-grid release, built OFF-TREE with no add_child so
+## _ready never runs, and
 ## Merchant.sell's pay-only-if-it-moved ordering. Those are what a regression would actually break.
-
-const VIEW_SRC := "res://scripts/ui/grid_inventory_view.gd"
 
 
 ## A 1x1-footprint item; distinct instances make distinct stacks (add() stacks by item identity).
@@ -105,10 +104,26 @@ func test_repack_places_stacks_the_caller_omitted() -> void:
 	inv.free()
 
 func test_repack_is_a_noop_with_the_grid_off() -> void:
+	# An unbounded bag has no layout to tidy, so a Sort on it must change nothing AND must not announce a change:
+	# `changed` is what every bag listener (the grid/list views, PassiveItemBuffs) rebuilds on. The emit is the one
+	# thing that can tell a real no-op apart from a repack that ran anyway (repack never touches the stacks, and an
+	# unconfigured grid has no cell to put anything in), so the control is the same repack on a GRIDDED bag.
+	var gridded := CharacterInventory.new()
+	gridded.enable_grid(2, 1)
+	gridded.add(_item(&"a"), 1)
+	watch_signals(gridded)
+	gridded.repack([int(gridded.placed_contents()[0]["key"])])
+	assert_signal_emit_count(gridded, "changed", 1,
+		"control: a repack on a GRIDDED bag re-lays it out and tells its listeners exactly once")
 	var inv := CharacterInventory.new()
 	inv.add(_item(&"a"), 1)
-	inv.repack([0, 1, 2])  # must not error on an unbounded bag
-	assert_eq(inv.contents().size(), 1, "an unbounded bag is untouched by a repack")
+	watch_signals(inv)
+	inv.repack([0, 1, 2])  # must not error on an unbounded bag either
+	assert_signal_not_emitted(inv, "changed",
+		"a repack on an unbounded bag is a no-op, so it must not tell every listener the bag changed")
+	assert_eq(inv.contents().size(), 1, "...and the bag still holds its one stack")
+	assert_eq(int(inv.placed_contents()[0]["x"]), -1, "...still unplaced: an unbounded bag has no cells")
+	gridded.free()
 	inv.free()
 
 
@@ -156,9 +171,13 @@ func test_place_transferred_moves_only_the_new_stack_to_the_aimed_cell() -> void
 	view.free()
 	inv.free()
 
-func test_place_transferred_is_a_noop_when_nothing_arrived_or_no_cell_was_aimed() -> void:
-	# Both degrade paths matter: a REFUSED transfer (equipped lock / unaffordable / caught pickpocketing) leaves
-	# no new stack, and a drop onto the column's margin passes cell.x < 0 meaning "auto-place, I didn't aim".
+func test_place_transferred_is_a_noop_when_nothing_arrived() -> void:
+	# A REFUSED transfer (equipped lock / unaffordable / caught pickpocketing) leaves no new stack, so the aimed cell
+	# must not be handed to a stack that was already in the bag. The aimed cell is FREE, so a stack wrongly picked
+	# as the arrival really would move there. test_place_transferred_moves_only_the_new_stack_to_the_aimed_cell is
+	# the control: the same call does move a stack that arrived.
+	# (The un-aimed drop, cell.x < 0, is not pinned: move_stack refuses an off-grid cell and InventoryGrid.place puts
+	# the old slot back, so the early return and its absence read back identically.)
 	var inv := CharacterInventory.new()
 	inv.enable_grid(3, 3)
 	inv.add(_item(&"a"), 1)
@@ -168,29 +187,61 @@ func test_place_transferred_is_a_noop_when_nothing_arrived_or_no_cell_was_aimed(
 	view.place_transferred(snapshot, Vector2i(2, 2), 1, 1)  # nothing new arrived
 	var row0: Dictionary = inv.placed_contents()[0]
 	assert_eq(Vector2i(int(row0["x"]), int(row0["y"])), Vector2i(0, 0), "a refused transfer never moves the incumbent")
-	inv.add(_item(&"b"), 1)
-	view.place_transferred(snapshot, Vector2i(-1, -1), 1, 1)  # arrived, but un-aimed
-	var b_pos := Vector2i(-9, -9)
-	for row in inv.placed_contents():
-		if (row["item"] as Item).id == &"b":
-			b_pos = Vector2i(int(row["x"]), int(row["y"]))
-	assert_eq(b_pos, Vector2i(1, 0), "an un-aimed drop keeps the slot add() chose (the pre-drag behaviour)")
 	view.free()
 	inv.free()
 
 
-# --- the transfer_partner contract (source-string, like the strip's click routing) ----------------------------
+# --- the transfer_partner contract: a cross-grid drop only REQUESTS the move ----------------------------------
 
-func test_cross_grid_drop_routes_through_the_host_not_the_view() -> void:
+func test_cross_grid_drop_requests_the_transfer_and_moves_nothing_itself() -> void:
 	# The load-bearing invariant: the VIEW must never move items between two bags itself. Every gameplay gate
 	# (equipped padlock, pickpocket steal-gate + caught roll, zorkmids->add_money, carry capacity, buy/sell
-	# price + till) lives in the HOST's take/deposit/buy/sell, so the view only ever REQUESTS a transfer.
-	var src := FileAccess.get_file_as_string(VIEW_SRC)
-	assert_false(src.is_empty(), "the view source should be readable")
-	assert_true(src.contains("transfer_requested.emit("),
-		"a cross-grid drop emits transfer_requested for the host to act on")
-	assert_false(src.contains("transfer_partner._inv.transfer_to") or src.contains("_inv.transfer_to("),
-		"the view must NEVER call transfer_to itself — that would bypass every host-owned transfer rule")
+	# price + till) lives in the HOST's take/deposit/buy/sell, so a drop over the partner column only EMITS
+	# transfer_requested with what was dragged and where it was aimed. The mouse drag that ARMS this state is
+	# in-tree (it hit-tests the partner's global rect), so the drag state _update_partner_target leaves behind is set
+	# by hand and the REAL _release runs off-tree.
+	var src_inv := CharacterInventory.new()
+	src_inv.enable_grid(2, 2)
+	var dst_inv := CharacterInventory.new()
+	dst_inv.enable_grid(2, 2)
+	var goods := _item(&"goods", 2, 1)  # a 2x1 tile...
+	src_inv.add(goods, 1)
+	var key := int(src_inv.placed_contents()[0]["key"])
+	var src_view := GridInventoryView.new()
+	var dst_view := GridInventoryView.new()
+	src_view.bind(src_inv)
+	dst_view.bind(dst_inv)
+	src_view.transfer_partner = dst_view
+	dst_view.transfer_partner = src_view
+	var requests: Array = []
+	src_view.transfer_requested.connect(func(item: Item, k: int, cell: Vector2i, w: int, h: int) -> void:
+		requests.append([item, k, cell, Vector2i(w, h)]))
+	# ...dragged ROTATED (held 1x2) until the cursor sits over the partner's cell (1, 0).
+	src_view._pressed_key = key
+	src_view._dragging = true
+	src_view._drag_key = key
+	src_view._drag_w = 1
+	src_view._drag_h = 2
+	src_view._partner_active = true
+	src_view._partner_target = Vector2i(1, 0)
+	src_view._release(Vector2.ZERO)
+	assert_eq(requests.size(), 1, "releasing a drag over the partner column asks the host for exactly one transfer")
+	if requests.size() == 1:
+		assert_eq(requests[0][0], goods, "the request names the dragged item")
+		assert_eq(requests[0][1], key,
+			"...and the exact dragged STACK key, so the host moves the tile the player grabbed, not another stack of that item")
+		assert_eq(requests[0][2], Vector2i(1, 0),
+			"...and the PARTNER cell the player aimed at, which the host hands back to place_transferred")
+		assert_eq(requests[0][3], Vector2i(1, 2),
+			"...and the footprint as HELD (rotated mid-drag), so the tile lands in the orientation the preview showed")
+	assert_eq(src_inv.count_of(goods), 1,
+		"the view moved nothing out of the source bag: only the host's transfer rules may move items between bags")
+	assert_eq(dst_inv.count_of(goods), 0, "...and nothing arrived in the partner bag either")
+	assert_false(src_view._dragging, "the drag is over once released, so a later mouse motion can't send it twice")
+	src_view.free()
+	dst_view.free()
+	src_inv.free()
+	dst_inv.free()
 
 
 # --- Merchant: the guard that gridding the shelf makes reachable ----------------------------------------------

@@ -54,6 +54,7 @@ func test_baseline_sheet_is_perfectly_neutral() -> void:
 	assert_almost_eq(s.rep_loss_mult(), 1.0, 0.0001, "baseline streetwise changes no rep loss")
 	assert_almost_eq(s.move_speed_mult(), 1.0, 0.0001, "baseline agility changes no move speed")
 	assert_almost_eq(s.jump_mult(), 1.0, 0.0001, "baseline agility changes no jump")
+	assert_almost_eq(s.landing_mult(), 1.0, 0.0001, "baseline agility changes no fall-damage curve — a baseline landing is scored by exactly the authored fall_damage_* exports")
 	assert_almost_eq(s.stamina_regen_mult(), 1.0, 0.0001, "baseline agility changes no stamina recovery — a baseline character still recovers, at exactly the authored tier rates")
 	assert_almost_eq(s.melee_time_mult(), 1.0, 0.0001, "baseline agility changes no melee cadence — a baseline character swings at exactly the authored attack_speed and wind-up")
 	assert_almost_eq(s.reload_time_mult(), 1.0, 0.0001, "baseline agility changes no reload time — a baseline character reloads in exactly the authored reload_time")
@@ -102,11 +103,77 @@ func test_endurance_drives_health_regen_rate() -> void:
 
 
 func test_gunplay_drives_gun_damage_and_aim() -> void:
-	var s := _sheet(0, 5)  # gunplay 5
-	assert_almost_eq(s.weapon_damage_mult(), 1.25, 0.0001, "gunplay 5 -> +25% gun damage (5%/pt)")
-	assert_almost_eq(s.headshot_damage_bonus(), 1.25, 0.0001, "gunplay 5 -> +25% headshot punch")
-	assert_almost_eq(s.sway_mult(), 0.6, 0.0001, "gunplay 5 -> 40% steadier aim (8%/pt)")
-	s = null
+	# GUNPLAY is the shooter stat. The per-point rates are designer tuning, so this checks the RELATIONS the stat
+	# promises, then drives the two real consumers: ShotResolver (gun damage) and AimSway (the player's aim wander).
+	var base := CharacterStats.new()
+	var gunner := _sheet(0, 5)
+	var poor := _sheet(0, -3)
+	var hopeless := _sheet(0, -1000)
+	# Better above baseline, worse below, on all three axes.
+	assert_gt(gunner.weapon_damage_mult(), base.weapon_damage_mult(), "a gunner's guns hit harder than a baseline shooter's")
+	assert_lt(poor.weapon_damage_mult(), base.weapon_damage_mult(), "a negative gunplay hits softer")
+	assert_gt(gunner.headshot_damage_bonus(), base.headshot_damage_bonus(), "a gunner's headshots punch harder")
+	assert_lt(poor.headshot_damage_bonus(), base.headshot_damage_bonus(), "a negative gunplay punches softer on a headshot")
+	assert_lt(gunner.sway_mult(), base.sway_mult(), "a gunner's aim wanders less")
+	assert_gt(poor.sway_mult(), base.sway_mult(), "a negative gunplay wanders more")
+	# NO SOFT CAP: a straight line, so a point far from baseline buys exactly what the first point did.
+	assert_almost_eq(_sheet(0, 51).weapon_damage_mult() - _sheet(0, 50).weapon_damage_mult(),
+		_sheet(0, 1).weapon_damage_mult() - base.weapon_damage_mult(), 0.0001,
+		"the 51st point of gunplay adds exactly as much gun damage as the 1st (better forever, no plateau)")
+	assert_almost_eq(_sheet(0, 51).headshot_damage_bonus() - _sheet(0, 50).headshot_damage_bonus(),
+		_sheet(0, 1).headshot_damage_bonus() - base.headshot_damage_bonus(), 0.0001,
+		"the 51st point adds exactly as much headshot punch as the 1st")
+	assert_almost_eq(_sheet(0, -51).sway_mult() - _sheet(0, -50).sway_mult(),
+		_sheet(0, -1).sway_mult() - base.sway_mult(), 0.0001,
+		"worse forever: the 51st point BELOW baseline widens the wander exactly as much as the 1st")
+	# The physical floor: a multiplier below 0 would HEAL the target, so damage stops at exactly 0.
+	assert_almost_eq(hopeless.weapon_damage_mult(), 0.0, 0.0001, "a deeply negative gunplay floors gun damage at 0, never negative")
+	assert_almost_eq(hopeless.headshot_damage_bonus(), 0.0, 0.0001, "...and the headshot bonus at 0 too")
+
+	# Consumer 1 — ShotResolver.scaled_damage, a RANGED hit (is_melee false) from a 10-damage gun with a x2 crit.
+	var body_base := ShotResolver.scaled_damage(10.0, 2.0, 1.0, false, false, 1.0, false, base)
+	var body_gunner := ShotResolver.scaled_damage(10.0, 2.0, 1.0, false, false, 1.0, false, gunner)
+	var crit_base := ShotResolver.scaled_damage(10.0, 2.0, 1.0, true, false, 1.0, false, base)
+	var crit_gunner := ShotResolver.scaled_damage(10.0, 2.0, 1.0, true, false, 1.0, false, gunner)
+	assert_almost_eq(body_base, 10.0, 0.0001, "a baseline shooter's body shot deals exactly the gun's damage")
+	assert_gt(body_gunner, body_base, "a gunner's body shot deals more than a baseline shooter's")
+	assert_lt(ShotResolver.scaled_damage(10.0, 2.0, 1.0, false, false, 1.0, false, poor), body_base,
+		"a negative-gunplay shooter's body shot deals less")
+	assert_almost_eq(ShotResolver.scaled_damage(10.0, 2.0, 1.0, false, false, 1.0, false, hopeless), 0.0, 0.0001,
+		"a hopeless shooter deals no damage, never negative damage")
+	assert_gt(crit_gunner / crit_base, body_gunner / body_base,
+		"a gunner's edge is BIGGER on a headshot than on a body shot: the extra headshot punch rides crits only")
+
+	# Consumer 2 — AimSway, ticked once from the same clock and stance for three shooters that differ ONLY in gunplay.
+	var wander_base := _aim_wander_after_one_tick(base)
+	assert_gt(wander_base, 0.0, "precondition: a baseline shooter standing still still wanders a little")
+	assert_lt(_aim_wander_after_one_tick(gunner), wander_base, "a gunner's aim wanders less than a baseline shooter's")
+	assert_gt(_aim_wander_after_one_tick(poor), wander_base, "a negative-gunplay shooter's aim wanders more")
+
+
+## A duck-typed AimSway host: standing still, no crouch component, no weapon hub, carrying `stats`.
+class _AimHost:
+	extends Node
+	var velocity := Vector3.ZERO
+	var crouch = null
+	var weapon_system = null
+	var stats: CharacterStats = null
+	func stats_or_default() -> CharacterStats:
+		return stats
+
+
+## The size of the aim wander (radians) after one physics tick on a fixed clock, for a shooter carrying `sheet`.
+func _aim_wander_after_one_tick(sheet: CharacterStats) -> float:
+	var host := _AimHost.new()
+	host.stats = sheet
+	var sway := AimSway.new()
+	sway.host = host
+	sway._t = 1.0  # the same starting phase for every shooter, clear of a zero crossing
+	sway._physics_process(1.0 / 60.0)
+	var size: float = sway._offset.length()
+	sway.free()
+	host.free()
+	return size
 
 
 func test_agility_speeds_movement_and_jump() -> void:
@@ -287,14 +354,35 @@ func test_restamp_derived_floors_heals_and_returns_applied_delta() -> void:
 	host.free()
 
 
-func test_dialogue_choice_gains_an_optional_skill_check() -> void:
-	var c := DialogueChoice.new()
-	assert_eq(c.required_stat, &"", "no check by default — existing dialogue is untouched")
-	assert_eq(c.required_value, 0, "no threshold by default")
-	c.required_stat = &"streetwise"
-	c.required_value = 6
-	assert_eq(c.required_stat, &"streetwise", "a choice can require a named stat")
-	c = null
+func test_dialogue_skill_check_is_met_at_exactly_the_required_value() -> void:
+	# Driven through the real DialogueView filter. No Player is in this bare tree, so the effective stat reads
+	# CharacterStats.BASELINE — which makes the boundary exact: a check AT baseline is met, one point over is not.
+	var view := DialogueView.new()
+	add_child_autofree(view)
+	view.open()
+	var plain := DialogueChoice.new()  # authored with no gate at all
+	plain.text = "Ask politely"
+	var at_value := DialogueChoice.new()
+	at_value.text = "Talk shop"
+	at_value.required_stat = &"streetwise"
+	at_value.required_value = CharacterStats.BASELINE
+	var above := DialogueChoice.new()
+	above.text = "Talk your way in"
+	above.required_stat = &"streetwise"
+	above.required_value = CharacterStats.BASELINE + 1
+	view.set_choices([plain, at_value, above], func(_choice: DialogueChoice, _passed: bool = true) -> void: pass)
+	var shown: PackedStringArray = []
+	for b in view._choices_box.get_children():
+		shown.append((b as Button).text)
+	assert_eq(shown.size(), 2,
+		"exactly the ungated choice and the one whose requirement is MET are offered (got %s)" % str(shown))
+	assert_true(shown.size() > 0 and shown[0] == "Ask politely",
+		"a fresh DialogueChoice carries no skill check — existing dialogue renders untouched and first (got %s)" % str(shown))
+	assert_true(shown.size() > 1 and shown[1].ends_with("Talk shop"),
+		"a check is met at EXACTLY required_value (>=, not >) — a player who has the listed score must see the option (got %s)" % str(shown))
+	for t in shown:
+		assert_false(t.ends_with("Talk your way in"),
+			"one point short of the requirement hides the option (got %s)" % str(shown))
 
 
 func test_apply_stats_stamps_hp_and_carry() -> void:
@@ -354,6 +442,7 @@ func test_status_bonus_folds_into_multiplier_stats() -> void:
 	assert_almost_eq(base.sway_mult(2.0), _sheet(0, 2).sway_mult(), 0.0001, "gunplay bonus folds into aim sway")
 	assert_almost_eq(base.move_speed_mult(2.0), _sheet(0, 0, 2).move_speed_mult(), 0.0001, "agility bonus folds into move speed")
 	assert_almost_eq(base.jump_mult(2.0), _sheet(0, 0, 2).jump_mult(), 0.0001, "agility bonus folds into jump")
+	assert_almost_eq(base.landing_mult(2.0), _sheet(0, 0, 2).landing_mult(), 0.0001, "agility bonus folds into the fall-damage stretch — a stim that raises your jump must soften its landing too")
 	assert_almost_eq(base.stamina_regen_mult(2.0), _sheet(0, 0, 2).stamina_regen_mult(), 0.0001, "agility bonus folds into the stamina recovery rate")
 	assert_almost_eq(base.melee_time_mult(2.0), _sheet(0, 0, 2).melee_time_mult(), 0.0001, "agility bonus folds into the melee swing clock — a kickstart stim really does swing faster, not just print faster")
 	assert_almost_eq(base.reload_time_mult(2.0), _sheet(0, 0, 2).reload_time_mult(), 0.0001, "agility bonus folds into the reload clock — Attack._agility_bonus exists for exactly this")

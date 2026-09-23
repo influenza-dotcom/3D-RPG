@@ -1,5 +1,5 @@
 extends GutTest
-## Contract: WINDOWED mode must stay playable. Two seams, both of which broke the game for a real player who
+## Contract: WINDOWED mode must stay playable. Three seams, each of which broke the game for a real player who
 ## picked Windowed in Options (2026-08-16):
 ##  1. project.godot `display/window/size/no_focus` — ON, Godot's Windows DisplayServer strips WS_VISIBLE and
 ##     answers clicks with MA_NOACTIVATE for the main window the moment it leaves fullscreen, so the game window
@@ -14,6 +14,18 @@ extends GutTest
 ## Everything here runs headless: ProjectSettings reads project.godot, the fit rule is pure, and a bare Settings
 ## instance has no window (get_window() null), which is exactly the "nothing to measure against" fallback path.
 
+var _prev_max_fps: int = 0
+var _prev_default_fov: float = 0.0
+
+func before_each() -> void:
+	_prev_max_fps = Engine.max_fps
+	_prev_default_fov = GameSettings.camera.default_fov
+
+func after_each() -> void:
+	# A regression in the bare-instance test below would push onto these live globals — never leak that into the suite.
+	Engine.max_fps = _prev_max_fps
+	GameSettings.camera.default_fov = _prev_default_fov
+
 func test_project_window_is_focusable() -> void:
 	# ProjectSettings returns the stored value or the fallback; a missing key = the engine default = false.
 	var v = ProjectSettings.get_setting("display/window/size/no_focus", false)
@@ -26,7 +38,12 @@ func test_windowed_is_the_first_window_mode() -> void:
 	# The Options row's index 0 == Windowed; the fit/centre path in apply_video keys off MODE_WINDOWED.
 	var script := load("res://managers/Settings.gd")
 	assert_eq(int(script.WINDOW_MODES[0]), int(Window.MODE_WINDOWED), "WINDOW_MODES[0] is Windowed")
-	assert_eq(script.RESOLUTIONS.size(), 12, "twelve ~16:9 windowed presets (640x360 .. 3840x2160)")
+	# The ladder's REACH, not its rung count (adding or dropping a rung is a retune, not a regression): the bottom rung
+	# must sit below 720p so a small work area still gets a decorated window, and the top must cover a 4K panel.
+	assert_lt(int(script.RESOLUTIONS[0].y), 720,
+		"the smallest preset must sit below 720p — a small work area would otherwise be offered no decorated window at all")
+	assert_gte(int(script.RESOLUTIONS[script.RESOLUTIONS.size() - 1].x), 3840,
+		"the largest preset must reach a 4K panel's width, or its owner can never pick the native size")
 	assert_true(script.RESOLUTIONS.has(Vector2i(1920, 1080)),
 		"the most common native size is a preset (offered borderless on a screen that cannot decorate it)")
 	var ascending := true
@@ -139,15 +156,28 @@ func test_available_resolutions_falls_back_to_all_presets_without_a_window() -> 
 	assert_eq(offered.get_typed_builtin(), TYPE_VECTOR2I, "returns a typed Array[Vector2i] the row can iterate + find in")
 	s.free()
 
-func test_bare_settings_apply_video_is_a_no_op_off_tree() -> void:
-	# apply_video is called by every video setter; a bare instance must survive it (get_window() is null) and
-	# must not touch the user's real settings.cfg (_loaded stays false so save_settings early-returns).
+func test_bare_settings_video_setters_stay_off_the_live_engine() -> void:
+	# apply_video runs from every video setter. A bare instance (every unit test that builds a Settings has one: no
+	# window, get_window() null) must bail before it touches anything live — else a test instance quietly retunes the
+	# frame cap and the camera FOV of the whole running suite, and the fit rule runs against a screen that isn't there.
 	var s = load("res://managers/Settings.gd").new()
-	s.set_windowed_size(Vector2i(1920, 1080))
-	assert_eq(s.windowed_size, Vector2i(1920, 1080), "off-tree there is no screen to fit against, so the value stands")
-	s.set_window_mode(0)
-	assert_eq(s.window_mode, 0, "window_mode index 0 (Windowed) sticks off-tree")
-	assert_false(s._loaded, "a bare instance never persists (save_settings guard)")
+	s.fov = _prev_default_fov + 7.0
+	s.set_max_fps(_prev_max_fps + 13)
+	assert_eq(Engine.max_fps, _prev_max_fps, "a bare Settings must not push its frame cap onto the running engine")
+	assert_almost_eq(GameSettings.camera.default_fov, _prev_default_fov, 0.0001,
+		"a bare Settings must not push its FOV onto the live camera tuning")
+	s.set_windowed_size(Vector2i(5000, 3000))
+	assert_eq(s.windowed_size, Vector2i(5000, 3000),
+		"with no screen to measure, the fit rule must not run — a request bigger than any preset is left exactly as asked (it is re-fitted when a real window applies it)")
+	# The mode index comes from settings.cfg, which a player can hand-edit: out-of-range must clamp to a real mode.
+	s.set_window_mode(99)
+	assert_eq(s.window_mode, s.WINDOW_MODES.size() - 1, "an index past the end clamps to the last real window mode")
+	s.set_window_mode(-3)
+	assert_eq(s.window_mode, 0, "a negative index clamps to Windowed")
+	# Kept as a pin because it is the only thing standing between every bare test instance above and the developer's
+	# REAL user://settings.cfg (save_settings refuses to write until load_settings ran); proving it by watching the
+	# file would race the other suites that write it.
+	assert_false(s._loaded, "a bare Settings must never count as loaded — its setters would otherwise overwrite the player's real settings.cfg")
 	# The Options row asks this per offered preset while building; off-tree there is no screen, so it must answer
 	# false rather than reach into a null window (the row would otherwise crash before it could be shown).
 	assert_false(s.is_borderless_size(Vector2i(1920, 1080)), "no window to measure -> nothing is borderless")

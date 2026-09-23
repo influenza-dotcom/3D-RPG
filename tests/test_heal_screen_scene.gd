@@ -4,7 +4,8 @@ extends GutTest
 ## Menus are .tscn scenes a designer/artist edits; the script binds chrome by %unique name and applies the
 ## skin-driven look on top. These are prefab WIRING contract tests (the silent-when-broken seams): the
 ## autoload points at the SCENE, every %node the script binds exists, and no text is authored in the scene
-## (strings belong to PlayerText / l10n, never a .tscn). Behaviour (open/heal) is in-tree -> playtest.
+## (strings belong to PlayerText / l10n, never a .tscn). The one runtime contract pinned here is the pad focus seed
+## in open_heal, driven on a second in-tree instance; the heal transaction itself is playtest territory.
 
 const SCENE := "res://scenes/ui/heal_screen.tscn"
 const SCREEN_SOURCE := "res://scripts/ui/heal_screen.gd"
@@ -12,6 +13,18 @@ const SCREEN_SOURCE := "res://scripts/ui/heal_screen.gd"
 ## Every unique name heal_screen.gd binds in _bind_ui — a rename in the editor breaks the bind at boot,
 ## so pin the roster here where it fails loudly instead.
 const BOUND := ["Root", "Dim", "Card", "Title", "Status", "Buttons", "RailButton", "HealButton", "CloseButton"]
+
+var _prev_mouse_mode: Input.MouseMode
+var _prev_menu_quiet: bool
+
+func before_each() -> void:
+	_prev_mouse_mode = Input.mouse_mode
+	_prev_menu_quiet = MenuStyle._quiet
+
+func after_each() -> void:
+	# open_heal frees the mouse (ModalMenu.grab_mouse) and the focus test mutes MenuStyle; hand both back.
+	Input.mouse_mode = _prev_mouse_mode
+	MenuStyle._quiet = _prev_menu_quiet
 
 
 func test_autoload_is_the_authored_scene() -> void:
@@ -29,7 +42,8 @@ func test_scene_instantiates_with_every_bound_unique_name() -> void:
 	var inst: Node = scene.instantiate()
 	assert_not_null(inst, "it instantiates (empty-PackedScene reimport transients aside)")
 	assert_true(inst is CanvasLayer, "root is the CanvasLayer the autoload expects")
-	assert_not_null(inst.get_script(), "the root carries heal_screen.gd")
+	assert_true(inst.get_script() != null and inst.get_script().resource_path == SCREEN_SOURCE,
+		"the root carries heal_screen.gd itself, not some other script")
 	for n in BOUND:
 		assert_not_null(inst.get_node_or_null("%" + n), "%%%s exists (the script binds it in _bind_ui)" % n)
 	inst.free()
@@ -81,27 +95,44 @@ func test_every_authored_button_is_reachable_by_a_pad() -> void:
 	inst.free()
 
 
+## Stands in for a Healer: the duck-typed surface open_heal / _refresh call (heal_name, heal_cost, do_heal).
+## A zero cost is the "fully mended" state, which DISABLES the Heal button — the harder case for focus.
+class _StubHealer extends Node:
+	var heal_name := "Doc"
+	func heal_cost(_player: Node) -> int:
+		return 0
+	func do_heal(_player: Node) -> bool:
+		return false
+
+
 func test_the_pad_landing_spot_is_seeded_when_the_card_opens() -> void:
-	# The other half of parity is RUNTIME (focus grabbed in open_heal on a live viewport), which a unit test
-	# must not run — this autoload's _ready binds real chrome and open_heal wants a live Healer and Player. So
-	# it is pinned by SOURCE, the test_atm_screen_scene.gd / test_payment_rail_selector.gd idiom.
-	#
-	# Every offset below is guarded before it is sliced or compared: find() answers -1 for a needle that has
-	# been renamed away and a bad substr yields "", over which a contains() check quietly reads as "absent" — a
-	# pin that retires itself in silence is worse than no pin.
-	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
-	assert_gt(src.length(), 0, "heal_screen.gd must be readable")
-	var open_at := src.find("func open_heal(")
-	assert_gt(open_at, -1, "func open_heal( no longer present — the pin is stale")
-	assert_eq(src.rfind("func open_heal("), open_at,
-		"open_heal must be defined exactly ONCE, or the body sliced below is not the one that runs")
-	var open_end := src.find("\nfunc ", open_at + 1)
-	assert_gt(open_end, open_at, "open_heal's body must end at the next function — the pin is stale")
-	var body := src.substr(open_at, open_end - open_at)
-	var shown := body.find("_root.visible = true")
-	assert_gt(shown, -1, "_root.visible = true no longer present in open_heal — the pin is stale")
-	var grabbed := body.find("_heal_btn.grab_focus()")
-	assert_gt(grabbed, -1,
+	# The other half of parity is RUNTIME: open_heal must hand focus to Heal once the card is visible. Driven on a
+	# second, in-tree instance of the authored scene (the HealScreen autoload stays untouched) with an off-tree
+	# Player (its _ready never runs) and a stub healer.
+	MenuStyle._quiet = true  # silence the open/back cues (restored in after_each): a cue still playing at exit leaks its playback
+	var screen: Node = (load(SCENE) as PackedScene).instantiate()
+	add_child_autofree(screen)
+	var healer: Node = autofree(_StubHealer.new())
+	var player = load("res://scripts/player/player.gd").new()
+	var heal_btn := screen.get_node("%HealButton") as Button
+	var closed := {"count": 0}
+	screen.closed.connect(func() -> void: closed["count"] += 1)
+	# When focus lands, is the card already on screen? A grab taken while the card is still hidden either fails
+	# or seeds a focus owner the player cannot see — both leave the pad with nowhere visible to start.
+	var focus_landed_on_visible_card: Array[bool] = []
+	heal_btn.focus_entered.connect(func() -> void: focus_landed_on_visible_card.append(heal_btn.is_visible_in_tree()))
+	assert_false(heal_btn.has_focus(), "control: the hidden card owns no focus before it opens")
+	screen.open_heal(healer, null)  # guard: no player -> refused
+	assert_false(screen.is_open(), "control: an open with no player is refused")
+	assert_false(heal_btn.has_focus(), "a refused open must not seed focus on a card that never showed")
+	assert_eq(closed["count"], 1, "the refuse path still emits `closed` (a dialogue-hosted open would strand otherwise)")
+	screen.open_heal(healer, player)
+	assert_true(screen.is_open(), "precondition: the same screen opens for a real player")
+	assert_true(heal_btn.has_focus(),
 		"open_heal must SEED focus on the Heal button — with no focus owner, ui navigation has nowhere to start and every button on the card is pad-unreachable")
-	assert_gt(grabbed, shown,
-		"and it must grab AFTER the card is shown — grab_focus on a hidden Control does nothing, so seeding first would leave the pad with no owner anyway")
+	assert_eq(focus_landed_on_visible_card, [true] as Array[bool],
+		"focus arrives exactly once, AFTER the card is shown — grab_focus before `_root.visible = true` seeds nothing the pad can use")
+	assert_true(heal_btn.disabled,
+		"precondition: fully mended, so Heal is DISABLED and yet still holds the pad's landing spot (one step reaches Close)")
+	screen.close()
+	player.free()

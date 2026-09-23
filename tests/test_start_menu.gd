@@ -85,9 +85,9 @@ func test_internet_warning_precedes_first_launch_terms() -> void:
 	assert_false(inst._startup_gate_finished, "the startup gate stays closed until TOS consent")
 	assert_false(inst._buttons.visible, "menu buttons remain hidden behind first-launch gates")
 
-## The internet warning is unskippable on a genuine first launch: a first-time player must read the cards before
-## the TOS gate. Driven through _input (not _skip_internet_warning) because the skip lives in the input branch.
-func test_internet_warning_is_unskippable_on_first_launch() -> void:
+## The internet warning is skippable on EVERY launch, a genuine first launch included: a splash nobody can cut
+## short reads as a hang, not as a warning. Driven through _input because the skip lives in the input branch.
+func test_internet_warning_is_skippable_on_first_launch() -> void:
 	var scene := load("res://scenes/start_menu.tscn") as PackedScene
 	assert_not_null(scene, "start_menu.tscn should load")
 	Settings.debug_skip_menu = false
@@ -95,14 +95,14 @@ func test_internet_warning_is_unskippable_on_first_launch() -> void:
 
 	var inst := scene.instantiate()
 	add_child_autofree(inst)
-	assert_false(inst._internet_warning_skippable, "a fresh install cannot skip the warning")
+	assert_true(inst._internet_warning_skippable, "a fresh install may skip the warning too")
 
 	var press := InputEventKey.new()
 	press.keycode = KEY_SPACE
 	press.pressed = true
 	inst._input(press)
-	assert_true(inst._internet_warning_active, "pressing a key does not cut the first-launch warning short")
-	assert_null(inst._terms_screen, "the TOS still waits for the cards to finish on their own")
+	assert_false(inst._internet_warning_active, "pressing a key cuts the first-launch warning short")
+	assert_not_null(inst._terms_screen, "...and the TOS gate comes up at once on a fresh install")
 	press = null
 
 func test_internet_warning_is_skippable_once_terms_accepted() -> void:
@@ -121,6 +121,33 @@ func test_internet_warning_is_skippable_once_terms_accepted() -> void:
 	inst._input(press)
 	assert_false(inst._internet_warning_active, "press-anything cuts the warning on an accepted install")
 	press = null
+
+## The crash card from the last run opens when the menu is REVEALED, never over the warning cards: over the cards the
+## skip ate the card's clicks and the card handed their HIDDEN cursor back on close (no cursor on the main menu).
+## Drives the LIVE autoload (StartMenu calls it by name), so the card is closed and the hold cleared unconditionally.
+func test_a_held_crash_card_opens_at_the_menu_reveal_not_over_the_warning() -> void:
+	var scene := load("res://scenes/start_menu.tscn") as PackedScene
+	assert_not_null(scene, "start_menu.tscn should load")
+	Settings.debug_skip_menu = false
+	Settings.tos_accepted = true
+	CrashReportScreen.set(&"_pending", {"report": "QA held crash", "path": ""})
+
+	var inst := scene.instantiate()
+	add_child_autofree(inst)
+	await wait_process_frames(1)
+	assert_true(inst._internet_warning_active, "the warning cards are up")
+	assert_false(CrashReportScreen.is_open(), "the held card does NOT open over the warning cards")
+
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	inst._input(click)
+	assert_true(inst._buttons.visible, "the skip revealed the menu")
+	await wait_process_frames(1)
+	assert_true(CrashReportScreen.is_open(), "the reveal opened the held card over the clickable menu")
+
+	CrashReportScreen.close()
+	CrashReportScreen.set(&"_pending", {})
 
 func test_internet_warning_waits_until_hosted_menu_is_visible() -> void:
 	var scene := load("res://scenes/start_menu.tscn") as PackedScene

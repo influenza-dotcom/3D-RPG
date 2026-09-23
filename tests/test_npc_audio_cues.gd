@@ -25,11 +25,24 @@ var _saved_player_stamp: int = 0
 var _saved_ambient_stamp: int = 0
 var _saved_player_vol: float = 0.0
 var _saved_ambient_vol: float = 0.0
+var _saved_hearing_initiates: bool = false
+var _saved_reaction_time: float = 0.0
+var _saved_reaction_jitter: float = 0.0
+
+
+## A stand-in NPC for NpcDistraction.scan_distractions: its `host` is Node-typed and duck-typed, and the scan only
+## touches the host's Perception and its loudest-noise pick (in a real NPC an in-tree &"noise" group walk).
+class _ScanHost extends Node:
+	var _perception: Perception = null
+	var loudest: NoiseSource = null
+
+	func _loudest_noise() -> NoiseSource:
+		return loudest
 
 
 func before_each() -> void:
 	# Both spot cooldowns are STATICS shared across every NPC; defeat them per test so each case gets its own sting,
-	# and restore afterwards so we don't leak state into other suites. Same save/restore for the two tuning knobs.
+	# and restore afterwards so we don't leak state into other suites. Same save/restore for the tuning knobs.
 	_saved_player_stamp = NpcAudioCues._last_alert_msec
 	_saved_ambient_stamp = NpcAudioCues._last_ambient_alert_msec
 	_reset_cooldowns()
@@ -37,6 +50,9 @@ func before_each() -> void:
 	_saved_ambient_vol = GameSettings.npc_audio.alert_volume_db_vs_npc
 	GameSettings.npc_audio.alert_volume_db = PLAYER_VOL
 	GameSettings.npc_audio.alert_volume_db_vs_npc = AMBIENT_VOL
+	_saved_hearing_initiates = GameSettings.npc_ai.hearing_initiates
+	_saved_reaction_time = GameSettings.npc_ai.hearing_reaction_time
+	_saved_reaction_jitter = GameSettings.npc_ai.hearing_reaction_jitter
 
 
 func after_each() -> void:
@@ -44,6 +60,9 @@ func after_each() -> void:
 	NpcAudioCues._last_ambient_alert_msec = _saved_ambient_stamp
 	GameSettings.npc_audio.alert_volume_db = _saved_player_vol
 	GameSettings.npc_audio.alert_volume_db_vs_npc = _saved_ambient_vol
+	GameSettings.npc_ai.hearing_initiates = _saved_hearing_initiates
+	GameSettings.npc_ai.hearing_reaction_time = _saved_reaction_time
+	GameSettings.npc_ai.hearing_reaction_jitter = _saved_reaction_jitter
 
 
 # --- NpcAudioCues.on_spotted: the two branches ------------------------------------------------------------------
@@ -225,19 +244,59 @@ func test_noticed_player_and_on_spotted_are_null_safe_off_tree() -> void:
 
 
 func test_on_spotted_routes_the_verdict_into_the_cue() -> void:
-	# _on_spotted itself is in-tree only (it reads global_position for the positional branch), so pin the routing by
-	# source: the cue's second arg must be noticed_player(), never a _target read (the proximity-lock trap above).
-	var src := FileAccess.get_file_as_string(NPC_SCRIPT)
-	var start := src.find("func _on_spotted()")
-	assert_gt(start, -1, "NPC defines _on_spotted (the just_spotted handler)")
-	if start < 0:
-		return
-	var end := src.find("\n## ", start + 1)  # the handler's body ends where the next doc-commented member begins
-	var body := src.substr(start, (end - start) if end > start else -1)
-	assert_true(body.contains("_audio_cues.on_spotted(global_position, noticed_player())"),
-		"_on_spotted hands the cue noticed_player() as its 2D-vs-positional verdict")
-	assert_false(body.contains("_target.is_in_group"),
-		"_on_spotted must NOT classify by _target (a proximity lock names the player even when what was noticed was a decoy)")
+	# The REAL NPC._on_spotted, driven in the tree WITHOUT the NPC's _ready: _on_spotted reads global_position, which
+	# errors off-tree, so the npc.gd script is attached to a plain CharacterBody3D that is ALREADY in the tree. A node
+	# gets one ready notification per lifetime and that one was spent on the bare body, so the brain never builds.
+	var holder := Node3D.new()
+	add_child_autofree(holder)
+	var body := CharacterBody3D.new()
+	holder.add_child(body)
+	body.position = Vector3(40.0, 0.0, 40.0)  # far from the origin, so a positional sting at the wrong spot shows
+	body.set_script(load(NPC_SCRIPT))
+	var npc = body
+	assert_true(npc is NPC, "precondition: the in-tree body now runs npc.gd")
+	assert_false(npc.is_in_group(Groups.NPC), "precondition: NPC._ready never ran (it would have joined the NPC group)")
+	npc.hp = 4.0  # a bare Character's hp is 0.0 and _on_spotted early-outs on a zero-HP NPC
+	var perception := Perception.new()
+	npc.add_child(perception)
+	npc._perception = perception
+	var cues := NpcAudioCues.new()
+	cues.host = npc
+	npc.add_child(cues)
+	npc._audio_cues = cues
+	var player_stub := Node3D.new()
+	player_stub.add_to_group(Groups.PLAYER)
+	holder.add_child(player_stub)
+	var decoy := Node3D.new()  # e.g. another NPC's gunfire-pulse emitter
+	holder.add_child(decoy)
+
+	# (A) it NOTICED the player, while its proximity lock happens to name something else -> the 2D sting.
+	npc._target = decoy
+	perception.noticed = player_stub
+	var before := _audio_players(get_tree().root)
+	npc._on_spotted()
+	var spawned := _newly_spawned(before)
+	assert_eq(spawned.size(), 1, "(A) spotting exactly one sting")
+	if spawned.size() == 1:
+		assert_true(spawned[0] is AudioStreamPlayer and not (spawned[0] is AudioStreamPlayer3D),
+			"(A) what was noticed is the PLAYER -> the in-your-ear 2D sting, whatever _target holds")
+	_free_all(spawned)
+
+	# (B) the proximity lock names the PLAYER, but what it noticed was the decoy -> positional, at the NPC.
+	_reset_cooldowns()
+	npc._target = player_stub
+	perception.noticed = decoy
+	before = _audio_players(get_tree().root)
+	npc._on_spotted()
+	spawned = _newly_spawned(before)
+	assert_eq(spawned.size(), 1, "(B) spotting exactly one sting")
+	if spawned.size() == 1:
+		assert_true(spawned[0] is AudioStreamPlayer3D,
+			"(B) a decoy was noticed -> the POSITIONAL sting, even though the proximity-locked _target is the player")
+		if spawned[0] is AudioStreamPlayer3D:
+			assert_eq((spawned[0] as AudioStreamPlayer3D).global_position, npc.global_position,
+				"(B) the positional sting sounds from the spotting NPC's own world position")
+	_free_all(spawned)
 
 
 # --- the noise channel names its emitter -----------------------------------------------------------------------------
@@ -249,11 +308,9 @@ func test_noise_source_exposes_emitter_and_the_pulser_stamps_its_host() -> void:
 	src_bare.free()
 
 	# NoisePulser (an NPC's gunfire / death pulse) stamps its HOST — an in-tree seam (pulse() places the source under
-	# the host's parent). The channel is inert unless NPCs listen; if a designer switched hearing_initiates off this
-	# spawns nothing, which is that feature's contract, not this one's.
-	if not GameSettings.npc_ai.hearing_initiates:
-		pass_test("hearing_initiates is off in the shipped tuning — NoisePulser deliberately spawns nothing; emitter stamping is unobservable here")
-		return
+	# the host's parent). The channel is inert unless NPCs listen, so the listener gate is forced ON here (restored in
+	# after_each): a designer switching hearing_initiates off must not silently turn this into a pass.
+	GameSettings.npc_ai.hearing_initiates = true
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	var host := Node3D.new()
@@ -267,17 +324,63 @@ func test_noise_source_exposes_emitter_and_the_pulser_stamps_its_host() -> void:
 		src.queue_free()
 
 
-func test_player_noise_and_distraction_scan_carry_the_emitter() -> void:
-	# NoiseEmitter.tick lazily builds the player's live source IN-TREE (a real Player's _ready is off-limits in a unit
-	# test), and NpcDistraction.scan_distractions is a live &"noise"-group scan — pin both seams by source text.
+func test_player_noise_emitter_stamps_the_player_on_its_live_source() -> void:
+	# KEPT AS A SOURCE PIN on purpose: NoiseEmitter builds its live &"noise" source only once its host is IN the tree,
+	# and that host is typed Player, so no stub can stand in and a real Player's _ready is off-limits in a unit test
+	# (CLAUDE.md). The distraction scan that CONSUMES the emitter is driven for real in the next test.
 	var emitter_src := FileAccess.get_file_as_string("res://scripts/player/noise_emitter.gd")
 	assert_true(emitter_src.contains("_source.emitter = host"),
 		"NoiseEmitter stamps the PLAYER as its live source's emitter — an NPC that investigates your footsteps/gunfire noticed YOU (2D sting)")
-	var scan_src := FileAccess.get_file_as_string("res://scripts/npc/npc_distraction.gd")
-	assert_true(scan_src.contains("is_instance_valid(src.emitter)"),
-		"the distraction scan reads the source's emitter, sanitized (a one-shot source can outlive its emitter; a typed Node param rejects a freed handle)")
-	assert_true(scan_src.contains("hear_noise(") and scan_src.contains(", who)"),
-		"…and hands it to Perception.hear_noise as `source` (3rd arg) so the '!' handler can tell 'I heard YOU' from 'I heard a can rattle' (hear_noise, not investigate_point: the noise ARMS the reaction buffer)")
+
+
+func test_distraction_scan_hands_the_noise_emitter_to_perception() -> void:
+	# An idle NPC hears the &"noise" channel through NpcDistraction.scan_distractions. What it NOTICED must be whoever
+	# made the sound (NoiseSource.emitter: the Player for its own steps/shots, an NPC for its gunfire pulse, nobody for
+	# a thrown decoy), because noticed_player() picks the 2D-vs-positional "!" off exactly that.
+	GameSettings.npc_ai.hearing_reaction_time = 0.0  # react on the scan itself (the buffered reaction has its own suite)
+	GameSettings.npc_ai.hearing_reaction_jitter = 0.0
+	var host := _ScanHost.new()
+	var perception := Perception.new()
+	host.add_child(perception)
+	host._perception = perception
+	var scan := NpcDistraction.new()
+	scan.host = host
+	var src := NoiseSource.new()
+	src.radius = 8.0
+	add_child_autofree(src)  # in-tree: the scan reads the source's global_position
+	host.loudest = src
+
+	# (A) the player's own noise
+	var player_stub := Node3D.new()
+	player_stub.add_to_group(Groups.PLAYER)
+	src.emitter = player_stub
+	scan.scan_distractions(0.0, true, false)
+	assert_eq(perception.state, Perception.State.INVESTIGATING, "(A) precondition: the scan heard the source and reacted")
+	assert_eq(perception.noticed, player_stub,
+		"(A) hearing the PLAYER's noise notices the player, so the '!' sting plays in your ear (2D)")
+
+	# (B) a decoy: heard and investigated, but about nobody
+	perception.forget()
+	scan.reset_for_reuse()
+	src.emitter = null
+	scan.scan_distractions(0.0, true, false)
+	assert_eq(perception.state, Perception.State.INVESTIGATING, "(B) a decoy with no emitter is still heard and investigated")
+	assert_null(perception.noticed, "(B) ...but nobody in particular was noticed, so the sting stays positional")
+
+	# (C) the emitter was freed before the scan (a one-shot source outliving the NPC whose gunfire made it)
+	perception.forget()
+	scan.reset_for_reuse()
+	var doomed := Node3D.new()
+	doomed.add_to_group(Groups.PLAYER)
+	src.emitter = doomed
+	doomed.free()
+	scan.scan_distractions(0.0, true, false)
+	assert_eq(perception.state, Perception.State.INVESTIGATING, "(C) a source whose emitter is gone is still heard")
+	assert_null(perception.noticed, "(C) a freed emitter reads as nobody, without a freed-handle script error")
+
+	player_stub.free()
+	scan.free()
+	host.free()  # frees the childed Perception
 
 
 # --- tuning ------------------------------------------------------------------------------------------------------------

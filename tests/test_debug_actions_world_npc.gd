@@ -16,6 +16,12 @@ const Common := preload("res://scripts/components/debug_actions_world_common.gd"
 const PerceptionScript := preload("res://scripts/npc/perception.gd")
 const DispositionScript := preload("res://scripts/npc/disposition.gd")
 
+## A duck-typed body: all _alive() may rely on is an is_alive() method.
+class AliveDouble extends Node:
+	var alive := true
+	func is_alive() -> bool:
+		return alive
+
 
 func _static_names(script: GDScript) -> Dictionary:
 	var out := {}
@@ -61,12 +67,35 @@ func test_dispatcher_routes_into_statics_that_exist() -> void:
 			assert_true(routed.has(fn), "%s is defined in the npc family but the dispatcher never routes to it (dead handler)" % String(fn))
 
 
-func test_brain_and_npc_are_world_rows_in_the_ai_category() -> void:
-	for n in ["brain", "npc"]:
-		var row := Commands.find(n)
-		assert_false(row.is_empty(), "'%s' is a registry row" % n)
-		assert_eq(row["mod"], &"world", "'%s' is a world-module command" % n)
-		assert_eq(String(row["category"]), "AI", "'%s' sits on the AI page" % n)
+## validate() is the ONLY gate in front of these handlers: _cmd_npc reads args[0] unguarded and to_float()s the value
+## slot, _cmd_brain reads no args at all. So the registry rows must refuse exactly the argv shapes the handlers cannot
+## take, and accept the ones they are documented to (a value on a non-sight verb is ignored, not an arity error).
+func test_brain_and_npc_rows_admit_exactly_the_argv_their_handlers_read() -> void:
+	var brain := Commands.find("brain")
+	var npc := Commands.find("npc")
+	assert_false(brain.is_empty(), "`brain` is a registry row")
+	assert_false(npc.is_empty(), "`npc` is a registry row")
+	assert_eq(Commands.validate(brain, PackedStringArray()), "", "a bare `brain` runs (it reads the crosshair, not argv)")
+	assert_ne(Commands.validate(npc, PackedStringArray()), "",
+		"a bare `npc` must be refused: _cmd_npc indexes args[0] with no guard, so letting it through would error in the console")
+	assert_eq(Commands.validate(npc, PackedStringArray(["kill"])), "", "`npc kill` runs")
+	assert_eq(Commands.validate(npc, PackedStringArray(["kill", "3"])), "", "`npc kill 3` is accepted (the value is ignored on every verb but sight)")
+	assert_eq(Commands.validate(npc, PackedStringArray(["sight", "40"])), "", "`npc sight 40` runs")
+	assert_ne(Commands.validate(npc, PackedStringArray(["sight", "far"])), "", "a non-number value is refused before _cmd_npc to_float()s it into 0")
+	assert_ne(Commands.validate(npc, PackedStringArray(["explode"])), "", "a verb _cmd_npc has no arm for is refused up front")
+	assert_ne(Commands.validate(npc, PackedStringArray(["kill", "3", "extra"])), "", "a third token is an arity error")
+	# validate() lowercases the verb it checks, so the handler must too or `npc KILL` would pass the gate and then
+	# fall into the "unknown verb" drift line.
+	assert_eq(Commands.validate(npc, PackedStringArray(["KILL"])), "", "the gate accepts an upper-case verb")
+	var shouted := Npc._cmd_npc({}, PackedStringArray(["KILL"]))
+	assert_true(shouted.size() == 1 and shouted[0].begins_with("npc kill:"),
+		"and the handler reads it as the same verb (lower-cased), never as a drifted unknown one: %s" % str(shouted))
+	# Both rows share a menu page with `who`, the family's read-only sibling that targets the same crosshair NPC.
+	var page := String(Commands.find("who")["category"])
+	var on_page := {}
+	for row in Commands.in_category(page):
+		on_page[String(row["name"])] = true
+	assert_true(on_page.has("brain") and on_page.has("npc"), "brain and npc sit on the same F1 page as `who` (%s)" % page)
 
 
 func test_npc_verbs_match_the_registry_both_ways() -> void:
@@ -80,18 +109,6 @@ func test_npc_verbs_match_the_registry_both_ways() -> void:
 		assert_true(arms.has(String(v)), "registry verb 'npc %s' has no match arm in _cmd_npc — the verb is dead" % String(v))
 	for a in arms.keys():
 		assert_true(verbs.has(String(a)), "_cmd_npc handles '%s' but the registry never offers it (unreachable arm)" % String(a))
-
-
-func test_family_preloads_exist_and_common_is_by_path() -> void:
-	var src := FileAccess.get_file_as_string(NPC_PATH)
-	assert_false(src.contains("\nclass_name "), "the family has no class_name (preloaded by path to dodge the stale-cache cascade)")
-	var rx := RegEx.new()
-	rx.compile("preload\\(\"(res://[^\"]+)\"\\)")
-	var n := 0
-	for m in rx.search_all(src):
-		n += 1
-		assert_true(ResourceLoader.exists(m.get_string(1)), "preload target %s must exist" % m.get_string(1))
-	assert_gte(n, 4, "Common, Disposition, Perception and GoapPlanner are preloaded")
 
 
 # --- degradation with no inspector ------------------------------------------------------------------------------
@@ -205,5 +222,12 @@ func test_alive_gate_is_null_and_duck_safe() -> void:
 	var plain := Node.new()
 	assert_false(Npc._alive(plain), "a node with no is_alive() is not alive (never an error)")
 	plain.free()
+	# The gate must READ is_alive(), not merely find it: every verb (heal / restock / provoke / ...) refuses a corpse
+	# through this one call, and a heal on a corpse is the "revive past the death freeze" bug it exists to stop.
+	var body := AliveDouble.new()
+	assert_true(Npc._alive(body), "a body whose is_alive() is true is alive")
+	body.alive = false
+	assert_false(Npc._alive(body), "the same body once is_alive() reads false is dead — the gate reports the answer, not the method")
+	body.free()
 	# A FREED handle cannot even be passed: the `n: Node` parameter type rejects it at the call boundary, so the
 	# in-body is_instance_valid guard is only reachable through the Variant-typed pick dictionary the callers use.

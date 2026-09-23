@@ -1,8 +1,8 @@
 extends GutTest
 
 ## CrouchLightDouse: the pure douse math (doused_target + stepped_energy), the duck-typed crouch-depth read's
-## standing fallback, the parent auto-wire, and the export defaults (the designer knobs). The in-tree per-tick
-## fade (physics_process writing light_energy each frame) stays manual-playtest; the harness covers the rest.
+## standing fallback, the parent auto-wire, and the per-tick douse itself (_physics_process writing light_energy) driven
+## by hand off-tree with the SHIPPED knobs — a fade, not a snap; a full douse; a relight to the authored energy.
 ## Loaded by path, not class_name, so a stale global class cache can't fail the whole script.
 
 const DOUSE_PATH := "res://scripts/player/crouch_light_douse.gd"
@@ -75,12 +75,48 @@ func test_crouch_depth_duck_typed_read() -> void:
 	douse.free()
 
 
-## Export defaults pinned (the test_component_tuning_exports idiom): these are the values every freshly
-## drag-dropped instance gets, and the guide documents them — a silent drift desyncs docs and feel.
-func test_export_defaults() -> void:
+## The whole per-tick douse on a freshly drag-dropped instance (shipped knobs, nothing set but the wiring), ticked by
+## hand off-tree. What the design needs from those defaults, rather than their numbers:
+##   * crouching FADES the lamp (the first tick is not a snap) and the fade honours fade_time;
+##   * the shipped douse is FULL — a ship decision: crouched in darkness your own glow is gone, not dimmed;
+##   * standing relights to the energy the designer AUTHORED on the light node, not to 1.0 and not to a mid-fade value.
+func test_a_dropped_in_douse_fades_the_lamp_out_and_back_to_its_authored_energy() -> void:
+	var dt := 1.0 / 60.0
 	var douse = load(DOUSE_PATH).new()
-	assert_eq(douse.crouched_energy, 0.0,
-			"crouched_energy must default to 0 — a full douse, so crouching in darkness reads as truly unlit")
-	assert_eq(douse.fade_time, 0.35,
-			"fade_time must default to 0.35 s — quick enough to feel responsive, slow enough to read as a fade")
+	var light := OmniLight3D.new()
+	light.light_energy = 2.5  # a deliberately non-1.0 authored brightness
+	var scripted := GDScript.new()
+	scripted.source_code = "extends Node3D\nvar crouch"
+	scripted.reload()
+	var host: Node3D = scripted.new()
+	var crouch: Node3D = load("res://scripts/player/crouch.gd").new()
+	host.crouch = crouch
+	douse.host = host
+	douse.light = light
+	var fade: float = douse.fade_time
+	assert_gt(fade, dt, "the shipped fade_time must span more than one physics frame, or the douse reads as a light switch")
+	var frames := int(ceil(fade / dt)) + 1
+	crouch.crouch_t = 0.0
+	douse._physics_process(dt)
+	assert_almost_eq(light.light_energy, 2.5, 0.0001, "standing, the lamp keeps its authored energy")
+	crouch.crouch_t = 1.0
+	douse._physics_process(dt)
+	assert_true(light.light_energy > 0.0 and light.light_energy < 2.5,
+			"the first crouched tick must start a FADE (energy %s), not snap the lamp dark" % light.light_energy)
+	var ticked := int(floor(fade / dt * 0.8))  # 80% of fade_time, counting the tick above
+	for _i in range(ticked - 1):
+		douse._physics_process(dt)
+	assert_gt(light.light_energy, 0.0, "80%% of the way through fade_time the douse must still be under way (energy %s)" % light.light_energy)
+	for _i in range(frames - ticked):  # ...up to one frame past fade_time in total
+		douse._physics_process(dt)
+	assert_eq(light.light_energy, 0.0,
+			"after fade_time the shipped douse must be COMPLETE and FULL (energy exactly 0) — crouching in darkness reads as truly unlit and your glow stops feeding the stealth meter")
+	crouch.crouch_t = 0.0
+	for _i in range(frames):
+		douse._physics_process(dt)
+	assert_almost_eq(light.light_energy, 2.5, 0.0001,
+			"standing back up must relight to the AUTHORED 2.5 within fade_time — never to 1.0, and never stuck at the doused value")
+	crouch.free()
+	host.free()
+	light.free()
 	douse.free()

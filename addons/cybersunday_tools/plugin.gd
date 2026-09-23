@@ -32,8 +32,10 @@ const WeaponInspector := preload("res://addons/cybersunday_tools/inspectors/weap
 const GoapInspector := preload("res://addons/cybersunday_tools/inspectors/goapprofile_inspector.gd")
 const PerkInspector := preload("res://addons/cybersunday_tools/inspectors/perk_inspector.gd")
 const PlayToolbar := preload("res://addons/cybersunday_tools/toolbar/play_from_spawn.gd")
+const TranslationParser := preload("res://addons/cybersunday_tools/core/translation_parser.gd")
 
 var _gizmo: EditorNode3DGizmoPlugin = null
+var _tr_parser: EditorTranslationParserPlugin = null  ## POT-generation parser (PlayerText consts + authored .tres/.tscn fields)
 var _panel: Control = null
 var _loot_insp: EditorInspectorPlugin = null
 var _npc_insp: EditorInspectorPlugin = null
@@ -46,6 +48,11 @@ var _toolbar: Control = null
 func _enter_tree() -> void:
 	_gizmo = GizmoPlugin.new()
 	add_node_3d_gizmo_plugin(_gizmo)
+
+	# Godot's POT generator learns PlayerText's constants and the authored resource fields through this parser
+	# (see core/translation_parser.gd) — Project Settings → Localization → POT Generation → Generate POT.
+	_tr_parser = TranslationParser.new()
+	add_translation_parser_plugin(_tr_parser)
 
 	# ALL the tool Controls live as tabs inside this one collapsible bottom panel (see header note).
 	_panel = CyberPanel.new()
@@ -101,6 +108,10 @@ func _exit_tree() -> void:
 		remove_control_from_bottom_panel(_panel)
 		_panel.queue_free()
 		_panel = null
+
+	if _tr_parser != null:
+		remove_translation_parser_plugin(_tr_parser)
+		_tr_parser = null
 
 	if _gizmo != null:
 		remove_node_3d_gizmo_plugin(_gizmo)

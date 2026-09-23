@@ -202,8 +202,73 @@ func test_normalize_of_an_empty_model_keeps_unit_extents() -> void:
 	assert_true(view._ext.is_equal_approx(Vector3.ONE), "a zero-size model must not divide by zero — extents stay ONE")
 	assert_true(inst.scale.is_equal_approx(Vector3.ONE), "and the instance is left unscaled")
 
-func test_frame_returns_quietly_without_a_camera() -> void:
+# --- _frame: the aspect-fit ortho camera -----------------------------------------------------------------------
+# Headless builds no rig, so these hand the view a camera of their own. It sits on +Z looking down -Z (Camera3D's
+# default facing), so the model's X/Y extents ARE its on-screen footprint — the fit can be judged with plain
+# geometry: ortho `size` is the visible HEIGHT, and the visible WIDTH is size * the tile's aspect.
+
+func _framed_view(tile: Vector2, ext: Vector3) -> Array:
 	var view := ItemMeshView.new()
 	add_child_autofree(view)
+	view.size = tile
+	var cam := Camera3D.new()
+	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	cam.position = Vector3(0, 0, 4)
+	add_child_autofree(cam)
+	view._cam = cam
+	view._ext = ext
 	view._frame()
-	assert_null(view._cam, "headless: no camera, and _frame (wired to `resized`) must not error without one")
+	return [view, cam]
+
+func test_frame_fits_the_whole_model_inside_the_tile_without_drowning_it() -> void:
+	# A long sniper-shaped box in a square tile, and a tall one in a wide tile: whichever axis binds, the whole
+	# footprint must be visible, and the camera must not zoom so far out that the model is a speck in its tile.
+	for c in [[Vector2(96, 96), Vector3(1.0, 0.25, 0.1)], [Vector2(192, 64), Vector3(0.3, 1.0, 0.2)]]:
+		var tile: Vector2 = c[0]
+		var ext: Vector3 = c[1]
+		var cam: Camera3D = _framed_view(tile, ext)[1]
+		var aspect := tile.x / tile.y
+		assert_true(cam.size >= ext.y, "the model's full HEIGHT %.3f fits the view height %.3f (tile %s)" % [ext.y, cam.size, tile])
+		assert_true(cam.size * aspect >= ext.x,
+			"the model's full WIDTH %.3f fits the view width %.3f (tile %s)" % [ext.x, cam.size * aspect, tile])
+		var tight := maxf(ext.y, ext.x / aspect)
+		assert_lt(cam.size, tight * 1.5, "the model FILLS its tile — only a margin of air, not a speck (tile %s)" % tile)
+
+func test_frame_widens_the_view_for_a_narrower_tile() -> void:
+	# The reason the fit is per tile: the same long model in a narrower tile needs a taller ortho view, or its
+	# ends are cropped off the sides.
+	var ext := Vector3(1.0, 0.2, 0.2)
+	var wide: Camera3D = _framed_view(Vector2(200, 50), ext)[1]
+	var square: Camera3D = _framed_view(Vector2(100, 100), ext)[1]
+	assert_gt(square.size, wide.size, "a long model in a square tile needs a larger ortho size than in a wide one")
+
+func test_frame_clamps_a_bad_measurement() -> void:
+	# The anti-explosion net: a runaway extent must never zoom the camera out to infinity, and a degenerate one
+	# must never zoom in to nothing.
+	# A 500-unit box needs ~575 of ortho size to fit unclamped; the net only has to keep it far below that.
+	var huge: Camera3D = _framed_view(Vector2(96, 96), Vector3(500, 500, 500))[1]
+	assert_lt(huge.size, 500.0, "a runaway extent is capped far below its unclamped fit (got %.3f)" % huge.size)
+	var unit: Camera3D = _framed_view(Vector2(96, 96), Vector3.ONE)[1]
+	assert_gt(huge.size, unit.size,
+		"...but a bigger model still zooms out past the unit model's view (%.3f vs %.3f)" % [huge.size, unit.size])
+	var tiny: Camera3D = _framed_view(Vector2(96, 96), Vector3.ZERO)[1]
+	assert_gt(tiny.size, 0.0, "a zero extent never collapses the view to nothing (got %.3f)" % tiny.size)
+
+func test_frame_skips_a_camera_that_is_not_in_the_tree() -> void:
+	# `_frame` is wired to `resized`, which can fire before the rig's camera is in the tree (and headless has no
+	# camera at all). An off-tree camera has no global_transform to project through, so the size must be left
+	# alone — the in-tree control above proves the same call DOES write it once the camera is live.
+	var view := ItemMeshView.new()
+	add_child_autofree(view)
+	view.size = Vector2(96, 96)
+	view._frame()   # headless: _cam is null
+	var cam := Camera3D.new()
+	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	cam.size = 1.2
+	view._cam = cam
+	view._ext = Vector3(3, 3, 3)
+	view._frame()
+	assert_almost_eq(cam.size, 1.2, 0.0001, "an off-tree camera keeps its authored size — no projection is attempted")
+	add_child_autofree(cam)
+	view._frame()
+	assert_gt(cam.size, 1.2, "control: the same camera, once in the tree, is refitted to the 3-unit model")

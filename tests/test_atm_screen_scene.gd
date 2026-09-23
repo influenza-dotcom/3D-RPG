@@ -16,10 +16,13 @@ extends GutTest
 ## carry NO `focus_mode = 0` (Button's default FOCUS_ALL is what a pad navigates onto), the code-built amount
 ## chips must set FOCUS_ALL, and open_atm must SEED focus on the first chip once the card is visible. With no
 ## focus owner at all, ui navigation has nowhere to start and EVERY button on the card is unreachable — a
-## mouse-only gate on a screen a pad player can walk up to.
+## mouse-only gate on a screen a pad player can walk up to. The runtime half is driven for real on a private
+## in-tree instance, opened for a bare off-tree terminal + Player (the test_atm idiom — no Player._ready runs).
 
 const SCENE := "res://scenes/ui/atm_screen.tscn"
 const SCREEN_SOURCE := "res://scripts/ui/atm_screen.gd"
+const PLAYER_PATH := "res://scripts/player/player.gd"
+const ATM_PATH := "res://scripts/components/atm.gd"
 
 ## Every unique name atm_screen.gd binds in _bind_ui, in bind order — a rename in the editor breaks the bind at
 ## boot, so pin the roster here where it fails loudly instead.
@@ -46,7 +49,8 @@ func test_scene_instantiates_with_every_bound_unique_name() -> void:
 	var inst: Node = scene.instantiate()
 	assert_not_null(inst, "it instantiates (empty-PackedScene reimport transients aside)")
 	assert_true(inst is CanvasLayer, "root is the CanvasLayer the autoload expects")
-	assert_not_null(inst.get_script(), "the root carries atm_screen.gd")
+	assert_true(inst.get_script() != null and String(inst.get_script().resource_path) == SCREEN_SOURCE,
+		"the root carries atm_screen.gd (the script whose _bind_ui reads these names)")
 	for n in BOUND:
 		assert_not_null(inst.get_node_or_null("%" + n), "%%%s exists (the script binds it in _bind_ui)" % n)
 	inst.free()
@@ -108,31 +112,48 @@ func test_every_authored_button_is_reachable_by_a_pad() -> void:
 	inst.free()
 
 
+## open_atm grabs the mouse (ModalMenu.grab_mouse) and close() hands back what it found; restored here as well so a
+## failed assert between the two can never leave the machine's cursor mode changed.
+var _prev_mouse_mode: Input.MouseMode
+
+
+func before_each() -> void:
+	_prev_mouse_mode = Input.mouse_mode
+
+
+func after_each() -> void:
+	Input.mouse_mode = _prev_mouse_mode
+
+
+## The live chips in %Presets (the ones _bind_ui just built — anything queued for deletion is a stale build).
+func _live_chips(screen: Node) -> Array:
+	return (screen.get_node("%Presets") as Node).get_children().filter(
+		func(c: Node) -> bool: return c is Button and not c.is_queued_for_deletion())
+
+
 func test_the_pad_landing_spot_is_seeded_when_the_card_opens() -> void:
-	# The other half of parity is RUNTIME (chips built in _bind_ui, focus grabbed in open_atm on a live viewport),
-	# which a unit test must not run — this autoload's _ready binds real chrome and open_atm wants a live Atm and
-	# Player. So it is pinned by SOURCE, the tests/test_payment_rail_selector.gd idiom.
-	#
-	# Every offset below is guarded before it is sliced or compared: find() answers -1 for a needle that has been
-	# renamed away and a bad substr yields "", over which a contains() check quietly reads as "absent" — a pin
-	# that retires itself in silence is worse than no pin.
-	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
-	assert_gt(src.length(), 0, "atm_screen.gd must be readable")
-	assert_true(src.contains("b.focus_mode = Control.FOCUS_ALL"),
-		"_add_chip must build the amount chips FOCUS_ALL — the chips ARE the pad path, and a control a pad can never land on is not a path")
-	assert_true(src.contains("_first_focus = b"),
-		"the first chip built must be recorded as the screen's landing spot")
-	var open_at := src.find("func open_atm(")
-	assert_gt(open_at, -1, "func open_atm( no longer present — the pin is stale")
-	assert_eq(src.rfind("func open_atm("), open_at,
-		"open_atm must be defined exactly ONCE, or the body sliced below is not the one that runs")
-	var open_end := src.find("\nfunc ", open_at + 1)
-	assert_gt(open_end, open_at, "open_atm's body must end at the next function — the pin is stale")
-	var body := src.substr(open_at, open_end - open_at)
-	var shown := body.find("_root.visible = true")
-	assert_gt(shown, -1, "_root.visible = true no longer present in open_atm — the pin is stale")
-	var grabbed := body.find("_first_focus.grab_focus()")
-	assert_gt(grabbed, -1,
-		"open_atm must SEED focus on the first chip — with no focus owner, ui navigation has nowhere to start and every button is unreachable")
-	assert_gt(grabbed, shown,
-		"and it must grab AFTER the card is shown — grab_focus on a hidden Control does nothing, so seeding first would leave the pad with no owner anyway")
+	# The other half of parity is RUNTIME: the chips are built in _bind_ui and focus is seeded in open_atm, after the
+	# card is shown (grab_focus on a hidden Control does nothing). Driven on a private instance of the authored
+	# scene — never the AtmScreen autoload — opened for a bare terminal and a bare Player that never enter the tree.
+	var screen: Node = (load(SCENE) as PackedScene).instantiate()
+	add_child_autofree(screen)  # _ready -> _bind_ui builds the amount chips
+	var chips := _live_chips(screen)
+	assert_gt(chips.size(), 0, "_bind_ui builds the amount chips — they are the pad path")
+	for c in chips:
+		assert_eq((c as Button).focus_mode, Control.FOCUS_ALL,
+			"amount chip '%s' must take focus — a control a pad can never land on is not a path" % (c as Button).text)
+	if chips.is_empty():
+		return
+	var viewport := screen.get_viewport()
+	assert_ne(viewport.gui_get_focus_owner(), chips[0], "control: nothing on the hidden card holds focus before it opens")
+	var atm: Node = load(ATM_PATH).new()
+	var player: Node = load(PLAYER_PATH).new()
+	player.set(&"money", 50.0)
+	screen.open_atm(atm, player)
+	assert_true(screen.is_open(), "a free terminal with a live player opens")
+	assert_eq(viewport.gui_get_focus_owner(), chips[0],
+		"open_atm must SEED focus on the first amount chip once the card is visible — with no focus owner, ui navigation has nowhere to start and every button is pad-unreachable")
+	screen.close()
+	assert_false(screen.is_open(), "the card closes again")
+	atm.free()
+	player.free()

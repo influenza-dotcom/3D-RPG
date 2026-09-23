@@ -30,6 +30,30 @@ const BULLET_SCENE := "res://scenes/projectiles/Projectile.tscn"
 ## print an engine error (which GUT 9.6 turns into a failure).
 const SAFE_LIFE_TIME: float = 600.0
 
+## Every Decal that was already in the tree when a test started, so after_each can tell this file's impact
+## scorches from another file's.
+var _decals_before: Array[Node] = []
+
+
+func before_each() -> void:
+	_decals_before = get_tree().root.find_children("*", "Decal", true, false)
+
+
+## ⭐A round's impact decal is parented into the LIVE tree, not under this test node, so GUT's autofree never
+## owns it and it outlives the blast's own 0.2 s timer. Left behind, it is a stale "BulletHoleDecal" under root
+## that a LATER file's decal test can find instead of the one it just spawned — exactly how
+## tests/test_throwable_destructible.gd's wall-scorch test went red in a full-suite run while passing alone.
+## Free what this file drew, and nothing else.
+func after_each() -> void:
+	for decal in get_tree().root.find_children("*", "Decal", true, false):
+		if _decals_before.has(decal) or not is_instance_valid(decal):
+			continue
+		var parent := decal.get_parent()
+		if parent != null:
+			parent.remove_child(decal)
+		decal.free()
+
+
 ## A stand-in for one func_godot brush: solid, on layer 1, scanning NOTHING (mask 0).
 ## These three numbers ARE the contract under test — keep them matching worldspawn.tres.
 func _worldspawn_slab() -> StaticBody3D:

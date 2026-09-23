@@ -1,10 +1,11 @@
 extends GutTest
 
 ## Locomotor (scripts/components/locomotor.gd): the standalone drop-in pathfinder/mover. Attach under a CharacterBody3D,
-## call move_to(), and it routes there on the navmesh. ACTUAL movement is integration/playtest territory (it needs a
-## baked NavigationRegion3D + physics ticks — covered by the soak / combat-smoke harnesses), so these pin only the
-## host-agnostic surface that IS cheaply checkable off-tree: the public API, the inert defaults, and the config warning
-## that steers a designer to a CharacterBody3D parent. A bare .new() runs no _ready, so it's safe headless.
+## call move_to(), and it routes there on the navmesh. ACTUAL path-following is integration/playtest territory (it needs
+## a baked NavigationRegion3D + physics ticks — covered by the soak / combat-smoke harnesses), so these pin the
+## host-agnostic surface that IS cheaply checkable: the pure traversal gates driven with their default knobs, the
+## config warning that steers a designer to a CharacterBody3D parent, and the stair step-up in a tiny physics rig.
+## A bare .new() runs no _ready, so it's safe headless.
 
 
 func test_api_surface_and_inert_defaults() -> void:
@@ -129,10 +130,47 @@ func test_should_climb_link_needs_ground_and_cooldown() -> void:
 	assert_false(Locomotor.should_climb_link(1.5, true, 0.5, 0.4), "cooldown active -> no machine-gun re-launch")
 
 
-func test_link_climb_exports_present_and_sane() -> void:
+func test_default_link_launch_is_on_and_matches_the_npc_base_jump() -> void:
+	# An authored link's base pop is the NPC's own jump: a profiled NPC's hop comes from NpcData.jump_velocity (the
+	# profile stamps it onto the node unconditionally), so a short link climb pops exactly like the combat hop does.
 	var loco := Locomotor.new()  # off-tree, inert
-	assert_almost_eq(loco.link_climb_velocity, 4.5, 0.001, "default base launch matches the NPC jump_velocity")
-	assert_true(loco.link_climb_min > 0.0, "a positive floor so near-flat links don't trigger a launch")
+	var profile: Resource = load("res://scripts/npc/npc_data.gd").new()
+	var npc_jump: float = profile.get(&"jump_velocity")
+	profile = null
+	assert_gt(loco.link_climb_velocity, 0.0,
+		"ship decision: link ascent is ON by default (0 disables it) -- otherwise idle NPCs stall under every authored ledge link")
+	assert_almost_eq(loco.link_climb_velocity, npc_jump, 0.001,
+		"the link launch's base pop must match the NPC profile's jump_velocity, or a link climb pops differently from the NPC's own hop")
+	assert_gt(loco.link_climb_min, 0.0, "a positive floor so near-flat links don't trigger a launch")
+	loco.free()
+
+
+func test_an_npc_with_step_up_has_a_way_over_every_upward_link_span() -> void:
+	# The NPC path (enable_step_up ON) answers an upward link in _on_link_reached with WALK (step-up) first, then a
+	# LAUNCH. A span neither gate takes is a link A* happily routes across that the body can never cross -- the NPC
+	# stands at its foot, STRANDED. Sweep every climb a TWO_WAY link may have (up to NavLink's jump-height warning
+	# budget) with the DEFAULT knobs: one of the two must fire, and a launch must actually carry the body to the exit.
+	var loco := Locomotor.new()  # off-tree, inert
+	var link := NavLink.new()
+	var budget := link.climb_warn_budget
+	link.free()
+	var g := absf(float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)))
+	var stranded: Array = []
+	var undershot: Array = []
+	for i in range(1, int(round(budget / 0.05)) + 1):
+		var climb := i * 0.05
+		var walks := Locomotor.should_walk_link_as_stairs(false, true, climb, 2.0, loco.step_up_height)
+		var launches := Locomotor.should_climb_link(climb, true, 0.0, loco.link_climb_min)
+		if not walks and not launches:
+			stranded.append(snappedf(climb, 0.01))
+		elif launches and not walks:
+			var v := Locomotor.jump_velocity_for_climb(climb, -g, loco.link_climb_velocity)
+			if v * v / (2.0 * g) < climb:  # ballistic apex of the launch
+				undershot.append(snappedf(climb, 0.01))
+	assert_eq(stranded, [],
+		"upward link spans (m) with NO traversal -- step_up_height and link_climb_min left a dead band between walking and launching")
+	assert_eq(undershot, [], "upward link spans (m) whose default launch apex falls short of the exit")
+	assert_gt(budget, loco.link_climb_min, "the sweep reached real launch territory (the budget sits above the launch floor)")
 	loco.free()
 
 
@@ -166,17 +204,79 @@ func test_unreachable_close_lower_target_does_not_count_as_arrived() -> void:
 		"same-level unreachable targets do not use the ledge-drop commit")
 
 
-# --- Stair step-up (try_step_up / try_step_down). The actual riser-climb needs a physics space + test_move, so it's
-# playtest/soak territory; these pin the OPT-IN default and the early-return gates that run BEFORE any physics query
-# (so they're safe off-tree — a body never in a tree must not reach test_move here). ---
+# --- Stair step-up (try_step_up / try_step_down). The riser climb itself is driven in a tiny in-tree physics rig
+# (static floor + riser boxes and a capsule body, stepped a few physics frames so test_move sees them). The rest pin
+# the OPT-IN default and the early-return gates that run BEFORE any physics query (so they're safe off-tree — a body
+# never in a tree must not reach test_move there). ---
 
-func test_step_up_is_opt_in_and_tunable() -> void:
+func test_step_up_ships_off_for_a_bare_mob_and_its_knobs_agree() -> void:
 	var loco := Locomotor.new()  # off-tree, inert
-	assert_false(loco.enable_step_up, "step-up is OFF by default — a bare mob stays cheap; npc.gd opts in")
-	assert_almost_eq(loco.step_up_height, 0.6, 0.001, "default riser matches this project's 0.5 m brush stairs + margin")
-	assert_true(loco.step_down_snap >= loco.step_up_height, "step_down_snap >= step_up_height so descents stay grounded")
-	assert_true(Locomotor.STEP_MAX_ANGLED_PROBE_EXTRA > 0.0, "diagonal stair approaches get a second into-riser probe")
-	assert_true(loco.has_method(&"try_step_up") and loco.has_method(&"try_step_down"), "exposes the step API the host calls")
+	assert_false(loco.enable_step_up, "ship decision: step-up is OFF by default -- a bare mob stays cheap; npc.gd opts in")
+	assert_gte(loco.step_down_snap, loco.step_up_height, "step_down_snap >= step_up_height so descents stay grounded")
+	assert_gt(Locomotor.STEP_MAX_ANGLED_PROBE_EXTRA, Locomotor.STEP_MIN_DELTA,
+		"the diagonal into-riser probe is only added when its extra reach beats STEP_MIN_DELTA -- a smaller cap silently disables diagonal stair approaches")
+	loco.free()
+
+
+## A static box spanning x in [x0, x1], y in [bottom_y, top_y], z in [z - 3, z + 3]; freed with the test.
+func _static_box(x0: float, x1: float, bottom_y: float, top_y: float, z: float) -> StaticBody3D:
+	var body := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(x1 - x0, top_y - bottom_y, 6.0)
+	shape.shape = box
+	body.add_child(shape)
+	body.position = Vector3((x0 + x1) * 0.5, (bottom_y + top_y) * 0.5, z)
+	add_child_autofree(body)
+	return body
+
+
+## A stair rig at `z`: a floor, a riser of `riser_h` whose face is at x = 0.5, and a 0.3 m-radius capsule body
+## standing 5 cm short of that face. Returns the body.
+func _riser_rig(riser_h: float, z: float) -> CharacterBody3D:
+	_static_box(-4.0, 4.0, -1.0, 0.0, z)
+	_static_box(0.5, 3.0, 0.0, riser_h, z)
+	var body := CharacterBody3D.new()
+	var shape := CollisionShape3D.new()
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 0.3
+	capsule.height = 1.8
+	shape.shape = capsule
+	shape.position = Vector3(0.0, 0.9, 0.0)
+	body.add_child(shape)
+	body.position = Vector3(0.15, 0.01, z)
+	add_child_autofree(body)
+	return body
+
+
+func test_default_step_up_climbs_a_brush_riser_and_the_tallest_walkable_step_but_not_a_wall() -> void:
+	# Drives the REAL riser climb (test_move in a physics space) with the DEFAULT step_up_height. Requirements:
+	#  - a 0.5 m brush stair riser (16 TrenchBroom units at FuncGodot's 32:1) is walked;
+	#  - so is the tallest step anything hands to step-up: NavLinkPlanner lays WALK links over risers up to its
+	#    step_walk_max, and the combat hop refuses any climb <= HOP_MIN_CLIMB -- a taller floor on either side is a
+	#    riser NPCs are routed over but can neither step nor hop;
+	#  - a 1.0 m wall is NOT stepped (that is the hop's / a NavLink's job) and the body is left where it stood.
+	var tallest_step := maxf(float(NavLinkPlanner.DEFAULT_BUDGET["step_walk_max"]), Locomotor.HOP_MIN_CLIMB)
+	var brush := _riser_rig(0.5, 0.0)
+	var tallest := _riser_rig(tallest_step, 10.0)
+	var wall := _riser_rig(1.0, 20.0)
+	await wait_physics_frames(3)  # let the physics server register the bodies before any test_move
+	var loco := Locomotor.new()
+	loco.enable_step_up = true
+	var push := Vector3(4.0, 0.0, 0.0)  # walking into the riser: 0.4 m of probe this frame
+
+	assert_true(loco.try_step_up(brush, brush.global_transform, push, 0.1), "a 0.5 m brush stair riser is stepped")
+	assert_almost_eq(brush.global_position.y, 0.5, 0.02, "...and the body now stands on the tread")
+	assert_almost_eq(loco.last_step_rise, 0.49, 0.02, "...reporting the rise it applied (the host eases the snap by it)")
+
+	assert_true(loco.try_step_up(tallest, tallest.global_transform, push, 0.1),
+		"a %.2f m riser (planner step_walk_max / HOP_MIN_CLIMB) is stepped -- no dead band between step-up and the hop" % tallest_step)
+	assert_almost_eq(tallest.global_position.y, tallest_step, 0.02, "...onto its tread")
+
+	var wall_before := wall.global_position
+	assert_false(loco.try_step_up(wall, wall.global_transform, push, 0.1), "a 1.0 m wall is not a stair riser")
+	assert_eq(wall.global_position, wall_before, "a refused step leaves the body where it stood")
+	assert_eq(loco.last_step_rise, 0.0, "a refused step reports no rise")
 	loco.free()
 
 

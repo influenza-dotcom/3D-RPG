@@ -44,19 +44,98 @@ func _elapse(t, seconds: float) -> void:
 	t._process(0.0)
 
 
-func test_exported_defaults() -> void:
+const HUD_SCENE := "res://scenes/player/ui.tscn"
+const PAUSE_MENU_SCENE := "res://scenes/ui/options_menu.tscn"
+
+
+## A title exactly as a designer drops it in: NO export touched before _ready.
+func _dropped_in_title():
 	var t = load(SCRIPT_PATH).new()
-	assert_eq(t.text, "CYBER SUNDAY", "the title text")
-	assert_eq(t.cue_seconds, 168.0, "the cue is 2:48 into the intro song")
-	assert_eq(t.fade_in_time, 2.5, "fade-in 2.5 s")
-	assert_eq(t.hold_seconds, 30.0, "holds 30 s")
-	assert_eq(t.fade_out_time, 2.5, "fade-out 2.5 s")
-	assert_eq(t.sky_distance, 350.0, "parked 350 m out")
-	assert_eq(t.vertical_stretch, 1.5, "tall letters")
-	assert_false(t.test_show_immediately, "the TESTING flag must ship OFF or the title skips the cue in a real game")
-	assert_true(t.overlay_enabled, "the on-top inverted duplicate ships on")
-	assert_eq(t.OVERLAY_LAYER, 100, "the overlay sits above the HUD and below the pause menu (128)")
-	t.free()
+	add_child_autofree(t)
+	return t
+
+
+## The CanvasLayer `layer` a scene's ROOT authors, or CanvasLayer's own default when the scene leaves it unset.
+func _root_canvas_layer(scene_path: String) -> int:
+	var ps := load(scene_path) as PackedScene
+	assert_not_null(ps, "%s must load to read its CanvasLayer" % scene_path)
+	if ps == null:
+		return -1
+	var state := ps.get_state()
+	for p in range(state.get_node_property_count(0)):
+		if state.get_node_property_name(0, p) == "layer":
+			return int(state.get_node_property_value(0, p))
+	return int(ClassDB.class_get_property_default_value(&"CanvasLayer", &"layer"))
+
+
+func test_a_dropped_in_title_waits_for_its_cue_instead_of_showing_at_once() -> void:
+	# The TESTING shortcut must be OFF out of the box, or a title dropped into a level skips its timed entrance.
+	var t = _dropped_in_title()
+	_elapse(t, 0.5)
+	assert_false(t._revealed, "a title dropped in with its shipped settings must wait for the cue, not reveal on spawn")
+	assert_false(t._label.visible, "the sky label stays hidden before the cue")
+	# Control: the only difference is the TESTING flag, and that same half second DOES reveal it.
+	var preview = _title(false, true)
+	_elapse(preview, 0.5)
+	assert_true(preview._revealed, "control: with test_show_immediately on, the same elapsed time reveals the title")
+
+
+func test_a_dropped_in_title_builds_its_on_top_duplicate() -> void:
+	var t = _dropped_in_title()
+	assert_true(t._overlay_layer != null and t._overlay_label != null,
+		"ship decision: the inverted on-top duplicate is ON out of the box, so the title stays legible over the HUD")
+
+
+func test_the_default_card_spells_the_games_name() -> void:
+	var t = _dropped_in_title()
+	var game_name := String(ProjectSettings.get_setting("application/config/name", "")).replace(" ", "").to_upper()
+	assert_ne(game_name, "", "the project must name the game")
+	assert_eq(String(t._label.text).replace(" ", "").to_upper(), game_name,
+		"the sky title card is the game's name — a dropped-in title must spell the project's name")
+
+
+func test_the_default_timeline_fades_up_to_full_holds_then_clears_for_good() -> void:
+	# Walk a dropped-in title's shipped timeline in quarter-second wall-clock steps from just before its cue.
+	# Whatever the durations are tuned to, the entrance must rise to FULL opacity, never flicker (rise then fall,
+	# once), and end hidden with the clock stopped.
+	var t = _dropped_in_title()
+	t._t = t.cue_seconds - 0.05
+	_elapse(t, 0.1)
+	assert_true(t._revealed, "crossing the shipped cue reveals the title")
+	var peak := 0.0
+	var falling := false
+	var flickered := false
+	var prev := 0.0
+	var steps := 0
+	while not t._done and steps < 4000:
+		_elapse(t, 0.25)
+		steps += 1
+		var a: float = t._label.modulate.a
+		if a < prev - 0.0001:
+			falling = true
+		elif a > prev + 0.0001 and falling:
+			flickered = true
+		peak = maxf(peak, a)
+		prev = a
+	assert_true(t._done, "the shipped timeline must finish (fade in, hold, fade out) rather than hang in the sky forever")
+	assert_almost_eq(peak, 1.0, 0.001, "the title must reach full opacity at some point — the HOLD is the beat the player reads it on")
+	assert_false(flickered, "alpha must rise to its peak and then fall, once — no second fade-up after it starts clearing")
+	assert_false(t._label.visible, "once done the sky label is hidden for good")
+	assert_true(t._overlay_bbc == null or t._overlay_bbc.copy_mode == BackBufferCopy.COPY_MODE_DISABLED,
+		"once done the full-screen copy is off")
+
+
+func test_the_overlay_draws_over_the_hud_but_under_the_pause_menu() -> void:
+	# The layer ORDER does not depend on whether the overlay ships on (test_a_dropped_in_title_builds_its_on_top_duplicate
+	# pins that decision), so build it explicitly rather than crash on a null layer if that default ever flips.
+	var t = _title(true)
+	var overlay_layer: int = t._overlay_layer.layer
+	var hud_layer := _root_canvas_layer(HUD_SCENE)
+	var pause_layer := _root_canvas_layer(PAUSE_MENU_SCENE)
+	assert_gt(overlay_layer, hud_layer,
+		"the on-top duplicate must draw ABOVE the HUD layer (%d) — that is the whole point of the overlay" % hud_layer)
+	assert_lt(overlay_layer, pause_layer,
+		"the on-top duplicate must draw BELOW the pause/options menu layer (%d), or the title covers the menu" % pause_layer)
 
 
 func test_ready_builds_a_hidden_occludable_label_and_arms() -> void:
@@ -68,7 +147,7 @@ func test_ready_builds_a_hidden_occludable_label_and_arms() -> void:
 	assert_not_null(l, "a Label3D is built at runtime")
 	if l == null:
 		return
-	assert_eq(l.text, "CYBER SUNDAY", "the label carries the title text")
+	assert_eq(l.text, t.text, "the label carries the title text export (the game's name itself is pinned by test_the_default_card_spells_the_games_name)")
 	assert_false(l.visible, "hidden until the cue elapses")
 	assert_eq(l.modulate.a, 0.0, "starts fully transparent (fades up from nothing)")
 	assert_false(l.no_depth_test, "depth test stays ON so the skyline occludes it — the whole point of a sky title")

@@ -8,46 +8,92 @@ extends GutTest
 ##   ScreenShake (scripts/camera/screen_shake.gd)
 ##     - shake()/shake_explosion() trauma clamping, additivity, and the design
 ##       contract that the explosion ceiling exceeds the ordinary one.
-##     - trauma decay via _process driven MANUALLY on a DETACHED .new() node
-##       (mirrors how test_smoke drives BulletTime._process); decay clamps at 0.
+##     - trauma decay via _process driven MANUALLY on a DETACHED .new() node: decay_rate is honoured as
+##       trauma-per-second, the settle is frame-rate independent, and decay clamps at 0.
 ##     - extends Node3D (the camera parents under it so its rotation shakes view).
 ##   MouseInput (scripts/components/mouse_input.gd)
 ##     - speed_sensitivity_multiplier() below-threshold == 1.0 and mid-range
 ##       monotonic falloff (the no-player==1.0 and at-max==sens_min cases are
 ##       ALREADY in test_smoke and are NOT duplicated here).
 ##     - rotate / attack signals exist (Head/body/GunMesh + attack.gd wire to them).
-##     - SOURCE PIN: mouse look reads InputEventMouseMotion.screen_relative, never
-##       `relative` (which the viewport stretch mode pre-scales by canvas/window
-##       width, so look speed used to ride the window size).
+##     - mouse look turns by InputEventMouseMotion.screen_relative, never `relative` (which the viewport stretch
+##       mode pre-scales by canvas/window width, so look speed used to ride the window size), driven through a
+##       recompiled copy of mouse_input.gd with only its cursor-capture test lifted (headless never reports a
+##       captured cursor — see the test's doc comment).
 ##     All MouseInput instances are .new() WITHOUT add_child so _ready never runs
 ##     and the real cursor is never captured.
-##   InputManager (managers/InputManager.gd, live autoload)
-##     - every action-name constant (test_autoload_order only checks action_forward).
+##   InputManager action names are NOT pinned here: tests/test_input_action_catalog.gd checks every action_* var
+##     against the live InputMap, and the Hotbar wheel test below presses InputManager.action_zoom so the raw
+##     "Zoom" polls in ScopeIn/Hotbar are proven to read that same action.
 ##   FreezeFrame (scenes/player/freeze_frame.gd, live autoload)
 ##     - freeze() exists. The active time_scale path is NOT invoked (it writes
 ##       Engine.time_scale + awaits a real timer); the disabled no-op is already in
 ##       test_smoke.
 ##   CameraEffects (scripts/camera/camera_effects.gd)
-##     - the scoped-FOV ownership latch is driven by set_scope_dof/reset_transients without running _process.
+##     - _process driven off-tree against a bare Player subclass (_SprintProbe): the scoped-FOV ownership latch
+##       really suppresses the movement-FOV writer, and the sprint kick LAYERS on the forward-run kick, inside
+##       Camera3D's legal FOV range.
+##   Hotbar (scripts/ui/hotbar.gd) — a wheel notch yields to an aimed variable-zoom scope and switches otherwise.
 ##   Hitmarker (scripts/ui/hitmarker.gd), DamageIndicators (scripts/ui/damage_indicators.gd),
 ##   UI (scripts/ui/ui.gd)
-##     - exported defaults, base class, has_method, and the pure state mutators
-##       (flash()/add()/_process()/setup()) driven on DETACHED .new() instances.
+##     - base class, has_method, the skin invariants that keep each cue visible, and the fade/lifetime state
+##       machines (flash()/add()/_process()) driven on DETACHED .new() instances with the skin retuned live;
+##       setup() injection + its Player-only wallet/hotbar hooks; set_scoped's reticle + back-buffer swap.
+##     - the hitmarker's prewarm paint is taken back by exactly one clearing repaint (counted in-tree).
 ##
 ## DELIBERATELY SKIPPED (instantiation is unsafe / behaviour needs a full scene):
-##   - CameraEffects._process/bob: those deref a null `player`; only a full Character + tree could exercise them.
+##   - CameraEffects in-tree _process/bob with a real Player _ready (a real sprint needs a grounded body —
+##     tests/test_player_core.gd drives is_sprinting() itself).
 ##   - flash_light.gd / ray_cast.gd: @onready NodePaths resolve to
 ##     null on a bare tree and _ready/_process dereference them; ray_cast also does
 ##     real physics (direct_space_state, impulses, freeze/layer mutation). Their
 ##     invariants are already guarded by test_smoke's file-content tests.
-##   - MouseInput._ready/_unhandled_input/_process: real cursor capture + viewport
-##     camera derefs.
+##   - MouseInput._ready/_process and the REAL class's _unhandled_input: real cursor capture (never reported
+##     headless) + viewport camera derefs (the look body itself is driven through the surrogate above).
 ##   - FreezeFrame active time-scale path; ui._process (derefs hp/ammo Labels);
 ##     adding any of the above into a live tree.
 ##   - The already-covered cases listed inline above (no duplication).
 ##
 ## All asserts (assert_eq/_gt/_lt/_true/_false/_not_null/_almost_eq) and the
 ## has_method/has_signal Object builtins match the existing suite (test_smoke.gd).
+
+const PLAYER_PATH := "res://scripts/player/player.gd"
+
+## A bare Player whose sprint read is an INPUT the test controls. A real is_sprinting() needs a grounded
+## in-tree body + stamina + the Run action (tests/test_player_core.gd drives exactly that); CameraEffects only
+## consumes the answer, so this isolates the camera's FOV composition from the sprint gates. Never added to
+## the tree, so the Player's _ready never runs.
+class _SprintProbe extends Player:
+	var sprinting: bool = false
+
+	func is_sprinting() -> bool:
+		return sprinting
+
+
+# Globals individual tests retune; snapshotted before and restored after EVERY test so a failing assert
+# can never leak a tuned value into a later test (GameSettings / MenuStyle.hud are process-wide resources).
+var _saved_fov_effects: bool
+var _saved_sprint_fov_mult: float
+var _saved_scope_magnification: float
+var _saved_hitmarker_duration: float
+var _saved_damage_arc_duration: float
+
+
+func before_each() -> void:
+	_saved_fov_effects = Settings.fov_effects_enabled
+	_saved_sprint_fov_mult = GameSettings.camera.sprint_fov_mult
+	_saved_scope_magnification = GameSettings.camera.scope_magnification
+	_saved_hitmarker_duration = MenuStyle.hud.hitmarker_duration
+	_saved_damage_arc_duration = MenuStyle.hud.damage_arc_duration
+
+
+func after_each() -> void:
+	Settings.fov_effects_enabled = _saved_fov_effects
+	GameSettings.camera.sprint_fov_mult = _saved_sprint_fov_mult
+	GameSettings.camera.scope_magnification = _saved_scope_magnification
+	MenuStyle.hud.hitmarker_duration = _saved_hitmarker_duration
+	MenuStyle.hud.damage_arc_duration = _saved_damage_arc_duration
+	Input.action_release(InputManager.action_zoom)
 
 
 # ---------------------------------------------------------------------------
@@ -95,18 +141,26 @@ func test_screen_shake_explosion_ceiling_exceeds_ordinary_ceiling() -> void:
 		"The explosion ceiling (1.6) must exceed shake()'s ceiling (1.0): this encodes the design contract that explosions are allowed to exceed the ordinary cap")
 
 
-func test_screen_shake_trauma_decays_on_process() -> void:
-	# DETACHED node: _process is called by hand (never added to the tree). Its
+func test_screen_shake_trauma_decays_at_the_tuned_rate_independent_of_frame_rate() -> void:
+	# DETACHED nodes: _process is called by hand (never added to the tree). Its
 	# rotation = randf_range(...) write is inert on an unparented Node3D — no scene.
-	var s := ScreenShake.new()
-	s.trauma = 1.0
-	s._process(1.0)
-	assert_lt(s.trauma, 1.0,
-		"Trauma must decay each frame so the shake settles instead of persisting forever")
-	var expected: float = max(1.0 - GameSettings.screen_shake.decay_rate * 1.0, 0.0)
-	assert_almost_eq(s.trauma, expected, 0.001,
-		"Decay must be linear at decay_rate (5.0): trauma = max(trauma - decay_rate*delta, 0)")
-	s.free()
+	# The step is chosen so the decay never reaches the 0 clamp (that edge has its own test below).
+	var rate: float = GameSettings.screen_shake.decay_rate
+	assert_gt(rate, 0.0, "screen_shake.decay_rate must be positive or a shake never settles")
+	var dt := 0.25 / rate  # decay_rate is trauma per SECOND, so this much time must remove a quarter of full trauma
+	var one_frame := ScreenShake.new()
+	one_frame.trauma = 1.0
+	one_frame._process(dt)
+	assert_almost_eq(one_frame.trauma, 0.75, 0.001,
+		"decay_rate must be honoured as trauma per second: 0.25/decay_rate seconds must settle exactly a quarter of a full shake")
+	var ten_frames := ScreenShake.new()
+	ten_frames.trauma = 1.0
+	for i in 10:
+		ten_frames._process(dt / 10.0)
+	assert_almost_eq(ten_frames.trauma, one_frame.trauma, 0.001,
+		"ten short frames must settle the shake exactly as far as one long frame covering the same time — shake duration must not depend on the frame rate")
+	one_frame.free()
+	ten_frames.free()
 
 
 func test_screen_shake_trauma_decay_clamps_at_zero() -> void:
@@ -134,14 +188,48 @@ func test_screen_shake_reset_clears_respawn_state() -> void:
 # CameraEffects
 # ---------------------------------------------------------------------------
 
-func test_camera_effects_scope_fov_owner_latch() -> void:
+## An off-tree CameraEffects wired to a bare _SprintProbe, so _process can run by hand. No `attributes`, so
+## set_scope_dof returns before its get_tree() fog/dust pass. Standing still, not sprinting, FOV effects ON.
+func _feel_camera() -> Array:
+	Settings.fov_effects_enabled = true  # restored in after_each
+	var probe := _SprintProbe.new()
 	var cam := CameraEffects.new()
-	assert_false(cam._scope_fov_active, "a fresh camera starts with CameraEffects owning ordinary feel FOV")
+	cam.player = probe
+	return [cam, probe]
+
+
+## One settled frame: a delta long enough that every exp() ease in _process lands exactly on its target.
+func _settle(cam: CameraEffects) -> void:
+	cam._process(100.0)
+
+
+func test_scoped_camera_leaves_fov_to_scope_in_until_unscoped_or_reset() -> void:
+	var rig := _feel_camera()
+	var cam: CameraEffects = rig[0]
+	var probe: _SprintProbe = rig[1]
+	var ads_fov := 40.0  # what ScopeIn eased camera.fov to for ADS; a legal angle well away from base_fov
+	assert_gt(absf(cam.base_fov - ads_fov), 5.0, "precondition: the ADS angle must differ from the rest FOV or nothing below discriminates")
+	cam.fov = ads_fov
+	_settle(cam)
+	assert_almost_eq(cam.fov, cam.base_fov, 0.01,
+		"control: with nobody scoped, the movement-FOV writer must ease an off-rest fov back to base_fov — otherwise the scoped assert below proves nothing")
 	cam.set_scope_dof(true, false)
-	assert_true(cam._scope_fov_active, "scoping marks ScopeIn as the FOV owner so movement FOV does not fight ADS zoom")
-	cam.reset_transients()
-	assert_false(cam._scope_fov_active, "respawn/transient reset hands FOV ownership back to CameraEffects")
+	cam.fov = ads_fov
+	_settle(cam)
+	assert_almost_eq(cam.fov, ads_fov, 0.01,
+		"while scoped CameraEffects must leave camera.fov to ScopeIn — easing it toward the movement FOV would fight the ADS zoom every frame")
+	cam.set_scope_dof(false, false)
+	_settle(cam)
+	assert_almost_eq(cam.fov, cam.base_fov, 0.01,
+		"unscoping must hand camera.fov back to CameraEffects, so the view returns to the rest FOV")
+	cam.set_scope_dof(true, false)
+	cam.reset_transients()  # respawn while scoped
+	cam.fov = ads_fov
+	_settle(cam)
+	assert_almost_eq(cam.fov, cam.base_fov, 0.01,
+		"a respawn reset must hand FOV ownership back too — a death while aiming must not freeze the new life's FOV")
 	cam.free()
+	probe.free()
 
 
 func test_camera_effects_exit_tree_scrubs_scoped_far_dof_off_the_shared_attributes() -> void:
@@ -195,16 +283,36 @@ func test_camera_effects_reset_transients_restores_neutral_pose() -> void:
 	cam.free()
 
 
-func test_camera_effects_layers_sprint_fov_with_other_cosmetic_fov() -> void:
-	var src := FileAccess.get_file_as_string("res://scripts/camera/camera_effects.gd")
-	assert_true(src.contains("climber.is_sprinting()"),
-		"CameraEffects must read Player.is_sprinting() so the sprint FOV follows the same gates as stamina sprint")
-	assert_true(src.contains("GameSettings.camera.sprint_fov_mult"),
-		"CameraEffects must add the designer-tuned sprint_fov_mult while sprinting")
-	assert_true(src.contains("move_fov + sprint_fov + _fov_punch"),
-		"Sprint FOV must layer with the existing movement and dash FOV terms instead of replacing them")
-	assert_true(src.contains("clampf(composed_fov, 1.0, 179.0)"),
-		"Composed movement FOV must stay inside Camera3D's valid perspective range")
+func test_camera_sprint_fov_layers_on_the_forward_run_kick_inside_the_legal_range() -> void:
+	var rig := _feel_camera()
+	var cam: CameraEffects = rig[0]
+	var probe: _SprintProbe = rig[1]
+	var sprint_kick: float = GameSettings.camera.sprint_fov_mult
+	assert_gt(sprint_kick, 0.0, "precondition: the shipped sprint_fov_mult must widen the view or there is nothing to layer")
+	probe.input_dir = Vector2(0.0, -1.0)  # full forward push
+	_settle(cam)
+	var run_fov := cam.fov
+	assert_gt(run_fov, cam.base_fov + 0.01,
+		"precondition: a full forward push must already kick the FOV wide, so the sprint layer below is measured on top of a real run kick")
+	probe.sprinting = true
+	_settle(cam)
+	assert_almost_eq(cam.fov - run_fov, sprint_kick, 0.01,
+		"breaking into a sprint must widen the view by exactly sprint_fov_mult ON TOP of the forward-run kick — replacing the run kick (or ignoring is_sprinting) changes the step")
+	probe.sprinting = false
+	_settle(cam)
+	assert_almost_eq(cam.fov, run_fov, 0.01, "dropping out of the sprint must drop exactly the sprint kick back off")
+	probe.sprinting = true
+	Settings.fov_effects_enabled = false  # restored in after_each
+	_settle(cam)
+	assert_almost_eq(cam.fov, cam.base_fov, 0.01,
+		"with the FOV Effects accessibility toggle off, a sprinting forward run must rest at base_fov — no cosmetic kick survives")
+	Settings.fov_effects_enabled = true
+	GameSettings.camera.sprint_fov_mult = 500.0  # a too-hot designer value; restored in after_each
+	_settle(cam)
+	assert_almost_eq(cam.fov, 179.0, 0.01,
+		"a stacked FOV past Camera3D's 179-degree limit must clamp to the limit instead of breaking the view")
+	cam.free()
+	probe.free()
 
 
 ## ⭐ REGRESSION (2026-08-20): moving the FOV slider mid-run left this camera resting at the OLD angle.
@@ -430,8 +538,10 @@ func test_scoped_target_fov_prefers_the_wheel_zoom_over_the_fixed_override() -> 
 	si.step_wheel_zoom(w, -1)
 	assert_gt(si.scoped_target_fov(w), 5.0,
 		"with a range authored, the scoped target must be the wheel-dialed zoom, not the frozen override")
-	assert_almost_eq(si.scoped_target_fov(null), si.global_scoped_fov(), 0.001,
-		"no weapon must still fall through to the global magnification solve — bare ADS keeps working")
+	GameSettings.camera.scope_magnification = 2.0  # restored in after_each
+	var rest := clampf(GameSettings.camera.default_fov, 1.0, 179.0)
+	assert_almost_eq(_apparent_magnification(rest, si.scoped_target_fov(null)), 2.0, 0.001,
+		"no weapon must still fall through to the global magnification solve — bare ADS must bring the world exactly scope_magnification closer")
 	GameSettings.camera.scope_zoom_wheel_step = old_step
 	si.free()
 	w = null
@@ -494,14 +604,62 @@ func test_sniper_authors_a_wheel_zoom_range_that_preserves_its_resting_look() ->
 		"the wheel seed must equal the sniper's pre-feature scoped look (its override under Camera3D's clamp) — adding the wheel must not move the authored scope-in")
 
 
-func test_hotbar_wheel_branch_yields_through_the_shared_scope_predicate() -> void:
-	# SOURCE PIN (the file-established idiom for wiring a bare test can't drive): the Hotbar's wheel branch
-	# must consult _scope_owns_wheel beside _spray_owns_wheel, and that yield must route through the SAME
-	# ScopeIn.wheel_owns_scope_zoom the scope consumes notches with — delete either and every behavioural
-	# test here stays green while the bar fights the scope for each notch (weapon switches mid-ADS).
-	var src := FileAccess.get_file_as_string("res://scripts/ui/hotbar.gd")
-	assert_string_contains(src, "not _spray_owns_wheel() and not _scope_owns_wheel(")
-	assert_string_contains(src, "ScopeIn.wheel_owns_scope_zoom")
+func _weapon_item(id: StringName, weapon: WeaponData) -> Item:
+	var it := Item.new()
+	it.id = id
+	it.category = Item.Category.WEAPON
+	it.weapon = weapon  # is_weapon() requires a real WeaponData
+	return it
+
+
+func test_hotbar_wheel_notch_yields_to_an_aimed_variable_scope_and_switches_weapons_otherwise() -> void:
+	# The bar and ScopeIn both hear every wheel notch; the Hotbar must YIELD while the aimed weapon's scope owns
+	# the wheel, or each notch that dials the sniper's zoom also swaps the weapon out mid-ADS. Driven through
+	# the real Hotbar._unhandled_input with a bare off-tree Player (the test_hotbar.gd idiom). The Hotbar itself
+	# is in-tree only because the switching branch marks the event handled on the real viewport.
+	# Zoom is pressed through InputManager.action_zoom, which also proves the raw "Zoom" polls in ScopeIn and
+	# Hotbar read the same action InputManager exposes.
+	var p = load(PLAYER_PATH).new()
+	p.hp = 1.0  # _ready (which seeds hp) never runs off-tree; the bar's liveness gate needs a living player
+	var inv := CharacterInventory.new()
+	p.inventory = inv
+	var sniper_data := WeaponData.new()
+	sniper_data.scoped_zoom_fov_min = 1.0
+	sniper_data.scoped_zoom_fov_max = 20.0
+	var sniper := _weapon_item(&"sniper", sniper_data)
+	var pistol := _weapon_item(&"pistol", WeaponData.new())
+	inv.add(sniper)
+	inv.add(pistol)
+	var ws := Weapon.new()
+	var atk := Attack.new()
+	atk.current_weapon = sniper_data
+	atk.holstered = false
+	ws.attack = atk
+	p.weapon_system = ws
+	var old_step := GameSettings.camera.scope_zoom_wheel_step
+	GameSettings.camera.scope_zoom_wheel_step = 1.25  # the wheel zoom's global on-switch
+	var hb := Hotbar.new()
+	add_child_autofree(hb)
+	hb.setup(p)
+	inv.equip_item(sniper)
+	var notch := InputEventMouseButton.new()
+	notch.button_index = MOUSE_BUTTON_WHEEL_DOWN  # project.godot binds this to Hotbar Next
+	notch.pressed = true
+	assert_true(notch.is_action_pressed(InputManager.action_hotbar_next),
+		"precondition: a wheel-down notch must read as Hotbar Next, or the bar never sees it and the yield below is vacuous")
+	Input.action_press(InputManager.action_zoom)
+	hb._unhandled_input(notch)
+	assert_eq(inv.equipped_item, sniper,
+		"a wheel notch while AIMING a variable-zoom scope belongs to the zoom dial — the hotbar must not swap the sniper out mid-ADS")
+	Input.action_release(InputManager.action_zoom)
+	hb._unhandled_input(notch)
+	assert_eq(inv.equipped_item, pistol,
+		"control: the same notch from the hip must still cycle to the next weapon — the yield is only for an aimed scope")
+	GameSettings.camera.scope_zoom_wheel_step = old_step
+	ws.free()
+	atk.free()
+	p.free()
+	inv.free()
 
 
 # ---------------------------------------------------------------------------
@@ -553,64 +711,73 @@ func test_mouse_input_exposes_rotate_and_attack_signals() -> void:
 ## turned the view 1.2-1.5x further the moment the game went WINDOWED and half as far on a 4K screen (the sensitivity
 ## default was tuned against 1080p fullscreen). screen_relative is unscaled, so one sensitivity means one thing
 ## everywhere; GameSettings.camera.mouse_sensitivity + Settings.SENS_MIN/MAX moved to that unit (x 792/1920) and a
-## legacy settings.cfg is migrated by Settings.read_mouse_sensitivity — tests/test_settings.gd pins those. Source-text
-## pin (the handler needs a captured cursor + a live viewport, so it is never driven under GUT); comment lines are
-## masked so this prose can name the forbidden read.
-func test_mouse_input_reads_screen_relative_not_relative() -> void:
-	var src := FileAccess.get_file_as_string("res://scripts/components/mouse_input.gd")
-	var code_lines: Array[String] = []
-	for line in src.split("\n"):
-		var body: String = line.get_slice("#", 0)  # drop trailing comments; a whole-line comment leaves only indent
-		if not body.strip_edges().is_empty():
-			code_lines.append(body)
-	var code := "\n".join(code_lines)
-	assert_true(code.contains("mm.screen_relative.x") and code.contains("mm.screen_relative.y"),
-		"MouseInput._unhandled_input must turn BOTH look axes from screen_relative (unscaled OS pixels) so look speed is window/resolution independent")
-	assert_false(code.contains(".relative"),
-		"MouseInput must not read InputEventMouseMotion.relative anywhere — the viewport stretch mode pre-scales it by canvas/window width, so mouse look would ride the window size again (1.5x faster in a 720p window, 0.5x at 4K)")
+## legacy settings.cfg is migrated by Settings.read_mouse_sensitivity — tests/test_settings.gd pins those.
+## DRIVEN THROUGH A SURROGATE: the handler only turns the view while `Input.mouse_mode == MOUSE_MODE_CAPTURED`, and the
+## headless display server never reports a captured cursor (setting CAPTURED reads back VISIBLE — tried 2026-09-17),
+## so the real class's _unhandled_input cannot be driven under GUT. The surrogate is mouse_input.gd's OWN source,
+## read from disk and compiled at test time with exactly two edits: the class_name line dropped (a second MouseInput
+## would collide with the global class) and the capture test lifted off the look gate. Everything past that gate —
+## the motion field read, the sensitivity scale, the axis mapping, the rotate emit — is the shipped code, so a
+## production edit to it reaches this test. If either edit stops matching, the test fails loudly (re-point the
+## constants below at the new spelling; never weaken the look asserts).
+const MOUSE_INPUT_PATH := "res://scripts/components/mouse_input.gd"
+const MOUSE_INPUT_CLASS_LINE := "class_name MouseInput\n"
+const MOUSE_LOOK_CAPTURE_GATE := "if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:"
+const MOUSE_LOOK_UNGATED := "if event is InputEventMouseMotion:"
 
+## A detached instance of the surrogate described above (never added to the tree, so its _ready never captures the
+## real cursor), or null after a failed assert when the source no longer carries the two spots the surrogate edits.
+func _mouse_look_surrogate() -> Node3D:
+	var src := FileAccess.get_file_as_string(MOUSE_INPUT_PATH)
+	assert_eq(src.count(MOUSE_INPUT_CLASS_LINE), 1, "mouse_input.gd declares class_name MouseInput exactly once (the surrogate drops that line)")
+	assert_eq(src.count(MOUSE_LOOK_CAPTURE_GATE), 1,
+		"mouse_input.gd's look gate is still spelled as MOUSE_LOOK_CAPTURE_GATE — the surrogate lifts its capture test")
+	if src.count(MOUSE_INPUT_CLASS_LINE) != 1 or src.count(MOUSE_LOOK_CAPTURE_GATE) != 1:
+		return null
+	var script := GDScript.new()
+	script.source_code = src.replace(MOUSE_INPUT_CLASS_LINE, "").replace(MOUSE_LOOK_CAPTURE_GATE, MOUSE_LOOK_UNGATED)
+	var err := script.reload()
+	assert_eq(err, OK, "the surrogate of mouse_input.gd compiles")
+	if err != OK:
+		return null
+	return script.new() as Node3D
 
-# ---------------------------------------------------------------------------
-# InputManager (live autoload — action-name strings must mirror project.godot's InputMap)
-# ---------------------------------------------------------------------------
+## Feed one mouse-motion event to `mi`'s look handler and return the ONE look delta it emitted on `rotate`
+## (.x = pitch, .y = yaw). `screen_px` is the OS motion; `window_scaled` is what the engine reports as `relative`.
+func _look_turn(mi: Node3D, screen_px: Vector2, window_scaled: Vector2) -> Vector2:
+	var turns: Array = []
+	var sink := func(amt: Vector2) -> void: turns.append(amt)
+	mi.connect(&"rotate", sink)
+	var motion := InputEventMouseMotion.new()
+	motion.screen_relative = screen_px
+	motion.relative = window_scaled
+	mi.call(&"_unhandled_input", motion)
+	mi.disconnect(&"rotate", sink)
+	assert_eq(turns.size(), 1, "one mouse-motion event turns the view exactly once")
+	return turns[0] if turns.size() == 1 else Vector2.ZERO
 
-func test_input_manager_action_name_constants() -> void:
-	assert_eq(InputManager.action_forward, &"forward",
-		"action_forward must be 'forward' to match the InputMap; drift breaks forward movement with no error")
-	assert_eq(InputManager.action_backward, &"backward",
-		"action_backward must be 'backward' to match the InputMap")
-	assert_eq(InputManager.action_left, &"left",
-		"action_left must be 'left' to match the InputMap")
-	assert_eq(InputManager.action_right, &"right",
-		"action_right must be 'right' to match the InputMap")
-	assert_eq(InputManager.action_jump, &"jump",
-		"action_jump must be 'jump' to match the InputMap")
-	assert_eq(InputManager.action_crouch, &"Crouch",
-		"action_crouch must be 'Crouch' (capitalised) to match the InputMap")
-	assert_eq(InputManager.action_attack, &"Attack",
-		"action_attack must be 'Attack' to match the InputMap (MouseInput._process reads this exact name)")
-	assert_eq(InputManager.action_reload, &"Reload",
-		"action_reload must be 'Reload' to match the InputMap")
-	assert_eq(InputManager.action_zoom, &"Zoom",
-		"action_zoom must be 'Zoom' to match the InputMap")
-	assert_eq(InputManager.action_pickup, &"PickUp",
-		"action_pickup must be 'PickUp' to match the InputMap")
-	assert_eq(InputManager.action_light, &"Light",
-		"action_light must be 'Light' to match the InputMap")
-	assert_eq(InputManager.action_grapple, &"Grapple",
-		"action_grapple must be 'Grapple' to match the InputMap")
-	assert_eq(InputManager.action_weapon_slot_1, &"Weapon Slot 1",
-		"action_weapon_slot_1 must be 'Weapon Slot 1' to match the InputMap")
-	assert_eq(InputManager.action_weapon_slot_2, &"Weapon Slot 2",
-		"action_weapon_slot_2 must be 'Weapon Slot 2' to match the InputMap")
-	assert_eq(InputManager.action_weapon_slot_3, &"Weapon Slot 3",
-		"action_weapon_slot_3 must be 'Weapon Slot 3' to match the InputMap")
-	assert_eq(InputManager.action_weapon_slot_4, &"Weapon Slot 4",
-		"action_weapon_slot_4 must be 'Weapon Slot 4' to match the InputMap")
-	assert_eq(InputManager.action_weapon_slot_5, &"Weapon Slot 5",
-		"action_weapon_slot_5 must be 'Weapon Slot 5' to match the InputMap")
-	assert_eq(InputManager.action_weapon_slot_6, &"Weapon Slot 6",
-		"action_weapon_slot_6 must be 'Weapon Slot 6' to match the InputMap")
+func test_mouse_look_turns_by_screen_pixels_not_the_window_scaled_relative() -> void:
+	var mi := _mouse_look_surrogate()
+	assert_true(mi != null, "the MouseInput look surrogate was built")
+	if mi == null:
+		return
+	# ONE hand motion (20 px across, 12 px up, in OS pixels) as the engine reports it in two window sizes: under the
+	# viewport stretch mode `relative` is that motion x 792/window width, so 1080p fullscreen and the 1600x900
+	# window hand the handler different `relative` values for the same hand.
+	var hand := Vector2(20.0, 12.0)
+	var fullscreen := _look_turn(mi, hand, hand * (792.0 / 1920.0))
+	var windowed := _look_turn(mi, hand, hand * (792.0 / 1600.0))
+	assert_ne(fullscreen.x, 0.0, "control: vertical mouse motion turns the pitch at all, so the equalities below are not two dead zeros")
+	assert_ne(fullscreen.y, 0.0, "control: horizontal mouse motion turns the yaw at all")
+	assert_eq(windowed, fullscreen,
+		"the same hand motion must turn the view the same amount fullscreen and windowed — reading `relative` made look 1.2-1.5x faster the moment the game went windowed (and half as fast at 4K)")
+	# CONTROL for what the turn DOES follow: twice the OS motion with the window-scaled value held still turns twice as far.
+	var doubled := _look_turn(mi, hand * 2.0, hand * (792.0 / 1920.0))
+	assert_almost_eq(doubled.x, fullscreen.x * 2.0, maxf(absf(fullscreen.x) * 0.001, 1e-9),
+		"pitch scales with the OS (screen) motion, so one sensitivity value means one thing at every window size")
+	assert_almost_eq(doubled.y, fullscreen.y * 2.0, maxf(absf(fullscreen.y) * 0.001, 1e-9),
+		"yaw scales with the OS (screen) motion, so one sensitivity value means one thing at every window size")
+	mi.free()
 
 
 # ---------------------------------------------------------------------------
@@ -624,7 +791,7 @@ func test_freeze_frame_exposes_freeze() -> void:
 
 
 # ---------------------------------------------------------------------------
-# Hitmarker  (.new() WITHOUT add_child; _draw never runs on a non-displayed Control)
+# Hitmarker  (.new() WITHOUT add_child, except the warm-paint guard, which counts real in-tree repaints)
 # ---------------------------------------------------------------------------
 
 func test_hitmarker_is_control_with_flash() -> void:
@@ -636,31 +803,43 @@ func test_hitmarker_is_control_with_flash() -> void:
 	h.free()
 
 
-func test_hitmarker_skin_defaults() -> void:
-	# Hitmarker's look moved onto MenuStyle.hud (HudSkin) — it is code-built, so the skin IS its
-	# authoring surface. Pin the load-bearing values there instead of the removed @exports.
+func test_hitmarker_skin_keeps_the_confirm_visible_and_head_hits_bigger() -> void:
+	# Hitmarker's look lives on MenuStyle.hud (HudSkin) — it is code-built, so the skin IS its authoring surface.
+	# These are the invariants a retune must keep, not the tuned numbers themselves (test_hud_skin.gd owns those).
 	var hud = MenuStyle.hud
-	assert_eq(hud.hitmarker_duration, 0.25,
-		"hitmarker_duration default (0.25s) is the fade window the HUD juice tuning relies on")
-	assert_gt(hud.hitmarker_tick_length, 0.0,
-		"hitmarker_tick_length must be positive so the confirm ticks are visible")
-	assert_gt(hud.hitmarker_thickness, 0.0,
-		"hitmarker_thickness must be positive so the ticks render")
+	assert_gt(hud.hitmarker_duration, 0.0,
+		"hitmarker_duration must be positive — a zero fade window ends the pop on the frame it is armed, so hits never confirm")
 	assert_gt(hud.hitmarker_headshot_scale, 1.0,
 		"hitmarker_headshot_scale must exceed 1.0 — the load-bearing 'head hits read bigger' invariant")
+	if hud.hitmarker_texture == null:  # the code-drawn X: only then do the tick metrics paint anything
+		assert_gt(hud.hitmarker_tick_length, 0.0,
+			"with no artist texture the confirm IS the drawn ticks, so hitmarker_tick_length must be positive or the marker is invisible")
+		assert_gt(hud.hitmarker_thickness, 0.0,
+			"with no artist texture the ticks need a positive hitmarker_thickness to render")
 
 
-func test_hitmarker_flash_arms_timer_and_records_headshot() -> void:
-	# flash() only sets _t/_headshot + queue_redraw (a no-op off-screen). No _draw.
+func test_hitmarker_fade_follows_the_skin_window_and_the_latest_hit_picks_the_look() -> void:
+	# Off-tree: queue_redraw is a no-op, so flash/_process run by hand. `_t > 0` is exactly _draw's "still
+	# showing" gate (it paints nothing once _t <= 0), so it is the observable for "the marker is on screen".
+	# The window is retuned on the LIVE skin (restored in after_each) to prove it is read at flash time.
 	var h := Hitmarker.new()
+	MenuStyle.hud.hitmarker_duration = 0.6
 	h.flash(true)
-	assert_almost_eq(h._t, MenuStyle.hud.hitmarker_duration, 0.001,
-		"flash() must arm the fade timer _t from the SKIN's hitmarker_duration (the wiring seam) so the marker pops at full strength")
-	assert_true(h._headshot,
-		"flash(true) must record the headshot flag that _draw uses to pick the bigger headshot colour/scale")
+	h._process(0.5)
+	assert_gt(h._t, 0.0, "0.5 s into a 0.6 s skin window the hit-confirm must still be showing")
+	h._process(0.2)
+	assert_true(h._t <= 0.0, "past the skin's fade window the hit-confirm must be gone")
+	var ended := h._t
+	h._process(1.0)
+	assert_eq(h._t, ended, "a finished marker must idle (no redraw churn) rather than keep counting down")
+	MenuStyle.hud.hitmarker_duration = 2.0
 	h.flash(false)
-	assert_false(h._headshot,
-		"flash(false) must clear the headshot flag so an ordinary hit draws in the normal colour/scale")
+	h._process(1.5)
+	assert_gt(h._t, 0.0,
+		"a designer retuning the skin to a 2 s window must see the marker still showing at 1.5 s — the window is read from the skin on every flash")
+	assert_false(h._headshot, "a body hit after a headshot must draw in the ordinary colour/scale, not keep the head look")
+	h.flash(true)
+	assert_true(h._headshot, "a headshot must switch the marker to the bigger headshot colour/scale")
 	h.free()
 
 
@@ -671,21 +850,26 @@ func test_hitmarker_warm_paint_is_taken_back_after_one_frame() -> void:
 	# ever did, and the warm ticks sat on the crosshair for the whole level (the HUD ghost, which captures the
 	# hitmarker, then accumulated that static source into a plainly visible X). _draw arms _warm_painted the frame
 	# the ticks reach the canvas; the next PROCESSED frame must spend it on one empty redraw.
-	# Off-tree by design: queue_redraw() is a no-op outside the tree, so _process can be driven by hand.
+	# IN-TREE on purpose: the bug is a MISSING REPAINT, and queue_redraw() only does anything inside the tree. The
+	# observable is the node's own `draw` signal, which the engine emits once per real repaint: a warm must cost
+	# exactly TWO — the near-invisible paint, then the empty one that takes it back — and then go quiet.
 	var h := Hitmarker.new()
+	add_child_autofree(h)
+	for i in 3:
+		await get_tree().process_frame  # let the enter-tree / theme / resize repaints land before counting
+	var repaints: Array = [0]
+	h.draw.connect(func() -> void: repaints[0] += 1)
+	for i in 6:
+		await get_tree().process_frame
+	assert_eq(repaints[0], 0,
+		"control: an idle hitmarker does not repaint on its own, so every repaint counted below is the warm's doing")
 	h.warm_draw(0.01)
-	assert_almost_eq(h._warm_alpha, 0.01, 0.0001,
-		"warm_draw() must stage exactly the requested near-invisible strength for the next _draw")
-	assert_eq(h._t, 0.0,
-		"warm_draw() must never touch the fade timer: a live flash outranks the warm and paints at full strength")
-	h._warm_painted = true  # stands in for the draw pass — _draw sets this when the warm actually reaches the canvas
-	h._process(0.016)
-	assert_false(h._warm_painted,
-		"the processed frame after a warm paint must SPEND the latch on one redraw with nothing left to paint — that redraw is the only thing that clears the retained draw list")
-	h._process(0.016)
-	assert_false(h._warm_painted,
-		"the clear is one-shot: a spent latch must not re-arm itself and queue a redraw every frame for the life of the HUD")
-	h.free()
+	for i in 6:
+		await get_tree().process_frame
+	assert_eq(repaints[0], 2,
+		"a warm costs exactly two repaints: the near-invisible paint, then ONE empty repaint that clears the retained draw list. 1 = the warm ticks stay on the crosshair for the whole level (the shipped 'transparent X'); more = the clear re-arms itself and repaints every frame for the life of the HUD")
+	assert_false(h._warm_painted, "the clean-up latch is spent once the clearing repaint has been queued")
+	assert_true(h._t <= 0.0, "a warm never starts a live flash: the fade timer stays idle, so nothing else would ever repaint the ticks away")
 
 
 # ---------------------------------------------------------------------------
@@ -701,30 +885,47 @@ func test_damage_indicators_is_control_with_add() -> void:
 	di.free()
 
 
-func test_damage_indicators_skin_defaults() -> void:
-	# DamageIndicators' look moved onto MenuStyle.hud (HudSkin) — code-built, so the skin IS its
-	# authoring surface. Pin the load-bearing values there instead of the removed @exports.
+func test_damage_arc_skin_keeps_the_cue_on_the_smallest_canvas() -> void:
+	# DamageIndicators' look lives on MenuStyle.hud (HudSkin). Invariants a retune must keep, not the tuned
+	# numbers (test_hud_skin.gd owns those). The smallest UI canvas is the base viewport height divided by the
+	# stretch scale (aspect=expand only ever GROWS it), so an arc ring must fit inside half of that height or
+	# the "hit from above/behind" wedges draw off screen.
 	var hud = MenuStyle.hud
-	assert_eq(hud.damage_arc_duration, 1.0,
-		"damage_arc_duration default (1.0s) is the arc lifetime the directional-damage cue relies on")
+	var min_canvas_h: float = float(ProjectSettings.get_setting("display/window/size/viewport_height")) \
+		/ float(ProjectSettings.get_setting("display/window/stretch/scale"))
+	assert_gt(hud.damage_arc_duration, 0.0,
+		"damage_arc_duration must be positive — a zero lifetime culls every arc on the next frame, so the directional cue never reads")
 	assert_gt(hud.damage_arc_radius, 0.0,
 		"damage_arc_radius must be positive so the arc sits off the crosshair centre")
+	assert_lt(hud.damage_arc_radius + hud.damage_arc_thickness * 0.5, min_canvas_h * 0.5,
+		"the arc ring must fit inside half the smallest canvas height (%s px) or the top/bottom wedges draw off screen" % min_canvas_h)
 	assert_gt(hud.damage_arc_degrees, 0.0,
 		"damage_arc_degrees must be positive so each wedge has angular width")
+	assert_lt(hud.damage_arc_degrees, 360.0,
+		"damage_arc_degrees must stay under a full circle — a 360-degree wedge is a ring that no longer points at the source")
 	assert_gt(hud.damage_arc_thickness, 0.0,
 		"damage_arc_thickness must be positive so the arc renders")
 
 
-func test_damage_indicators_add_records_hit_at_full_lifetime() -> void:
-	# add() only appends to _hits + queue_redraw — no camera deref.
+func test_damage_arcs_live_for_the_skin_lifetime_each_on_its_own_clock() -> void:
+	# add()/_process never deref the camera (only _draw does), so they run off-tree by hand. The lifetime is
+	# retuned on the LIVE skin (restored in after_each) to prove add() reads it per hit.
+	MenuStyle.hud.damage_arc_duration = 2.0
 	var di := DamageIndicators.new()
-	di.add(Vector3(1, 2, 3))
+	var first_source := Vector3(5.0, 0.0, 0.0)
+	var second_source := Vector3(0.0, 0.0, -5.0)
+	di.add(first_source)
+	di._process(1.5)
 	assert_eq(di._hits.size(), 1,
-		"add() must record one entry so the overlay has a source to draw")
-	assert_almost_eq(di._hits[0]["t"], MenuStyle.hud.damage_arc_duration, 0.001,
-		"A new hit must start at full lifetime (t == the SKIN's damage_arc_duration — the wiring seam) so its arc begins at full opacity")
-	assert_eq(di._hits[0]["pos"], Vector3(1, 2, 3),
-		"add() must store the source world position so the bearing can be recomputed live as the player turns")
+		"with the skin retuned to a 2 s lifetime, an arc must still be on screen 1.5 s after the hit")
+	di.add(second_source)  # a second hit lands later
+	di._process(0.6)  # the first is now 2.1 s old, the second 0.6 s
+	assert_eq(di._hits.size(), 1, "the older arc must expire on its own clock without taking the newer one with it")
+	if di._hits.size() == 1:
+		assert_eq(di._hits[0]["pos"], second_source,
+			"the SURVIVING arc must be the newer hit, still keyed by its world position so its bearing follows the player's turn")
+	di._process(1.5)
+	assert_eq(di._hits.size(), 0, "the newer arc must expire once its own lifetime has run out too")
 	di.free()
 
 
@@ -849,29 +1050,66 @@ func test_ui_is_canvaslayer_with_setup() -> void:
 	u.free()
 
 
-func test_ui_setup_assigns_refs_without_requiring_labels() -> void:
-	# setup() performs only two assignments and no deref, so null args are safe.
+func test_ui_setup_injects_refs_before_its_labels_exist_and_hooks_the_wallet_only_for_the_player() -> void:
+	# setup() runs from Player._enter_tree, BEFORE this layer's _ready builds any label — so it runs on a bare,
+	# off-tree UI here. An NPC is a Character but not the Player: this HUD must never narrate an NPC's wallet.
 	var u = load("res://scripts/ui/ui.gd").new()
-	u.setup(null, null)
-	assert_eq(u.player, null,
-		"setup() must assign the player ref directly (no deref) so the HUD can be wired before the player exists")
-	assert_eq(u.ammo_count, null,
-		"setup() must assign the ammo ref directly (no deref) so it doesn't require the Ammo node to be present at injection time")
+	var npc: NPC = load("res://scripts/npc/npc.gd").new()
+	var ammo := Ammo.new()
+	u.setup(npc, ammo)
+	assert_eq(u.player, npc, "setup() must inject the character the HUD reads HP/stamina from")
+	assert_eq(u.ammo_count, ammo, "setup() must inject the Ammo node the ammo readout reads")
+	assert_false(npc.is_connected(&"money_changed", u._on_money_changed),
+		"a non-Player character must NOT get its wallet wired to the HUD's money readout")
+	assert_true(u._hotbar == null, "a non-Player character must not get the player's hotbar built")
 	u.free()
+	npc.free()
+	# Control: the SAME call with the real Player does wire both, so the refusals above are the Player gate.
+	var hud = load("res://scripts/ui/ui.gd").new()
+	var p = load(PLAYER_PATH).new()
+	hud.setup(p, ammo)
+	assert_eq(hud.player, p, "setup() must inject the Player")
+	assert_true(p.is_connected(&"money_changed", hud._on_money_changed),
+		"control: the Player's wallet changes must drive the HUD money readout and its +N/-N float")
+	assert_true(hud._hotbar != null, "control: the Player gets the Deus Ex hotbar built under the HUD")
+	await get_tree().process_frame  # let the hotbar's deferred setup(p) run while p is still alive
+	hud.free()
+	p.free()
+	ammo.free()
 
 
-func test_ui_set_scoped_is_null_safe() -> void:
-	# On a bare .new() the engine never calls _ready, so crosshair stays null. set_scoped's
-	# `if crosshair:` guard must make these calls safe no-ops (the scope bridge can fire before
-	# the HUD's _ready has built the dot). Mirrors the detached-instance pattern above.
+func test_ui_set_scoped_swaps_to_the_inverting_reticle_and_pays_for_the_back_buffer_only_while_scoped() -> void:
+	# The scope bridge (player._on_scoped_in) can fire before the HUD's _ready has built the reticle: on a bare
+	# instance set_scoped must be a safe no-op. Then the reticle parts _ready would build are handed in by hand
+	# (no shader compile is needed to compare material identity) to drive the real swap.
 	var u = load("res://scripts/ui/ui.gd").new()
-	assert_true(u.has_method("set_scoped"),
-		"UI must expose set_scoped(): player._on_scoped_in calls it to show/hide the ADS reticle")
 	u.set_scoped(true)
 	u.set_scoped(false)
-	assert_eq(u.crosshair, null,
-		"crosshair stays null until _ready builds it; set_scoped must not create it or deref a null on a bare instance")
+	assert_true(u.crosshair == null, "set_scoped before _ready must not build a reticle of its own")
+	var dot := ColorRect.new()
+	var bbc := BackBufferCopy.new()
+	var art := TextureRect.new()
+	var flat_mat := ShaderMaterial.new()
+	var scoped_mat := ShaderMaterial.new()
+	u.crosshair = dot
+	u._crosshair_bbc = bbc
+	u._crosshair_art = art
+	u._flat_reticle_mat = flat_mat
+	u._scoped_reticle_mat = scoped_mat
+	u.set_scoped(true)
+	assert_eq(dot.material, scoped_mat,
+		"scoped, the reticle must wear the inverting disc — it is the only reticle that stays readable against any backdrop through a scope")
+	assert_eq(bbc.copy_mode, BackBufferCopy.COPY_MODE_VIEWPORT,
+		"scoped, the full-screen back-buffer copy must be ON so the inverting disc samples a fresh screen (else it washes white)")
+	assert_false(art.visible, "scoped, the optional artist reticle must be hidden under the inverting disc")
+	u.set_scoped(false)
+	assert_true(dot.material != scoped_mat, "unscoped, the reticle must leave the inverting disc")
+	assert_eq(bbc.copy_mode, BackBufferCopy.COPY_MODE_DISABLED,
+		"unscoped, the full-screen back-buffer copy must be OFF — paying for it every hip-fire frame is pure waste")
 	u.free()
+	dot.free()
+	bbc.free()
+	art.free()
 
 
 # UI HUD readouts: hp_segment_fill / _ammo_text are pure (no _ready-built nodes touched), so they run on a

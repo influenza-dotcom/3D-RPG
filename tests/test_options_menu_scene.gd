@@ -12,7 +12,7 @@ const SCENE := "res://scenes/ui/options_menu.tscn"
 ## Every unique name options_menu.gd binds in _bind_ui — a rename in the editor breaks the bind at boot,
 ## so pin the roster here where it fails loudly instead.
 const BOUND := ["Root", "Dim", "VBox", "Title", "Tabs", "Bottom",
-	"SaveLoadButton", "MainMenuButton", "ApplyButton", "RevertButton", "CloseButton", "QuitButton",
+	"SaveLoadButton", "MainMenuButton", "CloseButton", "QuitButton",
 	"QuitConfirm", "QuitDim", "QuitCard", "QuitTitle", "ConfirmRow", "ConfirmButton", "CancelButton"]
 
 
@@ -80,14 +80,14 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 	assert_true(tabs.use_hidden_tabs_for_min_size,
 		"the tab block reports ONE minimum for every page (use_hidden_tabs_for_min_size)")
 	# Bottom row: END-aligned, with the in-game-only pair FIRST (left end) so hiding them at the start menu
-	# never moves Apply/Revert/Close/Quit off the right edge.
+	# never moves Close/Quit off the right edge (Apply and Revert are gone: every control applies as it changes).
 	var bottom := inst.get_node("%Bottom") as HBoxContainer
 	assert_eq(bottom.alignment, BoxContainer.ALIGNMENT_END, "the bottom row is right-justified")
 	var order: Array[String] = []
 	for c in bottom.get_children():
 		order.append(String(c.name))
-	assert_eq(order, ["SaveLoadButton", "MainMenuButton", "ApplyButton", "RevertButton", "CloseButton", "QuitButton"],
-		"Save/Load + Main Menu sit FIRST (left end) so hiding them keeps Apply/Revert/Close/Quit in place")
+	assert_eq(order, ["SaveLoadButton", "MainMenuButton", "CloseButton", "QuitButton"],
+		"Save/Load + Main Menu sit FIRST (left end) so hiding them keeps Close/Quit in place")
 	# The quit-confirm overlay ships disarmed and is %Root's LAST child so it draws over the panel.
 	var qc := inst.get_node("%QuitConfirm") as Control
 	assert_false(qc.visible, "the quit-confirm ships disarmed")

@@ -67,8 +67,10 @@ func test_line_id_defaults_blank_so_an_old_file_reads_as_before() -> void:
 	var ln := DialogueLine.new()
 	assert_eq(ln.id, &"", "DialogueLine.id defaults to blank: a .tres written before ids existed carries no id field and must load as an id-less (int-addressed) line")
 	assert_eq(typeof(ln.id), TYPE_STRING_NAME, "id is a StringName, the same type every other stable key in this project uses (NpcData.id, Quest.id)")
+	assert_eq(DialogueResource.find_line([ln], &""), -1, "the blank default is never addressable by id, so an old id-less line can only be reached by its number")
 	ln.id = &"greet"
-	assert_eq(ln.id, &"greet", "id is a writable @export")
+	assert_eq(DialogueResource.resolve_target([DialogueLine.new(), ln], &"greet", 0), 1,
+		"once a designer names the line, a choice's target_id reaches it by that name even with a stale int saying line 0")
 
 
 func test_choice_id_targets_default_blank_and_the_ints_keep_their_defaults() -> void:
@@ -79,10 +81,30 @@ func test_choice_id_targets_default_blank_and_the_ints_keep_their_defaults() -> 
 	assert_eq(c.target_on_fail, DialogueLine.END, "the int fail target keeps its END default")
 
 
-func test_id_sentinels_are_the_documented_words() -> void:
-	assert_eq(DialogueLine.ID_END, &"END", "the END sentinel a designer types into target_id is the word END")
-	assert_eq(DialogueLine.ID_CONTINUE, &"CONTINUE", "the CONTINUE sentinel is the word CONTINUE")
-	assert_ne(DialogueLine.ID_END, DialogueLine.ID_CONTINUE, "the two id sentinels are distinct words")
+func test_the_sentinel_words_designers_type_resolve_as_sentinels_not_as_line_names() -> void:
+	# The words are persisted as TEXT: shipped .tres files store `target_id = &"CONTINUE"` / `&"END"`, and the
+	# inspector suggests them by name. Each lines list below carries lines literally NAMED after both words, so a word
+	# the resolver did not reserve would resolve to that line's index instead of a sentinel -- and a renamed
+	# sentinel would silently re-route every stored conversation into a trap line.
+	var lines := _three_lines()
+	for word in ["END", "CONTINUE"]:
+		var trap := DialogueLine.new()
+		trap.id = StringName(word)
+		lines.append(trap)
+	assert_eq(DialogueResource.resolve_target(lines, StringName("END"), 0), DialogueLine.END,
+		"the stored word END must finish the conversation (every shipped fail branch is saved as the text END)")
+	assert_eq(DialogueResource.resolve_target(lines, StringName("CONTINUE"), DialogueLine.END), DialogueLine.CONTINUE,
+		"the stored word CONTINUE must fall through to the next line (old_man.tres saves its replies as the text CONTINUE)")
+	var c := DialogueChoice.new()
+	var prop := {"name": "target_id", "hint": PROPERTY_HINT_NONE, "hint_string": ""}
+	c._validate_property(prop)
+	var outcomes := {}
+	for word in String(prop["hint_string"]).split(","):
+		var to := DialogueResource.resolve_target(lines, StringName(word.strip_edges()), 0)
+		assert_true(to == DialogueLine.END or to == DialogueLine.CONTINUE,
+			"the inspector suggests '%s', so picking it must resolve to a sentinel, never to a line of that name (got %d)" % [word, to])
+		outcomes[to] = true
+	assert_eq(outcomes.size(), 2, "the inspector's two suggested words must mean two different things (finish vs next line)")
 
 
 func test_choice_id_targets_suggest_the_sentinels_in_the_inspector() -> void:

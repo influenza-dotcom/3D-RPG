@@ -13,13 +13,13 @@ extends GutTest
 ## Conventions per test_items.gd: extends GutTest, real .tres via preload for shipped items, synthetic Item.new() /
 ## StatusEffect.new() (RefCounted -> released with `= null`) for the paths no shipped item exercises yet.
 
-const AbilityRegistry := preload("res://scripts/components/abilities/ability_registry.gd")  # the canonical ability-name accessor _ability_name routes through
-
 const CHROME_GRIN := preload("res://resources/items/chrome_grin.tres")   # unique, streetwise +3, max_stack 1
 const IRONHEART := preload("res://resources/items/ironheart_locket.tres")  # agility +1, strength +2, stacks, max_stack 5
 const MULE_RIG := preload("res://resources/items/mule_rig.tres")          # strength +3 only (Max HP + Carry, no melee)
 const FEATHERFRAME := preload("res://resources/items/featherframe_weave.tres")  # agility +3, strength -2 (negative path)
 const CHIP_WALL_CLIMB := preload("res://resources/items/chip_wall_climb.tres")
+const CHIP_BUNNYHOP := preload("res://resources/items/chip_bunnyhop.tres")        # installs bunnyhop, authored "Bunny Hop"
+const CHIP_BIO_SCANNER := preload("res://resources/items/chip_bio_scanner.tres")  # installs bio_scanner, authored "Bio-Scanner"
 const PISTOL_ITEM := preload("res://resources/items/pistol_item.tres")
 const MELEE_ITEM := preload("res://resources/items/melee_item.tres")     # is_melee, infinite ammo (must NOT read "∞")
 const SNIPER_ITEM := preload("res://resources/items/sniper_item.tres")   # move_speed 0.85 (heavy)
@@ -72,12 +72,41 @@ func test_negative_held_modifiers_are_sign_correct() -> void:
 	assert_true(t.contains("+3 Agility"), "agility +3 stays a positive raw stat. Got:\n%s" % t)
 	assert_false(t.contains("+-"), "A negative must never render as a '+-' double sign. Got:\n%s" % t)
 
+## The "While carried: ..." line of a tooltip, or "" when it has none.
+func _carried_line(tooltip: String) -> String:
+	for line in tooltip.split("\n"):
+		if line.begins_with("While carried: "):
+			return line
+	return ""
+
 func test_stacking_note_only_when_multiple_can_be_held() -> void:
-	# Ironheart stacks and max_stack is 5 -> "per copy"; Chrome Grin is unique AND max_stack 1 -> no note at all.
-	assert_true(ItemInfo.tooltip(IRONHEART).contains("per copy"),
-		"A stacking trinket you can hold several of must say the buff is 'per copy'.")
-	assert_false(ItemInfo.tooltip(CHROME_GRIN).contains("per copy") or ItemInfo.tooltip(CHROME_GRIN).contains("counts once"),
-		"A max_stack 1 trinket can only ever be held once, so no stacking note should clutter its tooltip.")
+	# Ironheart stacks and max_stack is 5 -> a stacking note; Chrome Grin is unique AND max_stack 1 -> no note at all.
+	assert_true(ItemInfo.tooltip(IRONHEART).contains("stacks"),
+		"A stacking trinket you can hold several of must say that its buff stacks.")
+	# The "only when" half compares one synthetic buff item at max_stack 3 and max_stack 1 instead of searching for
+	# typed note words, so a reworded note can't leave it looking for text the composer no longer paints.
+	var fx := StatusEffect.new()
+	fx.stat_modifiers = {"gunplay": 2}
+	var charm := Item.new()
+	charm.id = &"test_charm"  # id'd, like every held-buff fixture here
+	charm.display_name = "Test Charm"
+	charm.held_passive_effect = fx
+	for unique in [true, false]:
+		charm.passive_unique = unique
+		charm.max_stack = 3
+		var several := _carried_line(ItemInfo.tooltip(charm))
+		charm.max_stack = 1
+		var one := _carried_line(ItemInfo.tooltip(charm))
+		assert_true(not one.is_empty() and several.begins_with(one) and several.length() > one.length(),
+			"control (unique %s): the same buff on an item you can hold 3 of gains a stacking note after the buff. max_stack 3: '%s', max_stack 1: '%s'" % [unique, several, one])
+		assert_eq(one, "While carried: +2 Gunplay",
+			"(unique %s) an item you can only ever hold one of must show the buff alone, with no stacking note" % unique)
+		if unique and several.length() > one.length():
+			var note := several.substr(one.length())
+			assert_false(ItemInfo.tooltip(CHROME_GRIN).contains(note),
+				"the shipped Chrome Grin is unique and max_stack 1, so it must not carry the unique stacking note '%s'. Got:\n%s" % [note, ItemInfo.tooltip(CHROME_GRIN)])
+	charm = null
+	fx = null
 
 func test_unique_stackable_says_counts_once() -> void:
 	# No shipped item is BOTH unique and max_stack > 1, so synthesize that edge to pin the 'counts once' branch.
@@ -90,7 +119,7 @@ func test_unique_stackable_says_counts_once() -> void:
 	it.passive_unique = true
 	it.held_passive_effect = fx
 	var t := ItemInfo.tooltip(it)
-	assert_true(t.contains("counts once"),
+	assert_true(t.contains("doesn't stack"),
 		"A unique buff you can still stack copies of must say the bonus 'counts once'. Got:\n%s" % t)
 	assert_true(t.contains("+2 Gunplay"), "The buff itself must still show. Got:\n%s" % t)
 	it = null
@@ -119,14 +148,26 @@ func test_chip_tooltip_names_the_installed_ability() -> void:
 		"An upgrade chip must name the ability it installs so the player knows what carrying it will buy. Got:\n%s" % t)
 
 func test_chip_ability_name_routes_through_registry() -> void:
-	# Phase-2 wiring: _ability_name reads AbilityRegistry.display_name_for (the ONE canonical accessor), so an
-	# authored Ability.display_name rename reaches this tooltip with no code change. An id with no ability scene
-	# keeps the old capitalized-id degrade — never a blank "Installs " line.
-	for id in AbilityRegistry.ids():
-		assert_eq(ItemInfo._ability_name(StringName(id)), AbilityRegistry.display_name_for(StringName(id)),
-			"_ability_name('%s') must match the canonical accessor — one ability name game-wide" % id)
-	assert_eq(ItemInfo._ability_name(&"ghost_ability_xyz"), "Ghost Ability Xyz",
-		"an unknown mechanic id degrades to the capitalized id, never a blank")
+	# The chip line names the AUTHORED Ability.display_name (on the ability scene's root), so a designer's rename
+	# reaches this tooltip with no code change. The two shipped chips below are the ones whose authored name is NOT
+	# what capitalizing the id would give ("bunnyhop" -> "Bunnyhop", "bio_scanner" -> "Bio Scanner"), so a tooltip
+	# that stopped reading the authored name reads differently here. An id with no ability scene keeps the old
+	# capitalized-id degrade — never a blank "Installs " line.
+	var hop := ItemInfo.tooltip(CHIP_BUNNYHOP)
+	assert_true(hop.contains("Installs Bunny Hop"),
+		"the Bunnyhop chip must name the authored 'Bunny Hop' (BunnyHop.tscn display_name). Got:\n%s" % hop)
+	assert_false(hop.contains("Installs Bunnyhop"),
+		"...not the capitalized mechanic id, which is only the degrade for an ability with no authored name. Got:\n%s" % hop)
+	var scan := ItemInfo.tooltip(CHIP_BIO_SCANNER)
+	assert_true(scan.contains("Installs Bio-Scanner"),
+		"the Bio-Scanner chip must name the authored 'Bio-Scanner', hyphen and all. Got:\n%s" % scan)
+	var ghost := Item.new()
+	ghost.display_name = "Unlabeled Chip"
+	ghost.installs_ability = &"ghost_ability_xyz"
+	var t := ItemInfo.tooltip(ghost)
+	assert_true(t.contains("Installs Ghost Ability Xyz"),
+		"a chip for a mechanic with no ability scene degrades to the capitalized id, never a blank line. Got:\n%s" % t)
+	ghost = null
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +186,7 @@ func test_consumable_effect_reads_as_when_used() -> void:
 	var t := ItemInfo.tooltip(it)
 	assert_true(t.contains("Heals 10 HP"), "The heal line still shows. Got:\n%s" % t)
 	assert_true(t.contains("When used:"), "A consumable's applied effect is a WHEN-USED line. Got:\n%s" % t)
-	assert_true(t.contains("+2 Agility") and t.contains("+25% Move Speed") and t.contains("for 8 s"),
+	assert_true(t.contains("+2 Agility, +25% Move Speed for 8 s"),
 		"The timed effect must summarise its stat, speed and duration. Got:\n%s" % t)
 	it = null
 	fx = null
@@ -200,9 +241,9 @@ func test_on_hit_effect_clause_is_scoped_with_chance_in_label() -> void:
 	it.category = Item.Category.WEAPON
 	it.weapon = w
 	var t := ItemInfo.tooltip(it)
-	assert_true(t.contains("On hit (50%): "), "The application chance must ride the 'On hit' label. Got:\n%s" % t)
-	assert_true(t.contains("3 HP/s damage, for 5 s"),
-		"On-hit sub-parts must join with commas so they stay scoped under the clause. Got:\n%s" % t)
+	assert_true(t.contains("50% on hit: "), "The application chance LEADS the label, never a bracketed chance. Got:\n%s" % t)
+	assert_true(t.contains("3 HP/s damage for 5 s"),
+		"On-hit sub-parts join with commas and the duration trails as prose. Got:\n%s" % t)
 	it = null
 	w = null
 	fx = null
@@ -214,7 +255,7 @@ func test_on_hit_effect_clause_is_scoped_with_chance_in_label() -> void:
 
 func test_holdable_prop_says_hold_and_throw() -> void:
 	var t := ItemInfo.tooltip(CRATE_ITEM)
-	assert_true(t.contains("Hold in hand"),
+	assert_true(t.contains("Can be held and thrown"),
 		"A world_prop item can be carried in hand from the hotbar — its tooltip must say so (otherwise it's a bare name). Got:\n%s" % t)
 
 
@@ -223,9 +264,39 @@ func test_holdable_prop_says_hold_and_throw() -> void:
 # ---------------------------------------------------------------------------
 
 func test_plain_weapon_has_no_effect_lines() -> void:
+	# Each effect-line marker is first shown LIVE on an item that should carry it, so a marker that goes stale when the
+	# composer's wording changes fails loudly here instead of quietly turning the negatives below green.
+	const HOLD_LINE := "Can be held and thrown"
+	var stim_fx := StatusEffect.new()
+	stim_fx.stat_modifiers = {"agility": 1}
+	stim_fx.duration = 5.0
+	var stim := Item.new()
+	stim.category = Item.Category.CONSUMABLE
+	stim.consumable_effect = stim_fx
+	assert_true(ItemInfo.tooltip(CHROME_GRIN).contains("While carried:"), "control: a held-buff trinket paints the While carried marker")
+	assert_true(ItemInfo.tooltip(stim).contains("When used:"), "control: a consumable with an applied effect paints the When used marker")
+	assert_true(ItemInfo.tooltip(CHIP_WALL_CLIMB).contains("Installs"), "control: an upgrade chip paints the Installs marker")
+	assert_true(ItemInfo.tooltip(CRATE_ITEM).contains(HOLD_LINE), "control: a holdable prop paints the hold-and-throw line")
 	var t := ItemInfo.tooltip(PISTOL_ITEM)
-	assert_false(t.contains("While carried:") or t.contains("When used:") or t.contains("Installs") or t.contains("Hold in hand"),
+	assert_false(t.contains("While carried:") or t.contains("When used:") or t.contains("Installs") or t.contains(HOLD_LINE),
 		"A plain weapon has no held/consumable/chip/holdable effect — its tooltip must gain no effect lines. Got:\n%s" % t)
+	# A weapon may author a world_model for its dropped look, and any OTHER item with one is a holdable prop. A weapon
+	# is wielded, never carried as a prop, so the model must not buy it the hold line. The control is the same item
+	# with its weapon category taken away.
+	var dropped_gun := Item.new()
+	dropped_gun.display_name = "Dropped Gun"
+	dropped_gun.category = Item.Category.WEAPON
+	dropped_gun.weapon = WeaponData.new()
+	dropped_gun.world_model = BoxMesh.new()
+	var gun_tip := ItemInfo.tooltip(dropped_gun)
+	assert_false(gun_tip.contains(HOLD_LINE),
+		"a weapon with a world_model is still a weapon, so its tooltip must not offer to hold and throw it as a prop. Got:\n%s" % gun_tip)
+	dropped_gun.category = Item.Category.MISC
+	assert_true(ItemInfo.tooltip(dropped_gun).contains(HOLD_LINE),
+		"control: the same item with a world_model but no weapon category IS a holdable prop and says so")
+	dropped_gun = null
+	stim = null
+	stim_fx = null
 
 
 # ---------------------------------------------------------------------------
@@ -235,12 +306,47 @@ func test_plain_weapon_has_no_effect_lines() -> void:
 # ---------------------------------------------------------------------------
 
 func test_footer_money_uses_the_whole_money_phrase() -> void:
-	var t := ItemInfo.tooltip(CHIP_WALL_CLIMB)
-	if CHIP_WALL_CLIMB.value > 0.0:
-		assert_true(t.contains(Zorkmids.money_text(CHIP_WALL_CLIMB.value)),
-			"the value footer must carry the whole money phrase from Zorkmids.money_text. Got:\n%s" % t)
+	# A synthetic price with a fractional part, so the footer has to carry the whole "<amount> zm" phrase —
+	# trimmed number AND the currency word — exactly once, on the LAST line (the weight/value footer).
+	var priced := Item.new()
+	priced.display_name = "Priced Scrap"
+	priced.value = 1250.5
+	var t := ItemInfo.tooltip(priced)
+	var footer := t.get_slice("\n", t.get_slice_count("\n") - 1)
+	assert_true(footer.ends_with("1250.5 zm"),
+		"the value footer ends with the whole money phrase '1250.5 zm' — number then the zm word. Got:\n%s" % t)
+	assert_eq(t.count("zm"), 1, "the currency word appears exactly once — never appended twice at the call site. Got:\n%s" % t)
+	assert_false(ItemInfo.tooltip(priced, null, false).contains("zm"),
+		"show_value off (the shop, whose price line quotes the real deal) drops the list value entirely")
+	priced = null
 	var worthless := Item.new()
 	worthless.display_name = "Scrap"
 	assert_false(ItemInfo.tooltip(worthless).contains("zm"),
 		"a value-0 item shows no money footer at all")
 	worthless = null
+
+
+# ---------------------------------------------------------------------------
+# No machine-formatted separators (2026-09-17 UX pass).
+# ---------------------------------------------------------------------------
+
+func test_tooltips_paint_no_middle_dots_and_no_bracketed_asides() -> void:
+	var gun := ItemDb.item_by_id(&"pistol")
+	assert_not_null(gun, "the shipped pistol is the fixture")
+	if gun == null:
+		return
+	var bag := CharacterInventory.new()
+	var ammo := ItemDb.ammo_item_for(gun.weapon.caliber)
+	if ammo != null:
+		bag.add(ammo, 2)
+	var t := ItemInfo.tooltip(gun, bag)
+	assert_false(t.contains("\u00b7"), "no middle-dot separators — stats sit in columns. Got:\n%s" % t)
+	assert_false(t.contains("spare)"), "no '(N spare)' aside — the reserve is its own column. Got:\n%s" % t)
+	assert_true(t.contains("Clip %d" % gun.weapon.max_ammo), "the clip is a labeled column. Got:\n%s" % t)
+	assert_false(t.contains(String(gun.weapon.caliber) + " "), "the raw caliber id never paints. Got:\n%s" % t)
+	if ammo != null:
+		assert_true(t.contains("Reserve 2"), "the rounds in the bag read as a labeled column. Got:\n%s" % t)
+		var at := ItemInfo.tooltip(ammo)
+		assert_false(at.contains("\u00b7") or at.contains(String(ammo.caliber)),
+			"an ammo item's tooltip carries no 'Ammo \u00b7 <caliber id>' line. Got:\n%s" % at)
+	bag.free()  # CharacterInventory is a Node — free it, never just drop the ref (an orphan fails GUT)

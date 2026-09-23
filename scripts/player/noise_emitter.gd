@@ -107,6 +107,16 @@ func silence() -> void:
 	if _source != null and is_instance_valid(_source):
 		_source.radius = 0.0
 
+## The FOOTSTEP channel's radius for one grounded frame at `ground_speed` (planar m/s): the speed scaled by
+## `move_per_speed`, cut by `crouch`'s crouch_t (a full crouch is exact silence), and a hard 0 at or under the
+## standing-still deadzone. A pure static (the Landing.impact_for idiom) so the tier ladder and the deadzone are
+## testable without a floor under an off-tree Player. tick() owns the is_on_floor() gate; `crouch` is only read
+## above the deadzone, exactly as the inline expression it replaced.
+static func footstep_radius_for(ground_speed: float, move_per_speed: float, crouch: Crouch) -> float:
+	if ground_speed > GameSettings.player_movement.footstep_min_horizontal_speed:
+		return ground_speed * move_per_speed * (1.0 - crouch.crouch_t)
+	return 0.0
+
 ## One frame of noise: age the gunfire + impact spikes, take the LOUDEST of them and the ground-speed footstep
 ## noise, and write the result back to host.noise_radius (0 = silent) AND into the shared &"noise" channel.
 ## ⭐The loudest-wins max is why a quiet event is free: a landing thud while sprinting is swallowed by the run's
@@ -131,8 +141,7 @@ func tick(delta: float) -> void:
 		# tail tidy: player.gd decelerates with an exponential lerp that asymptotes toward zero and never arrives, and
 		# at the louder noise_move_per_speed that residual sliver is big enough to trickle out through the minimap
 		# ring's 0.25 m snap for several frames after you stop. Under the cutoff we write a hard 0 instead.
-		if ground_speed > GameSettings.player_movement.footstep_min_horizontal_speed:
-			move_noise = ground_speed * host.noise_move_per_speed * (1.0 - host.crouch.crouch_t)
+		move_noise = footstep_radius_for(ground_speed, host.noise_move_per_speed, host.crouch)
 	host.noise_radius = maxf(move_noise, maxf(_gunfire_noise, _impact_noise))
 	# Publish the same radius into the &"noise" group via a live source at the player. Off-tree (unit-test
 	# stub host) this stays null and is skipped; in-tree it's created once and then just tracks noise_radius.

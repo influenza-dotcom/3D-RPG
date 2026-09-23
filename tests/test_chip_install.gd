@@ -82,13 +82,38 @@ func test_is_upgrade_chip_helper() -> void:
 func test_installs_ability_dropdown_is_dynamic() -> void:
 	# Item is @tool with _validate_property, so installs_ability's dropdown is built from disk (AbilityRegistry)
 	# at property-list time — the SAME source UpgradePickup.unlock_id uses. Built off-tree (no add_child).
+	# What a designer needs from that dropdown, checked against things OTHER than the registry call that builds it:
+	# every ability a shipped chip installs is offered, nothing blank or doubled is offered, and every option is one
+	# a real install can actually grant (picking any entry makes a working chip, never a chip that installs nothing).
 	var it := Item.new()
 	var p := _property(it, "installs_ability")
 	assert_false(p.is_empty(), "Item must expose an installs_ability property")
 	assert_eq(p.get("hint", -1), PROPERTY_HINT_ENUM_SUGGESTION,
 		"installs_ability must be a PROPERTY_HINT_ENUM_SUGGESTION dropdown (set in _validate_property)")
-	assert_eq(p.get("hint_string", ""), AbilityRegistry.ids_csv(),
-		"installs_ability dropdown must auto-populate from the ability scenes on disk (AbilityRegistry.ids_csv)")
+	var options := String(p.get("hint_string", "")).split(",")
+	var seen := {}
+	for opt in options:
+		assert_false(opt.strip_edges().is_empty(),
+			"the installs_ability dropdown offers a blank entry (hint_string '%s') — it did not populate from disk" % p.get("hint_string", ""))
+		assert_false(seen.has(opt), "the installs_ability dropdown lists '%s' twice" % opt)
+		seen[opt] = true
+	var dir := DirAccess.open(ITEMS_DIR)
+	assert_true(dir != null, "the items folder must exist")
+	if dir != null:
+		for f in dir.get_files():
+			var fn := f.trim_suffix(".remap")
+			if not fn.begins_with("chip_") or fn.get_extension() != "tres":
+				continue
+			var chip := load(ITEMS_DIR + fn) as Item
+			if chip != null and chip.is_upgrade_chip():
+				assert_true(seen.has(String(chip.installs_ability)),
+					"shipped chip '%s' installs '%s', which the dropdown does not offer — a designer re-picking it could never find it" % [fn, chip.installs_ability])
+	var p_bare := _player()
+	for opt in seen:
+		assert_true(p_bare.can_grant_mechanic(StringName(opt)),
+			"the dropdown offers '%s', but a Player cannot be granted it — a chip authored from that pick installs nothing" % opt)
+	p_bare.inventory.free()
+	p_bare.free()
 	it = null
 
 
@@ -290,13 +315,19 @@ func test_installer_exposes_dialogue_duck_type_surface() -> void:
 	# through them); the "Install" dialogue OPTION itself rides the dialogue-station contract
 	# (dialogue_station_option / open_dialogue_station), pinned in tests/test_dialogue_speaker_contracts.gd.
 	# Pin the screen-side surface here so a rename can't silently kill the install rows.
+	# The screen holds the installer as a plain Node (a class cycle forbids the type), so every one of these calls
+	# resolves by NAME at run time — a rename is not a parse error there, just rows that silently stop working.
 	var m := ChipInstaller.new()
-	assert_true(m.has_method(&"install_carried"), "ChipInstallScreen prices/commits installs through install_carried()")
-	assert_true(m.has_method(&"install_fee"), "...and through install_fee()")
+	assert_true(m.has_method(&"install_carried"), "ChipInstallScreen gates its open on + commits installs through install_carried()")
+	assert_true(m.has_method(&"install_fee"), "...prices the carried rows through install_fee()")
+	assert_true(m.has_method(&"buy_and_install"), "...commits a shelf purchase through buy_and_install()")
+	assert_true(m.has_method(&"buy_and_install_cost"), "...prices the shelf rows through buy_and_install_cost()")
+	assert_true(m.has_method(&"installable_carried"), "...lists your chips through installable_carried()")
+	assert_true(m.has_method(&"installable_stock"), "...and lists the shelf through installable_stock()")
 	m.free()
 
 
-# --- The authored content: 8 chip .tres + the reusable mechanic scene --------------------------------------
+# --- The authored content: the chip_*.tres set + the reusable mechanic scene --------------------------------
 
 func test_all_chip_resources_are_valid() -> void:
 	# Every chip_*.tres must be a real upgrade chip whose ability EXISTS on disk (else the install grants nothing),
@@ -306,7 +337,7 @@ func test_all_chip_resources_are_valid() -> void:
 	assert_not_null(dir, "the items folder must exist")
 	if dir == null:
 		return
-	var count := 0
+	var chip_for := {}  # ability id -> the chip file that installs it
 	for f in dir.get_files():
 		var fn := f.trim_suffix(".remap")
 		if not fn.begins_with("chip_") or fn.get_extension() != "tres":
@@ -315,12 +346,20 @@ func test_all_chip_resources_are_valid() -> void:
 		assert_not_null(item, "chip resource '%s' must load as an Item" % fn)
 		if item == null:
 			continue
-		count += 1
 		assert_true(item.is_upgrade_chip(), "'%s' must set installs_ability" % fn)
 		assert_true(known.has(String(item.installs_ability)),
 			"'%s' installs '%s', which must be a real ability on disk" % [fn, item.installs_ability])
 		assert_not_null(item.world_model, "'%s' must carry a world_model (the microchip look)" % fn)
-	assert_eq(count, 11, "expected 11 authored upgrade chips (one per shipped ability, incl. the Board Visualizer, the Takedown Chip, the Bunny-Hop Chip, the two body scanners + the Laser-Sight Chip, which is back after being retired when the flashlight took the Light key)")
+		var ability := String(item.installs_ability)
+		assert_false(chip_for.has(ability),
+			"'%s' and '%s' both install '%s' — one chip per ability, or the shelves and loot carry a duplicate implant" % [chip_for.get(ability, ""), fn, ability])
+		chip_for[ability] = fn
+	# ONE CHIP PER SHIPPED ABILITY: every mechanic on disk is obtainable as a chip (a new ability without one could
+	# never be installed by a player), rather than a hand-bumped count that drifts every time content is added.
+	assert_false(known.is_empty(), "precondition: the ability registry found the ability scenes on disk")
+	for ability in known:
+		assert_true(chip_for.has(ability),
+			"the shipped ability '%s' has no chip_*.tres that installs it — players could never fit it" % ability)
 
 func test_mechanic_scene_loads_and_can_instantiate() -> void:
 	# The hand-authored mechanic scene must resolve its whole resource graph (NPC + Talkable dialogue +
@@ -373,17 +412,37 @@ func test_a_half_authored_discount_fails_closed_to_the_list_price() -> void:
 	negative = null
 	nameless = null
 
-func test_the_laser_sight_chip_is_authored_200_and_100_on_gunplay() -> void:
-	# The shipped rule, pinned on the REAL resource: worth 200 zm, half price once you have any gunplay at all.
+func test_the_shipped_laser_sight_chip_is_cheaper_for_anyone_with_gunplay() -> void:
+	# The shipped RULE, driven through a real installer on the REAL resource — the prices themselves are designer
+	# tuning and free to move: the laser sight is cheaper for a buyer who has put ANY point into gunplay, a baseline
+	# character pays list, and the cheaper price is a genuine (positive) discount rather than a free chip.
 	var chip := load(ITEMS_DIR + "chip_laser_sight.tres") as Item
 	assert_not_null(chip, "the laser-sight chip must load")
 	if chip == null:
 		return
-	assert_eq(chip.value, 200.0, "the laser sight lists at 200 zm")
-	assert_eq(chip.discount_stat, &"gunplay", "its conditional price watches GUNPLAY")
-	assert_eq(chip.discount_above, 0, "any invested gunplay point qualifies (CharacterStats baseline is 0)")
-	assert_eq(chip.value_at(0), 200.0, "no gunplay -> the full 200 zm")
-	assert_eq(chip.value_at(1), 100.0, "one point of gunplay -> 100 zm")
+	assert_eq(chip.discount_stat, &"gunplay", "ship decision: the laser sight's conditional price rewards GUNPLAY")
+	assert_true(CharacterStats.STAT_NAMES.has(chip.discount_stat),
+		"its discount_stat must be a real CharacterStats stat, or the discount can never trigger")
+	assert_gt(chip.discount_value, 0.0, "the discounted price is a real price, never a free chip")
+	assert_lt(chip.discount_value, chip.value, "…and it is actually CHEAPER than the list price")
+	var m := _installer(0.5, 1.25, 0)  # min_fee 0 so the floor cannot mask the price difference
+	var novice := _player()
+	novice.stats = CharacterStats.new()  # a fresh sheet: every stat at the baseline
+	var shooter := _player()
+	shooter.stats = CharacterStats.new()
+	shooter.stats.gunplay = CharacterStats.BASELINE + 1  # the smallest possible investment
+	assert_eq(m.install_fee(chip, novice), m.install_fee(chip, null),
+		"a baseline character with no gunplay pays the same as an unknown buyer: list price")
+	assert_lt(m.install_fee(chip, shooter), m.install_fee(chip, novice),
+		"one invested point of gunplay is enough to be quoted the cheaper laser-sight install")
+	assert_lt(m.buy_and_install_cost(chip, shooter), m.buy_and_install_cost(chip, novice),
+		"…and the cheaper buy-and-install price off the shelf")
+	m.stock.free()
+	m.free()
+	novice.inventory.free()
+	novice.free()
+	shooter.inventory.free()
+	shooter.free()
 	chip = null
 
 func test_installer_quotes_the_buyers_conditional_price() -> void:

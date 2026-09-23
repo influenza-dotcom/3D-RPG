@@ -16,15 +16,21 @@ extends GutTest
 const STYLE := "res://scripts/ui/menu_style.gd"
 
 var _ms
+## The live autoload's skin, saved per test: the DialogueView consumer test swaps MenuStyle.skin for a fixture
+## (DialogueView reads the AUTOLOAD, not _ms) and after_each must always put the shipped skin back.
+var _live_skin: MenuSkin
 
 
 func before_each() -> void:
+	_live_skin = MenuStyle.skin
 	_ms = load(STYLE).new()
 	_ms.skin = MenuSkin.new()  # a pristine skin, not the shipped .tres — tests author their own art
 	_ms.rebuild()
 
 
 func after_each() -> void:
+	MenuStyle.skin = _live_skin
+	_live_skin = null
 	if _ms != null:
 		_ms.free()
 		_ms = null
@@ -313,11 +319,17 @@ func test_shipped_skin_carries_the_button_frame_art() -> void:
 		assert_not_null(compact.texture, "compact-card art has its PNG assigned")
 		assert_true(compact.content_margin_left >= 16.0 and compact.content_margin_top >= 12.0,
 			"the compact card pads its title/button row wider than a one-line tooltip does")
+	# One shadow pad for every textured state (its size is the bake's business — the pixel test below ties each
+	# pad to the art): a per-state pad would make the shadow jump as a button is hovered/pressed.
+	var pad0 := -1.0
 	for sb in boxes:
 		if sb is StyleBoxTexture:
-			assert_eq(Vector2((sb as StyleBoxTexture).expand_margin_left, (sb as StyleBoxTexture).expand_margin_bottom),
-				Vector2(5.0, 5.0),
-				"every button state box carries the same 5px shadow expand pad (uniform shadow, zero layout cost)")
+			var tb := sb as StyleBoxTexture
+			assert_gt(tb.expand_margin_left, 0.0, "every button state box reserves a shadow expand pad (draw-only, zero layout cost)")
+			assert_eq(tb.expand_margin_bottom, tb.expand_margin_left, "the pad is the same below as beside the body")
+			if pad0 < 0.0:
+				pad0 = tb.expand_margin_left
+			assert_eq(tb.expand_margin_left, pad0, "every button state box carries the SAME shadow pad (uniform shadow)")
 	for sb in boxes:
 		assert_eq(Vector4(sb.content_margin_left, sb.content_margin_top,
 				sb.content_margin_right, sb.content_margin_bottom),
@@ -361,12 +373,36 @@ func test_dialogue_panel_slot_is_null_by_default_and_hands_out_duplicates() -> v
 	if got != null:
 		assert_ne(got.get_instance_id(), art.get_instance_id(),
 			"...as a DUPLICATE (the _pick rule): the caller mounts it on a Control, and mutating a shared .tres sub-resource would bleed back into the saved skin")
-	# The consumer, pinned by source: DialogueView is the only reader, and this slot has no theme entry to
-	# assert against (it is deliberately NOT the theme panel). If that call is renamed or moved, update
-	# THIS pin — do not delete it.
-	var src := FileAccess.get_file_as_string("res://scripts/dialogue/dialogue_view.gd")
-	assert_true(src.contains("MenuStyle.make_dialogue_panel_style()"),
-		"DialogueView backs its box with the skin's dialogue art slot")
+	# The consumer (DialogueView, the only reader) is driven in the next test.
+
+
+## The consumer side of the slot: DialogueView's subtitle block wears whatever the LIVE skin's dialogue art resolves
+## to. This slot has no theme entry (it is deliberately NOT the theme panel), so the built view is the only place the
+## contract is observable. Driven in-tree through open() (the test_dialogue idiom) with the autoload's skin swapped
+## for fixtures — after_each restores the shipped skin.
+func test_dialogue_view_backs_its_subtitle_box_with_the_skin_dialogue_art() -> void:
+	var art := StyleBoxTexture.new()
+	var lit := MenuSkin.new()
+	lit.dialogue_panel = art
+	lit.dialogue_panel_enabled = true
+	MenuStyle.skin = lit
+	var view := DialogueView.new()
+	add_child_autofree(view)
+	view.open()
+	var worn: StyleBox = view._panel.get_theme_stylebox(&"panel")
+	assert_true(worn is StyleBoxTexture, "with the gate ON the subtitle block wears the skin's dialogue-box art")
+	assert_ne(worn, art, "...as a duplicate, never the skin's own sub-resource")
+	# Control: the SAME art with the gate OFF (the shipped box-less look) wears nothing, not the art.
+	var gated := MenuSkin.new()
+	gated.dialogue_panel = art
+	gated.dialogue_panel_enabled = false
+	MenuStyle.skin = gated
+	var bare_view := DialogueView.new()
+	add_child_autofree(bare_view)
+	bare_view.open()
+	assert_true(bare_view._panel.get_theme_stylebox(&"panel") is StyleBoxEmpty,
+		"with the gate OFF the block is background-less (a StyleBoxEmpty) even though the slot keeps its art")
+	MenuStyle.skin = _live_skin
 
 
 func test_shipped_skin_carries_the_dialogue_box_art_with_its_notch_intact() -> void:
@@ -451,24 +487,24 @@ func test_disabled_body_derives_dimmed_from_rest_art_when_unset() -> void:
 		"authored disabled art still wins over the derive")
 
 
-func test_grid_tile_badge_keeps_its_own_light_ink_off_the_panel_palette() -> void:
-	# The PANEL-ink boundary, grid side: a tile's stack-count badge ("x3", a money amount) paints over the
-	# ITEM ART inside a dark tinted cell — NOT on the menu card — so it must never consume text_color. The
-	# shipped skin runs a dark plum panel ink; the badge stayed the light hotbar white it always was. Same
-	# family as dialogue_text_color and the start menu's quote: a surface off the panel pins its own ink.
+func test_shipped_grid_tile_badge_ink_reads_against_its_black_outline() -> void:
+	# A tile's stack-count badge ("x3", a money amount) is a GRID ink (MenuSkin.tile_count_color), not the panel
+	# ink: GridTile._draw strokes a near-black outline round the glyphs first and paints this ink inside it, over
+	# the item art in a dark tinted cell. So the requirement on the shipped value is legibility against BLACK,
+	# whatever the panel palette is doing. Measured the WCAG way — the ink composited by its own alpha onto the
+	# black stroke, linearised, then the contrast ratio against black — and held to AA for small text (4.5:1),
+	# since the badge renders at 7-12 px inside 22 px loot cells.
+	# (Which ink GridTile._draw hands draw_string is not asserted here: a headless run has no renderer to read a
+	# canvas command back from, and a source grep is not a behavioural pin.)
 	var shipped: MenuSkin = load("res://resources/ui/menu_skin.tres")
 	assert_not_null(shipped, "the shipped skin loads")
-	assert_lt(shipped.text_color.get_luminance(), 0.35, "the shipped panel ink is dark (the plum) — the premise")
-	assert_gt(shipped.tile_count_color.get_luminance(), 0.7, "...and the grid badge ink is still light against it")
-	assert_gt(shipped.tile_count_color.a, 0.9, "the badge ink is opaque — it reads at 22px loot cells")
-	# The paint site, pinned by source: the regression this guards is a future pass "tidying" the badge back
-	# onto the shared palette accessor, which would flip it dark with the panel the next time the skin does.
-	# If grid_tile.gd's badge draw is renamed/moved, update THIS pin — do not delete it.
-	var src := FileAccess.get_file_as_string("res://scripts/ui/grid_tile.gd")
-	assert_true(src.contains("MenuStyle.skin.tile_count_color"),
-		"grid_tile.gd draws the count badge with the skin's grid knob")
-	assert_false(src.contains("MenuStyle.text_color()"),
-		"grid_tile.gd never paints with the PANEL ink accessor")
+	if shipped == null:
+		return
+	var ink: Color = shipped.tile_count_color
+	var on_black := Color(ink.r * ink.a, ink.g * ink.a, ink.b * ink.a)
+	var contrast := (on_black.srgb_to_linear().get_luminance() + 0.05) / 0.05
+	assert_gt(contrast, 4.5,
+		"the shipped badge ink must reach WCAG AA small-text contrast (4.5:1) against the black stroke it sits in, got %.2f:1 — a dark or faded badge vanishes into its own outline" % contrast)
 
 
 func test_text_drop_shadow_reaches_every_theme_type_that_has_one() -> void:
@@ -492,11 +528,28 @@ func test_text_drop_shadow_reaches_every_theme_type_that_has_one() -> void:
 
 
 func test_text_drop_shadow_is_off_until_a_skin_authors_it() -> void:
-	# The alpha-0 sentinel, same rule as the button_font_*_color ink knobs: a bare skin must generate the
-	# identical pre-shadow theme, so art and type can land one at a time.
-	assert_eq(MenuSkin.new().text_shadow_color.a, 0.0, "an unskinned MenuSkin draws no text shadow")
+	# The alpha-0 sentinel, same rule as the button_font_*_color ink knobs: an art-less skin stays flat and a skin
+	# opts IN, so art and type can land one at a time. Driven as a live reskin in BOTH directions, on the two
+	# surfaces the shadow reaches: the built Theme's Label entry, and the cursor tip, which takes the shadow as
+	# per-node overrides that OUTLIVE a rebuild. Turning the shadow on and then swapping back to an art-less skin
+	# must turn it OFF again on both, never leave the previous skin's ink behind on the tip.
+	_ms._build_tip()  # off-tree child of the bare instance; _ms.free() takes it with it
+	var tip: Label = _ms._tip_label
 	assert_eq(_ms.theme.get_color(&"font_shadow_color", &"Label").a, 0.0,
-		"a bare skin's Label shadow ink is transparent — the entry exists so a reskin can turn it on")
+		"an art-less skin's Label shadow ink is transparent, so no text shadow is drawn")
+	assert_eq(tip.get_theme_color(&"font_shadow_color").a, 0.0, "...and the cursor tip is flat too")
+	var lit := MenuSkin.new()
+	lit.text_shadow_color = Color(0, 0, 0, 0.5)
+	_ms.set_skin(lit)
+	assert_eq(_ms.theme.get_color(&"font_shadow_color", &"Label").a, 0.5,
+		"control: a skin that authors the shadow turns it on in the theme")
+	assert_eq(tip.get_theme_color(&"font_shadow_color").a, 0.5, "control: ...and on the live tip")
+	_ms.set_skin(MenuSkin.new())
+	assert_eq(_ms.theme.get_color(&"font_shadow_color", &"Label").a, 0.0,
+		"swapping back to an art-less skin turns the theme's text shadow OFF again")
+	assert_eq(tip.get_theme_color(&"font_shadow_color").a, 0.0,
+		"...and the live tip's: its override is re-stamped from the new skin, not left inked by the old one")
+	lit = null
 
 
 func test_shipped_skin_drops_its_text_shadow_straight_down() -> void:
@@ -507,11 +560,30 @@ func test_shipped_skin_drops_its_text_shadow_straight_down() -> void:
 	assert_eq(shipped.text_shadow_offset.x, 0,
 		"STRAIGHT DOWN: a sideways lean here would disagree with the baked art shadow (see the PNG test below)")
 	assert_gt(shipped.text_shadow_offset.y, 0, "...and it does fall, rather than sitting under the glyph")
-	# The cursor tip hangs off MenuStyle's own CanvasLayer, so NO theme reaches it and _style_tip must repeat
-	# the shadow by hand. Source-pinned: without this, the tip is the one menu text surface left flat.
-	var src := FileAccess.get_file_as_string("res://scripts/ui/menu_style.gd")
-	assert_true(src.contains("_tip_label.add_theme_color_override(&\"font_shadow_color\", skin.text_shadow_color)"),
-		"_style_tip gives the in-viewport cursor tip the same text shadow by hand")
+
+
+func test_cursor_tip_repeats_the_skin_text_shadow_by_hand() -> void:
+	# The cursor tip hangs off MenuStyle's own CanvasLayer, so NO theme reaches it and _style_tip must repeat the
+	# shadow as overrides: without them the tip is the one menu text surface left flat. Built on the bare instance
+	# (the tip layer lands as an off-tree child; _ms.free() takes it with it).
+	var s := MenuSkin.new()
+	s.text_shadow_color = Color(0, 0, 0, 0.5)
+	s.text_shadow_offset = Vector2i(0, 2)
+	_ms.set_skin(s)
+	_ms._build_tip()
+	var tip: Label = _ms._tip_label
+	assert_eq(tip.get_theme_color(&"font_shadow_color"), Color(0, 0, 0, 0.5), "the tip carries the skin's text shadow ink")
+	assert_eq(tip.get_theme_constant(&"shadow_offset_x"), 0, "the tip's shadow has no sideways lean")
+	assert_eq(tip.get_theme_constant(&"shadow_offset_y"), 2, "the tip's shadow drops by the skin's offset")
+	# A runtime reskin restyles the already-built tip (rebuild -> _style_tip), not only a fresh one.
+	var s2 := MenuSkin.new()
+	s2.text_shadow_color = Color(0.1, 0, 0.2, 0.8)
+	s2.text_shadow_offset = Vector2i(0, 3)
+	_ms.set_skin(s2)
+	assert_eq(tip.get_theme_color(&"font_shadow_color"), Color(0.1, 0, 0.2, 0.8), "a skin swap re-inks the live tip's shadow")
+	assert_eq(tip.get_theme_constant(&"shadow_offset_y"), 3, "...and re-drops it by the new offset")
+	s = null
+	s2 = null
 
 
 func test_shipped_art_bakes_its_drop_shadow_straight_down() -> void:

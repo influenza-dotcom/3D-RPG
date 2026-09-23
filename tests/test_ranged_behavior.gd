@@ -1,18 +1,36 @@
 extends GutTest
 
-## RangedEnemy non-combat behaviour. Covers the wander-point sampler (pure math) and that the new
-## opt-in behaviour exports default to today's enemy (FIGHT, no wander) so existing enemies are
-## unchanged. Built off-tree via load().new() so _ready (weapon / perception / nav spawn + group-add)
-## never runs. The wander/flee MOVEMENT itself is time- + navmesh-dependent, so it's verified
-## in-engine during manual check, not here.
+## RangedEnemy non-combat behaviour. Covers the wander-point sampler (pure math), the stranded counter, the
+## charge-sting scheduling, and that a plain NPC with untouched Behavior exports is today's enemy (fights, holds
+## its post) so existing enemies are unchanged. Built off-tree via load().new() so _ready (weapon / perception /
+## nav spawn + group-add) never runs. The wander/flee MOVEMENT itself is time- + navmesh-dependent, so it's
+## verified in-engine during manual check, not here.
 
 const RANGED_PATH := "res://scripts/npc/npc.gd"
 
-func test_behavior_exports_default_to_todays_enemy() -> void:
+## GameSettings.npc_bark knobs the aim tests retune, restored after every test (the autoload's resource is shared).
+var _saved_aim_sfx_delay: float
+var _saved_aim_cooldown_ms: int
+
+func before_each() -> void:
+	_saved_aim_sfx_delay = GameSettings.npc_bark.aim_sfx_delay
+	_saved_aim_cooldown_ms = GameSettings.npc_bark.aim_cooldown_ms
+
+func after_each() -> void:
+	GameSettings.npc_bark.aim_sfx_delay = _saved_aim_sfx_delay
+	GameSettings.npc_bark.aim_cooldown_ms = _saved_aim_cooldown_ms
+
+func test_a_plain_npc_fights_back_and_holds_its_post() -> void:
+	# Ship decision: an NPC dropped into a level with its Behavior exports untouched is TODAY'S ENEMY. Read through
+	# the accessors the AI consults rather than the raw enum: is_fleeing() is the GOAP Survive gate, and a fleer's
+	# _on_aim refuses to charge a shot -- so a default that flipped to FLEE would make every placed enemy run.
 	var e: NPC = load(RANGED_PATH).new()
-	assert_eq(e.threat_response, NPC.ThreatResponse.FIGHT,
-		"default response must be FIGHT so a plain enemy still engages")
-	assert_false(e.wanders, "wandering is opt-in; default off so plain enemies hold their post")
+	assert_false(e.is_fleeing(),
+		"a plain NPC must not be a fleer -- is_fleeing() gates the Survive goal, so every placed enemy would run from you")
+	e._last_aim_msec = -10000
+	e._on_aim()
+	assert_true(e._aim_sfx_delay >= 0.0, "a plain NPC charges its shots (the sniper sting is scheduled), i.e. it fights")
+	assert_false(e.wanders, "ship decision: wandering is opt-in; a plain enemy holds its post unless a designer enables it")
 	e.free()
 
 func test_wander_point_stays_within_radius_of_spawn() -> void:
@@ -54,12 +72,35 @@ func test_snap_to_navmesh_is_identity_offtree() -> void:
 	assert_eq(e._snap_to_navmesh(p, 4.0), p, "off-tree -> returns the input point unchanged")
 	e.free()
 
-func test_on_aim_schedules_the_charge_sting_after_a_delay() -> void:
+func test_on_aim_schedules_the_charge_sting_a_tuned_beat_after_the_shot() -> void:
 	# The charge sting must be SCHEDULED a short beat out (not played instantly the same frame as the
-	# shot), so the gunshot and the charge-up don't blur together.
+	# shot), so the gunshot and the charge-up don't blur together -- and the beat is the designer's knob.
+	assert_gt(_saved_aim_sfx_delay, 0.0,
+		"shipped NpcBarkSettings.aim_sfx_delay must be > 0 -- a zero beat plays the charge sting on the gunshot's frame and the two blur together")
+	GameSettings.npc_bark.aim_sfx_delay = 0.37  # a distinctive retune, so a hardcoded delay cannot pass
 	var e: NPC = load(RANGED_PATH).new()
 	e._last_aim_msec = -10000  # force off the per-shot aim cooldown so _on_aim runs
+	assert_lt(e._aim_sfx_delay, 0.0, "precondition: no sting pending on a fresh NPC")
 	e._on_aim()
-	assert_eq(e._aim_sfx_delay, NPC.AIM_SFX_DELAY,
-		"_on_aim must schedule the charge sting (a ~0.1s beat after the shot), not fire it immediately")
+	assert_almost_eq(e._aim_sfx_delay, 0.37, 0.0001,
+		"_on_aim must arm the sting countdown at GameSettings.npc_bark.aim_sfx_delay, not play it now or ignore the knob")
+	e.free()
+
+func test_on_aim_is_refused_for_a_fleer_and_inside_the_aim_cooldown() -> void:
+	# Two guards, each with the same NPC setup as a control: a fleer never charges a shot, and a second lock-on
+	# inside aim_cooldown_ms is de-duplicated so a lock + an immediate first shot sting once, not twice.
+	GameSettings.npc_bark.aim_cooldown_ms = 60000  # the whole test runs inside one cooldown window
+	var fleer: NPC = load(RANGED_PATH).new()
+	fleer.threat_response = NPC.ThreatResponse.FLEE
+	fleer._last_aim_msec = -1000000
+	fleer._on_aim()
+	assert_lt(fleer._aim_sfx_delay, 0.0, "a FLEE NPC never aims, so no sniper-charge sting is scheduled for it")
+	fleer.free()
+	var e: NPC = load(RANGED_PATH).new()
+	e._last_aim_msec = -1000000
+	e._on_aim()
+	assert_true(e._aim_sfx_delay >= 0.0, "control: the same NPC set to FIGHT does schedule the sting")
+	e._aim_sfx_delay = -1.0  # the sting played
+	e._on_aim()              # re-lock inside the cooldown window
+	assert_lt(e._aim_sfx_delay, 0.0, "a re-lock inside aim_cooldown_ms must not schedule a second sting")
 	e.free()

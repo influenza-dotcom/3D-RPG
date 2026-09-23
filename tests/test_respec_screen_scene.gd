@@ -5,10 +5,11 @@ extends GutTest
 ## designer/artist edits; the script binds chrome by %unique name and applies the skin-driven look on
 ## top. These pin the silent-when-broken seams: the autoload points at the SCENE, every %node the
 ## script binds exists, and no text is authored in the scene (strings belong to PlayerText / l10n,
-## never a .tscn). Behaviour (open/confirm) is in-tree -> playtest.
+## never a .tscn). One runtime half is DRIVEN on the live autoload: opening the card seeds pad focus (an off-tree
+## RespecStation + a bare Player, never added to the tree — the test_merchant.gd ShopScreen idiom). The confirm
+## transaction itself is RespecStation.do_respec, pinned in tests/test_respec.gd.
 
 const SCENE := "res://scenes/ui/respec_screen.tscn"
-const SCREEN_SOURCE := "res://scripts/ui/respec_screen.gd"
 
 ## Every unique name respec_screen.gd binds in _bind_ui — a rename in the editor breaks the bind at
 ## boot, so pin the roster here where it fails loudly instead.
@@ -60,7 +61,9 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 		assert_eq(btn.size_flags_horizontal, Control.SIZE_EXPAND_FILL, "%s splits the fixed card width" % b)
 		assert_true(btn.clip_text, "%s clips its caption instead of growing the card" % b)
 	var confirm := inst.get_node("%ConfirmButton") as Button
-	assert_eq(confirm.size_flags_stretch_ratio, 1.5, "Confirm gets 1.5x the stretch — it carries the cost caption")
+	var cancel := inst.get_node("%CancelButton") as Button
+	assert_gt(confirm.size_flags_stretch_ratio, cancel.size_flags_stretch_ratio,
+		"Confirm out-stretches Cancel — the emphasized, destructive action carries the cost caption, so it gets the wider share")
 	for wrapping in ["Blurb", "Status"]:
 		var lbl := inst.get_node("%" + wrapping) as Label
 		assert_eq(lbl.autowrap_mode, TextServer.AUTOWRAP_WORD_SMART, "%s wraps within the fixed card instead of widening it" % wrapping)
@@ -93,27 +96,49 @@ func test_every_authored_button_is_reachable_by_a_pad() -> void:
 	inst.free()
 
 
+## The live-autoload fixtures for the focus test, released in after_each whatever the asserts did.
+var _station: Node = null
+var _player: Node = null
+var _prev_account: float
+var _prev_method: String
+
+func before_each() -> void:
+	# Player.charge_total/spendable read the SHARED GameState banking fields while the card prices the respec.
+	_prev_account = GameState.account
+	_prev_method = GameState.payment_method
+
+func after_each() -> void:
+	if RespecScreen.is_open():
+		RespecScreen.close()
+	if is_instance_valid(_player):
+		_player.free()  # frees the PerkManager the preview find-or-created on it, too
+	if is_instance_valid(_station):
+		_station.free()
+	_player = null
+	_station = null
+	GameState.account = _prev_account
+	GameState.payment_method = _prev_method
+
+
 func test_the_pad_landing_spot_is_seeded_when_the_card_opens() -> void:
-	# The other half of parity is RUNTIME (focus grabbed in open_respec on a live viewport), which a unit test
-	# must not run — this autoload's _ready binds real chrome and open_respec wants a live RespecStation and
-	# Player. So it is pinned by SOURCE, the test_atm_screen_scene.gd / test_payment_rail_selector.gd idiom.
-	#
-	# Every offset below is guarded before it is sliced or compared: find() answers -1 for a needle that has
-	# been renamed away and a bad substr yields "", over which a contains() check quietly reads as "absent" — a
-	# pin that retires itself in silence is worse than no pin.
-	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
-	assert_gt(src.length(), 0, "respec_screen.gd must be readable")
-	var open_at := src.find("func open_respec(")
-	assert_gt(open_at, -1, "func open_respec( no longer present — the pin is stale")
-	assert_eq(src.rfind("func open_respec("), open_at,
-		"open_respec must be defined exactly ONCE, or the body sliced below is not the one that runs")
-	var open_end := src.find("\nfunc ", open_at + 1)
-	assert_gt(open_end, open_at, "open_respec's body must end at the next function — the pin is stale")
-	var body := src.substr(open_at, open_end - open_at)
-	var shown := body.find("_root.visible = true")
-	assert_gt(shown, -1, "_root.visible = true no longer present in open_respec — the pin is stale")
-	var grabbed := body.find("_confirm_btn.grab_focus()")
-	assert_gt(grabbed, -1,
+	# The other half of parity is RUNTIME: open_respec must hand the viewport a focus owner, or ui navigation has
+	# nowhere to start and every button on the card is pad-unreachable. Driven on the live autoload (its _ready
+	# already bound the chrome) with an off-tree RespecStation and a bare Player — neither enters the tree, so no
+	# station or Player _ready runs. A FREE station and a perk-less player is the edge the landing spot must
+	# survive: Confirm is DISABLED there (nothing to refund) and must still take the focus the pad steps off from.
+	GameState.account = 0.0
+	GameState.payment_method = "debit"
+	var st := RespecStation.new()
+	st.respec_cost = 0.0
+	_station = st
+	_player = load("res://scripts/player/player.gd").new()
+	get_viewport().gui_release_focus()
+	var confirm: Button = RespecScreen._confirm_btn
+	assert_false(confirm.has_focus(), "precondition: nothing on the card owns focus before it opens")
+	RespecScreen.open_respec(_station, _player)
+	assert_true(RespecScreen.is_open(), "precondition: the card opens on a valid station + player")
+	assert_true(confirm.disabled, "precondition: a perk-less player leaves Confirm disabled (the edge under test)")
+	assert_true(confirm.has_focus(),
 		"open_respec must SEED focus on Confirm — with no focus owner, ui navigation has nowhere to start and every button on the card is pad-unreachable")
-	assert_gt(grabbed, shown,
-		"and it must grab AFTER the card is shown — grab_focus on a hidden Control does nothing, so seeding first would leave the pad with no owner anyway")
+	RespecScreen.close()
+	assert_false(confirm.has_focus(), "closing the card hides it and releases the focus it seeded")

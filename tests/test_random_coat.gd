@@ -1,9 +1,10 @@
 extends GutTest
 
 ## Tests for RandomCoat — the "pick a random albedo per instance" cosmetic drop-in. The PICK is pure static maths
-## (literal rolls, no tree), so it's unit-tested here. The actual recolour (duplicate material_override + set albedo)
-## is in-tree / deferred and needs a real MeshInstance3D + host, so it's manual-playtest only (mirrors PropFollow,
-## whose in-tree teleport is likewise playtest-only).
+## (literal rolls, no tree), so it's unit-tested here. The spawn-time recolour is driven in-tree on a bare Node3D host
+## with a MeshInstance3D child (a one-coat pool makes the roll deterministic) and read back after the deferred call
+## flushes: the drop-in coats out of the box, the master switch and an unauthored pool leave the natural material
+## alone, a re-dropped preset beats the roll, and the shared scene material is never tinted in place.
 
 const RandomCoat := preload("res://scripts/components/random_coat.gd")
 
@@ -34,14 +35,86 @@ func test_pick_index_single_option() -> void:
 	assert_eq(RandomCoat.pick_index(1, 0.42), 0, "a one-coat pool always returns the only index")
 
 
-func test_enabled_by_default() -> void:
-	# Off-tree field read — no add_child, so no _ready/deferred coat runs. The component ships ON so a dog wearing it
-	# gets a random coat out of the box; a designer flips it off to pin a specific look.
-	var c = RandomCoat.new()
-	assert_true(c.enabled, "RandomCoat ships enabled — dropping it on a prop randomises the coat by default")
-	assert_eq(c.coat_tints.size(), 0, "the tint pool is empty by default (the dog scene authors its own natural coats)")
-	assert_eq(c.coat_value_mults.size(), 0, "no coat prices by default -> every coat is worth the same (backwards-compatible)")
-	c.free()
+const RARE_COAT := Color(0.17, 0.17, 0.18, 1)
+
+
+## A prop host (Node3D) wearing `shared` as its mesh's material_override, with a RandomCoat child. The coat component
+## is configured by `setup` BEFORE the host enters the tree, so its _ready sees the authored exports.
+func _spawn_coated_prop(shared: StandardMaterial3D, setup: Callable) -> MeshInstance3D:
+	var host := Node3D.new()
+	var mesh := MeshInstance3D.new()
+	mesh.material_override = shared
+	host.add_child(mesh)
+	var coat := RandomCoat.new()
+	setup.call(coat)
+	host.add_child(coat)
+	add_child_autofree(host)
+	return mesh
+
+
+func _white_material() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color.WHITE
+	return m
+
+
+func test_dropped_in_coat_recolours_its_host_on_spawn_without_touching_the_shared_material() -> void:
+	# Zero authoring beyond the pool: `enabled` is left at its shipped value, so a dog wearing the component gets
+	# a coat out of the box. The scene material is SHARED by every dog, so it must stay white.
+	var shared := _white_material()
+	var mesh := _spawn_coated_prop(shared, func(c: RandomCoat) -> void:
+		var tints: Array[Color] = [RARE_COAT]
+		c.coat_tints = tints)
+	await wait_process_frames(2)  # the coat is applied on a deferred call, after every _ready this frame
+	var worn := mesh.material_override as StandardMaterial3D
+	assert_true(worn != null, "the host mesh must wear a StandardMaterial3D coat after spawn")
+	if worn == null:
+		return
+	assert_eq(worn.albedo_color, RARE_COAT,
+		"a freshly dropped RandomCoat must recolour its prop from the pool on spawn — otherwise every dog stays the same white")
+	assert_ne(worn, shared, "the coat is painted on a per-instance copy, never on the material every dog shares")
+	assert_eq(shared.albedo_color, Color.WHITE,
+		"the shared scene material must stay untouched, or one dog's coat would repaint the whole litter")
+
+
+func test_switched_off_coat_leaves_the_natural_material_alone() -> void:
+	# Same setup as the spawn test, only the master switch differs: the pool is authored but nothing may apply.
+	var shared := _white_material()
+	var mesh := _spawn_coated_prop(shared, func(c: RandomCoat) -> void:
+		var tints: Array[Color] = [RARE_COAT]
+		c.coat_tints = tints
+		c.enabled = false)
+	await wait_process_frames(2)
+	assert_eq(mesh.material_override, shared,
+		"enabled = false is how a designer pins a specific look — the prop must keep its authored material")
+	assert_eq(shared.albedo_color, Color.WHITE, "a disabled coat must not recolour anything")
+
+
+func test_unauthored_pools_leave_the_natural_material_alone() -> void:
+	# The component with nothing in either pool has no coat to give: the prop keeps its natural look rather than
+	# being swapped onto a blank material.
+	var shared := _white_material()
+	var mesh := _spawn_coated_prop(shared, func(_c: RandomCoat) -> void: pass)
+	await wait_process_frames(2)
+	assert_eq(mesh.material_override, shared,
+		"a RandomCoat with no tints and no albedos must not replace the prop's material")
+
+
+func test_redropped_preset_coat_wins_over_the_roll() -> void:
+	# RE-DROP FIDELITY: a dog restored from an Item carries preset_tint, and the pool holds only OTHER colours, so a
+	# roll could never produce the preset — wearing it proves the roll was skipped.
+	var shared := _white_material()
+	var mesh := _spawn_coated_prop(shared, func(c: RandomCoat) -> void:
+		var tints: Array[Color] = [Color(0.8, 0.5, 0.2, 1)]
+		c.coat_tints = tints
+		c.preset_tint = RARE_COAT)
+	await wait_process_frames(2)
+	var worn := mesh.material_override as StandardMaterial3D
+	assert_true(worn != null, "a preset coat is applied on spawn")
+	if worn == null:
+		return
+	assert_eq(worn.albedo_color, RARE_COAT,
+		"a re-dropped dog must come back in the coat it was picked up in, not a fresh roll from the pool")
 
 
 # ---------------------------------------------------------------------------

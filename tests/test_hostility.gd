@@ -1,8 +1,12 @@
 extends GutTest
 
-## GUT suite for the NPC hostility resolution + aggro-on-attack layer (scripts/npc/npc.gd) and
-## the Perception/RangedEnemy hostility gate. Enemies are built off-tree (load().new() WITHOUT
-## add_child) so _ready never runs — matching test_npc.gd / test_enemies.gd construction.
+## GUT suite for the NPC hostility resolution + aggro-on-attack layer (scripts/npc/npc.gd), the Perception
+## hostility gate, and the voice behaviour that follows hostility (npc_voice.gd: the hover greeting, the
+## death-witness remark, the fighter-only combat taunt). NPCs are built off-tree (load().new() WITHOUT add_child)
+## so _ready never runs — matching test_npc.gd / test_enemies.gd construction; their NpcVoice child is a recording
+## double where the real emit body would need the tree. The Perception gate tests run IN-TREE with a real target in
+## an otherwise empty world, so the gate's refusal is observable against a control that genuinely sees and hears.
+## (ENEMY_PATH and RANGED_PATH are the same script since enemy.gd / ranged_enemy.gd folded into npc.gd.)
 
 const ENEMY_PATH := "res://scripts/npc/npc.gd"
 const RANGED_PATH := "res://scripts/npc/npc.gd"
@@ -43,12 +47,6 @@ func test_unaligned_enemy_defaults_to_hostile() -> void:
 		"NPC.disposition must default HOSTILE so an unaligned enemy is aggressive on sight like today")
 	assert_true(e.is_hostile(),
 		"A default Enemy must resolve is_hostile()==true so existing scenes never go passive")
-	e.free()
-
-func test_provoked_starts_false() -> void:
-	var e = load(ENEMY_PATH).new()
-	assert_false(e._provoked,
-		"_provoked must start false — nothing has aggroed the NPC yet")
 	e.free()
 
 # --- Resolution priority: provoked > faction(+rep) > standalone disposition ---
@@ -190,12 +188,6 @@ func test_holstering_forgives_the_provoke_rep_hit() -> void:
 		"forgive restores the exact rep the provoke dropped (no live player -> unscaled round-trip to 0)")
 	assert_false(e.is_hostile(),
 		"flag cleared + rep restored above threshold -> the factioned NPC stands down")
-	e.free()
-
-func test_holster_forgiveness_spent_starts_false() -> void:
-	var e = load(ENEMY_PATH).new()
-	assert_false(e._holster_forgiveness_spent,
-		"the betrayal one-shot latch must start unspent — nothing has holster-pardoned this NPC yet")
 	e.free()
 
 func test_successful_pardon_cue_always_has_art() -> void:
@@ -473,37 +465,83 @@ func test_deaggro_on_player_death_off_settles_nothing() -> void:
 	assert_true(killer.provoked, "...and the provoked NPC keeps its grudge through your death")
 	GameSettings.npc_ai.deaggro_on_player_death = prev  # restore the shared autoload for other tests
 
-func test_attack_focuses_the_attacker_over_the_nearest() -> void:
-	# Being hit must lock the attacker as the target immediately (and remember it as _last_attacker so
-	# _acquire_target keeps favouring it), so a closer bystander can't distract the NPC off its aggressor.
-	var e = load(RANGED_PATH).new()
-	e.disposition = Disposition.Kind.HOSTILE
-	var fake_player := Node3D.new()
-	fake_player.add_to_group(&"Player")
-	add_child_autofree(fake_player)
-	e._on_damaged_by(fake_player, false)
-	assert_eq(e._last_attacker, fake_player,
-		"A hit must record the attacker as _last_attacker so re-scans favour it over the nearest hostile")
-	assert_eq(e._target, fake_player,
-		"A hit must immediately focus the attacker, not wait for the retarget throttle")
-	e.free()
+func test_a_hit_pulls_focus_onto_the_attacker_only_once_the_npc_is_hostile_to_it() -> void:
+	# A hit from someone this NPC is hostile to locks the shooter as its target AT ONCE, pulling it off the foe it was
+	# already fighting up close, and records the shooter as _last_attacker: the sticky lock NpcTargeting's throttled
+	# re-scans keep over the nearest hostile (that re-scan half is driven in test_npc_facade_contract.gd). A hit from
+	# someone it is NOT hostile to must not steal its focus. The same shooter plays both parts here: a FRIENDLY guard
+	# forgives the player's first stray round (ProvokeOnAttack, under friendly_aggro_threshold) and only turns once the
+	# player's hits pass that threshold.
+	var guard = _npc_with_provoke(RANGED_PATH)
+	guard.disposition = Disposition.Kind.FRIENDLY
+	guard.hp = 50.0  # alive: a bare NPC skips _ready, so hp stays 0 until seeded
+	var raider := Node3D.new()  # the foe the guard is already fighting at close range
+	add_child_autofree(raider)
+	guard._set_target(raider)
+	var player := Node3D.new()
+	player.add_to_group(&"Player")
+	add_child_autofree(player)
+	guard._on_damaged_by(player, false, guard.friendly_aggro_threshold * 0.25)
+	assert_false(guard.is_hostile(), "precondition: the guard forgave the player's stray round and is still friendly")
+	assert_eq(guard._target, raider,
+		"control: a hit from someone the guard is not hostile to leaves it fighting the raider in front of it")
+	assert_null(guard._last_attacker,
+		"control: ...and records no attacker lock for the re-scans to favour")
+	guard._on_damaged_by(player, false, guard.friendly_aggro_threshold)
+	assert_true(guard.is_hostile(), "precondition: the player's hits passed the forgiveness threshold, so the guard turned on them")
+	assert_eq(guard._target, player,
+		"the hit that made the guard hostile pulls its focus off the nearer raider onto the shooter at once, without waiting for the retarget throttle")
+	assert_eq(guard._last_attacker, player,
+		"...and records the shooter as _last_attacker, the lock the re-scans keep over the nearest hostile")
+	guard.free()
 
 # --- Perception hostility gate ----------------------------------------------
 
-func test_perception_has_hostility_gate_defaulting_true() -> void:
+## A target that is making noise: Perception.can_hear reads `noise_radius` duck-typed off its target.
+class _NoisyTarget extends Node3D:
+	var noise_radius: float = 10.0
+
+## An IN-TREE Perception with `target` parked 5 m dead ahead (+Z is the model's front), well inside sight range and
+## the noise radius. The world is otherwise empty, so the line of sight is clear: with the hostility gate out of the
+## way this Perception both sees and hears its target, which is what makes the gate's refusal observable.
+func _perception_facing(target: Node3D) -> Perception:
 	var p := Perception.new()
-	assert_true(p.is_hostile,
-		"Perception.is_hostile must default true so a bare/old-style enemy senses exactly as before")
-	p.free()
+	add_child_autofree(p)
+	add_child_autofree(target)
+	target.global_position = Vector3(0.0, 0.0, 5.0)
+	p.target = target
+	return p
 
 func test_perception_non_hostile_cannot_see_or_hear() -> void:
-	var p := Perception.new()
+	var p := _perception_facing(_NoisyTarget.new())
+	assert_true(p.can_see(),
+		"control: a bare Perception (is_hostile left at its default, hostile) sees a target 5 m dead ahead in a clear world — the setup gets past every other sight gate")
+	assert_true(p.can_hear(),
+		"control: the same bare, hostile-by-default Perception hears a target making noise 5 m away — the setup gets past every other hearing gate")
 	p.is_hostile = false
 	assert_false(p.can_see(),
-		"A non-hostile Perception must never see the player — the gate short-circuits can_see()")
+		"the SAME Perception turned non-hostile must not see the player standing in plain view — the hostility gate short-circuits can_see()")
 	assert_false(p.can_hear(),
-		"A non-hostile Perception must never hear the player — the gate short-circuits can_hear()")
-	p.free()
+		"...and must not hear the player's noise either — the hostility gate short-circuits can_hear()")
+
+func test_non_hostile_perception_idles_unaware_with_the_target_in_plain_view() -> void:
+	# The state machine consequence: a non-hostile NPC never fills its meter, never plays the "!" sting and never
+	# locks on, however long the player stands in front of it. Control: the hostile twin notices on the first tick.
+	var hostile := _perception_facing(Node3D.new())
+	watch_signals(hostile)
+	hostile.sense(0.1)
+	assert_eq(hostile.state, Perception.State.DETECTING,
+		"control: a hostile Perception with the target in view leaves UNAWARE on the first tick")
+	assert_signal_emitted(hostile, "just_spotted", "control: ...and plays the '!' spot sting")
+	var calm := _perception_facing(Node3D.new())
+	calm.is_hostile = false
+	watch_signals(calm)
+	for i in 5:
+		calm.sense(0.5)
+	assert_eq(calm.state, Perception.State.UNAWARE,
+		"a non-hostile Perception stays UNAWARE through 2.5 s of the target in plain view — no detection, no alert, no fire")
+	assert_eq(calm.detection, 0.0, "...and its detection meter never moves off empty")
+	assert_signal_not_emitted(calm, "just_spotted", "...and it never plays the '!' spot sting at a player it isn't hostile to")
 
 # --- RangedEnemy still exposes the aggro hook + legacy handler --------------
 
@@ -574,12 +612,57 @@ func test_npc_exposes_death_witness_api() -> void:
 		"NPC must expose _is_ally_of — the co-aligned check behind the 'Murderer!' reaction")
 	n.free()
 
-func test_death_witness_pools_ship_unauthored() -> void:
-	# Speech is authored content: witness reaction pools ship EMPTY (silent) until a designer fills
-	# BarkSet death_ally/death_approve/death_question (react_remark guards lines.is_empty()).
-	assert_eq(NPC.DEATH_ALLY_LINES.size(), 0, "DEATH_ALLY_LINES ships unauthored (empty = silent)")
-	assert_eq(NPC.DEATH_APPROVE_LINES.size(), 0, "DEATH_APPROVE_LINES ships unauthored (empty = silent)")
-	assert_eq(NPC.DEATH_QUESTION_LINES.size(), 0, "DEATH_QUESTION_LINES ships unauthored (empty = silent)")
+## Records every line an NPC asks its voice to speak, WITHOUT the awaited bubble / TTS body of NpcVoice.emit — so a
+## bare off-tree NPC can host it. Every bark trigger funnels through NPC._emit_bark -> NpcVoice.emit.
+class _RecordingVoice extends NpcVoice:
+	var lines: Array[String] = []
+	func emit(line: String, _voice: VoiceData) -> void:
+		lines.append(line)
+
+## A bare off-tree NPC that can SPEAK: alive, carrying a Talkable (the speak component every remark / greeting needs),
+## and voiced by a _RecordingVoice — the child _build_components would build in-game. Unaligned NEUTRAL unless the
+## caller sets a faction. Caller frees it (the Talkable + voice are children, so they go with it).
+func _speaking_townsperson():
+	var n = load(ENEMY_PATH).new()
+	n.disposition = Disposition.Kind.NEUTRAL
+	n.hp = 10.0  # a bare NPC skips _ready, so hp is still 0 (dead) until seeded
+	n.add_child(Talkable.new())
+	var voice := _RecordingVoice.new()
+	voice.host = n
+	n.add_child(voice)
+	n._voice = voice
+	return n
+
+func test_authored_witness_line_reaches_an_allied_bystander_but_not_a_provoked_one() -> void:
+	# Witness speech is AUTHORED content: a designer fills BarkSet.death_ally and a co-aligned bystander cries it when
+	# the player kills its ally. Driven through the real NPC facade, the real _bark_pool override rule and the real
+	# faction alliance check. The gate that matters here: a bystander the player has PROVOKED is fighting the player,
+	# so it doesn't stand around mourning — only a non-hostile witness remarks.
+	var f = load(FACTION_PATH).new()
+	f.id = &"townsfolk"
+	f.default_disposition = Disposition.Kind.NEUTRAL
+	var victim = load(ENEMY_PATH).new()
+	victim.faction = f
+	var mourn: Array[String] = ["Murderer!"]
+	var bystander = _speaking_townsperson()
+	bystander.faction = f
+	bystander._voice._bark_set = BarkSet.new()
+	bystander._voice._bark_set.death_ally = mourn
+	bystander._witness_death(victim)
+	assert_eq(bystander._voice.lines, mourn,
+		"control: an allied, non-hostile bystander cries the AUTHORED death_ally line when the player kills its ally")
+	var turned = _speaking_townsperson()
+	turned.faction = f
+	turned._voice._bark_set = BarkSet.new()
+	turned._voice._bark_set.death_ally = mourn
+	turned.provoke()
+	assert_true(turned.is_hostile(), "precondition: the provoked bystander is hostile to the player")
+	turned._witness_death(victim)
+	assert_eq(turned._voice.lines.size(), 0,
+		"a PROVOKED (hostile) bystander stays silent on the same kill — it is fighting the player, not remarking on them")
+	bystander.free()
+	turned.free()
+	victim.free()
 
 # --- Reputation bounds + kill penalty --------------------------------------
 
@@ -619,33 +702,102 @@ func test_npc_exposes_protector_and_wounded_api() -> void:
 		"a fresh NPC defends nobody (no leader, no guard target)")
 	n.free()
 
-func test_npc_greet_api() -> void:
-	assert_eq(NPC.GREET_LINES.size(), 0,
-		"GREET_LINES ships unauthored (empty = silent) — greeting text is designer content")
-	var n = load(ENEMY_PATH).new()
-	assert_true(n.has_method("greet"),
-		"NPC must expose greet() — the FNV-style look-at hover greeting")
-	n.greet()  # safe off-tree: a hostile-by-default bare NPC early-returns, and no talkable -> no-op
-	assert_true(true, "greet() must be safe to call off-tree")
-	n.free()
+# --- Voice gates that follow hostility: hover greeting + combat call-outs -----
 
-func test_npc_combat_bark_api() -> void:
-	# The combat call-out pools ship unauthored (empty = silent); the API surface below is what's load-bearing.
-	assert_eq(NPC.RELOAD_LINES.size(), 0, "RELOAD_LINES ships unauthored (empty = silent)")
-	assert_eq(NPC.COMBAT_END_LINES.size(), 0, "COMBAT_END_LINES ships unauthored (empty = silent)")
-	assert_eq(NPC.LOST_INTEREST_LINES.size(), 0, "LOST_INTEREST_LINES ships unauthored (empty = silent)")
+func test_provoked_npc_stops_greeting_the_player() -> void:
+	# The FNV hover greeting (player.gd calls npc.greet() when the crosshair lands) is for NON-hostile NPCs only: a
+	# townsperson the player just attacked must not say hello to the gun pointed at it. The greeting pool's CONTENT is
+	# authored data, so this counts greeting REQUESTS reaching the voice rather than reading any line.
+	var calm = _speaking_townsperson()
+	calm.greet()
+	assert_eq(calm._voice.lines.size(), 1,
+		"control: a neutral, idle NPC with a Talkable greets the player when looked at")
+	var provoked = _speaking_townsperson()
+	provoked.provoke()
+	assert_true(provoked.is_hostile(), "precondition: the provoke turned the townsperson hostile")
+	provoked.greet()
+	assert_eq(provoked._voice.lines.size(), 0,
+		"a PROVOKED NPC must not greet the player it is now hostile to — the hover greeting is gated on hostility")
+	calm.free()
+	provoked.free()
+
+## Counts the three combat call-out facades reaching the NPC's voice (the NpcVoice bodies need an in-tree host).
+class _CallOutVoice extends NpcVoice:
+	var reload: int = 0
+	var combat_end: int = 0
+	var lost_interest: int = 0
+	func _try_reload_bark() -> void:
+		reload += 1
+	func _try_combat_end_bark() -> void:
+		combat_end += 1
+	func _try_lost_interest_bark() -> void:
+		lost_interest += 1
+
+func test_npc_combat_bark_facades_forward_to_its_voice() -> void:
+	# NpcCombat calls host._try_reload_bark() and the engagement settle calls the other two, all DUCK-TYPED on the NPC;
+	# each facade must reach the NpcVoice that owns the gates, or the shout is silently lost.
 	var n = load(ENEMY_PATH).new()
-	assert_true(n.has_method("_try_reload_bark"),
-		"NPC must expose _try_reload_bark() — the reload shout, fired from _act_alerted on reload")
-	assert_true(n.has_method("_try_combat_end_bark"),
-		"NPC must expose _try_combat_end_bark() — the combat-over shout, fired on the return to UNAWARE")
-	assert_true(n.has_method("_try_lost_interest_bark"),
-		"NPC must expose _try_lost_interest_bark() — the gave-up-searching shout, fired on the return to UNAWARE")
-	n._try_reload_bark()       # safe off-tree: bare NPC has hp 0 (no _ready) -> early-returns, no talkable
+	var voice := _CallOutVoice.new()
+	n.add_child(voice)
+	n._voice = voice
+	n._try_reload_bark()
 	n._try_combat_end_bark()
 	n._try_lost_interest_bark()
-	assert_true(true, "all three combatant/sentry barks must be safe to call off-tree")
+	assert_eq([voice.reload, voice.combat_end, voice.lost_interest], [1, 1, 1],
+		"each combat call-out facade (reload, combat-over, lost-interest) must forward exactly once to the NPC's NpcVoice")
 	n.free()
+
+## A shouting NPC stand-in for NpcVoice's combat call-outs (the duck-typed host surface test_bark_gates pins against
+## the real npc.gd): alive, in-tree beside the listening player, one line per pool, and `fleeing` as the variable.
+class _ShoutHost extends Node3D:
+	var RELOAD_LINES: Array[String] = ["Reloading!"]
+	var COMBAT_END_LINES: Array[String] = ["Lost 'em."]
+	var LOST_INTEREST_LINES: Array[String] = ["Must be gone now."]
+	var fleeing := false
+	var _dead := false
+	var hp := 10.0
+	var player: Node3D = null
+	var emitted: Array[String] = []
+	func is_hostile() -> bool: return true
+	func is_fleeing() -> bool: return fleeing
+	func _find_talkable(): return null
+	func _real_player(): return player
+	func _pick_bark(fallback: Array[String], _override: Array[String]) -> String:
+		return fallback[0] if not fallback.is_empty() else ""
+	func _emit_bark(line: String, _voice) -> void: emitted.append(line)
+
+func _shouting_host(fleeing: bool) -> _ShoutHost:
+	var h := _ShoutHost.new()
+	h.fleeing = fleeing
+	add_child_autofree(h)  # in-tree: every combat call-out checks the player's distance off global_position
+	var listener := Node3D.new()
+	add_child_autofree(listener)
+	listener.position = Vector3(1.0, 0.0, 0.0)
+	h.player = listener
+	return h
+
+func _voice_for(h: Node) -> NpcVoice:
+	var v := NpcVoice.new()
+	v.host = h
+	autofree(v)
+	return v
+
+func test_fleeing_npc_skips_the_combat_over_taunt_but_still_calls_out() -> void:
+	# "Lost 'em." is a fighter's taunt: an NPC RUNNING from the player doesn't gloat when the fight ends. The softer
+	# give-up line is a calm remark, not a taunt, so a fleer still says it — and the refused taunt must not have burnt
+	# the shared bark cooldown on the way out, or it would swallow that line.
+	var fighter := _shouting_host(false)
+	_voice_for(fighter)._try_combat_end_bark()
+	assert_eq(fighter.emitted, ["Lost 'em."] as Array[String],
+		"control: a fighter whose fight just ended gives the combat-over taunt")
+	var runner := _shouting_host(true)
+	var runner_voice := _voice_for(runner)
+	runner_voice._try_combat_end_bark()
+	assert_eq(runner.emitted.size(), 0,
+		"a FLEEING NPC must not taunt the player it is running from when the fight ends")
+	runner_voice._try_lost_interest_bark()
+	assert_eq(runner.emitted, ["Must be gone now."] as Array[String],
+		"...but it still gives the calm lost-interest line, and the refused taunt left the shared bark cooldown free for it")
 
 func test_npc_unarmed_fist_fallback_surface() -> void:
 	# With nothing equipped, an NPC falls back to a weak "fists" melee. The swing (the _act_unarmed facade ->
@@ -666,12 +818,21 @@ func test_unarmed_attack_paces_to_fist_cadence_and_damage() -> void:
 	# So a punch winds up on its own cadence, an unarmed NPC's timer + damage readout use the FISTS weapon
 	# (not a stale/absent gun). Off-tree -> _can_fight_with_gun() is false (no equipped weapon).
 	var n = load(ENEMY_PATH).new()
-	var expected_interval: float = maxf(0.05, NPC.FISTS.attack_speed * n.rate_of_fire_factor)
-	assert_almost_eq(n._shot_interval(), expected_interval, 0.0001,
-		"an unarmed NPC's attack interval is the fists' cadence, so the charge wind-up paces to the punch")
+	assert_almost_eq(n._shot_interval(), NPC.FISTS.attack_speed, 0.0001,
+		"a baseline unarmed NPC's attack interval IS the fists' authored cadence (not the 1 s pre-equip base), so the charge wind-up paces to the punch")
 	assert_almost_eq(n._attack_damage(), NPC.FISTS.damage, 0.0001,
 		"an unarmed NPC reports the fists' damage on the player's threat indicator, not a stale gun's")
+	n.rate_of_fire_factor = 2.0
+	assert_almost_eq(n._shot_interval(), NPC.FISTS.attack_speed * 2.0, 0.0001,
+		"rate_of_fire_factor is the per-NPC difficulty dial for punches too: doubling it doubles the time between swings")
+	n.rate_of_fire_factor = 1.0
+	var quick := CharacterStats.new()
+	quick.agility = 5
+	n.stats = quick
+	assert_lt(n._shot_interval(), NPC.FISTS.attack_speed,
+		"an AGILE NPC punches quicker than a baseline one — the unarmed branch never reaches Attack, so its melee scale is the only place agility can bite")
 	n.free()
+	quick = null
 
 func test_melee_weapons_do_not_use_ranged_attack_telegraphs() -> void:
 	var melee: WeaponData = load("res://resources/weapons/melee.tres")

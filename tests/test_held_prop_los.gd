@@ -9,38 +9,39 @@ extends GutTest
 ## This is SIGHT/DETECTION only — line-of-FIRE rays (bullets, the NPC clear-shot test, grapple) intentionally keep
 ## seeing the held prop, so a carried prop stays solid physical cover.
 ##
-## These tests pin: (1) the mask helper to the single tuning source of truth — guarding the off-by-one bit mistake
-## (the carry code assigns `collision_layer = pickup_held_collision_layer` DIRECTLY, so the value is the raw bitmask
-## to clear, NOT 1<<index); (2) the mask semantics; (3) the actual behaviour via an in-tree Perception query.
-
-func test_helper_matches_tuning_source_of_truth() -> void:
-	# If someone "corrects" the helper to 1<<(value-1) or 1<<value it would mask the WRONG layer — failing to hide
-	# the held prop AND wrongly blinding sight to a different layer. This equality is the regression lock.
-	assert_eq(TalkHelpers.held_prop_collision_layer(), GameSettings.physics_damage.pickup_held_collision_layer,
-		"held_prop_collision_layer() must equal the tuning value it mirrors (raw bitmask, not a shifted index)")
-	assert_gt(TalkHelpers.held_prop_collision_layer(), 0,
-		"the held-prop layer bit must be a real (>0) physics layer to be maskable")
-
-
-func test_sight_mask_clears_held_bit_but_keeps_world_and_characters() -> void:
-	var held := TalkHelpers.held_prop_collision_layer()
-	var mask := 0xFFFFFFFF & ~held
-	assert_eq(mask & held, 0, "the sight mask clears the held-prop bit — a carried box is invisible to sight")
-	assert_eq(mask & 1, 1, "the sight mask still sees world geometry (layer 1)")
-	assert_eq(mask & 2, 2, "the sight mask still sees player / NPC bodies (layer 2)")
-	assert_eq(mask & TalkHelpers.TALK_LAYER, TalkHelpers.TALK_LAYER,
-		"the held mask alone leaves the talk layer intact — pet/claim combine ~TALK_LAYER separately")
-
-
-# --- In-tree behaviour: Perception.can_see() must look THROUGH a held prop but NOT through a real wall ---
+## These tests pin: (1) the defensive read the per-frame sight rays rely on -- an unresolved tuning resource clears NO
+## bit instead of throwing; (2) the actual behaviour via in-tree Perception queries: a prop on the held-prop layer is
+## looked THROUGH, while a world wall and a character standing in the way still occlude. The raw-bitmask contract
+## (the carry code assigns `collision_layer = pickup_held_collision_layer` DIRECTLY, so the helper must clear that
+## value, NOT 1<<index) is proven by test_held_prop_does_not_block_sight, whose box sits on exactly that raw value.
 
 var _root: Node3D
+var _saved_physics_damage: PhysicsDamageSettings
 
 
 func before_each() -> void:
+	_saved_physics_damage = GameSettings.physics_damage
 	_root = Node3D.new()
 	add_child_autofree(_root)
 
+
+func after_each() -> void:
+	GameSettings.physics_damage = _saved_physics_damage
+
+
+func test_held_layer_read_clears_no_bit_while_the_tuning_is_unresolved() -> void:
+	# Sight rays call the helper every frame per NPC; a reimport / hot-reload can leave GameSettings.physics_damage
+	# momentarily null. The read must degrade to "clear nothing" (the old maskless ray) and never throw mid-frame.
+	assert_gt(TalkHelpers.held_prop_collision_layer(), 0,
+		"control: with the tuning resolved the helper names a real layer bit for the sight rays to clear")
+	GameSettings.physics_damage = null
+	var during := TalkHelpers.held_prop_collision_layer()
+	GameSettings.physics_damage = _saved_physics_damage
+	assert_eq(during, 0,
+		"with the physics tuning unresolved the helper must clear NO bit (never throw inside every NPC's per-frame sight ray)")
+
+
+# --- In-tree behaviour: Perception.can_see() must look THROUGH a held prop but NOT through a real wall ---
 
 ## A Perception parented to a (shapeless) CharacterBody3D, mirroring a real NPC: front is +Z (the model convention
 ## can_see uses) and get_parent() is a CollisionObject3D, matching how perception.gd self-excludes.
@@ -101,3 +102,23 @@ func test_real_wall_still_blocks_sight() -> void:
 	await get_tree().physics_frame
 	assert_false(p.can_see(),
 		"a solid world-layer body between eye and target still occludes — the held mask must not over-block")
+
+
+func test_only_the_held_prop_bit_is_see_through_a_character_in_the_way_still_blocks_sight() -> void:
+	# The held-prop layer must be its OWN single bit: the carry code assigns it as the prop's whole collision_layer,
+	# and every sight ray clears it. Tuned onto the character layer (2), NPCs would see straight through bodies;
+	# onto the world layer (1), through walls (test_real_wall_still_blocks_sight); onto the talk layer, the look-at
+	# verbs that already clear TALK_LAYER would stop telling a carried prop from a talk volume.
+	var held := TalkHelpers.held_prop_collision_layer()
+	assert_true(held > 0 and (held & (held - 1)) == 0,
+		"pickup_held_collision_layer must be exactly ONE physics layer bit (got %d)" % held)
+	assert_eq(held & (1 | 2 | TalkHelpers.TALK_LAYER), 0,
+		"the held-prop layer must not share a bit with world (1), characters (2) or the talk layer (%d); got %d" % [TalkHelpers.TALK_LAYER, held])
+	var p := _make_perception()
+	var target := _make_body(Vector3(0, p.eye_height, 2), 2)
+	p.target = target
+	_make_body(Vector3(0, p.eye_height, 1), 2)  # another character standing between the eye and the target
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	assert_false(p.can_see(),
+		"a character body between eye and target still occludes -- only a CARRIED prop is see-through, not everyone on the character layer")

@@ -18,10 +18,13 @@ extends GutTest
 ##     fresh click after that fires normally, and the OTHER button is never eaten (holding ADS after a left-click
 ##     activation must not swallow the next shot). PickupRay's alternate-throw (left-click throws the carried prop)
 ##     honours the primary latch.
-## Everything here runs headless and OFF-TREE: `Object.notification()` drives MouseInput's _notification directly
-## (no window exists, so nothing else ever sends these), the latch math is a static, and tick_refocus_latches takes
-## the polled button states as parameters (no Input / viewport read). MouseInput is `.new()` WITHOUT add_child so
-## its _ready never captures the cursor and its _process (which derefs get_viewport()) never runs — per CLAUDE.md.
+## Everything here runs headless: `Object.notification()` drives MouseInput's _notification directly (no window
+## exists, so nothing else ever sends these), the latch math is a static, and tick_refocus_latches takes the polled
+## button states as parameters. The latch tests use a bare MouseInput `.new()` WITHOUT add_child, so its _ready never
+## captures the cursor. The two _process tests need a viewport, so they put a _NoCaptureMouseInput in the tree (its
+## _ready override skips the capture) and press the real Attack / Zoom actions through Input before each hand-driven
+## frame (released again in after_each). PickupRay's throw is driven in-tree the way tests/test_pickup_ray_liveness.gd
+## drives it: physics_process off, a Player built off-tree via .new() (its _ready never runs), an off-tree prop.
 ##
 ## MANUAL CHECK (the seam a headless run cannot see): windowed mode, draw a gun, alt-tab away, then CLICK the game
 ## window to come back — no shot, no NoiseSource alert; release and click again — it fires. Right-click to come
@@ -29,6 +32,39 @@ extends GutTest
 ## does not throw it. On a pad: hold RT / deflect the right stick while alt-tabbed — nothing fires or turns.
 ## (Known residual, documented in CURRENT_ARCHITECTURE: a trigger held ACROSS the alt-tab reads released after
 ## refocus and fires on its next movement — the engine only re-reports the axis on a value change.)
+
+
+## MouseInput minus its cursor capture — the ONLY thing MouseInput._ready does is Input.mouse_mode = CAPTURED, which
+## would grab the developer's real cursor when the suite runs from the editor. Godot 4 calls only the most-derived
+## _ready, so this override replaces it; _process, _input, _notification and the latches are inherited unchanged.
+class _NoCaptureMouseInput extends MouseInput:
+	func _ready() -> void:
+		pass
+
+
+func after_each() -> void:
+	Input.action_release(&"Attack")
+	Input.action_release(&"Zoom")
+
+
+## One hand-driven MouseInput frame with the fire buttons physically held (or not) as the poll will read them.
+func _frame(mi: MouseInput, attack_held: bool, alt_held: bool) -> void:
+	for pair in [[&"Attack", attack_held], [mi.alt_attack_action, alt_held]]:
+		if pair[1]:
+			Input.action_press(pair[0])
+		else:
+			Input.action_release(pair[0])
+	mi._process(1.0 / 60.0)
+
+
+## An in-tree MouseInput whose frames only run when a test calls _frame, with its signals watched.
+func _live_mouse_input() -> MouseInput:
+	var mi := _NoCaptureMouseInput.new()
+	add_child_autofree(mi)
+	mi.set_process(false)
+	watch_signals(mi)
+	assert_false(InputManager.gameplay_suppressed(), "fixture: nothing may suppress gameplay input in this test, or no emit could ever be observed")
+	return mi
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -187,37 +223,71 @@ func test_only_the_app_level_focus_notifications_arm_the_latches() -> void:
 	mi.free()
 
 
-func test_process_feeds_both_latches_before_the_emits_and_gates_each_emit_on_its_own() -> void:
-	# _process can't run off-tree (get_viewport() is null), so pin its SHAPE with the exact load-bearing text: the
-	# tick sits ABOVE the emits and is fed both buttons, and each emit is gated on ITS latch. A future edit that polls
-	# Attack straight into attack.emit, or gates both emits on one latch, re-opens the refocus shot / the ADS swallow.
-	var src := FileAccess.get_file_as_string("res://scripts/components/mouse_input.gd")
-	var proc_at := src.find("func _process(")
-	assert_true(proc_at >= 0, "MouseInput still has _process")
-	var proc_end := src.find("\nfunc ", proc_at + 1)
-	assert_true(proc_end > proc_at, "_process is followed by another top-level func (delimiter for the pin)")
-	var body := src.substr(proc_at, proc_end - proc_at)
-	var tick_at := body.find("tick_refocus_latches(attack_held, alt_held)")
-	var emit_at := body.find("attack.emit(")
-	assert_true(tick_at >= 0 and emit_at >= 0 and tick_at < emit_at,
-		"MouseInput._process must call tick_refocus_latches(attack_held, alt_held) BEFORE any attack/alt_attack emit")
-	assert_true(body.find("if attack_held and not _attack_latch:") >= 0,
-		"the primary emit is gated on the PRIMARY latch (if attack_held and not _attack_latch:)")
-	assert_true(body.find("if alt_held and not _alt_latch:") >= 0,
-		"the alt emit is gated on the ALT latch (if alt_held and not _alt_latch:) — never on the primary one")
+func test_process_eats_the_activating_click_and_fires_the_next_one() -> void:
+	# The feature end to end through MouseInput's real per-frame poll: the `attack` signal is what fires the gun.
+	var mi := _live_mouse_input()
+	_frame(mi, true, false)
+	assert_signal_emit_count(mi, "attack", 1, "CONTROL: with no focus edge, a held fire button fires on its frame")
+	mi.notification(NOTIFICATION_APPLICATION_FOCUS_IN)
+	_frame(mi, true, false)
+	_frame(mi, true, false)
+	assert_signal_emit_count(mi, "attack", 1, "the click that re-focused the window must not fire for as long as it is held")
+	_frame(mi, false, false)
+	_frame(mi, true, false)
+	assert_signal_emit_count(mi, "attack", 2, "once that click is released, the next click fires on its very first frame")
 
 
-func test_pickup_ray_alternate_throw_honours_the_primary_latch() -> void:
-	# PickupRay can't be instantiated bare (RayCast3D + @onready NodePaths + real physics — see test_camera_input_ui's
-	# skip list), so pin the source: the left-click alternate throw stands in for the fire click while your hands are
-	# full, and the click that re-focuses the window must not fling the carried prop any more than it may fire.
-	var src := FileAccess.get_file_as_string("res://scripts/components/ray_cast.gd")
-	var branch_at := src.find("event.is_action_pressed(InputManager.action_attack)")
-	assert_true(branch_at >= 0, "PickupRay still has the left-click alternate-throw branch")
-	var branch_end := src.find("\n\telif ", branch_at + 1)
-	assert_true(branch_end > branch_at, "the alternate-throw branch is followed by another elif (delimiter for the pin)")
-	var branch := src.substr(branch_at, branch_end - branch_at)
-	assert_true(branch.find("if _refocus_latched():") >= 0,
-		"the alternate-throw branch must bail while MouseInput's primary refocus latch holds — the activating click is not a throw")
-	assert_true(src.find("pl.mouse_input.fire_blocked_by_refocus()") >= 0,
-		"_refocus_latched reads MouseInput.fire_blocked_by_refocus() (the PRIMARY-button latch) through the exported player")
+func test_process_gates_each_fire_button_on_its_own_latch() -> void:
+	var mi := _live_mouse_input()
+	# Left-click activation, then ADS (the alt button) while letting go of the left button, then a fresh left click.
+	mi.notification(NOTIFICATION_APPLICATION_FOCUS_IN)
+	_frame(mi, true, false)
+	assert_signal_emit_count(mi, "attack", 0, "the activating left click does not fire")
+	_frame(mi, true, true)
+	assert_signal_emit_count(mi, "alt_attack", 1, "a fresh right press after a LEFT-click activation is not eaten (ADS / the right fist)")
+	_frame(mi, false, true)
+	_frame(mi, true, true)
+	assert_signal_emit_count(mi, "attack", 1, "a fresh left click while still holding ADS fires — the held alt button must not gate the primary")
+	# Right-click activation: the activating right click is eaten, a fresh left click a frame later is not.
+	mi.notification(NOTIFICATION_APPLICATION_FOCUS_IN)
+	_frame(mi, false, true)
+	assert_signal_emit_count(mi, "alt_attack", 3, "the activating RIGHT click does not fire on its first frame (no right punch)")
+	_frame(mi, true, true)
+	assert_signal_emit_count(mi, "attack", 2, "a fresh LEFT click fires while the activating right click is still held")
+	assert_signal_emit_count(mi, "alt_attack", 3, "...and the activating right click stays eaten for as long as it is held")
+
+
+func test_pickup_ray_refocus_click_does_not_throw_the_carried_prop_but_the_next_click_does() -> void:
+	# While carrying, the left click is the alternate THROW (PickupRay._unhandled_input) — it stands in for the fire
+	# click, so the click that re-focuses the window must not fling the prop any more than it may fire the gun.
+	var root := Node3D.new()
+	add_child_autofree(root)
+	var mi := MouseInput.new()  # off-tree: only its latch is read
+	var pl = load("res://scripts/player/player.gd").new()  # off-tree: Player._ready never runs
+	pl.hp = pl.max_hp  # _ready seeds hp; a 0-hp player is "dead" and the ray ignores all input
+	pl.mouse_input = mi
+	var ray := PickupRay.new()
+	root.add_child(ray)
+	ray.set_physics_process(false)
+	ray.player = pl
+	var prop := Throwable.new()  # off-tree: no release sound, no physics step
+	ray.held_object = prop
+	ray._holding = true
+	var click := InputEventAction.new()
+	click.action = InputManager.action_attack
+	click.pressed = true
+	mi.notification(NOTIFICATION_APPLICATION_FOCUS_IN)
+	mi.tick_refocus_latches(true, false)  # the activating left click, held
+	ray._unhandled_input(click)
+	assert_true(ray.held_object == prop, "the click that re-focused the window must not throw the carried prop")
+	mi.tick_refocus_latches(false, false)  # the activating click is released
+	ray._unhandled_input(click)
+	assert_true(ray.held_object == null, "CONTROL: the next left click after the release throws the carried prop")
+	assert_gt(prop.linear_velocity.length(), 0.0, "...and the prop is launched, not just let go")
+	ray.held_object = null
+	ray._holding = false
+	ray.player = null
+	ray.free()
+	prop.free()
+	pl.free()
+	mi.free()

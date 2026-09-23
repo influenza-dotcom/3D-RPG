@@ -2,9 +2,11 @@ extends GutTest
 
 ## The CYBER SUNDAY Scene Diff tab: the PURE .tscn parse + diff are unit-tested with in-memory scene text, the tab's
 ## own pure helpers (selection plan, field refusals, row labels) on plain strings, and the file-read -> diff -> tree
-## render path end-to-end over two throwaway scenes written to user://. Only the handlers that need a live editor
-## (Use Selected / Use Open Scene / the double-click handoff) are pinned by source-scan. No scene is ever
-## instantiated — it's a structural text diff — and nothing here touches a project file.
+## render path end-to-end over two throwaway scenes written to user://. The double-click handler is driven up to the
+## point it would call the editor (EditorInterface does not exist headless); Use Selected / Use Open Scene read the
+## editor's selection and are covered through their pure plan_selection / field_problem halves. The height + width
+## contract is measured on the tab in the tree. No scene is ever instantiated — it's a structural text diff — and
+## nothing here touches a project file.
 
 const SceneDiff := preload("res://addons/cybersunday_tools/dock_scenediff/scene_diff.gd")
 const SceneDiffView := preload("res://addons/cybersunday_tools/dock_scenediff/scene_diff_view.gd")
@@ -93,8 +95,6 @@ func test_scene_diff_view_constructs() -> void:
 	assert_eq(v._status.text, SceneDiffView.MSG_IDLE, "idle status is the duplicate -> fill -> Compare walkthrough")
 	assert_true(v._status.text.contains("Use Open Scene") and v._status.text.contains("Compare"), "the idle line names the buttons it points at")
 	assert_eq(v._status.tooltip_text, v._status.text, "the status tooltip mirrors the text from the first write")
-	assert_eq(v._status.max_lines_visible, 2, "the status Label is clamped to two lines (the tooltip carries the rest)")
-	assert_eq(v._status.autowrap_mode, TextServer.AUTOWRAP_WORD_SMART, "and autowraps")
 	var labels := _label_texts(v)
 	assert_true("Before" in labels, "the first field is labelled Before (not 'A'): %s" % str(labels))
 	assert_true("After" in labels, "the second field is labelled After (not 'B'): %s" % str(labels))
@@ -261,6 +261,7 @@ func test_compare_reports_no_differences_and_refuses_bad_fields() -> void:
 	var before_path := _write_temp("cs_diff_same_a.tscn", BEFORE_TEXT)
 	var twin_path := _write_temp("cs_diff_same_b.tscn", BEFORE_TEXT)
 	var v = SceneDiffView.new()
+	var resting_modulate: Color = v._status.modulate
 	v._before.text = before_path
 	v._after.text = twin_path
 	v._compare()
@@ -271,7 +272,7 @@ func test_compare_reports_no_differences_and_refuses_bad_fields() -> void:
 	v._compare()
 	assert_true(v._status.text.begins_with("Couldn't compare -- After: not an existing .tscn."), "a bad field refuses per field: %s" % v._status.text)
 	assert_true(v._status.has_theme_color_override("font_color"), "a refusal is tinted through a theme colour override")
-	assert_eq(v._status.modulate.a, 0.75, "while the modulate alpha stays the panel-wide 0.75")
+	assert_eq(v._status.modulate, resting_modulate, "while the status keeps the modulate it rests at -- the tint is the only thing a refusal changes")
 	v._after.text = twin_path
 	v._compare()
 	assert_false(v._status.has_theme_color_override("font_color"), "a successful compare clears the tint")
@@ -281,49 +282,158 @@ func test_compare_reports_no_differences_and_refuses_bad_fields() -> void:
 
 
 # ================================================================================================================
-# scene_diff_view.gd — source-scanned contracts (editor-only handlers, height, read-only)
+# scene_diff_view.gd — the double-click handoff, the height + width contract, read-only
 # ================================================================================================================
 
-func test_scene_diff_view_double_click_opens_the_scene_and_selects_the_node() -> void:
-	# The handoff needs a live editor, so it is pinned by source-scan like the other tabs' contracts.
-	var src := FileAccess.get_file_as_string(VIEW_PATH)
-	assert_ne(src, "", "scene_diff_view.gd source should be readable")
-	assert_true(src.contains("_tree.item_activated.connect(_on_activated)"), "double-click / Enter on a row is wired")
-	assert_true(src.contains("EditorInterface.open_scene_from_path("), "a row opens its scene AS the edited scene")
-	assert_true(src.contains("get_node_or_null(NodePath(node))"), "then finds the node by its key from the root")
-	assert_true(src.contains("EditorInterface.get_selection()"), "and selects it in the Scene dock")
-	assert_true(src.contains("EditorInterface.get_edited_scene_root()") and src.contains("root.scene_file_path"),
-		"Use Open Scene reads the edited scene root's file path")
-
-
-func test_scene_diff_view_bounds_its_own_height() -> void:
-	# A TabContainer's minimum is the CURRENT tab's minimum, and the editor's bottom splitter keeps whatever height it
-	# grew to — so one tall tab, once shown, leaves the panel tall for every tab after it. Source-scanned: an
-	# off-tree Control has no layout pass to measure; what must not regress is the STRUCTURE.
-	var src := FileAccess.get_file_as_string(VIEW_PATH)
-	assert_ne(src, "", "scene_diff_view.gd source should be readable")
-	assert_true(src.contains("ScrollContainer.SCROLL_MODE_DISABLED"), "a long path or row must never widen the bottom panel")
-	assert_true(src.contains("custom_minimum_size = Vector2(0, BODY_MIN_HEIGHT)"), "the scrolled body carries the tab's only vertical minimum")
-	assert_lte(SceneDiffView.BODY_MIN_HEIGHT, 120.0, "the body floor stays small (mirrors reach_view / stats_view)")
+func test_double_click_routes_each_row_to_the_file_that_holds_its_node() -> void:
+	# The handoff's tail (open the scene, select the node) needs a live editor. Everything before it is driven here:
+	# the Tree's item_activated reaches the handler, an empty selection or a section header does nothing, and each row
+	# resolves to the file its node lives in -- a GONE row to Before (the only file it still exists in), NEW and CHANGED
+	# rows and the property lines under them to After. Both scenes are deleted after the Compare, so every row stops
+	# at the handler's missing-file refusal -- whose status names the file the row resolved to -- and never reaches
+	# the editor.
+	var before_path := _write_temp("cs_diff_route_before.tscn", BEFORE_TEXT)
+	var after_path := _write_temp("cs_diff_route_after.tscn", AFTER_TEXT)
 	var v = SceneDiffView.new()
-	assert_true(v._tree.get_parent() is ScrollContainer, "the Tree lives INSIDE the ScrollContainer")
-	assert_eq(v._status.get_parent(), v, "the status Label is a direct child of the tab, outside the scroll")
+	v._before.text = before_path
+	v._after.text = after_path
+	v._compare()
+	_remove_temp(before_path)
+	_remove_temp(after_path)
+	var done: String = v._status.text
+	var new_head: TreeItem = v._tree.get_root().get_first_child()
+	var gone_head: TreeItem = new_head.get_next()
+	var changed_head: TreeItem = gone_head.get_next()
+	v._tree.item_activated.emit()
+	assert_eq(v._status.text, done, "a double-click with no row selected does nothing")
+	new_head.select(0)
+	v._tree.item_activated.emit()
+	assert_eq(v._status.text, done, "a section header opens nothing")
+	assert_false(v._status.has_theme_color_override("font_color"), "…and raises no refusal")
+	gone_head.get_first_child().select(0)
+	v._tree.item_activated.emit()
+	assert_true(v._status.text.contains("cs_diff_route_before.tscn") and not v._status.text.contains("cs_diff_route_after.tscn"),
+		"a GONE row resolves to BEFORE -- opening After would land on a scene that no longer has the node: %s" % v._status.text)
+	assert_true(v._status.has_theme_color_override("font_color"), "a missing file is a tinted refusal, never an editor error")
+	v._set_status("")  # clear the last verdict so each row below must write its own
+	new_head.get_first_child().select(0)
+	v._tree.item_activated.emit()
+	assert_true(v._status.text.contains("cs_diff_route_after.tscn") and not v._status.text.contains("cs_diff_route_before.tscn"), "a NEW row resolves to After: %s" % v._status.text)
+	v._set_status("")
+	changed_head.get_first_child().get_first_child().select(0)
+	v._tree.item_activated.emit()
+	assert_true(v._status.text.contains("cs_diff_route_after.tscn") and not v._status.text.contains("cs_diff_route_before.tscn"), "a property line under a CHANGED node resolves to After too: %s" % v._status.text)
 	v.free()
 
 
+func test_scene_diff_view_minimum_size_does_not_grow_with_a_big_diff() -> void:
+	# A TabContainer's minimum is the CURRENT tab's minimum, and the editor's bottom splitter keeps whatever size it
+	# grew to -- so one tall or wide tab, once shown, deforms the panel for every tab after it. Measured IN the tree
+	# (an off-tree Control never recomputes its minimum): a Compare that paints hundreds of long rows and a status
+	# naming two long file names must leave the tab's minimum size exactly where the idle tab had it.
+	var stem := "cs_diff_wide_" + "x".repeat(90)
+	var many := "[gd_scene format=3]\n[node name=\"Root\" type=\"Node3D\"]\n"
+	for i in 300:
+		many += "[node name=\"Node_%03d_%s\" type=\"Node3D\" parent=\".\"]\n" % [i, "y".repeat(120)]
+	var before_path := _write_temp(stem + "_before.tscn", BEFORE_TEXT)
+	var after_path := _write_temp(stem + "_after.tscn", many)
+	var v = SceneDiffView.new()
+	add_child_autofree(v)
+	await wait_process_frames(2)
+	var idle_min: Vector2 = v.get_combined_minimum_size()
+	var idle_status_min: Vector2 = v._status.get_combined_minimum_size()
+	v._before.text = before_path
+	v._after.text = after_path
+	v._compare()
+	await wait_process_frames(2)
+	assert_eq(v._tree.get_root().get_first_child().get_child_count(), 300, "precondition: the Compare painted 300 long rows")
+	assert_true(v._status.text.contains(stem), "precondition: the status names the long file names")
+	assert_eq(v.get_combined_minimum_size(), idle_min, "300 long rows and a long verdict leave the tab's minimum size unchanged")
+	assert_eq(v._status.get_combined_minimum_size(), idle_status_min, "the status row in particular stays the height it rests at")
+	# Controls: the same verdict in a plain Label would have outgrown the tab, and wrapped at the status's own width
+	# without the two-line clamp it would be taller -- so the equalities above are held by the tab, not by a short line.
+	var unwrapped := Label.new()
+	unwrapped.text = v._status.text
+	add_child_autofree(unwrapped)
+	var unclamped := Label.new()
+	unclamped.autowrap_mode = v._status.autowrap_mode
+	unclamped.custom_minimum_size = Vector2(v._status.size.x, 0)
+	unclamped.text = v._status.text
+	add_child_autofree(unclamped)
+	await wait_process_frames(2)
+	assert_gt(unwrapped.get_combined_minimum_size().x, idle_min.x, "control: unwrapped, this verdict is wider than the whole idle tab")
+	assert_gt(unclamped.get_combined_minimum_size().y, idle_status_min.y, "control: wrapped but unclamped, this verdict is taller than the status row")
+	# The fence that keeps the body out of the tab's minimum: the Tree sits in a ScrollContainer that never scrolls
+	# sideways and carries the body floor, with the Tree's own floor inside it.
+	var scroll := v._tree.get_parent() as ScrollContainer
+	assert_true(scroll != null, "the Tree lives INSIDE a ScrollContainer")
+	if scroll != null:
+		assert_eq(scroll.horizontal_scroll_mode, ScrollContainer.SCROLL_MODE_DISABLED, "a long row must never widen the bottom panel")
+		assert_eq(scroll.custom_minimum_size.y, SceneDiffView.BODY_MIN_HEIGHT, "the scrolled body carries the tab's body floor")
+		assert_true(scroll.custom_minimum_size.y <= 120.0, "the body floor stays under the bottom panel's shared 120 px ceiling (test_devtools_layout TALL_FLOOR; reach / refs / saves / stats hold their tabs to it)")
+		assert_true(v._tree.custom_minimum_size.y <= scroll.custom_minimum_size.y, "the Tree's own floor fits inside the body floor, so the outer scroll never engages")
+	assert_eq(v._status.get_parent(), v, "the status Label is a direct child of the tab, outside the scroll")
+	_remove_temp(before_path)
+	_remove_temp(after_path)
+
+
+## The write surfaces a READ-ONLY tab must never name, as [label, RegEx] pairs matched over comment-MASKED code: saving
+## a resource; a file handle (the tab reads through FileAccess.get_file_as_string / file_exists, so no handle that
+## could be opened for WRITE ever exists in it) or a FileAccess attribute write; a file-system mutation on a
+## DirAccess; a project-settings write; an editor scene save; an undo-able scene edit; sending a file to the trash.
+## Call SHAPES rather than bare words, so the tab's own `_tree.clear()` / `sel.clear()` / FileAccess reads stay legal.
+const READ_ONLY_WRITE_SURFACES := [
+	["ResourceSaver", "\\bResourceSaver\\b"],
+	["file handle", "\\bFileAccess\\s*\\.\\s*(open|open_compressed|open_encrypted|open_encrypted_with_pass|create_temp|WRITE|READ_WRITE|WRITE_READ)\\b"],
+	["FileAccess attribute write", "\\bFileAccess\\s*\\.\\s*set_\\w+\\s*\\("],
+	["file store", "\\.\\s*store_\\w+\\s*\\("],
+	["DirAccess mutation", "\\b(make_dir|make_dir_recursive|make_dir_absolute|make_dir_recursive_absolute|remove|remove_absolute|rename|rename_absolute|copy|copy_absolute|create_link)\\s*\\("],
+	["ProjectSettings write", "\\bProjectSettings\\s*\\.\\s*(save|save_custom|set_setting|set|clear|set_initial_value|set_order)\\s*\\("],
+	["editor save", "\\b(save_scene|save_scene_as|save_all_scenes|mark_scene_as_unsaved)\\s*\\("],
+	["undo-able edit", "\\b(get_editor_undo_redo|EditorUndoRedoManager|UndoRedo)\\b"],
+	["trash", "\\bmove_to_trash\\s*\\("],
+]
+
+
+## Every write surface in `source`, as "label: matched text" lines. Comments are masked first with the audit panel's
+## shared masker, so a docstring PROMISING "no ResourceSaver" is not read as a violation of that promise.
+func _write_surfaces(source: String) -> Array:
+	var code := ScanWiring._mask_comments(source)
+	var out: Array = []
+	for entry in READ_ONLY_WRITE_SURFACES:
+		var pair := entry as Array
+		var re := RegEx.create_from_string(str(pair[1]))
+		for m in re.search_all(code):
+			out.append("%s: %s" % [str(pair[0]), m.get_string()])
+	return out
+
+
 func test_scene_diff_view_is_read_only() -> void:
-	# Scene Diff is on the QA doc's read-only list: it compares, never merges or writes. Scanned over MASKED source —
-	# the file's own comments name the things it does not do, and a raw grep would trip on the promise.
-	var code := ScanWiring._mask_comments(FileAccess.get_file_as_string(VIEW_PATH))
-	assert_ne(code, "", "scene_diff_view.gd source should be readable")
-	assert_false(code.contains("ResourceSaver"), "never saves a resource")
-	assert_false(code.contains("FileAccess.WRITE"), "never opens a file for writing")
-	assert_false(code.contains("DirAccess"), "never touches the file system beyond reading two scenes")
-	assert_false(code.contains("get_editor_undo_redo"), "never mutates the open scene — no merge, so no undo entry to get wrong")
-	assert_false(code.contains("text = \"Diff\""), "the verb is Compare; Diff is retired")
-	assert_false(code.contains("\"Scene A"), "the fields are Before / After, not A / B")
-	var pure := ScanWiring._mask_comments(FileAccess.get_file_as_string("res://addons/cybersunday_tools/dock_scenediff/scene_diff.gd"))
-	assert_false(pure.contains("FileAccess") or pure.contains("ResourceSaver"), "the pure module never reads or writes a file")
+	# Scene Diff is on the QA doc's read-only list: it compares, never merges or writes. "Never writes" is not something
+	# a driven test can observe — a write on a branch no fixture reaches still ships — so this is a POLICY LINT over
+	# EVERY script the tab is made of: the glue, the pure parse/diff module, and any script added to the folder later.
+	var dir := VIEW_PATH.get_base_dir()
+	var scripts: Array = []
+	for f in DirAccess.get_files_at(dir):
+		if str(f).get_extension() == "gd":
+			scripts.append(dir.path_join(str(f)))
+	assert_has(scripts, VIEW_PATH, "the lint covers the tab's editor glue: %s" % str(scripts))
+	assert_has(scripts, dir.path_join("scene_diff.gd"), "and the pure parse/diff module: %s" % str(scripts))
+	# CONTROL: the lint catches a real write in code, and does not catch the same words inside a comment or the tab's
+	# own reads.
+	var violation := "func _merge(root: Node, path: String) -> void:\n\tvar packed := PackedScene.new()\n" \
+		+ "\tpacked.pack(root)\n\tResourceSaver.save(packed, path)\n" \
+		+ "\tvar f := FileAccess.open(path + \".diff\", FileAccess.WRITE)\n\tf.store_string(\"merged\")\n"
+	var caught := _write_surfaces(violation)
+	assert_eq(caught.size(), 4, "control: ResourceSaver.save, FileAccess.open, FileAccess.WRITE and store_string are all caught: %s" % str(caught))
+	var legal := "## No ResourceSaver, no FileAccess.WRITE, no save_scene() anywhere below.\nfunc _read(p: String) -> String:\n" \
+		+ "\tif not FileAccess.file_exists(p):\n\t\treturn \"\"\n\t_tree.clear()\n\treturn FileAccess.get_file_as_string(p)\n"
+	assert_eq(_write_surfaces(legal), [], "control: a docstring promising no writes is masked, and a plain read is not flagged")
+	for path in scripts:
+		var source := FileAccess.get_file_as_string(str(path))
+		assert_ne(source, "", "%s should be readable" % str(path))
+		var found := _write_surfaces(source)
+		assert_eq(found, [], "%s must stay read-only, but its code names a write surface: %s" % [str(path), str(found)])
 
 
 # ================================================================================================================

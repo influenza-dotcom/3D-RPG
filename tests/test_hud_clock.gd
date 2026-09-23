@@ -116,7 +116,7 @@ func test_the_clock_has_options_rows() -> void:
 	for spec in catalog.specs:
 		if spec != null and want.has(spec.key):
 			found[spec.key] = true
-			assert_eq(spec.tab, &"Accessibility", "the %s row lives on the Accessibility tab" % spec.key)
+			assert_eq(spec.tab, &"HUD", "the %s row lives on the HUD tab" % spec.key)
 			assert_eq(spec.getter, StringName(want[spec.key][0]), "%s is bound to the Settings field" % spec.key)
 			assert_eq(spec.setter, StringName(want[spec.key][1]), "%s is bound to the Settings setter" % spec.key)
 			assert_false(spec.label.is_empty(), "%s carries a visible label" % spec.key)

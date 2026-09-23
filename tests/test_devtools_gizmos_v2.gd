@@ -38,12 +38,20 @@ func test_arc_zero_start_points_along_plus_z() -> void:
 
 
 func test_arc_sweep_endpoint_is_at_sweep_angle() -> void:
-	# The second bounding radius (a[3]) is origin -> the swept end point at start+sweep.
+	# The second bounding radius (a[3]) is origin -> the swept end point at start+sweep. Expectations are the
+	# hand-placed compass points of the atan2(x, z) convention (0 = +Z, a quarter turn = +X, a half turn = -Z),
+	# never the helper's own trig, so a convention slip reads as the door arc drawn on the wrong side.
 	var r := 2.0
-	var sweep := deg_to_rad(90.0)
-	var a := Shapes.arc(r, 0.0, sweep)
-	var expected := Vector3(sin(sweep), 0.0, cos(sweep)) * r  # 90deg -> ~(r, 0, 0)
-	assert_almost_eq(a[3], expected, Vector3(0.001, 0.001, 0.001), "open edge points to the swept angle")
+	var tol := Vector3(0.001, 0.001, 0.001)
+	var a := Shapes.arc(r, 0.0, deg_to_rad(90.0))
+	assert_almost_eq(a[3], Vector3(r, 0.0, 0.0), tol,
+		"a quarter-turn sweep from +Z must put the open-panel edge on +X")
+	# A non-zero start: the end is start + sweep, not the sweep alone (90 + 90 = a half turn -> -Z).
+	var b := Shapes.arc(r, deg_to_rad(90.0), deg_to_rad(90.0))
+	assert_almost_eq(b[1], Vector3(r, 0.0, 0.0), tol, "the closed-panel edge sits at the start angle (+X)")
+	assert_almost_eq(b[3], Vector3(0.0, 0.0, -r), tol,
+		"the open-panel edge must sit at start + sweep (-Z) -- a swing drawn from 0 would ignore the door's rest angle")
+	assert_almost_eq(b[b.size() - 1], Vector3(0.0, 0.0, -r), tol, "the curved edge ends exactly on the open-panel edge")
 
 
 func test_arc_negative_sweep_goes_the_other_way() -> void:

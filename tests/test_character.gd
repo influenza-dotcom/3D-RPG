@@ -9,11 +9,15 @@ extends GutTest
 ##     its damaged(current_hp, max_hp) signal.
 ##   - heal() partial restore and clamp-at-max_hp.
 ##   - hp == max_hp after _ready(); the _dead latch makes take_damage a no-op.
-##   - Exported defaults: max_hp (10.0), head_local_y (0.4), explosion_velocity (ZERO).
+##   - Authored defaults as INVARIANTS, not numbers: a default actor spawns alive with a positive pool, and the
+##     default hit zones split the 2 m capsule into head / torso / legs (a retune that keeps that shape passes).
+##   - reset_for_reuse(): a pooled body comes back alive, at full HP, carrying no residual blast impulse, and a
+##     body shot from its previous life no longer disqualifies it from the all-crit reward.
 ##   - is_headshot() head-zone threshold; is_off_guard() base false.
-##   - Weapon-host aim contract (get_aim_origin/direction/basis) at an identity transform.
-##   - get_hit_flash() base null; the base no-op hooks exist (indicate_damage_from,
-##     on_dealt_hit, on_scored_kill, on_weapon_fired, on_air_dash).
+##   - Weapon-host aim contract (get_aim_origin/direction/basis) on a MOVED and TURNED body.
+##   - get_hit_flash() base null; the base no-op hooks exist and are inert when CALLED (indicate_damage_from,
+##     on_dealt_hit, on_scored_kill — the last one driven through the real lethal branch — on_weapon_fired,
+##     on_air_dash).
 ##   - The movement guard reports no live physics space on a bare off-tree actor.
 ##
 ## DELIBERATELY SKIPPED (would crash / mutate the world in a unit run, see character.gd):
@@ -117,29 +121,67 @@ func test_current_carry_weight_reflects_backpack() -> void:
 	it = null
 
 
-# --- Exported defaults (pure: load().new() WITHOUT add_child, so _ready never runs) ---
+# --- Authored defaults, pinned as the shape the design needs (the numbers themselves are designer knobs) ---
 
-func test_max_hp_default() -> void:
-	# Mirrors test_smoke's blast_damp_divisor load+new pattern. No add_child => _ready
-	# (which would assign hp) never runs, so we read the raw exported default.
-	var c = load(CHARACTER_PATH).new()
-	assert_eq(c.max_hp, 4.0,
-		"Character.max_hp must default to 4.0 — the authored baseline health pool (retuned 2026-06 from 10; subclasses/scenes tune up from here)")
-	c.free()
+## max_hp is retuned freely (it was 10 until 2026-06), so its NUMBER is not the contract. What every retune must keep:
+## the default pool is positive, and an actor spawned with it enters the world on exactly that pool —
+## _apply_stats floors max_hp at 1, so a non-positive default would silently spawn every un-tuned actor on a 1 HP
+## pool nobody authored.
+func test_a_default_authored_actor_spawns_alive() -> void:
+	var raw = load(CHARACTER_PATH).new()  # no add_child => _ready never runs: the raw exported default
+	assert_gt(raw.max_hp, 0.0,
+		"Character.max_hp must default to a POSITIVE pool — _apply_stats floors max_hp at 1, so a non-positive default would silently spawn every un-tuned actor on a 1 HP pool nobody authored")
+	var authored: float = raw.max_hp
+	raw.free()
+	var c := _Stub.new()
+	add_child_autofree(c)  # the default CharacterStats sheet adds 0 max HP, so the spawned pool is the authored one
+	assert_eq(c.hp, authored,
+		"a default-authored actor must enter the world with exactly the authored pool - the 1 HP floor in _apply_stats must not have had to rescue it")
+	assert_true(c.is_alive(), "a default-authored actor must spawn fightable (is_alive), not as a corpse")
 
 
-func test_head_local_y_default() -> void:
-	var c = load(CHARACTER_PATH).new()
-	assert_eq(c.head_local_y, 0.4,
-		"head_local_y must default to 0.4 so the head zone sits at the top cap of the 2m capsule attackers aim for")
-	c.free()
+## The zone knobs (head_local_y / leg_local_y / arm_local_x) are per-enemy tuning, so what is pinned is the layout they
+## must produce on the 2 m capsule centred on the origin (local y -1..+1) every attacker aims at: the top cap is the
+## head, the centre is the torso, the bottom is the legs — and is_headshot agrees with body_part_at about the head.
+func test_default_hit_zones_split_the_capsule_into_head_torso_and_legs() -> void:
+	var c := _Stub.new()
+	add_child_autofree(c)  # identity transform: world y == local y
+	assert_gt(c.head_local_y, c.leg_local_y,
+		"the head threshold must sit ABOVE the legs threshold, or the torso band is empty and every body shot is a limb/head hit")
+	var top_cap := Vector3(0.0, 0.9, 0.0)
+	var centre := Vector3.ZERO
+	var shins := Vector3(0.0, -0.9, 0.0)
+	assert_eq(c.body_part_at(top_cap), Character.BodyPart.HEAD, "a hit on the capsule's top cap (y 0.9) must be a HEAD hit")
+	assert_true(c.is_headshot(top_cap),
+		"...and is_headshot must agree, or the headshot multiplier and the head weakpoint disagree about the same hit")
+	assert_eq(c.body_part_at(centre), Character.BodyPart.TORSO, "centre mass (y 0) must be a TORSO hit")
+	assert_false(c.is_headshot(centre), "a centre-mass hit must never earn the headshot multiplier")
+	assert_eq(c.body_part_at(shins), Character.BodyPart.LEGS, "a hit near the capsule's bottom (y -0.9) must be a LEGS hit")
 
 
-func test_explosion_velocity_defaults_to_zero() -> void:
-	var c = load(CHARACTER_PATH).new()
+## The pool reuse path is where "a fresh actor carries no residual blast impulse" can actually break: a pooled body
+## that died mid-rocket-jump must not launch its next life, stay latched dead, or keep the last life's damage.
+func test_pooled_reuse_comes_back_alive_with_no_residual_blast() -> void:
+	var c := _Stub.new()
+	c.max_hp = 10.0
+	add_child_autofree(c)
+	c.take_damage(3.0, false)
+	c.explosion_velocity = Vector3(0.0, 12.0, -4.0)  # blasted...
+	c.velocity = Vector3(2.0, 5.0, 0.0)
+	c._dead = true                                   # ...and killed, mid-flight
+	c.reset_for_reuse()
 	assert_eq(c.explosion_velocity, Vector3.ZERO,
-		"explosion_velocity must start at ZERO so a freshly spawned actor carries no residual blast impulse")
-	c.free()
+		"a reused body must carry NO residual blast impulse, or its next life spawns already flying")
+	assert_eq(c.velocity, Vector3.ZERO, "a reused body must not keep the previous life's momentum")
+	assert_eq(c.hp, 10.0, "a reused body comes back at full health (max_hp), not with the last life's 7")
+	assert_true(c.is_alive(), "a reused body must be fightable again — the death latch has to clear")
+	assert_false(c.killed_by_only_crits(),
+		"the new life has taken no hits, so it cannot already qualify for the all-crit reward")
+	# The setup's body shot disqualified the LAST life from the all-crit bounty. A new life that opens on a headshot
+	# must qualify again (hp 10 -> 9 keeps this on the non-lethal branch), or a pooled NPC can never pay it out.
+	c.take_damage(1.0, true)
+	assert_true(c.killed_by_only_crits(),
+		"a reused body's first headshot must count toward the all-crit reward: a body shot from the PREVIOUS life must not disqualify the new one")
 
 
 func test_offtree_character_has_no_live_physics_space() -> void:
@@ -196,46 +238,94 @@ func test_mesh_asset_instances_glb_style_packed_scene() -> void:
 	authored_root.free()
 
 
-# --- Base no-op / null hooks (pure: has_method / return value, no add_child needed) ---
+# --- Base no-op / null hooks (called and checked inert, or a pure return value) ---
 
+## damage_trace.gd and explosion_area.gd call this on every Character they hurt, and projectile.gd does too whenever its
+## shooter is still alive, typed as Character, so an NPC victim lands on the base. Only the Player overrides it (the
+## directional damage arc on its HUD); on the base it must be inert when actually called — attributed (a shooter
+## passed) or not (an explosion) — or every hit on an NPC would double up its damage, kill it early or grow indicator
+## nodes nobody sees.
 func test_indicate_damage_from_is_base_noop() -> void:
-	# The directional-damage-indicator hook must EXIST as a safe no-op so Character
-	# callers work on enemies that don't override it. Calling it must not crash.
-	var c = load(CHARACTER_PATH).new()
-	assert_true(c.has_method("indicate_damage_from"),
-		"Character must expose indicate_damage_from() as a no-op hook so callers work on non-overriding enemies")
-	c.indicate_damage_from(Vector3.ZERO)
-	c.free()
+	var c := _Stub.new()
+	c.max_hp = 10.0
+	add_child_autofree(c)
+	var shooter := Node.new()
+	watch_signals(c)
+	var children_before := c.get_child_count()
+	c.indicate_damage_from(Vector3(3.0, 0.0, 4.0))
+	c.indicate_damage_from(Vector3(-2.0, 1.0, 0.0), shooter)
+	assert_eq(c.hp, 10.0, "the base damage-indicator hook must not touch the victim's health")
+	assert_true(c.is_alive(), "the base damage-indicator hook must not kill the victim")
+	assert_signal_not_emitted(c, "damaged",
+		"the base hook must not report a second hit — the take_damage that preceded it already emitted `damaged`")
+	assert_signal_not_emitted(c, "died", "the base hook must not report a death")
+	assert_eq(c.get_child_count(), children_before,
+		"the base hook must build no indicator node — only the Player overrides it with HUD feedback")
+	assert_true(is_instance_valid(shooter), "the base hook must leave the attributed shooter alone")
+	shooter.free()
 
 
+## damage_trace.gd tells EVERY wielder it landed a hit and explosion_area.gd duck-types the name. The base must exist AND
+## be inert when actually called — an NPC wielder landing a shot must not lose health, die or grow feedback nodes.
 func test_on_dealt_hit_is_base_noop() -> void:
-	var c = load(CHARACTER_PATH).new()
+	var c := _Stub.new()
+	c.max_hp = 10.0
+	add_child_autofree(c)
 	assert_true(c.has_method("on_dealt_hit"),
 		"Character must expose on_dealt_hit() so any wielder can be told it landed a hit without a Player-specific override")
-	c.free()
+	var children_before := c.get_child_count()
+	c.on_dealt_hit(true, 0.25)
+	c.on_dealt_hit(false, 1.0)
+	assert_eq(c.hp, 10.0, "the base hit-confirm hook must not touch the WIELDER's health")
+	assert_true(c.is_alive(), "the base hit-confirm hook must not kill the wielder")
+	assert_eq(c.get_child_count(), children_before,
+		"the base hook must spawn no hitmarker/feedback node — only the Player overrides it with HUD feedback")
 
 
 ## The kill-flash cue. take_damage's lethal branch fires it DUCK-TYPED on whoever _resolve_killer picked, and that
 ## is EVERY killer in the game — so an NPC that kills another NPC lands here too. It must therefore (a) exist on
 ## the base at all, or the has_method guard misses and the seam quietly stops working for anything that isn't a
 ## Player, and (b) do NOTHING on the base, or NPC-vs-NPC infighting would pour red across the player's sky.
-## Both halves are asserted: the method exists, and CALLING it on a bare Character is inert. The behaviour that
-## rides on it (once per victim, never a suicide, delayed credit) is pinned by the kill-cue tests at the bottom.
+## Both halves are asserted, through the REAL lethal branch: an NPC-style killer that overrides only reward_kill (so
+## the base on_scored_kill is what the cue line reaches) kills a victim; the bounty proves the branch resolved that
+## killer, and the killer comes out of it untouched. The behaviour that rides on it (once per victim, never a
+## suicide, delayed credit) is pinned by the kill-cue tests at the bottom.
 func test_on_scored_kill_is_base_noop() -> void:
-	var c = load(CHARACTER_PATH).new()
-	assert_true(c.has_method("on_scored_kill"),
-		"Character must expose on_scored_kill() so take_damage's lethal branch can tell any killer it scored, without a Player-specific override")
-	c.on_scored_kill()  # must not crash and must not touch StarSky / the HUD — the base is a pure no-op
-	c.free()
+	var killer := _BountyOnlyKiller.new()
+	killer.max_hp = 50.0
+	killer.hp = 50.0
+	var victim := _kill_spy()
+	assert_true(killer.has_method("on_scored_kill"),
+		"Character must expose on_scored_kill() so take_damage's lethal branch (which has_method-gates it) can tell any killer it scored")
+	victim.take_damage(999.0, false, killer)
+	assert_eq(killer.rewarded, 1,
+		"control: the lethal branch must have resolved this killer (it paid the bounty) — so the cue line ran on it too")
+	assert_eq(killer.hp, 50.0, "the base kill cue must not touch the killer's health")
+	assert_true(killer.is_alive(), "the base kill cue must not kill the killer")
+	assert_eq(killer.get_child_count(), 0,
+		"the base kill cue must build nothing — NPC-vs-NPC infighting reaches this hook and must never grow a flash")
+	killer.free()
+	victim.free()
 
 
+## attack.gd calls on_weapon_fired on every wielder each shot and air_dash.gd duck-types on_air_dash, so both must exist
+## on the base AND be inert when actually called: an NPC firing or dashing must not lose health, die or grow a
+## feedback node (only the Player overrides them with recoil / camera-shake feedback).
 func test_weapon_fire_and_launch_hooks_exist() -> void:
-	var c = load(CHARACTER_PATH).new()
+	var c := _Stub.new()
+	c.max_hp = 10.0
+	add_child_autofree(c)
 	assert_true(c.has_method("on_weapon_fired"),
 		"Character must expose on_weapon_fired() — a hosted Weapon calls it every shot, so an Enemy wielder needs no override")
 	assert_true(c.has_method("on_air_dash"),
 		"Character must expose on_air_dash() — the dash feedback hook the AirDash ability calls, as a base no-op")
-	c.free()
+	var children_before := c.get_child_count()
+	c.on_weapon_fired(null)
+	c.on_air_dash(0.5)
+	assert_eq(c.hp, 10.0, "the base fire / dash hooks must not touch the wielder's health")
+	assert_true(c.is_alive(), "the base fire / dash hooks must not kill the wielder")
+	assert_eq(c.get_child_count(), children_before,
+		"the base fire / dash hooks must build nothing — an NPC firing or dashing must never grow recoil or shake feedback nodes")
 
 
 func test_get_hit_flash_base_returns_null() -> void:
@@ -474,18 +564,24 @@ func test_get_aim_direction_is_forward() -> void:
 		"get_aim_direction() must fire straight forward (-global_basis.z) from the body so a camera-less wielder still aims")
 
 
-func test_get_aim_basis_is_identity_at_identity_transform() -> void:
+## A body that has walked and turned: an aim contract that ignores the transform (returning the origin / identity)
+## would still pass at spawn, which is exactly where an NPC never shoots from.
+func test_get_aim_basis_turns_with_the_body() -> void:
 	var c := _Stub.new()
 	add_child_autofree(c)
-	assert_eq(c.get_aim_basis(), Basis.IDENTITY,
-		"get_aim_basis() must return this body's transform basis (identity here) — the basis projectile spread rotates around")
+	c.rotation = Vector3(0.0, PI / 2.0, 0.0)  # turned 90 degrees left
+	assert_true(c.get_aim_basis().is_equal_approx(Basis(Vector3.UP, PI / 2.0)),
+		"get_aim_basis() must be this body's CURRENT basis (turned 90 degrees here) — the basis projectile spread rotates around")
+	assert_true(c.get_aim_direction().is_equal_approx(Vector3(-1.0, 0.0, 0.0)),
+		"a body turned 90 degrees left must fire down -X, not the spawn-time -Z")
 
 
-func test_get_aim_origin_is_global_position() -> void:
+func test_get_aim_origin_follows_the_body() -> void:
 	var c := _Stub.new()
 	add_child_autofree(c)
-	assert_eq(c.get_aim_origin(), Vector3.ZERO,
-		"get_aim_origin() must return the body's global_position (origin here) — where hitscan/projectiles originate")
+	c.global_position = Vector3(3.0, 1.5, -7.0)
+	assert_true(c.get_aim_origin().is_equal_approx(Vector3(3.0, 1.5, -7.0)),
+		"get_aim_origin() must return where the body IS now — where its hitscan/projectiles originate — not the world origin")
 
 
 # --- the KILL CUE: Character.take_damage's lethal branch -> killer.on_scored_kill() -----------
@@ -509,6 +605,14 @@ class _KillSpy extends Character:
 		pass
 	func on_scored_kill() -> void:
 		scored += 1
+	func reward_kill(_bounty: float) -> void:
+		rewarded += 1
+
+
+## An NPC-style killer: it pays out like any Character killer but does NOT override on_scored_kill, so the lethal
+## branch's cue line lands on the BASE hook (test_on_scored_kill_is_base_noop).
+class _BountyOnlyKiller extends Character:
+	var rewarded := 0
 	func reward_kill(_bounty: float) -> void:
 		rewarded += 1
 

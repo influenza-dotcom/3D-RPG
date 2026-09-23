@@ -13,20 +13,25 @@ extends GutTest
 ##   1. THE INVERSION itself (`weapon_hands_position`) — pure and static, so the algebra can be checked without
 ##      a rig. If it drifts, the hands float beside the weapon rather than on it.
 ##   2. THE MODE IS EXCLUSIVE. One rig serves three poses (carry hold / bare fists / weapon hold) and only the
-##      weapon hold re-solves its transform every frame; the fists' walk-bob and rest-ease write the SAME four
+##      weapon hold re-solves its transform every frame; the fists' walk-bob and rest-ease write the SAME
 ##      properties, so both have to yield to this latch or they fight frame by frame.
-##   3. THE NULL GUARDS. Every `_wanted` clause is a host read, and the component holds zero gameplay state.
+##   3. THE GATES. Every `_wanted` clause is a host read, and the component holds zero gameplay state.
 ##   4. THE AUTHORED GRIPS ARE REACHABLE. `WeaponData.view_model_grip` is per-weapon because these view models
 ##      share no origin — and a grip left at ZERO sits at the gun rig's own origin, which is ON the camera
 ##      plane: the hands would be solved to a point nothing can render. That is invisible in code review and
 ##      obvious in one render (scripts/tools/probes/preview_weapon_hands_frame.gd).
 ##
-## Off-tree throughout (the test_fp_body_arms idiom): a bare first_person_body.gd + a bare player.gd host, no
-## `_ready` on either.
+## Everything is DRIVEN. The live harness (_live) is: a bare player.gd host (off-tree, no `_ready`), the component
+## in-tree with its own processing OFF (so its slides can create Tweens and nothing ticks unasked), a GunMesh
+## in-tree with PROCESS_MODE_DISABLED (its `_ready` builds the swapper, but GunPose never runs — the test places
+## the gun), and a bob mount + arms rig carrying the shipped arm model. Weapons are synthetic WeaponData, so no
+## authored flag on a shipped .tres can quietly change what a gate test is testing.
 
 const FP_BODY_SOURCE := "res://scripts/player/first_person_body.gd"
 const PLAYER_SOURCE := "res://scripts/player/player.gd"
 const CAMERA_RIG := "res://scenes/player/camera_rig.tscn"
+const ARM_MODEL := "res://assets/models/arm.blend"
+const FISTS_PATH := "res://resources/weapons/fists.tres"
 ## Every shipped weapon that mounts a view model. fists.tres is excluded on purpose — it is
 ## `view_model_is_first_person_only`, i.e. the bare-fists rig, which is the OTHER pose of this same rig.
 const WEAPONS := [
@@ -45,22 +50,88 @@ const WEAPONS := [
 const MIN_GRIP_DEPTH := 0.10
 
 
-func _build() -> Dictionary:
+## A synthetic weapon that mounts a (blank) view model — enough for every gate, which only asks "is there one".
+func _weapon(grip: Vector3, one_handed: bool = false, hand_scale: float = 1.0) -> WeaponData:
+	var wd := WeaponData.new()
+	wd.view_model = PackedScene.new()
+	wd.view_model_grip = grip
+	wd.view_model_one_handed = one_handed
+	wd.view_model_hand_scale = hand_scale
+	return wd
+
+
+## The live weapon-hold harness (see the header). `mounted` is what the gun rig has on it AND what the combat
+## inventory has equipped — tests that need the two to disagree (a swap in flight) change one of them.
+## In the baseline every `_weapon_hands_wanted` clause passes. Caller frees via _teardown.
+func _live(mounted: WeaponData) -> Dictionary:
 	var host = load(PLAYER_SOURCE).new()
 	var body = load(FP_BODY_SOURCE).new()
 	body.host = host
-	return {"host": host, "body": body}
+	add_child_autofree(body)
+	body.set_process(false)
+	var gun := GunMesh.new()
+	gun.process_mode = Node.PROCESS_MODE_DISABLED  # _ready still builds the swapper; GunPose never ticks
+	gun.position = Vector3(0.19, -0.23, -0.19)
+	add_child_autofree(gun)
+	gun._swapper._mounted_weapon = mounted
+	host.gun_mesh = gun
+	var ws := Weapon.new()
+	var hub := Inventory.new()
+	var atk := Attack.new()
+	ws.inventory = hub
+	ws.attack = atk
+	host.weapon_system = ws
+	hub.equipped_weapon = mounted
+	var mount := Node3D.new()
+	add_child_autofree(mount)
+	var rig := BodyModelSwap.new()
+	rig.animate_arms = false
+	rig.arm_model = load(ARM_MODEL)
+	mount.add_child(rig)
+	rig.arm_rotation = Vector3(0.0, 180.0, 0.0)  # hands down the camera's -Z, as _build_first_person_arms sets
+	rig.arm_scale = 0.14
+	rig.visible = false  # built hidden
+	body._fp_arms = rig
+	body._fp_arm_bob_mount = mount
+	return {"host": host, "body": body, "gun": gun, "ws": ws, "hub": hub, "atk": atk, "mount": mount, "rig": rig}
+
+
+## fists.tres is the SHARED cached resource (Player.FISTS preloads the same instance), and one gate test authors a
+## view model on it to isolate the identity clause. Whatever it held going in is saved here and put back afterwards,
+## even if the test bailed — never a hard-coded value, so a future authored model on fists survives the suite.
+var _saved_fists_view_model: PackedScene
+
+
+func before_each() -> void:
+	_saved_fists_view_model = (load(FISTS_PATH) as WeaponData).view_model
+
+
+func after_each() -> void:
+	(load(FISTS_PATH) as WeaponData).view_model = _saved_fists_view_model
+	_saved_fists_view_model = null
 
 
 func _teardown(parts: Dictionary) -> void:
-	(parts["body"] as Node).free()
+	var body = parts["body"]
+	body.set_process(false)
+	body._kill_fp_arm_tween()
+	body.host = null
 	(parts["host"] as Node).free()
+	(parts["ws"] as Node).free()
+	(parts["hub"] as Node).free()
+	(parts["atk"] as Node).free()
 
 
-func _fp_source() -> String:
-	var f := FileAccess.open(FP_BODY_SOURCE, FileAccess.READ)
-	assert_not_null(f, "first_person_body.gd must be readable")
-	return "" if f == null else f.get_as_text()
+## How far the grip the rig's arms form sits from the gun's anchor, in the bob mount's frame (metres). Zero is the
+## whole feature: the hands ON the weapon.
+func _grip_offset(parts: Dictionary) -> Vector3:
+	var rig: BodyModelSwap = parts["rig"]
+	var mount: Node3D = parts["mount"]
+	var grip: Variant = rig.weapon_grip_position()
+	var anchor: Variant = parts["body"]._weapon_hands_anchor()
+	if grip == null or anchor == null:
+		return Vector3.INF
+	return rig.transform * (grip as Vector3) - mount.global_transform.affine_inverse() * (anchor as Vector3)
 
 
 ## The GunMesh's authored mount under the camera, read off camera_rig.tscn's scene state — the same transform
@@ -83,13 +154,15 @@ func _gun_mount() -> Transform3D:
 
 ## `rig.transform * grip == anchor` is the whole contract, and weapon_hands_position is the half that solves for
 ## the rig's ORIGIN. Checked by composing it back: whatever basis the rig wears, the grip its arms form must land
-## on the anchor to floating-point.
+## on the anchor to floating-point — including a ZERO grip (a rebuilt-but-unmeasured rig), which must park the rig
+## straight on the anchor rather than warp it.
 func test_the_solved_position_puts_the_arms_grip_exactly_on_the_anchor() -> void:
 	var cases := [
 		[Vector3(0.19, -0.23, -0.19), Basis(), Vector3(0.0, 0.0, -0.27)],
 		[Vector3(0.19, -0.23, -0.19), Basis.from_euler(Vector3(deg_to_rad(34.0), 0.0, 0.0)), Vector3(0.0, 0.0, -0.27)],
 		[Vector3(-1.5, 2.25, 0.75), Basis.from_euler(Vector3(0.4, -1.1, 0.2)), Vector3(0.03, -0.01, -0.5)],
 		[Vector3.ZERO, Basis.from_euler(Vector3(deg_to_rad(80.0), 0.0, 0.0)), Vector3.ZERO],
+		[Vector3(1.0, 2.0, 3.0), Basis.from_euler(Vector3(0.3, 0.9, -0.4)), Vector3.ZERO],
 	]
 	for c in cases:
 		var anchor: Vector3 = c[0]
@@ -102,109 +175,205 @@ func test_the_solved_position_puts_the_arms_grip_exactly_on_the_anchor() -> void
 		assert_almost_eq(landed.z, anchor.z, 0.0001, "solved rig must put the grip on the anchor (z)")
 
 
-## A rig with no arms yet reports a ZERO grip, and then the rig simply sits ON the anchor. Pinned because it is
-## the degenerate case the live solve hands straight through (weapon_grip_position returns null for "no arms",
-## which _solve_weapon_hands bails on — but a zero grip from a rebuilt-but-unmeasured rig must not warp it).
-func test_a_zero_grip_parks_the_rig_on_the_anchor() -> void:
-	assert_eq(FirstPersonBody.weapon_hands_position(Vector3(1.0, 2.0, 3.0), Basis(), Vector3.ZERO),
-		Vector3(1.0, 2.0, 3.0), "with no reach to correct for, the rig origin IS the anchor")
-
-
 # --- 2. The mode is exclusive -------------------------------------------------------------------------------
 
-## The weapon hold re-solves position / tilt / scale / spread / stagger EVERY FRAME, and the fists' per-frame
-## pose ease writes the same properties toward a fixed rest. Both live in this one file, so the gate is a source
-## contract: if either loses its `_weapon_hands_up` guard the two writers alternate and the hands judder off the
-## gun. (`arm_stride_deg` is the sharpest case — the weapon hold borrows it for the fore/aft hand stagger, and
-## the bob's closed-gate branch parks it to zero.)
+## The weapon hold re-solves position / tilt / scale / spread EVERY FRAME, and the fists' per-frame pose ease
+## writes the same properties toward a fixed rest — so with the weapon latch up that ease must leave the rig
+## alone, and the bob's closed-gate branch must not park the arm-pump property the solve also owns.
 func test_the_fists_pose_ease_and_bob_yield_to_the_weapon_solve() -> void:
-	var src := _fp_source()
-	assert_true(src.contains("not _fp_arm_stowing and not _weapon_hands_up"),
-		"the per-frame pose ease must skip while the weapon solve owns the rig's transform")
-	assert_true(src.contains("_fp_arms.arm_stagger = stagger"),
-		"the weapon hold's fore/aft stagger must be the METRES shift (arm_stagger), never a pitch — a pitch crosses the arms")
-	assert_true(src.contains("func _update_weapon_hands"), "the per-frame grip solve must exist")
-	# ...and ticked DEFERRED, never called: this component runs at process_priority -1, BEFORE GunPose writes the
-	# gun's transform, so a direct call would glue the hands to LAST frame's gun — one frame behind every recoil
-	# kick, which reads as the gun jumping out of your hands on each shot (the 2026-09-15 "they don't move with
-	# the weapon" report).
-	assert_true(src.contains("_update_weapon_hands.call_deferred(delta)"),
-		"the grip solve must run deferred from _process so it lands AFTER GunPose has moved the gun this frame")
-	assert_false(src.contains("_fp_arms.position = _fp_arms.position.lerp(target"),
-		"the grip must be a HARD write — an eased follow trails every recoil kick by several frames")
-	assert_true(src.contains("_fp_arms.position = (target as Vector3) + _weapon_hands_settle"),
-		"only the draw/handoff RESIDUAL eases (_weapon_hands_settle); the grip under it is never lagged")
-
-
-## One refresh settles BOTH latches and runs exactly one transition. Pinned as a source contract because the
-## failure is a sequencing one: asking the fists first and the weapon second made a gun draw stow the hands
-## (the fists answer) and then immediately raise them (the weapon answer) — a visible bounce on every swap.
-func test_a_drawn_weapon_outranks_the_fists_in_one_transition() -> void:
-	var src := _fp_source()
-	assert_true(src.contains("var want_fists := (not want_weapon) and _unarmed_hands_wanted()"),
-		"the fists must be asked only once the weapon has answered — one mode wins, not two")
-	assert_true(src.contains("if want_weapon == _weapon_hands_up and want_fists == _unarmed_hands_up:"),
-		"refresh must early-out when NEITHER latch moved, so a repeat call can't re-fire a slide")
-
-
-## Carrying a prop is the third pose of the same rig and it is on_carry_changed's, not ours — so both `_wanted`
-## calls answer false while `_carrying` is up, and the grab explicitly stands the solve down.
-func test_a_carried_prop_takes_the_rig_off_the_weapon_solve() -> void:
-	var src := _fp_source()
-	assert_true(src.contains("_weapon_hands_up = false  # the CARRY hold owns the rig now"),
-		"a carry grab must clear the weapon latch before the carry slide writes the rig's position")
-	var parts := _build()
+	var parts := _live(_weapon(Vector3(0.2, -0.02, 0.0)))
 	var body = parts["body"]
-	var host = parts["host"]
-	host._carrying = true
-	assert_false(body._weapon_hands_wanted(), "hands full of crate are not hands on a gun")
-	host._carrying = false
-	host._dying = true
-	assert_false(body._weapon_hands_wanted(), "the death cinematic must not raise hands onto the view model")
+	var rig: BodyModelSwap = parts["rig"]
+	rig.visible = true
+	body._weapon_hands_up = true
+	rig.arm_scale = 0.05
+	rig.arm_position = Vector3(0.02, 0.0, 0.0)
+	rig.position = Vector3(0.1, -0.3, -0.4)
+	rig.rotation_degrees = Vector3(62.0, 20.0, 0.0)
+	rig.arm_stride_deg = 3.0
+	body._update_fp_arm_bob(0.1)
+	assert_almost_eq(rig.arm_scale, 0.05, 0.00001, "the fists' ease must not pull a weapon-held rig toward the carry scale")
+	assert_almost_eq(rig.arm_position.x, 0.02, 0.00001, "...nor its spread")
+	assert_true(rig.position.is_equal_approx(Vector3(0.1, -0.3, -0.4)), "...nor its position (the solve's hard write)")
+	assert_almost_eq(rig.rotation_degrees.x, 62.0, 0.0001, "...nor its tilt")
+	assert_almost_eq(rig.arm_stride_deg, 3.0, 0.00001, "the bob's closed gate must not park a property the weapon latch owns")
+	body._weapon_hands_up = false
+	body._update_fp_arm_bob(0.1)
+	assert_gt(rig.arm_scale, 0.05, "control: with the weapon latch DOWN the same call eases the rig toward its rest")
+	assert_almost_eq(rig.arm_stride_deg, 0.0, 0.00001, "control: ...and parks the arm-pump")
 	_teardown(parts)
 
 
-# --- 3. The null guards -------------------------------------------------------------------------------------
+## The grip is a HARD write: a recoil kick that moves the gun in one frame must move the hands in that frame. Only
+## the draw/handoff RESIDUAL (_weapon_hands_settle) eases, on top of a grip that is never lagged.
+func test_the_grip_is_a_hard_write_and_only_the_draw_residual_eases() -> void:
+	var parts := _live(_weapon(Vector3(0.2, -0.02, 0.0)))
+	var body = parts["body"]
+	var gun: GunMesh = parts["gun"]
+	parts["rig"].visible = true
+	body._weapon_hands_up = true
+	var dt := 1.0 / 60.0
+	body._update_weapon_hands(dt)
+	assert_lt(_grip_offset(parts).length(), 0.0005, "settled, the hands' grip must sit ON the gun's anchor")
+	gun.position += Vector3(0.0, 0.03, 0.02)  # a recoil kick between two frames
+	body._update_weapon_hands(dt)
+	assert_lt(_grip_offset(parts).length(), 0.0005,
+		"one frame after a 3.6 cm kick the grip must already be on the moved gun (off by %s) — an eased follow trails every shot" % _grip_offset(parts))
+	body._weapon_hands_settle = Vector3(0.0, -0.35, 0.0)  # a fresh draw: rise from below the grip
+	body._update_weapon_hands(dt)
+	var residual := _grip_offset(parts)
+	assert_true(residual.y < -0.001 and residual.y > -0.35,
+		"a draw residual must EASE toward the grip (one frame in: %s), not snap and not hold" % residual)
+	assert_almost_eq(residual.x, 0.0, 0.0005, "the rise is straight up — no sideways residual")
+	for i in 120:
+		body._update_weapon_hands(dt)
+	assert_lt(_grip_offset(parts).length(), 0.001, "two seconds on, the draw has settled onto the grip")
+	_teardown(parts)
 
-## Every clause is a host read, so a component with no host — or with the feature switched off — must answer
-## false rather than reaching through a null. The same contract _unarmed_hands_wanted already carries.
+
+## ...and the solve must read THIS frame's gun. The component ticks at priority -1, BEFORE GunPose writes the gun
+## (priority 0), so a direct call would glue the hands to LAST frame's gun — one frame behind every recoil kick
+## (the 2026-09-15 "they don't move with the weapon" report). A priority-0 stand-in moves the gun every frame here.
+func test_the_grip_solve_reads_this_frames_gun_not_last_frames() -> void:
+	var parts := _live(_weapon(Vector3(0.2, -0.02, 0.0)))
+	var body = parts["body"]
+	parts["rig"].visible = true
+	body._weapon_hands_up = true
+	var script := GDScript.new()
+	script.source_code = "extends Node\nvar gun: Node3D\nvar step := Vector3.ZERO\nfunc _process(_delta: float) -> void:\n\tgun.position += step\n"
+	script.reload()
+	var mover := Node.new()
+	mover.set_script(script)
+	mover.set("gun", parts["gun"])
+	mover.set("step", Vector3(0.0, 0.02, 0.0))  # 2 cm a frame: a gun pose that moves EVERY frame
+	add_child_autofree(mover)
+	body.set_process(true)
+	for i in 4:
+		await get_tree().process_frame
+	var off := _grip_offset(parts)
+	body.set_process(false)
+	mover.set("step", Vector3.ZERO)
+	assert_lt(off.length(), 0.0005,
+		"the hands must sit on the gun as it was drawn THIS frame (off by %s — one frame's 2 cm step means the solve ran before the gun moved)" % off)
+	_teardown(parts)
+
+
+## One refresh settles BOTH latches and runs exactly one transition: asking the fists first and the weapon second
+## made a gun draw stow the hands (the fists answer) and then immediately raise them (the weapon answer).
+func test_a_drawn_weapon_outranks_the_fists_in_one_transition() -> void:
+	var parts := _live(_weapon(Vector3(0.2, -0.02, 0.0)))
+	var body = parts["body"]
+	var rig: BodyModelSwap = parts["rig"]
+	parts["hub"].equipped_weapon = load(FISTS_PATH)  # the combat hub reads FISTS while a real model is mounted
+	assert_true(body._weapon_hands_wanted(), "sanity: the weapon hold answers yes")
+	assert_true(body._unarmed_hands_wanted(), "sanity: ...and so, on its own, would the fists")
+	body.refresh_unarmed_hands()
+	assert_true(body._weapon_hands_up, "a drawn weapon must win the rig")
+	assert_false(body._unarmed_hands_up, "...and the fists must NOT also claim it — one mode, not two")
+	# A repeat refresh with nothing changed must early-out rather than re-run the draw.
+	body._weapon_hands_settle = Vector3.ZERO  # the rise has finished...
+	rig.position += Vector3(0.0, 0.1, 0.0)  # ...and the live solve has moved the rig since
+	body.refresh_unarmed_hands()
+	assert_eq(body._weapon_hands_settle, Vector3.ZERO,
+		"a refresh where NEITHER latch moved must not re-fire the transition (it seeded a fresh residual)")
+	_teardown(parts)
+
+
+## Carrying a prop is the third pose of the same rig and it is on_carry_changed's, not ours — and dying is nobody's.
+func test_a_carried_prop_takes_the_rig_off_the_weapon_solve() -> void:
+	var parts := _live(_weapon(Vector3(0.2, -0.02, 0.0)))
+	var body = parts["body"]
+	var host = parts["host"]
+	var rig: BodyModelSwap = parts["rig"]
+	assert_true(body._weapon_hands_wanted(), "baseline: a drawn, visible, mounted weapon wants the hands")
+	for latch in ["_carrying", "_dying", "_dead"]:
+		host.set(latch, true)
+		assert_false(body._weapon_hands_wanted(), "%s must refuse the weapon hold — hands full of crate / a death cinematic are not hands on a gun" % latch)
+		host.set(latch, false)
+		assert_true(body._weapon_hands_wanted(), "control: clearing %s gives the hands back" % latch)
+	# The grab itself: after the holster beat the CARRY hold takes the rig and the grip solve stands down.
+	body.fp_arm_draw_delay = 0.01
+	body._weapon_hands_up = true
+	host._carrying = true
+	host._dying = true
+	await body.on_carry_changed(true)
+	assert_false(rig.visible, "a death during the holster beat must not pop the carry hands into the cinematic")
+	host._dying = false
+	await body.on_carry_changed(true)
+	assert_true(rig.visible, "control: alive, the carry hands slide up after the beat")
+	assert_false(body._weapon_hands_up, "...and the grip solve is stood down, or it keeps writing over the carry slide")
+	_teardown(parts)
+
+
+# --- 3. The gates -------------------------------------------------------------------------------------------
+
+## A component with no host must answer false rather than reach through a null; with a host, the feature toggle
+## must switch the whole pose off.
 func test_the_want_check_is_null_safe_and_respects_its_toggle() -> void:
-	var body = load(FP_BODY_SOURCE).new()
-	assert_false(body._weapon_hands_wanted(), "a bare component with no host wants nothing on screen")
-	body.free()
-	var parts := _build()
-	var b = parts["body"]
-	b.weapon_hands = false
-	assert_false(b._weapon_hands_wanted(), "the toggle must switch the whole pose off")
+	var bare = load(FP_BODY_SOURCE).new()
+	assert_false(bare._weapon_hands_wanted(), "a bare component with no host wants nothing on screen")
+	bare.free()
+	var parts := _live(_weapon(Vector3(0.2, -0.02, 0.0)))
+	var body = parts["body"]
+	assert_true(body._weapon_hands_wanted(), "control: switched on, the same harness wants the hands")
+	body.weapon_hands = false
+	assert_false(body._weapon_hands_wanted(), "the toggle must switch the whole pose off")
 	_teardown(parts)
 
 
 ## The hands must vanish with the view model they are holding, not outlive it — the accessibility toggle
-## (Settings.view_model_visible) and the sniper's scoped hide both land on GunPose's per-frame `visible` write,
-## so reading the rig's live `visible` is what keeps one decision instead of three.
+## (Settings.view_model_visible) and the sniper's scoped hide both land on GunPose's per-frame `visible` write.
 func test_the_hands_hide_whenever_the_view_model_does() -> void:
-	var src := _fp_source()
-	assert_true(src.contains("if gun == null or not gun.is_inside_tree() or not gun.visible:"),
-		"a hidden view model must take the hands with it — GunPose owns that visible flag")
-	assert_true(src.contains("if wd == null or wd.view_model == null:"),
-		"a weapon with no view_model shows nothing, so there is nothing to hold")
+	var real := _weapon(Vector3(0.2, -0.02, 0.0))
+	var parts := _live(real)
+	var body = parts["body"]
+	var gun: GunMesh = parts["gun"]
+	assert_true(body._weapon_hands_wanted(), "baseline: the hands are wanted")
+	gun.visible = false
+	assert_false(body._weapon_hands_wanted(), "a hidden view model must take the hands with it — GunPose owns that visible flag")
+	gun.visible = true
+	assert_true(body._weapon_hands_wanted(), "control: shown again, the hands come back")
+	gun._swapper._mounted_weapon = WeaponData.new()
+	assert_false(body._weapon_hands_wanted(), "a weapon with no view_model shows nothing, so there is nothing to hold")
+	# FISTS refuse by IDENTITY, not by lacking a view model: fists.tres authors no view_model, so the clause above
+	# would already refuse it and prove nothing about this one. Author a scene on the SHARED cached Player.FISTS so
+	# only the identity clause stands in the way, and put it back BEFORE asserting (after_each is the second net).
+	var fists := load(FISTS_PATH) as WeaponData
+	fists.view_model = PackedScene.new()
+	gun._swapper._mounted_weapon = fists
+	var fists_wanted: bool = body._weapon_hands_wanted()
+	fists.view_model = _saved_fists_view_model  # what before_each found on it, not an assumed null
+	assert_false(fists_wanted, "unarmed is the FISTS pose of this rig, never a weapon hold, even with a view model authored on fists")
+	gun._swapper._mounted_weapon = real
+	parts["atk"].holstered = true
+	assert_false(body._weapon_hands_wanted(), "a holstered weapon takes the hands with it")
+	_teardown(parts)
 
 
-## The hands TURN with the gun, not just travel with it. GunPose droops the gun 18° after a few quiet seconds
-## (and kicks it on every shot); a rig whose orientation stayed camera-level slid down with the weapon while
-## pointing the wrong way — the standing player's view, i.e. nearly always. The rig basis must be the gun's
-## rotation off its rest composed with the authored pose.
+## The hands TURN with the gun, not just travel with it. GunPose droops the gun 18° after a few quiet seconds (and
+## kicks it on every shot); a rig whose orientation stayed camera-level slid down with the weapon while pointing
+## the wrong way. So however far the gun rotates off its rest, the rig must rotate by exactly that much.
 func test_the_rig_basis_turns_with_the_gun() -> void:
-	var src := _fp_source()
-	assert_true(src.contains("func _gun_delta_basis() -> Basis:"), "the gun-delta seam must exist")
-	assert_true(src.contains("gun.transform.basis.orthonormalized() * rest.inverse()"),
-		"...and be the live gun basis over its captured rest (GunMesh.base_rotation)")
-	assert_true(src.contains("* _gun_delta_basis() \\\n\t\t\t* Basis.from_euler(Vector3(deg_to_rad(weapon_hands_tilt_deg), deg_to_rad(weapon_hands_yaw_deg), 0.0))"),
-		"the solve must compose gun delta x authored pose into the rig basis (never rotation_degrees alone)")
-	# Pure check of the composition: an off-tree body (no gun) yields identity, so the pose IS the authored one.
 	var body = load(FP_BODY_SOURCE).new()
-	assert_eq(body._gun_delta_basis(), Basis(), "no gun rig -> identity delta -> plain authored pose")
+	assert_eq(body._gun_delta_basis(), Basis(), "no gun rig -> identity delta -> the plain authored pose")
 	body.free()
+	var parts := _live(_weapon(Vector3(0.2, -0.02, 0.0)))
+	var gun: GunMesh = parts["gun"]
+	var rig: BodyModelSwap = parts["rig"]
+	gun.rotation_degrees = Vector3(0.0, 90.0, 0.0)  # the rig's baked barrel yaw...
+	gun.base_rotation = gun.rotation_degrees  # ...captured as the rest pose, exactly as GunMesh._ready does
+	var gun_rest := gun.transform.basis
+	assert_true(parts["body"]._solve_weapon_hands() != null, "the solve must place the rig on a live harness")
+	var rig_rest := rig.transform.basis
+	gun.rotation_degrees = Vector3(-18.0, 90.0, 6.0)  # idle droop + a kick
+	parts["body"]._solve_weapon_hands()
+	var gun_turn := gun.transform.basis * gun_rest.inverse()
+	var rig_turn := rig.transform.basis * rig_rest.inverse()
+	assert_false(gun_turn.is_equal_approx(Basis()), "sanity: the gun really turned")
+	for axis in 3:
+		assert_true(rig_turn[axis].is_equal_approx(gun_turn[axis]),
+			"the rig must turn with the gun (column %d: rig %s vs gun %s)" % [axis, rig_turn[axis], gun_turn[axis]])
+	_teardown(parts)
 
 
 ## The hands dress the VISIBLE gun. Attack equips the new weapon on the inventory the instant a swap STARTS but
@@ -212,18 +381,34 @@ func test_the_rig_basis_turns_with_the_gun() -> void:
 ## MOUNTED weapon, or the hands leap to the next weapon's grip on the current weapon's model for the whole
 ## down-swing (the 2026-09-15 "swap messes up where your hands are" — probe: __weapon_hands_swap_probe.tscn).
 func test_every_per_weapon_read_keys_on_the_mounted_weapon_not_the_inventory() -> void:
-	var src := _fp_source()
-	assert_true(src.contains("func _mounted_weapon() -> WeaponData:"), "the mounted-weapon seam must exist")
-	assert_true(src.contains("return host.gun_mesh.mounted_weapon()"), "...and read it off the gun rig")
-	for fn in ["_weapon_hands_wanted", "_weapon_hands_anchor", "_weapon_hands_scale", "_weapon_hands_one_handed"]:
-		var body := src.substr(src.find("func " + fn + "("))
-		body = body.substr(0, body.find("\nfunc "))
-		assert_true(body.contains("_mounted_weapon()"), fn + " must key on the MOUNTED weapon")
-		assert_false(body.contains("inventory.equipped_weapon"), fn + " must not read the inventory's equipped weapon")
-	# ...and the swapper stamps it in the one place the model actually changes.
-	var sw := FileAccess.open("res://scripts/effects/weapon_model_swapper.gd", FileAccess.READ).get_as_text()
-	assert_true(sw.contains("_mounted_weapon = inventory.equipped_weapon"),
-		"WeaponModelSwapper.equip must stamp the mounted weapon beside the model it mounts")
+	var mounted := _weapon(Vector3(0.2, -0.02, 0.0), false, 0.7)
+	var next := _weapon(Vector3(0.45, 0.05, 0.1), true, 1.6)
+	var parts := _live(mounted)
+	var body = parts["body"]
+	var gun: GunMesh = parts["gun"]
+	var hub: Inventory = parts["hub"]
+	var anchor_settled: Vector3 = body._weapon_hands_anchor()
+	hub.equipped_weapon = next  # the swap has STARTED: the inventory already names the next weapon
+	assert_true(body._weapon_hands_wanted(), "mid-swap the mounted weapon still wants the hands")
+	assert_almost_eq(body._weapon_hands_scale(), 0.7, 0.00001, "the hand size must be the MOUNTED weapon's, not the inventory's 1.6")
+	assert_false(body._weapon_hands_one_handed(), "the one-handed hold must be the MOUNTED weapon's, not the inventory's")
+	assert_true((body._weapon_hands_anchor() as Vector3).is_equal_approx(anchor_settled),
+		"the grip anchor must not move while only the INVENTORY has changed — the pistol is still the model on screen")
+	gun._swapper._mounted_weapon = next  # swap_finished: the new model lands
+	assert_false((body._weapon_hands_anchor() as Vector3).is_equal_approx(anchor_settled), "...and follows the model once it does")
+	assert_almost_eq(body._weapon_hands_scale(), 1.6, 0.00001, "...the size too")
+	assert_true(body._weapon_hands_one_handed(), "...and the one-handed hold")
+	gun._swapper._mounted_weapon = load(FISTS_PATH)
+	hub.equipped_weapon = mounted
+	assert_false(body._weapon_hands_wanted(), "fists still mounted must refuse, whatever the inventory already says")
+	# The swapper stamps the mounted weapon in the one place the model actually changes — even for no scene at all.
+	var fists := load(FISTS_PATH) as WeaponData
+	gun._swapper._mounted_weapon = mounted
+	hub.equipped_weapon = fists
+	gun.inventory = hub
+	gun._swapper.equip()
+	assert_eq(gun.mounted_weapon(), fists, "WeaponModelSwapper.equip must stamp the weapon it just mounted")
+	_teardown(parts)
 
 
 # --- 4. The authored grips are reachable ---------------------------------------------------------------------
@@ -232,19 +417,28 @@ func test_every_per_weapon_read_keys_on_the_mounted_weapon_not_the_inventory() -
 ## camera plane, outside any frustum. Every shipped weapon must author one far enough down its own barrel to be
 ## on screen. This is the test that catches "a new weapon was added and nobody ran the frame probe".
 func test_every_shipped_weapon_authors_a_grip_the_camera_can_see() -> void:
-	var mount := _gun_mount()
+	# The REAL _weapon_hands_anchor, with the gun rig parked at camera_rig.tscn's authored mount. The harness gun
+	# sits under this GutTest, a plain Node, so its global frame IS the camera-local frame the mount is authored in
+	# — and the anchor comes out in the camera's metres, where z < 0 is in front of the lens.
+	var parts := _live(_weapon(Vector3.ZERO))
+	var gun: GunMesh = parts["gun"]
+	gun.transform = _gun_mount()
 	for path in WEAPONS:
 		var wd := load(path) as WeaponData
 		assert_not_null(wd, "%s must load as a WeaponData" % path)
 		if wd == null:
 			continue
 		assert_not_null(wd.view_model, "%s is in this list because it mounts a view model" % path)
-		# The live anchor, exactly as _weapon_hands_anchor builds it (the rig's own basis, never its transform —
-		# these models nest under wildly scaled parents and a grip pushed through one comes out in the wrong unit).
-		var anchor: Vector3 = mount.origin + mount.basis.orthonormalized() * wd.view_model_grip
+		gun._swapper._mounted_weapon = wd
+		var raw: Variant = parts["body"]._weapon_hands_anchor()
+		assert_true(raw is Vector3, "%s: a mounted weapon on an in-tree gun rig must yield a grip anchor" % path)
+		if not (raw is Vector3):
+			continue
+		var anchor: Vector3 = raw
 		assert_lt(anchor.z, -MIN_GRIP_DEPTH,
 			"%s: view_model_grip must sit at least %s m in front of the lens (anchor z %s) or the hands solve to a point nothing renders — re-run scripts/tools/probes/preview_weapon_hands_frame.gd"
 			% [path, MIN_GRIP_DEPTH, anchor.z])
+	_teardown(parts)
 
 
 ## The grip is authored in the GUN's own frame, whose +X runs down the barrel (the project convention
@@ -258,13 +452,27 @@ func test_the_grip_axis_convention_is_down_the_barrel() -> void:
 
 
 ## ...and the reconciliation that makes that reachability hold at RUN time. Two of the gates move with no signal
-## behind them (the view-model accessibility toggle and the sniper's scoped hide both land on GunPose's
-## per-frame `visible` write), so the latch is re-asked each frame — but only while the fists are NOT the pose on
-## screen, because their handoff timing is signal-driven on purpose.
+## behind them (the view-model accessibility toggle and the sniper's scoped hide both land on GunPose's per-frame
+## `visible` write), so the latch is re-asked each frame — but only while the fists are NOT the pose on screen,
+## because their handoff timing is signal-driven on purpose.
 func test_the_weapon_latch_is_reconciled_every_frame_but_never_the_fists() -> void:
-	var src := _fp_source()
-	assert_true(src.contains("if want != _weapon_hands_up and not _unarmed_hands_up:"),
-		"the weapon latch must re-settle per frame, and must stand down while the fists own the rig")
+	var parts := _live(_weapon(Vector3(0.2, -0.02, 0.0)))
+	var body = parts["body"]
+	var gun: GunMesh = parts["gun"]
+	var dt := 1.0 / 60.0
+	parts["rig"].visible = true
+	body._weapon_hands_up = true
+	gun.visible = false  # no signal announces this
+	body._update_weapon_hands(dt)
+	assert_false(body._weapon_hands_up, "the per-frame update must drop the latch when the view model hides")
+	gun.visible = true
+	body._update_weapon_hands(dt)
+	assert_true(body._weapon_hands_up, "...and raise it again when the view model returns, with no signal either way")
+	body._weapon_hands_up = false
+	body._unarmed_hands_up = true  # the fists own the rig
+	body._update_weapon_hands(dt)
+	assert_false(body._weapon_hands_up, "while the fists own the rig the per-frame update must not seize it — that handoff is signal-driven")
+	_teardown(parts)
 
 
 # --- 5. The two-handed V, and the one-handed collapse ---------------------------------------------------------
@@ -274,7 +482,7 @@ func test_the_weapon_latch_is_reconciled_every_frame_but_never_the_fists() -> vo
 func _hold_rig(spread: float, converge: float) -> BodyModelSwap:
 	var rig := BodyModelSwap.new()
 	rig.animate_arms = false
-	rig.arm_model = load("res://assets/models/arm.blend")
+	rig.arm_model = load(ARM_MODEL)
 	add_child_autofree(rig)
 	rig.arm_rotation = Vector3(0.0, 180.0, 0.0)  # hands down the camera's -Z, as _build_first_person_arms sets
 	rig.arm_scale = 0.14
@@ -316,7 +524,7 @@ func test_one_handed_hides_the_offhand_and_survives_a_rebuild() -> void:
 	assert_false(rig._arm_right.visible, "...and the off hand goes")
 	# A rebuild (an appearance swap) instances a fresh, visible pair — the hold must be re-asserted, or a
 	# one-handed weapon silently grows a second hand the next time the player changes clothes.
-	rig.arm_model = load("res://assets/models/arm.blend")
+	rig.arm_model = load(ARM_MODEL)
 	assert_false(rig._arm_right.visible, "a rebuilt pair must come back with the off hand still hidden")
 
 
@@ -340,54 +548,76 @@ func test_a_one_handed_grip_must_be_collapsed_or_it_reports_a_phantom_midpoint()
 		"collapsed, the averaged grip IS the visible hand — the weapon lands in it")
 
 
-## The source contract for that pairing, since the three writes live apart from each other in the solve.
+## The solve itself makes that pairing: a two-handed weapon gets the V (spread + converge) and the fore/aft stagger
+## as a METRES shift (never the arm-pump pitch, which crosses the forearms at this tilt); a one-handed weapon
+## collapses all three together and hides the off hand.
 func test_the_solve_zeroes_spread_converge_and_stagger_together_for_one_hand() -> void:
-	var src := _fp_source()
-	assert_true(src.contains("var spread := 0.0 if one else weapon_hands_spread"),
-		"a one-handed hold must collapse the spread")
-	assert_true(src.contains("var converge := 0.0 if one else weapon_hands_converge_deg"),
-		"...and the converge with it")
-	assert_true(src.contains("var stagger := 0.0 if one else weapon_hands_stagger"),
-		"...and the fore/aft stagger, which is also a two-hand term")
+	var parts := _live(_weapon(Vector3(0.2, -0.02, 0.0), false))
+	var body = parts["body"]
+	var rig: BodyModelSwap = parts["rig"]
+	body.weapon_hands_spread = 0.1
+	body.weapon_hands_converge_deg = 20.0
+	body.weapon_hands_stagger = 0.04
+	rig.arm_stride_deg = 7.0  # a leftover fists arm-pump
+	assert_true(body._solve_weapon_hands() != null, "the two-handed solve must place the rig")
+	assert_gt(rig.arm_position.x, 0.0, "two hands: the shoulders stay spread")
+	assert_gt(rig.arm_converge_deg, 0.0, "two hands: ...and converge onto one point (the V)")
+	assert_gt(rig.arm_stagger, 0.0, "two hands: the support hand sits AHEAD along the weapon, as a metres shift")
+	assert_almost_eq(rig.arm_stride_deg, 0.0, 0.00001, "the fists' arm-pump pitch is never part of this pose")
+	assert_false(rig.hide_offhand, "two hands: both drawn")
+	parts["gun"]._swapper._mounted_weapon = _weapon(Vector3(0.2, -0.02, 0.0), true)
+	body._solve_weapon_hands()
+	assert_almost_eq(rig.arm_position.x, 0.0, 0.00001, "a one-handed hold must collapse the spread")
+	assert_almost_eq(rig.arm_converge_deg, 0.0, 0.00001, "...and the converge with it")
+	assert_almost_eq(rig.arm_stagger, 0.0, 0.00001, "...and the fore/aft stagger, which is also a two-hand term")
+	assert_true(rig.hide_offhand, "...and hide the off hand")
+	_teardown(parts)
 
 
 # --- 6. Every way OUT of the weapon pose opens the grip again ---------------------------------------------
 
+## The weapon hold's two-hand geometry, as the solve leaves it on the rig.
+func _close_grip(rig: BodyModelSwap) -> void:
+	rig.arm_converge_deg = 24.0
+	rig.hide_offhand = true
+	rig.arm_stagger = 0.03
+	rig.rotation_degrees = Vector3(62.0, 20.0, 0.0)
+
+
+func _assert_grip_open(rig: BodyModelSwap, exit_name: String) -> void:
+	assert_almost_eq(rig.arm_converge_deg, 0.0, 0.00001, "%s must open the converge" % exit_name)
+	assert_false(rig.hide_offhand, "%s must bring the off hand back" % exit_name)
+	assert_almost_eq(rig.arm_stagger, 0.0, 0.00001, "%s must clear the stagger" % exit_name)
+	assert_almost_eq(rig.rotation_degrees.y, 0.0, 0.0001, "%s must clear the weapon hold's yaw" % exit_name)
+
+
 ## The 2026-09-15 CARRY REGRESSION: a grab holsters the weapon (the hands start a 0.22 s stow) and draws the
 ## carry hold after only fp_arm_draw_delay 0.18 s — so the carry draw runs while the rig is STILL VISIBLE and the
-## hidden-only reset in _slide_fp_arms is skipped. Scale and spread survive that race (the per-frame pose ease
-## pulls them to rest); the converge, the hidden off hand and the stagger had no ease path, so you carried the
-## crate with one tiny converged hand. Pinned as a source contract on the three exits.
+## hidden-only reset in _slide_fp_arms is skipped. The converge, the hidden off hand and the stagger have no ease
+## path, so you carried the crate with one tiny converged hand. Driven on all three exits.
 func test_every_exit_from_the_weapon_pose_opens_the_grip() -> void:
-	var src := _fp_source()
-	assert_true(src.contains("func _open_weapon_grip"), "the grip-opening seam must exist")
-	var draw_fn := src.substr(src.find("func _slide_fp_arms("))
-	draw_fn = draw_fn.substr(0, draw_fn.find("
-func "))
-	var hidden_block_end := draw_fn.find("_fp_arms.visible = true")
-	var open_at := draw_fn.find("_open_weapon_grip()")
-	assert_true(open_at >= 0 and open_at < hidden_block_end,
-		"a carry / fists DRAW must open the grip before it shows the rig")
-	# ...and NOT inside the `if not _fp_arms.visible:` block — that is precisely the race
-	var hidden_if := draw_fn.find("if not _fp_arms.visible:")
-	var hidden_if_end := draw_fn.find("
-		_open_weapon_grip()")
-	assert_true(hidden_if_end > 0 and hidden_if_end > hidden_if,
-		"_open_weapon_grip must run UNCONDITIONALLY on a draw (two tabs deep, outside the hidden-only reset)")
-	var ease_fn := src.substr(src.find("func _ease_fp_arms_to_rest("))
-	ease_fn = ease_fn.substr(0, ease_fn.find("
-func "))
-	assert_true(ease_fn.contains("_open_weapon_grip()"), "the weapon->fists handoff must open the grip")
-	var hide_fn := src.substr(src.find("func _hide_fp_arms("))
-	hide_fn = hide_fn.substr(0, hide_fn.find("
-func "))
-	assert_true(hide_fn.contains("_open_weapon_grip()"), "the stow tail must open the grip once the rig is off screen")
+	var parts := _live(_weapon(Vector3(0.2, -0.02, 0.0)))
+	var body = parts["body"]
+	var rig: BodyModelSwap = parts["rig"]
+	rig.visible = true  # mid-stow: still on screen when the carry draw lands — the race
+	_close_grip(rig)
+	body._slide_fp_arms(true)
+	_assert_grip_open(rig, "a carry / fists DRAW over a still-visible rig")
+	_close_grip(rig)
+	body._ease_fp_arms_to_rest()
+	_assert_grip_open(rig, "the weapon->fists handoff")
+	_close_grip(rig)
+	body._hide_fp_arms()
+	_assert_grip_open(rig, "the stow tail")
+	assert_false(rig.visible, "the stow tail hides the rig")
+	_teardown(parts)
 
 
 ## And the seam itself, on a live rig: it clears exactly the three terms the weapon solve writes.
 func test_open_weapon_grip_clears_converge_offhand_and_stagger() -> void:
-	var parts := _build()
-	var body = parts["body"]
+	var host = load(PLAYER_SOURCE).new()
+	var body = load(FP_BODY_SOURCE).new()
+	body.host = host
 	var rig := _hold_rig(0.105, 24.0)
 	rig.hide_offhand = true
 	rig.arm_stagger = 0.05
@@ -403,4 +633,5 @@ func test_open_weapon_grip_clears_converge_offhand_and_stagger() -> void:
 	assert_eq(rig.rotation_degrees.z, 0.0, "...nor any roll")
 	assert_true(rig._arm_right.visible, "...and the right arm is actually drawn again")
 	body._fp_arms = null
-	_teardown(parts)
+	body.free()
+	host.free()

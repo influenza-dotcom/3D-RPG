@@ -34,16 +34,37 @@ func _new_marker() -> StationMarker:
 
 # --- the inspector surface -----------------------------------------------------------------------------
 
-## The defaults a designer sees. `enabled` on and a TRANSPARENT colour are the two that carry meaning: the
-## marker is opt-OUT, and a transparent tint is the sentinel for "use the skin".
-func test_component_defaults() -> void:
-	var m := _new_marker()
-	autofree(m)
-	assert_true(m.enabled, "a station pin is opt-OUT, not opt-in — that is the zero-authoring promise")
-	assert_eq(m.color.a, 0.0,
-			"the tint ships TRANSPARENT: the sentinel for 'use MenuStyle.hud.minimap_station_color'")
-	assert_false(m.pin_offscreen,
-			"the bare default does not pin — ensure() is what raises it for a fixed kiosk")
+## OPT-OUT, driven: the pin ensure() hands a bare station joins the channel the minimap paints with no authoring,
+## and the SAME setup with a hand-placed `enabled = false` marker stays off it — the per-station mute switch.
+func test_a_station_is_on_the_map_unless_a_designer_switches_its_pin_off() -> void:
+	var bare := Node3D.new()
+	add_child_autofree(bare)
+	var ensured := StationMarker.ensure(bare, StationMarker.Kind.SHOP)
+	assert_true(ensured.is_in_group(Groups.MINIMAP_STATION),
+			"a bare station's pin must join Groups.MINIMAP_STATION on its own — that is the zero-authoring promise")
+	var muted := Node3D.new()
+	add_child_autofree(muted)
+	var authored := _new_marker()
+	authored.enabled = false
+	muted.add_child(authored)
+	assert_eq(StationMarker.ensure(muted, StationMarker.Kind.SHOP), authored, "ensure() keeps the authored marker")
+	assert_false(authored.is_in_group(Groups.MINIMAP_STATION),
+			"a hand-placed marker with enabled = false keeps that ONE station off the minimap")
+
+## A hand-placed marker keeps the pin setting the designer left on it: ensure() finding it must not re-derive
+## pin_offscreen from the station, even on a fixture (no `standalone` field) that a fresh pin WOULD pin.
+func test_ensure_does_not_repin_a_hand_placed_marker() -> void:
+	var fixture := Node3D.new()
+	add_child_autofree(fixture)
+	var authored := _new_marker()
+	fixture.add_child(authored)
+	StationMarker.ensure(fixture, StationMarker.Kind.TRAIN)
+	assert_false(authored.pin_offscreen,
+			"a hand-placed marker left unpinned stays clipped to the box — ensure() only picks the pin for markers it creates")
+	var control := Node3D.new()
+	add_child_autofree(control)
+	assert_true(StationMarker.ensure(control, StationMarker.Kind.TRAIN).pin_offscreen,
+			"control: the same bare fixture WITHOUT an authored marker gets a pinned one")
 
 ## The sentinel rule, both branches, in the one place it lives.
 func test_resolved_color_prefers_the_skin_until_a_designer_overrides() -> void:
@@ -150,9 +171,10 @@ func test_a_station_without_a_standalone_field_pins() -> void:
 func test_ensure_is_null_safe() -> void:
 	assert_null(StationMarker.ensure(null, StationMarker.Kind.SHOP), "no station, no marker, no crash")
 
-## find_marker scans DIRECT children only. Two stations on one dialogue NPC are SIBLINGS, so a deep search
-## would hand the Merchant the Atm's pin.
-func test_find_marker_does_not_reach_into_a_sibling_station() -> void:
+## find_marker reads the station's DIRECT children only. A pin further down belongs to whatever station hangs beneath
+## this node, and a pin beside it (two stations on one dialogue NPC are siblings) belongs to the sibling — a deeper
+## scan would claim the first, a scan from the parent the second, and either hands this station a pin that is not its own.
+func test_find_marker_claims_neither_a_nested_nor_a_sibling_stations_pin() -> void:
 	var npc := Node3D.new()
 	add_child_autofree(npc)
 	var shop := Node3D.new()
@@ -160,9 +182,16 @@ func test_find_marker_does_not_reach_into_a_sibling_station() -> void:
 	var bank := Node3D.new()
 	npc.add_child(bank)
 	StationMarker.ensure(bank, StationMarker.Kind.BANK)
-	assert_null(StationMarker.find_marker(shop), "the shop must not see the bank's pin")
+	var nested := Node3D.new()
+	shop.add_child(nested)
+	StationMarker.ensure(nested, StationMarker.Kind.TECH)
+	assert_null(StationMarker.find_marker(shop),
+			"the shop must see neither the sibling bank's pin nor the pin of the station nested beneath it")
 	var own := StationMarker.ensure(shop, StationMarker.Kind.SHOP)
-	assert_eq(own.kind, StationMarker.Kind.SHOP, "...it gets its own instead")
+	assert_eq(own.kind, StationMarker.Kind.SHOP, "...so ensure() gives the shop a pin of its own")
+	assert_eq(StationMarker.find_marker(shop), own, "CONTROL: the shop's own direct-child pin IS found")
+	assert_eq(StationMarker.find_marker(nested).kind, StationMarker.Kind.TECH,
+			"CONTROL: the nested station still finds its own pin")
 
 
 # --- the roster: a station that forgets its line is invisible with nothing failing ----------------------

@@ -2,8 +2,8 @@ extends GutTest
 
 ## NpcLook (scripts/npc/npc_look.gd): the reusable per-NPC appearance resource. After the fold, an NPC's
 ## appearance is overridden SOLELY via its `look` resource -- the inline body/head/arm/leg fields were removed
-## from npc.gd, and the shared default look lives on the BodyModelSwap child. Verifies the look's defaults, that
-## the NPC no longer carries the inline fields, and that BodyModelSwap resolves a look over its own default.
+## from npc.gd, and the shared default look lives on the BodyModelSwap child. Verifies that an untouched look overrides
+## nothing, that the NPC no longer carries the inline fields, and that BodyModelSwap resolves a look over its own default.
 ## Built off-tree (no SceneTree entry) so no NPC _ready runs (CLAUDE.md).
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
@@ -25,15 +25,40 @@ func _part_node(parts: Array, key: String) -> Node3D:
 			return entry.get("node", null) as Node3D
 	return null
 
-func test_npc_look_defaults() -> void:
-	var lk := NpcLook.new()
-	assert_null(lk.body_model, "NpcLook.body_model defaults null (no body override)")
-	assert_null(lk.head_model, "NpcLook.head_model defaults null (no head override)")
-	assert_eq(lk.body_model_scale, 1.0, "NpcLook.body_model_scale defaults 1.0")
-	assert_eq(lk.body_color, Color.WHITE, "NpcLook.body_color defaults WHITE (no tint)")
-	assert_eq(lk.arm_color, Color.WHITE, "NpcLook.arm_color defaults WHITE")
-	assert_eq(lk.leg_color, Color.WHITE, "NpcLook.leg_color defaults WHITE")
-	lk = null
+func test_a_fresh_npc_look_overrides_nothing() -> void:
+	# NpcLook's contract: a field left at its default means "no override for this part", so a designer can start a
+	# look from New Resource, set ONE thing, and every other part keeps the BodyModelSwap child's shared default.
+	# Driven through the real resolver (not by reading the defaults back), so a default that stops being the
+	# resolver's "leave it" sentinel -- e.g. a grey default tint -- fails here because it would re-skin every NPC.
+	var npc = load(NPC_PATH).new()
+	var bms = load(BMS_PATH).new()
+	npc.add_child(bms)  # off-tree: get_parent() without _ready/_rebuild
+	var own_body := BoxMesh.new()
+	var own_head := SphereMesh.new()
+	var red := Color(1, 0, 0)
+	bms.body_model = own_body
+	bms.body_model_scale = 0.3
+	bms.head_model = own_head
+	bms.body_color = red
+	bms.head_color = red
+	bms.arm_color = red
+	bms.leg_color = red
+	npc.look = NpcLook.new()  # untouched look
+	var body: Dictionary = bms._eff_body()
+	var head: Dictionary = bms._eff_head()
+	assert_eq(body["model"], own_body, "an untouched look keeps the child's body model")
+	assert_almost_eq(float(body["scale"]), 0.3, 0.0001, "...and its body scale (a look scale only applies with a look model)")
+	assert_eq(body["col"], red, "an untouched look keeps the child's body tint")
+	assert_eq(head["model"], own_head, "an untouched look keeps the child's head model")
+	assert_eq(head["col"], red, "an untouched look keeps the child's head tint")
+	assert_eq(bms._eff_arm_color(), red, "an untouched look keeps the child's arm tint")
+	assert_eq(bms._eff_leg_color(), red, "an untouched look keeps the child's leg tint")
+	# Control: the SAME setup with one field set on the look does override that part (and only that part).
+	var green := Color(0, 1, 0)
+	npc.look.leg_color = green
+	assert_eq(bms._eff_leg_color(), green, "control: a look that sets leg_color re-tints the legs")
+	assert_eq(bms._eff_arm_color(), red, "...while the untouched arm tint still falls through to the child")
+	npc.free()
 
 func test_npc_look_model_fields_accept_scene_or_mesh() -> void:
 	var lk := NpcLook.new()
@@ -175,28 +200,43 @@ func test_lower_arms_drops_to_rest_and_clears_raised_state() -> void:
 	# puts its arms DOWN — the world pauses for the chat, which halts the gait, so a raised gun-hold / fists-out /
 	# airborne pose would otherwise freeze up for the whole conversation. lower_arms clears every raised-arm state
 	# and snaps the arms to their by-side rest pose. Built in-tree with a mesh arm_model so the arms actually
-	# instance and the rest transform is observable.
+	# instance and the rest transform is observable. The rest pose is whatever the build itself laid the arms at,
+	# captured BEFORE the arms are raised — so the final check can only pass if lower_arms writes the arms back.
 	var host := _LookHost.new()
 	var bms = load(BMS_PATH).new()
 	bms.arm_model = BoxMesh.new()
 	bms.arm_rotation = Vector3(10.0, 0.0, 0.0)  # a non-trivial authored rest pose to compare against
 	host.add_child(bms)
 	add_child_autofree(host)
-	# Pretend the gait had raised the arms (gun-hold pitch + walk swing + fists sway + a mid strike flail).
+	var arm_l := _part_node(bms.character_parts(), "arm_l") as Node3D
+	var arm_r := _part_node(bms.character_parts(), "arm_r") as Node3D
+	assert_true(arm_l != null and arm_r != null, "the mesh arm_model instanced both arms")
+	if arm_l == null or arm_r == null:
+		return
+	var rest_l: Transform3D = arm_l.transform
+	var rest_r: Transform3D = arm_r.transform
+	# The gait had raised the arms: the state it keeps (gun-hold pitch + walk swing + fists sway + a mid strike
+	# flail + a closed two-handed grip) AND the pose it last wrote — the arms held forward at the gun-hold pitch,
+	# through the rig's own pose builder. The world is paused in dialogue, so no gait frame will ever undo it.
 	bms._mode_pitch = bms.arm_hold_pitch
 	bms._swing_blend = 1.0
 	bms._fists_sway = 8.0
 	bms._strike_t = 1.0
+	bms._hold_blend = 1.0
+	var raised: Transform3D = bms._arm_pose(bms.arm_rotation + Vector3(bms.arm_hold_pitch, 0.0, 0.0))
+	arm_l.transform = raised
+	arm_r.transform = raised
+	assert_false(arm_l.transform.is_equal_approx(rest_l), "precondition: the left arm is really raised off its rest pose")
 	bms.lower_arms()
 	assert_eq(bms._mode_pitch, 0.0, "lower_arms clears the weapon-hold pitch so the arms aren't held forward")
 	assert_eq(bms._swing_blend, 0.0, "lower_arms clears the walk-swing blend")
 	assert_eq(bms._fists_sway, 0.0, "lower_arms clears the fists-out sway")
 	assert_eq(bms._strike_t, 0.0, "lower_arms clears any in-flight strike flail")
-	var arm_l := _part_node(bms.character_parts(), "arm_l") as Node3D
-	assert_not_null(arm_l, "the mesh arm_model instanced a left arm")
-	if arm_l != null:
-		assert_true(arm_l.transform.is_equal_approx(bms._arm_pose(bms.arm_rotation)),
-			"lower_arms snaps the left arm to its authored by-side rest pose")
+	assert_eq(bms._hold_blend, 0.0, "lower_arms opens the two-handed grip, so the hands don't stay closed on a lowered gun")
+	assert_true(arm_l.transform.is_equal_approx(rest_l),
+		"lower_arms snaps the raised left arm back to the rest pose the rig was built with")
+	assert_true(arm_r.transform.is_equal_approx(rest_r),
+		"...and the raised right arm too — the whole conversation plays out with both arms down")
 
 func test_body_model_swap_instances_mesh_models_for_limbs() -> void:
 	var host := _LookHost.new()

@@ -62,6 +62,8 @@ func test_vary_pitch_never_returns_a_hanging_zero() -> void:
 	GameSettings.audio.global_pitch_spread = 0.05
 	assert_gte(AudioManager.vary_pitch(0.0), AudioManager.MIN_PITCH,
 		"a caller handing in 0 must still be floored, not passed straight through to a hung voice")
+	assert_gt(AudioManager.vary_pitch(0.0), 0.0,
+		"the floor itself must be above zero — a MIN_PITCH of 0 would satisfy the bound above and still hang the voice")
 	GameSettings.audio.global_pitch_spread = restore
 
 
@@ -126,13 +128,37 @@ func test_play_varied_stamps_a_fresh_pitch_on_every_play() -> void:
 
 
 ## Callers stay unconditional (`AudioManager.play_varied(maybe_null_export)`), so a missing node is a silent
-## no-op rather than an error — the same shape play_sfx's `stream == null` early-out already has.
+## no-op rather than an error — the same shape play_sfx's `stream == null` early-out already has. The decoy
+## carries a `pitch_scale` but no `play()`, so a guard that let it through would visibly stamp a roll on it (and
+## then error calling the missing play); the real player beside it, driven identically, proves the same call
+## DOES stamp when the node can play — without that control an always-no-op play_varied would pass too.
 func test_play_varied_is_a_silent_noop_on_a_node_that_cannot_play() -> void:
-	AudioManager.play_varied(null)
-	var plain := Node.new()
-	add_child_autofree(plain)
-	AudioManager.play_varied(plain)  # no `play` method — must not error
-	assert_true(true, "play_varied tolerates null / a non-audio node so call sites can stay unconditional")
+	var restore: float = GameSettings.audio.global_pitch_spread
+	GameSettings.audio.global_pitch_spread = 0.05
+
+	AudioManager.play_varied(null)  # null export: must return before touching anything (an engine error fails this)
+
+	var decoy_script := GDScript.new()
+	decoy_script.source_code = "extends Node\nvar pitch_scale: float = 1.0\n"
+	decoy_script.reload()
+	var decoy := Node.new()
+	decoy.set_script(decoy_script)
+	add_child_autofree(decoy)
+	AudioManager.play_varied(decoy, 0.5)
+	assert_eq(float(decoy.get(&"pitch_scale")), 1.0,
+		"a node with no play() must be left untouched — play_varied may not stamp a pitch on something it cannot play")
+
+	var real := AudioStreamPlayer.new()
+	real.stream = _silent_wav()
+	real.bus = &"sfx"
+	real.volume_db = -80.0
+	add_child_autofree(real)
+	AudioManager.play_varied(real, 0.5)
+	assert_between(real.pitch_scale, 0.5 * 0.95 - 0.0001, 0.5 * 1.05 + 0.0001,
+		"control: the same call on a real player DOES stamp base * (1 +/- spread), so the decoy's untouched pitch is the guard, not a dead seam")
+	real.stop()
+
+	GameSettings.audio.global_pitch_spread = restore
 
 
 ## Fire one play_2d_sfx and hand back the pitch_scale of the player it spawned, tidying that player up. Finding

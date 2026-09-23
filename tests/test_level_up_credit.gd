@@ -1,29 +1,19 @@
 extends GutTest
 
-## ⭐THE TRAINER DOES NOT LEND — and this suite is the pin on WHY, because the reason is not visible from the
-## line it changes. `Player.credit_limit()` rates the LIVE PERMANENT stat sheet, and the LevelUp station is the
-## only till in the game that SELLS entries on that sheet. Sold on credit, the loan underwrites itself:
-## measured on the shipped knobs, the first point costs 1 zm and lifts the line from 200 to 300 zm, each of the
-## first fifteen purchases opens more credit than it consumes, and the ladder runs to total level 51 with
-## 2022 zm owed — identically for EVERY starting build, because character creation is zero-sum so all of them
-## meet the same cost curve. Stat points also survive death (Character.die() takes `money` and nothing else),
-## so the loop the ONE SIGNED ACCOUNT exists to make unrepresentable comes back through the stat sheet.
-## Atm.withdraw already refuses the mirror-image trade ("the credit line funds PURCHASES, never cash"), and a
-## chess wager is staked in cash for exactly this reason.
-##
-## ⭐THE FIX IS A TILL POLICY, NOT A UI CHANGE. `LevelUp.accepts_credit` (default OFF) rides into the ONE
-## affordability predicate — `can_pay(cost, allow_credit)` — so the station's gate, the screen's row dim and
-## the screen's quoted total cannot disagree. Hiding the rail selector alone would be COSMETIC:
-## GameState.payment_method is global persisted run state, so a player can arm CREDIT at an ATM and walk back.
-##
-## Off-tree, no nodes: LevelUp's methods touch no transforms, and a Player's _ready wants the whole prefab.
+## ⭐THE TRAINER DOES NOT LEND. `Player.credit_limit()` rates the live permanent stat sheet and LevelUp is the
+## only till that sells entries on it, so a raise bought on credit underwrites its own loan (the full measured
+## ladder is in the level_up.gd header). Two station knobs close it: `accepts_credit` (gate 1, default OFF) and
+## `requires_settled_account` (gate 2, default ON — the buy-on-credit, sell-for-cash laundry defeats gate 1 alone).
+## The card must agree with the till: a row that lights up must be a raise the station serves, and the price it
+## quotes must be what leaves the player. Those are driven on the REAL authored card below (only _rebuild runs;
+## the Player stays detached and its _ready never runs).
 ##
 ## ⭐GameState is an AUTOLOAD — account / rail / record are SHARED MUTABLE STATE across the whole suite.
-## Snapshot and restore (the test_payment.gd / test_level_up.gd idiom), or a balance left behind by another
-## file turns a refusal test green for the wrong reason.
+## Snapshot and restore, or a balance left behind by another file turns a refusal test green for the wrong reason.
 
 const PLAYER_PATH := "res://scripts/player/player.gd"
 const CHARACTER_PATH := "res://scripts/player/character.gd"
+const SCREEN_SCENE := "res://scenes/ui/level_up_screen.tscn"
 
 var _prev_account: float
 var _prev_method: String
@@ -74,6 +64,54 @@ func _station(cost: int) -> LevelUp:
 
 func _fee() -> float:
 	return GameSettings.economy.bank_noncash_fee_fraction
+
+
+## Paint the REAL level-up card (the authored scene, chrome bound by its own _ready) for this station + player and
+## read back what the player would see. Only _rebuild runs — open_level_up wants a live in-tree player — and
+## _rebuild asks the detached Player nothing but the payment seam the station itself gates on.
+func _paint_card(lv: LevelUp, p: Variant) -> Dictionary:
+	var screen = (load(SCREEN_SCENE) as PackedScene).instantiate()
+	add_child_autofree(screen)
+	screen._station = lv
+	screen._player = p
+	screen._rebuild()
+	var lit := 0
+	var dimmed := 0
+	var dim_matches_lock := true
+	var price := NAN
+	for row in screen._rows.get_children():
+		var btn := row.get_child(0) as Button
+		var cols := row.get_child(1).get_child(0) as Control
+		if btn.disabled:
+			dimmed += 1
+		else:
+			lit += 1
+		if (cols.modulate.a < 1.0) != btn.disabled:
+			dim_matches_lock = false
+		price = _last_number((cols.get_child(cols.get_child_count() - 1) as Label).text)
+	var card := {
+		"lit": lit,
+		"dimmed": dimmed,
+		"dim_matches_lock": dim_matches_lock,
+		"price": price,
+		"wallet": _last_number((screen._money_label as Label).text),
+		"rail_shown": (screen._rail_btn as Control).visible,
+		"notice_shown": (screen._credit_notice as Control).visible,
+		"notice": (screen._credit_notice as Label).text,
+	}
+	screen._station = null  # the caller frees the station + player; the card must not outlive them holding handles
+	screen._player = null
+	return card
+
+
+## The last number painted in a label ("[PH] Your zorkmids: 103.5" -> 103.5, "103 zm" -> 103). NAN when none.
+func _last_number(text: String) -> float:
+	var re := RegEx.new()
+	re.compile("-?\\d+(?:\\.\\d+)?")
+	var hits := re.search_all(text)
+	if hits.is_empty():
+		return NAN
+	return float(hits[hits.size() - 1].get_string())
 
 
 # --- the shipping default ----------------------------------------------------------------------------------
@@ -249,53 +287,84 @@ func test_the_policy_is_inert_on_a_plain_wallet() -> void:
 	npc.free()
 
 
-func test_no_other_till_changed() -> void:
-	# The fix is SCOPED to the station that sells the COLLATERAL — the six stats credit_limit() rates. A heal, a
-	# respec and a vendor's rifle stay buyable on credit and are not entries on that sheet, so none of them can
-	# bootstrap the line. ⭐NOT a claim that every other till is fine: ChipInstaller sells PERMANENT abilities
-	# (`unlock_mechanic`) on the credit rail with no policy at all. That is the same shape minus the
-	# self-collateralising half — a real open question, deliberately left alone here rather than widened into by
-	# a knob nobody asked for.
+func test_a_vendor_still_sells_on_credit_to_the_player_the_trainer_refuses() -> void:
+	# The fix is SCOPED to the station that sells the COLLATERAL — the six stats credit_limit() rates. A vendor's
+	# rifle is not an entry on that sheet, so it stays buyable on the line. ⭐NOT a claim that every other till is
+	# fine: ChipInstaller sells PERMANENT abilities on the credit rail with no policy at all — a real open
+	# question, deliberately left alone here rather than widened into by a knob nobody asked for.
 	GameState.payment_method = "credit"
 	var p = _player(0.0)
-	assert_true(p.can_pay(100.0), "the credit line is alive and well for every other counter")
 	var lv := _station(100)
-	assert_false(p.can_pay(100.0, lv.accepts_credit), "only the trainer reads it as unaffordable")
+	assert_false(lv.level_up_stat(p, &"gunplay"), "the trainer refuses a broke player's raise on the credit line")
+	assert_eq(GameState.account, 0.0, "precondition: the refusal opened no debt")
+	var vendor := Merchant.new()  # never add_child: its _ready is not what is under test
+	var rifle := Item.new()
+	rifle.value = 100.0
+	var price := vendor.buy_price(rifle, p)
+	assert_true(vendor.take_payment(price, p), "the SAME player, at a ledger vendor, still buys on the credit line")
+	assert_lt(GameState.account, 0.0, "and that sale really was funded by borrowing")
+	rifle = null
+	vendor.free()
 	lv.free()
 	p.free()
 
 
 # --- the screen obeys the same policy --------------------------------------------------------------------------
 
-func test_the_screen_threads_the_station_policy_into_every_price() -> void:
-	# The card needs a LIVE in-tree player to exercise, which CLAUDE.md forbids in a unit test, so the wiring is
-	# pinned by SOURCE TEXT — the tests/test_payment_rail_selector.gd convention for exactly this case.
-	# ⭐If a rewording breaks one of these, do not delete the assert: re-point it. The invariant is that the
-	# header readout, the row dim and the quoted total all carry the SAME flag the station gates on — otherwise
-	# a row lies about a sale the till will refuse, which is the divergence the payment seam exists to kill.
-	var src := FileAccess.get_file_as_string("res://scripts/ui/level_up_screen.gd")
-	assert_ne(src, "", "level_up_screen.gd is readable")
-	assert_true(src.contains("_station.get(&\"accepts_credit\")"),
-		"the screen must read THIS station's policy, duck-typed off the Node-typed handle (the shop_screen idiom)")
-	assert_true(src.contains("spendable(takes_credit)"),
-		"the 'Your zorkmids' readout must not advertise a line the till refuses — spendable() adds credit_left() on its OWN path, separate from _split, so it has to be passed the flag too")
-	assert_true(src.contains("can_pay(cost, takes_credit)"),
-		"the row dim must gate on the same predicate AND the same policy as LevelUp.level_up_stat")
-	assert_true(src.contains("charge_total(cost, takes_credit)"),
-		"the printed all-in price must be quoted under the policy that will charge it")
-	assert_true(src.contains("_rail_btn.set_available(takes_credit)"),
-		"a selector that cannot change the answer must HIDE (the shop's cash-only idiom) rather than sit there lying")
-	assert_true(src.contains("PlayerText.level_up_no_credit(barred, "),
-		"and the terms must be SERVED in its place — the rail is global persisted state, so a player may have armed CREDIT elsewhere and deserves to be told why it vanished")
+func test_the_card_dims_every_raise_a_credit_refusing_till_refuses() -> void:
+	# The rail is GLOBAL persisted state: a player can arm CREDIT at an ATM and walk in here holding nothing. The
+	# card must not light a row, advertise the line in its wallet readout, or offer a rail selector that cannot
+	# change the answer — otherwise it lies about a sale the till will refuse.
+	GameState.payment_method = "credit"
+	var p = _player(0.0)
+	var lv := _station(100)
+	var card := _paint_card(lv, p)
+	assert_eq(card.lit + card.dimmed, 6, "precondition: the card painted one row per stat")
+	assert_eq(card.lit, 0, "a player whose only money is the credit line sees every raise dimmed at a till that does not lend")
+	assert_true(card.dim_matches_lock, "each dimmed row is also the locked one (the fade and the click agree)")
+	assert_almost_eq(float(card.wallet), 0.0, 0.01, "the 'Your zorkmids' readout does not count a credit line this till refuses")
+	assert_false(card.rail_shown, "the DEBIT/CREDIT selector hides on a till where credit cannot change the answer")
+	assert_false(lv.level_up_stat(p, &"gunplay"), "...and the till agrees with the dimmed row: the raise is refused")
+	lv.free()
+	p.free()
+
+	# CONTROL: the same broke, credit-armed player at a station that DOES lend sees a lit card, the line in the
+	# readout and the selector — so the dim above is the station's policy, not a card that is always dark.
+	var p2 = _player(0.0)
+	var lender := _station(100)
+	lender.accepts_credit = true
+	var lent := _paint_card(lender, p2)
+	assert_eq(lent.lit, 6, "a lending station lights every raise the credit line covers")
+	assert_gt(float(lent.wallet), 100.0, "and its readout counts the credit line")
+	assert_true(lent.rail_shown, "and it offers the rail selector")
+	assert_true(lender.level_up_stat(p2, &"gunplay"), "...and that lit row is a raise the till really serves")
+	lender.free()
+	p2.free()
 
 
-func test_the_station_gate_carries_the_policy() -> void:
-	var src := FileAccess.get_file_as_string("res://scripts/components/level_up.gd")
-	assert_ne(src, "", "level_up.gd is readable")
-	assert_true(src.contains("player.can_pay(cost, accepts_credit)"),
-		"the refusal must sit at the can_pay GATE: level_up_stat applies the raise before it charges, so a policy checked only at charge() would hand out the stat point for free")
-	assert_true(src.contains("player.charge(cost, accepts_credit)"),
-		"and the debit must run under the same policy it was gated on")
+func test_the_card_quotes_the_price_that_actually_leaves_the_player() -> void:
+	# Savings carry the non-cash service charge; cash does not. Whatever the card prints in the cost column must be
+	# exactly what the station then takes, or the row under-quotes the sale.
+	GameState.account = 500.0
+	var banked = _player(0.0)
+	var lv := _station(100)
+	var card := _paint_card(lv, banked)
+	assert_false(is_nan(float(card.price)), "precondition: the cost column painted a number")
+	assert_true(lv.level_up_stat(banked, &"gunplay"), "precondition: savings buy the raise")
+	assert_almost_eq(500.0 - GameState.account, float(card.price), 0.01,
+		"the all-in price printed on a savings-funded row is exactly what left the account (service charge included)")
+	lv.free()
+	banked.free()
+
+	GameState.account = 0.0
+	var holding_cash = _player(200.0)
+	var lv2 := _station(100)
+	var cash_card := _paint_card(lv2, holding_cash)
+	assert_true(lv2.level_up_stat(holding_cash, &"gunplay"), "precondition: pocket cash buys the raise")
+	assert_almost_eq(200.0 - float(holding_cash.money), float(cash_card.price), 0.01,
+		"the price printed on a cash-funded row is exactly what left the wallet (no service charge on cash)")
+	lv2.free()
+	holding_cash.free()
 
 
 func test_the_terms_match_the_gate_that_is_actually_shut() -> void:
@@ -348,16 +417,27 @@ func test_the_buy_sell_launder_route_is_closed() -> void:
 	# (`player.add_money(price)`), and sell_price is clamped to only min_vendor_spread under buy_price — so the
 	# round trip returns nearly the whole line as spendable coins, which a cash-taking till would accept. Worse,
 	# the shipped Medicine Person carries a Merchant AND a LevelUp on the same NPC.
-	# This reproduces the OUTCOME of that laundry (cash in hand, account in the red) and asserts the till is shut.
+	# This RUNS that laundry through a real ledger vendor at its most generous buyback, then walks the cash over.
 	GameState.payment_method = "credit"
-	GameState.account = -103.0    # what the credit-funded purchase cost, incl. the 3% non-cash fee
-	var p = _player(99.0)         # ...and what selling it straight back returned, in cash
+	var p = _player(0.0)
+	var vendor := Merchant.new()  # never add_child: only its pricing + till are under test
+	vendor.sell_mult = 10.0       # a buyback far above the sticker: only the arbitrage floor limits the payout
+	var goods := Item.new()
+	goods.value = 100.0
+	assert_true(vendor.take_payment(vendor.buy_price(goods, p), p), "precondition: the goods are bought on the credit line")
+	assert_lt(GameState.account, 0.0, "precondition: ...with borrowed money")
+	p.add_money(vendor.sell_price(goods, p))  # Merchant.sell's payout: straight back, in cash
+	var laundered := float(p.money)
 	var lv := _station(50)
 	assert_true(p.can_pay(50.0, false), "the laundered cash WOULD cover the raise — gate 1 cannot see it")
 	assert_false(lv.level_up_stat(p, &"gunplay"), "gate 2 shuts the till: you cannot hold laundered cash without being in the red")
 	assert_eq(int(p.stats.gunplay), 10, "no point was bought")
-	# ...and squaring the debt costs MORE than the laundry returned, so the loop is strictly lossy.
-	assert_gt(103.0, 99.0, "the round trip lost the service charge and the vendor spread")
+	assert_almost_eq(float(p.money), laundered, 0.01, "and not a coin of the laundered cash was taken")
+	# ...and squaring the debt costs MORE than the laundry returned (service charge + vendor spread), so the loop is lossy.
+	assert_gt(-GameState.account, laundered,
+		"the round trip must lose money: if the fee and the spread ever both reach zero, gate 2 is the only thing left and settling up re-opens a free laundry")
+	goods = null
+	vendor.free()
 	lv.free()
 	p.free()
 
@@ -372,12 +452,44 @@ func test_gate_two_is_a_designer_knob_too() -> void:
 	p.free()
 
 
-func test_the_station_gate_carries_both_halves() -> void:
-	var src := FileAccess.get_file_as_string("res://scripts/components/level_up.gd")
-	assert_true(src.contains("requires_settled_account and owes_the_ledger()"),
-		"gate 2 must sit at the same refusal point as gate 1 — level_up_stat applies the raise before it charges, so anything checked later hands out the stat point for free")
-	assert_true(src.contains("cost > 0.0 and requires_settled_account"),
-		"...and must gate the FEE, not the service: a free raise still serves a debtor")
-	var scr := FileAccess.get_file_as_string("res://scripts/ui/level_up_screen.gd")
-	assert_true(scr.contains("not barred and _player.can_pay(cost, takes_credit)"),
-		"the row dim must apply BOTH gates in the same order the station does, or a row lights up on a sale the till refuses")
+func test_the_card_applies_gate_two_exactly_where_the_till_does() -> void:
+	# The card must shut the SAME rows the till shuts: a debtor rich in cash sees dim rows and the terms, a debtor
+	# on a FREE raise still sees it lit, and a settled player at the same station sees neither. The station is a
+	# lending one throughout, so gate 2 (the debt) is the only thing that changes between the three.
+	GameState.account = -50.0
+	var debtor = _player(1000.0)
+	var lv := _station(100)
+	lv.accepts_credit = true
+	var shut := _paint_card(lv, debtor)
+	assert_eq(shut.lit, 0, "a debtor holding plenty of cash sees every PAID raise dimmed while the Ledger is owed")
+	assert_true(shut.notice_shown, "and the card serves the terms in place of a silent dead card")
+	assert_true(String(shut.notice).to_lower().contains("square") or String(shut.notice).to_lower().contains("owe"),
+		"...and those terms name the debt, the actual reason the counter is shut")
+	assert_false(lv.level_up_stat(debtor, &"gunplay"), "the till agrees with the dimmed row")
+	debtor.free()
+
+	var free_rider = load(PLAYER_PATH).new()
+	var sheet := CharacterStats.new()
+	for stat in CharacterStats.STAT_NAMES:
+		sheet.set(stat, -5)
+	free_rider.stats = sheet
+	GameState.account = -500.0
+	lv.base_cost = 1
+	lv.cost_per_level = 1.5
+	assert_eq(lv.level_up_cost(free_rider), 0.0, "precondition: an all(-5) sheet trains for free")
+	var free_card := _paint_card(lv, free_rider)
+	assert_eq(free_card.lit, 6, "a FREE raise stays lit for a debtor — gate 2 gates the fee, never the service")
+	assert_true(lv.level_up_stat(free_rider, &"strength"), "and the till serves exactly that lit row")
+	free_rider.free()
+	sheet = null
+
+	GameState.account = 0.0
+	var settled = _player(1000.0)
+	lv.base_cost = 100
+	lv.cost_per_level = 0.0
+	var open := _paint_card(lv, settled)
+	assert_eq(open.lit, 6, "CONTROL: square with the Ledger, the same station lights every raise the cash covers")
+	assert_false(open.notice_shown, "and serves no terms, because nothing is shut")
+	assert_true(lv.level_up_stat(settled, &"gunplay"), "and the till serves it")
+	settled.free()
+	lv.free()

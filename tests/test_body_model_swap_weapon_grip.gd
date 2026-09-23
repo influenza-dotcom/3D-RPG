@@ -11,8 +11,18 @@ extends GutTest
 ##
 ## Both are derived from the LIVE `_arm_left` / `_arm_right` transforms, so the rig below builds real arm nodes
 ## rather than stubbing the maths. Everything is OFF-TREE (`.new()` + `free()`, no `_ready`) per CLAUDE.md.
+##
+## The HOLD itself is posed by the production gait, `_animate_limbs`, driven directly under a duck-typed armed host
+## (`_process` would need the tree). Never pose the arms by hand here: a test that composes the hold pitch, the aim
+## swing, the converge and the stagger itself grades its own arithmetic, not the pose the NPC actually wears.
 
 const SWAP_PATH := "res://scripts/components/body_model_swap.gd"
+
+## One gait frame long enough that every eased arm term (the slowest rate in _animate_limbs is 10/s) lands on its
+## target: the settled hold, with no easing left in it.
+const SETTLE_DELTA: float = 10.0
+## One ordinary render frame, for the tests that watch the easing itself.
+const FRAME_DELTA: float = 1.0 / 60.0
 
 ## A swap with a real ARM PAIR: two Node3Ds each carrying a 2 m box down local +Z, which is the axis the shipped
 ## arm.blend puts its hand on (arm_rotation (90,0,0) then turns that axis DOWN into the by-the-side hang).
@@ -44,22 +54,49 @@ func _swap_with_arms(hold_pitch: float = -78.0) -> Node:
 	return bms
 
 
-## Pose both arms exactly as _animate_limbs does with the weapon UP: hold pitch, the inward converge yaw, and the
-## fore/aft stagger. `_animate_limbs` needs a live _process, so off-tree tests write the same expression by hand.
-func _pose_holding(bms: Node, hold_blend: float = 1.0) -> void:
-	var converge: float = bms.arm_hold_converge_deg * hold_blend
-	var stagger := Vector3(0.0, 0.0, bms.arm_hold_stagger * hold_blend)
-	var rot: Vector3 = bms.arm_rotation + Vector3(bms.arm_hold_pitch, 0.0, 0.0)
-	bms._arm_left.transform = bms._arm_pose(rot, stagger, converge)
-	bms._arm_right.transform = bms._reflect() * bms._arm_pose(rot, -stagger, converge)
-
-
 ## Minimal duck-typed host that reports an aim elevation. BodyModelSwap reads `aim_pitch_degrees()` off its
 ## PARENT by name, so a bare Node3D carrying it is all the arm rig needs.
 class _AimHost extends Node3D:
 	var pitch_deg: float = 0.0
 	func aim_pitch_degrees() -> float:
 		return pitch_deg
+
+
+## An NPC-shaped host with its weapon drawn: `is_holding_gun()` is what raises the arms onto the weapon in
+## _animate_limbs. No is_on_floor / velocity / is_fists_out, so the gait reads it as a grounded, standing, armed body.
+class _ArmedHost extends _AimHost:
+	var gun_out: bool = true
+	func is_holding_gun() -> bool:
+		return gun_out
+
+
+## Parent `bms` under an armed host (freeing the host frees the swap).
+func _armed(bms: Node) -> _ArmedHost:
+	var host := _ArmedHost.new()
+	host.add_child(bms)
+	return host
+
+
+## Run the real gait until the hold has settled.
+func _settle(bms: Node) -> void:
+	bms._animate_limbs(SETTLE_DELTA, false)
+
+
+## Both hand tips (swap-local), [left, right], at the arms' current pose.
+func _hands(bms: Node) -> Array[Vector3]:
+	var tip := Vector3(0.0, 0.0, bms._arm_reach_measured())
+	return [bms._arm_left.transform * tip, bms._arm_right.transform * tip]
+
+
+## The two grip terms READ BACK off the posed arms: x = the LEFT arm's inward yaw about UP (degrees) and y = how far
+## ahead of the right hand the left one leads, per hand (metres). The arm's own rotation here is a pure pitch, so its
+## hand axis has no X component and the yaw of (hand - shoulder anchor) in the XZ plane IS the applied converge;
+## the fore/aft split of the two mirrored hands is twice the applied stagger whatever the pitch or converge.
+func _grip_terms(bms: Node) -> Vector2:
+	var h := _hands(bms)
+	var stagger: float = (h[0].z - h[1].z) * 0.5
+	var from_shoulder: Vector3 = h[0] - (bms.arm_position + Vector3(0.0, 0.0, stagger))
+	return Vector2(rad_to_deg(atan2(from_shoulder.x, from_shoulder.z)), stagger)
 
 
 # --- weapon_grip_position -------------------------------------------------------------------------------
@@ -107,20 +144,18 @@ func test_grip_respects_weapon_grip_reach_and_offset() -> void:
 	bms.free()
 
 func test_grip_rises_as_the_arms_raise() -> void:
-	# arm_hold_pitch now decides WHERE THE WEAPON IS, not just how the arms look.
+	# arm_hold_pitch now decides WHERE THE WEAPON IS, not just how the arms look: two armed NPCs that differ only in
+	# their authored hold angle, posed by the real gait.
 	var low = _swap_with_arms(-40.0)
 	var high = _swap_with_arms(-90.0)
-	# _apply_arm_transform writes the REST pose; the hold pitch reaches the arms through _animate_limbs, so pose
-	# both rigs by hand at their own hold angle — the same expression _animate_limbs writes.
-	for pair in [[low, -40.0], [high, -90.0]]:
-		var b = pair[0]
-		var pitch: float = pair[1]
-		b._arm_left.transform = b._arm_pose(b.arm_rotation + Vector3(pitch, 0.0, 0.0))
-		b._arm_right.transform = b._reflect() * b._arm_pose(b.arm_rotation + Vector3(pitch, 0.0, 0.0))
+	var low_host := _armed(low)
+	var high_host := _armed(high)
+	_settle(low)
+	_settle(high)
 	assert_gt((high.weapon_grip_position() as Vector3).y, (low.weapon_grip_position() as Vector3).y,
 		"a hold pitch nearer level (-90) lifts the hands, and the weapon hanging off them")
-	low.free()
-	high.free()
+	low_host.free()
+	high_host.free()
 
 func test_single_arm_rig_still_offers_a_grip() -> void:
 	# The Player's first-person view-model arm (single_arm) leaves _arm_right null; the read must degrade to the
@@ -170,18 +205,30 @@ func test_aim_follow_is_clamped_symmetrically() -> void:
 	assert_almost_eq(bms.aim_pitch_contribution(), -55.0, 0.0001, "and the clamp is symmetric downward")
 	host.free()
 
-func test_raised_arm_target_pitch_subtracts_the_aim_swing() -> void:
-	# Sign check, and it is easy to get backwards: this rig raises an arm with a MORE NEGATIVE pitch (see
-	# arm_air_pitch -160 = straight up), so an UPWARD aim (positive degrees) must SUBTRACT from arm_hold_pitch.
+func test_aiming_up_lifts_the_held_grip_and_aiming_down_drops_it() -> void:
+	# The sign is easy to get backwards: this rig raises an arm with a MORE NEGATIVE pitch (arm_air_pitch -160 is
+	# straight up), while a positive aim elevation means UP. Judged where the player sees it — the height of the
+	# grip the NPC hangs its gun from — after the real gait has posed the arms.
 	var bms = _swap_with_arms(-78.0)
-	var host := _AimHost.new()
-	host.add_child(bms)
+	var host := _armed(bms)
+	host.pitch_deg = 0.0
+	_settle(bms)
+	var level_y: float = (bms.weapon_grip_position() as Vector3).y
 	host.pitch_deg = 30.0
-	var target: float = bms.arm_hold_pitch - bms.aim_pitch_contribution()
-	assert_lt(target, bms.arm_hold_pitch, "aiming UP drives the arm pitch more negative — the hands rise")
+	_settle(bms)
+	var up_y: float = (bms.weapon_grip_position() as Vector3).y
 	host.pitch_deg = -30.0
-	assert_gt(bms.arm_hold_pitch - bms.aim_pitch_contribution(), bms.arm_hold_pitch,
-		"and aiming DOWN drives it back the other way")
+	_settle(bms)
+	var down_y: float = (bms.weapon_grip_position() as Vector3).y
+	assert_gt(up_y, level_y, "a foe ABOVE must lift the hands and the gun hanging off them, not drop them")
+	assert_lt(down_y, level_y, "a foe BELOW must lower the hands and the gun")
+	# CONTROL: the same rig with the aim follow opted out holds the level grip at the same +30 elevation, so the
+	# rise above really is the aim swing and not left-over easing.
+	bms.arm_aim_follow = 0.0
+	host.pitch_deg = 30.0
+	_settle(bms)
+	assert_almost_eq((bms.weapon_grip_position() as Vector3).y, level_y, 0.0001,
+		"arm_aim_follow 0 must keep the grip at the level-hold height whatever the host's aim elevation")
 	host.free()
 
 
@@ -192,65 +239,116 @@ func test_raised_arm_target_pitch_subtracts_the_aim_swing() -> void:
 
 func test_converge_brings_the_hands_together_on_the_centreline() -> void:
 	var bms = _swap_with_arms()
+	var host := _armed(bms)
 	bms.arm_hold_stagger = 0.0
 	bms.arm_hold_converge_deg = 0.0
-	_pose_holding(bms)
-	var apart_open: float = (bms._arm_left.transform * Vector3(0.0, 0.0, bms._arm_reach_measured())).distance_to(
-			bms._arm_right.transform * Vector3(0.0, 0.0, bms._arm_reach_measured()))
+	_settle(bms)
+	var open := _hands(bms)
+	var apart_open: float = open[0].distance_to(open[1])
 	bms.arm_hold_converge_deg = 24.0
-	_pose_holding(bms)
-	var apart_closed: float = (bms._arm_left.transform * Vector3(0.0, 0.0, bms._arm_reach_measured())).distance_to(
-			bms._arm_right.transform * Vector3(0.0, 0.0, bms._arm_reach_measured()))
+	_settle(bms)
+	var closed := _hands(bms)
+	var apart_closed: float = closed[0].distance_to(closed[1])
 	assert_lt(apart_closed, apart_open * 0.5,
 		"converging must close the fists onto the weapon, not merely narrow the stance a little")
 	assert_almost_eq((bms.weapon_grip_position() as Vector3).x, 0.0, 0.0001,
 		"and the grip stays on the body centreline — the converge is symmetric, so the weapon does not drift sideways")
-	bms.free()
+	host.free()
 
 func test_converge_is_a_yaw_not_a_pitch_so_the_hands_stay_level() -> void:
-	# The converge is PRE-multiplied about UP. Folded into the arm's own euler instead it would tilt the hold.
+	# The converge is PRE-multiplied about UP, so it only swings each hand sideways in the horizontal plane. Turned
+	# about any other axis (a pitch, or a roll of the already-pitched arm) it would lift or drop the whole hold. The
+	# right arm is the left one mirrored, so the two hands ALWAYS match each other's height — "level" is therefore
+	# judged against the SAME settled hold with the converge zeroed, not left hand against right.
 	var bms = _swap_with_arms()
+	var host := _armed(bms)
+	var shipped_converge: float = bms.arm_hold_converge_deg
 	bms.arm_hold_stagger = 0.0
-	_pose_holding(bms)
-	var l: Vector3 = bms._arm_left.transform * Vector3(0.0, 0.0, bms._arm_reach_measured())
-	var r: Vector3 = bms._arm_right.transform * Vector3(0.0, 0.0, bms._arm_reach_measured())
-	assert_almost_eq(l.y, r.y, 0.0001, "converging swings the hands inward, never up or down")
-	bms.free()
+	bms.arm_hold_converge_deg = 0.0
+	_settle(bms)
+	var open := _hands(bms)
+	bms.arm_hold_converge_deg = shipped_converge
+	_settle(bms)
+	var closed := _hands(bms)
+	# CONTROL: the converge really moved the hands, so the height checks below compare two different poses.
+	assert_gt(closed[0].x, open[0].x + 0.1,
+		"control: the shipped converge swings the left hand inward toward the centreline")
+	assert_lt(closed[1].x, open[1].x - 0.1, "control: ...and the right hand inward from the other side")
+	assert_almost_eq(closed[0].y, open[0].y, 0.0001,
+		"converging swings the left hand inward, never up or down — the hold stays at the height the pitch put it")
+	assert_almost_eq(closed[1].y, open[1].y, 0.0001, "...and the right hand keeps its height too")
+	host.free()
 
-func test_stagger_separates_the_hands_ALONG_the_weapon_not_vertically() -> void:
+func test_stagger_separates_the_hands_along_the_weapon_not_vertically() -> void:
 	# ⭐The regression this pins, caught on screen: the stagger was first written as an antisymmetric PITCH, and
 	# at a near-level hold a pitch moves a hand UP and DOWN — so it split the fists 0.23 m vertically instead of
 	# offsetting them along the barrel. It is an antisymmetric shift of the shoulder anchors along +Z instead.
 	var bms = _swap_with_arms()
+	var host := _armed(bms)
 	bms.arm_hold_stagger = 0.08
-	_pose_holding(bms)
-	var l: Vector3 = bms._arm_left.transform * Vector3(0.0, 0.0, bms._arm_reach_measured())
-	var r: Vector3 = bms._arm_right.transform * Vector3(0.0, 0.0, bms._arm_reach_measured())
-	assert_almost_eq(l.y, r.y, 0.0001, "the two hands stay at the SAME height — a stagger, not a tilt")
-	assert_almost_eq(absf(l.z - r.z), 2.0 * bms.arm_hold_stagger, 0.0001,
+	_settle(bms)
+	var h := _hands(bms)
+	assert_almost_eq(h[0].y, h[1].y, 0.0001, "the two hands stay at the SAME height — a stagger, not a tilt")
+	assert_almost_eq(absf(h[0].z - h[1].z), 2.0 * bms.arm_hold_stagger, 0.0001,
 		"and they are offset along the body's forward axis by twice the authored stagger — one hand leads")
-	bms.free()
+	host.free()
 
-func test_zero_grip_terms_reproduce_the_plain_forward_reach() -> void:
-	# Both knobs are opt-out: zeroed, the pose must be byte-identical to the parallel reach that shipped before.
+func test_zeroed_grip_knobs_hold_the_hands_in_a_plain_parallel_reach() -> void:
+	# Both knobs are opt-out: zeroed, a drawn weapon is held the way it was before the grip existed — each hand
+	# straight out in front of its own shoulder, side by side, neither leading.
 	var bms = _swap_with_arms()
+	var host := _armed(bms)
 	bms.arm_hold_converge_deg = 0.0
 	bms.arm_hold_stagger = 0.0
-	_pose_holding(bms)
-	var rot: Vector3 = bms.arm_rotation + Vector3(bms.arm_hold_pitch, 0.0, 0.0)
-	assert_eq(bms._arm_left.transform, bms._arm_pose(rot),
-		"zero converge + zero stagger is exactly the un-gripped arm pose")
-	bms.free()
+	_settle(bms)
+	var h := _hands(bms)
+	assert_almost_eq(h[0].x, bms.arm_position.x, 0.0001,
+		"zero converge: the left hand must reach straight ahead of the left shoulder, not swing inward")
+	assert_almost_eq(h[1].x, -bms.arm_position.x, 0.0001, "...and the right hand ahead of the right shoulder")
+	assert_almost_eq(h[0].z, h[1].z, 0.0001, "zero stagger: neither hand leads the other along the weapon")
+	# CONTROL: the shipped knobs on the same armed rig DO move both, so the checks above can tell the grip apart.
+	bms.arm_hold_converge_deg = 24.0
+	bms.arm_hold_stagger = 0.08
+	_settle(bms)
+	var gripped := _hands(bms)
+	assert_gt(gripped[0].x, bms.arm_position.x + 0.1, "with the shipped converge the left hand swings in toward the centreline")
+	assert_gt(gripped[0].z - gripped[1].z, 0.1, "with the shipped stagger the left hand leads the right")
+	host.free()
 
-func test_hold_blend_scales_both_grip_terms_together() -> void:
-	# Drawing / holstering fades the grip open and shut on one envelope, so the hands never snap together.
+func test_drawing_eases_both_grip_terms_closed_on_one_envelope() -> void:
+	# Drawing / holstering fades the grip open and shut on ONE envelope, so the hands never snap together and the
+	# lead hand never arrives before the hands have closed. Watched frame by frame through the real gait.
 	var bms = _swap_with_arms()
-	_pose_holding(bms, 0.0)
-	var open_l: Vector3 = bms._arm_left.transform * Vector3(0.0, 0.0, bms._arm_reach_measured())
-	_pose_holding(bms, 0.5)
-	var half_l: Vector3 = bms._arm_left.transform * Vector3(0.0, 0.0, bms._arm_reach_measured())
-	_pose_holding(bms, 1.0)
-	var shut_l: Vector3 = bms._arm_left.transform * Vector3(0.0, 0.0, bms._arm_reach_measured())
-	assert_lt(absf(half_l.x), absf(open_l.x), "half-closed is already inboard of the open reach")
-	assert_lt(absf(shut_l.x), absf(half_l.x), "and fully closed is inboard of that — one monotonic envelope")
-	bms.free()
+	var host := _armed(bms)
+	host.gun_out = false
+	_settle(bms)  # holstered: grip fully open
+	host.gun_out = true
+	var frames: Array[Vector2] = []
+	for _i in 20:
+		bms._animate_limbs(FRAME_DELTA, false)
+		frames.append(_grip_terms(bms))
+	_settle(bms)
+	var closed := _grip_terms(bms)
+	assert_gt(closed.x, 1.0, "harness: the settled hold must show a real converge yaw")
+	assert_gt(closed.y, 0.01, "harness: the settled hold must show a real stagger")
+	var prev := -1.0
+	for i in frames.size():
+		var converge_frac: float = frames[i].x / closed.x
+		var stagger_frac: float = frames[i].y / closed.y
+		assert_almost_eq(converge_frac, stagger_frac, 0.001,
+			"frame %d after drawing: the converge (%.3f closed) and the stagger (%.3f closed) must ease on the same envelope" % [i + 1, converge_frac, stagger_frac])
+		assert_gt(converge_frac, prev, "frame %d: the hands keep closing on the weapon every frame after the draw" % (i + 1))
+		prev = converge_frac
+	var first: float = frames[0].x / closed.x
+	assert_gt(first, 0.0, "one frame after drawing, the hands have started to close")
+	assert_lt(first, 0.5, "...but must not SNAP shut in a single frame")
+	assert_gt(prev, 0.9, "a third of a second after drawing, the grip is essentially closed")
+	# Holstering opens them on the same eased envelope rather than snapping them apart.
+	host.gun_out = false
+	bms._animate_limbs(FRAME_DELTA, false)
+	var opening := _grip_terms(bms)
+	assert_lt(opening.x / closed.x, 1.0, "one frame after holstering, the hands have started to open")
+	assert_gt(opening.x / closed.x, 0.5, "...but must not snap open in a single frame")
+	assert_almost_eq(opening.x / closed.x, opening.y / closed.y, 0.001,
+		"and the lead hand falls back on the same envelope the converge opens on")
+	host.free()

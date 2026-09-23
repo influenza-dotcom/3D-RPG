@@ -92,15 +92,44 @@ func test_quote_splits_cash_and_rail_and_charges_the_fee_on_the_rail_only() -> v
 	assert_almost_eq(float(q["total"]), 100.0 + 70.0 * _fee(), 0.01, "total = base + fee")
 	p.free()
 
-func test_quote_matches_the_seam_it_quotes() -> void:
-	# The quote is not a second formula — it must agree with charge_total/can_pay exactly, or the label and the
-	# till diverge (the bug the seam exists to prevent).
+func test_the_quote_s_parts_are_what_the_till_actually_takes() -> void:
+	# The quote is what a point-of-sale label paints ("100 zm + fee"). Its parts must be the money that really moves:
+	# `cash` out of the wallet, `rail` + `fee` off the account, `total` in all.
 	var p = _player(30.0)
 	GameState.account = 500.0
 	var q: Dictionary = p.quote(100.0)
-	assert_eq(float(q["total"]), p.charge_total(100.0), "quote total must equal charge_total")
-	assert_eq(bool(q["ok"]), p.can_pay(100.0), "quote ok must equal can_pay")
+	assert_true(p.charge(100.0), "precondition: 30 cash + 500 savings covers a 100 price")
+	assert_almost_eq(30.0 - float(p.money), float(q["cash"]), 0.001,
+		"the wallet paid exactly the quote's cash portion")
+	assert_almost_eq(500.0 - GameState.account, float(q["rail"]) + float(q["fee"]), 0.001,
+		"the account paid exactly the quote's rail portion plus its service charge — the fee on the label is the fee charged")
+	assert_almost_eq((30.0 - float(p.money)) + (500.0 - GameState.account), float(q["total"]), 0.001,
+		"everything that left the player adds up to the quoted total")
 	p.free()
+
+func test_the_quote_s_ok_predicts_the_till_to_the_last_coin() -> void:
+	# A label that says 'affordable' must be served, and one that says 'too dear' must be refused having moved
+	# nothing — right at the edge, where the service charge decides it.
+	var probe = _player(30.0)
+	GameState.account = 500.0
+	var needed: float = float(probe.quote(100.0)["total"]) - 30.0  # what the account must hold, fee included
+	probe.free()
+
+	var exact = _player(30.0)
+	GameState.account = needed
+	assert_true(bool(exact.quote(100.0)["ok"]), "savings that exactly cover the rail + fee quote as affordable")
+	assert_true(exact.charge(100.0), "...and the till serves that quote")
+	assert_almost_eq(GameState.account, 0.0, 0.001, "...spending the account down to exactly zero")
+	exact.free()
+
+	var short = _player(30.0)
+	GameState.account = snappedf(needed - Zorkmids.QUANTUM, Zorkmids.QUANTUM)
+	assert_false(bool(short.quote(100.0)["ok"]), "one coin short of the fee, the quote must say no")
+	assert_false(short.charge(100.0), "...and the till must refuse it")
+	assert_eq(short.money, 30.0, "...having taken no cash")
+	assert_almost_eq(GameState.account, snappedf(needed - Zorkmids.QUANTUM, Zorkmids.QUANTUM), 0.001,
+		"...and nothing off the account")
+	short.free()
 
 func test_free_service_quotes_clean_for_a_debtor() -> void:
 	# A free service must clear whatever the wallet or the debt looks like — the free-respec-refused-while-negative
@@ -183,25 +212,38 @@ func test_cash_only_vendor_quotes_no_service_charge() -> void:
 	m_ledger.free()
 	p.free()
 
-func test_merchants_accept_the_ledger_by_default() -> void:
+func test_an_authored_merchant_takes_the_ledger_unless_told_otherwise() -> void:
 	# Existing authored merchants have no `accepts_ledger` in their .tres/.tscn, so the default decides their
-	# behaviour: it must stay ON, or every shop in the game silently becomes cash-only.
+	# behaviour. Built bare (the field never touched), a merchant must let savings pay, or every shop in the game
+	# silently becomes cash-only.
 	var m := Merchant.new()
-	assert_true(m.accepts_ledger, "accepts_ledger must default ON so authored merchants keep taking the ledger")
+	var p = _player(10.0)
+	GameState.account = 500.0
+	assert_true(m.can_afford(100.0, p), "a merchant authored without accepts_ledger must count banked savings")
+	assert_true(m.take_payment(100.0, p), "...and ring the sale up")
+	assert_lt(GameState.account, 500.0, "...drawing the shortfall from the account")
 	m.free()
+	p.free()
 
 func test_gate_and_display_read_the_same_predicate() -> void:
 	# ⭐The whole point. Walk a price range across both vendor kinds and assert can_afford never disagrees with
-	# what take_payment actually does — a row can never look dead while the till would serve it, or the reverse.
+	# what take_payment actually does — a row can never look dead while the till would serve it, or the reverse —
+	# and that a served row costs exactly the quoted_total it painted.
 	for takes_ledger in [true, false]:
 		for price in [0.0, 5.0, 25.0, 60.0, 100.0, 400.0]:
 			var m := _merchant(takes_ledger)
 			var p = _player(50.0)
 			GameState.account = 100.0
 			var shown: bool = m.can_afford(price, p)
+			var shown_total: float = m.quoted_total(price, p)
+			var before: float = p.money + GameState.account
 			var took: bool = m.take_payment(price, p)
+			var moved: float = before - (p.money + GameState.account)
 			assert_eq(took, shown,
 				"vendor(ledger=%s) price %s: the display predicate and the till must agree" % [takes_ledger, price])
+			assert_almost_eq(moved, shown_total if took else 0.0, 0.001,
+				"vendor(ledger=%s) price %s: a sale takes exactly the total the row showed; a refusal takes nothing"
+				% [takes_ledger, price])
 			m.free()
 			p.free()
 

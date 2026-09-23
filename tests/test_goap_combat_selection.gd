@@ -6,37 +6,45 @@ extends GutTest
 ## Investigate, and (valid target but still UNAWARE) -> the Idle floor. This pins the SELECTION/PLANNING layer
 ## where the design's fatal traps lived (goal self-satisfaction, the armed/unarmed split, sentinel reachability).
 ##
-## Scope: the SELECTION/PLANNING layer over the REAL combat action classes — their _init planning halves
-## (preconditions/effects/costs) drive select_goal + plan. Each action's act()/is_runtime_valid delegation is
-## pinned in its own test_goap_action_*.gd; the in-tree tick() stepping is manual-playtest. The goal priorities
-## here are the authored spec (the eventual GoapProfile values the combatant archetype carries).
+## Scope: the SELECTION/PLANNING layer over the SHIPPED combat library — GoapLibrary.build_actions/build_goals with
+## no profile, i.e. exactly what npc.gd hands its executor. The real action classes' _init planning halves
+## (preconditions/effects/costs) and the library's authored goal priorities drive select_goal + plan, so a retune or
+## a dropped action in goap_library.gd fails the matrix here. Each action's act()/is_runtime_valid delegation is
+## pinned in its own test_goap_action_*.gd; the in-tree tick() stepping is manual-playtest. One case (armed-but-dry)
+## senses its facts off an off-tree NPC through GoapExecutor._build_world_state instead, because the split it
+## protects lives in that sensor rather than in the planner.
 
-# --- The combat library (real action classes) + the designed goal priorities ---
+const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")
+const NPC_PATH := "res://scripts/npc/npc.gd"
+const PISTOL := preload("res://resources/weapons/pistol.tres")
+
+# --- The shipped combat library (no GoapProfile = the authored defaults every combatant starts from) ---
 
 func _combat_actions() -> Array:
-	return [
-		GoapActionDetect.new(),       # pre {state_detecting}      -> {threat_faced},  cost 0.1
-		GoapActionSearch.new(),  # pre {state_investigating}  -> {spot_searched}, cost 0.2
-		GoapActionFireArmed.new(),    # pre {state_alerted, can_fight_with_gun:true}  -> {target_engaged}, cost 0.5
-		GoapActionFireUnarmed.new(),  # pre {state_alerted, can_fight_with_gun:false} -> {target_engaged}, cost 0.6
-		GoapActionFlee.new(),         # pre {is_fleeing, threat_noticed} -> {fled}, cost 0.3
-		GoapActionHold.new(),         # pre {}                     -> {idle_done},     cost 0.1 (the floor)
-	]
+	return GoapLibrary.build_actions()
 
 func _combat_goals() -> Array:
-	return [
-		GoapGoal.new(&"Survive", 3.0, {&"fled": true}),
-		GoapGoal.new(&"Engage", 2.0, {&"target_engaged": true}),
-		GoapGoal.new(&"Investigate", 0.4, {&"spot_searched": true}),
-		GoapGoal.new(&"Detect", 0.3, {&"threat_faced": true}),
-		GoapGoal.new(&"Idle", 0.1, {&"idle_done": true}),
-	]
+	return GoapLibrary.build_goals()
+
+## The shipped goal called `goal_name`, or null.
+func _shipped_goal(goal_name: StringName) -> GoapGoal:
+	for g in _combat_goals():
+		if (g as GoapGoal).name == goal_name:
+			return g
+	return null
 
 ## Run the full library through select_goal + plan for a world-state; return the chosen goal + first action names.
 func _selected(facts: Dictionary) -> Dictionary:
+	return _selected_for(GoapWorldState.new(facts))
+
+## The same selection over a world-state SENSED off a real host by GoapExecutor._build_world_state.
+func _selected_from_host(host: Node) -> Dictionary:
+	return _selected_for(GoapExecutor.new()._build_world_state(host))
+
+func _selected_for(ws: GoapWorldState) -> Dictionary:
 	var ex := GoapExecutor.new()
 	ex.setup(_combat_actions(), _combat_goals())
-	ex.decide(GoapWorldState.new(facts))
+	ex.decide(ws)
 	var goal_name: StringName = ex.current_goal.name if ex.current_goal != null else &""
 	var action: GoapAction = ex.current_action()
 	var action_name: StringName = action.name if action != null else &""
@@ -50,12 +58,12 @@ func test_detecting_selects_detect() -> void:
 
 func test_alerted_with_gun_selects_fire_armed() -> void:
 	var s := _selected({&"state_alerted": true, &"can_fight_with_gun": true})
-	assert_eq(s[&"goal"], &"Engage", "ALERTED + can fight with gun -> Engage (GOAP FireArmed action body _act_alerted, npc.gd:2028)")
+	assert_eq(s[&"goal"], &"Engage", "ALERTED + can fight with gun -> Engage via the FireArmed action")
 	assert_eq(s[&"action"], &"FireArmed")
 
 func test_alerted_without_gun_selects_fire_unarmed() -> void:
 	# The FSM unarmed branch keys on _can_fight_with_gun() (ammo OR a spare clip), NOT is_armed — so an
-	# armed-but-dry-with-no-clips NPC lands here too (keyed on _can_fight_with_gun(), npc.gd:653), throwing fists.
+	# armed-but-dry-with-no-clips NPC lands here too, throwing fists.
 	var s := _selected({&"state_alerted": true, &"can_fight_with_gun": false})
 	assert_eq(s[&"goal"], &"Engage", "ALERTED + cannot fight with gun -> Engage via fists")
 	assert_eq(s[&"action"], &"FireUnarmed")
@@ -93,44 +101,92 @@ func test_not_fleeing_engages_normally() -> void:
 	assert_eq(s[&"goal"], &"Engage", "not fleeing -> Survive infeasible -> Engage")
 	assert_eq(s[&"action"], &"FireArmed")
 
+## An off-tree ALERTED combatant (no _ready — the test_npc_combat._off_tree_armed_npc idiom) still HOLDING a pistol
+## whose magazine is empty, with `spare_clips` pistol clips in its backpack. Every read _build_world_state makes is
+## the real one: is_armed off the backpack's equipped item, _can_fight_with_gun off the hub's Ammo and that backpack.
+func _alerted_dry_pistol_npc(spare_clips: int, target: Node3D) -> Node:
+	var npc = load(NPC_PATH).new()
+	var bag := CharacterInventory.new()
+	npc.add_child(bag)
+	npc.inventory = bag
+	var gun := ItemDb.make_weapon_item(PISTOL)
+	bag.add(gun)
+	bag.equip_item(gun)  # marks equipped_item (the equip signal is unwired off-tree; the marker still sets)
+	if spare_clips > 0:
+		bag.add(ItemDb.ammo_item_for(PISTOL.caliber), spare_clips)
+	var hub := Weapon.new()
+	var clip := Ammo.new()
+	clip.current_weapon = PISTOL
+	clip.current_ammo = 0  # the magazine is dry
+	clip.character = npc   # the wielder whose backpack a reload would draw from
+	hub.add_child(clip)
+	hub.ammo = clip
+	npc.add_child(hub)
+	npc._weapon = hub
+	var perception := Perception.new()
+	perception.state = Perception.State.ALERTED
+	npc.add_child(perception)
+	npc._perception = perception
+	npc._target = target
+	npc.hp = npc.max_hp
+	return npc
+
 func test_armed_dry_no_clips_punches_not_idles() -> void:
-	# Regression for the Design-3 gap the workflow caught: an ARMED NPC that is dry with no reload supply has
-	# can_fight_with_gun=false, so it must select FireUnarmed (punch), NOT fall through to Idle. Splitting on
-	# is_armed instead of can_fight_with_gun would have idled it while being shot.
-	var s := _selected({&"state_alerted": true, &"can_fight_with_gun": false})
-	assert_eq(s[&"action"], &"FireUnarmed", "armed-but-dry -> fists, never the Idle floor")
-	assert_ne(s[&"action"], &"Hold", "must not idle a combatant that still has a target")
+	# Regression for the Design-3 gap the workflow caught: an NPC still HOLDING its gun but dry with no reload supply
+	# must fight with its fists, not keep pulling a dead trigger and not fall through to Idle. The split lives in the
+	# SENSOR (_build_world_state's can_fight_with_gun <- NPC._can_fight_with_gun: ammo OR a spare clip), so the facts
+	# are sensed off a real NPC here rather than written by hand: sensing is_armed instead would call this NPC able
+	# to fight with its gun, plan FireArmed, and leave it clicking an empty pistol while being shot.
+	var target := Node3D.new()
+	var dry = _alerted_dry_pistol_npc(0, target)
+	assert_true(dry.is_armed(), "precondition: the dry NPC still HOLDS its pistol — this is the armed-but-dry case, not a disarm")
+	var s := _selected_from_host(dry)
+	assert_eq(s[&"goal"], &"Engage", "an ALERTED NPC with a target engages, gun or no gun")
+	assert_eq(s[&"action"], &"FireUnarmed", "armed-but-dry with no spare clip -> fists, never the dry gun and never the Idle floor")
+	# Control: the same body with ONE spare clip can reload, so the sensor keeps it on the gun. Without this, a sensor
+	# that never reported a usable gun at all would pass the case above.
+	var reloadable = _alerted_dry_pistol_npc(1, target)
+	assert_eq(_selected_from_host(reloadable)[&"action"], &"FireArmed",
+		"control: an empty magazine WITH a spare clip in the backpack still fights with the gun (it reloads)")
+	dry.free()
+	reloadable.free()
+	target.free()
 
 func test_engage_goal_never_self_satisfies() -> void:
 	# target_engaged is a SENTINEL: set only by FireArmed/FireUnarmed, NEVER sensed by _build_world_state. So the
 	# Engage goal is reachable-but-never-pre-satisfied — plan() is non-empty exactly when an Engage action's
 	# perception precondition holds, instead of returning [] (the self-satisfaction trap that sinks a goal keyed
 	# on an already-true fact like has_target).
-	var engage := GoapGoal.new(&"Engage", 2.0, {&"target_engaged": true})
-	var ws := GoapWorldState.new({&"state_alerted": true, &"can_fight_with_gun": true})
-	assert_false(engage.satisfied_by(ws), "Engage is never pre-satisfied (target_engaged is never sensed)")
+	# Uses the SHIPPED Engage goal, and a world-state carrying has_target=true exactly as _build_world_state senses it
+	# for an NPC with a target, so a goal re-keyed on that sensed fact fails here instead of silently idling combat.
+	var engage := _shipped_goal(&"Engage")
+	assert_true(engage != null, "the shipped library must build an Engage goal")
+	if engage == null:
+		return
+	var ws := GoapWorldState.new({&"has_target": true, &"state_alerted": true, &"can_fight_with_gun": true})
+	assert_false(engage.satisfied_by(ws), "Engage is never pre-satisfied by sensed facts (target_engaged is a sentinel)")
 	var plan := GoapPlanner.plan(ws, _combat_actions(), engage)
 	assert_eq(plan.size(), 1, "reachable in exactly one step")
-	assert_eq((plan[0] as GoapAction).name, &"FireArmed", "via FireArmed")
+	if plan.size() == 1:
+		assert_eq((plan[0] as GoapAction).name, &"FireArmed", "via FireArmed")
 	engage = null
 
-func test_goal_priority_order_and_absolutes() -> void:
-	# Select by NAME, not array index: the previous index-based version silently stopped comparing Engage vs
-	# Investigate once Survive took slot 0, so a reorder/retune that flipped combat priority (a fleer fighting,
-	# Detect outranking Engage) would still pass. Pins both the absolute authored values and the total order.
-	var by_name := {}
-	var ws := GoapWorldState.new({&"hp_frac": 1.0})
-	for g in _combat_goals():
-		by_name[g.name] = g.priority(ws)
-	assert_almost_eq(float(by_name[&"Survive"]), 3.0, 0.001, "Survive 3.0")
-	assert_almost_eq(float(by_name[&"Engage"]), 2.0, 0.001, "Engage 2.0")
-	assert_almost_eq(float(by_name[&"Investigate"]), 0.4, 0.001, "Investigate 0.4")
-	assert_almost_eq(float(by_name[&"Detect"]), 0.3, 0.001, "Detect 0.3")
-	assert_almost_eq(float(by_name[&"Idle"]), 0.1, 0.001, "Idle 0.1")
-	assert_gt(float(by_name[&"Survive"]), float(by_name[&"Engage"]), "Survive > Engage -> a fleer never fights")
-	assert_gt(float(by_name[&"Engage"]), float(by_name[&"Investigate"]), "Engage > Investigate")
-	assert_gt(float(by_name[&"Investigate"]), float(by_name[&"Detect"]), "Investigate > Detect")
-	assert_gt(float(by_name[&"Detect"]), float(by_name[&"Idle"]), "Detect > Idle")
+func test_every_goal_feasible_at_once_resolves_by_the_shipped_priority_order() -> void:
+	# The priority ORDER, driven through select_goal instead of read off the numbers: make every combat goal feasible
+	# in one world-state and peel the winners off. A retune that keeps the order stays green; a reorder that flips
+	# combat (a fleer fighting, a search outranking a gunfight, the Idle floor beating a noticed threat) fails.
+	var all_on := {&"is_fleeing": true, &"threat_noticed": true, &"state_alerted": true,
+		&"can_fight_with_gun": true, &"state_investigating": true, &"state_detecting": true}
+	assert_eq(_selected(all_on)[&"goal"], &"Survive", "with every goal feasible a fleer RUNS -- Survive tops the order")
+	var fighter := all_on.duplicate()
+	fighter[&"is_fleeing"] = false
+	assert_eq(_selected(fighter)[&"goal"], &"Engage",
+		"a non-fleer with a live target FIGHTS -- Engage outranks Investigate/Detect even when those are feasible too")
+	var suspicious := fighter.duplicate()
+	suspicious[&"state_alerted"] = false
+	var searched: StringName = _selected(suspicious)[&"goal"]
+	assert_true(searched == &"Investigate" or searched == &"Detect",
+		"a suspicious NPC reacts (Investigate/Detect) -- the Idle floor must never outrank a noticed threat, got %s" % searched)
 
 func test_fleeing_and_detecting_selects_survive_not_detect() -> void:
 	# Flee's precondition {is_fleeing, threat_noticed} is perception-agnostic, so a fleer bolts in DETECTING too:

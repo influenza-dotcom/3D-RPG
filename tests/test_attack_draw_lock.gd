@@ -11,10 +11,19 @@ extends GutTest
 const ATTACK_PATH := "res://scripts/combat/attack.gd"
 
 
-func test_draw_lock_defaults_off() -> void:
-	var a = load(ATTACK_PATH).new()
-	assert_false(a.draw_locked, "draw_locked ships OFF — a normal / AI wielder is never lock-gated")
-	a.free()
+func test_a_wielder_nobody_carry_locked_holsters_and_draws_freely() -> void:
+	# The lock ships OFF: only the player's carry path engages it, so a fresh wielder (every NPC, and the player
+	# with empty hands) must be able to put the gun away and bring it back out through every draw vector.
+	var a = autofree(load(ATTACK_PATH).new())
+	a.set_holstered(true)
+	assert_true(a.holstered, "an unlocked wielder can put the gun away")
+	a.set_holstered(false)
+	assert_false(a.holstered, "a wielder nobody carry-locked draws again through set_holstered(false) (fire-click / swap)")
+	a.toggle_holster()
+	assert_true(a.holstered, "the hold-R toggle puts an unlocked gun away")
+	a.toggle_holster()
+	assert_false(a.holstered, "…and the hold-R toggle draws it back out")
+	assert_false(a._fire_should_abort(false), "a drawn, unlocked player weapon never drops its queued shot")
 
 
 func test_locked_refuses_to_draw_but_allows_holstering() -> void:
@@ -44,14 +53,21 @@ func test_unlock_restores_the_draw() -> void:
 	a.free()
 
 
-func test_lock_does_not_force_holster_by_itself() -> void:
-	# Setting the lock while the gun is OUT doesn't yank it away — Player always holsters FIRST, then locks. The lock
-	# only refuses future draws; it never changes the current state on its own.
-	var a = load(ATTACK_PATH).new()
-	assert_false(a.holstered, "starts drawn")
+func test_a_refused_draw_changes_nothing_and_a_locked_put_away_still_lands() -> void:
+	# The lock only REFUSES draws. A draw call that lands while locked with the gun already out (a weapon swap's
+	# set_holstered(false) mid-carry) must not yank the gun away or announce a change the view model would act on;
+	# and putting the gun away while locked must still go through, announced once.
+	var a = autofree(load(ATTACK_PATH).new())
+	watch_signals(a)
 	a.draw_locked = true
-	assert_false(a.holstered, "engaging the lock alone leaves the current holster state untouched")
-	a.free()
+	a.set_holstered(false)
+	assert_false(a.holstered, "a refused draw leaves a drawn gun drawn — the lock never holsters on its own")
+	assert_signal_not_emitted(a, "holster_changed", "a refused draw emits nothing, so gun_mesh does not hide or re-raise the view model")
+	a.set_holstered(true)
+	assert_true(a.holstered, "putting the weapon away is allowed even while locked")
+	assert_signal_emit_count(a, "holster_changed", 1, "the locked put-away is announced exactly once")
+	a.set_holstered(false)
+	assert_signal_emit_count(a, "holster_changed", 1, "the refused re-draw adds no second announcement")
 
 
 func test_fire_should_abort_gates() -> void:

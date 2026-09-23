@@ -12,6 +12,13 @@ const AbilityRegistry := preload("res://scripts/components/abilities/ability_reg
 const Perks := preload("res://scripts/player/perks.gd")
 const Factions := preload("res://scripts/faction/factions.gd")
 
+## A stat id no shipped resources/stats/*.tres carries — the stat-gate test authors a title for it in memory only.
+const SYNTHETIC_STAT := &"test_display_names_grit"
+
+
+func after_each() -> void:
+	StatText._by_id.erase(SYNTHETIC_STAT)
+
 
 # --- abilities: Ability.display_name authored per scene, read by id via AbilityRegistry ---------------------
 
@@ -60,6 +67,11 @@ func test_faction_name_blank_display_falls_back_to_capitalized_id() -> void:
 	fac.id = &"neutral_wildlife"  # display_name deliberately left blank
 	assert_eq(UI._faction_name(fac), "Neutral Wildlife",
 		"a faction without an authored display_name degrades to the capitalized id — never a blank toast")
+	# Control: the same faction WITH an authored name that is not its capitalized id — the authored one must win,
+	# independent of whatever the shipped .tres files happen to say.
+	fac.display_name = "Critters"
+	assert_eq(UI._faction_name(fac), "Critters",
+		"an authored display_name wins over the capitalized id on the rep toast")
 	fac = null
 
 
@@ -85,15 +97,22 @@ func test_perk_display_label_falls_back_to_raw_id() -> void:
 
 # --- dialogue: the stat-gate choice label routes through StatInfo.title -----------------------------------
 
-func test_dialogue_stat_gate_label_routes_through_stat_info_title() -> void:
-	assert_eq(DialogueView.stat_gate_label(&"strength", 6, "Threaten him"),
-		"[%s 6] Threaten him" % StatInfo.title(&"strength"),
-		"the stat-gate choice button shows the SAME authored StatText title as the stats screen")
+## Today's shipped StatText titles EQUAL the capitalized ids, so the shipped data cannot tell the authored route
+## from the old local `.capitalize()` bypass. A synthetic stat whose authored title is NOT its capitalized id can:
+## it is registered straight into StatText's id cache (after forcing the one-time disk scan, so the scan can never
+## clear it) and erased again in after_each.
+func test_dialogue_stat_gate_label_shows_the_authored_stat_title_not_the_capitalized_id() -> void:
+	StatText.by_id(&"strength")  # force the lazy disk scan first
+	var authored := StatText.new()
+	authored.id = SYNTHETIC_STAT
+	authored.display_name = "Backbone"
+	StatText._by_id[SYNTHETIC_STAT] = authored
+	var label := DialogueView.stat_gate_label(SYNTHETIC_STAT, 6, "Threaten him")
+	assert_true(label.contains("Backbone"),
+		"the stat-gate choice button must show the AUTHORED StatText title, the same name the stats screen shows ('%s')" % label)
+	assert_false(label.contains(String(SYNTHETIC_STAT).capitalize()),
+		"...never the capitalized internal id ('%s')" % label)
+	assert_true(label.contains("6") and label.contains("Threaten him"),
+		"the gate tag still carries the required value and the choice text ('%s')" % label)
 	assert_eq(DialogueView.stat_gate_label(&"charisma", 3, "Charm"), "[Charisma 3] Charm",
 		"an unauthored stat id degrades to the capitalized fallback inside StatInfo.title — never a blank gate tag")
-	# Source pin: today's authored titles EQUAL the old capitalize output, so bytes alone can't prove the routing —
-	# assert the view reads StatInfo.title and the old local capitalize bypass hasn't crept back.
-	var src := FileAccess.get_file_as_string("res://scripts/dialogue/dialogue_view.gd")
-	assert_true(src.contains("StatInfo.title("), "dialogue_view.gd routes the gate label through StatInfo.title")
-	assert_false(src.contains("required_stat).capitalize()"),
-		"the capitalized-id bypass must not return to dialogue_view.gd (the authored title is the one stat name)")

@@ -80,6 +80,13 @@ static func next_step_index(roll: int, last: int, count: int) -> int:
 		i = (i + 1) % count
 	return i
 
+## Is `speed` (m/s) fast enough to PLAY a footstep? The footstep sound's deadzone: at or under
+## footstep_min_horizontal_speed no step plays. NoiseEmitter.footstep_radius_for applies the same cutoff to the
+## stealth noise, so "no footfall played" and "nothing for an enemy to hear" never drift apart. Pure static so the
+## gate is testable without a floor or a wall under an off-tree Player.
+static func is_footfall_speed(speed: float) -> bool:
+	return speed > GameSettings.player_movement.footstep_min_horizontal_speed
+
 ## Latch the authored footstep volume AND ceiling. Called from `_ready` (a child's `_ready` runs before its parent's,
 ## and exported NodePaths are already resolved by then) and again lazily on the first tick, so an off-tree or
 ## late-wired host still gets a correct base instead of 0 dB.
@@ -155,10 +162,10 @@ func tick_footsteps(delta: float, target_speed: float) -> void:
 	_footstep_timer -= delta
 	footstep_interval = interval_for(target_speed)
 	var planar_speed := Vector2(host.velocity.x, host.velocity.z).length()
-	var on_foot := host.is_on_floor() and planar_speed > GameSettings.player_movement.footstep_min_horizontal_speed
+	var on_foot := host.is_on_floor() and is_footfall_speed(planar_speed)
 	# Climb footsteps only while actually moving up/down the wall — a wall-hold (velocity.y == 0) is silent
 	# like standing still (the into-wall grip push isn't real movement, so don't count it).
-	var on_climb := host.is_climbing() and absf(host.velocity.y) > GameSettings.player_movement.footstep_min_horizontal_speed
+	var on_climb := host.is_climbing() and is_footfall_speed(absf(host.velocity.y))
 	if not (on_foot or on_climb) or host.is_sliding() or _footstep_timer > 0.0:
 		return
 	if host.walking_sfx == null:

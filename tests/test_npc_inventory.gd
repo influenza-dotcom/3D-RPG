@@ -9,13 +9,13 @@ extends GutTest
 ##   - _equip_initial_weapon() SEEDS the backpack from weapon_data (the part that makes a corpse
 ##     lootable): a registered weapon -> its ItemDb item lands in the backpack; an unregistered
 ##     WeaponData seeds nothing (and doesn't crash on the direct-equip fallback while _weapon is null).
-##   - _on_equip_weapon_requested() is null-safe before a weapon hub exists (the _weapon guard).
+##   - _on_equip_weapon_requested() routes a backpack equip onto the weapon hub's Inventory, and is a guarded
+##     no-op before a hub (or its Inventory) exists.
 ##   - Both equip-bridge methods are present (surface check, like the AI-method surface tests).
 ##
 ## DELIBERATELY SKIPS (verified by manual playtest, as the repo does for all _ready behaviour): the
-## actual draw-from-backpack on spawn and the _weapon.inventory.equip routing — both need a real Weapon
-## (weapon.tscn) under the tree. Off-tree, _equip_initial_weapon's equip_item() emits to an UNCONNECTED
-## signal (Character._ready, which wires it, never ran), so only the backpack-seed line has any effect.
+## actual draw-from-backpack on spawn — off-tree, _equip_initial_weapon's equip_item() emits to an UNCONNECTED
+## signal (Character._ready, which wires it, never ran), and the held-mesh build needs the in-tree muzzle rig.
 
 const RANGED_PATH := "res://scripts/npc/npc.gd"
 const PISTOL := preload("res://resources/weapons/pistol.tres")
@@ -39,7 +39,10 @@ func test_equip_initial_weapon_seeds_backpack_from_registered_weapon() -> void:
 			found_weapon = true
 	assert_true(found_weapon,
 		"A combatant NPC seeds its backpack with its (unique) weapon item, so the corpse can drop it")
-	assert_eq(inv.ammo_count(&"pistol"), NpcAiSettings.new().starting_clips,
+	# The oracle is the SHIPPED knob _equip_initial_weapon reads (GameSettings.npc_ai, the .tres), not the .gd default.
+	var clips: int = GameSettings.npc_ai.starting_clips
+	assert_gt(clips, 0, "shipped NpcAiSettings.starting_clips must be positive or every combatant spawns with no reserve and no ammo loot")
+	assert_eq(inv.ammo_count(&"pistol"), clips,
 		"It also stashes its starting clips (combat reserve + corpse loot) of the weapon's caliber")
 	inv.free()
 	n.free()
@@ -64,19 +67,26 @@ func test_is_armed_tracks_equipped_weapon_item() -> void:
 	n.free()
 
 
-func test_can_wield_weapons_reflects_the_weapon_hub() -> void:
+func test_can_wield_weapons_is_the_hub_not_the_held_gun() -> void:
 	# Cross-system contract: LootScreen._plant_target_cannot_wield duck-types can_wield_weapons() off the
 	# deposit receiver to warn when you PLANT a gun on an NPC that can never use it (a hub-less civilian).
-	# Pin both ends: false with no hub (civilian -> warn), true with one (combatant -> no warning; it re-arms
-	# from the backpack on its next combat tick, unchanged).
+	# The rule is "has a weapon HUB", deliberately NOT is_armed(): a DISARMED combatant (gun pickpocketed) must still
+	# report it can wield, because it re-arms from the backpack on its next combat tick -- warning there would lie.
 	var n: NPC = load(RANGED_PATH).new()  # no add_child: _ready never builds the hub -> _weapon stays null
+	n.inventory = CharacterInventory.new()
 	assert_false(n.can_wield_weapons(),
 		"a civilian NPC (no weapon hub) reports it can't wield -> planting a weapon on it warns the player")
 	var hub := Weapon.new()  # bare Node3D stand-in for the hub _ready builds only for a combatant (weapon_data set)
 	n._weapon = hub
+	assert_false(n.is_armed(), "precondition: the combatant holds no weapon item (it was disarmed)")
 	assert_true(n.can_wield_weapons(),
-		"a combatant with a weapon hub reports it CAN wield -> no futile-plant warning")
+		"a DISARMED combatant with a weapon hub still reports it CAN wield -> no futile-plant warning, it re-arms from the backpack")
+	var witem := ItemDb.make_weapon_item(PISTOL)
+	n.inventory.add(witem)
+	n.inventory.equip_item(witem)
+	assert_true(n.is_armed() and n.can_wield_weapons(), "an armed combatant can wield too")
 	hub.free()
+	n.inventory.free()
 	n.free()
 
 
@@ -108,13 +118,28 @@ func test_equip_initial_weapon_unregistered_weapon_seeds_nothing() -> void:
 	n.free()
 
 
-func test_on_equip_weapon_requested_is_null_safe_without_weapon_hub() -> void:
+func test_on_equip_weapon_requested_routes_to_the_hub_and_is_null_safe_without_one() -> void:
+	# The backpack's equip request lands on the weapon hub's Inventory (what the NPC actually fires). Before a hub
+	# exists -- or while the hub has no Inventory child yet -- the same call must be a guarded no-op: an unguarded
+	# dereference raises a script error, which GUT fails on. A stray WeaponData (no view model) keeps the held-mesh
+	# rebuild a no-op off-tree, so only the routing is observed.
+	var stray := WeaponData.new()
 	var n: NPC = load(RANGED_PATH).new()  # no add_child: _weapon stays null
-	# Must not crash dereferencing the absent weapon hub — the guard short-circuits.
-	n._on_equip_weapon_requested(PISTOL)
-	assert_true(n._weapon == null,
-		"With no weapon hub yet, _on_equip_weapon_requested must be a guarded no-op (no _weapon created)")
+	n._on_equip_weapon_requested(stray)   # no hub at all -> guarded
+	var hub := Weapon.new()
+	n._weapon = hub
+	n._on_equip_weapon_requested(stray)   # a hub with no Inventory yet -> guarded
+	assert_null(hub.inventory, "the guarded call must not conjure an Inventory onto the hub")
+	# Control: the same request with a wired Inventory reaches the hub.
+	var hub_inv := Inventory.new()
+	hub.inventory = hub_inv
+	n._on_equip_weapon_requested(stray)
+	assert_eq(hub_inv.equipped_weapon, stray,
+		"with a hub + Inventory the requested weapon is equipped on the hub -> a disarmed NPC handed a gun fires THAT gun")
+	hub_inv.free()
+	hub.free()
 	n.free()
+	stray = null
 
 
 func test_npc_equip_bridge_method_surface() -> void:
@@ -138,7 +163,7 @@ func test_npc_loadout_fits_the_shipped_grid() -> void:
 	inv.add(ItemDb.make_weapon_item(PISTOL))            # a spare gun (raiders often carry two)
 	var ammo := ItemDb.ammo_item_for(&"pistol")
 	if ammo != null:
-		inv.add(ammo, NpcAiSettings.new().starting_clips)  # reserve ammo, exactly like _equip_initial_weapon
+		inv.add(ammo, GameSettings.npc_ai.starting_clips)  # the SHIPPED reserve ammo, exactly like _equip_initial_weapon
 	for i in 5:
 		inv.add(_junk_item("carried_%d" % i))          # keycards / stims / trinkets — 1×1 carried loot
 	# Seed unbounded, THEN clamp — the NPC._ready order — and assert every stack found a home in the shipped grid.

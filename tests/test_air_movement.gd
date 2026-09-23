@@ -5,8 +5,9 @@ extends GutTest
 ## Driving the pure static needs no Player, no _ready and no world access, which sidesteps both GUT traps in
 ## this area: a bare CharacterBody3D always reports is_on_floor() == false, and an off-tree get_world_3d()
 ## raises a tracked engine error GUT 9.6 turns into a failure (see MovementHelpers' guarded probe).
-## (The shell AirMovement.step's climb/rope stand-down and the bhop-stamp ordering are integration surface,
-## held by source-text pins here and in test_player_core.gd plus a playtest — the same split M13 made.)
+## The shell AirMovement.step is driven too, on an OFF-TREE Player (load().new(), never add_child, so _ready never
+## runs): its horizontal-only write, its read-only use of the banked ground speed and its climb/rope stand-down. The
+## bhop-stamp ordering inside player.gd stays integration surface (test_player_core.gd plus a playtest).
 ##
 ## ⭐THE HELPER MIRRORS THE SHELL ON PURPOSE. `wish_speed` and `wish_dir` collapse together in the real caller
 ## (both are scaled by the stick magnitude), so a helper that hands step_horizontal a NON-zero wish speed
@@ -15,7 +16,7 @@ extends GutTest
 ## wish speed from whether a direction is held; `tier` is the separate settle floor the Player latches.
 
 const AIR := preload("res://scripts/player/air_movement.gd")
-const AIR_PATH := "res://scripts/player/air_movement.gd"
+const PLAYER_PATH := "res://scripts/player/player.gd"
 
 const DT := 1.0 / 60.0
 const FPS := 1.0        ## fps_factor at exactly 60 Hz
@@ -24,6 +25,7 @@ const TAP_FRAMES := 19  ## a jump_cut_factor 0.4 tap: 0.3225 s
 const ACCEL := 12.0     ## PlayerMovementSettings.air_accel
 const STEER := 22.0     ## PlayerMovementSettings.air_steer_accel
 const WISH := 1.75      ## the RUN-tier air wish: max_speed 5.0 x air_speed_mult 0.35 (the walk tier is 1.23)
+const WALK_WISH := 1.225  ## the WALK-tier air wish: a 3.5 m/s walk x air_speed_mult 0.35 — a LOWER ground target
 const BLEED := 0.0135   ## smoothing 0.135 / air_smoothing_divisor 10.0
 const OLD_STANDING_TRAVEL := 0.1395  ## what the two-lerp model carried over one whole standing jump, in metres
 
@@ -71,11 +73,21 @@ func test_releasing_after_building_keeps_what_you_built() -> void:
 
 func test_dropping_the_ground_tier_mid_air_does_not_brake() -> void:
 	# Same root as above, reached the other way: releasing Run, scoping, or crouching mid-flight all LOWER
-	# this frame's ground target. The latched floor is what stops that retroactively braking you.
-	var built := _run(Vector2.ZERO, Vector2(1.0, 0.0), 0.0, 20)          # built to the 3.0 Run tier
-	var after := _run(built, Vector2(1.0, 0.0), 0.0, 28, BLEED, WISH)    # tier stays at the high-water
-	assert_almost_eq(after.length(), WISH, 0.0001,
+	# this frame's ground target while the direction stays HELD. So this frame's wish speed drops to the walk tier
+	# while the latched floor (air_tier) stays at the Run-tier high-water — the one pairing the release test above
+	# never produces, because there the wish drops to zero instead. Driven through step_horizontal directly: _step
+	# always asks for the full tier while a direction is held, which is exactly the frame this case is not.
+	var built := _run(Vector2.ZERO, Vector2(1.0, 0.0), 0.0, 20)
+	assert_almost_eq(built.length(), WISH, 0.0001, "precondition: 20 held frames build the full Run-tier air wish")
+	var latched := built
+	var unlatched := built
+	for _i in 28:
+		latched = AIR.step_horizontal(latched, Vector2(1.0, 0.0), WALK_WISH, WISH, 0.0, ACCEL, STEER, BLEED, DT, FPS)
+		unlatched = AIR.step_horizontal(unlatched, Vector2(1.0, 0.0), WALK_WISH, WALK_WISH, 0.0, ACCEL, STEER, BLEED, DT, FPS)
+	assert_almost_eq(latched.length(), WISH, 0.0001,
 		"letting go of Run (or scoping, or crouching) mid-air must not claw back speed already built — the latch is a high-water, so a lowered ground target only stops you building further")
+	assert_lt(unlatched.length(), WISH - 0.05,
+		"control: the same held run with the settle floor lowered to the walk tier DOES bleed the built speed, so the pin above is measuring the latch and not a frame that could never brake")
 
 
 func test_a_blast_from_a_standstill_still_damps_to_rest() -> void:
@@ -306,15 +318,62 @@ func test_degenerate_inputs_are_safe_no_ops() -> void:
 		"a dead-stop body with no input must not produce NAN — every division here is guarded (speed > 0 before the scale, MIN_STEER_SPEED before the rate, after > 0 before the clamp)")
 
 
-func test_air_movement_never_writes_the_shared_ground_scalar() -> void:
+## An OFF-TREE Player (no add_child: _ready never runs) posed mid-air with a pinned stick, for the step shell.
+func _airborne_player(velocity: Vector3, banked: float) -> Player:
+	var p: Player = load(PLAYER_PATH).new()
+	p.velocity = velocity
+	p.current_speed = banked
+	p.input_dir = Vector2(0.0, -1.0)  # a fully deflected stick -> full air authority (wish_scale 1)
+	return p
+
+
+func test_the_shell_steers_only_the_horizontal_channels_and_never_writes_the_ground_scalar() -> void:
 	# TRAP-PROOFING. current_speed being frozen in the air LOOKS like the bug and is actually the fix: it is a
-	# GROUND scalar CameraEffects.bob divides by max_speed for the head-bob amplitude.
-	var air_src := FileAccess.get_file_as_string(AIR_PATH)
-	assert_false(air_src.contains("current_speed ="),
-		"AirMovement must READ the banked ground speed and never WRITE it — a mid-air write lands a stale, oversized head-bob on the touchdown frame. This pin is what stops the next pass 'fixing' the freeze")
-	assert_true(air_src.contains("player.velocity.x = v_h.x"),
-		"the shell must write ONLY the two horizontal channels — velocity.y belongs to gravity / jump / wall-climb / grapple, and fall damage, the long-fall kill and the fall-grey warning all read it alone")
-	assert_true(air_src.contains("if player.is_climbing() or player.is_grapple_attached():"),
-		"air control must stand down while climbing or while the rope is ATTACHED — and specifically NOT on the wider is_grappling(), which also covers the retract that follows a release: detach() applies the 12 m/s slingshot BEFORE flipping to RETRACTING, so the wide gate kills air control at the exact instant the player is flung")
-	assert_true(air_src.contains("var settle_cap := maxf(banked_speed, air_tier)"),
-		"the settle floor must read the LATCHED per-airtime tier, never the live stick-scaled wish — if it tracks the current frame's input then releasing the key, feathering a stick, scoping or opening a modal retroactively brakes speed already built in the air")
+	# GROUND scalar CameraEffects.bob divides by max_speed for the head-bob amplitude. And velocity.y belongs to
+	# gravity / jump / wall-climb / grapple -- fall damage, the long-fall kill and the fall-grey warning read it alone.
+	# Banked 3.0 under a 5.0 m/s launch, so any write-back of the live horizontal speed would visibly change it.
+	var p := _airborne_player(Vector3(5.0, -7.0, 0.0), 3.0)
+	AIR.step(p, Vector3(0.0, 0.0, -1.0), 5.0, WISH, DT, FPS)
+	assert_lt(p.velocity.z, 0.0,
+		"control: a held sideways wish must actually steer the horizontal velocity through the shell, or the two pins below prove nothing")
+	assert_eq(p.velocity.y, -7.0,
+		"the shell must write ONLY the two horizontal channels -- a touched velocity.y retunes fall damage, the long-fall kill and the fall-grey warning")
+	assert_eq(p.current_speed, 3.0,
+		"AirMovement must READ the banked ground speed and never WRITE it -- a mid-air write lands a stale, oversized head-bob on the touchdown frame. This pin is what stops the next pass 'fixing' the freeze")
+	p.free()
+
+
+func test_the_shell_stands_down_while_climbing_or_while_the_rope_is_attached() -> void:
+	# WallClimb and GrappleHook.apply_pull both run LATER in the same step and do their own read-modify-write on
+	# `velocity`; air steering fighting them shoved the player along the wall and bled a swing's tangential speed.
+	var start := Vector3(5.0, 2.0, 0.0)
+	var wish := Vector3(0.0, 0.0, -1.0)
+	var climber := _airborne_player(start, 5.0)
+	var climb := WallClimb.new()
+	climb._climbing = true
+	climber._wall_climb = climb
+	assert_true(climber.is_climbing(), "precondition: the WallClimb grip latch reads as climbing")
+	AIR.step(climber, wish, 5.0, WISH, DT, FPS)
+	assert_eq(climber.velocity, start, "air control must stand down while gripping a wall -- WallClimb owns the velocity this frame")
+	var swinger := _airborne_player(start, 5.0)
+	var grapple := Grapple.new()
+	var hook := GrappleHook.new()
+	hook._state = GrappleHook.State.ATTACHED
+	grapple._hook = hook
+	swinger._grapple_ability = grapple
+	assert_true(swinger.is_grapple_attached(), "precondition: the rope reads as ATTACHED")
+	AIR.step(swinger, wish, 5.0, WISH, DT, FPS)
+	assert_eq(swinger.velocity, start, "air control must stand down while the rope is ATTACHED -- the swing's tangential speed is the grapple's to keep")
+	# Control, and the narrow-gate decision: the RETRACT after a release is still the WIDE is_grappling(), but
+	# detach() applies the 12 m/s slingshot BEFORE flipping to RETRACTING, so standing down there would kill air
+	# control at the exact instant the player is flung.
+	hook._state = GrappleHook.State.RETRACTING
+	assert_true(swinger.is_grappling() and not swinger.is_grapple_attached(), "precondition: retracting = grappling but not attached")
+	AIR.step(swinger, wish, 5.0, WISH, DT, FPS)
+	assert_lt(swinger.velocity.z, 0.0,
+		"the release fling must stay steerable -- gating on the wide is_grappling() instead of is_grapple_attached() kills air control mid-fling")
+	climber.free()
+	swinger.free()
+	climb.free()
+	hook.free()
+	grapple.free()
