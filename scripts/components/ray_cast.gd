@@ -264,7 +264,10 @@ func _physics_process(delta: float) -> void:
 	# reference and NEVER reach this recovery — leaving held_object dangling and carry_changed(false) unfired, so the
 	# player stays "carrying" forever with the gun holstered + draw-locked (the reported stuck-until-death). _holding
 	# stays true across the free (held_object can't tell us it was ever set), so this branch still catches it.
-	if _holding and not is_instance_valid(held_object):
+	# A prop that is valid but OUT OF THE TREE is gone just the same: its level was parked in GameRoot's level cache (a
+	# console warp mid-carry — a door needs the interact key, which a carry blocks), and chasing it would write a
+	# global transform off-tree every frame. It stays where it was, in its level, for when the level comes back.
+	if _holding and (not is_instance_valid(held_object) or not held_object.is_inside_tree()):
 		held_object = null
 		_holding = false
 		carry_changed.emit(false)

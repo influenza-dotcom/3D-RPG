@@ -5,7 +5,7 @@ extends Control
 ## @seam AUTHORED SCENE: scenes/ui/hud_minimap.tscn, instantiated by ui.gd into the _weighted carrier (top-right corner, shared with the quest tracker). The SCENE owns the box — anchors, offsets, z_index, texture filter and the two art slots — and ui.gd MEASURES it back through UI.minimap_box() so the clock and the objective tracker reflow when an artist drags it. Geometry comes from the level's baked NavigationMesh via FloorplanSection, paint from MenuStyle.hud.minimap_*, fallback layout from GameSettings.hud.minimap_*, and the player's choices are polled LIVE off Settings.minimap_enabled / _rotates / _zoom so an Options change bites the same frame with no rebuild.
 ## @seam THE ART SANDWICH — the artist's drop-in surface, and the reason this widget is a scene at all. This script's _draw is ONE layer; the scene wraps it in two empty full-rect slots whose TREE ORDER is the render order: %MapUnder (forced show_behind_parent in _ready, so the slot NAME is the contract rather than a checkbox an artist must remember) renders wholly BEHIND the plan — a backdrop supplied there wants the ALPHA of MenuStyle.hud.minimap_backing_color zeroed so it shows through, the alpha-as-null sentinel this project already uses for StationMarker.color — and %MapOver renders wholly IN FRONT of plan, markers, caret and rim, which is where a bezel/frame/glass/vignette belongs (a NinePatchRect there beats minimap_frame_texture's plain stretch). THREE LIMITS: art cannot be inserted BETWEEN the plan and the marker channels (they are one _draw), everything is clipped to the box by clip_contents below, and art children need NO repaint wiring at all — each is its own CanvasItem, so nothing an artist adds can touch _needs_repaint / _painted / the drawn stamps. ⚠ The live READ is only half of that: a Control repaints solely on queue_redraw, so it also takes the drawn-options stamps below to notice the row moved — without them the live read is a lie for any player who is standing still (see the queue_redraw @risk).
 ## @seam TWO HOSTS, ONE WIDGET. Besides the HUD corner box this script is also the body of the MAP TAB (scripts/ui/map_screen.gd + scenes/ui/map_screen.tscn — the sixth Pip-Boy tab, default M), which authors a second instance filling a menu panel. The map tab differs ONLY in the "Instance view" exports (a wider world_span_override, its own zoom_override driven by Settings.map_zoom, heading = NORTH_UP, zoom_key_enabled off, labels on, a live view_offset it pans with, waypoint_pin_offscreen on) — every layer, marker channel, deck cache and idle-gate term is shared code. So a paint site that reads Settings.minimap_zoom / _rotates / GameSettings.hud.minimap_world_span DIRECTLY is a bug: it makes the map tab silently draw the HUD box's view. Go through effective_zoom() / effective_rotates() / effective_world_span(), and stamp what you drew (_drawn_zoom / _drawn_span / _drawn_rotates / _drawn_view_offset) or the idle gate strands the stale picture.
-## @seam The level swap is detected from the Groups.NAVMESH region's INSTANCE ID, not a GameRoot signal — a freed region leaves the group by itself, so the deck cache self-heals across a LevelDoor transition and this widget needs no new wiring in game_root.gd.
+## @seam The level swap is detected from the Groups.NAVMESH regions' INSTANCE IDS, not a GameRoot signal — a freed region leaves the group by itself, so the deck cache self-heals across a LevelDoor transition and this widget needs no new wiring in game_root.gd. A STREAMED world (ChunkStreamer) has one region per loaded chunk: a change in that set under the SAME level root is a restream (decks re-slice from every loaded region, walls re-gather only the new chunks via FloorplanSource.sync_roots), never a full rebake.
 ## @seam The authored underlay is per-level: LevelData.map_data, PULLED (never pushed) by _resolve_level_underlay inside rebake() — the same region-instance-id hook — via Groups.GAME_ROOT's `level`. The widget's own map_data export is a per-instance override that wins when set, and a level without an authored map CLEARS the previous level's art (the stamp writes null too).
 ## @risk Renders ONLY the player's own floor band, so a mezzanine or catwalk above the cut is invisible and a staircase reads as a gap between two decks.
 ## @risk An unbaked level has no walkable fill and a level with no static colliders has no walls; either degrades to a partial map in silence, because both are legitimate states. Minimap.deck_count() is the introspection seam when a level looks blank.
@@ -225,11 +225,17 @@ const WAYPOINT_BOOK := preload("res://scripts/world/waypoint_book.gd")
 var _decks: Dictionary = {}
 var _deck_lru: Array[int] = []      ## deck keys, least-recently-used first
 var _deck: Dictionary = {}          ## the ACTIVE deck (empty until one is built)
-## Instance id of the NavigationRegion3D the decks were sliced from. Seeded -1 — an id no region (and no
-## ABSENCE of a region, which reads 0) can ever produce — so the FIRST processed frame always trips the
-## staleness check below: even a REGION-LESS boot must rebake once, or an authored level underlay would
-## silently never resolve on a level with no NavigationRegion3D.
+## Identity of the NavigationRegion3D(s) the decks were sliced from (_regions_signature: one region's instance id,
+## a hash of every id for a streamed world's many). Seeded -1 — a value no region set (and no ABSENCE of a region,
+## which reads 0) can ever produce — so the FIRST processed frame always trips the staleness check below: even a
+## REGION-LESS boot must rebake once, or an authored level underlay would silently never resolve on a level with no
+## NavigationRegion3D.
 var _source_region_id: int = -1
+## Instance id of the LEVEL ROOT those regions belong to (_level_root_for). A region-set change under the SAME level
+## root is a chunk streaming in or out (restream); under a different one it is a level swap (rebake).
+var _source_level_id: int = 0
+## The wall gather is out of date with the streamed chunk set — re-sync it (new chunks only) on the next gather beat.
+var _walls_stale: bool = false
 var _centre_xz: Vector2 = Vector2.ZERO
 var _yaw: float = 0.0
 ## THE FLOOR THE PLAYER IS STANDING ON, not their live altitude — the reference every vertical decision here
@@ -397,12 +403,18 @@ func _process(delta: float) -> void:
 	# node still doing all its work.
 	if not is_inside_tree() or not is_visible_in_tree():
 		return
-	var region := _find_region()
-	var rid: int = region.get_instance_id() if region != null else 0
+	var regions := _find_regions()
+	var rid := _regions_signature(regions)
 	if rid != _source_region_id:
-		# A different level (or none). Drop every deck — they are sliced in the old level's world space.
+		var level_id: int = _level_root_for(regions[0]).get_instance_id() if not regions.is_empty() else 0
+		if _source_region_id != -1 and level_id != 0 and level_id == _source_level_id:
+			# Same level, different chunks streamed in/out: re-slice, keep the walls already gathered.
+			_restream()
+		else:
+			# A different level (or none). Drop every deck — they are sliced in the old level's world space.
+			rebake()
 		_source_region_id = rid
-		rebake()
+		_source_level_id = level_id
 		_bake_delay_left = bake_delay
 	if _bake_delay_left > 0.0:
 		_bake_delay_left = maxf(0.0, _bake_delay_left - delta)
@@ -416,9 +428,11 @@ func _process(delta: float) -> void:
 	# The wall layer's geometry, gathered ONCE per level (it only changes when the level does). Deferred
 	# until after bake_delay for the same reason the deck is: func_godot brushes and CSG colliders settle
 	# over the first frames, and a gather on frame one can see a half-built level.
-	if _source == null and draw_walls:
-		_source = FLOORPLAN_SOURCE.new()
-		_source.gather(_level_root_for(region), Groups.MINIMAP_HIDE)
+	if draw_walls and (_source == null or _walls_stale):
+		if _source == null:
+			_source = FLOORPLAN_SOURCE.new()
+		_source.sync_roots(_wall_roots(regions), Groups.MINIMAP_HIDE)
+		_walls_stale = false
 	_centre_xz = Vector2(p.global_position.x, p.global_position.z)
 	_update_ground_reference(p)
 	# Sampled HERE, once, and stamped by _draw from this same field — see _drawn_noise_r.
@@ -428,7 +442,7 @@ func _process(delta: float) -> void:
 	# paint site that re-asked would be a second question that could drift from the one the idle gate asked.
 	_scan_r = _sample_scan_range(p)
 	_yaw = _camera_yaw(p)
-	_ensure_deck(region, _ground_y)
+	_ensure_deck(regions, _ground_y)
 	# The idle gate: a standing, still player never repaints. It keys on the PLAYER, so it has to be
 	# overridden whenever something else on the map can move — or VANISH, or be switched off — on its own;
 	# otherwise a marker (or a dotted NPC) would freeze in place the moment the player stopped walking. See
@@ -445,10 +459,56 @@ func _process(delta: float) -> void:
 ## The level's NavigationRegion3D. Groups.NAVMESH holds the geometry FEEDER nodes as well as the region
 ## itself (TestLevel.tscn puts both in it), so this must type-filter rather than take the first member.
 func _find_region() -> NavigationRegion3D:
+	var all := _find_regions()
+	return all[0] if not all.is_empty() else null
+
+
+## Every NavigationRegion3D in the level — one for an ordinary level, one per loaded chunk in a streamed world.
+func _find_regions() -> Array[NavigationRegion3D]:
+	var out: Array[NavigationRegion3D] = []
 	for n in get_tree().get_nodes_in_group(Groups.NAVMESH):
 		if n is NavigationRegion3D:
-			return n as NavigationRegion3D
-	return null
+			out.append(n as NavigationRegion3D)
+	return out
+
+
+## One int standing for a region SET: 0 for none, the instance id itself for exactly one (so a plain level keeps the
+## old single-region identity), an order-independent hash of every id for several.
+static func _regions_signature(regions: Array) -> int:
+	if regions.is_empty():
+		return 0
+	if regions.size() == 1:
+		return (regions[0] as Object).get_instance_id()
+	var ids: Array[int] = []
+	for r in regions:
+		ids.append((r as Object).get_instance_id())
+	ids.sort()
+	return hash(ids)
+
+
+## The streamed-world half of a region-set change: the level is the same, only which chunks are loaded moved. Every
+## deck drops (each was sliced from the OLD set of regions and would show stale floor at the edges) but the wall gather
+## and the authored underlay stay — the walls re-sync on the next gather beat, walking only the chunks that are new.
+func _restream() -> void:
+	_decks.clear()
+	_deck_lru.clear()
+	_deck = {}
+	_band_keyed = false
+	_walls_stale = true
+	_deck_dirty = true
+
+
+## The roots the wall layer is gathered from: the level root (FloorplanSource never walks into a ChunkStreamer) plus,
+## in a streamed world, every loaded chunk as a root of its own so sync_roots can add and drop them one by one.
+func _wall_roots(regions: Array) -> Array:
+	var roots: Array = []
+	var level := _level_root_for(regions[0]) if not regions.is_empty() else null
+	if level != null:
+		roots.append(level)
+	for streamer in get_tree().get_nodes_in_group(Groups.CHUNK_STREAMER):
+		for chunk in streamer.get_children():
+			roots.append(chunk)
+	return roots
 
 
 ## The bearing the map is drawn along: the ACTIVE camera's, degrading to the player's own rotation when
@@ -832,8 +892,9 @@ static func _nearest_zoom_step(steps: PackedFloat32Array, now: float) -> int:
 
 
 ## Make sure the deck for the band containing `y` is built and active. A cache hit is free — this is what
-## lets a player walk a whole floor without re-slicing anything.
-func _ensure_deck(region: NavigationRegion3D, y: float) -> void:
+## lets a player walk a whole floor without re-slicing anything. `regions` is the level's region list (null or a
+## single NavigationRegion3D also accepted — the off-tree tests pass null).
+func _ensure_deck(regions, y: float) -> void:
 	var band: float = GameSettings.hud.minimap_band_height
 	# STICKY, not a raw quantisation: the drawn floor only changes once the player is properly clear of the
 	# one on screen. Paired with the grounded-Y reference above, this is what stops a jump (or a stair riser,
@@ -853,9 +914,11 @@ func _ensure_deck(region: NavigationRegion3D, y: float) -> void:
 	# the hysteresis above would be filled with the geometry of the band the player has drifted into.
 	var y_lo := float(key) * band
 	var tris := PackedVector2Array()
-	if region != null:
-		tris = FloorplanSection.walkable_triangles(region.navigation_mesh, region.global_transform,
-				y_lo, y_lo + band)
+	var sources: Array = regions if regions is Array else ([regions] if regions != null else [])
+	for region in sources:
+		if is_instance_valid(region) and region is NavigationRegion3D:
+			tris.append_array(FloorplanSection.walkable_triangles(region.navigation_mesh, region.global_transform,
+					y_lo, y_lo + band))
 	# canvas_item_add_triangle_array wants an explicit index list; the soup is already whole triangles in
 	# order, so it is just 0..n-1 — built once here rather than every frame in _draw.
 	var idx := PackedInt32Array()
@@ -1759,6 +1822,7 @@ func rebake() -> void:
 	_deck = {}
 	_band_keyed = false   # nothing drawn -> the next band choice takes the raw answer, not a stale sticky one
 	_source = null   # the solids are in the OLD level's world space — re-gather, never re-cut
+	_walls_stale = false
 	_resolve_level_underlay()   # the level changed (or might have): re-stamp its authored underlay, even to null
 	_deck_dirty = true
 

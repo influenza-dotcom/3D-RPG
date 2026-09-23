@@ -8,6 +8,11 @@ extends Node3D
 ## new level by duplicating `scenes/levels/LevelTemplate.tscn` (or File -> Run `scripts/tools/new_level.gd`) — it
 ## comes pre-wired, so this validator stays quiet until you break it. At RUNTIME it does exactly ONE thing: spawn
 ## the brush z-fight pass (`clean_brush_zfights`, below) so overlapping brushes never need a hand fix.
+##
+## STREAMED WORLDS: a level holding a `ChunkStreamer` is a worldspace — its navmesh and most geometry live in the chunk
+## scenes, so the navmesh checks are skipped here (each chunk's `WorldChunk` root runs them instead) and the walk never
+## descends into the streamer (its editor preview chunks are not this scene's content). `WorldChunk` extends this class
+## and turns the sky / spawn requirements into chunk-shaped advice through the two hooks below.
 
 ## RUNTIME: spawn a `BrushZFightClean` under this level on load (see `scripts/components/brush_zfight_clean.gd`)
 ## so every level gets the overlapping-brush z-fight fix without authoring a node. Untick to let this level's
@@ -48,6 +53,7 @@ func _get_configuration_warnings() -> PackedStringArray:
 	var world_env: WorldEnvironment = null
 	var region: NavigationRegion3D = null
 	var has_navmesh_geometry := false
+	var streamed := false
 	var spawns: Array[PlayerSpawn] = []
 	for n in nodes:
 		if n is WorldEnvironment:
@@ -56,17 +62,24 @@ func _get_configuration_warnings() -> PackedStringArray:
 			region = n as NavigationRegion3D
 		elif n is PlayerSpawn:
 			spawns.append(n as PlayerSpawn)
+		elif _is_chunk_streamer(n):
+			streamed = true
 		if n.is_in_group(Groups.NAVMESH) and not (n is NavigationRegion3D):
 			has_navmesh_geometry = true
 
 	# Sky / ambient (StarSky repaints any WorldEnvironment in the `world_environment` group — see star_sky.gd).
-	if world_env == null:
+	if not _wants_world_environment():
+		if world_env != null:
+			w.append("This chunk has its own WorldEnvironment — it would fight the worldspace's sky whenever the chunk streams in. Keep the sky / fog / sun in the worldspace (the scene with the ChunkStreamer).")
+	elif world_env == null:
 		w.append("No WorldEnvironment — add one (in group `world_environment`) so the level has a sky/fog and StarSky can repaint it.")
 	elif not world_env.is_in_group(Groups.WORLD_ENVIRONMENT):
 		w.append("The WorldEnvironment isn't in the `world_environment` group — StarSky won't find it. Add it to that group.")
 
-	# Navigation: a region, something to bake from, and an actual bake.
-	if region == null:
+	# Navigation: a region, something to bake from, and an actual bake. A worldspace's navmesh lives in its chunks.
+	if streamed and region == null:
+		pass
+	elif region == null:
 		w.append("No NavigationRegion3D — NPCs have nothing to path on. Add one (in group `navmesh`).")
 	else:
 		if not has_navmesh_geometry:
@@ -99,7 +112,10 @@ func _get_configuration_warnings() -> PackedStringArray:
 				w.append("%d navmesh polygon(s) baked above the floor (likely prop/car roofs NPCs get stuck on). Add a `NavBlocker(CARVE)` on those props or lower `agent_max_climb`, then re-bake. (File -> Run `audit_navmesh.gd` for locations.)" % rep.elevated.size())
 
 	# Player entry: at least one spawn, and no duplicate entry_ids (GameRoot._find_spawn uses the FIRST match).
-	if spawns.is_empty():
+	if not _wants_player_spawn():
+		if not spawns.is_empty():
+			w.append("This chunk holds a PlayerSpawn — GameRoot only finds it while the chunk happens to be loaded, so a door aimed at it can miss. Put arrival spawns in the worldspace (the scene with the ChunkStreamer).")
+	elif spawns.is_empty():
 		w.append("No PlayerSpawn — GameRoot can't place the player here. Drop a `scenes/world/PlayerSpawn.tscn` (leave one with a blank entry_id as the default arrival).")
 	else:
 		var seen := {}
@@ -113,12 +129,27 @@ func _get_configuration_warnings() -> PackedStringArray:
 
 	return w
 
+## Does this kind of scene need its own WorldEnvironment? A level does; a streamed chunk (WorldChunk) must NOT have one.
+func _wants_world_environment() -> bool:
+	return true
+
+## Does this kind of scene need a PlayerSpawn? A level does; a streamed chunk (WorldChunk) should not hold one.
+func _wants_player_spawn() -> bool:
+	return true
+
 ## Every descendant of `node`, depth-first (excludes `node`). Explicit recursion on purpose — NOT
-## get_tree().get_nodes_in_group(), which at edit time scans the WHOLE open editor scene, not just this level.
+## get_tree().get_nodes_in_group(), which at edit time scans the WHOLE open editor scene, not just this level. A
+## ChunkStreamer is collected but not entered: its children are streamed / previewed chunks, not this scene's content.
 func _collect(node: Node, out: Array[Node]) -> void:
 	for c in node.get_children():
 		out.append(c)
-		_collect(c, out)
+		if not _is_chunk_streamer(c):
+			_collect(c, out)
+
+## Duck-typed on purpose, never `is ChunkStreamer`: this @tool script loads in the editor for every level, and naming a
+## class_name the editor hasn't scanned yet would fail this whole file to parse (the GameRoot / EffectPrewarmer idiom).
+static func _is_chunk_streamer(n: Node) -> bool:
+	return n.has_method(&"chunk_exists") and n.has_method(&"coord_at")
 
 ## This level's ENABLED NavLinks as { a, b, bidirectional } in the REGION's local space (= navmesh space), for
 ## NavMeshAudit.reachability. A link's endpoints are stored local to the link node, so world-project (link transform)

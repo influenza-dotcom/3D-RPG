@@ -34,6 +34,7 @@ extends Node
 
 ## Default pickup used for the loot-table path when spawn_scene is left empty (the rolled item is stamped onto a copy).
 const DEFAULT_PICKUP: PackedScene = preload("res://scenes/components/can_pick_up.tscn")
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 
 ## One process-wide RNG for every loot roll, seeded ONCE (lazily, in roll order) rather than allocating a
 ## fresh RandomNumberGenerator + randomize() per destroy — that churned an object and re-seeded from the OS
@@ -68,7 +69,12 @@ func _on_destroyed() -> void:
 		return
 	var host := get_parent() as Node3D
 	var origin: Vector3 = host.global_position if is_instance_valid(host) else Vector3.ZERO
-	var into: Node = get_tree().current_scene if get_tree() != null else null
+	# The world under the prop (WorldSpawn: its chunk / level) — so the loot stays in this level through a door and
+	# unloads with its chunk. With no level, the current scene as before (and nothing at all without one).
+	var scene_root: Node = get_tree().current_scene if get_tree() != null else null
+	if scene_root == null:
+		return
+	var into: Node = WorldSpawn.parent_for(self, origin, scene_root)
 	if into == null:
 		return
 	if loot_table != null:

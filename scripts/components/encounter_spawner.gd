@@ -152,6 +152,12 @@ func _track_spawn(npc: Node) -> void:
 func _on_spawn_gone(npc: Node) -> void:
 	if not _alive.has(npc):
 		return
+	# A tree_exited from a WHOLE SUBTREE leaving — GameRoot parking the level in its level cache — is not a despawn: the
+	# body still hangs off its parent, nobody freed it, and it comes back with the level. (A body detached ON ITS OWN,
+	# as the pool parks one, has no parent by the time tree_exited fires; a freed one is queued for deletion.) Counting
+	# it gone here would fire `cleared` — and every door wired to it — while the player is in another level.
+	if is_instance_valid(npc) and not npc.is_inside_tree() and npc.get_parent() != null and not npc.is_queued_for_deletion():
+		return
 	_alive.erase(npc)
 	alive_count_changed.emit(_alive.size())
 	if _alive.is_empty() and _spawning == 0:  # don't fire mid-stagger — wait until the wave has finished spawning

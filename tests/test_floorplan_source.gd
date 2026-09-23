@@ -288,3 +288,46 @@ func test_a_tagged_prop_contributes_no_walls() -> void:
 	fence.add_child(HIDE.new())          # _ready fires on add_child, marking `fence`
 	s.gather(root, Groups.MINIMAP_HIDE)
 	assert_eq(s.solid_count(), 0, "tagged, it drops out of the floorplan entirely")
+
+
+# --- streamed worlds (ChunkStreamer) --------------------------------------------------------------------
+
+## A streamed world's chunks are children of a ChunkStreamer, and the minimap gathers each chunk as a root of its
+## own. The level-root walk therefore must NOT descend into the streamer, or every chunk's walls count twice.
+func test_walk_never_descends_into_a_chunk_streamer() -> void:
+	var level := Node3D.new()
+	add_child_autofree(level)
+	level.add_child(_box_body(StaticBody3D.new(), Vector3.ONE, Vector3.ZERO))
+	var streamer: Node3D = load("res://scripts/world/chunk_streamer.gd").new()
+	level.add_child(streamer)
+	var chunk := Node3D.new()
+	streamer.add_child(chunk)
+	chunk.add_child(_box_body(StaticBody3D.new(), Vector3.ONE, Vector3(5, 0, 0)))
+	var s = SRC.new()
+	s.gather(level, &"")
+	assert_eq(s.solid_count(), 1, "the level walk takes its own wall and skips the streamed chunk under the streamer")
+	s.sync_roots([level, chunk], &"")
+	assert_eq(s.solid_count(), 2, "listed as its own root, the chunk's wall is gathered exactly once")
+
+
+## sync_roots walks only NEW roots and forgets roots that left: a chunk streaming in costs one walk of that chunk.
+func test_sync_roots_adds_and_drops_roots_incrementally() -> void:
+	var a := Node3D.new()
+	var b := Node3D.new()
+	add_child_autofree(a)
+	add_child_autofree(b)
+	a.add_child(_box_body(StaticBody3D.new(), Vector3.ONE, Vector3.ZERO))
+	b.add_child(_box_body(StaticBody3D.new(), Vector3.ONE, Vector3(9, 0, 0)))
+	var s = SRC.new()
+	assert_true(s.sync_roots([a], &""), "the first sync gathers")
+	assert_eq(s.solid_count(), 1, "one root, one solid")
+	a.add_child(_box_body(StaticBody3D.new(), Vector3.ONE, Vector3(0, 0, 4)))  # a change to an ALREADY-walked root...
+	assert_false(s.sync_roots([a], &""), "...is not re-walked: the same root set is a no-op")
+	assert_eq(s.solid_count(), 1, "(so its cached solids stand)")
+	assert_true(s.sync_roots([a, b], &""), "a new root changes the union")
+	assert_eq(s.solid_count(), 2,
+		"b walked (1) + a's cache kept as it was (1) — 3 would mean a was re-walked and its new box picked up")
+	assert_true(s.sync_roots([b], &""), "a root that left the list changes it too")
+	assert_eq(s.solid_count(), 1, "only b's solid remains")
+	assert_true(s.sync_roots([b, a], &""), "a root that left and came back is new again")
+	assert_eq(s.solid_count(), 3, "a dropped root's cache is FORGOTTEN, so its return re-walks it and sees both boxes")

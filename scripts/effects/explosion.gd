@@ -23,6 +23,8 @@ extends Node3D
 ## Grow-in speed of the spawned blast mesh: 0 = pop at full size instantly, >0 = bloom outward from zero (higher = faster bloom).
 @export var speed_to_scale: float
 
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
+
 ## `_deals_damage` MUST be passed explicitly by every caller. Explosion.deals_damage defaults to TRUE on the
 ## script (explosion_area.gd), and explosion_area.tscn does not override it — so a blast this bridge spawns
 ## without setting it damages whatever it overlaps. That default is right for the rocket and wrong for the
@@ -46,8 +48,8 @@ func _spawn_at(_last_pos: Vector3, _force: float, _radius: float, _damage: float
 	# only fires for a PLAYER-instigated explosion, not an NPC's rocket. null if there's no shooter.
 	var p := get_parent()
 	explosion.instigator = p.get(&"shooter") if p else null
-	get_tree().root.add_child(explosion)
-	explosion.position = _last_pos
+	WorldSpawn.add(self, explosion, _last_pos)
+	explosion.global_position = _last_pos
 
 ## Rocket/rock impact: full-force damaging explosion + a reparented one-shot SFX.
 ## The SFX is reparented to the scene root so it outlives this node / the projectile

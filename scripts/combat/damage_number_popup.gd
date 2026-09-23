@@ -20,6 +20,7 @@ class_name DamageNumberPopup
 ## a const (not on EffectsSettings) so should_show() remains a pure, autoload-free static the
 ## off-tree unit tests call bare; pinned by test_damage_number_popup.gd.
 const MIN_LOSS: float = 0.5
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 ## --- Shipped feel baseline: each const seeds the matching GameSettings.effects.damage_number_*
 ## default. The runtime path reads the resource; these stay as the anchors. ---
 const HIT_OFFSET_Y: float = 0.25
@@ -60,7 +61,7 @@ static func show(victim: Object, loss: float, hit_pos: Vector3, was_crit: bool, 
 	var victim_node := victim as Node3D
 	if not victim_node.is_inside_tree():
 		return
-	var parent := victim_node.get_tree().current_scene if victim_node.get_tree().current_scene != null else victim_node.get_tree().root
+	var parent := WorldSpawn.parent_for(victim_node, hit_pos, victim_node.get_tree().current_scene)
 	if parent == null:
 		return
 	# Live designer tuning, resolved once — and only PAST the bails above, so the pure policy statics

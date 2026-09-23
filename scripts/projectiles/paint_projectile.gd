@@ -6,6 +6,7 @@ extends Node3D
 ## spray-paint weapon and handed the wheel-selected colour. Fully self-contained — no scene needed.
 
 const PAINT_TEXTURE: Texture2D = preload("uid://cqurw22t40nt6")
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 const PAINT_SIZE: float = 0.5
 const PAINT_EMISSION: float = 1.0      ## full-bright so paint never dims in shadow
 const PAINT_ALPHA: float = 1.0         ## fully opaque — fresh paint covers what's underneath, no blending
@@ -92,8 +93,8 @@ func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 		burst.deals_damage = false
 		burst.explosion_radius = GameSettings.effects.explosion_spark_radius
 		burst.tint_color = paint_color
-		get_tree().root.add_child(burst)
-		burst.position = pos
+		WorldSpawn.add(self, burst, pos)
+		burst.global_position = pos
 	# Spray-paintable props (a dog, a car door) RECOLOUR to the paint instead of wearing a splatter decal: the blob
 	# discovers the SprayPaintable on the body it hit and repaints its whole coat. When the component suppresses the
 	# decal (its default), stop here — the prop just changed colour, so gluing a splat on top would look wrong. The
@@ -132,15 +133,15 @@ func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 	decal.modulate = Color(paint_color, PAINT_ALPHA)
 	decal.set_meta(&"paint_color", paint_color)  # base colour, for overlap + merge checks later
 	# Parent the decal to whatever it hit so it rides along when that body moves (enemies, props).
-	# Falls back to the world root for plain static geometry or anything without a Node3D.
-	var parent_node: Node = body if body is Node3D else get_tree().root
-	parent_node.add_child(decal)
-	# Orient so the decal projects along -Y into the surface (mirrors Character.spawn_blood_decal).
-	var up := normal
-	var z := (Vector3.FORWARD if absf(up.dot(Vector3.UP)) > 0.99 else Vector3.UP).slide(up).normalized()
-	var x := up.cross(z).normalized()
-	# Spin each splat a random amount around the surface normal so they don't all face the same way.
-	var _basis := Basis(x, up, z).rotated(up, randf() * TAU)
+	# Falls back to the world (WorldSpawn: the level / chunk under the splat) for anything without a Node3D.
+	if body is Node3D:
+		(body as Node3D).add_child(decal)
+	else:
+		WorldSpawn.add(self, decal, pos)
+	# Orient so the decal projects along -Y into the surface (Projectile.decal_basis_for_normal, the one
+	# decal-orientation rule), then spin each splat a random amount around the normal so they don't all face the
+	# same way.
+	var _basis := Projectile.decal_basis_for_normal(normal).rotated(normal, randf() * TAU)
 	decal.global_transform = Transform3D(_basis, pos + normal * 0.02)
 	decal.add_to_group(Groups.PAINT_DECAL)
 	if get_tree().get_node_count_in_group(Groups.PAINT_DECAL) > max_paint_decals:

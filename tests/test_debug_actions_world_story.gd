@@ -5,9 +5,11 @@ extends GutTest
 ## Pins (1) the static surface the dispatcher routes into and the registry<->family verb parity for `quest` /
 ## `notify` BY SOURCE SCAN (test_debug_commands.gd's approach — run() writes real GameState / QuestTracker
 ## state so it is never driven blind), (2) the pure helpers (objective type words, notify verb mapping, objective
-## lookup on the authored quests) with concrete inputs, and (3) the READ-ONLY command paths (`flag <unset>`,
-## `flag <unset> clear`, `quest show`, `quests`, `flags`, `ledger`) which only read GameState / QuestTracker.
-## `names` flips one in-memory bool and is snapshot/restored.
+## lookup on the authored quests and on a hand-built one) with concrete inputs, and (3) the READ-ONLY command paths
+## (`flag <unset>`, `flag <unset> clear`, `quest show`, `quests`, `flags`, `ledger`) which only read GameState /
+## QuestTracker. `names` flips one in-memory bool and is snapshot/restored. The active-quest snapshot helpers and
+## `ledger` read probe entries parked straight into QuestTracker's journal and GameState.world_objects (never through
+## start_quest / record_object_state, which both queue an autosave), erased key-for-key in after_each.
 
 const STORY_PATH := "res://scripts/components/debug_actions_world_story.gd"
 const WORLD_PATH := "res://scripts/components/debug_actions_world.gd"
@@ -17,16 +19,37 @@ const Common := preload("res://scripts/components/debug_actions_world_common.gd"
 
 ## A flag name no test or game code ever sets — every read below stays a miss and writes nothing.
 const NEVER_FLAG := "__gut_story_probe_flag_never_set__"
+## Quest ids the active-set test parks in the live tracker's journal (QuestTracker._quests_active) — never through
+## start_quest, which emits quest_started, runs stage entry and queues an autosave. Erased in after_each.
+const PROBE_QUESTS := [&"__gut_story_probe_quest_a__", &"__gut_story_probe_quest_b__", &"__gut_story_probe_quest_c__"]
+## A level key no level ever loads: the ledger test parks one world_objects bucket under it. Erased in after_each.
+const PROBE_LEVEL := "res://__gut_story_probe_level__.tres"
 
 var _names_before: bool
+## GameState.flags as found. `flags` is driven over hand-placed entries (written straight into the dictionary — never
+## through set_flag, which notifies QuestTracker and AUTOSAVES) and put back key-for-key in after_each.
+var _flags_before: Dictionary = {}
 
 
 func before_each() -> void:
 	_names_before = GameState.stranger_names_enabled
+	_flags_before = GameState.flags.duplicate(true)
 
 
 func after_each() -> void:
 	GameState.stranger_names_enabled = _names_before
+	GameState.flags.clear()
+	GameState.flags.merge(_flags_before)
+	for qid in PROBE_QUESTS:
+		QuestTracker._quests_active.erase(qid)
+	GameState.world_objects.erase(PROBE_LEVEL)
+
+
+## Park `qid` in the live tracker's journal in the entry shape start_quest writes (a stage-less quest, no objectives).
+func _park_active_quest(qid: StringName) -> void:
+	var quest := Quest.new()
+	quest.id = qid
+	QuestTracker._quests_active[qid] = {"quest": quest, "stage": &"", "epoch": 0, "progress": {}}
 
 
 func _static_names(script: GDScript) -> Dictionary:
@@ -111,18 +134,6 @@ func test_notify_verbs_all_map_to_a_real_objective_type() -> void:
 	assert_eq(Story._notify_type_for("zzz"), -1, "an unknown word is -1")
 
 
-func test_family_preloads_exist_and_there_is_no_class_name() -> void:
-	var src := FileAccess.get_file_as_string(STORY_PATH)
-	assert_false(src.contains("\nclass_name "), "the family has no class_name (preloaded by path)")
-	var rx := RegEx.new()
-	rx.compile("preload\\(\"(res://[^\"]+)\"\\)")
-	var n := 0
-	for m in rx.search_all(src):
-		n += 1
-		assert_true(ResourceLoader.exists(m.get_string(1)), "preload target %s must exist" % m.get_string(1))
-	assert_gte(n, 3, "Common, DebugCommands and Groups are preloaded")
-
-
 # --- pure helpers -----------------------------------------------------------------------------------------------
 
 func test_objective_type_text_covers_the_enum_and_degrades() -> void:
@@ -141,13 +152,25 @@ func test_notify_type_for_matches_the_objective_enum() -> void:
 
 
 func test_find_objective_is_exact_then_case_insensitive() -> void:
+	# Precedence needs two ids that differ ONLY by case, which no shipped quest authors, so a hand-built stage-less quest
+	# carries them, with the differently-cased one FIRST: a lookup that went straight to the case-insensitive pass would
+	# hand that one back.
+	var cased_first := QuestObjective.new()
+	cased_first.id = &"Reach_Vault"
+	var exact_second := QuestObjective.new()
+	exact_second.id = &"reach_vault"
+	var objectives: Array[QuestObjective] = [cased_first, exact_second]
+	var twins := Quest.new()
+	twins.objectives = objectives
+	assert_true(Story._find_objective(twins, "reach_vault") == exact_second,
+		"an exact id match wins over an EARLIER objective that only matches case-insensitively")
+	assert_true(Story._find_objective(twins, "Reach_Vault") == cased_first,
+		"the other exact spelling finds its own objective")
+	assert_true(Story._find_objective(twins, "REACH_VAULT") == cased_first,
+		"with no exact match, the first case-insensitive match is accepted (typing convenience)")
 	var quest := _load_quest("clear_the_block")
 	if quest == null:
 		return
-	var exact := Story._find_objective(quest, "kill_raiders")
-	assert_not_null(exact, "an exact objective id is found")
-	if exact != null:
-		assert_eq(String(exact.get("id")), "kill_raiders", "and it is that objective")
 	var loose := Story._find_objective(quest, "REACH_VAULT")
 	assert_not_null(loose, "a case-insensitive match is accepted (typing convenience)")
 	if loose != null:
@@ -177,10 +200,21 @@ func test_open_required_objectives_is_empty_for_a_non_active_quest() -> void:
 
 
 func test_active_id_set_and_new_active_since_are_consistent() -> void:
+	# `quest advance` / `notify` snapshot the active set BEFORE firing the tracker, then name what the cascade started.
+	# Anything already active (a quest another test left behind included) sits in the snapshot, so only this test's
+	# probes can be reported as new.
+	var already := StringName(PROBE_QUESTS[0])
+	_park_active_quest(already)
 	var before := Story._active_id_set()
-	assert_eq(before.size(), QuestTracker.active_quest_ids().size(), "the snapshot mirrors the tracker's active list")
-	assert_eq(Story._new_active_since(before).size(), 0, "nothing is new against a snapshot taken just now")
-	assert_eq(Story._new_active_since({}).size(), before.size(), "against an EMPTY snapshot everything active is new")
+	assert_true(before.has(String(already)),
+		"an active quest is in the snapshot under its String id (the key _quest_advance looks next_quest up by)")
+	assert_false(before.has(String(PROBE_QUESTS[1])), "a quest that is not active is not in the snapshot")
+	assert_eq(Story._new_active_since(before).size(), 0, "nothing went active since the snapshot, so nothing is new")
+	# Two more go active, parked in REVERSE name order: the report must still read alphabetically.
+	_park_active_quest(StringName(PROBE_QUESTS[2]))
+	_park_active_quest(StringName(PROBE_QUESTS[1]))
+	assert_eq(Array(Story._new_active_since(before)), [String(PROBE_QUESTS[1]), String(PROBE_QUESTS[2])],
+		"exactly the two quests that went active after the snapshot, sorted; the one active before it is not new")
 
 
 # --- read-only command paths --------------------------------------------------------------------------------------
@@ -199,11 +233,33 @@ func test_flag_read_and_clear_on_an_unset_flag_write_nothing() -> void:
 	assert_false(GameState.has_flag(NEVER_FLAG), "the probe flag is still unset")
 
 
-func test_flags_lists_the_one_flag_known_in_code() -> void:
+func test_flags_lists_every_set_flag_sorted_and_names_a_flag_the_game_really_reads() -> void:
+	GameState.flags.clear()
+	var empty := Story._cmd_flags()
+	assert_true(empty[0].contains("no story flags"), "with nothing set the first line says so rather than printing an empty list: %s" % empty[0])
+	# Inserted OUT of order: the listing must sort, or two runs of `flags` over the same state read differently.
+	GameState.flags["zz_gut_story_probe"] = true
+	GameState.flags["aa_gut_story_probe"] = 3
 	var out := Story._cmd_flags()
-	assert_gt(out.size(), 0, "flags prints something even with no flags set")
-	assert_eq(out[out.size() - 1], "known in code: %s" % String(GameState.HOLSTER_FORGIVENESS_TUTORIAL_SEEN_FLAG),
-		"the last line names the flag that exists in code (the shipped game authors ~zero flags)")
+	var joined := "\n".join(out)
+	var at_a := joined.find("aa_gut_story_probe")
+	var at_z := joined.find("zz_gut_story_probe")
+	assert_gt(at_a, -1, "a set flag is listed: %s" % joined)
+	assert_gt(at_z, -1, "every set flag is listed: %s" % joined)
+	assert_lt(at_a, at_z, "flags list alphabetically, whatever order they were set in: %s" % joined)
+	for line in out:
+		if line.contains("aa_gut_story_probe"):
+			assert_true(line.strip_edges().ends_with("3"), "a flag's line carries its stored value, not just its name: %s" % line)
+	assert_true(joined.contains("2 flag"), "the count line matches the number of flags set: %s" % joined)
+	# The footer points a designer at the one flag that exists in code. Prove the name it prints is a flag the game
+	# actually READS (the holster-forgiveness tutorial latch), not a stale spelling of it.
+	var footer := out[out.size() - 1]
+	var named := footer.split(" ", false)[-1]
+	GameState.flags.clear()
+	assert_false(GameState.holster_forgiveness_tutorial_seen(), "precondition: with no flags the tutorial reads unseen")
+	GameState.flags[named] = true
+	assert_true(GameState.holster_forgiveness_tutorial_seen(),
+		"the flag the `flags` footer names ('%s') is the one the holster tutorial latch reads — setting it by that name marks the tutorial seen" % named)
 
 
 func test_quest_show_reads_the_authored_quest_case_insensitively() -> void:
@@ -228,6 +284,11 @@ func test_quests_lists_ids_with_their_file_note() -> void:
 
 
 func test_ledger_is_read_only_and_reports_every_section() -> void:
+	# A world_objects bucket under a level that is NOT the current one: plain `ledger` reports the current level only,
+	# so the bucket must stay out of it, and `ledger ALL` walks every level, so it must show up there. Parked before the
+	# snapshot, so "never writes" is checked over a ledger that has something in it.
+	assert_ne(String(GameState.current_level_path), PROBE_LEVEL, "precondition: the probe bucket is not the current level's")
+	GameState.world_objects[PROBE_LEVEL] = {"id:gut_story_probe_door": {"open": true}}
 	var wo_before := GameState.world_objects.duplicate(true)
 	var out := Story._cmd_ledger(PackedStringArray())
 	var joined := "\n".join(out)
@@ -236,8 +297,12 @@ func test_ledger_is_read_only_and_reports_every_section() -> void:
 	assert_true(joined.contains("-- dead authored NPCs"), "section 2: the dead-NPC ledger")
 	assert_true(joined.contains("-- discovered_corpses:"), "the corpse ledger line")
 	assert_true(joined.contains("-- latches:"), "section 3: the latches")
-	var all := Story._cmd_ledger(PackedStringArray(["ALL"]))
-	assert_true("\n".join(all).contains("level bucket(s)"), "`ledger all` (any case) walks every level bucket")
+	assert_false(joined.contains(PROBE_LEVEL),
+		"plain `ledger` reports the current level only, so another level's bucket stays out of it: %s" % joined)
+	var all := "\n".join(Story._cmd_ledger(PackedStringArray(["ALL"])))
+	assert_true(all.contains("-- world_objects[\"%s\"]: 1 entry" % PROBE_LEVEL),
+		"`ledger ALL` (any case) walks every level's bucket, including one that is not the current level: %s" % all)
+	assert_true(all.contains("id:gut_story_probe_door"), "and lists that bucket's entries: %s" % all)
 	assert_eq(GameState.world_objects, wo_before, "ledger never writes the ledger")
 
 

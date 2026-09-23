@@ -158,6 +158,8 @@ var _visual_vibration_phase: float = 0.0
 var _physics_vibration_phase: float = 0.0
 var _physics_vibration_wave: float = 0.0
 
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
+
 ## Editor warning: a radio with no pinned track, no folder of tracks, AND no fallback is silent. Surface it at edit time.
 func _get_configuration_warnings() -> PackedStringArray:
 	if track == null and fallback_audio == null and _scan_audio_folder(music_folder).is_empty():
@@ -297,8 +299,7 @@ func _spawn_music_note() -> void:
 		note_rise,
 		randf_range(-note_spread, note_spread)
 	)
-	var note_parent := get_tree().current_scene if get_tree().current_scene != null else self
-	note_parent.add_child(note)
+	WorldSpawn.add(self, note, global_position, get_tree().current_scene if get_tree().current_scene != null else self)
 	note.global_position = global_position + start
 
 	var fade_time := minf(note_fade_time, note_lifetime)

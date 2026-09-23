@@ -264,18 +264,25 @@ func _on_body_entered(body: Node) -> void:
 func _on_queued_for_deletion(_last_pos: Vector3) -> void:
 	on_deletion()
 
-## Stand a decal on a surface: `normal` becomes the decal's UP (a Decal projects along -Y) and the forward axis is
-## whichever world axis is NOT near-parallel to it, so a floor hit and a wall hit both get a stable basis. Static so
-## the blood-drop splat (blood_drop.gd) shares it instead of carrying a copy — the ONE decal-orientation rule.
-static func orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
-	var up := normal
+## The basis that stands a decal on a surface — the ONE decal-orientation rule. `normal` becomes the decal's local Y
+## (a Decal projects along -Y) and local Z is whichever world axis is NOT near-parallel to it (FORWARD on a floor or
+## ceiling, UP on a wall), so every surface gets a stable, orthonormal, RIGHT-HANDED basis (x = up × z; the flipped
+## cross product mirrors the stamp). Pure + static so every splat shares it instead of carrying a copy: bullet holes
+## (below), blood drops (blood_drop.gd), wound and gib splats (bloody_mess.gd), the death splat (GoreSpawner), the
+## destroy scorch (Throwable.destroy_decal_basis) and paint (PaintProjectile). tests/test_smoke.gd pins it directly.
+static func decal_basis_for_normal(normal: Vector3) -> Basis:
+	var up := normal.normalized()
 	var z: Vector3
 	if absf(up.dot(Vector3.UP)) > NORMAL_PARALLEL_THRESHOLD:
 		z = Vector3.FORWARD.slide(up).normalized()
 	else:
 		z = Vector3.UP.slide(up).normalized()
 	var x := up.cross(z).normalized()
-	decal.global_transform.basis = Basis(x, up, z)
+	return Basis(x, up, z)
+
+## Stand `decal` on a surface via decal_basis_for_normal. Static so blood_drop.gd can call it without an instance.
+static func orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
+	decal.global_transform.basis = decal_basis_for_normal(normal)
 
 ## Instance seam Bullet / RockProjectile call (tests pin it by name); the rule itself is the static above.
 func _orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:

@@ -1042,19 +1042,57 @@ func consume_clock_apply() -> bool:
 ## change; the RELOAD_CHECKPOINT_FRESH death calls it with include_live_npcs = false (see WorldSnapshot.capture). No
 ## disk write — the next save persists it — and a no-op for a blank path, a null tree, or the level whose bucket apply
 ## is still queued (_level_apply_pending: capturing now would overwrite the saved state with the fresh seed).
-func capture_level_state(tree: SceneTree, level_path: String, include_live_npcs: bool = true) -> void:
-	if tree == null or level_path == "" or level_path == _level_apply_pending:
+##
+## STREAMED WORLDS: every chunk a ChunkStreamer has loaded is captured too, each into its OWN bucket
+## (WorldSnapshot.bucket_for) — the level bucket skips chunk content. Returns every bucket key written, so a save can
+## keep fold_dead_ledger off them.
+func capture_level_state(tree: SceneTree, level_path: String, include_live_npcs: bool = true) -> PackedStringArray:
+	var written := PackedStringArray()
+	if tree == null or level_path == "":
+		return written
+	if level_path != _level_apply_pending:
+		world_snapshot.capture(tree, level_path, _dead_authored.get(level_path, {}), include_live_npcs)
+		written.append(level_path)
+	for streamer in tree.get_nodes_in_group(Groups.CHUNK_STREAMER):
+		if not streamer.has_method(&"ledger_chunks"):
+			continue
+		for chunk in streamer.call(&"ledger_chunks"):
+			var key := capture_chunk_state(chunk, include_live_npcs)
+			if key != "":
+				written.append(key)
+	return written
+
+## One streamed chunk's half of the ledger: REPLACE its bucket with what is under `chunk` now. ChunkStreamer calls it
+## right before it unloads a chunk; capture_level_state calls it for every loaded chunk. Returns the bucket key, or ""
+## when there was nothing to key it by (off-tree, no active level).
+func capture_chunk_state(chunk: Node, include_live_npcs: bool = true) -> String:
+	if not is_instance_valid(chunk) or not chunk.is_inside_tree() or current_level_path == "":
+		return ""
+	var key := ledger_bucket_for(chunk)
+	world_snapshot.capture(chunk.get_tree(), key, _dead_authored.get(key, {}), include_live_npcs, chunk)
+	return key
+
+## Hand a freshly streamed-in chunk its bucket back (dead authored NPCs freed, live ones repositioned, containers
+## refilled exactly), scoped to that chunk. No-op without a bucket.
+func apply_chunk_state(chunk: Node) -> void:
+	if not is_instance_valid(chunk) or not chunk.is_inside_tree():
 		return
-	world_snapshot.capture(tree, level_path, _dead_authored.get(level_path, {}), include_live_npcs)
+	world_snapshot.apply(chunk.get_tree(), ledger_bucket_for(chunk), chunk)
+
+## The world-ledger bucket `node` belongs to: its streamed chunk's inside a ChunkStreamer world, else the current level's.
+## NPC deaths are recorded under it, so a chunk's kills ride that chunk's bucket.
+func ledger_bucket_for(node: Node) -> String:
+	return WorldSnapshot.bucket_for(node, current_level_path)
 
 ## Bring the whole ledger up to date for a SAVE: capture the level the player is in (when in-tree), then fold every
 ## level's death ledger into its bucket (a level the player has not re-entered since a kill keeps its captured live
 ## data and gains the new dead keys). Called by autosave and _capture_and_write right before save_to_disk. Bounded:
 ## each call REPLACES the current level's bucket, so saving a thousand times never grows the payload.
 func capture_world_state() -> void:
+	var written := PackedStringArray([current_level_path])
 	if is_inside_tree() and get_tree() != null:
-		capture_level_state(get_tree(), current_level_path)
-	world_snapshot.fold_dead_ledger(_dead_authored, current_level_path)
+		written.append_array(capture_level_state(get_tree(), current_level_path))
+	world_snapshot.fold_dead_ledger(_dead_authored, written)
 
 ## GameRoot is about to spawn `level_path`: arm the capture guard when the ledger has a bucket to apply to it (and clear
 ## any guard left by an earlier load that was superseded). Returns whether an apply should be queued.

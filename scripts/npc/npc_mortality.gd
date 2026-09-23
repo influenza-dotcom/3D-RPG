@@ -15,6 +15,8 @@ extends Node
 
 var host: Node = null
 
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
+
 ## Leave a lootable corpse at the death spot holding a copy of our backpack — a PERSISTENT node (not the fading
 ## ragdoll) the player loots with E. Skipped when a ragdoll already carries the loot, when the bag AND wallet are
 ## both empty, or off-tree. Spawned into our PARENT (the world), not under us, since the NPC is about to queue_free.
@@ -37,7 +39,7 @@ func drop_loot() -> void:
 	# themselves, else their job title ("Loot Merchant"), else "Stranger" (GameState.public_name). A body you never
 	# learned the name of stays a Stranger.
 	corpse.setup(host.inventory, GameState.public_name(host.display_name, host), host.money)
-	world.add_child(corpse)
+	WorldSpawn.add(host, corpse, host.global_position, world)  # the chunk / level under the body; our parent without a level
 	corpse.global_position = host.global_position
 
 ## Grant the player XP for the kill — a global flat amount (GameSettings.xp.xp_per_kill), routed to the live HUMAN
@@ -53,7 +55,8 @@ func award_kill_xp() -> void:
 ## Stealth body-discovery: leave an invisible, discoverable Corpse marker at the death spot (separate from any
 ## ragdoll / LootableCorpse) so a nearby UNAWARE NPC can NOTICE the death and investigate. Off by default
 ## (host._body_discovery_on()) -> nothing spawns, so stealth kills stay free until the designer opts in. Spawned into
-## our PARENT (the world), since the NPC is about to queue_free.
+## the world (WorldSpawn: the chunk / level under the body, our parent without a level), since the NPC is about to
+## queue_free.
 func spawn_corpse_marker() -> void:
 	if not host._body_discovery_on():
 		return
@@ -64,5 +67,5 @@ func spawn_corpse_marker() -> void:
 		return
 	var marker := Corpse.new()
 	marker.who = host.display_name
-	world.add_child(marker)
+	WorldSpawn.add(host, marker, host.global_position, world)
 	marker.global_position = host.global_position

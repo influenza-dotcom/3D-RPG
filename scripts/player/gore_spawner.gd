@@ -22,6 +22,7 @@ var _host: Character
 ## would have to be in the editor's global class cache before any actor could compile; a preloaded path never
 ## is. Only its STATICS are used from here — the per-actor instance is read duck-typed (_body_part_config).
 const BodyPartGibsScript := preload("res://scripts/components/body_part_gibs.gd")
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 
 ## The PIN kill's geometry + policy statics, preloaded by path for exactly the reason above.
 const PartPinnerScript := preload("res://scripts/effects/part_pinner.gd")
@@ -92,7 +93,7 @@ func clear_tagged_gore() -> int:
 ## Spawn a flat blood splat decal on the floor beneath the host (on death). Raycasts straight down,
 ## orients the decal to the hit surface normal, and uses cull_mask = 2 (the world's decal render
 ## layer) so it lands on level geometry but not on view-model/gun meshes (which live on the gun
-## layer). The gib floor-decal logic in bloody_mess.gd mirrors this.
+## layer). The basis is Projectile.decal_basis_for_normal, the one decal-orientation rule every splat shares.
 func spawn_blood_decal() -> void:
 	if not _host.is_inside_tree():
 		return
@@ -108,21 +109,14 @@ func spawn_blood_decal() -> void:
 		var decal = Character.BLOOD_SPLAT_DECAL.instantiate()
 		if decal == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 			return
-		_host.get_tree().root.add_child(decal)
+		WorldSpawn.add(_host, decal, result.position)
 		_tag(decal)  # our gore, so the player's revive can wipe its own splat (see _tag_group)
 
 		decal.global_position = result.position + result.normal * 0.02
 
 		decal.cull_mask = 2
 
-		var up: Vector3 = result.normal
-		var z: Vector3
-		if absf(up.dot(Vector3.UP)) > 0.99:
-			z = Vector3.FORWARD.slide(up).normalized()
-		else:
-			z = Vector3.UP.slide(up).normalized()
-		var x := up.cross(z).normalized()
-		decal.global_transform.basis = Basis(x, up, z)
+		decal.global_transform.basis = Projectile.decal_basis_for_normal(result.normal)
 
 ## Spawn the on-death corpse/loot drop at the host's spot, launched the way it was knocked/blasted (the
 ## killing blow), if a ragdoll_scene is assigned. The drop is either a rigged-skeleton Ragdoll (goes limp
@@ -147,9 +141,9 @@ func _spawn_ragdoll() -> void:
 	_attach_loot(corpse)  # make the skeleton itself lootable; the ragdoll lingers until emptied
 	if corpse is Node3D:
 		var c3d := corpse as Node3D
-		c3d.position = _host.global_position  # added under root, so local == world
+		c3d.position = _host.global_position  # WORLD space: WorldSpawn.add keeps it there under whatever parent it picks
 		c3d.rotation.y = _host.global_rotation.y  # face the way we were facing when we died
-	_host.get_tree().root.add_child(corpse)
+	WorldSpawn.add(_host, corpse, _host.global_position)  # the level / chunk the body fell in, so it leaves with it
 	_tag(corpse)  # the body itself is part of the burst — a revived player must not leave its own corpse behind
 
 ## If the dying actor carries ANYTHING — items OR cash — attach a LootableCorpse (its look-at talk hitbox +
@@ -214,7 +208,7 @@ func spawn_gibs() -> void:
 			var gib = _host.gib_scene.instantiate()
 			if gib == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 				continue
-			_host.get_tree().root.add_child(gib)
+			WorldSpawn.add(_host, gib, _host.global_position)
 			_tag(gib)  # ownership tag alongside the &"gib" group below — see _tag_group
 			gib.begin_gib_lifetime(GameSettings.effects.gib_lifetime, GameSettings.effects.gib_fade_time)  # &"gib" group + timed fade-out
 			# Per-spawn fragility roll. Override hp after add_child so _ready (which
@@ -337,10 +331,10 @@ func _spawn_body_part_gibs() -> Array[RigidBody3D]:
 	var inherited: Vector3 = (_host.velocity + _host.explosion_velocity) * GameSettings.effects.body_part_gib_launch_inherit
 	for i in pending.size():
 		var gib = pending[i]
-		_host.get_tree().root.add_child(gib)
+		WorldSpawn.add(_host, gib, _host.global_position)
 		_tag(gib)  # ownership tag alongside the &"gib" group begin_gib_lifetime adds below — see _tag_group
 		# The part's own visual centre + facing — it does not move or turn a millimetre on becoming a gib, so
-		# the body is still whole for the frame the burst starts. (Added under root, so local == world.)
+		# the body is still whole for the frame the burst starts. (Set in world space, so it lands the same under any parent.)
 		gib.global_position = gib.spawn_origin()
 		gib.global_basis = gib.spawn_basis()
 		# hp / mass AFTER add_child: Throwable._ready sets hp from data.max_hp and mass from data.mass, so an

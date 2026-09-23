@@ -2,6 +2,7 @@ class_name ProjectileSpawner
 extends Node3D
 
 const PITCH_AXIS_MIN_LENGTH_SQ: float = 0.0001
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 
 ## The Inventory this watches for weapon swaps — its weapon_changed/equipped_weapon decide which weapon's
 ## projectile scene + stats get spawned. Wired by WeaponSystem.setup.
@@ -78,7 +79,7 @@ func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool, _
 		_bullet.get_node("Explosion").explosion_radius = current_weapon.explosion_radius
 		_bullet.get_node("Explosion").explosion_damage = current_weapon.explosion_damage  # M9: -1 forwards the global fallback
 
-	get_tree().root.add_child(_bullet)
+	WorldSpawn.add(self, _bullet, _from)
 	_bullet.global_position = _from
 
 	# Projectiles play their own impact SFX (the scene's AudioStreamPlayer3Ds).

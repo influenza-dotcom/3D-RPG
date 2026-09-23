@@ -148,7 +148,8 @@ const COVER_LAYER: int = 130
 ## Process-lifetime latch (see the class doc): the draw pass runs once per process, not once per game.tscn.
 static var _warmed: bool = false
 
-## Everything the current pass instanced; freed together after the hidden hold (the atlas keeper is NOT in here).
+## Everything the current pass instanced; parked hidden after the hidden hold and KEPT for this node's lifetime, never
+## freed by the pass (see _park_warm_nodes; the atlas keeper is NOT in here).
 var _warm_nodes: Array[Node] = []
 
 
@@ -159,6 +160,13 @@ var _warm_nodes: Array[Node] = []
 func warm(camera: Camera3D) -> void:
 	if DisplayServer.get_name() == "headless" or Engine.is_editor_hint() or not is_inside_tree():
 		return
+	await _warm_pass(camera)
+
+
+## The pass itself, past warm()'s render gate (headless / editor / off-tree). Split out ONLY so
+## tests/test_effect_prewarm.gd can drive the real pass in a headless GUT tree — warm() rightly refuses there, since
+## nothing renders — and observe what it builds, its cover and its once-per-process latch. Call warm() from gameplay.
+func _warm_pass(camera: Camera3D) -> void:
 	# The keeper is per-game.tscn (it dies with the root on a death reload), so it is re-created on EVERY call —
 	# before the latch, which only guards the once-per-process draw pass.
 	_ensure_decal_keeper()
@@ -257,7 +265,7 @@ func _raise_cover() -> CanvasLayer:
 
 
 ## Take the cover down. Null-safe (cover_screen off) and validity-safe (a pass cut short by a reload was freed with
-## us): every exit from warm() routes through here, so no path can leave the screen stuck black.
+## us): every exit from the pass (_warm_pass) routes through here, so no path can leave the screen stuck black.
 func _drop_cover(cover: CanvasLayer) -> void:
 	if cover != null and is_instance_valid(cover):
 		cover.queue_free()
@@ -462,8 +470,8 @@ func _ensure_decal_keeper() -> void:
 ## under an in-flight compile is a use-after-free the engine cannot defend against; a couple of dozen hidden nodes
 ## cost nothing, and their materials/shaders can never be evicted and recompiled mid-fight either. Hidden with
 ## `visible = false` per node (not only via this node's own flag) so a later `visible = true` on the component —
-## e.g. the resting-state restore in warm() — never re-shows them. GPUParticles3D emitters are switched off too, so
-## nothing keeps simulating behind the scenes.
+## e.g. the resting-state restore at the end of _warm_pass — never re-shows them. GPUParticles3D emitters are switched
+## off too, so nothing keeps simulating behind the scenes.
 func _park_warm_nodes() -> void:
 	for n in _warm_nodes:
 		if not is_instance_valid(n):

@@ -11,6 +11,7 @@ extends Node3D
 ## GoreGib `destroy` signal in gore_gib.tscn).
 
 const BLOODY_MESS = preload("uid://yeq88l33gvle")
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 
 ## OWNERSHIP TAG — the group every WORLD node this controller spawns joins, or &"" for none. Answers "whose gore
 ## is this?", and today only the player's death names one (Groups.PLAYER_GORE), so its checkpoint revive can wipe
@@ -52,7 +53,7 @@ func _tag(node: Node) -> void:
 ## and rain blood_drop_count physics drops. The particle node self-frees on finish.
 func particles(_offset: Vector3) -> void:
 	var _particles = BLOODY_MESS.instantiate()
-	get_tree().root.add_child(_particles)
+	WorldSpawn.add(self, _particles, global_position + _offset)
 	_tag(_particles)
 	_particles.global_position = global_position + _offset
 	# Trim the death burst from the scene's 960 — that many translucent sphere particles at once
@@ -65,10 +66,10 @@ func particles(_offset: Vector3) -> void:
 
 func _rain_drops(origin: Vector3) -> void:
 	# Hand off to a persistent emitter that drips the drops in over several frames.
-	# It lives under the scene root, so it keeps spawning after this character (and
-	# its BloodyMess child) is freed at the end of this frame.
+	# It lives in the WORLD (WorldSpawn: the level / chunk), not under this character, so it keeps
+	# spawning after this character (and its BloodyMess child) is freed at the end of this frame.
 	var emitter := BloodDropEmitter.new()
-	get_tree().root.add_child(emitter)
+	WorldSpawn.add(self, emitter, origin)
 	# Tag the emitter AND hand it the tag to stamp onto each drop: sweeping the emitter itself stops a rain that
 	# is still in flight (it dribbles over several frames), and the per-drop tag carries on to the landed decals.
 	_tag(emitter)
@@ -92,7 +93,6 @@ const HIT_DECAL_SIZE_MAX: float = 0.8
 # .blood_decal_grow_time / .blood_decal_fadeout_delay with landed physics drops (blood_drop.gd), so tuning
 # blood lingering changes BOTH paths together.
 const HIT_DECAL_CULL_MASK: int = 1048571  # all render layers except the gun's (layer 3), so blood spray hits walls too
-const HIT_DECAL_NORMAL_PARALLEL_THRESHOLD: float = 0.99
 
 func splatter_at(world_pos: Vector3, hit_dir: Vector3, count: int = HIT_DECAL_COUNT, _silent: bool = true) -> void:
 	# `_silent` kept for backwards-compat with the old physics-drop signature.
@@ -125,22 +125,14 @@ func _spawn_hit_decal(pos: Vector3, normal: Vector3) -> void:
 	decal.target_size = Vector3(s, 0.05, s)
 	decal.grow_time = GameSettings.effects.blood_decal_grow_time
 	decal.cull_mask = HIT_DECAL_CULL_MASK
-	get_tree().root.add_child(decal)
+	WorldSpawn.add(self, decal, pos)
 	_tag(decal)
 	decal.global_position = pos + normal * GameSettings.effects.decal_normal_offset
-	var up := normal
-	var z: Vector3
-	if absf(up.dot(Vector3.UP)) > HIT_DECAL_NORMAL_PARALLEL_THRESHOLD:
-		z = Vector3.FORWARD.slide(up).normalized()
-	else:
-		z = Vector3.UP.slide(up).normalized()
-	var x := up.cross(z).normalized()
-	decal.global_transform.basis = Basis(x, up, z)
+	decal.global_transform.basis = Projectile.decal_basis_for_normal(normal)
 
 
 const GIB_FLOOR_DECAL_SIZE: float = 1.5
 const GIB_FLOOR_DECAL_PROBE: float = 2.0
-const GIB_FLOOR_DECAL_PARALLEL_THRESHOLD: float = 0.99
 
 ## Wired to a gore gib's `destroy` signal: when a flung gib breaks, leave a floor
 ## blood decal plus a smaller secondary burst (fewer particles + drops than a full
@@ -148,7 +140,7 @@ const GIB_FLOOR_DECAL_PARALLEL_THRESHOLD: float = 0.99
 func _on_gore_gib_destroy() -> void:
 	_spawn_gib_floor_decal()
 	var _particles = BLOODY_MESS.instantiate()
-	get_tree().root.add_child(_particles)
+	WorldSpawn.add(self, _particles, global_position)
 	_tag(_particles)  # tag INHERITED off the gib body we hang under (_resolved_tag) — a player gib bleeds player gore
 	_particles.global_position = global_position
 	_particles.emitting = true
@@ -156,7 +148,7 @@ func _on_gore_gib_destroy() -> void:
 	_particles.amount = 16
 
 	var emitter := BloodDropEmitter.new()
-	get_tree().root.add_child(emitter)
+	WorldSpawn.add(self, emitter, global_position)
 	_tag(emitter)
 	emitter.gore_tag = _resolved_tag()
 	var gib_drops: int = GameSettings.effects.gib_destroy_drops
@@ -184,16 +176,9 @@ func _spawn_gib_floor_decal() -> void:
 		light.queue_free()
 	decal.target_size = Vector3(GIB_FLOOR_DECAL_SIZE, 0.15, GIB_FLOOR_DECAL_SIZE)
 	decal.cull_mask = 2
-	get_tree().root.add_child(decal)
+	WorldSpawn.add(self, decal, result["position"])
 	_tag(decal)
 	var normal: Vector3 = result["normal"]
 	decal.global_position = result["position"] + normal * GameSettings.effects.decal_normal_offset
-	var up := normal
-	var z: Vector3
-	if absf(up.dot(Vector3.UP)) > GIB_FLOOR_DECAL_PARALLEL_THRESHOLD:
-		z = Vector3.FORWARD.slide(up).normalized()
-	else:
-		z = Vector3.UP.slide(up).normalized()
-	var x := up.cross(z).normalized()
-	decal.global_transform.basis = Basis(x, up, z)
+	decal.global_transform.basis = Projectile.decal_basis_for_normal(normal)
 	

@@ -172,7 +172,7 @@ static func run(cmd: String, ctx: Dictionary, args: PackedStringArray) -> Packed
 		"wandermusic": return _cmd_wander_music(ctx)
 		"timescale": return _cmd_timescale(ctx, args)
 		"warp": return _cmd_warp(ctx, args)
-		"levels": return _cmd_levels()
+		"levels": return _cmd_levels(ctx)
 		"reload": return _cmd_reload(ctx)
 		"save": return _cmd_save(ctx, args)
 		"load": return _cmd_load(ctx, args)
@@ -502,7 +502,11 @@ static func _cmd_warp(ctx: Dictionary, args: PackedStringArray) -> PackedStringA
 	# Synchronous: instantiate + add_child happen inside this call. Safe from a console _input / a menu button —
 	# NEVER from a _ready() (add_child is blocked while the parent is setting up children).
 	gr.call(&"load_level", data)
-	out.append("old level subtree was renamed, detached and queue_free()d — anything parented inside it is gone.")
+	var parked: PackedStringArray = gr.call(&"cached_level_paths") if gr.has_method(&"cached_level_paths") else PackedStringArray()
+	if parked.is_empty():
+		out.append("old level subtree was renamed, detached and queue_free()d — anything parented inside it is gone.")
+	else:
+		out.append("old level parked in GameRoot's level cache (%d held: %s) — warp back and it returns exactly as left." % [parked.size(), ", ".join(parked)])
 
 	var lvl := Common._level_node(tree)
 	if lvl == null:
@@ -517,19 +521,22 @@ static func _cmd_warp(ctx: Dictionary, args: PackedStringArray) -> PackedStringA
 	return out
 
 
-static func _cmd_levels() -> PackedStringArray:
+static func _cmd_levels(ctx: Dictionary = {}) -> PackedStringArray:
 	var index := _levels()
 	if index.is_empty():
 		return Common._one("no LevelData resources under %s" % LEVEL_DIR)
 	var active := String(GameState.current_level_path)
+	var tree := Common._tree(ctx)
+	var gr: Node = Common._game_root(tree) if tree != null else null
+	var parked: PackedStringArray = gr.call(&"cached_level_paths") if gr != null and gr.has_method(&"cached_level_paths") else PackedStringArray()
 	var out := PackedStringArray()
 	for stem in Common._sorted_keys(index):
 		var path := String(index[stem])
 		var data := load(path)
 		var label := String(data.get("display_name")) if data != null else "?"
-		var mark := "*" if path == active else " "
+		var mark := "*" if path == active else ("~" if parked.has(path) else " ")
 		out.append("%s %-18s %s" % [mark, stem, label])
-	out.append("* = the active level (GameState.current_level_path)")
+	out.append("* = the active level (GameState.current_level_path)   ~ = parked in memory (GameRoot level cache)")
 	return out
 
 

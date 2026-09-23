@@ -98,8 +98,8 @@ func _process(delta: float) -> void:
 	_find_cd -= delta
 	# Groups.is_usable, NOT is_instance_valid: the cached handle must also still be IN THE TREE. quickload /
 	# reload_current_scene detaches the current scene (Player included) on the spot and frees it only at end of
-	# frame, and a loot-sack beacon rides a corpse GoreSpawner parented to get_tree().root — a SIBLING of the scene
-	# — so it keeps processing through that gap holding a valid-but-detached player. Reading global_position off it
+	# frame, and a beacon that lives OUTSIDE the scene (a corpse loot sack WorldSpawn fell back to the tree root for,
+	# with no level) keeps processing through that gap holding a valid-but-detached player. Reading global_position off it
 	# is an engine error ("!is_inside_tree()"), once per beacon per frame. Re-look-up the moment the handle goes
 	# unusable rather than waiting out the 0.5 s throttle, so the glow is correct again on the very next frame.
 	if _find_cd <= 0.0 or not Groups.is_usable(_player):

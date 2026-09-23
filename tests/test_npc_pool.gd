@@ -48,13 +48,35 @@ func test_apply_overrides_stamps_faction_and_weapon() -> void:
 	assert_eq(String(t.faction_id), "", "faction_id dropdown is cleared so the override wins in _resolve_faction")
 	t.free(); def = null; fac = null
 
-func test_apply_overrides_prefers_profile() -> void:
+## A PROFILE is the whole archetype: NPC._ready's full stamp writes faction_id / faction / weapon_data FROM it. So a
+## profile-only definition stamps the profile and leaves those fields alone. Clearing faction_id is the faction
+## override's job, and doing it here would blank an id the NPC's own authored faction resolves through.
+func test_apply_overrides_profile_only_stamps_the_archetype_and_nothing_else() -> void:
 	var prof := NpcData.new()
 	var def := SpawnDefinition.new()
 	def.profile = prof
 	var t := _StampTarget.new()
 	def.apply_overrides(t)
 	assert_eq(t.profile, prof, "a profile is stamped as the archetype")
+	assert_eq(String(t.faction_id), "seed",
+		"a profile-only spawn must not clear the NPC's faction_id: only a faction_override does that")
+	assert_null(t.faction, "a profile-only spawn stamps no faction of its own (the profile supplies it at _ready)")
+	assert_null(t.weapon_data, "a profile-only spawn stamps no weapon of its own (the profile supplies it at _ready)")
+	assert_push_warning_count(0, "a well-formed profile-only definition warns about nothing")
+	t.free(); def = null; prof = null
+
+## The precedence contract when a designer sets BOTH: the profile is still stamped (so NPC._ready's full archetype
+## stamp overwrites the overrides) and the designer is told the overrides are ignored.
+func test_apply_overrides_warns_when_a_profile_is_mixed_with_overrides() -> void:
+	var prof := NpcData.new()
+	var def := SpawnDefinition.new()
+	def.profile = prof
+	def.weapon_override = PISTOL
+	var t := _StampTarget.new()
+	def.apply_overrides(t)
+	assert_eq(t.profile, prof, "the profile is stamped even alongside overrides, so the archetype wins at _ready")
+	assert_push_warning("the profile wins",
+		"a definition mixing a profile with overrides must warn the designer that the overrides are ignored")
 	t.free(); def = null; prof = null
 
 # --- CharacterInventory.clear(): the backpack wipe used before re-seeding a reused NPC's loadout ------------------
@@ -160,16 +182,62 @@ func test_scavenge_reset_drops_stale_raid() -> void:
 	assert_almost_eq(sc._scan_t, 0.0, 0.0001, "the scan throttle is reset")
 	sc.free(); crate.free()
 
-func test_voice_reset_rewinds_bark_cooldowns() -> void:
+## A speaking NPC stand-in for NpcVoice (the duck-typed host surface tests/test_bark_gates.gd pins against the real
+## npc.gd): alive, non-hostile, idle, with a Talkable and the player in earshot, so on each trigger below the ONLY
+## filter left is its cooldown. Every emitted line is recorded in order.
+class _VoiceHost extends Node3D:
+	var WARN_ATTACK_LINES: Array[String] = ["Cut that out!"]
+	var GREET_LINES: Array[String] = ["Hey there."]
+	var SEARCH_LINES: Array[String] = ["Where are you?"]
+	var _dead := false
+	var hp := 10.0
+	var talkable: Node = null
+	var player: Node3D = null
+	var emitted: Array[String] = []
+
+	func is_hostile() -> bool: return false
+	func is_in_combat() -> bool: return false
+	func _find_talkable(): return talkable
+	func _real_player(): return player
+	func _pick_bark(fallback: Array[String], _override: Array[String]) -> String: return fallback[0]
+	func _emit_bark(line: String, _voice) -> void: emitted.append(line)
+
+class _VoiceTalkable extends Node:
+	var voice: VoiceData = null
+
+## The pooled body's three independent voice cooldowns (the shared bark, the hover greeting, the search mutter), each
+## driven through a real trigger: the previous life speaks, the same body inside the cooldown is muted (the control),
+## and after reset_for_reuse the reborn NPC speaks again at once — a quick same-wave respawn is not born mute.
+func test_voice_reset_lets_a_reused_npc_speak_at_once() -> void:
+	var h := _VoiceHost.new()
+	h.talkable = _VoiceTalkable.new()
+	h.add_child(h.talkable)
+	add_child_autofree(h)  # in-tree: the search mutter measures the player's distance off global_position
+	var listener := Node3D.new()
+	add_child_autofree(listener)
+	listener.position = Vector3(1.0, 0.0, 0.0)
+	h.player = listener
 	var v := NpcVoice.new()
-	v._last_bark_msec = 999999
-	v._last_greet_msec = 999999
-	v._last_search_msec = 999999
+	v.host = h
+	autofree(v)
+	v.warn_attack()
+	v.greet()
+	v.bark_searching()
+	assert_eq(h.emitted, ["Cut that out!", "Hey there.", "Where are you?"] as Array[String],
+		"sanity: the previous life speaks once on each channel, arming all three cooldowns")
+	v.warn_attack()
+	v.greet()
+	v.bark_searching()
+	assert_eq(h.emitted.size(), 3, "control: the same body still inside those cooldowns is muted on every channel")
 	v.reset_for_reuse()
-	assert_eq(v._last_bark_msec, -100000, "a quick respawn isn't muted — the bark cooldown rewinds to its sentinel")
-	assert_eq(v._last_greet_msec, -100000, "greet cooldown rewound")
-	assert_eq(v._last_search_msec, -100000, "search-mutter cooldown rewound")
-	v.free()
+	h.emitted.clear()
+	v.warn_attack()
+	assert_eq(h.emitted, ["Cut that out!"] as Array[String],
+		"after reuse the shared bark cooldown is clear: the reborn NPC's first call-out is not swallowed")
+	v.greet()
+	assert_eq(h.emitted.back(), "Hey there.", "after reuse the hover greeting is not held by the previous life's cooldown")
+	v.bark_searching()
+	assert_eq(h.emitted.back(), "Where are you?", "after reuse the search mutter is not held by the previous life's cooldown")
 
 func test_distraction_reset_clears_scan_state() -> void:
 	# NpcDistraction owns the noise/music scan throttles + the once-per-attend music-comment latch; a reused body
@@ -187,12 +255,40 @@ func test_distraction_reset_clears_scan_state() -> void:
 	assert_null(d._music_commented_radio, "the once-per-attend comment latch is dropped (a reused body comments again)")
 	d.free(); radio.free()
 
-func test_self_healer_reset_rewinds_heal_cooldown() -> void:
-	var h := SelfHealer.new()
-	h._last_heal_msec = 999999
-	h.reset_for_reuse()
-	assert_eq(h._last_heal_msec, -1_000_000_000, "a reused NPC can heal early in its new life (cooldown rewound)")
-	h.free()
+## A duck-typed hurt body for SelfHealer.react (hp / max_hp / inventory / heal), carrying a REAL backpack so the
+## medkit lookup and spend are production code too.
+class _HealHost:
+	var hp := 20.0
+	var max_hp := 100.0
+	var inventory: CharacterInventory = null
+	func heal(amount: float) -> void:
+		hp = minf(hp + amount, max_hp)
+
+## The previous life chugs a medkit just before it dies; the body is pooled and respawns hurt. Inside the old cooldown
+## the same healer refuses (the control); after reset_for_reuse the reborn NPC heals on its very first hit, whatever
+## cooldown the designer authored.
+func test_self_healer_reset_lets_a_reused_npc_heal_on_its_first_hit() -> void:
+	var host := _HealHost.new()
+	host.inventory = CharacterInventory.new()
+	var kit := Item.new()
+	kit.category = Item.Category.CONSUMABLE
+	kit.heal_amount = 30.0
+	kit.max_stack = 5
+	host.inventory.add(kit, 3)
+	var healer := SelfHealer.new()
+	healer.cooldown_ms = 600_000  # a long authored cooldown: the rewind must clear ANY configured window
+	healer.react(host)
+	assert_eq(host.inventory.count_of(kit), 2, "sanity: the previous life spends one medkit, arming the cooldown")
+	host.hp = 20.0
+	healer.react(host)
+	assert_eq(host.inventory.count_of(kit), 2, "control: the same body inside that cooldown does not heal")
+	healer.reset_for_reuse()
+	healer.react(host)
+	assert_eq(host.inventory.count_of(kit), 1, "a reused NPC reaches for a medkit on its first hit in the new life")
+	assert_almost_eq(host.hp, 50.0, 0.0001, "...and the heal actually lands")
+	healer.free()
+	host.inventory.free()
+	kit = null
 
 func test_talk_approach_reset_abandons_walkup() -> void:
 	var t := TalkApproach.new()
@@ -220,6 +316,43 @@ func test_forget_dead_peer_drops_grudge_and_attacker() -> void:
 # --- NpcPoolReuseReport verdict math (pure) --------------------------------------------------------------------
 
 func test_reuse_report_ok_requires_all_invariants() -> void:
+	# CONTROL first: a run that met every invariant passes. Then each invariant is broken ON ITS OWN from that same
+	# passing report, so a verdict that silently dropped any one condition would stay green for that case.
+	assert_true(_passing_reuse_report().pool_stable(), "control: start == final == warmed -> the pool never grew")
+	assert_true(_passing_reuse_report().ok(), "control: all invariants met -> ok")
+
+	var no_nav := _passing_reuse_report()
+	no_nav.nav_ready = false
+	assert_false(no_nav.ok(), "the navmesh never synced -> INCONCLUSIVE, which must never read as a pass")
+
+	var nothing_warmed := _passing_reuse_report()
+	nothing_warmed.warmed = 0
+	nothing_warmed.pool_count_start = 0
+	nothing_warmed.pool_count_final = 0
+	assert_true(nothing_warmed.pool_stable(), "precondition: an empty pool is trivially 'stable' (0 -> 0)")
+	assert_false(nothing_warmed.ok(), "a pool warmed with ZERO bodies proved nothing about reuse -> not ok")
+
+	var grew := _passing_reuse_report()
+	grew.pool_count_final = 5
+	assert_false(grew.pool_stable(), "a pool that ended with more bodies than it was warmed with is not stable")
+	assert_false(grew.ok(), "a leak (the pool grew across cycles) fails the verdict")
+
+	var short_warm := _passing_reuse_report()
+	short_warm.pool_count_start = 2
+	assert_false(short_warm.pool_stable(), "a pool that started short of its warm count is not stable")
+	assert_false(short_warm.ok(), "...and fails the verdict")
+
+	var fresh_instances := _passing_reuse_report()
+	fresh_instances.reused_all_same = false
+	assert_false(fresh_instances.ok(), "a re-spawn that handed back a FRESH instance instead of a pooled one fails the verdict")
+
+	var dirty_reset := _passing_reuse_report()
+	dirty_reset.reset_clean = false
+	assert_false(dirty_reset.ok(), "a reused body that came back with stale state fails the verdict")
+
+
+## A report for a run that met every invariant — the baseline each case in the verdict test breaks one thing from.
+func _passing_reuse_report() -> NpcPoolReuseReport:
 	var r := NpcPoolReuseReport.new()
 	r.nav_ready = true
 	r.warmed = 3
@@ -227,9 +360,4 @@ func test_reuse_report_ok_requires_all_invariants() -> void:
 	r.pool_count_final = 3
 	r.reused_all_same = true
 	r.reset_clean = true
-	assert_true(r.pool_stable(), "start==final==warmed => the pool never grew")
-	assert_true(r.ok(), "all invariants met => ok")
-	r.pool_count_final = 5  # a leak: the pool grew
-	assert_false(r.pool_stable(), "a grown pool is not stable")
-	assert_false(r.ok(), "a leak fails the verdict")
-	r = null
+	return r

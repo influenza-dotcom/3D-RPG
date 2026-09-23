@@ -7,10 +7,12 @@ extends RefCounted
 ## @system Save Model — the PER-LEVEL WORLD LEDGER (authored-NPC alive/pos/hp + deaths + container contents, for every visited level)
 ## NOTE: each @seam/@risk below must stay on ONE line — ArchScan only reads lines that start with a @tag, so a
 ## wrapped continuation line is DROPPED and the statement renders truncated in docs/SYSTEM_MAP.md.
-## @seam GameState.world_snapshot is ONE long-lived instance holding a bucket per visited level: GameRoot.load_level captures the OUTGOING level before freeing it and applies the INCOMING level's bucket after it spawns; every save (autosave, Continue, quicksave, slots) captures the current level + folds the death ledger and writes the whole ledger as [world_snapshot].
+## @seam GameState.world_snapshot is ONE long-lived instance holding a bucket per visited level: GameRoot.load_level captures the OUTGOING level before parking or freeing it and applies the INCOMING level's bucket after it spawns; every save (autosave, Continue, quicksave, slots) captures the current level + folds the death ledger and writes the whole ledger as [world_snapshot].
 ## @risk A capture that runs BEFORE a freshly loaded level's bucket is applied overwrites the saved bucket with the level's authored seed (a looted safe restocks) — GameState._level_apply_pending is the guard; never capture a level whose apply is still queued.
 ## @risk The ledger and GameState.world_objects are two separate stores keyed differently (snapshot_key vs WorldSaveId.key_for); never merge them — doors/pickups ride world_objects, actors/containers ride this.
 ## @risk NPC identity is POSITION-INDEPENDENT (NPC.snapshot_key), NOT WorldSaveId.key_for — an NPC moves, so a position-keyed match would fail against the reloaded node sitting at its authored .tscn spot.
+## @seam STREAMED WORLDS: a ChunkStreamer chunk root carries SCOPE_META, and every authored NPC / container under it belongs to that chunk's OWN bucket (bucket_for -> "<level>#Chunk_<x>_<z>"). capture/apply take the chunk as `scope`; a level-wide pass (scope null) skips chunk content, so a capture never overwrites a chunk bucket with the few chunks that happen to be loaded.
+## @risk A level-wide capture that stopped skipping chunk content would file every loaded chunk's NPCs and containers into the LEVEL bucket too — the chunk bucket goes stale, and the next time that chunk streams in it re-applies the older state (a looted crate restocks).
 ## @test res://tests/test_world_snapshot.gd
 ## @test res://tests/test_level_boot_lifecycle.gd
 ##
@@ -50,10 +52,39 @@ extends RefCounted
 const SNAPSHOT_VERSION := 2
 const SNAPSHOT_MIN_COMPAT := 1
 
+## Metadata on a streamed chunk's root (ChunkStreamer sets it to the chunk's node name): everything beneath that root
+## belongs to the chunk's own bucket, scoped_key(level, name). Chunks come and go independently of their level, so each
+## needs a bucket a capture can REPLACE while the rest of the world is unloaded.
+const SCOPE_META := &"world_ledger_scope"
+
 ## level_path -> { "authored_npcs": {...}, "dead_authored": [...], "containers": {...} } (the full SHAPE block
-## above). Private; round-tripped via to_dict/from_dict. Every write path (capture, fold_dead_ledger, from_dict)
+## above). A streamed chunk's bucket sits beside its level's under scoped_key(level_path, chunk name). Private; round-tripped via to_dict/from_dict. Every write path (capture, fold_dead_ledger, from_dict)
 ## stores all three buckets, so a reader can assume the keys exist — the values may be empty.
 var _data: Dictionary = {}
+
+## The bucket key for a streamed chunk of `level_path`: "<level_path>#<scope>" (scope = the chunk root's SCOPE_META).
+static func scoped_key(level_path: String, scope: String) -> String:
+	return "%s#%s" % [level_path, scope]
+
+
+## The bucket `node` belongs to: the nearest ancestor (or itself) carrying SCOPE_META makes it that chunk's, otherwise
+## it is `level_path`'s own. Walks parents, so it works on anything attached under the chunk.
+static func bucket_for(node: Node, level_path: String) -> String:
+	var n: Node = node
+	while n != null:
+		if n.has_meta(SCOPE_META):
+			return scoped_key(level_path, str(n.get_meta(SCOPE_META)))
+		n = n.get_parent()
+	return level_path
+
+
+## Does `n` belong to the pass for bucket `key`? With a `scope` node: anything at or under it. Without one (a whole
+## level): anything NOT under a streamed chunk — those have buckets of their own.
+static func _in_pass(n: Node, key: String, scope: Node) -> bool:
+	if scope != null:
+		return n == scope or scope.is_ancestor_of(n)
+	return bucket_for(n, key) == key
+
 
 ## Walk the live tree and REPLACE `level_path`'s bucket with what is there now. The caller guarantees the tree holds
 ## that level and only that level (GameRoot captures the outgoing level BEFORE detaching it; a save captures the current
@@ -66,7 +97,10 @@ var _data: Dictionary = {}
 ## reload (RELOAD_CHECKPOINT_FRESH) banks the level this way so enemies return to their authored spots at full hp while
 ## looted crates stay looted — the in-memory profile it keeps still holds that loot, so re-seeding the crate would
 ## duplicate it.
-func capture(tree: SceneTree, level_path: String, dead_keys: Variant = {}, include_live_npcs: bool = true) -> void:
+##
+## `scope` (a streamed chunk root) narrows the walk to that chunk and `level_path` is then the chunk's bucket key
+## (scoped_key); without it the walk skips everything under a chunk (see _in_pass).
+func capture(tree: SceneTree, level_path: String, dead_keys: Variant = {}, include_live_npcs: bool = true, scope: Node = null) -> void:
 	var live := {}
 	var dead := {}
 	if dead_keys is Dictionary:
@@ -77,7 +111,7 @@ func capture(tree: SceneTree, level_path: String, dead_keys: Variant = {}, inclu
 			dead[str(k)] = true
 	if tree != null:
 		for n in tree.get_nodes_in_group(Groups.NPC):
-			if not is_instance_valid(n) or not n.has_method(&"snapshot_key"):
+			if not is_instance_valid(n) or not n.has_method(&"snapshot_key") or not _in_pass(n, level_path, scope):
 				continue
 			# A DYNAMIC encounter spawn (pooled OR pool-less — the spawner default is pool-less) is excluded from the
 			# exact-save tier, matching NPC._record_snapshot_death's own dynamic-spawn skip. Without this, capture would
@@ -114,7 +148,8 @@ func capture(tree: SceneTree, level_path: String, dead_keys: Variant = {}, inclu
 	var conts := {}
 	if tree != null:
 		for c in tree.get_nodes_in_group(Groups.CONTAINERS):
-			if not is_instance_valid(c) or not c.has_method(&"snapshot_key") or not c.has_method(&"snapshot_contents"):
+			if not is_instance_valid(c) or not c.has_method(&"snapshot_key") or not c.has_method(&"snapshot_contents") \
+					or not _in_pass(c, level_path, scope):
 				continue
 			var ckey: String = str(c.snapshot_key())
 			# A RUNTIME-spawned container (no authored save_id, so its key falls back to a generated "@Class@N"
@@ -133,12 +168,19 @@ func capture(tree: SceneTree, level_path: String, dead_keys: Variant = {}, inclu
 ## capture — only the keys of authored NPCs the player killed while there. Without this, a quicksave stores only the level
 ## you saved IN, so dead_map() on load forgets cross-level kills and they resurrect when you door back. Merges into any
 ## existing bucket (defensive) so the current level's live data is never clobbered. `dead_authored_all` is GameState's
-## live { level_path -> { key: true } } ledger; junk-typed buckets are skipped.
-func fold_dead_ledger(dead_authored_all: Dictionary, current_level_path: String) -> void:
+## live { level_path -> { key: true } } ledger; junk-typed buckets are skipped. `current_level_path` may also be a LIST of
+## bucket keys (the current level plus every streamed chunk capture() just wrote): all of them are skipped.
+func fold_dead_ledger(dead_authored_all: Dictionary, current_level_path: Variant) -> void:
+	var skip := {}
+	if current_level_path is String:
+		skip[current_level_path] = true
+	elif current_level_path is Array or current_level_path is PackedStringArray:
+		for k in current_level_path:
+			skip[str(k)] = true
 	for lvl in dead_authored_all:
 		var lvl_s := str(lvl)
-		if lvl_s == current_level_path:
-			continue  # capture() already wrote this level (live + its dead)
+		if skip.has(lvl_s):
+			continue  # capture() already wrote this bucket (live + its dead)
 		var b: Variant = dead_authored_all[lvl]
 		if not (b is Dictionary):
 			continue
@@ -171,7 +213,7 @@ func has_level(level_path: String) -> bool:
 ## which REPLACES the fresh _ready seed). Unmatched reloaded NPCs/containers (e.g. a dynamic spawn, or a crate
 ## added to the level after the save) are left alone. queue_free is deferred, so freeing while iterating the
 ## group snapshot is safe. SCOPE: only `level_path`'s bucket is applied (the only level in the tree).
-func apply(tree: SceneTree, level_path: String) -> void:
+func apply(tree: SceneTree, level_path: String, scope: Node = null) -> void:
 	if tree == null:
 		return
 	var bucket: Variant = _data.get(level_path)
@@ -182,7 +224,7 @@ func apply(tree: SceneTree, level_path: String) -> void:
 	for k in bucket.get("dead_authored", []):
 		dead[str(k)] = true
 	for n in tree.get_nodes_in_group(Groups.NPC):
-		if not is_instance_valid(n) or not n.has_method(&"snapshot_key"):
+		if not is_instance_valid(n) or not n.has_method(&"snapshot_key") or not _in_pass(n, level_path, scope):
 			continue
 		var key: String = str(n.snapshot_key())
 		var legacy := _legacy_key(n)
@@ -198,7 +240,8 @@ func apply(tree: SceneTree, level_path: String) -> void:
 	var conts: Dictionary = bucket.get("containers", {})
 	if not conts.is_empty():
 		for c in tree.get_nodes_in_group(Groups.CONTAINERS):
-			if not is_instance_valid(c) or not c.has_method(&"snapshot_key") or not c.has_method(&"restore_snapshot_contents"):
+			if not is_instance_valid(c) or not c.has_method(&"snapshot_key") or not c.has_method(&"restore_snapshot_contents") \
+					or not _in_pass(c, level_path, scope):
 				continue
 			var ckey: String = str(c.snapshot_key())
 			var clegacy := _legacy_key(c)

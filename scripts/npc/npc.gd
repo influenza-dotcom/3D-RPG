@@ -1504,7 +1504,7 @@ func _record_snapshot_death() -> void:
 		return  # a spawner-produced encounter NPC (pooled OR pool-less) is a DYNAMIC actor (excluded from the world
 		# ledger); recording its ephemeral @-node_path as permanently dead would pollute the ledger and, on a re-spawn at
 		# the same @path, suppress a legit enemy. Only authored (.tscn-placed) NPCs reach record_npc_death.
-	GameState.record_npc_death(GameState.current_level_path, snapshot_key())
+	GameState.record_npc_death(GameState.ledger_bucket_for(self), snapshot_key())  # a streamed chunk's NPC -> that chunk's bucket
 
 func _on_died() -> void:
 	if _noise_pulser != null:
@@ -1620,7 +1620,14 @@ func _freeze_always_children(n: Node) -> void:
 
 ## Fire the gore burst + removal once the freeze beat elapses (deferred from _begin_death). If we were freed during
 ## the freeze — a level unload — the timer's connection to us is already gone, so this never runs on a dead instance.
+## If our level was PARKED instead (GameRoot's level cache detaches a level the player leaves, and a SceneTree timer
+## keeps running while it is away), the burst waits for the level to come back: gore spawns into the tree and the
+## death is recorded under the level it belongs to, neither of which works from outside the tree.
 func _complete_death() -> void:
+	if not is_inside_tree():
+		if not tree_entered.is_connected(_complete_death):
+			tree_entered.connect(_complete_death, CONNECT_ONE_SHOT | CONNECT_DEFERRED)
+		return
 	gore()
 	die()
 

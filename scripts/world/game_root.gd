@@ -1,6 +1,8 @@
 @tool
 ## @system Run And Level Flow
 ## @seam GameRoot is game.tscn's level-load seam: resolve_boot_level picks the boot level (saved-by-path beats export); load_level swaps the single "Level" child and seeds PlayerSpawn + respawn.
+## @seam THE LEVEL CACHE (Fallout's cell buffer): a level the player leaves is PARKED — detached, not freed — in a LevelCache of up to `cached_levels`, and a load_level back into it re-attaches that very instance (NPCs, loot, corpses, dropped items exactly as left) with no world-ledger apply and no dead-NPC sweep, because the instance IS the state. The ledger still captures it on the way out, so an eviction (or a quit) loses nothing a save would keep.
+## @risk A parked level is OUT of the tree but alive: a SceneTree timer or an autoload signal can still call into it. Its scripts must treat "not inside the tree" as "away", not "gone" (NPC._complete_death waits for tree_entered, EncounterSpawner ignores a subtree detach, QuestMarkerSync rebuilds on return) — a new level-content script that frees, untracks or records on tree_exited alone misfires the first time a door parks its level.
 ## @seam load_level is where the per-level world ledger moves: it captures the OUTGOING level (GameState.capture_level_state) while it is still in the tree and under its own current_level_path, then applies the INCOMING level's bucket deferred (GameState.apply_level_state) once every node's _ready has run.
 ## @risk Capturing after set_current_level, or after the old Level left the tree, files the outgoing level's NPCs/containers under the NEW level's path (their snapshot_key fallback reads current_level_path) or captures nothing — a looted safe in the level you left silently restocks.
 ## @risk resolve_boot_level diverging from _ready's respawn_level_matches gate boots the WRONG level yet keeps the saved respawn — silent, no crash (both must read saved_level_is_bootable).
@@ -27,6 +29,18 @@ extends Node3D
 ## ambience). Leave unset for a no-op so the existing hardcoded Level child is used unchanged.
 @export var level: LevelData = null
 
+## How many levels the player has LEFT stay in memory (detached, not running) so walking back through their door is
+## instant and finds them exactly as left — the NPC mid-patrol, the body on the floor, the gun you dropped. The oldest
+## is freed when one more would not fit (its world-ledger state was already captured, so a save loses nothing).
+## 0 = free every level on leave (rebuilt from its scene + the ledger on return). A LevelData can opt out with
+## keep_in_memory. Each parked level costs its whole scene's memory.
+@export_range(0, 8) var cached_levels: int = 2:
+	set(value):
+		cached_levels = maxi(value, 0)
+		if _level_cache != null:
+			for n in _level_cache.set_capacity(cached_levels):
+				n.queue_free()
+
 ## DEV ONLY: the editor's play-from-spawn toolbar writes a PlayerSpawn entry_id here; _ready consumes it ONCE so the
 ## first level loads with the player placed at that spawn instead of the default first one. Absent in normal play.
 const DEV_START_FILE := "user://_dev_start_entry.txt"
@@ -39,12 +53,16 @@ const EFFECT_PREWARMER_SCRIPT_PATH := "res://scripts/components/effect_prewarmer
 ## Name of the prewarmer child under the host. A hand-placed child of this name (beside the Player in game.tscn) is
 ## REUSED rather than duplicated, which is how its @exports (hold frames, spawn distance) stay Inspector-tunable.
 const EFFECT_PREWARMER_NODE := &"EffectPrewarmer"
+## The parked-level LRU (preloaded helper, no class_name — the WorldSnapshot idiom). Built lazily by _cache().
+const LevelCache = preload("res://scripts/world/level_cache.gd")
 
 ## The "Level" child THIS GameRoot instantiated (null until the first load_level). load_level captures the outgoing level
 ## into the world ledger only when the child it is about to free is this one — a hand-placed "Level" (the
 ## adopt-incrementally path) was never loaded under any LevelData path, so capturing it would file its nodes under a
 ## level they don't belong to.
 var _level_node: Node = null
+## Levels the player left, parked out of the tree (see cached_levels). Null until the first park.
+var _level_cache: LevelCache = null
 
 
 func _ready() -> void:
@@ -139,6 +157,8 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	DialogueManager.abort()
 	var host := _host()
 	var existing := host.get_node_or_null(^"Level")
+	var leaving_path := GameState.current_level_path
+	var leaving_data := level
 	# THE WORLD LEDGER, OUTGOING HALF: record the level the player is leaving (its authored NPCs, their deaths, every
 	# container's exact contents) BEFORE anything else happens to it. Order is load-bearing: the level must still be in
 	# the tree (group walks) and current_level_path must still be ITS path (the bucket key, and the snapshot_key fallback
@@ -149,11 +169,23 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	level = data
 	GameState.set_current_level(data.resource_path)  # record the active level so a save reloads THIS one, not the export
 	if existing != null:
-		# B-F62: defer the old level's free (queue_free, not a synchronous free) so anything still referencing it THIS
-		# frame isn't invalidated mid-swap. Detach + rename FIRST so the queued node can't collide the new "Level" name.
-		existing.name = &"_LevelFreeing"
-		host.remove_child(existing)
-		existing.queue_free()
+		if _should_park(existing, leaving_data, leaving_path, data):
+			# THE LEVEL CACHE: detach the level we are leaving and keep it. Renamed first so it can't collide with the new
+			# "Level"; given its name back when it returns. Whatever falls off the far end of the cache is freed.
+			existing.name = &"_LevelParked"
+			host.remove_child(existing)
+			for evicted in _cache().put(leaving_path, existing):
+				evicted.queue_free()
+		else:
+			# B-F62: defer the old level's free (queue_free, not a synchronous free) so anything still referencing it THIS
+			# frame isn't invalidated mid-swap. Detach + rename FIRST so the queued node can't collide the new "Level" name.
+			existing.name = &"_LevelFreeing"
+			host.remove_child(existing)
+			existing.queue_free()
+	var parked := _cache().take(data.resource_path) if data.resource_path != "" else null
+	if parked != null:
+		_restore_parked_level(parked, data, entry_id, place_at_spawn)
+		return
 	var inst := data.scene.instantiate()
 	if inst == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 		push_warning("GameRoot.load_level: scene of '%s' instantiated null (editor reimport transient?) — skipping load" % data.resource_path)
@@ -194,6 +226,50 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	# at the level's default spawn here would override that. A fresh game / a runtime door-swap DOES place + re-seed.
 	if place_at_spawn:
 		_place_player_at_entry.call_deferred(entry_id)  # after the new level's PlayerSpawns have entered the tree
+
+
+## THE LEVEL CACHE, RETURN HALF: re-attach a parked level as "Level". Deliberately NOT the fresh-instance path's post-load
+## passes: no world-ledger apply and no dead-NPC sweep (the parked instance already IS that state — re-applying the bucket
+## captured on the way out would only rewind anything the capture doesn't see), no prewarm (once per process anyway).
+## The PS1 cover is idempotent and kept for a level parked before its first cover.
+func _restore_parked_level(parked: Node, data: LevelData, entry_id: StringName, place_at_spawn: bool) -> void:
+	# No apply is coming for this level, so no capture guard may stay armed from an earlier load whose deferred apply
+	# never ran (two loads in one frame): it would stop the next capture of this very level.
+	GameState.begin_level_load("")
+	parked.name = &"Level"
+	_host().add_child(parked)
+	_level_node = parked
+	_apply_audio(data)
+	_apply_ps1_warp(parked)
+	if place_at_spawn:
+		_place_player_at_entry.call_deferred(entry_id)
+
+
+## Should the level being left be parked rather than freed? Only one THIS GameRoot loaded (a hand-placed "Level" has no
+## LevelData path to be found by), only on a real CHANGE of level (a same-level reload — the console's resurrect —
+## wants a fresh copy), only when it has a stable path, and only when neither the cache size nor the level opts out.
+func _should_park(existing: Node, leaving: LevelData, leaving_path: String, incoming: LevelData) -> bool:
+	return cached_levels > 0 and existing == _level_node and leaving_path != "" \
+			and leaving_path != incoming.resource_path and leaving != null and leaving.keep_in_memory
+
+
+func _cache() -> LevelCache:
+	if _level_cache == null:
+		_level_cache = LevelCache.new(cached_levels)
+	return _level_cache
+
+
+## The paths of the levels currently parked in memory, least-recently-left first (the debug console's `levels`).
+func cached_level_paths() -> PackedStringArray:
+	return _level_cache.keys() if _level_cache != null else PackedStringArray()
+
+
+## Parked levels are out of the tree, so nothing frees them with this node — do it here, or every reload_current_scene
+## (death, quickload, Continue, back to the menu) would leak each one whole.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and _level_cache != null:
+		for n in _level_cache.drain():
+			n.queue_free()
 
 
 ## No-arg load of the ASSIGNED `level` — so a TriggerVolume (action = "load_assigned_level") or a cutscene can

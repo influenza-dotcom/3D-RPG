@@ -13,9 +13,11 @@ extends Node3D
 ## exclude it from the ground probe.
 var _host: Character
 
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
+
 ## Raycast straight down from the host to find the ground, then drop a one-shot dust puff there,
-## scaled + ratio-clamped by `intensity` (jump/land/slide pass their own). Adds the puff under the
-## scene root (world-space, independent of the moving actor) and self-frees it when it finishes.
+## scaled + ratio-clamped by `intensity` (jump/land/slide pass their own). Adds the puff to the world
+## (WorldSpawn — world-space, independent of the moving actor) and self-frees it when it finishes.
 ## Bails when the host isn't in the tree (no world to raycast) — mirrors the monolith's guard.
 func spawn(intensity: float = 1.0) -> void:
 	if not _host.is_inside_tree():
@@ -31,7 +33,7 @@ func spawn(intensity: float = 1.0) -> void:
 	var dust: GPUParticles3D = Character.CHARACTER_DUST.instantiate()
 	if dust == null:
 		return # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
-	_host.get_tree().root.add_child(dust)
+	WorldSpawn.add(_host, dust, pos)
 	dust.global_position = pos + Vector3.UP * GameSettings.effects.dust_ground_offset
 	var safe_intensity = max(intensity, 0.05)
 	dust.scale = Vector3.ONE * safe_intensity

@@ -55,6 +55,8 @@ var _t: float = 0.0
 var _recollect_t: float = 0.0
 var _lights: Array[Node] = []   ## cached Light3D list (auto_collect); refreshed every recollect_interval
 
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
+
 ## Zero-config drop-in: dropped as a CHILD of the player with no `host` set, it auto-wires host = parent — so the
 ## live-sampling writer needs no Player.tscn edit / inspector step (use it OR a painted ShadowVolume, not both).
 func _ready() -> void:
@@ -82,6 +84,9 @@ func _physics_process(delta: float) -> void:
 ## Every Light3D in the running scene (auto_collect). Walks the CURRENT SCENE (so autoloads / UI overlays aren't
 ## scanned), falling back to the whole tree when there's no current scene or this component is outside current_scene
 ## (e.g. a unit test). owned=false so instanced-level lights whose owner is the level root are still included.
+## Lights under a RUNTIME world spawn (WorldSpawn.is_spawned: a corpse's blood-splat glow, a muzzle flash, an explosion)
+## are left out: those spawns used to live on the tree root, outside this scan, and moving them into the level must not
+## start lighting the player up for enemy perception.
 func _collect_lights() -> Array[Node]:
 	var tree := get_tree()
 	if tree == null:
@@ -91,7 +96,11 @@ func _collect_lights() -> Array[Node]:
 		root = tree.root
 	if root == null:
 		return []
-	return root.find_children("*", "Light3D", true, false)
+	var out: Array[Node] = []
+	for light in root.find_children("*", "Light3D", true, false):
+		if not WorldSpawn.is_spawned(light):
+			out.append(light)
+	return out
 
 ## Sum ambient + every light's contribution at the host, clamped to 0..1. Sources are the auto-collected list, or
 ## the &"lights" group when auto_collect is off.

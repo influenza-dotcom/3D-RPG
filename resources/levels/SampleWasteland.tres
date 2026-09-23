@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="LevelData" format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/worlds/SampleWasteland/SampleWasteland.tscn" id="1_rxh75"]
+[ext_resource type="Script" path="res://scripts/world/level_data.gd" id="2_q46id"]
+
+[resource]
+script = ExtResource("2_q46id")
+scene = ExtResource("1_rxh75")
+display_name = "[PH] Sample Wasteland"

@@ -11,26 +11,50 @@ extends GutTest
 const PISTOL := preload("res://resources/weapons/pistol.tres")
 const PISTOL_ITEM := preload("res://resources/items/pistol_item.tres")
 
+## The stand-in current_scene the SpawnOnDestroy test parks drops under, and the runner's own value to restore.
+var _stage: Node3D = null
+var _prev_current_scene: Node = null
+
+
+func after_each() -> void:
+	if _stage != null:
+		get_tree().current_scene = _prev_current_scene if is_instance_valid(_prev_current_scene) else null
+		if is_instance_valid(_stage):
+			_stage.free()
+		_stage = null
+		_prev_current_scene = null
+
 
 # ---------------------------------------------------------------------------
 # CanPickUp — talk-handler surface + grant
 # ---------------------------------------------------------------------------
 
-func test_can_pick_up_surface() -> void:
+## Wording-agnostic on purpose: the prompt TEMPLATE belongs to PlayerText (and is being re-worded), so what is
+## pinned here is what CanPickUp decides — the readout names the item, an authored label wins, and a pickup is
+## interactable exactly while it has SOMETHING to give (an item, a count-based pile, or a loot table).
+func test_can_pick_up_hover_names_the_item_and_interactable_while_it_has_a_payload() -> void:
 	var cp := CanPickUp.new()
 	cp.item = PISTOL_ITEM
 	assert_true(cp.can_be_talked_to(),
 		"a pickup with an item is interactable")
-	assert_eq(cp.look_name(), "Take Pistol",
-		"the default hover readout is 'Take <item label>'")
+	var readout := cp.look_name()
+	assert_true(readout.contains(PISTOL_ITEM.label()),
+		"the default hover readout must name the item on the ground ('%s' does not mention '%s')" % [readout, PISTOL_ITEM.label()])
 	assert_true(cp.host_npc() == null,
 		"a pickup has no NPC behind it (so the FNV hover won't greet/tint it)")
 	cp.pickup_label = "Grab the rock"
 	assert_eq(cp.look_name(), "Grab the rock",
-		"an explicit pickup_label overrides the default readout")
+		"an authored pickup_label wins over the item-derived readout, verbatim")
 	cp.item = null
 	assert_false(cp.can_be_talked_to(),
-		"a pickup with no item is not interactable")
+		"a pickup with nothing to give is not interactable")
+	# Control: the same item-less pickup carrying only a count-based pile still has something to give.
+	var pile := ItemStack.new()
+	pile.item = PISTOL_ITEM
+	var stacks: Array[ItemStack] = [pile]
+	cp.item_stacks = stacks
+	assert_true(cp.can_be_talked_to(),
+		"an item-less pickup with item_stacks rows is still a pickup — the pile IS its payload")
 	cp.free()
 
 
@@ -147,18 +171,25 @@ func test_can_pick_up_start_talk_is_single_use_before_free_processes() -> void:
 	# cp queue_free'd itself in start_talk; don't free it again.
 
 
-func test_can_pick_up_null_item_grants_nothing() -> void:
+func test_can_pick_up_with_nothing_to_give_is_not_consumed_by_interact() -> void:
+	# An unfinished pickup (no item, no pile, no loot table) must be inert: an interact on it must not COMMIT a
+	# pickup of nothing, which would free the world object and record it "gone" in the save ledger for good.
+	# Control: the same pickup, once it carries an item, gets past that guard on the same press and is consumed.
 	var cp := CanPickUp.new()
-	# No item configured -> start_talk is a guarded no-op (doesn't crash, grants nothing).
 	var player: NPC = load("res://scripts/npc/npc.gd").new()
 	var bag := CharacterInventory.new()
 	player.inventory = bag
 	cp.start_talk(player)
-	assert_true(bag.is_empty(),
-		"a pickup with no item grants nothing")
+	assert_false(cp.is_queued_for_deletion(),
+		"a pickup with nothing to give must stay in the world when interacted with — it is not consumed")
+	assert_true(bag.is_empty(), "…and it grants nothing")
+	cp.item = PISTOL_ITEM
+	cp.start_talk(player)
+	assert_eq(bag.contents().size(), 1, "control: the same pickup with an item grants it on the same press")
+	assert_true(cp.is_queued_for_deletion(), "control: …and is consumed by it")
 	bag.free()
 	player.free()
-	cp.free()
+	# cp queue_free'd itself on the committed pickup; don't free it again.
 
 
 # ---------------------------------------------------------------------------
@@ -212,34 +243,81 @@ func test_spawn_on_destroy_connects_to_candestroy_host() -> void:
 		"SpawnOnDestroy must connect to its CanDestroy host's `destroyed` signal so drops spawn on break")
 
 
-func test_spawn_on_destroy_is_safe_without_scene() -> void:
-	var sod := SpawnOnDestroy.new()  # no add_child, no spawn_scene
-	sod._on_destroyed()  # must be a guarded no-op with nothing configured
-	assert_eq(sod.count, 1,
-		"count defaults to 1")
-	sod.free()
+## In-tree, so the guard is the ONLY thing between the call and a real spawn: a SpawnOnDestroy with nothing
+## configured drops nothing when its host breaks, and the SAME setup with a scene assigned gets past that guard and
+## drops `count` copies. The GUT runner has no current_scene (a drop's fallback parent when no level is loaded), so
+## a throwaway stage stands in for one; every node the handler adds is caught off SceneTree.node_added (wherever
+## WorldSpawn parents it) and freed again, and after_each puts current_scene back.
+func test_spawn_on_destroy_drops_nothing_unconfigured_and_count_copies_of_a_scene() -> void:
+	_prev_current_scene = get_tree().current_scene
+	_stage = Node3D.new()
+	get_tree().root.add_child(_stage)
+	get_tree().current_scene = _stage
+	var host := Node3D.new()
+	var sod := SpawnOnDestroy.new()
+	host.add_child(sod)
+	add_child_autofree(host)
+	var spawned: Array[Node] = []
+	var catch_spawn := func(n: Node) -> void: spawned.append(n)
+	get_tree().node_added.connect(catch_spawn)
+	sod._on_destroyed()
+	var unconfigured := spawned.size()
+	var drop := Node3D.new()
+	drop.name = "TestDrop"
+	var packed := PackedScene.new()
+	packed.pack(drop)
+	drop.free()
+	sod.spawn_scene = packed
+	sod.count = 2
+	sod._on_destroyed()
+	get_tree().node_added.disconnect(catch_spawn)
+	var configured := spawned.size() - unconfigured
+	for n in spawned:
+		if is_instance_valid(n):
+			n.free()
+	assert_eq(unconfigured, 0,
+		"a SpawnOnDestroy with no spawn_scene and no loot_table must drop nothing when its host breaks")
+	assert_eq(configured, 2,
+		"control: the same breakable with a spawn_scene set drops exactly `count` (2) copies into the world")
+	sod.spawn_scene = null
+	packed = null
 
 
 # ---------------------------------------------------------------------------
 # Container — persistent lootable container (talk-handler surface + seeding)
 # ---------------------------------------------------------------------------
 
-func test_container_surface() -> void:
+## Wording-agnostic (the templates are PlayerText's): what ItemContainer decides is that the readout names the
+## container, and that a Lock child holding it shut switches the prompt to say what pressing will attempt.
+func test_container_hover_names_it_and_says_unlock_only_while_a_lock_holds_it() -> void:
 	var c := ItemContainer.new()
 	assert_true(c.can_be_talked_to(),
 		"a container is always interactable (open it to take OR deposit)")
-	assert_eq(c.look_name(), "[PH] Container",
-		"an unnamed container reads 'Container' on the hover readout")
+	var unnamed := c.look_name()
+	assert_false(unnamed.strip_edges().is_empty(),
+		"an unnamed container still reads a hover prompt — never a blank [F] label")
 	c.container_name = "Footlocker"
-	assert_eq(c.look_name(), "[PH] Loot Footlocker",
-		"a named container reads 'Loot <name>'")
+	var loot_prompt := c.look_name()
+	assert_true(loot_prompt.contains("Footlocker"),
+		"a named container's hover readout names it ('%s')" % loot_prompt)
+	var lock := Lock.new()  # `locked` defaults true
+	c.add_child(lock)
+	var locked_prompt := c.look_name()
+	assert_true(locked_prompt.contains("Footlocker"),
+		"a locked container still names itself ('%s')" % locked_prompt)
+	assert_ne(locked_prompt, loot_prompt,
+		"while a Lock holds it shut the prompt must say what pressing will attempt (unlock), not offer to loot it")
+	lock.locked = false
+	assert_eq(c.look_name(), loot_prompt,
+		"control: the same container with its lock open reads the plain loot prompt again")
 	assert_true(c.host_npc() == null,
 		"a container has no NPC behind it (so the FNV hover won't greet/tint it)")
+	# PickupRay duck-types these two names on whatever it hits, so a rename fails silently at interact time.
 	assert_true(c.has_method("start_talk"),
 		"Container exposes start_talk so the interaction ray opens it")
 	assert_true(c.has_method("set_look_highlight"),
 		"Container exposes set_look_highlight for the look-at outline")
-	c.free()
+	c.free()  # frees the Lock child too
 
 
 func test_container_seeds_unique_weapon_in_tree() -> void:

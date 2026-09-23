@@ -23,3 +23,7 @@ extends Resource
 ## hook that drops its deck cache) and draws the image UNDER its procedural floorplan. Null — the shipped
 ## case — means the procedural plan is the entire map.
 @export var map_data: MapData = null
+## Keep this level in memory after the player leaves it (GameRoot's level cache, up to GameRoot.cached_levels), so
+## walking back in is instant and finds it EXACTLY as left. Off = it is freed on leave and rebuilt from its scene plus the
+## world ledger on the next visit — for a level that should reset, or one too large to hold alongside another.
+@export var keep_in_memory: bool = true

@@ -24,7 +24,10 @@ extends Node
 @export var blood_particle: PackedScene = preload("uid://c7v6vgs74fhn4")  # blood.tscn
 
 
-## Instantiate `scene` at `pos` under `parent` (or the scene root), auto-emitting + auto-freeing particles. Null-safe:
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
+
+## Instantiate `scene` at `pos` under `parent` (or the world — WorldSpawn: the level / chunk at `pos`, the tree root
+## without a level), auto-emitting + auto-freeing particles. Null-safe:
 ## a null scene, or an empty-PackedScene reimport transient (instantiate() returns null), warns/skips instead of crashing.
 ##
 ## This is the SHARED instantiate -> position -> emit -> auto-free seam: spawn_blood_particle routes through it, and
@@ -38,8 +41,10 @@ func spawn_at(scene: PackedScene, pos: Vector3, parent: Node = null) -> Node:
 		return null
 	var inst = scene.instantiate()
 	if inst == null: return null  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
-	var target := parent if parent else get_tree().root
-	target.add_child(inst)
+	if parent != null:
+		parent.add_child(inst)
+	else:
+		WorldSpawn.add(self, inst, pos)
 	if inst is Node3D:
 		(inst as Node3D).global_position = pos
 	# GPUParticles3D: emit + auto-free

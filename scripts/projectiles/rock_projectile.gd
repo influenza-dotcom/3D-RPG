@@ -6,6 +6,7 @@ extends Projectile
 ## to the inherited `queued_for_deletion` signal.
 
 const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 
 const ROCK_DECAL_SCALE: float = 10.0
 const ROCK_DECAL_PROBE_DISTANCE: float = 0.8
@@ -26,7 +27,7 @@ func _spawn_decal(last_velocity: Vector3) -> void:
 	# empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 	if decal == null:
 		return
-	get_tree().root.add_child(decal)
+	WorldSpawn.add(self, decal, result.position if result else global_position)
 	decal.size = DECAL_SIZE * ROCK_DECAL_SCALE
 	decal.cull_mask = DECAL_CULL_MASK
 
@@ -41,7 +42,7 @@ func particles(_body, _last_velocity) -> void:
 	# empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 	if _particles == null:
 		return
-	get_tree().root.add_child(_particles)
+	WorldSpawn.add(self, _particles, global_position)
 	_particles.global_position = global_position - _last_velocity.normalized() * PARTICLE_BACKOFF
 	_particles.emitting = true
 	_particles.finished.connect(_particles.queue_free)

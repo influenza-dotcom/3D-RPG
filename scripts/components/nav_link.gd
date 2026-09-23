@@ -63,6 +63,12 @@ enum Traversal {
 @export var climb_warn_budget: float = 3.0
 
 var _settle_frames: int = 0  ## physics frames spent waiting for the nav map to answer queries (see _physics_process)
+## The nav map's iteration id when this link last ENTERED the tree (-1 before it ever has). Until the map has synced past
+## it, the map still describes the world from BEFORE this link's level arrived: a streamed chunk's links land on a map
+## that already answers for the neighbouring chunks (a near-miss would snap onto the WRONG chunk's floor), and a level
+## GameRoot brings back out of its level cache re-enters a map still holding the level it replaced (measured: 248
+## "endpoint is 12-88 m off the navmesh" warnings on one return). Projection waits for a newer iteration.
+var _entered_iteration: int = -1
 
 ## ⭐Per-PHYSICS-FRAME wall-clock budget (µs) for endpoint projection, SHARED by every NavLink in the tree (a static
 ## ledger, reset by the first link to run each physics frame — _claim_budget). Projection is a one-shot per link, but
@@ -83,6 +89,10 @@ static var _budget_spent_usec: int = 0
 ## nav map per World3D, so any link's answer stands for every link that frame. See _map_answers.
 static var _answers_frame: int = -1
 static var _answers: bool = false
+
+func _enter_tree() -> void:
+	if not Engine.is_editor_hint():
+		_entered_iteration = NavigationServer3D.map_get_iteration_id(get_navigation_map())
 
 func _ready() -> void:
 	_apply()  # authoritative pass once positions exist (after .tscn load)
@@ -126,6 +136,8 @@ func _physics_process(_delta: float) -> void:
 	var map := get_navigation_map()
 	if not NavigationUtils.is_nav_map_ready(map):
 		return
+	if NavigationServer3D.map_get_iteration_id(map) <= _entered_iteration:
+		return  # the map hasn't synced since we (re)entered the tree — it doesn't hold our level's region yet
 	_settle_frames += 1
 	if not _map_answers(map, global_transform * start_position):
 		if _settle_frames < project_settle_frames:

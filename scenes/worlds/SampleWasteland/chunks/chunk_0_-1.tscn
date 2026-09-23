@@ -1,0 +1,124 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/world/world_chunk.gd" id="1_bskme"]
+[ext_resource type="Script" path="res://scripts/components/see_through_brushes.gd" id="2_sc2hy"]
+
+[sub_resource type="NavigationMesh" id="NavigationMesh_xh3oj"]
+vertices = PackedVector3Array(26.75, 0.01999998, -15.75, 27, 0.01999998, -15.75, 27, 0.01999998, -16, 27.25, 0.01999998, -16, 27.25, 0.01999998, -16.25, 28.25, 0.01999998, -29.5, 28.25, 0.01999998, -29.75, 28, 0.01999998, -29.75, 28, 0.01999998, -30, 27.75, 0.01999998, -30, 21.75, 0.01999998, -40, 21.75, 0.01999998, -40.25, 21.5, 0.01999998, -40.25, 21.5, 0.01999998, -40.5, 21.25, 0.01999998, -40.5, 21.25, 0.01999998, -42.25, 21.5, 0.01999998, -42.25, 21.5, 0.01999998, -42.5, 21.75, 0.01999998, -42.5, 21.75, 0.01999998, -42.75, 43.25, 0.01999998, -27.75, 43, 0.01999998, -27.5, 48, 0.01999998, 0, 26.75, 0.01999998, -14, 26.75, 0.01999998, -15.5, 27.75, 0.01999998, -31.5, 23.25, 0.01999998, -40, 48, 0.01999998, -48, 43, 0.01999998, -29.75, 43.25, 0.01999998, -29.5, 28.5, 0.01999998, -16.25, 28.75, 0.01999998, -29.5, 0, 0.01999998, -48, 23.5, 0.01999998, -42.75, 23.5, 0.01999998, -42.5, 23.75, 0.01999998, -42.5, 23.75, 0.01999998, -42.25, 24, 0.01999998, -42.25, 24, 0.01999998, -40.5, 23.75, 0.01999998, -40.5, 23.75, 0.01999998, -40.25, 28.25, 0.01999998, -32.25, 30, 0.01999998, -32.25, 23.5, 0.01999998, -40.25, 23.5, 0.01999998, -40, 28, 0.01999998, -32, 28.25, 0.01999998, -32, 27.75, 0.01999998, -31.75, 28, 0.01999998, -31.75, 30.25, 0.01999998, -32, 30.5, 0.01999998, -31.75, 30, 0.01999998, -32, 30.25, 0.01999998, -31.75, 40.5, 0.01999998, -29.5, 40.75, 0.01999998, -29.5, 40.75, 0.01999998, -29.75, 30.5, 0.01999998, -30.25, 41, 0.01999998, -29.75, 41, 0.01999998, -30, 42.75, 0.01999998, -30, 42.75, 0.01999998, -29.75, 43, 0.01999998, -29.5, 22.5, 0.01999998, -42.75, 42.75, 0.01999998, -27.25, 43.25, 0.01999998, -28.75, 29.25, 0.01999998, -13.75, 29, 0.01999998, -13.75, 29, 0.01999998, -13.5, 40.5, 0.01999998, -29.25, 29.5, 0.01999998, -14, 29.25, 0.01999998, -14, 41, 0.01999998, -27.25, 41, 0.01999998, -27.5, 40.75, 0.01999998, -27.5, 40.75, 0.01999998, -27.75, 40.5, 0.01999998, -27.75, 30.5, 0.01999998, -30, 30.25, 0.01999998, -30, 30.25, 0.01999998, -29.75, 30, 0.01999998, -29.75, 30, 0.01999998, -29.5, 28.75, 0.01999998, -16.25, 41.25, 0.01999998, -27.25, 29, 0.01999998, -16.25, 29, 0.01999998, -16, 29.25, 0.01999998, -16, 29.25, 0.01999998, -15.75, 29.5, 0.01999998, -15.75, 43, 0.01999998, -27.75, 42.75, 0.01999998, -27.5, 27.25, 0.01999998, -13.5, 27.25, 0.01999998, -13.75, 27, 0.01999998, -13.75, 27, 0.01999998, -14, 29.5, 0.01999998, -14.75, 0, 0.01999998, 0, 28, 0.01999998, -13.5)
+polygons = [PackedInt32Array(2, 1, 0), PackedInt32Array(4, 3, 2), PackedInt32Array(7, 6, 5), PackedInt32Array(8, 7, 9), PackedInt32Array(9, 7, 4), PackedInt32Array(9, 4, 2), PackedInt32Array(12, 11, 10), PackedInt32Array(14, 13, 12), PackedInt32Array(17, 16, 15), PackedInt32Array(19, 18, 17), PackedInt32Array(22, 21, 20), PackedInt32Array(14, 24, 23), PackedInt32Array(14, 0, 24), PackedInt32Array(10, 26, 25), PackedInt32Array(12, 10, 25), PackedInt32Array(12, 25, 14), PackedInt32Array(14, 25, 9), PackedInt32Array(14, 9, 2), PackedInt32Array(14, 2, 0), PackedInt32Array(29, 28, 27), PackedInt32Array(5, 31, 30), PackedInt32Array(5, 30, 7), PackedInt32Array(7, 30, 4), PackedInt32Array(32, 15, 14), PackedInt32Array(35, 34, 33), PackedInt32Array(37, 36, 35), PackedInt32Array(39, 38, 40), PackedInt32Array(40, 38, 41), PackedInt32Array(41, 38, 42), PackedInt32Array(46, 45, 41), PackedInt32Array(41, 45, 44), PackedInt32Array(41, 44, 40), PackedInt32Array(40, 44, 43), PackedInt32Array(48, 47, 45), PackedInt32Array(45, 47, 44), PackedInt32Array(49, 38, 50), PackedInt32Array(50, 38, 37), PackedInt32Array(49, 51, 42), PackedInt32Array(50, 52, 49), PackedInt32Array(54, 53, 55), PackedInt32Array(55, 53, 56), PackedInt32Array(55, 56, 50), PackedInt32Array(57, 55, 58), PackedInt32Array(58, 55, 50), PackedInt32Array(28, 60, 59), PackedInt32Array(29, 61, 28), PackedInt32Array(62, 19, 32), PackedInt32Array(35, 33, 59), PackedInt32Array(59, 33, 27), PackedInt32Array(22, 63, 21), PackedInt32Array(59, 37, 35), PackedInt32Array(64, 27, 20), PackedInt32Array(20, 27, 22), PackedInt32Array(67, 66, 65), PackedInt32Array(44, 47, 26), PackedInt32Array(26, 47, 25), PackedInt32Array(49, 42, 38), PackedInt32Array(53, 68, 56), PackedInt32Array(65, 70, 69), PackedInt32Array(73, 72, 71), PackedInt32Array(75, 74, 73), PackedInt32Array(77, 76, 78), PackedInt32Array(78, 76, 68), PackedInt32Array(78, 68, 75), PackedInt32Array(79, 78, 80), PackedInt32Array(80, 78, 75), PackedInt32Array(80, 75, 73), PackedInt32Array(76, 56, 68), PackedInt32Array(71, 82, 81), PackedInt32Array(73, 71, 80), PackedInt32Array(80, 71, 31), PackedInt32Array(31, 71, 81), PackedInt32Array(31, 81, 30), PackedInt32Array(84, 83, 85), PackedInt32Array(85, 83, 82), PackedInt32Array(86, 85, 87), PackedInt32Array(87, 85, 82), PackedInt32Array(21, 88, 20), PackedInt32Array(63, 89, 21), PackedInt32Array(62, 32, 33), PackedInt32Array(33, 32, 27), PackedInt32Array(19, 17, 32), PackedInt32Array(17, 15, 32), PackedInt32Array(83, 81, 82), PackedInt32Array(28, 59, 27), PackedInt32Array(92, 91, 90), PackedInt32Array(23, 93, 92), PackedInt32Array(64, 29, 27), PackedInt32Array(69, 94, 82), PackedInt32Array(58, 50, 59), PackedInt32Array(59, 50, 37), PackedInt32Array(94, 87, 82), PackedInt32Array(82, 63, 69), PackedInt32Array(69, 63, 22), PackedInt32Array(23, 92, 95), PackedInt32Array(65, 69, 22), PackedInt32Array(67, 65, 22), PackedInt32Array(96, 67, 22), PackedInt32Array(96, 22, 90), PackedInt32Array(90, 22, 95), PackedInt32Array(14, 23, 32), PackedInt32Array(32, 23, 95), PackedInt32Array(92, 90, 95)]
+geometry_parsed_geometry_type = 1
+geometry_source_geometry_mode = 1
+geometry_source_group_name = &"navmesh"
+cell_height = 0.01
+border_size = 1.0
+agent_height = 2.2
+agent_radius = 0.6
+agent_max_climb = 0.4
+agent_max_slope = 30.0
+region_min_size = 0.1
+edge_max_error = 0.1
+filter_low_hanging_obstacles = true
+filter_baking_aabb = AABB(-1, -5, -49, 50, 15.995986, 50)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mwa5j"]
+albedo_color = Color(0.3, 0.31, 0.28, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_67xy3"]
+material = SubResource("StandardMaterial3D_mwa5j")
+size = Vector3(48, 1, 48)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_aexv4"]
+size = Vector3(52, 1, 52)
+
+[sub_resource type="BoxMesh" id="BoxMesh_s3v78"]
+size = Vector3(1, 3.1639514, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_rs3ue"]
+size = Vector3(1, 3.1639514, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_nck4w"]
+size = Vector3(1, 6.995986, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_k1nwl"]
+size = Vector3(1, 6.995986, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_dvaqg"]
+size = Vector3(1, 5.4220686, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_2om2r"]
+size = Vector3(1, 5.4220686, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_jcltt"]
+size = Vector3(1, 4.719804, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_tthxo"]
+size = Vector3(1, 4.719804, 1)
+
+[node name="Chunk" type="Node3D" unique_id=1037964666]
+script = ExtResource("1_bskme")
+cell = Vector2i(0, -1)
+cell_size = 48.0
+
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="." unique_id=1226549407 groups=["navmesh"]]
+visible = false
+navigation_mesh = SubResource("NavigationMesh_xh3oj")
+
+[node name="Geometry" type="Node3D" parent="." unique_id=944887527 groups=["navmesh"]]
+
+[node name="Ground" type="MeshInstance3D" parent="Geometry" unique_id=1937064973]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 24, -0.5, -24)
+mesh = SubResource("BoxMesh_67xy3")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Geometry/Ground" unique_id=1843265660]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Geometry/Ground/StaticBody3D" unique_id=1470796120]
+shape = SubResource("BoxShape3D_aexv4")
+
+[node name="Blockout" type="Node3D" parent="Geometry" unique_id=1257243166 groups=["navmesh"]]
+
+[node name="Landmark0" type="MeshInstance3D" parent="Geometry/Blockout" unique_id=1152768411]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28.073414, 1.5819757, -14.778404)
+mesh = SubResource("BoxMesh_s3v78")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Geometry/Blockout/Landmark0" unique_id=1550349692]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Geometry/Blockout/Landmark0/StaticBody3D" unique_id=1237688153]
+shape = SubResource("BoxShape3D_rs3ue")
+
+[node name="Landmark1" type="MeshInstance3D" parent="Geometry/Blockout" unique_id=1354855575]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22.527805, 3.497993, -41.42055)
+mesh = SubResource("BoxMesh_nck4w")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Geometry/Blockout/Landmark1" unique_id=1589437603]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Geometry/Blockout/Landmark1/StaticBody3D" unique_id=1592070199]
+shape = SubResource("BoxShape3D_k1nwl")
+
+[node name="Landmark2" type="MeshInstance3D" parent="Geometry/Blockout" unique_id=1591852710]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 29.220905, 2.7110343, -30.829702)
+mesh = SubResource("BoxMesh_dvaqg")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Geometry/Blockout/Landmark2" unique_id=860415713]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Geometry/Blockout/Landmark2/StaticBody3D" unique_id=1718979621]
+shape = SubResource("BoxShape3D_2om2r")
+
+[node name="Landmark3" type="MeshInstance3D" parent="Geometry/Blockout" unique_id=340608972]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 41.788795, 2.359902, -28.73497)
+mesh = SubResource("BoxMesh_jcltt")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Geometry/Blockout/Landmark3" unique_id=1358111895]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Geometry/Blockout/Landmark3/StaticBody3D" unique_id=413673601]
+shape = SubResource("BoxShape3D_tthxo")
+
+[node name="Characters" type="Node" parent="." unique_id=193209801]
+
+[node name="Lights" type="Node" parent="." unique_id=968673980]
+
+[node name="Objects" type="Node" parent="." unique_id=2076905214]
+
+[node name="SeeThroughBrushes" type="Node" parent="." unique_id=1956003776]
+script = ExtResource("2_sc2hy")
+extra_surfaces = PackedStringArray()
+opaque_surfaces = PackedStringArray()

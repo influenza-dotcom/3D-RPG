@@ -750,3 +750,76 @@ func test_capture_world_state_folds_deaths_into_levels_not_in_the_tree() -> void
 	assert_eq(b["dead_authored"], ["id:guard"], "the new death reached level B's bucket")
 	assert_true((b["containers"] as Dictionary).has("id:safe"), "and B's looted safe is still in it")
 	gs.free()
+
+
+# --- streamed worlds: a bucket per chunk ------------------------------------------------------------------------
+
+## A ChunkStreamer chunk root carries SCOPE_META; everything under it belongs to that chunk's OWN bucket. A level-wide
+## capture must skip it (the level bucket would otherwise hold chunk state that goes stale the moment the chunk unloads),
+## and a scoped capture must take only that chunk.
+func test_a_chunk_scope_splits_capture_between_the_level_and_the_chunk() -> void:
+	var chunk := Node3D.new()
+	chunk.set_meta(WorldSnapshot.SCOPE_META, "Chunk_0_0")
+	add_child_autofree(chunk)
+	var in_chunk := NpcStub.new()
+	in_chunk.key = "id:in_chunk"
+	chunk.add_child(in_chunk)
+	in_chunk.add_to_group(Groups.NPC)
+	var crate := ContainerStub.new()
+	crate.key = "id:chunk_crate"
+	chunk.add_child(crate)
+	crate.add_to_group(Groups.CONTAINERS)
+	var persistent := NpcStub.new()
+	persistent.key = "id:persistent"
+	add_child_autofree(persistent)
+	persistent.add_to_group(Groups.NPC)
+
+	assert_eq(WorldSnapshot.bucket_for(in_chunk, "res://w.tres"), "res://w.tres#Chunk_0_0", "a chunk's node is keyed to the chunk's bucket")
+	assert_eq(WorldSnapshot.bucket_for(persistent, "res://w.tres"), "res://w.tres", "anything outside a chunk is the level's")
+
+	var snap := WorldSnapshot.new()
+	snap.capture(get_tree(), "res://w.tres")
+	var chunk_key := WorldSnapshot.scoped_key("res://w.tres", "Chunk_0_0")
+	snap.capture(get_tree(), chunk_key, {}, true, chunk)
+	var d := snap.to_dict()
+	assert_true((d["res://w.tres"]["authored_npcs"] as Dictionary).has("id:persistent"), "the level bucket holds the persistent-layer NPC")
+	assert_false((d["res://w.tres"]["authored_npcs"] as Dictionary).has("id:in_chunk"), "...and never the chunk's")
+	assert_false((d["res://w.tres"]["containers"] as Dictionary).has("id:chunk_crate"), "...nor the chunk's container")
+	assert_true((d[chunk_key]["authored_npcs"] as Dictionary).has("id:in_chunk"), "the chunk bucket holds its own NPC")
+	assert_true((d[chunk_key]["containers"] as Dictionary).has("id:chunk_crate"), "...and its container")
+	assert_false((d[chunk_key]["authored_npcs"] as Dictionary).has("id:persistent"), "...and nothing outside the chunk")
+	snap = null
+
+
+func test_a_scoped_apply_touches_only_its_chunk() -> void:
+	var chunk := Node3D.new()
+	chunk.set_meta(WorldSnapshot.SCOPE_META, "Chunk_1_0")
+	add_child_autofree(chunk)
+	var mine := NpcStub.new()
+	mine.key = "id:shared_name"
+	chunk.add_child(mine)
+	mine.add_to_group(Groups.NPC)
+	var outsider := NpcStub.new()
+	outsider.key = "id:shared_name"  # the same key outside the chunk must be left alone by the chunk's apply
+	add_child_autofree(outsider)
+	outsider.add_to_group(Groups.NPC)
+	var chunk_key := WorldSnapshot.scoped_key("res://w.tres", "Chunk_1_0")
+	var snap := WorldSnapshot.new()
+	snap.from_dict({chunk_key: {"authored_npcs": {"id:shared_name": {"pos": Vector3(9, 0, 9), "yaw": 0.0, "hp": 5.0}}, "dead_authored": [], "containers": {}}})
+	snap.apply(get_tree(), chunk_key, chunk)
+	assert_true(mine.restored, "the chunk's own NPC is restored")
+	assert_eq(mine.last_pos, Vector3(9, 0, 9), "...with the chunk bucket's position")
+	assert_false(outsider.restored, "a node outside the scope is untouched, even under the same key")
+	snap = null
+
+
+func test_fold_dead_ledger_skips_every_bucket_a_save_just_captured() -> void:
+	var snap := WorldSnapshot.new()
+	var chunk_key := WorldSnapshot.scoped_key("res://w.tres", "Chunk_0_0")
+	# The chunk was just captured with its NPC ALIVE (live wins); the death ledger still holds a stale key for it.
+	snap.from_dict({chunk_key: {"authored_npcs": {"id:back": {"pos": Vector3.ZERO, "yaw": 0.0, "hp": 1.0}}, "dead_authored": [], "containers": {}}})
+	snap.fold_dead_ledger({chunk_key: {"id:back": true}, "res://other.tres": {"id:gone": true}}, PackedStringArray(["res://w.tres", chunk_key]))
+	var d := snap.to_dict()
+	assert_false("id:back" in d[chunk_key]["dead_authored"], "a bucket captured THIS save is not re-poisoned by the stale ledger")
+	assert_true("id:gone" in d["res://other.tres"]["dead_authored"], "every other bucket still folds its deaths in")
+	snap = null

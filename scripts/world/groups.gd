@@ -45,6 +45,7 @@ const VIEW_MODEL_LIGHT_EXEMPT := &"view_model_light_exempt"
 const GAME_ROOT := &"game_root"                 ## the GameRoot (level-load seam) — LevelDoor finds it here
 const PLAYER_SPAWN := &"player_spawn"
 const NAVMESH := &"navmesh"                     ## geometry + the NavigationRegion3D that feed the navmesh bake
+const CHUNK_STREAMER := &"chunk_streamer"       ## live ChunkStreamers — the minimap gathers each streamed chunk's walls as its own root
 const WORLD_ENVIRONMENT := &"world_environment" ## the WorldEnvironment StarSky repaints
 const MUSIC := &"music"
 const DAY_NIGHT := &"day_night"                 ## the level's DayNightSky driver — sampled (duck-typed current_day_factor) by ViewModelCamera's night fill

@@ -9,6 +9,7 @@ extends Projectile
 ## rock_projectile.gd is the other variant.
 
 const BLOOD = preload("uid://c7v6vgs74fhn4")
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 const DUST = preload("uid://um6f8g8g6l7v")
 
 ## Backoff used to place the decal when the impact raycast finds no surface.
@@ -38,7 +39,7 @@ func particles(_body, _last_velocity) -> void:
 	# empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 	if _particles == null:
 		return
-	get_tree().root.add_child(_particles)
+	WorldSpawn.add(self, _particles, global_position)
 	var backoff := IMPACT_BACKOFF if is_character else PARTICLE_BACKOFF
 	_particles.global_position = global_position - _last_velocity.normalized() * backoff
 	_particles.emitting = true
@@ -62,7 +63,7 @@ func _spawn_decal(last_velocity: Vector3) -> void:
 	# empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 	if decal == null:
 		return
-	get_tree().root.add_child(decal)
+	WorldSpawn.add(self, decal, result.position if result else global_position)  # the chunk of the surface it marks
 	decal.size = DECAL_SIZE
 	decal.cull_mask = DECAL_CULL_MASK
 

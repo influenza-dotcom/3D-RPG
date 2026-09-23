@@ -11,6 +11,7 @@ extends Node3D
 ## _bark_duration_ms, which runs off-tree with no instance) still resolve and the GUT pins stay green. The
 ## inspector @export vars below default to these — designers tune the instance, the consts stay the baseline.
 const POPUP_HEAD_Y: float = 1.5
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 const POPUP_HOLD: float = 0.35
 const POPUP_FADE: float = 0.65
 const POPUP_WORLD_HEIGHT: float = 0.7
@@ -151,8 +152,8 @@ static func build_icon(tex: Texture2D, world_height: float) -> Sprite3D:
 
 ## Pop a billboarded icon above the head, hold briefly, fade its alpha to 0, then free — built through build_icon.
 ## Used by the alert "!" and the turn-hostile cue. extra_y nudges the icon off the default head height so distinct
-## cues don't stack. follow=true parents it to us (tracks movement); follow=false parents to the tree root so the
-## cue SURVIVES our death (a one-shotted friendly still pops the "negative" icon even as we're freed this frame).
+## cues don't stack. follow=true parents it to us (tracks movement); follow=false parents it to the world (WorldSpawn)
+## so the cue SURVIVES our death (a one-shotted friendly still pops the "negative" icon even as we're freed this frame).
 func show_icon(tex: Texture2D, follow: bool = false, extra_y: float = 0.0) -> void:
 	if tex == null or not is_inside_tree():
 		return
@@ -161,7 +162,7 @@ func show_icon(tex: Texture2D, follow: bool = false, extra_y: float = 0.0) -> vo
 		add_child(icon)
 		icon.position = Vector3(0.0, popup_head_y + extra_y, 0.0)
 	else:
-		get_tree().root.add_child(icon)
+		WorldSpawn.add(self, icon, global_position)
 		icon.global_position = global_position + Vector3(0.0, popup_head_y + extra_y, 0.0)
 	var tween := icon.create_tween()
 	tween.tween_interval(popup_hold)

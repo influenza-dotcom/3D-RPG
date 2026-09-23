@@ -19,10 +19,13 @@ extends RefCounted
 ## the rings to FloorplanSection.silhouette, which differences them against each other so overlapping and
 ## abutting solids print ONE outline rather than a wireframe of the brushwork.
 
-## Every solid found by the last gather(), in world space.
+## Every solid found by the last gather() / sync_roots(), in world space.
 var solids: Array[Dictionary] = []
 ## Instance id of the root the last gather() walked — the caller's staleness check.
 var source_id: int = 0
+## STREAMED WORLDS: each root's own solids, keyed by the root's instance id, so sync_roots re-walks only the roots
+## that are new since the last call (a chunk that just streamed in) and drops the ones that left.
+var _by_root: Dictionary = {}
 
 ## How many sides stand in for a round collider. 12 is invisible from a mismatch at this widget's ~2.7 px/m.
 const ROUND_SIDES := 12
@@ -36,16 +39,57 @@ const ROUND_SIDES := 12
 ## Anything under a `hide_group` subtree is skipped (the MinimapHide drop-in), as are disabled shapes.
 func gather(root: Node, hide_group: StringName) -> void:
 	solids.clear()
+	_by_root.clear()
 	source_id = root.get_instance_id() if root != null else 0
 	if root == null:
 		return
 	_walk(root, hide_group)
 
 
+## THE STREAMED-WORLD FORM of gather(): make `solids` the union of every root in `roots`, walking only roots not
+## walked by an earlier call and forgetting roots no longer listed. A ChunkStreamer's chunks are gathered as their
+## own roots (the walk never descends into a streamer — see _walk), so a chunk streaming in costs one walk of that
+## chunk rather than a re-walk of the whole world. Returns true when the union changed. Order is the list's order,
+## so the same roots always produce the same solids.
+func sync_roots(roots: Array, hide_group: StringName) -> bool:
+	var wanted := {}
+	var order: Array[int] = []
+	for r in roots:
+		if is_instance_valid(r) and r is Node:
+			var id: int = (r as Node).get_instance_id()
+			if not wanted.has(id):
+				wanted[id] = r
+				order.append(id)
+	var changed := false
+	for id in _by_root.keys():
+		if not wanted.has(id):
+			_by_root.erase(id)
+			changed = true
+	for id in order:
+		if _by_root.has(id):
+			continue
+		var keep := solids
+		solids = []
+		_walk(wanted[id], hide_group)
+		_by_root[id] = solids
+		solids = keep
+		changed = true
+	if changed:
+		solids.clear()
+		for id in order:
+			solids.append_array(_by_root[id])
+	source_id = order[0] if not order.is_empty() else 0
+	return changed
+
+
 func _walk(n: Node, hide_group: StringName) -> void:
 	# A hidden subtree is skipped WHOLE — cheaper than testing every descendant, and it matches the
 	# drop-in's promise ("this prop and everything under it").
 	if hide_group != &"" and n.is_in_group(hide_group):
+		return
+	# A ChunkStreamer's children are streamed chunks, gathered as their own roots by sync_roots — walking into them
+	# from the level root would count every chunk twice. Duck-typed (the LevelRoot idiom), never `is ChunkStreamer`.
+	if n.has_method(&"chunk_exists") and n.has_method(&"coord_at"):
 		return
 	var cs := n as CollisionShape3D
 	if cs != null:

@@ -1,0 +1,66 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/world/level_root.gd" id="1_gm8wj"]
+[ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="2_tf4cm"]
+[ext_resource type="Script" path="res://scripts/components/ambient_dust.gd" id="3_pw4ed"]
+[ext_resource type="Texture2D" path="res://assets/textures/dda61fd3-14cc-4f8e-b474-b60606de4ced.png" id="4_h51bt"]
+[ext_resource type="Script" path="res://scripts/components/quest_marker_sync.gd" id="5_mx4ln"]
+[ext_resource type="PackedScene" path="res://scenes/world/PlayerSpawn.tscn" id="6_lit75"]
+[ext_resource type="Script" path="res://scripts/world/player_spawn.gd" id="7_iorhb"]
+[ext_resource type="Script" path="res://scripts/world/chunk_streamer.gd" id="8_1sfya"]
+
+[sub_resource type="PanoramaSkyMaterial" id="panomat"]
+panorama = ExtResource("4_h51bt")
+
+[sub_resource type="Sky" id="sky"]
+sky_material = SubResource("panomat")
+process_mode = 1
+
+[sub_resource type="Environment" id="env"]
+background_mode = 2
+background_energy_multiplier = 0.0
+sky = SubResource("sky")
+ambient_light_sky_contribution = 0.0
+ambient_light_energy = 0.0
+reflected_light_source = 2
+tonemap_mode = 4
+fog_mode = 1
+fog_sun_scatter = 1.0
+fog_density = 1.0
+volumetric_fog_enabled = true
+volumetric_fog_anisotropy = 0.1
+volumetric_fog_sky_affect = 0.33
+
+[node name="SampleWasteland" type="Node3D" unique_id=232748506]
+script = ExtResource("1_gm8wj")
+
+[node name="AmbientDust" type="GPUParticles3D" parent="." unique_id=1866493844 instance=ExtResource("2_tf4cm")]
+script = ExtResource("3_pw4ed")
+motes = 1600
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=581157571 groups=["world_environment"]]
+environment = SubResource("env")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1424542704]
+transform = Transform3D(1, 0, 0, 0, 0.6427876, 0.7660444, 0, -0.7660444, 0.6427876, 0, 12, 0)
+shadow_enabled = true
+
+[node name="Characters" type="Node" parent="." unique_id=2136400981]
+
+[node name="Lights" type="Node" parent="." unique_id=25172774]
+
+[node name="Objects" type="Node" parent="." unique_id=446965432]
+
+[node name="Graffitti" type="Node" parent="." unique_id=845615858]
+
+[node name="QuestMarkerSync" type="Node" parent="." unique_id=1720517805]
+script = ExtResource("5_mx4ln")
+
+[node name="PlayerSpawn" type="Marker3D" parent="." unique_id=562872050 instance=ExtResource("6_lit75")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 24, 1.5, 24)
+script = ExtResource("7_iorhb")
+
+[node name="ChunkStreamer" type="Node3D" parent="." unique_id=1276085985]
+script = ExtResource("8_1sfya")
+chunk_folder = "res://scenes/worlds/SampleWasteland/chunks"
+chunk_size = 48.0

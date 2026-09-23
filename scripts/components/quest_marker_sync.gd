@@ -12,6 +12,9 @@ extends Node
 @export var marker_color: Color = Color(0.4, 0.9, 1.0)
 
 var _markers: Array[Node] = []
+## A quest changed while this level was PARKED (GameRoot's level cache keeps a left level out of the tree, and the
+## QuestTracker signals still arrive): a WorldMarker can't be placed off-tree, so the rebuild waits for the return.
+var _rebuild_on_return: bool = false
 
 func _ready() -> void:
 	QuestTracker.quest_started.connect(_on_quest_changed)
@@ -31,8 +34,16 @@ func _on_quest_changed(_quest = null) -> void:
 func _on_objective_advanced(_quest, _objective) -> void:
 	_rebuild()
 
+func _enter_tree() -> void:
+	if _rebuild_on_return:
+		_rebuild_on_return = false
+		_rebuild.call_deferred()
+
 ## Clear and re-spawn a WorldMarker for every active, not-yet-done objective that wants one.
 func _rebuild() -> void:
+	if not is_inside_tree():
+		_rebuild_on_return = true
+		return
 	for m in _markers:
 		if is_instance_valid(m):
 			m.queue_free()

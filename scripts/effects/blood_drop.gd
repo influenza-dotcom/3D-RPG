@@ -6,6 +6,7 @@ extends RigidBody3D
 ## suppresses the SFX so a 100-drop burst doesn't roar.
 
 const BLOOD_SPLAT_DECAL = preload("uid://dg5ui5is8sakg")
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 
 ## The wet-splat sound played once on the drop's first contact (at a random pitch). Reparented to the scene root so it outlives the freed drop. Skipped when `silent`.
 @export var impact_sfx: AudioStreamPlayer3D
@@ -93,7 +94,7 @@ func _spawn_impact_decal() -> void:
 	decal.target_size = Vector3(s, 0.05, s)
 	decal.grow_time = GameSettings.effects.blood_decal_grow_time
 	decal.cull_mask = DECAL_CULL_MASK
-	get_tree().root.add_child(decal)
+	WorldSpawn.add(self, decal, result["position"])
 	if gore_tag != &"":
 		decal.add_to_group(gore_tag)
 	decal.global_position = result["position"] + result["normal"] * GameSettings.effects.decal_normal_offset

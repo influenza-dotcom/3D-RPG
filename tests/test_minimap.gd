@@ -2,7 +2,7 @@ extends GutTest
 
 ## Minimap (scripts/ui/minimap.gd) — the top-right procedural floorplan Control. Its PAINTING is
 ## playtest-verified and its geometry maths lives in FloorplanSection (pinned in test_floorplan_section.gd);
-## what is pinned HERE is the part that can silently rot: the off-tree construction contract, the
+## what is pinned HERE is the part that can silently rot: the hidden/off-tree no-work gate, the
 ## marker_color fallback that test_hud_skin.gd also leans on, the component defaults a designer sees in the
 ## inspector, the deck cache's LRU bound, the level-swap drop (BOTH halves of rebake — the deck cache AND
 ## the FloorplanSource wall gather — plus the region-instance-id check that is its only shipped trigger),
@@ -25,27 +25,63 @@ const MINIMAP_SCRIPT := "res://scripts/ui/minimap.gd"
 ## gathered" state on the widget's _source — loaded by path for the same cache reason as above.
 const FLOORPLAN_SOURCE_SCRIPT := "res://scripts/ui/floorplan_source.gd"
 
+## Globals the zoom-key tests move, snapshotted around EVERY test so a failed assert cannot leak them.
+## Settings._loaded = false is test_settings.gd's persistence off switch: _poll_zoom_key writes through
+## Settings.set_minimap_zoom, which would otherwise save into the developer's real user://settings.cfg.
+var _was_zoom: float
+var _was_loaded: bool
+var _was_zoom_steps: PackedFloat32Array
 
-## A bare .new() with no tree must be completely safe: test_hud_skin.gd constructs one exactly this way to
-## check the skin wiring, so an @onready or a tree-touching _init creeping in here takes THAT suite down
-## too, from a file whose author never looked at this one.
-func test_new_off_tree_does_not_crash() -> void:
+
+func before_each() -> void:
+	_was_zoom = Settings.minimap_zoom
+	_was_loaded = Settings._loaded
+	Settings._loaded = false
+	_was_zoom_steps = GameSettings.hud.minimap_zoom_steps
+
+
+func after_each() -> void:
+	Input.action_release(InputManager.action_minimap_zoom)
+	GameSettings.hud.minimap_zoom_steps = _was_zoom_steps
+	Settings.minimap_zoom = _was_zoom
+	Settings._loaded = _was_loaded
+
+
+## A HIDDEN MAP COSTS NOTHING (the first line of minimap.gd's _process): not a redraw, not a slice, not even the
+## group scan — which is what makes the Options toggle, the dialogue hide and the death hide free. Observed through
+## the region staleness check, the first work past that gate: a fresh widget's _source_region_id is seeded -1, so
+## the first tick that gets past the gate ALWAYS rebakes, dropping the cached deck and stamping the level's
+## underlay. A tick that leaves both alone did no work. Two quiet hosts — a bare .new() off-tree (test_hud_skin.gd
+## builds one exactly this way) and the same widget in-tree but hidden — then the control: that widget shown,
+## whose very next tick does the work, so the silence above was the gate and not a tick with nothing to do.
+func test_a_hidden_or_off_tree_map_does_no_work() -> void:
 	var mm = load(MINIMAP_SCRIPT).new()
 	autofree(mm)
-	assert_not_null(mm, "the widget constructs with no tree")
-	assert_eq(mm.deck_count(), 0, "no decks are sliced before it ever runs")
-	assert_almost_eq(mm.active_band_floor(), 0.0, 0.0001, "no active band either")
-	mm._process(0.016)  # must bail on the is_inside_tree guard rather than touching get_tree()
-	assert_eq(mm.deck_count(), 0, "a process tick off-tree still slices nothing")
-	mm.rebake()
-	assert_eq(mm.deck_count(), 0, "rebake is safe with nothing cached")
-	# rebake also resolves the level underlay, which needs a tree to find the GameRoot — off-tree it must
-	# degrade to "no underlay", never touch get_tree().
-	assert_null(mm.active_map_data(), "off-tree there is no level, so there is no underlay either")
+	mm._ensure_deck(null, 0.5)
+	assert_eq(mm.deck_count(), 1, "precondition: a floor deck is cached")
+	mm._process(0.016)
+	assert_eq(mm.deck_count(), 1,
+			"an off-tree tick bails before the staleness check (whose seeded -1 would rebake and drop the deck)")
+	var root := GameRootStub.new()
+	add_child_autofree(root)
+	var map := MapData.new()
+	root.level = LevelData.new()
+	root.level.map_data = map
+	add_child(mm)
+	mm.visible = false
+	mm._process(0.016)
+	assert_eq(mm.deck_count(), 1, "a HIDDEN in-tree map does no work either: the cached deck survives the tick")
+	assert_null(mm.active_map_data(), "...and the level's authored underlay was never resolved")
+	mm.visible = true
+	mm._process(0.016)
+	assert_eq(mm.deck_count(), 0,
+			"control: shown, the same widget's next tick reaches the staleness check and rebakes the deck away")
+	assert_eq(mm.active_map_data(), map, "...and stamps the level's underlay, so the hidden tick really skipped that work")
+	map = null
 
 
-## THE CONTRACT test_hud_skin.gd:159-174 depends on. Re-asserted locally so a change here fails in the
-## file that caused it, not only in a distant skin test.
+## THE CONTRACT test_hud_skin.gd's test_nav_marker_fallback_tints_follow_the_live_skin depends on. Re-asserted
+## locally so a change here fails in the file that caused it, not only in a distant skin test.
 func test_marker_color_falls_back_to_the_skin_npc_tint() -> void:
 	var mm = load(MINIMAP_SCRIPT).new()
 	autofree(mm)
@@ -86,7 +122,8 @@ func test_component_defaults() -> void:
 	# handled differently now — dots are CLIPPED to the box instead of pinned to its rim, so a dot means
 	# "near you" rather than "somewhere on this level" — and the player can still switch them off in Options.
 	assert_true(mm.dot_npcs, "NPC dots ship on; the rim-pin exclusion is what keeps them from being a radar")
-	assert_eq(mm.deck_cache_max, 12, "deck cache bound")
+	# deck_cache_max is NOT pinned as a number: what the design needs from it is driven below
+	# (test_the_shipped_deck_bound_keeps_a_stair_trip_cached_and_caps_a_tower).
 	assert_gt(mm.bake_delay, 0.0, "a gather on frame one can see a half-built level, so the delay is real")
 
 
@@ -103,6 +140,53 @@ func test_deck_cache_is_lru_capped() -> void:
 		mm._ensure_deck(null, float(storey) * band + 0.5)
 	assert_lte(mm.deck_count(), 3, "the cache never grows past deck_cache_max")
 	assert_gt(mm.deck_count(), 0, "...but it does keep the recent floors")
+
+
+## LEAST-RECENTLY-USED, not first-in-first-out: the floor the player just walked BACK to must survive the next
+## eviction. A FIFO cache would throw the ground floor away the moment a third storey was sliced, even though the
+## player had been standing on it a second earlier, and re-slice it on the very next trip down the stairs.
+## Mid-band heights throughout, so the sticky band never holds a floor and every move is a real storey change.
+## is_same (identity), never ==: two decks sliced from a null region are equal BY VALUE, and a re-slice is exactly
+## the thing a value compare would hide.
+func test_deck_eviction_drops_the_least_recently_visited_floor() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	mm.deck_cache_max = 2
+	var band: float = GameSettings.hud.minimap_band_height
+	mm._ensure_deck(null, band * 0.5)
+	var ground: Dictionary = mm._deck
+	mm._ensure_deck(null, band * 1.5)
+	var first_floor: Dictionary = mm._deck
+	mm._ensure_deck(null, band * 0.5)                  # back down: the ground floor is now the most recent
+	assert_true(is_same(mm._deck, ground), "precondition: walking back to a cached floor is a hit, not a re-slice")
+	mm._ensure_deck(null, band * 2.5)                  # a third storey: one deck has to go
+	mm._ensure_deck(null, band * 0.5)
+	assert_true(is_same(mm._deck, ground),
+			"the floor the player most recently stood on must survive the eviction — dropping it would re-slice it on every stair trip")
+	assert_eq(mm.deck_count(), 2, "the bound still holds while it does")
+	mm._ensure_deck(null, band * 1.5)
+	assert_false(is_same(mm._deck, first_floor),
+			"...because the storey visited LONGEST ago is the one that went, and walking back to it slices it afresh")
+
+
+## The SHIPPED bound, driven rather than pinned as a number. What the design needs from deck_cache_max is that a
+## stair trip — up one storey and straight back down — never re-slices the floor you left (so the bound must hold
+## at least those two), and that a tower taller than the bound stops growing exactly AT it.
+func test_the_shipped_deck_bound_keeps_a_stair_trip_cached_and_caps_a_tower() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	autofree(mm)
+	var band: float = GameSettings.hud.minimap_band_height
+	mm._ensure_deck(null, band * 0.5)
+	var ground: Dictionary = mm._deck
+	mm._ensure_deck(null, band * 1.5)
+	mm._ensure_deck(null, band * 0.5)
+	assert_true(is_same(mm._deck, ground),
+			"with the shipped deck_cache_max, walking back down the stairs you just climbed must be a cache hit, not a re-slice")
+	var storeys: int = mm.deck_cache_max + 3
+	for storey in storeys:
+		mm._ensure_deck(null, (float(storey) + 0.5) * band)
+	assert_eq(mm.deck_count(), mm.deck_cache_max,
+			"a tower taller than the shipped bound keeps exactly deck_cache_max decks — the cache neither grows past it nor under-fills")
 
 
 ## Revisiting a floor inside the same band is a cache HIT — this is what makes walking around one storey
@@ -182,6 +266,40 @@ func test_a_new_region_instance_id_triggers_the_swap_drop() -> void:
 	mm._process(0.016)
 	assert_eq(mm.deck_count(), 0, "a new region identity is a level swap: every deck drops")
 	assert_null(mm._source, "and the wall source drops with them — level B re-gathers, never re-cuts")
+
+
+## A STREAMED world (ChunkStreamer) changes its region set every time a chunk loads or unloads, all under ONE level
+## root. That must re-slice the decks from every loaded region but keep the gathered walls (a rebake would re-walk the
+## whole world on every border crossing); a region set under a DIFFERENT level root is still a full swap.
+func test_a_chunk_streaming_in_restreams_instead_of_rebaking() -> void:
+	var mm = load(MINIMAP_SCRIPT).new()
+	add_child_autofree(mm)
+	var level := Node3D.new()
+	level.name = "Level"
+	add_child_autofree(level)
+	var region_a := NavigationRegion3D.new()
+	region_a.add_to_group(Groups.NAVMESH)
+	level.add_child(region_a)
+	mm._process(0.016)                                 # boot
+	mm._ensure_deck(null, 0.5)
+	var source = load(FLOORPLAN_SOURCE_SCRIPT).new()
+	mm._source = source
+	var region_b := NavigationRegion3D.new()           # a second chunk streams in under the same level
+	region_b.add_to_group(Groups.NAVMESH)
+	level.add_child(region_b)
+	mm._process(0.016)
+	assert_eq(mm.deck_count(), 0, "the decks were sliced from the old region set, so they drop")
+	assert_eq(mm._source, source, "but the wall gather is KEPT — only the new chunk will be walked")
+	assert_true(mm._walls_stale, "and flagged to re-sync on the next gather beat")
+	var other := Node3D.new()                          # a different level (a door swap) is still a rebake
+	other.name = "Level"
+	level.free()
+	add_child_autofree(other)
+	var region_c := NavigationRegion3D.new()
+	region_c.add_to_group(Groups.NAVMESH)
+	other.add_child(region_c)
+	mm._process(0.016)
+	assert_null(mm._source, "a new level root is a swap: the walls drop too")
 
 
 # --- the "map flips when I jump" fix --------------------------------------------------------------------
@@ -313,13 +431,34 @@ func test_widget_authored_map_data_wins_over_the_levels() -> void:
 	own = null
 
 
-## No GameRoot in the tree (a bare level scene, a test harness): the resolve degrades to "no underlay"
-## rather than crashing — the same soft-fail rule every other lookup in this widget follows.
+## No GameRoot to ask (a bare level scene, a test harness, the root freed on the way out) or no tree at all (a
+## widget detached from its HUD): the resolve degrades to "no underlay" rather than crashing — the same soft-fail
+## rule every other lookup in this widget follows — and it CLEARS what an earlier rebake stamped rather than
+## leaving that level's art drawing in whatever world comes next. Each case starts from a stamped map, which is
+## the control that the null afterwards is the degrade and not a widget that never had an underlay.
 func test_underlay_resolves_null_with_no_game_root() -> void:
 	var mm = load(MINIMAP_SCRIPT).new()
 	add_child_autofree(mm)
+	var root := GameRootStub.new()
+	add_child(root)
+	root.level = LevelData.new()
+	root.level.map_data = MapData.new()
 	mm.rebake()
-	assert_null(mm.active_map_data(), "no GameRoot in the tree -> no underlay, no crash")
+	assert_true(mm.active_map_data() != null, "control: with a GameRoot in the tree the level's map is stamped")
+	remove_child(root)
+	root.free()
+	mm.rebake()
+	assert_null(mm.active_map_data(), "the GameRoot is gone -> the old level's map is cleared, and nothing crashes")
+	var next_root := GameRootStub.new()
+	add_child_autofree(next_root)
+	next_root.level = LevelData.new()
+	next_root.level.map_data = MapData.new()
+	mm.rebake()
+	assert_true(mm.active_map_data() != null, "control: a new GameRoot's level map stamps again while the widget is in the tree")
+	remove_child(mm)
+	mm.rebake()
+	assert_null(mm.active_map_data(),
+			"a DETACHED widget's rebake clears the stamped map without asking a tree it is no longer in")
 
 
 ## THE DELIVERY PATH: in the shipped game nothing calls rebake() but _process's region-staleness check, so
@@ -404,15 +543,35 @@ func test_dead_npcs_get_no_dot() -> void:
 	autofree(plain)
 	assert_true(mm._npc_is_live(plain), "a host with no is_alive() is assumed live rather than silently dropped")
 
-## The designer switch ships ON now (the player asked to see NPCs), but BOTH it and the player's Options row
-## must agree — either one off means no dots.
-func test_npc_dots_ship_on_for_both_owners() -> void:
-	var mm = load(MINIMAP_SCRIPT).new()
-	autofree(mm)
-	assert_true(mm.dot_npcs, "the designer switch ships on")
+## SHIP DECISION (user request: the player asked to see NPCs): body dots ship ON for BOTH owners — the designer's
+## dot_npcs and the player's Options row — so a fresh game wearing a scanner really puts a body on the map. Driven
+## with the two DEFAULTS as shipped (a bare widget's export, a fresh Settings instance's row), through the real
+## sampler and a real paint; then either owner switched off paints nothing, which is the control that the
+## observation can go dark at all. (The sampler's three-owner rule is pinned in tests/test_minimap_scan.gd.)
+func test_a_fresh_games_defaults_paint_body_dots() -> void:
 	var fresh = load("res://managers/Settings.gd").new()
-	assert_true(fresh.minimap_show_npcs, "and so does the player-facing row")
+	var shipped_row: bool = fresh.minimap_show_npcs
 	fresh.free()
+	var was_npcs: bool = Settings.minimap_show_npcs
+	Settings.minimap_show_npcs = shipped_row
+	var mm = _idle_minimap()   # samples _scan_r through the shipped sampler, off the widget's own default dot_npcs
+	var body := CountingNpcStub.new()
+	add_child_autofree(body)
+	body.add_to_group(Groups.NPC)
+	await _repaint(mm)
+	assert_gt(body.asked, 0,
+			"NPC dots ship ON for both owners (user request) — with the shipped defaults a scanner-wearing player must see a dot for the body beside them")
+	body.asked = 0
+	mm.dot_npcs = false
+	mm._scan_r = mm._sample_scan_range(_scanner())
+	await _repaint(mm)
+	assert_eq(body.asked, 0, "the designer switch alone takes the dots off")
+	mm.dot_npcs = true
+	Settings.minimap_show_npcs = false
+	mm._scan_r = mm._sample_scan_range(_scanner())
+	await _repaint(mm)
+	assert_eq(body.asked, 0, "...and so does the player's Options row alone")
+	Settings.minimap_show_npcs = was_npcs
 
 
 ## Minimal stand-in for an NPC: the widget duck-types resolved_disposition / is_following / is_alive, so a
@@ -427,6 +586,16 @@ class NpcStub extends Node3D:
 		return following
 	func is_alive() -> bool:
 		return alive
+
+
+## An NpcStub that COUNTS how often the widget asks its allegiance. Only the body channel's dot paint
+## (_paint_npc_dot, through npc_dot_color) asks that during a frame with no human player in the tree, so a
+## non-zero count after a repaint means "a dot was painted for this body" and zero means it was not.
+class CountingNpcStub extends NpcStub:
+	var asked: int = 0
+	func resolved_disposition() -> int:
+		asked += 1
+		return disposition
 
 
 # --- the hostile alert ring -----------------------------------------------------------------------------
@@ -456,18 +625,32 @@ func test_only_a_hostile_wears_the_alert_ring() -> void:
 
 ## The ring is TARGET-GATED through NPC.suspicion_of, which returns CALM unless the asker is what the NPC is
 ## actually tracking. A guard trading fire with a stray dog must not read as "they are onto you".
+##
+## Driven through the REAL facade, not a stub told what to answer: a bare npc.gd built off-tree (never added, so
+## its _ready never runs — the house rule, and test_perception_suspicion.gd's idiom) carrying a real Perception.
+## What is proven is the pipeline the paint site uses — widget -> NPC.suspicion_of(player) -> Perception — and
+## the control shows the very same guard DOES ring once it is locked on to you.
 func test_the_ring_is_silent_when_the_npc_is_watching_someone_else() -> void:
 	var mm = load(MINIMAP_SCRIPT).new()
 	autofree(mm)
 	var me := Node3D.new()
 	autofree(me)
-	var npc := AwareNpcStub.new()
-	autofree(npc)
-	npc.disposition = Disposition.Kind.HOSTILE
-	npc.tier = 3
-	npc.watching = Node3D.new()   # a different target entirely
-	autofree(npc.watching)
-	assert_eq(mm.alert_tier(npc, me), 0, "fighting something else is not the same as hunting you")
+	var stray_dog := Node3D.new()
+	autofree(stray_dog)
+	var guard = load("res://scripts/npc/npc.gd").new()
+	autofree(guard)
+	guard.disposition = Disposition.Kind.HOSTILE
+	var perception := Perception.new()
+	autofree(perception)
+	perception.state = Perception.State.ALERTED
+	perception.detection = 1.0
+	perception.target = stray_dog                    # fully alerted — on somebody else
+	guard._perception = perception
+	assert_eq(mm.alert_tier(guard, me), Perception.SuspicionTier.CALM,
+			"a hostile guard fighting a stray dog must not ring — fighting something else is not the same as hunting you")
+	perception.target = me
+	assert_eq(mm.alert_tier(guard, me), Perception.SuspicionTier.ALERTED,
+			"control: the same guard locked on to YOU rings at its full tier, so the silence above is the target gate and not a dead ring")
 
 ## Degrades over a whole group every frame, so every soft input must be answered rather than crash: no player
 ## resolved yet (a boot frame), a plain prop that answers nothing, a null.
@@ -487,23 +670,22 @@ func test_alert_tier_degrades_for_anything_that_cannot_answer() -> void:
 	assert_eq(mm.alert_tier(npc, null), 0, "and with no player resolved there is nobody to be alerted ON")
 
 
-## An NPC stub that also answers the awareness surface. Mirrors NPC.suspicion_of's TARGET GATE — it reports its
-## tier only for the node it is actually watching — so the test exercises the same shape the real facade has,
-## without npc.gd's _ready or a live Perception child.
+## An NPC stub that also answers the awareness surface, reporting `tier` for WHOEVER asks. It deliberately carries
+## no target gate of its own: the tests using it pin the widget's HOSTILE and null-player gates, and the target
+## gate is proven through the real npc.gd facade above rather than re-implemented here.
 class AwareNpcStub extends Node3D:
 	var disposition: int = Disposition.Kind.NEUTRAL
 	var following: bool = false
 	var alive: bool = true
 	var tier: int = 0
-	var watching: Node = null   ## null = "watching whoever asks" (the common test case)
 	func resolved_disposition() -> int:
 		return disposition
 	func is_following() -> bool:
 		return following
 	func is_alive() -> bool:
 		return alive
-	func suspicion_of(who: Node) -> int:
-		return tier if watching == null or watching == who else 0
+	func suspicion_of(_who: Node) -> int:
+		return tier
 
 
 # --- the idle gate --------------------------------------------------------------------------------------
@@ -852,27 +1034,69 @@ func test_a_zoom_or_heading_change_repaints_an_otherwise_idle_map() -> void:
 
 # --- the station channel --------------------------------------------------------------------------------
 
-## The two-owner idiom, copied verbatim from the NPC dots: the designer switch AND the player's Options row
-## both ship ON, and either one off means no glyphs.
-func test_station_glyphs_ship_on_for_both_owners() -> void:
-	var mm = load(MINIMAP_SCRIPT).new()
-	autofree(mm)
-	assert_true(mm.dot_stations, "the designer switch ships on")
+## SHIP DECISION, the two-owner idiom copied from the NPC dots: the designer switch AND the player's Options row
+## both ship ON, so a station dropped into a fresh game is on the map — and either one off means no glyphs.
+## Driven end to end with the shipped defaults: a StationMarker left to join Groups.MINIMAP_STATION through its
+## OWN _ready (the zero-authoring path every station component takes), a bare widget's dot_stations, a fresh
+## Settings instance's row, and a real paint.
+func test_a_fresh_games_defaults_paint_station_glyphs() -> void:
 	var fresh = load("res://managers/Settings.gd").new()
-	assert_true(fresh.minimap_show_stations, "and so does the player-facing row")
+	var shipped_row: bool = fresh.minimap_show_stations
 	fresh.free()
+	var was_stations: bool = Settings.minimap_show_stations
+	Settings.minimap_show_stations = shipped_row
+	var mm = _idle_minimap()
+	var pin := CountingStation.new()
+	add_child_autofree(pin)   # NOT added to the group by hand: its own _ready does that, as in a shipped level
+	await _repaint(mm)
+	assert_gt(pin.asked, 0,
+			"station glyphs ship ON for both owners — with the shipped defaults a station in the level must be glyphed on the map")
+	pin.asked = 0
+	mm.dot_stations = false
+	await _repaint(mm)
+	assert_eq(pin.asked, 0, "the designer switch alone takes the glyphs off")
+	mm.dot_stations = true
+	Settings.minimap_show_stations = false
+	await _repaint(mm)
+	assert_eq(pin.asked, 0, "...and so does the player's Options row alone")
+	Settings.minimap_show_stations = was_stations
+
+
+## A StationMarker that COUNTS how often the widget asks its tint. resolved_color is asked once per painted glyph
+## (_paint_station) and by nothing else on the map, so the count is "was this station glyphed". _ready is NOT
+## overridden, so the marker still joins Groups.MINIMAP_STATION exactly the way a shipped one does.
+class CountingStation extends StationMarker:
+	var asked: int = 0
+	func resolved_color(station_color: Color, exit_color: Color) -> Color:
+		asked += 1
+		return super(station_color, exit_color)
+
 
 ## A station riding a dialogue NPC must get BOTH marks — the shop glyph AND its body's allegiance dot. The old
 ## de-dupe (skip any Groups.NPC member already in Groups.MINIMAP) is exactly why stations went into their own
 ## group: joining Groups.MINIMAP would have suppressed the dot, trading "who is hostile" for "who is a shop" on
-## the 7-of-8 placed stations that ride NPCs.
+## the 7-of-8 placed stations that ride NPCs. Driven through a real paint, with the control that the de-dupe
+## really does suppress a body that is ALSO a POI beacon — so the dot seen first is not a skip that never fires.
 func test_a_station_group_membership_does_not_suppress_the_bodys_dot() -> void:
-	var npc := NpcStub.new()
-	add_child_autofree(npc)
-	npc.add_to_group(Groups.NPC)
-	npc.add_to_group(Groups.MINIMAP_STATION)
-	assert_false(npc.is_in_group(Groups.MINIMAP),
-			"the station channel must never be Groups.MINIMAP — that group is what the NPC loop skips")
+	var was_npcs: bool = Settings.minimap_show_npcs
+	var was_stations: bool = Settings.minimap_show_stations
+	Settings.minimap_show_npcs = true
+	Settings.minimap_show_stations = true
+	var mm = _idle_minimap()
+	var vendor := CountingNpcStub.new()
+	add_child_autofree(vendor)
+	vendor.add_to_group(Groups.NPC)
+	vendor.add_to_group(Groups.MINIMAP_STATION)   # the shop riding the body
+	await _repaint(mm)
+	assert_gt(vendor.asked, 0,
+			"a body that is also a station must still paint its allegiance dot — a vendor's hostility must never be hidden behind its shop glyph")
+	vendor.asked = 0
+	vendor.add_to_group(Groups.MINIMAP)           # control: a body that is ALSO a POI beacon is drawn by that channel
+	await _repaint(mm)
+	assert_eq(vendor.asked, 0,
+			"control: the body loop's de-dupe skips a Groups.MINIMAP member, so station membership is what keeps the dot above")
+	Settings.minimap_show_npcs = was_npcs
+	Settings.minimap_show_stations = was_stations
 
 
 # --- the zoom cycle key ---------------------------------------------------------------------------------
@@ -889,15 +1113,31 @@ func test_the_zoom_key_walks_from_the_nearest_authored_step() -> void:
 	assert_eq(mm._nearest_zoom_step(steps, 9.0), 2, "...and one past the end snaps to the last")
 	assert_eq(mm._nearest_zoom_step(steps, 0.1), 0, "...or the first")
 
-## The walk WRAPS, so the key is a cycle rather than a ramp that sticks at maximum zoom.
-func test_the_zoom_cycle_wraps_at_the_end() -> void:
+## THE KEY ITSELF, through the real _poll_zoom_key with the action held: it advances ONE authored step, WRAPS at
+## the end (a cycle, not a ramp that sticks at maximum zoom), and advances from the step NEAREST the live value,
+## not from a remembered index. Input.action_press is visible to a same-frame is_action_just_pressed (the
+## test_flashlight.gd idiom), so every poll below sees the one press. The steps are this test's own so every
+## expectation is an exact authored value; the shipped list's one real requirement is asserted first.
+func test_the_zoom_key_advances_one_step_wraps_and_follows_the_slider() -> void:
 	var mm = load(MINIMAP_SCRIPT).new()
 	autofree(mm)
-	var steps: PackedFloat32Array = GameSettings.hud.minimap_zoom_steps
-	assert_gt(steps.size(), 1, "the shipped step list must hold more than one value or the key does nothing")
-	var last: int = steps.size() - 1
-	assert_eq((mm._nearest_zoom_step(steps, steps[last]) + 1) % steps.size(), 0,
-			"stepping off the end returns to the first zoom, never past the array")
+	assert_gt(_was_zoom_steps.size(), 1, "the SHIPPED step list must hold more than one value or the key does nothing")
+	GameSettings.hud.minimap_zoom_steps = PackedFloat32Array([1.0, 1.5, 2.25])
+	Settings.minimap_zoom = 1.0
+	mm._poll_zoom_key()
+	assert_almost_eq(Settings.minimap_zoom, 1.0, 0.0001, "control: with the zoom key NOT pressed the poll writes nothing")
+	assert_false(InputManager.gameplay_suppressed(), "precondition: no menu or cutscene is suppressing gameplay keys")
+	Input.action_press(InputManager.action_minimap_zoom)
+	mm._poll_zoom_key()
+	assert_almost_eq(Settings.minimap_zoom, 1.5, 0.0001, "one press advances the map one authored zoom step")
+	Settings.minimap_zoom = 2.25
+	mm._poll_zoom_key()
+	assert_almost_eq(Settings.minimap_zoom, 1.0, 0.0001,
+			"pressing on the LAST step wraps to the first — the key is a cycle, never stuck at maximum zoom")
+	Settings.minimap_zoom = 1.45   # the Options slider moved the value off-step since the last press
+	mm._poll_zoom_key()
+	assert_almost_eq(Settings.minimap_zoom, 2.25, 0.0001,
+			"the key advances from the step CLOSEST to what the map shows (1.5), not from where the last press left it (1.0)")
 
 ## Every authored step has to be reachable through the setter, or the key would silently clamp two steps onto
 ## the same value and the cycle would stutter.
@@ -1004,15 +1244,17 @@ func test_the_drawn_stamps_track_the_overridden_view_not_the_settings_row() -> v
 ## above, so it has to settle exactly the way the zoom and the span do — a permanently-open gate here would
 ## repaint a full-panel map every frame the tab is up.
 ##
-## It also EXERCISES the ink, which is the part no off-tree test can reach. With the view dragged off the
-## player, `view * _centre_xz` is no longer size * 0.5, so the player caret and the noise ring take a projected
-## point like any other marker (clipped to the box, never rim-pinned) instead of the box centre they used to
-## assume. GUT 9.6 fails a whole suite on ONE engine error, so "it painted panned and the suite is still green"
-## is a real signal that the projected path holds — the geometry itself is playtest-verified.
+## The panned repaint also runs the whole _draw with the view dragged off the player, so the caret and a live noise
+## ring are inked at a projected point rather than the box centre. Only an ENGINE ERROR on that path can fail this
+## test (GUT 9.6 fails on one); WHERE they land is not observable headless and is not asserted here. The projection
+## itself is pinned through the one matrix by test_waypoint_map.gd's pan tests.
 func test_a_panned_view_paints_and_settles() -> void:
 	var mm = _idle_minimap()
 	mm.world_span_override = 120.0
 	mm.heading = mm.Heading.NORTH_UP     # the map tab's view: a page you READ has a fixed bearing
+	# A live noise ring, so the panned paint below inks it too. _process bails at the missing human player, so
+	# this sample survives the frames below (the noise-suite idiom).
+	mm._noise_r = 12.0
 	await _repaint(mm)
 	assert_false(mm._needs_repaint(false), "precondition: an un-panned widget settles idle")
 	mm.view_offset = Vector2(60.0, -40.0)
@@ -1021,20 +1263,27 @@ func test_a_panned_view_paints_and_settles() -> void:
 	await _repaint(mm)
 	assert_eq(mm._drawn_view_offset, mm.view_offset, "the paint stamps the pan it drew")
 	assert_false(mm._needs_repaint(false), "...and settles ONCE, rather than pinning the gate open every frame")
-	# The ring is centred on the player's PROJECTED point now — off-centre here, and partly off the box.
-	# _process bails at the missing human player, so this sample survives the frames below (the noise-suite idiom).
-	mm._noise_r = 12.0
-	await _repaint(mm)
-	assert_almost_eq(mm._drawn_noise_r, 12.0, 0.0001,
-			"the caret and the noise ring painted off-centre, and the gate stamped what they drew")
 
 ## The zoom key has ONE owner. A second live widget polling it would write Settings.minimap_zoom from the map
-## tab and move the corner box under the player's HUD on a keypress meant for neither.
+## tab and move the corner box under the player's HUD on a keypress meant for neither. The key is really HELD
+## here, and the HUD box's poll on the very same press is the control that the refusal is the export and not a
+## key nobody pressed. An EMPTY authored step list is the other documented off switch, and must refuse too.
 func test_the_zoom_key_gate_is_switchable_per_instance() -> void:
-	var mm = load(MINIMAP_SCRIPT).new()
-	autofree(mm)
-	mm.zoom_key_enabled = false
-	var before: float = Settings.minimap_zoom
-	mm._poll_zoom_key()  # must bail on the export before it ever reaches Input / the steps list
-	assert_almost_eq(Settings.minimap_zoom, before, 0.0001,
-			"a widget with the key switched off never writes the shared zoom row")
+	var hud_box = load(MINIMAP_SCRIPT).new()
+	autofree(hud_box)
+	var map_tab = load(MINIMAP_SCRIPT).new()
+	autofree(map_tab)
+	map_tab.zoom_key_enabled = false
+	GameSettings.hud.minimap_zoom_steps = PackedFloat32Array([1.0, 1.5, 2.25])
+	Settings.minimap_zoom = 1.0
+	Input.action_press(InputManager.action_minimap_zoom)
+	map_tab._poll_zoom_key()
+	assert_almost_eq(Settings.minimap_zoom, 1.0, 0.0001,
+			"a widget with the key switched off (the map tab) never writes the shared zoom row, even with the key pressed")
+	hud_box._poll_zoom_key()
+	assert_almost_eq(Settings.minimap_zoom, 1.5, 0.0001,
+			"control: the same press on the key's owner (the HUD box) does zoom, so the refusal above is the export")
+	GameSettings.hud.minimap_zoom_steps = PackedFloat32Array()
+	hud_box._poll_zoom_key()
+	assert_almost_eq(Settings.minimap_zoom, 1.5, 0.0001,
+			"an EMPTY authored step list disables the key outright rather than dividing by zero")

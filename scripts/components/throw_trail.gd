@@ -16,8 +16,8 @@ extends Node3D
 ## prop's facing is pinned. `WorldItem._make_throwable` builds weapon drops that way on purpose — the
 ## component it stamps gets no offset at all.
 ##
-## WHERE THE RIBBON LIVES, AND WHY IT IS NOT PARENTED UNDER THE PROP: the MeshInstance3D goes to the TREE
-## ROOT (the `GunFX.spawn_tracer` convention). TWO sweeps over a Throwable's descendants would otherwise
+## WHERE THE RIBBON LIVES, AND WHY IT IS NOT PARENTED UNDER THE PROP: the MeshInstance3D goes to the LEVEL root
+## (`WorldSpawn.parent_for` — the tree root when there is no level; the `GunFX.spawn_tracer` convention). TWO sweeps over a Throwable's descendants would otherwise
 ## dress the streak as if it were part of the prop, and both go through `TalkHelpers.collect_meshes`:
 ##   * `Throwable._setup_overlay_chain` stamps the flash overlay, the outline RING (a tint duplicate under
 ##     every mesh) AND the `InkOutline.ACTOR_INK_MASK_LAYER` bit onto EVERY MeshInstance3D under the prop
@@ -26,8 +26,8 @@ extends Node3D
 ##   * `Throwable._set_carried_transparency` fades that same set while the prop is carried.
 ## (`Ps1Applier` is NOT one of them and is no reason to root-parent: its walk returns on `node is Throwable`
 ## before recursing, so it never visits a prop's descendants — and it skips transparent materials anyway.)
-## Root-parenting also means the geometry is authored in plain WORLD space against an identity transform
-## (the AiDebugDraw idiom) — no `top_level` dance, and none of the stale-world-transform trap that costs
+## Parenting outside the prop also means the geometry is authored in plain WORLD space — the ribbon's global
+## transform is pinned to identity (the AiDebugDraw idiom) — no `top_level` dance, and none of the stale-world-transform trap that costs
 ## NpcLaser a `reset_for_reuse`. `_exit_tree` frees the ribbon, so a prop destroyed, picked up into a
 ## backpack, or unloaded by a level swap mid-flight takes its streak with it.
 ##
@@ -50,6 +50,7 @@ extends Node3D
 ## samples closer than this produce a zero-length span whose tangent is numerically meaningless (a NaN
 ## basis), and at the speeds that pass `min_speed` a 60 Hz tick covers many times this.
 const MIN_STEP: float = 0.015
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 ## Below this squared length a cross product is treated as degenerate (parallel inputs) and the next
 ## fallback axis is tried — the `GunFX.spawn_tracer` guard, which a throw straight up or down needs.
 const DEGENERATE_SQ: float = 0.000001
@@ -82,7 +83,7 @@ const DEGENERATE_SQ: float = 0.000001
 ## enough to hold more than this many ticks. 0 inherits `GameSettings.effects.throw_trail_max_points`.
 @export var max_points: int = 0
 
-var _ribbon: MeshInstance3D = null  ## the world-space ribbon, parented to the tree root and built on first use
+var _ribbon: MeshInstance3D = null  ## the world-space ribbon, parented to the LEVEL (WorldSpawn) and built on first use
 var _mesh: ImmediateMesh = null
 var _host: RigidBody3D = null  ## the thrown body this streak follows (nearest RigidBody3D ancestor)
 var _points: PackedVector3Array = PackedVector3Array()  ## world-space samples, OLDEST first
@@ -274,7 +275,7 @@ static func side_vector(tangent: Vector3, to_camera: Vector3) -> Vector3:
 
 # --- The ribbon node -----------------------------------------------------------------------------------
 
-## Build the ribbon on FIRST USE rather than in `_ready`. Two reasons: adding to the tree root while the
+## Build the ribbon on FIRST USE rather than in `_ready`. Two reasons: adding to the level while the
 ## rest of the scene is still running `_ready` races the "parent node is busy setting up children" error
 ## (the hazard NpcLaser documents), and a prop that is never thrown — every crate in the level — then
 ## costs nothing at all, not even an empty MeshInstance3D.
@@ -290,8 +291,16 @@ func _ensure_ribbon() -> void:
 	_ribbon.material_override = build_material()
 	_ribbon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_ribbon.layers = 1  # the world layer, like every other code-spawned world visual (see WorldItem._make_world_renderable)
-	get_tree().root.add_child(_ribbon)
-	_ribbon.global_transform = Transform3D.IDENTITY  # vertices are authored in world space; keep local == world
+	# The LEVEL root, not the chunk under the throw: a streak crosses cells, and a chunk unloading behind it must not
+	# free the ribbon out from under a live trail.
+	var into := WorldSpawn.parent_for(self)
+	if into == null:
+		_ribbon.free()
+		_ribbon = null
+		_mesh = null  # nothing to draw into this frame; the next sample retries
+		return
+	into.add_child(_ribbon)
+	_ribbon.global_transform = Transform3D.IDENTITY  # vertices are authored in world space; cancel the parent's transform
 
 func _free_ribbon() -> void:
 	if is_instance_valid(_ribbon):

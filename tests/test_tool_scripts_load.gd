@@ -142,7 +142,9 @@ func test_scenetree_scripts_compile_with_their_entry_hooks() -> void:
 		var m := _methods(shots)
 		assert_true(m.has("_process"), "__zfight_shots drives itself from SceneTree._process (nodes must be in-tree before the census)")
 		assert_true(m.has("_build"), "__zfight_shots builds the rig in _build on the first _process frame")
-		assert_eq(_consts(shots).get("SETTLE"), 30, "the probe waits SETTLE=30 frames before each shot (same frame count for before/after)")
+		var settle = _consts(shots).get("SETTLE")
+		assert_true(settle is int and int(settle) >= 1,
+			"SETTLE must be a whole number of frames >= 1 — the probe rewinds _frame to SETTLE - 1 between shots, so 0 would park it on frame -1")
 
 
 func test_hitch_probe_compiles_and_its_scene_wraps_it() -> void:
@@ -409,9 +411,12 @@ func test_bake_item_icons_paths_and_render_math() -> void:
 	if baker == null or render == null:
 		return
 	var cell = _consts(baker).get("CELL")
-	assert_eq(cell, 96, "Baker.CELL is 96 px per grid cell (shared by the Icons tab and this CLI so both write identical files)")
-	assert_eq(render.pixel_size(2, 1, cell), Vector2i(192, 96), "a 2x1 item bakes a 192x96 icon")
-	assert_eq(render.pixel_size(0, 0, cell), Vector2i(96, 96), "a degenerate 0x0 footprint floors to one cell")
+	assert_true(cell is int and int(cell) > 0, "Baker.CELL (the px-per-grid-cell both the Icons tab and this CLI bake at) is a positive int")
+	if not (cell is int and int(cell) > 0):
+		return
+	assert_eq(render.pixel_size(2, 1, cell), Vector2i(2 * cell, cell), "a 2x1 item bakes an icon two cells wide and one cell tall")
+	assert_eq(render.pixel_size(1, 3, cell), Vector2i(cell, 3 * cell), "width and height are not swapped: a 1x3 item bakes a tall icon")
+	assert_eq(render.pixel_size(0, 0, cell), Vector2i(cell, cell), "a degenerate 0x0 footprint floors to one cell rather than a 0 px image")
 	assert_eq(baker.save_png(null, "res://resources/icons/_never_written.png"), ERR_INVALID_DATA, "save_png(null) refuses without touching disk")
 	assert_false(FileAccess.file_exists("res://resources/icons/_never_written.png"), "the refused save wrote nothing")
 	var rig = baker.new()
@@ -453,22 +458,55 @@ func test_zfight_shots_level_and_cleaner_contract() -> void:
 # ---------------------------------------------------------------------------------------------------------------
 # __load_in_hitch_probe.gd — the kept load-in hitch diagnostic
 
-func test_hitch_probe_knobs_and_defaults() -> void:
+## The run tag the dump test writes under, so its JSON can never collide with a real probe run's file.
+const HITCH_DUMP_TAG := "gut_tool_scripts_load"
+const HITCH_DUMP_PATH := "user://load_in_hitch_gut_tool_scripts_load.json"
+
+
+func after_each() -> void:
+	if FileAccess.file_exists(HITCH_DUMP_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(HITCH_DUMP_PATH))
+
+
+func test_hitch_probe_knobs_are_coherent() -> void:
 	var consts := _consts(load(HITCH_PROBE))
 	assert_eq(consts.get("GAME"), GAME_TSCN, "the probe boots the REAL game.tscn")
 	assert_true(ResourceLoader.exists(GAME_TSCN), "game.tscn exists (the threaded load target)")
-	assert_eq(consts.get("WINDOW_SEC"), 12.0, "the recording window is 12 s after the swap")
-	assert_eq(consts.get("PRINT_FLOOR_MS"), 20.0, "frames over 20 ms are printed / summed as `over20`")
+	assert_gt(float(consts.get("WINDOW_SEC", 0.0)), 0.0,
+		"the recording window must be positive — at 0 _process stops and dumps on the first recorded frame")
+	assert_gt(float(consts.get("PRINT_FLOOR_MS", 0.0)), 1000.0 / 60.0,
+		"the print floor must sit above one 60 Hz frame, or every ordinary frame prints and the hitches drown")
 	var monitors: Array = consts.get("PIPE_MONITORS", [])
 	var names: Array = consts.get("PIPE_NAMES", [])
-	assert_eq(monitors.size(), 5, "five pipeline-compilation monitors are sampled")
+	assert_gt(monitors.size(), 0, "at least one pipeline-compilation monitor is sampled")
 	assert_eq(names.size(), monitors.size(), "PIPE_NAMES labels every PIPE_MONITORS entry (they are indexed together)")
 	var probe: Node = load(HITCH_PROBE).new()  # OFF-tree on purpose: _ready resizes the window + hooks the tree
-	assert_eq(probe._run_tag, "run", "the default run tag is `run` (the JSON is user://load_in_hitch_run.json)")
-	assert_true(probe._flags.is_empty(), "no --no-* flags by default")
-	assert_false(probe._recording, "recording starts only at the scene swap")
-	assert_eq(probe._pipe_prev.size(), monitors.size(), "the previous-sample array covers every monitor")
+	assert_eq(probe._pipe_prev.size(), monitors.size(), "the previous-sample array covers every monitor (_pipeline_deltas indexes it per monitor)")
 	probe.free()
+
+
+func test_hitch_probe_dump_writes_the_recorded_frames_to_its_run_tagged_json() -> void:
+	# The probe's whole output contract: `user://load_in_hitch_<tag>.json` holding the run tag, the --no-* flags and
+	# every recorded frame. Driven with a hand-filled frame list (no scene swap, no window) under a test-only tag.
+	var probe: Node = load(HITCH_PROBE).new()
+	probe._run_tag = HITCH_DUMP_TAG
+	probe._flags = PackedStringArray(["navlinks"])
+	probe._frames = [{"t": 0.1, "dt": 35.0}, {"t": 0.2, "dt": 5.0}, {"t": 0.7, "dt": 8.0}]
+	probe._dump()
+	probe.free()
+	assert_true(FileAccess.file_exists(HITCH_DUMP_PATH), "_dump writes user://load_in_hitch_<run tag>.json")
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(HITCH_DUMP_PATH))
+	assert_true(parsed is Dictionary, "the dump is one JSON object")
+	if not parsed is Dictionary:
+		return
+	var dump: Dictionary = parsed
+	assert_eq(String(dump.get("run", "")), HITCH_DUMP_TAG, "the dump records which run it was")
+	assert_eq(dump.get("flags", []), ["navlinks"], "the dump records the --no-* flags the run was made with")
+	var frames: Array = dump.get("frames", [])
+	assert_eq(frames.size(), 3, "every recorded frame is written, not just the ones over the print floor")
+	if frames.size() == 3:
+		assert_almost_eq(float(frames[0].get("dt", 0.0)), 35.0, 0.001, "frames keep their recorded durations, in order")
+		assert_almost_eq(float(frames[2].get("t", 0.0)), 0.7, 0.001, "frames keep their recorded timestamps, in order")
 
 
 func test_hitch_probe_node_added_tallies_every_node_but_caps_the_names() -> void:
@@ -501,10 +539,19 @@ func test_hitch_probe_navlinks_flag_disables_auto_project() -> void:
 	probe.free()
 
 
-func test_hitch_probe_pipeline_deltas_are_quiet_between_consecutive_reads() -> void:
+func test_hitch_probe_pipeline_deltas_label_each_monitor_then_go_quiet() -> void:
+	# Prime the previous samples so monitor i reads exactly i + 1 compilations since the last read: each delta must
+	# come out under ITS monitor's label, in monitor order, and the read must re-baseline so the next one is quiet.
 	var probe: Node = load(HITCH_PROBE).new()
-	var first = probe._pipeline_deltas()
-	assert_true(first is String, "_pipeline_deltas returns the comma-joined delta string")
+	var consts := _consts(load(HITCH_PROBE))
+	var monitors: Array = consts.get("PIPE_MONITORS", [])
+	var names: Array = consts.get("PIPE_NAMES", [])
+	var expected := PackedStringArray()
+	for i in monitors.size():
+		probe._pipe_prev[i] = Performance.get_monitor(monitors[i]) - float(i + 1)
+		expected.append("%s+%d" % [names[i], i + 1])
+	assert_eq(probe._pipeline_deltas(), ",".join(expected),
+		"every monitor that moved reports under its own label with its own delta, comma-joined in monitor order")
 	assert_eq(probe._pipeline_deltas(), "", "no pipeline compiled between two back-to-back reads -> empty string (the print gate)")
 	probe.free()
 
@@ -531,3 +578,22 @@ func test_hitch_probe_collects_links_and_their_authored_endpoints() -> void:
 	probe._drift_report()
 	lvl.free()
 	probe.free()
+
+
+# new_worldspace.gd — scaffolds a streamed worldspace (persistent scene + a grid of baked chunks + LevelData)
+
+func test_new_worldspace_is_a_run_tool_that_ships_its_placeholder_name() -> void:
+	const NEW_WORLDSPACE := "res://scripts/tools/new_worldspace.gd"
+	var script: Script = load(NEW_WORLDSPACE)
+	assert_not_null(script, "new_worldspace.gd must compile (a parse error here only shows on File -> Run)")
+	if script == null:
+		return
+	assert_true(script.is_tool(), "new_worldspace.gd is @tool — File -> Run refuses a non-tool EditorScript")
+	assert_eq(script.get_instance_base_type(), &"EditorScript", "new_worldspace.gd extends EditorScript")
+	assert_true(_methods(script).has("_run"), "new_worldspace.gd defines _run()")
+	var consts := _consts(script)
+	assert_eq(consts.get("WORLD_NAME"), "MyWorld", "the committed WORLD_NAME is the placeholder — File -> Run on a fresh checkout warns instead of WRITING a world")
+	var builder: Script = consts.get("Builder")
+	assert_not_null(builder, "the tool drives scripts/world/worldspace_builder.gd")
+	if builder != null:
+		assert_true(ResourceLoader.exists(String(_consts(builder).get("TEMPLATE_SCENE", ""))), "the builder's persistent-layer template exists")

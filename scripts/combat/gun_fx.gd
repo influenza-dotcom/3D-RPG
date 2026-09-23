@@ -2,7 +2,7 @@ class_name GunFX
 
 ## Stateless gunfire visual effects lifted off the Attack coordinator — the throwaway tracer, hit
 ## spark, and (spray-paint) muzzle flash, each spawned under an explicit `parent` so they outlive the
-## firing Weapon's churn (attack.gd parents them to the tree root) and aimed by explicit args rather
+## firing Weapon's churn (attack.gd parents them to the level — WorldSpawn.parent_for) and aimed by explicit args rather
 ## than reading any state. The bullet material lives here; the explosion-area blast scene is resolved through the
 ## shared Explosion.instantiate_recovering() source. The coordinator decides WHEN to spawn (a hit, a tracer-flagged
 ## weapon, a spray shot) and passes the camera in for the distance-scaled tracer thickness.
@@ -20,7 +20,7 @@ const TRACER_MATERIAL = preload("res://resources/materials/bulletmat.tres")
 
 ## Spawn a brief tracer: a thin box stretched from `from` (muzzle) to `to` (the shot point), wearing
 ## the bullet material, freed after the tunable tracer_lifetime. Built like the laser beam (manual
-## basis so it stays thin + aligned to the shot), parented to `parent` (the tree root) so it outlives
+## basis so it stays thin + aligned to the shot), parented to `parent` (the level, via WorldSpawn) so it outlives
 ## the Weapon's churn. `cam` is the active camera (may be null) — its distance only scales the visible
 ## thickness.
 static func spawn_tracer(parent: Node, from: Vector3, to: Vector3, cam: Camera3D) -> void:

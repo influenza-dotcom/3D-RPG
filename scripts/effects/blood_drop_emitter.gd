@@ -7,13 +7,14 @@ extends Node
 ## on death. This emitter batches them (`_per_frame` each physics frame) so the cost
 ## is amortized while keeping the full drop count.
 ##
-## It lives under the scene root, independent of the dying Character (which
+## It lives in the world (WorldSpawn: the level / chunk), independent of the dying Character (which
 ## queue_free()s itself the same frame its gore fires, taking its BloodyMess child
 ## with it), and self-frees once every drop has spawned. The per-drop spawn
 ## parameters (scatter + speed range) live in GameSettings.effects (blood_drop_*),
 ## so the death rain and the per-gib burst spawn identical drops.
 
 const BLOOD_DROP := preload("res://scenes/effects/blood_drop.tscn")
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 
 var _origin: Vector3
 var _remaining: int = 0
@@ -25,7 +26,7 @@ var _per_frame: int = 1
 var gore_tag: StringName = &""
 
 ## Begin raining `count` drops centred on `origin`, at most `per_frame` per physics
-## frame. Call right after add_child()ing the emitter to the scene root.
+## frame. Call right after adding the emitter to the world (WorldSpawn.add).
 func start(origin: Vector3, count: int, per_frame: int) -> void:
 	_origin = origin
 	_remaining = maxi(0, count)
@@ -43,7 +44,7 @@ func _spawn_one() -> void:
 	var drop := BLOOD_DROP.instantiate()
 	if drop == null:
 		return  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
-	get_tree().root.add_child(drop)
+	WorldSpawn.add(self, drop, _origin)
 	if gore_tag != &"":
 		drop.add_to_group(gore_tag)
 		drop.set(&"gore_tag", gore_tag)  # so the decal it leaves on impact is tagged too (blood_drop.gd)

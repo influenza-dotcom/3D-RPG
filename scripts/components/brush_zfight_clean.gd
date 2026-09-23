@@ -185,8 +185,8 @@ static func _material_name(mi: MeshInstance3D, surface: int) -> String:
 	var mat := mi.get_active_material(surface)
 	if mat == null:
 		return "<none>"
-	var name := mat.resource_path.get_file().get_basename()
-	return name if not name.is_empty() else mat.resource_name
+	var mat_name := mat.resource_path.get_file().get_basename()
+	return mat_name if not mat_name.is_empty() else mat.resource_name
 
 
 ## Every MeshInstance3D with an ArrayMesh beneath a `FuncGodotMap` under `node`. Scoped to func_godot output on
@@ -213,12 +213,12 @@ static func _is_opaque(mat: Material) -> bool:
 func _is_forced_loser(mat: Material) -> bool:
 	if mat == null or loser_surfaces.is_empty():
 		return false
-	var name := mat.resource_path.get_file().get_basename().to_lower()
-	if name.is_empty():
-		name = mat.resource_name.to_lower()
+	var mat_name := mat.resource_path.get_file().get_basename().to_lower()
+	if mat_name.is_empty():
+		mat_name = mat.resource_name.to_lower()
 	for pattern in loser_surfaces:
 		var p := String(pattern).get_file().get_basename().to_lower()
-		if not p.is_empty() and name.contains(p):
+		if not p.is_empty() and mat_name.contains(p):
 			return true
 	return false
 
@@ -253,6 +253,7 @@ func _harvest(mi: MeshInstance3D, slot: int, tris: Array[_Tri]) -> Array:
 			arrays[Mesh.ARRAY_INDEX] = index
 		per_surface.append(arrays)
 		var forced := _is_forced_loser(mat)
+		@warning_ignore("integer_division") # the index array is whole triangles
 		var tri_count := index.size() / 3
 		for k in tri_count:
 			var t := _Tri.new()

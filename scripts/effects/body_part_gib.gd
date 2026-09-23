@@ -319,9 +319,9 @@ func _physics_process(delta: float) -> void:
 		return
 	if not _pin_seated:
 		return
-	# A level swap frees the "Level" subtree, but gore is parented under the tree ROOT and survives it (see
-	# GoreSpawner) -- so a pin outliving a door transition would hang in the next map's empty air with the wall it
-	# was stapled to gone. The trophy belongs to its wall: when that collider goes, so does this.
+	# Gore lives in the level now (WorldSpawn), so a door parks or frees the limb together with its wall; this still
+	# matters when ONLY the wall goes -- a destructible surface shot apart, or the neighbouring chunk the wall sat in
+	# streaming out while the limb's own chunk stays. The trophy belongs to its wall: when that collider goes, so does this.
 	if not is_instance_valid(_pin_surface) or not _pin_surface.is_inside_tree():
 		_release_pin()
 		queue_free()
