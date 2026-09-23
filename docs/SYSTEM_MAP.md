@@ -479,9 +479,11 @@ QuestTracker OWNS the live quest tracker (active/completed/failed + current stag
 
 ### `class RainFall` - `scripts/components/rain_fall.gd`
 
-Drop-in weather: one RainFall anywhere in a level fills it with rain that follows the camera — a slab of emitter riding overhead, drops falling through the view, a looping rain bed on the `ambient` bus, and an indoors test (the player's own `is_indoors` when there is a player, else its own upward ray) that stops the fall and ducks the sound under a roof. No collider, nothing saved.
+Drop-in weather: one RainFall anywhere in a level fills it with rain that follows the camera — a slab of emitter riding overhead, drops whose STREAKS lie along the direction they are really falling and foreshorten as you look up them (rain_drop.gdshader), a looping rain bed on the `ambient` bus, and an overhead test (its own fan of up-rays, OR'd with the player's `is_indoors`) that stops the fall and ducks the sound under anything solid. No collider, nothing saved.
 
-- **Risk:** The shelter probe is a single ray straight up from the camera; a level whose roofs have no COLLISION (visual-only brushes) will rain indoors regardless. Author roofs with colliders, or turn `stop_when_sheltered` off and place rain per-area instead.
+- **Risk:** The shelter probe is a fan of rays straight up from the camera; a level whose roofs have no COLLISION (visual-only brushes) will rain indoors regardless. Author roofs with colliders, or turn `stop_when_sheltered` off and place rain per-area instead.
+- **Risk:** The sky heightfield is a GRID: roof edges are ragged at `volume_extents * 2 / sky_grid_cells` metres (about a metre by default), and anything thinner than a cell — a wire, a railing, a sign — either shelters a whole cell or none of it. Raise `sky_grid_cells` for a crisper eave at the cost of more rays per sweep.
+- **Risk:** The field is only `volume_extents` wide and rides the camera, so you can never see rain further than about 14 m away whatever the weather is doing. Standing deep inside a building looking out of a distant window shows a dry world for that reason and not because of the occlusion above — widening `volume_extents` buys reach and spends it on density, since `drops` is a fixed budget.
 - **Test:** `tests/test_rain_fall.gd`
 
 ### `class SkyscraperVoid` - `scripts/components/skyscraper_void.gd`
