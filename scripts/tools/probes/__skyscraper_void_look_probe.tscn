@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/tools/probes/__skyscraper_void_look_probe.gd" id="1_qa"]
+
+[node name="SkyscraperVoidLookProbe" type="Node"]
+script = ExtResource("1_qa")
