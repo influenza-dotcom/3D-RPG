@@ -20,6 +20,7 @@ extends Resource
 ##   streetwise -> buy/sell_price_mult()              Merchant.buy_price / sell_price (the trading character)
 ##                 + rep_gain/loss_mult()             Reputation.add_reputation (gains bigger, losses smaller)
 ##   agility    -> move_speed_mult() + jump_mult()    Player locomotion (faster on foot, higher jump)
+##                 + landing_mult()                   Character.effective_fall_damage_* (fall curve stretches with the jump)
 ##                 + stamina_regen_mult()             StaminaManager.recovery_rate_for (the pool refills faster)
 ##                 + melee_time_mult()                Attack.effective_attack_speed / _windup (quicker swings)
 ##                 + reload_time_mult()               Attack.effective_reload_time (quicker magazine changes)
@@ -87,7 +88,8 @@ const TAKEDOWN_TIME_PER_LARCENY := 0.05    ## larceny  -> silent-takedown wind-u
 ## RANGED weapons, and adds 5% headshot punch. 0 = neutral; higher = a deadlier, tighter shooter.
 @export var gunplay: int = BASELINE
 ## AGILITY. The QUICKNESS stat — every point over baseline buys 5% on each of five axes: you move + jump 5%
-## faster/higher, recharge stamina 5% faster (stamina_regen_mult, read live at the regen curve — endurance still
+## faster/higher (and land softer by that same jump factor — landing_mult, so your own jumps never become lethal),
+## recharge stamina 5% faster (stamina_regen_mult, read live at the regen curve — endurance still
 ## sets the pool's SIZE), swing a MELEE weapon 5% quicker (melee_time_mult, cadence AND wind-up), and finish a
 ## reload 5% quicker (reload_time_mult). 0 = neutral; negative = slower on every axis, down to a standstill / no
 ## recovery / a swing and a magazine change that take forever. The two combat halves are HANDS, not legs, and they
@@ -253,6 +255,29 @@ func move_speed_mult(bonus: float = 0.0) -> float:
 ## high-agility build springs noticeably higher; a deeply negative agility eventually can't leave the ground.
 func jump_mult(bonus: float = 0.0) -> float:
 	return maxf(0.0, 1.0 + float(agility - BASELINE + bonus) * JUMP_PER_AGILITY)
+
+## The floor under landing_mult. It is a DIVISOR guard, not a design number. jump_mult reaches 0 at agility -20, and
+## Character.effective_fall_damage_per_speed divides by landing_mult, so a 0 there would score a landing at INF HP
+## (int(INF) wraps NEGATIVE, so it would do no damage at all). Only reachable below agility -19, where you can
+## barely leave the ground anyway.
+const MIN_LANDING_MULT := 0.05
+
+## AGILITY: how far this character's whole fall-damage curve stretches along the SPEED axis. The safe landing speed
+## is multiplied by this and the HP-per-m/s cost is divided by it (Character.effective_fall_damage_min_speed /
+## effective_fall_damage_per_speed). The result is that a landing at speed v scores exactly like a baseline
+## landing at v / landing_mult.
+##
+## ⭐ IT IS jump_mult ON PURPOSE, NOT ITS OWN PER-POINT RATE. A jump off flat ground lands at the speed it took off
+## with, times sqrt(PlayerMovementSettings.fall_gravity_mult). Launch speed scales with jump_mult, so stretching
+## the curve by the SAME number keeps your own jump exactly as safe at agility 50 as at 0. Before this, the safe
+## speed stood still while the jump kept climbing. Agility 34 started hurting you on flat ground, and agility 50
+## (a 15.75 m/s launch, a 12.7 m apex, a 20.8 m/s landing) took ~60% of your health bar per hop. Give this its own
+## rate and that bug comes back as soon as the two rates drift apart.
+##
+## A lower jump from ENCUMBRANCE is not folded in: a heavy pack makes your jump lower, not your landing softer.
+## Floored at MIN_LANDING_MULT (see above). Otherwise a straight line, like every other derived effect (NO SOFT CAP).
+func landing_mult(bonus: float = 0.0) -> float:
+	return maxf(MIN_LANDING_MULT, jump_mult(bonus))
 
 ## AGILITY: the stamina RECOVERY rate runs 5% faster per point over baseline — multiply whichever tier rate the
 ## regen curve picked (idle / moving / airborne / special-movement) by this, at StaminaManager.recovery_rate_for.

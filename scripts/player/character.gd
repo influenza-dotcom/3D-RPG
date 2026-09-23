@@ -140,10 +140,12 @@ var _authored_max_hp: float = 0.0
 ## read at their own seams (Merchant prices, AimSway steadiness, Reputation scaling, dialogue skill checks).
 @export var stats: CharacterStats = null
 @export_group("Fall Damage")
-## Downward speed (m/s) a landing must exceed before it does fall damage.
+## Downward speed (m/s) a landing must exceed before it does fall damage, AT baseline agility. AGILITY multiplies it
+## by the same factor it multiplies the jump by (CharacterStats.landing_mult), so read it through
+## effective_fall_damage_min_speed(), never raw.
 @export var fall_damage_min_speed: float = 16.0
-## HP lost per m/s of downward speed above the safe speed, AT the reference max HP below — the cost scales
-## with max_hp from there, so read this with fall_damage_reference_max_hp.
+## HP lost per m/s of downward speed above the safe speed, AT the reference max HP below and at baseline agility.
+## The cost scales up with max_hp and down with agility from there (effective_fall_damage_per_speed()).
 @export var fall_damage_per_speed: float = 0.5
 ## The max HP `fall_damage_per_speed` is authored against. Fall damage is multiplied by max_hp / this, so a
 ## given drop always costs the same FRACTION of your health bar however much of it you have earned (see
@@ -956,23 +958,42 @@ func fall_damage_reference_hp() -> float:
 		return fall_damage_reference_max_hp
 	return _authored_max_hp if _authored_max_hp > 0.0 else max_hp
 
-## ⭐ THE ONE SEAM every fall-damage reader goes through: `fall_damage_per_speed` scaled by how far this actor's
-## max HP has grown past the value the knob was authored against. Both the COST (hp_loss, below and in the
-## Player override) and the WARNING (FallDamage.lethal_fraction, in Player._fall_grey_target) must read it —
-## a caller that reaches for the raw export instead is the one bug this feature cannot survive, because the
-## screen would then be scoring the landing by a different curve than the one that kills you.
-func effective_fall_damage_per_speed() -> float:
-	return fall_damage_per_speed * FallDamage.hp_scale(max_hp, fall_damage_reference_hp())
+## How far AGILITY stretches this actor's fall curve along the speed axis: CharacterStats.landing_mult, with live
+## held and timed agility buffs included. That is the same number the Player's jump velocity is multiplied by, so
+## a jump and the landing it causes scale together. 1.0 on a baseline sheet, never below
+## CharacterStats.MIN_LANDING_MULT.
+func fall_damage_agility_mult() -> float:
+	return stats_or_default().landing_mult(status_stat_modifier(&"agility"))
 
-## Fall damage: a landing whose downward speed tops fall_damage_min_speed costs HP, scaling
-## with the excess AND with this actor's max HP (see effective_fall_damage_per_speed). Shared by the
+## ⭐ THE SAFE-SPEED HALF OF THE SEAM: `fall_damage_min_speed` stretched by agility. Every fall-damage reader passes
+## this, never the raw export, for the same reason as effective_fall_damage_per_speed below. Mix the two and the
+## grey warning scores the landing on a different curve than the one that kills you.
+func effective_fall_damage_min_speed() -> float:
+	return fall_damage_min_speed * fall_damage_agility_mult()
+
+## ⭐ THE ONE SEAM every fall-damage reader goes through for the cost: `fall_damage_per_speed` scaled UP by how far
+## this actor's max HP has grown past the value the knob was authored against, and DOWN by the agility stretch.
+## Both the COST (hp_loss, below and in the Player override) and the WARNING (FallDamage.lethal_fraction, in
+## Player._fall_grey_target) must read it and effective_fall_damage_min_speed together. A caller that reaches for
+## either raw export is the one bug this feature cannot survive, because the screen would then be scoring the
+## landing by a different curve than the one that kills you.
+##
+## Dividing the cost by the same factor that multiplies the safe speed stretches the WHOLE curve, not just its
+## start. The lethal speed at full health becomes landing_mult x the authored one, so a 1.5x jumper survives a
+## 1.5x faster landing (a 2.25x taller drop, since height goes as speed squared). A landing at v scores exactly
+## like a baseline landing at v / landing_mult.
+func effective_fall_damage_per_speed() -> float:
+	return fall_damage_per_speed * FallDamage.hp_scale(max_hp, fall_damage_reference_hp()) / fall_damage_agility_mult()
+
+## Fall damage: a landing whose downward speed tops the agility-stretched safe speed costs HP, scaling with the
+## excess, this actor's max HP, and its agility (see the two effective_fall_damage_* seams above). Shared by the
 ## player (its landing block) and enemies (Enemy.apply_velocity).
 func _apply_fall_damage(fall_speed: float) -> void:
 	# Allies (companions following the player) are immune to fall damage — they keep up via teleport and
 	# shouldn't be punished by dying to terrain. has_method-guarded so only NPCs answer is_following().
 	if HostMethodHelper.try_call_bool(self, &"is_following"):
 		return
-	var dmg := FallDamage.hp_loss(fall_speed, fall_damage_min_speed, effective_fall_damage_per_speed())
+	var dmg := FallDamage.hp_loss(fall_speed, effective_fall_damage_min_speed(), effective_fall_damage_per_speed())
 	if dmg > 0:
 		take_damage(dmg)
 

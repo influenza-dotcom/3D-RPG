@@ -16,8 +16,8 @@ extends GutTest
 ##   2. THE ACTOR SEAM — Character.fall_damage_reference_hp / effective_fall_damage_per_speed on an off-tree
 ##      Character (load().new(), never added to the tree), including the "changes nothing yet" promise that lets
 ##      this land on a tuned game: every actor the game ships spawns at a scale of exactly 1.0.
-##   3. THE READERS, by source text. The cost and the WARNING must be scored by the same number. A reader that
-##      reaches for the raw `fall_damage_per_speed` export still compiles, still runs, and silently makes the
+##   3. THE READERS, by source text. The cost and the WARNING must be scored by the same numbers. A reader that
+##      reaches for a raw `fall_damage_*` export still compiles, still runs, and silently makes the
 ##      grayscale warning promise a survivable landing that then kills you — no error anywhere. Same pin shape
 ##      as test_upgrades.gd's Landing.on_land grep, and for the same reason.
 
@@ -88,14 +88,27 @@ func test_the_lethal_height_at_full_health_does_not_move_as_you_grow() -> void:
 		assert_almost_eq(FallDamage.lethal_speed(MIN_SPEED, scaled, m), LETHAL_SPEED, 0.001,
 			"a full-health actor with %s max HP must still die at %s m/s" % [m, LETHAL_SPEED])
 
-## The regression, stated as the size of the hole that was there: unscaled, a 20 HP player survived to 56 m/s.
+## The regression, stated as the size of the hole that was there (unscaled, a 20 HP player survived to 56 m/s), and
+## shut on the ACTOR the game reads: a grown Character's own effective_fall_damage_* curve and its real landing
+## (Character._apply_fall_damage), never a cost this test multiplies together itself.
 func test_buying_max_hp_no_longer_buys_fall_immunity() -> void:
-	var unscaled := FallDamage.lethal_speed(MIN_SPEED, PER_SPEED, GROWN_HP)
-	assert_almost_eq(unscaled, 56.0, 0.001,
-		"the old behaviour, for the record: 20 HP at a flat 0.5 per m/s survived everything under 56 m/s")
-	var scaled := FallDamage.lethal_speed(MIN_SPEED, PER_SPEED * FallDamage.hp_scale(GROWN_HP, BASE_HP), GROWN_HP)
-	assert_lt(scaled, unscaled,
-		"scaled, the same player dies far sooner — earning health must not silently retire the level's ledges")
+	assert_almost_eq(FallDamage.lethal_speed(MIN_SPEED, PER_SPEED, GROWN_HP), 56.0, 0.001,
+		"the hole, for the record: scored on the flat 0.5-per-m/s export, a full 20 HP bar survived everything under 56 m/s")
+	var grown = _grown_character(GROWN_HP)
+	grown.hp = GROWN_HP
+	var lethal: float = FallDamage.lethal_speed(grown.effective_fall_damage_min_speed(), grown.effective_fall_damage_per_speed(), grown.hp)
+	assert_almost_eq(lethal, LETHAL_SPEED, 0.001,
+		"a full-health 20 HP actor's own curve must kill at the shipped player's %s m/s, not at 56 — earned health must not retire the level's ledges" % LETHAL_SPEED)
+	# Driven through the real landing, a hair under that speed so nothing dies off-tree: the grown body must be left on
+	# its LAST point, exactly like the shipped player. Scored on the unscaled export it would walk away with 17 of 20.
+	var near_lethal := LETHAL_SPEED - 0.1
+	var shipped = _grown_character(BASE_HP)
+	shipped.hp = BASE_HP
+	shipped._apply_fall_damage(near_lethal)
+	assert_almost_eq(shipped.hp, 1.0, 0.001, "control: a %s m/s landing leaves the shipped 4 HP player on its last point" % near_lethal)
+	grown._apply_fall_damage(near_lethal)
+	assert_almost_eq(grown.hp, 1.0, 0.001,
+		"the same landing must leave a grown 20 HP body on its last point too, not on 17 — extra max HP must buy no fall margin")
 
 ## Being HURT still greys the screen earlier, because the scale reads max_hp and lethal_speed reads hp. The two
 ## must not collapse into each other: damage is scored against the bar you OWN, survival against what is LEFT.
@@ -115,9 +128,10 @@ func test_the_scale_reads_max_hp_while_survival_still_reads_the_health_you_have_
 # =============================================================================================================
 
 ## THE SAFETY PROMISE that lets this land on a tuned game: a reference of 0 auto-calibrates to the actor's own
-## authored max_hp, so on the frame it spawns every character whose stat sheet adds no HP — which is every one
-## the game ships: player, raider, the 2 HP TestLevel dummy with its 100-per-speed knob — is scored by exactly
-## the curve it was tuned with. (A strength sheet DOES scale from frame one, deliberately: see the export doc.)
+## authored max_hp, so on the frame it spawns every character whose stat sheet adds no HP is scored by exactly the
+## curve it was tuned with. The loop covers representative authored pools (the shipped player's 4, the 2 HP TestLevel
+## dummy, a mid and a huge one) rather than enumerating shipped actors. (A strength sheet DOES scale from frame one,
+## deliberately: see the export doc.)
 func test_every_actor_spawns_at_a_scale_of_exactly_one() -> void:
 	for authored in [BASE_HP, 2.0, 14.0, 100.0]:
 		var c = _character()
@@ -158,6 +172,109 @@ func test_losing_max_hp_walks_the_cost_back_down() -> void:
 	assert_almost_eq(c.effective_fall_damage_per_speed(), PER_SPEED, 0.001,
 		"back at the authored max HP, back to the authored cost — the scale is read live, never banked")
 
+## THE READERS, DRIVEN (the behavioural half of section 3, whose text pins below stay as the spelling guard).
+## Character._apply_fall_damage is the shared landing cost for the player and every NPC: drive it on a grown body and
+## on a shipped one, and the SAME drop must take the SAME share of each bar. A reader that scored the landing with the
+## raw export would take 2 HP off both — half the shipped bar, a tenth of the grown one.
+func test_the_shared_landing_reader_takes_the_same_share_of_a_grown_bar() -> void:
+	var grown = _grown_character(GROWN_HP)
+	grown.hp = GROWN_HP
+	grown._apply_fall_damage(20.0)
+	var shipped = _grown_character(BASE_HP)
+	shipped.hp = BASE_HP
+	shipped._apply_fall_damage(20.0)
+	assert_almost_eq(GROWN_HP - grown.hp, 10.0, 0.001,
+		"a 20 m/s landing must take 10 of a grown 20 HP bar through the real reader — the half-bar the shipped player loses")
+	assert_almost_eq(BASE_HP - shipped.hp, 2.0, 0.001, "control: the same landing takes 2 of the shipped 4 HP bar")
+	var safe = _grown_character(GROWN_HP)
+	safe.hp = GROWN_HP
+	safe._apply_fall_damage(MIN_SPEED)
+	assert_almost_eq(safe.hp, GROWN_HP, 0.001, "a landing AT the safe speed costs nothing, however big the bar has grown")
+
+
+## GameSettings.player_feedback is one shared resource and the warning test below writes its fall_grey_max. Snapshot it
+## before every test and put it back after, so a test that errors half-way can never leak a raw-drain peak into the suite.
+var _saved_grey_peak: float = 0.0
+
+func before_each() -> void:
+	_saved_grey_peak = GameSettings.player_feedback.fall_grey_max
+
+func after_each() -> void:
+	GameSettings.player_feedback.fall_grey_max = _saved_grey_peak
+
+
+## ⭐ The headline promise, driven: the grey fall WARNING (Player._fall_grey_target, off-tree) must drain exactly as far as
+## the landing will actually cost (Character._apply_fall_damage on a body with the same profile), at every speed, on
+## a grown bar. A warning scored on the unscaled curve reads 0.1 at 20 m/s while the ground takes half the bar.
+func test_the_warning_drains_exactly_as_far_as_the_landing_will_cost() -> void:
+	var p = autofree(load(PLAYER_PATH).new())  # off-tree: no _ready, per the house rule
+	p.max_hp = BASE_HP
+	p.fall_damage_min_speed = MIN_SPEED
+	p.fall_damage_per_speed = PER_SPEED
+	p._apply_stats()  # captures the authored 4.0, exactly like _grown_character
+	p.max_hp = GROWN_HP
+	p.hp = GROWN_HP
+	GameSettings.player_feedback.fall_grey_max = 1.0  # read the raw drain, not the designer's peak scaling of it (after_each restores)
+	var speeds := [18.0, 20.0, 22.0, LETHAL_SPEED]
+	var warnings: Array[float] = []
+	for v in speeds:
+		p.velocity = Vector3(0.0, -v, 0.0)
+		warnings.append(p._fall_grey_target())
+	for i in range(3):
+		var body = _grown_character(GROWN_HP)
+		body.hp = GROWN_HP
+		body._apply_fall_damage(speeds[i])
+		var cost_share: float = (GROWN_HP - body.hp) / GROWN_HP
+		assert_gt(cost_share, 0.0, "control: a %s m/s landing must cost the grown body something" % speeds[i])
+		assert_almost_eq(warnings[i], cost_share, 0.001,
+			"at %s m/s the warning reads %s grey but the landing takes %s of the bar — the screen must score the fall on the SAME curve that deals the damage" % [speeds[i], warnings[i], cost_share])
+	assert_almost_eq(warnings[3], 1.0, 0.001,
+		"at the shipped lethal speed a full-health grown player must see a completely grey frame — the whole bar is about to go")
+
+## An off-tree body carrying the shipped fall profile on `sheet` (null = no sheet, which reads as a baseline one), with
+## _apply_stats run and a full health bar. `script_path` picks a plain Character or the Player (whose _fall_grey_target
+## is the warning reader); neither is ever added to the tree, so no _ready runs.
+func _fall_body(script_path: String, sheet: CharacterStats):
+	var b = autofree(load(script_path).new())
+	b.stats = sheet
+	b.max_hp = BASE_HP
+	b.fall_damage_min_speed = MIN_SPEED
+	b.fall_damage_per_speed = PER_SPEED
+	b._apply_stats()
+	b.hp = BASE_HP
+	return b
+
+## THE READERS, DRIVEN ON THE SAFE-SPEED HALF. Both readers must start the curve at the AGILITY-stretched safe speed
+## (effective_fall_damage_min_speed), not at the raw export — at baseline agility the two are the same number, so only an
+## agile sheet can tell them apart. A landing over the raw 16 m/s but under the stretched safe speed must cost the agile
+## body nothing AND show the agile player no warning; the same landing on a baseline sheet is the control that it is a
+## real, damaging landing that only the stretch spared.
+func test_both_readers_start_the_curve_at_the_agility_stretched_safe_speed() -> void:
+	var agile := CharacterStats.new()
+	agile.agility = 10
+	var agile_body = _fall_body(CHARACTER_PATH, agile)
+	var safe: float = agile_body.effective_fall_damage_min_speed()
+	assert_gt(safe, MIN_SPEED + 1.0,
+		"sanity: agility 10 must stretch the safe speed well past the raw %s m/s export, or this test cannot tell the two apart (got %s)" % [MIN_SPEED, safe])
+	var landing := safe - 0.5  # over the raw export, under the stretched safe speed
+	assert_gt(landing, MIN_SPEED, "sanity: the test landing is faster than the raw safe speed")
+
+	var base_body = _fall_body(CHARACTER_PATH, null)
+	base_body._apply_fall_damage(landing)
+	assert_lt(base_body.hp, BASE_HP, "control: a %s m/s landing on a baseline sheet costs HP" % landing)
+	agile_body._apply_fall_damage(landing)
+	assert_almost_eq(agile_body.hp, BASE_HP, 0.001,
+		"Character._apply_fall_damage: under the agility-stretched safe speed (%s m/s) a %s m/s landing is free" % [safe, landing])
+
+	GameSettings.player_feedback.fall_grey_max = 1.0  # the raw drain, not the designer's peak scaling (after_each restores)
+	var base_player = _fall_body(PLAYER_PATH, null)
+	base_player.velocity = Vector3(0.0, -landing, 0.0)
+	assert_gt(base_player._fall_grey_target(), 0.0, "control: on a baseline sheet the same fall greys the screen")
+	var agile_player = _fall_body(PLAYER_PATH, agile)
+	agile_player.velocity = Vector3(0.0, -landing, 0.0)
+	assert_eq(agile_player._fall_grey_target(), 0.0,
+		"Player._fall_grey_target: a landing the agile body takes for free must show no warning — the screen scores the fall on the same stretched curve")
+
 ## The explicit knob, for a designer who wants a tougher archetype's extra HP to be real fall protection rather
 ## than something the scale immediately takes back.
 func test_an_explicit_reference_pins_the_curve_against_the_auto_baseline() -> void:
@@ -173,29 +290,38 @@ func test_an_explicit_reference_pins_the_curve_against_the_auto_baseline() -> vo
 # 3. The readers — the cost and the warning must be scored by the SAME number
 # =============================================================================================================
 
+## A FallDamage call that names a RAW export anywhere on its line. `[^_]` is what lets the effective_ seams through
+## (their `fall_damage_` is preceded by an underscore); `.*` rather than `[^)]*` because the seams' own `()` would
+## otherwise end the scan before it reached a raw export later in the same call.
+func _raw_export_in_a_fall_call() -> RegEx:
+	return RegEx.create_from_string(r"FallDamage\.(hp_loss|lethal_fraction|lethal_speed)\(.*[^_]fall_damage_(per|min)_speed")
+
 func _read(path: String) -> String:
 	var s := FileAccess.get_file_as_string(path)
 	assert_false(s.is_empty(), "%s must be readable" % path)
 	return s
 
 ## Character._apply_fall_damage is the shared cost for the player's landing block AND for NPCs (npc.gd's
-## apply_velocity reaches it). If it reads the raw export, nothing scales anywhere and every test above is
-## measuring a helper the game never calls.
+## apply_velocity reaches it). If it reads a raw export, nothing scales anywhere. The landing tests above DRIVE this
+## reader on both halves of the seam (a grown max HP and an agile sheet); this text pin is the spelling guard beside them.
 func test_the_shared_cost_goes_through_the_scaled_seam() -> void:
 	var src := _read(CHARACTER_PATH)
-	assert_true("FallDamage.hp_loss(fall_speed, fall_damage_min_speed, effective_fall_damage_per_speed())" in src,
-		"Character._apply_fall_damage must score the landing with effective_fall_damage_per_speed(), not the raw fall_damage_per_speed export")
+	assert_true("FallDamage.hp_loss(fall_speed, effective_fall_damage_min_speed(), effective_fall_damage_per_speed())" in src,
+		"Character._apply_fall_damage must score the landing with BOTH effective_fall_damage_* seams (max HP + agility), not the raw exports")
+	assert_null(_raw_export_in_a_fall_call().search(src),
+		"no FallDamage call in character.gd may pass a raw fall_damage_min_speed / fall_damage_per_speed export")
 
 ## ⭐ THE ONE THAT MATTERS MOST. player.gd has TWO readers — the damage and the grayscale fall warning — and they
 ## must agree. Feed the warning the unscaled export and it drains to full grey at 56 m/s while the ground kills
-## you at 24: the screen would promise a survivable landing right up to the frame it kills you, and there is no
-## error, no crash and no failing behavioural test anywhere to catch it.
+## you at 24: the screen would promise a survivable landing right up to the frame it kills you, with no error and no
+## crash. The WARNING reader is also driven above (test_the_warning_drains_exactly_as_far_as_the_landing_will_cost and
+## the agility safe-speed test); the Player's own landing PREVIEW is not driven anywhere in this file, so for that reader
+## this pin is the only guard here.
 func test_the_damage_and_the_warning_read_the_same_scaled_cost() -> void:
 	var src := _read(PLAYER_PATH)
-	assert_true("FallDamage.hp_loss(fall_speed, fall_damage_min_speed, effective_fall_damage_per_speed())" in src,
-		"the Player's _apply_fall_damage override previews the cost to arm the fall death card — it must preview the SCALED cost the base will actually deal")
-	assert_true("FallDamage.lethal_fraction(-velocity.y, fall_damage_min_speed, effective_fall_damage_per_speed(), hp)" in src,
-		"_fall_grey_target must score the warning with the same scaled cost — a warning drawn from a different curve than the damage is worse than no warning at all")
-	var raw := RegEx.create_from_string(r"FallDamage\.(hp_loss|lethal_fraction|lethal_speed)\([^)]*[^_]fall_damage_per_speed")
-	assert_null(raw.search(src),
-		"no FallDamage call in player.gd may pass the raw fall_damage_per_speed export — go through effective_fall_damage_per_speed()")
+	assert_true("FallDamage.hp_loss(fall_speed, effective_fall_damage_min_speed(), effective_fall_damage_per_speed())" in src,
+		"the Player's _apply_fall_damage override previews the cost to arm the fall death card — it must preview the SCALED curve the base will actually deal")
+	assert_true("FallDamage.lethal_fraction(-velocity.y, effective_fall_damage_min_speed(), effective_fall_damage_per_speed(), hp)" in src,
+		"_fall_grey_target must score the warning with the same scaled curve — a warning drawn from a different curve than the damage is worse than no warning at all")
+	assert_null(_raw_export_in_a_fall_call().search(src),
+		"no FallDamage call in player.gd may pass a raw fall_damage_min_speed / fall_damage_per_speed export — go through the effective_fall_damage_* seams")

@@ -8,18 +8,20 @@ const METERS_PER_SECOND_TO_MILES_PER_HOUR: float = 2.2369362920544
 ## library, like the resolution helpers elsewhere (TalkHelpers and friends).
 ##
 ## Character keeps the fall_damage_min_speed / fall_damage_per_speed @exports (set per-actor in
-## the editor) and the thin _apply_fall_damage() facade that calls take_damage; only the
-## speed -> HP math moved here so it can't drift between callers.
+## the editor), the effective_fall_damage_* seams that scale them by max HP and agility, and the thin
+## _apply_fall_damage() facade that calls take_damage; only the speed -> HP math moved here so it
+## can't drift between callers.
 
 ## HP lost for a landing at `fall_speed` (downward m/s). A landing at or under `min_speed` is
 ## safe (0). Above it, the excess speed times `per_speed` is truncated to a whole HP — int() so a
 ## graze that doesn't clear a full point of damage costs nothing, matching the original inline
 ## `int(...)` in Character._apply_fall_damage. Never returns negative (the <= min_speed guard).
 ##
-## ⭐ `per_speed` is the SCALED cost — Character.effective_fall_damage_per_speed(), not the raw
-## `fall_damage_per_speed` export. See hp_scale() below for why, and note that the warning curve
-## (lethal_speed / lethal_fraction) must be handed the SAME scaled number or the screen starts
-## lying about a landing it is scoring by a different rule.
+## ⭐ Both knobs are the SCALED ones. `min_speed` comes from Character.effective_fall_damage_min_speed(), which
+## agility stretches, and `per_speed` from Character.effective_fall_damage_per_speed(), scaled by max HP and
+## agility. Neither is the raw export. See hp_scale() below and CharacterStats.landing_mult for why, and note
+## that the warning curve (lethal_speed / lethal_fraction) must be handed the SAME two numbers or the screen
+## starts lying about a landing it is scoring by a different rule.
 static func hp_loss(fall_speed: float, min_speed: float, per_speed: float) -> int:
 	if fall_speed <= min_speed:
 		return 0
@@ -75,11 +77,12 @@ static func mph(fall_speed: float) -> int:
 ## HP is a lethal fall at one point of it, so the screen has to go fully grey EARLIER when you are hurt. Reading
 ## `hp` (not `max_hp`) is what makes the full-grey frame mean "this kills YOU, now".
 ##
-## ⭐ `per_speed` MUST be the max-HP-scaled cost (Character.effective_fall_damage_per_speed()), the same number
-## hp_loss() is handed. Pass the raw export here and the warning silently drifts: with max HP bought up, the
-## screen would promise a survivable landing that the scaled damage then kills you on. The pleasant consequence
-## of scaling BOTH is that the speed which kills a healthy actor is a CONSTANT — hp/per_speed is max_hp over
-## (per_speed x max_hp/reference), i.e. reference/per_speed, whatever the health bar has grown to.
+## ⭐ `min_speed` / `per_speed` MUST be Character.effective_fall_damage_min_speed() / effective_fall_damage_per_speed(),
+## the same numbers hp_loss() is handed. Pass a raw export here and the warning silently drifts: with max HP or
+## agility bought up, the screen would promise a survivable landing that the scaled damage then kills you on (or
+## grey out over one it doesn't). The pleasant consequence of scaling BOTH readers is that max HP never moves the
+## speed which kills a healthy actor: hp/per_speed is max_hp over (per_speed x max_hp/reference), i.e.
+## reference/per_speed, whatever the health bar has grown to. Only agility moves it, by exactly landing_mult.
 static func lethal_speed(min_speed: float, per_speed: float, hp: float) -> float:
 	if per_speed <= 0.0 or hp <= 0.0:
 		return INF
