@@ -8,6 +8,7 @@
 [sub_resource type="Resource" id="Resource_1cldg"]
 script = ExtResource("1_tveky")
 id = &"kill_raiders"
+description = "[PH] Kill the raiders"
 type = 0
 target_id = &"Raider"
 required_count = 5
@@ -15,6 +16,7 @@ required_count = 5
 [sub_resource type="Resource" id="Resource_0imx4"]
 script = ExtResource("1_tveky")
 id = &"reach_vault"
+description = "[PH] Reach the vault"
 type = 3
 target_id = &"vault"
 optional = true

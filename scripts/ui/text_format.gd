@@ -13,7 +13,10 @@ extends RefCounted
 ##
 ## PlayerText (scripts/ui/player_text.gd) owns the English templates; designer-authored resource
 ## strings (TutorialPrompt, CrippleCallout {part}, RentCollector {amount}) follow the same token
-## convention at their own call sites. This class is pure statics — no state, no locale yet.
+## convention at their own call sites. This class is pure statics — no state. The LOCALE enters here:
+## `subst` and `plural` translate the whole authored template through Localization (the TranslationServer
+## seam) BEFORE substituting, so a catalog line keyed on the English template is what the player reads, tokens
+## re-ordered however the translator wrote them. A "[PH]" placeholder template is never looked up.
 
 
 ## {name}-token replacement via String.replace — the translator-safe seam: a translation may reorder
@@ -22,9 +25,11 @@ extends RefCounted
 ## Token values are str()-converted, so ints/floats can be passed raw. A token present in the
 ## template but MISSING from `tokens` is left visible ("{name}") — a loud authoring bug, never a
 ## silent blank (pinned by tests/test_text_format.gd). Extra dictionary entries are no-ops. Values
-## are inserted verbatim; don't nest one token's brace-pattern inside another value.
+## are inserted verbatim; don't nest one token's brace-pattern inside another value. The template is
+## translated FIRST (Localization.t — identity with no catalog, and always identity for a "[PH]" template),
+## so a translator's re-ordered tokens are what get filled.
 static func subst(template: String, tokens: Dictionary) -> String:
-	var out := template
+	var out := Localization.t(template)
 	for key in tokens:
 		out = out.replace("{" + str(key) + "}", str(tokens[key]))
 	return out
@@ -81,11 +86,12 @@ static func pad2(value: int) -> String:
 	return "%02d" % value
 
 
-## Whole-WORD (or whole-template) selection by count — the future tr_n() seam. The two-form
-## signature is deliberately the ENGLISH source shape (singular / everything-else); languages with
-## richer agreement (Russian needs 3 forms, Arabic 6) will be served by widening this behind
-## tr_n()/TranslationServer plurals later, at which point `plural_form` becomes the English source
-## string a catalog keys on. Callers pass whole variants ("{count} item" / "{count} items"), never
-## a bare suffix ("s") — the suffix is exactly the untranslatable fragment THE RULE forbids.
+## Whole-WORD (or whole-template) selection by count — the tr_n() seam. The two-form signature is
+## deliberately the ENGLISH source shape (singular / everything-else): a catalog keys its plural entry on
+## these two source strings and may carry as many forms as its language needs (Russian 3, Arabic 6) —
+## Localization.t_plural lets the engine's plural rule for the active locale pick the form. With no
+## catalog entry the English rule applies (`singular` at exactly 1, else `plural_form`). Callers pass
+## whole variants ("{count} item" / "{count} items"), never a bare suffix ("s") — the suffix is exactly
+## the untranslatable fragment THE RULE forbids.
 static func plural(count: int, singular: String, plural_form: String) -> String:
-	return singular if count == 1 else plural_form
+	return Localization.t_plural(singular, plural_form, count)

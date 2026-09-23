@@ -28,13 +28,13 @@ const CANCEL := "Cancel"
 const CLOSE := "Close"
 const CONFIRM := "Confirm"
 const DEFAULT := "Default"
-const EMPTY_LIST := "(empty)"
+const EMPTY_LIST := "Empty"
 ## Currently UNREFERENCED in production (the same "kept for the row's return" status as
 ## CHARACTER_CREATE_SKIN_LABEL): the shop's sell column became a GRID, and a tile marks the wielded weapon
 ## visually (GridTile's equipped chrome) instead of appending "(equipped)" to a row string. Kept because it is
 ## the correct whole-template shape for any future LIST that needs the marker — the "{row}" token carries the
 ## composed row in as a value, so a locale can move or reword the marker. Pinned by tests/test_player_text.gd.
-const EQUIPPED_ROW := "{row}   (equipped)"
+const EQUIPPED_ROW := "{row}   Equipped"
 
 const PROMPT_PICK_UP := "[PH] Pick Up"
 const PICK_UP := "Pick Up"
@@ -89,8 +89,8 @@ const JOB_BANKER := "Banker"
 const TOAST_ALREADY_FULL_HEALTH := "[PH] Already at full health"
 const TOAST_ALREADY_LEARNED := "[PH] Already learned"
 const TOAST_BACKPACK_FULL := "[PH] No room in your backpack"
-const TOAST_BACKPACK_PARTIAL := "[PH] Backpack full — some items didn't fit"
-const TOAST_CAUGHT := "[PH] Caught!"
+const TOAST_BACKPACK_PARTIAL := "[PH] Backpack full. Some items didn't fit"
+const TOAST_CAUGHT := "[PH] Caught"
 const TOAST_CANT_LIFT_EQUIPPED := "[PH] Can't lift the weapon they're holding"
 const TOAST_NO_ROOM_FOR_ALL := "[PH] No room for all of that"
 const TOAST_THEY_CANT_CARRY_MORE := "[PH] They can't carry any more"
@@ -103,16 +103,16 @@ const TOAST_LOCK_PICKED := "[PH] Lock picked"
 const TOAST_UNLOCKED := "[PH] Unlocked"
 const TOAST_LOCKED := "[PH] Locked"
 const TOAST_NOT_OPEN_FOR_BUSINESS := "[PH] Not open for business"
-const TOAST_IT_WONT_BUDGE := "[PH] It won't budge."
+const TOAST_IT_WONT_BUDGE := "[PH] It won't budge"
 ## A LevelDoor whose travel can't run (no GameRoot on the scene root) — the PLAYER-facing line only; the
 ## dev diagnostic ("attach game_root.gd…") goes to push_error at the call site, never onto the HUD.
-const TOAST_DOOR_STUCK := "[PH] It won't open."
+const TOAST_DOOR_STUCK := "[PH] It won't open"
 const TOAST_QUICKSAVED := "[PH] Quicksaved"
 const TOAST_QUICKSAVE_FAILED := "[PH] Quicksave failed"
-const TOAST_SNEAK_ATTACK := "[PH] Sneak Attack!"
+const TOAST_SNEAK_ATTACK := "[PH] Sneak attack"
 const TOAST_TAKEDOWN := "[PH] Takedown"
 
-const SAVE_WARN_ACTIVE_QUEST_MISSING := "[PH] Couldn't restore a saved quest — its data is missing, so its progress was lost."
+const SAVE_WARN_ACTIVE_QUEST_MISSING := "[PH] Couldn't restore a saved quest. Its data is missing, so its progress was lost."
 const SAVE_WARN_COMPLETED_QUEST_MISSING := "[PH] Couldn't restore a completed quest record (its data is missing)."
 const SAVE_WARN_FAILED_QUEST_MISSING := "[PH] Couldn't restore a failed quest record (its data is missing)."
 ## The SYNTHESIZED dialogue response-menu options — the buttons DialogueManager splices on top of a line's
@@ -164,13 +164,6 @@ const CHARACTER_CREATE_EMPTY_PART := "—"
 ## keep the codepoint when re-skinning or re-fonting.
 const CHARACTER_CREATE_STAT_MINUS := "−"
 const CHARACTER_CREATE_STAT_PLUS := "+"
-## The Stats tab's standing RULE line, under the points banner. The builder is ZERO-SUM and nothing else on
-## the tab admits it: the screen opens with no spare points and every "+" painted disabled, which reads as a
-## broken menu until you work out that a "−" somewhere else is what funds one. This line is the only thing
-## teaching that, so it names the mechanic rather than describing the screen.
-## ⭐ONE LINE, and keep any re-wording inside one: it paints into a fixed-height row above the stat list, and a
-## second line would push the list down — the menus-must-not-resize-with-text rule that letterboxed the map.
-const CHARACTER_CREATE_STAT_RULE := "Lower a stat to free points for another."
 ## The "Shirt" tab — the player paints their own torso texture (a blank tee they decorate).
 const CHARACTER_CREATE_SHIRT_TAB := "Shirt"
 const CHARACTER_CREATE_SHIRT_PAINT := "Paint"
@@ -190,12 +183,6 @@ const CHARACTER_CREATE_SHIRT_FRONT := "Front"
 const CHARACTER_CREATE_SHIRT_BACK := "Back"
 ## Closes the free-colour wheel overlay.
 const CHARACTER_CREATE_SHIRT_PICK_DONE := "Done"
-## The name field's placeholder. SHARED with NameEntryDialog (the same box claims a stray dog), which is why
-## it says "a name" and not "your character's name" — one line has to sit honestly in both boxes. The trailing
-## ellipsis is the authored affordance for "type here", the same convention WALLET_DROP uses for "opens a card".
-const CHARACTER_NAME_PLACEHOLDER := "Enter a name…"
-## Shown under the name field (and gating Begin) while the name is blank — a run must be NAMED before it can start.
-const CHARACTER_CREATE_NAME_REQUIRED := "Name your character to begin."
 
 ## The implant-purchase step (implant_choice.gd) — New Game's SECOND screen, after character creation's
 ## Begin: fit starting chips ON CREDIT — each is billed at its authored Item.value against the starting
@@ -206,30 +193,29 @@ const CHARACTER_CREATE_NAME_REQUIRED := "Name your character to begin."
 ## nothing is the default. Chip rows paint Item.label() / AbilityRegistry.display_name_for /
 ## Zorkmids.money_text — only the chrome lives here; the tally line is composed by implant_choice_tally.
 const IMPLANT_CHOICE_TITLE := "Starting Implants"
-const IMPLANT_CHOICE_HINT := "Implants go on your tab — whatever you fit is billed against your starting zorkmids.\nThe Ledger rates the build, then sets the line."
 ## The PINNED footer tally under the roster: the running implant bill + the resulting starting balance +
 ## the credit still extendable (limit + starting money − bill; the roster greys rows that no longer fit it).
-const IMPLANT_CHOICE_TALLY := "Implant bill: {cost}  ·  Starting zorkmids: {balance}  ·  Credit left: {credit}"
+const IMPLANT_CHOICE_TALLY := "Bill {cost}      Balance {balance}      Credit {credit}"
 
 ## THE LEDGER'S VERDICT on the creation build — one WHOLE template per score band, SELECTED by the key
 ## EconomySettings.credit_rating_for returns (never a prose fragment glued to a number; re-wording a band here
 ## can never change what the bank actually does). The creditor is "the Ledger", the same always-online thing
 ## the first-launch terms gate says keeps the Record — the entity financing your body-mods is the entity that
 ## remembers what you do with them. Keep every line under ~100 chars: it paints on an 11px autowrapped band.
-const IMPLANT_CREDIT_BAND_NO_FILE := "No file — {score}. Nothing on record to price. The Ledger will advance you {money}."
-const IMPLANT_CREDIT_BAND_DECLINED := "Declined — {score}. Nothing here we could repossess. You're good for {money}."
-const IMPLANT_CREDIT_BAND_SUBPRIME := "Subprime — {score}. No trade, no assets, no notable features. You're good for {money}."
-const IMPLANT_CREDIT_BAND_SERVICEABLE := "Serviceable — {score}. No enthusiasm, no objection. You're good for {money}."
-const IMPLANT_CREDIT_BAND_BANKABLE := "Bankable — {score}. We can price this. You're good for {money}."
-const IMPLANT_CREDIT_BAND_PREFERRED := "Preferred debtor — {score}. We like your odds of living long enough. You're good for {money}."
+const IMPLANT_CREDIT_BAND_NO_FILE := "No file, {score}. Nothing on record to price. The Ledger will advance you {money}."
+const IMPLANT_CREDIT_BAND_DECLINED := "Declined, {score}. Nothing here we could repossess. You're good for {money}."
+const IMPLANT_CREDIT_BAND_SUBPRIME := "Subprime, {score}. No trade, no assets, no notable features. You're good for {money}."
+const IMPLANT_CREDIT_BAND_SERVICEABLE := "Serviceable, {score}. No enthusiasm, no objection. You're good for {money}."
+const IMPLANT_CREDIT_BAND_BANKABLE := "Bankable, {score}. We can price this. You're good for {money}."
+const IMPLANT_CREDIT_BAND_PREFERRED := "Preferred debtor, {score}. We like your odds of living long enough. You're good for {money}."
 
 ## The FILED REASON — the adverse-action notice parody: the one underwriting line the build falls furthest
 ## under, or a commendation when nothing is short. Whole templates keyed like the bands above. "Notable
 ## Cowardice" is a callback to the standing heading the terms gate files declined choices under.
 const IMPLANT_CREDIT_REASON_NONE := "Noted in your favour: a specialty the Ledger can insure."
 const IMPLANT_CREDIT_REASON_NO_FILE := "Filed reason: no established identity. The Ledger has no notes on you."
-const IMPLANT_CREDIT_REASON_UNSPENT := "Filed reason: allocation left undrawn — see 'Notable Cowardice'."
-const IMPLANT_CREDIT_REASON_THIN_TRADE := "Filed reason: no trade of record — allocation spread too thin to price."
+const IMPLANT_CREDIT_REASON_UNSPENT := "Filed reason: allocation left undrawn. See 'Notable Cowardice'."
+const IMPLANT_CREDIT_REASON_THIN_TRADE := "Filed reason: no trade of record. Allocation spread too thin to price."
 const IMPLANT_CREDIT_REASON_NO_INCOME := "Filed reason: no visible means of support."
 const IMPLANT_CREDIT_REASON_MORTALITY := "Filed reason: life expectancy under the repayment term."
 const IMPLANT_CREDIT_REASON_EXPOSURE := "Filed reason: pledged attributes exceed recoverable value."
@@ -258,8 +244,8 @@ const PLAYER_WALLET := "You: {money}"
 ## OPEN the amount card rather than committing anything; the card's own commit button is handed the same
 ## caption today, which is why the ellipsis reads oddly there (see the note on ask()'s confirm_caption).
 const WALLET_ROW := "Zorkmids  {money}"
-const WALLET_DROP := "Drop…"
-const WALLET_STASH := "Stash…"
+const WALLET_DROP := "Drop"
+const WALLET_STASH := "Stash"
 ## The amount card's TITLE, in natural casing: AmountPrompt.ask routes it through MenuStyle.title_text, which
 ## is the one place casing is decided (skin.uppercase_titles paints these "DROP ZORKMIDS" today) — the
 ## INSTALL_SCREEN_TITLE rule. An uppercase_titles = false skin must still get the authored wording.
@@ -278,17 +264,17 @@ const INSTALL_TITLE := "INSTALL"
 ## parenthetical says what a click does. ⭐ONE VERB across both — "install" — and the parentheticals differ
 ## only by the PAYMENT. They used to read "(click to install)" and "(click to fit)", which made a player work
 ## out whether fitting and installing were two different operations on one screen. They are not.
-const INSTALL_CARRIED_HEADING := "Your chips  (click to install)"
-const INSTALL_STOCK_HEADING := "For sale  (click to buy & install)"
+const INSTALL_CARRIED_HEADING := "Your chips"
+const INSTALL_STOCK_HEADING := "For sale"
 ## The ARMED caption a row swaps to on its first click, before the second click actually charges. Installing
 ## spends money AND consumes the chip, so the row states the price at the moment of commitment rather than
 ## letting one click do both — the em dash and money phrase match respec_button / heal_button, the other two
 ## captions in the game that are the last thing pressed before a debit. Read it through chip_install_confirm().
-const CHIP_INSTALL_CONFIRM := "Confirm — {cost}"
+const CHIP_INSTALL_CONFIRM := "Confirm  {cost}"
 ## The empty-section line in BOTH install lists (you carry no installable chip / the mechanic stocks none).
 ## Deliberately NOT the shop's EMPTY_LIST "(empty)" — the install sections read "(none)" today and this is a pure
 ## move of that literal; unifying the two wordings is a copy call, not a refactor.
-const INSTALL_NONE := "(none)"
+const INSTALL_NONE := "None"
 ## The install panel's CONSTRUCTION-time title, cased by title_text ("INSTALL" under the default
 ## skin); open_install re-titles with install_title(mechanic) before the panel is ever shown. Kept in natural
 ## casing — unlike the all-caps INSTALL_TITLE above — because title_text owns casing, and an
@@ -314,25 +300,23 @@ const LOOT_CONTAINER_HEADING := "Container"
 const LOOT_SOURCE_HEADING := "Source"
 const LOOT_YOU_HEADING := "You"
 
-const CHESS_MOVE_PLACEHOLDER := "[PH] your move…"
+const CHESS_MOVE_PLACEHOLDER := "e2e4"
 const CHESS_MOVE_BUTTON := "[PH] Move"
 const CHESS_MOVES_HEADING := "[PH] Moves"
-const CHESS_NO_MOVES := "[PH] (no moves yet)"
-const CHESS_STALEMATE := "[PH] Stalemate — a draw."
-const CHESS_DRAW_FIFTY_MOVE := "[PH] Draw — fifty-move rule."
-const CHESS_DRAW_INSUFFICIENT := "[PH] Draw — not enough material to mate."
+const CHESS_NO_MOVES := "[PH] No moves yet"
+const CHESS_STALEMATE := "[PH] Stalemate. Draw."
+const CHESS_DRAW_FIFTY_MOVE := "[PH] Draw by the fifty-move rule."
+const CHESS_DRAW_INSUFFICIENT := "[PH] Draw. Not enough material to mate."
 const CHESS_GAME_OVER := "[PH] Game over."
 const CHESS_YOUR_MOVE := "[PH] Your move."
 ## Appended by ChessScreen's status line — a suffix-append FRAGMENT holdout (the shop's equivalent became
 ## the whole EQUIPPED_ROW template); the chess phase folds it into whole "your move" / "your move — check" templates.
-const CHESS_CHECK_SUFFIX := "  (Check!)"
+const CHESS_CHECK_SUFFIX := "  Check!"
 ## Checkmate result — TWO whole templates selected by who won (never a spliced "you win/you lose" fragment).
-const CHESS_CHECKMATE_WIN := "[PH] Checkmate — you win."
-const CHESS_CHECKMATE_LOSS := "[PH] Checkmate — you lose."
-const CHESS_INPUT_HINT := "[PH] Type a move (e2e4 or Nf3) · Enter to play · Esc to leave"
-const CHESS_BLINDFOLD_HINT := "[PH] Blindfold: track the board from the move log · type e2e4 or Nf3 · Esc to leave"
-const CHESS_BLINDFOLD_BADGE := "[ BLINDFOLD ]"
-const CHESS_NO_BOARD_HINT := "[PH] No board — play it in your head.\nInstall the Board Visualizer chip to see the position."
+const CHESS_CHECKMATE_WIN := "[PH] Checkmate. You win."
+const CHESS_CHECKMATE_LOSS := "[PH] Checkmate. You lose."
+const CHESS_BLINDFOLD_BADGE := "Blindfold"
+const CHESS_NO_BOARD_HINT := "[PH] No board. Install the Board Visualizer chip to see the position."
 ## The chess panel's CONSTRUCTION-time title. MenuStyle.title_text cases it (so it paints
 ## "CHESS" under the default skin), and open_match re-titles with chess_title(opponent) before the panel is ever
 ## shown — this is only the pre-match placeholder. Natural casing on purpose: casing is title_text's job (the one
@@ -344,15 +328,14 @@ const HEAL_FULLY_HEALED := "[PH] Fully healed"
 ## caller ever assembles the block from line fragments. The limb line and the can't-afford note are
 ## authored INSIDE each variant; HealScreen pads the rendered block to a constant height (see heal_screen.gd).
 const HEAL_STATUS := "[PH] HP  {hp} / {max_hp}\nYour zorkmids: {amount}"
-const HEAL_STATUS_LIMB := "[PH] HP  {hp} / {max_hp}\n— limb damage\nYour zorkmids: {amount}"
-const HEAL_STATUS_CANT_AFFORD := "[PH] HP  {hp} / {max_hp}\nYour zorkmids: {amount}\n— can't afford"
-const HEAL_STATUS_LIMB_CANT_AFFORD := "[PH] HP  {hp} / {max_hp}\n— limb damage\nYour zorkmids: {amount}\n— can't afford"
+const HEAL_STATUS_LIMB := "[PH] HP  {hp} / {max_hp}\nLimb damage\nYour zorkmids: {amount}"
+const HEAL_STATUS_CANT_AFFORD := "[PH] HP  {hp} / {max_hp}\nYour zorkmids: {amount}\nCan't afford"
+const HEAL_STATUS_LIMB_CANT_AFFORD := "[PH] HP  {hp} / {max_hp}\nLimb damage\nYour zorkmids: {amount}\nCan't afford"
 ## The heal card's CONSTRUCTION-time title, cased by title_text ("HEAL" under the default skin);
 ## open_heal re-titles with heal_title(healer) before the card is ever shown, so this is only the placeholder.
 ## Natural casing on purpose — title_text is the single casing chokepoint (skin.uppercase_titles).
 const HEAL_SCREEN_TITLE := "Heal"
-const RESPEC_NO_PERKS := "[PH] (no perks unlocked)"
-const RESPEC_NOTHING := "[PH] Nothing to respec"
+const RESPEC_NO_PERKS := "[PH] No perks"
 ## The respec card's title as BUILT — the text handed to title_text, title-case because
 ## MenuStyle.title_text applies the skin's casing. Distinct from respec_title(), which RE-titles the
 ## same Label with the station's name when the modal opens; only that runtime path carries the
@@ -361,11 +344,13 @@ const RESPEC_CARD_TITLE := "Respec"
 ## Keep this SHORT: it swaps onto a rebind button pinned to MenuSkin.rebind_button_width (120px English
 ## budget incl. margins, clip_text on) — a longer prompt clips rather than growing the button, so it must
 ## read whole at ~100px (the shipped art button boxes carry 10+10 margins).
-const OPTIONS_BIND_PROMPT := "Press a key…"
+const OPTIONS_BIND_PROMPT := "Press a key"
 ## The Music Folder row's button caption while no custom folder is chosen. Says what the DEFAULT actually
 ## does rather than printing an empty path: each in-world radio plays out of its own authored folder until
 ## you point them all at one of yours.
-const OPTIONS_MUSIC_FOLDER_DEFAULT := "Default (each radio's own folder)"
+const OPTIONS_MUSIC_FOLDER_DEFAULT := "Default"
+## The Music Folder row's second button, which drops a chosen folder back to that default.
+const OPTIONS_MUSIC_FOLDER_CLEAR := "Clear"
 ## The OS folder-picker's window title (a real FileDialog, so this is chrome the desktop paints, not the skin).
 const OPTIONS_CHOOSE_MUSIC_FOLDER := "Choose a music folder"
 ## Window-mode choice captions. DISPLAY text only, but the caller's ARRAY ORDER IS BEHAVIOUR — item INDEX
@@ -397,9 +382,9 @@ const OPTIONS_CB_TRITANOPIA := "Tritanopia"
 ## and "32768 colours" is a number nobody recognises. Kept SHORT — the cycler's value button clips rather than
 ## widening the row (MenuStyle.cap_button), and the longest of these has to read whole beside two arrows.
 const OPTIONS_CQ_AUTHORED := "Default"
-const OPTIONS_CQ_24BIT := "24-bit (Off)"
+const OPTIONS_CQ_24BIT := "Off"
 const OPTIONS_CQ_16BIT := "16-bit"
-const OPTIONS_CQ_15BIT := "15-bit (PS1)"
+const OPTIONS_CQ_15BIT := "15-bit"
 const OPTIONS_CQ_12BIT := "12-bit"
 const OPTIONS_CQ_9BIT := "9-bit"
 const OPTIONS_CQ_8BIT := "8-bit"
@@ -409,6 +394,9 @@ const OPTIONS_CQ_3BIT := "3-bit"
 const OPTIONS_DIFFICULTY_EASY := "Easy"
 const OPTIONS_DIFFICULTY_NORMAL := "Normal"
 const OPTIONS_DIFFICULTY_HARD := "Hard"
+## Entry 0 of Options → Game → Language (Settings.language = "", follow the OS). The other entries are the
+## engine's own language names (Localization.locale_label) and are not authored here.
+const OPTIONS_LANGUAGE_SYSTEM := "System"
 ## The resolution dropdown's row for a window size outside the preset list — {w}/{h} ride in as digit
 ## strings. The preset rows themselves ("1280 x 720") are digits-only non-prose and stay at the call site.
 const OPTIONS_RESOLUTION_CUSTOM := "{w} x {h} (custom)"
@@ -428,8 +416,10 @@ const OPTIONS_MAIN_MENU := "Main Menu"
 ## surface, and re-wording one must never silently re-word the other.
 const OPTIONS_SAVE_LOAD := "Save / Load"
 const OPTIONS_APPLY := "Apply"
-const OPTIONS_REVERT := "Revert"
 const OPTIONS_QUIT_GAME := "Quit Game"
+## The quit confirm card: its question and its commit verb (a bare "Confirm" under a "QUIT GAME" title said nothing).
+const OPTIONS_QUIT_CONFIRM_TITLE := "Quit game?"
+const QUIT := "Quit"
 
 ## The main menu's button column (StartMenu — an authored scene, captions painted in _bind_ui). "Continue" is
 ## only shown when a save file exists; "New Game" opens character creation before anything is overwritten. Deliberately separate from the
@@ -462,6 +452,8 @@ const SAVE_LOAD_SAVE := "Save"
 const SAVE_LOAD_LOAD := "Load"
 ## The overwrite-confirm card's title (Save pressed on an OCCUPIED slot) — the card reuses CONFIRM / CANCEL.
 const SAVE_LOAD_OVERWRITE_TITLE := "Overwrite this save?"
+## The overwrite card's commit verb — the action, never a bare "Confirm" under a question.
+const SAVE_LOAD_OVERWRITE := "Overwrite"
 ## Screen-local failure lines (the TOAST_QUICKSAVE_FAILED wording idiom, painted on the panel's status hint
 ## instead of toasted): a save that didn't persist (disk full / permission / no player), a load whose file
 ## vanished or won't parse.
@@ -471,7 +463,7 @@ const SAVE_LOAD_LOAD_FAILED := "Load failed"
 ## authored level name (save_slot_caption): level display name + modified time, or the time alone. The
 ## separator is a MIDDLE DOT (U+00B7) with three spaces each side — the middle-dot idiom.
 ## Both tokens are VALUES (an authored LevelData.display_name and a formatted timestamp), never msgids of ours.
-const SAVE_SLOT_CAPTION := "{level}   ·   {time}"
+const SAVE_SLOT_CAPTION := "{level}   {time}"
 const SAVE_SLOT_CAPTION_NO_LEVEL := "{time}"
 ## Player-menu tab-strip labels (the Deus Ex / Pip-Boy tab group). DISPLAY text only: PlayerMenus routes
 ## between the six screens on StringName keys (PlayerMenus.TABS); these are just what the strip's buttons
@@ -487,13 +479,10 @@ const MENU_TAB_JOURNAL := "Journal"
 ## Accessibility "Minimap" / "Map Zoom" row labels: those name SETTINGS rows and a locale may word a settings
 ## row differently from a tab chip (the tab-chip-versus-heading rule).
 const MENU_TAB_MAP := "Map"
-## The Journal's EMPTY STATE — the whole screen when nothing is tracked, so it is the one line that has to
-## teach where quests come from. TWO LINES, the MAP_HINT shape: the state, then the action that ends it. A
-## bare "No quests yet." is a status readout on a blank panel and answers nothing a player would ask next.
-## The line break is authored (make_hint also autowraps, so a narrower panel simply reflows the second line —
-## it never widens the tab).
-const QUEST_JOURNAL_EMPTY := "No quests yet.\nAccept a job from someone in the city and its objectives are tracked here."
-const REPUTATION_EMPTY := "[PH] No factions defined."
+## The Journal's EMPTY STATE — a status readout, nothing more. It used to carry a two-line tutorial about
+## where quests come from; an empty panel that lectures reads as unfinished, so it just states the fact.
+const QUEST_JOURNAL_EMPTY := "No quests."
+const REPUTATION_EMPTY := "[PH] No factions."
 ## The Stats screen's portrait-column button — hands off to the fullscreen CharacterInspectScreen
 ## (full body + the equipped weapon, drag to rotate).
 const STATS_INSPECT_BUTTON := "Inspect"
@@ -503,33 +492,11 @@ const STATS_INSPECT_BUTTON := "Inspect"
 ## hint under the carried rows. Deliberately NOT reuses of the INSTALL_* consts: those paint the
 ## ChipInstallScreen (the paid mechanic modal), an independent surface.
 const IMPLANTS_INSTALLED_HEADING := "Installed"
-## The toggle verb, under the installed rows. Switching one OFF keeps it installed (it just stops working)
-## — the copy must not read as uninstalling, or a player will fear losing a chip they paid for. Names BOTH
-## directions: the rows carry no on/off word of their own (an off row is only dimmer), so a player looking at
-## a dim row needs this line to tell them the click that dimmed it is the click that brings it back.
-const IMPLANTS_TOGGLE_HINT := "Click an implant to switch it on or off — it stays installed."
-## Says NOT INSTALLED in the heading itself: a carried chip and a fitted one are the same row shape one
-## section apart, and "In your bag" alone would leave the difference to be inferred from position.
-const IMPLANTS_CARRIED_HEADING := "In your bag — not installed"
-const IMPLANTS_CARRIED_HINT := "A chip mechanic can fit these."
+const IMPLANTS_CARRIED_HEADING := "Carried"
 ## The per-section empty line. Reads like INSTALL_NONE's "(none)" but is deliberately its OWN const —
 ## one const per painted surface, so re-wording the install screen never re-words this tab.
-const IMPLANTS_NONE := "(none)"
+const IMPLANTS_NONE := "None"
 
-## The Map tab (map_screen.gd). MAP_HINT is the tab's WHOLE tutorial — it names the pointer gestures nothing
-## on screen announces (a click pins, a drag pans, the wheel zooms) — and it is painted as an EMPTY STATE over
-## the plan itself rather than in the footer. It lived in the footer once and never fitted: in the strip the
-## row's buttons left over it shipped ellipsized to "Click to pi…", which teaches nothing. On the plan
-## it has the whole panel width, and it earns its space by only appearing when there is nothing else to look at
-## (no pins on this level, nothing selected) — the first pin the player drops takes it away, and an empty floor
-## teaches again. The double space between its two sentences is the file's usual breath, not padding.
-const MAP_HINT := "Click to drop a pin.   Drag to pan, scroll to zoom."
-## What the FOOTER hint says instead, and the one fact the footer genuinely owes the player: this tab is
-## NORTH-UP while the HUD minimap they already know is heading-up by default, and without saying so the two
-## pictures disagreeing reads as a bug. Three words on purpose — the footer row is fixed-height, a wrapping
-## hint would shove the zoom controls (menus-dont-shift-with-text), and this one fits the strip the buttons
-## leave over at any panel width instead of being trimmed to nothing.
-const MAP_NORTH_UP := "North is up."
 ## The three footer buttons. They exist so the zoom and the pan have a focusable pad/keyboard path at all (the
 ## atm_screen "a control a pad can never land on is not a path" rule) — a wheel-and-drag-only affordance is
 ## unreachable without a mouse. RECENTRE puts the view back on the player: panning is the one gesture that does
@@ -583,7 +550,6 @@ const MAP_PIN_NO_NOTE := "No note."
 const WAYPOINT_EDIT_TITLE := "Edit Pin"
 const WAYPOINT_NAME_LABEL := "Name"
 const WAYPOINT_NOTE_LABEL := "Note"
-const WAYPOINT_NOTE_PLACEHOLDER := "What's here, or what you meant to do."
 const WAYPOINT_ICON_LABEL := "Mark"
 const WAYPOINT_TINT_LABEL := "Colour"
 const WAYPOINT_SAVE := "Save"
@@ -607,7 +573,7 @@ const WAYPOINT_MARKED := "Marked: {name}"
 ## The refusal when the level is already at WaypointBook.MAX_PER_LEVEL. It names the cap as a VALUE so the
 ## number and the sentence stay one template, and it is a REFUSAL rather than a silent drop because a pin that
 ## does not appear reads exactly like a broken map.
-const WAYPOINT_FULL := "Map is full — {max} pins on this level."
+const WAYPOINT_FULL := "This level holds {max} pins."
 ## The OTHER refusal: a level that records no path (a code-built LevelData) has no ledger to file a pin
 ## into. Its own copy because telling that player "the map is full" over an empty map is a lie.
 const WAYPOINT_NO_LEVEL := "Nowhere to file a pin here."
@@ -628,8 +594,8 @@ const STEALTH_CAUTION := "[ CAUTION ]"
 const STEALTH_DANGER := "[ DANGER ]"
 
 ## Reputation-shift toast — TWO whole templates selected by direction (never a "gained"/"lost" fragment).
-const REPUTATION_GAINED := "[PH] {faction} reputation gained!"
-const REPUTATION_LOST := "[PH] {faction} reputation lost!"
+const REPUTATION_GAINED := "[PH] {faction} reputation gained"
+const REPUTATION_LOST := "[PH] {faction} reputation lost"
 
 ## The three standing WORDS, painted standalone by the reputation screen's disposition column (a phase-2
 ## file) and doubling — for now — as alignment_changed's selection keys, because the phase-2-owned caller
@@ -639,9 +605,9 @@ const ALIGNMENT_NEUTRAL_WORD := "Neutral"
 const ALIGNMENT_FRIENDLY_WORD := "Friendly"
 ## Standing-crossed announcement — one whole template per alignment kind, SELECTED (see alignment_changed);
 ## the kind word is authored inside each template, never substituted in as a fragment.
-const ALIGNMENT_NOW_HOSTILE := "[PH] {faction} is now Hostile!"
-const ALIGNMENT_NOW_NEUTRAL := "[PH] {faction} is now Neutral!"
-const ALIGNMENT_NOW_FRIENDLY := "[PH] {faction} is now Friendly!"
+const ALIGNMENT_NOW_HOSTILE := "[PH] {faction} is now Hostile"
+const ALIGNMENT_NOW_NEUTRAL := "[PH] {faction} is now Neutral"
+const ALIGNMENT_NOW_FRIENDLY := "[PH] {faction} is now Friendly"
 const ALIGNMENT_CHANGED_TEMPLATES := {
 	ALIGNMENT_HOSTILE_WORD: ALIGNMENT_NOW_HOSTILE,
 	ALIGNMENT_NEUTRAL_WORD: ALIGNMENT_NOW_NEUTRAL,
@@ -653,7 +619,7 @@ const ALIGNMENT_CHANGED_TEMPLATES := {
 ## them is phase-2 territory — migrate the resource seam and these together.
 const DEATH_MESSAGE := "[PH] You were killed."
 const DEATH_MESSAGE_KILLED_BY := "[PH] You were killed by %s."
-const DEATH_MESSAGE_KILLED_BY_WEAPON := "[PH] You were killed by %s. They were using a %s."
+const DEATH_MESSAGE_KILLED_BY_WEAPON := "[PH] You were killed by %s with a %s."
 
 
 static func prefixed(text: String) -> String:
@@ -675,24 +641,39 @@ static func display(text: String) -> String:
 	return text.replace(PH_PREFIX_SPACE, "").replace(PH_PREFIX, "")
 
 
+const ACQUIRED := "[PH] {name} acquired"
+
+
 static func acquired(name: String) -> String:
-	return TextFormat.subst("[PH] {name} acquired!", {"name": name})
+	return TextFormat.subst(ACQUIRED, {"name": name})
+
+
+const INSTALLED := "[PH] {name} installed"
 
 
 static func installed(name: String) -> String:
-	return TextFormat.subst("[PH] {name} installed", {"name": name})
+	return TextFormat.subst(INSTALLED, {"name": name})
+
+
+const TAKE := "[PH] Take {name}"
 
 
 static func take(name: String) -> String:
-	return TextFormat.subst("[PH] Take {name}", {"name": name})
+	return TextFormat.subst(TAKE, {"name": name})
+
+
+const TAKE_ITEM := "Take {name}"
 
 
 static func take_item(name: String) -> String:
-	return TextFormat.subst("Take {name}", {"name": name})
+	return TextFormat.subst(TAKE_ITEM, {"name": name})
+
+
+const PICK_UP_NAMED := "[PH] Pick Up {name}"
 
 
 static func pick_up(name: String) -> String:
-	return TextFormat.subst("[PH] Pick Up {name}", {"name": name}) if not name.is_empty() else PROMPT_PICK_UP
+	return TextFormat.subst(PICK_UP_NAMED, {"name": name}) if not name.is_empty() else PROMPT_PICK_UP
 
 
 ## The player-facing noun for a BodyModelSwap part key (torso / head / arm_l / arm_r / leg_l / leg_r), used to
@@ -712,85 +693,137 @@ static func body_part(key: String) -> String:
 	return ""
 
 
+const PICK_POCKET_NAMED := "[PH] Pick Pocket {name}"
+const PICK_POCKET := "[PH] Pick Pocket"
+
+
 static func pick_pocket(name: String) -> String:
-	return TextFormat.subst("[PH] Pick Pocket {name}", {"name": name}) if not name.is_empty() else "[PH] Pick Pocket"
+	return TextFormat.subst(PICK_POCKET_NAMED, {"name": name}) if not name.is_empty() else PICK_POCKET
 
 
 ## The hover-tooltip odds line while pickpocketing a live target: the chance (0..100 %) of lifting the hovered item
 ## without being caught. Fed by LootScreen._pickpocket_success_percent (1 - catch chance).
+const PICKPOCKET_SUCCESS := "[PH] {pct}% to lift unnoticed"
+
+
 static func pickpocket_success(pct: int) -> String:
-	return TextFormat.subst("[PH] {pct}% to lift unnoticed", {"pct": pct})
+	return TextFormat.subst(PICKPOCKET_SUCCESS, {"pct": pct})
+
+
+const TALK_TO := "[PH] Talk to {name}"
 
 
 static func talk_to(name: String) -> String:
-	return TextFormat.subst("[PH] Talk to {name}", {"name": name})
+	return TextFormat.subst(TALK_TO, {"name": name})
+
+
+const TRADE_PROMPT := "Trade: {name}"
 
 
 static func trade_prompt(name: String) -> String:
-	return TextFormat.subst("Trade: {name}", {"name": name}) if not name.is_empty() else DEFAULT_MERCHANT_LABEL
+	return TextFormat.subst(TRADE_PROMPT, {"name": name}) if not name.is_empty() else DEFAULT_MERCHANT_LABEL
 
 
 ## The death card's IN-SENTENCE form of a JOB_* title ("You were killed by the gunsmith."): the label-context
 ## title reads wrong mid-line, exactly as STRANGER does (PlayerFeedbackSettings.death_stranger_killer swaps in
 ## "a stranger" for the same reason). Lower-cased because it sits inside the sentence, never at its head.
+const KILLER_JOB := "the {job}"
+
+
 static func killer_job(job: String) -> String:
-	return TextFormat.subst("the {job}", {"job": job.to_lower()})
+	return TextFormat.subst(KILLER_JOB, {"job": job.to_lower()})
+
+
+const UNLOCK := "[PH] Unlock {name}"
 
 
 static func unlock(name: String) -> String:
-	return TextFormat.subst("[PH] Unlock {name}", {"name": name})
+	return TextFormat.subst(UNLOCK, {"name": name})
+
+
+const LOOT := "[PH] Loot {name}"
 
 
 static func loot(name: String) -> String:
-	return TextFormat.subst("[PH] Loot {name}", {"name": name}) if not name.is_empty() else PROMPT_CONTAINER
+	return TextFormat.subst(LOOT, {"name": name}) if not name.is_empty() else PROMPT_CONTAINER
+
+
+const ACCEPT := "[PH] Accept: {title}"
 
 
 static func accept(quest_title: String) -> String:
-	return TextFormat.subst("[PH] Accept: {title}", {"title": quest_title})
+	return TextFormat.subst(ACCEPT, {"title": quest_title})
+
+
+const QUEST_STARTED := "[PH] Quest started: {title}"
 
 
 static func quest_started(quest_title: String) -> String:
-	return TextFormat.subst("[PH] Quest started: {title}", {"title": quest_title})
+	return TextFormat.subst(QUEST_STARTED, {"title": quest_title})
+
+
+const NEW_QUEST := "[PH] New quest: {title}"
 
 
 static func new_quest(quest_title: String) -> String:
-	return TextFormat.subst("[PH] New quest: {title}", {"title": quest_title})
+	return TextFormat.subst(NEW_QUEST, {"title": quest_title})
+
+
+const OBJECTIVE_COMPLETE := "[PH] Objective complete: {objective}"
 
 
 static func objective_complete(description: String) -> String:
-	return TextFormat.subst("[PH] Objective complete: {objective}", {"objective": description})
+	return TextFormat.subst(OBJECTIVE_COMPLETE, {"objective": description})
+
+
+const QUEST_COMPLETE := "[PH] Quest complete: {title}"
 
 
 static func quest_complete(quest_title: String) -> String:
-	return TextFormat.subst("[PH] Quest complete: {title}", {"title": quest_title})
+	return TextFormat.subst(QUEST_COMPLETE, {"title": quest_title})
+
+
+const QUEST_FAILED := "[PH] Quest failed: {title}"
 
 
 static func quest_failed(quest_title: String) -> String:
-	return TextFormat.subst("[PH] Quest failed: {title}", {"title": quest_title})
+	return TextFormat.subst(QUEST_FAILED, {"title": quest_title})
 
 
 ## Two whole templates (with/without the progress counter), selected on `required` — the counter is
 ## authored into its variant, never appended.
+const QUEST_TRACKER_LINE_COUNTED := "[PH] ◈ {title}: {objective} ({progress}/{required})"
+const QUEST_TRACKER_LINE := "[PH] ◈ {title}: {objective}"
+
+
 static func quest_tracker_line(title: String, objective_desc: String, progress: int, required: int) -> String:
-	var template := "[PH] ◈ {title} — {objective} ({progress}/{required})" if required > 1 else "[PH] ◈ {title} — {objective}"
+	var template := QUEST_TRACKER_LINE_COUNTED if required > 1 else QUEST_TRACKER_LINE
 	return TextFormat.subst(template, {"title": title, "objective": objective_desc, "progress": progress, "required": required})
 
 
 ## Quest-REWARD overflow (QuestTracker._grant_quest_rewards) — names the loss as reward items. The generic
 ## non-quest overflow (a dialogue gift) is inventory_full below.
+const QUEST_REWARDS_FULL_ONE := "[PH] Inventory full. {count} quest reward item couldn't fit"
+const QUEST_REWARDS_FULL_MANY := "[PH] Inventory full. {count} quest reward items couldn't fit"
+
+
 static func quest_rewards_full(lost_count: int) -> String:
 	return TextFormat.subst(TextFormat.plural(lost_count,
-			"[PH] Inventory full — {count} quest reward item couldn't fit",
-			"[PH] Inventory full — {count} quest reward items couldn't fit"),
+			QUEST_REWARDS_FULL_ONE,
+			QUEST_REWARDS_FULL_MANY),
 			{"count": lost_count})
 
 
 ## Neutral bag-overflow toast for a NON-quest item grant (the dialogue gift path in DialogueManager) —
 ## deliberately does not claim the lost items were quest rewards.
+const INVENTORY_FULL_ONE := "[PH] Inventory full. {count} item couldn't fit"
+const INVENTORY_FULL_MANY := "[PH] Inventory full. {count} items couldn't fit"
+
+
 static func inventory_full(lost_count: int) -> String:
 	return TextFormat.subst(TextFormat.plural(lost_count,
-			"[PH] Inventory full — {count} item couldn't fit",
-			"[PH] Inventory full — {count} items couldn't fit"),
+			INVENTORY_FULL_ONE,
+			INVENTORY_FULL_MANY),
 			{"count": lost_count})
 
 
@@ -807,98 +840,144 @@ static func alignment_changed(faction_name: String, kind_word: String) -> String
 
 ## Deny toast for a stat gate. Takes the stat ID — the authored StatText title resolves HERE (StatInfo.title,
 ## capitalized-id fallback built in), so callers (BuildGate) never pre-resolve or re-capitalize the display name.
+const REQUIRES_STAT := "[PH] Requires {stat} {value}"
+
+
 static func requires_stat(stat: StringName, value: int) -> String:
-	return TextFormat.subst("[PH] Requires {stat} {value}", {"stat": StatInfo.title(stat), "value": value})
+	return TextFormat.subst(REQUIRES_STAT, {"stat": StatInfo.title(stat), "value": value})
 
 
 ## Deny toast for a perk gate. Takes the perk ID: the authored Perk.display_name resolves HERE (Perks registry),
 ## [PH]-stripped since this template prepends its own marker; a missing/blank name degrades to the capitalized
 ## id (the pre-authoring look). Authored casing is used VERBATIM — never re-capitalize()d.
+const REQUIRES_PERK := "[PH] Requires the {perk} perk"
+
+
 static func requires_perk(perk_id: StringName) -> String:
 	var label := Perks.display_label(perk_id)  # authored display_name verbatim, else the raw id back
 	label = strip_prefix(label) if label != String(perk_id) else label.capitalize()
-	return TextFormat.subst("[PH] Requires the {perk} perk", {"perk": label})
+	return TextFormat.subst(REQUIRES_PERK, {"perk": label})
+
+
+const REQUIRES_ABILITY := "[PH] Requires an ability"
 
 
 static func requires_ability() -> String:
-	return "[PH] Requires an ability"
+	return REQUIRES_ABILITY
 
 
 ## Deny toast for a faction-standing gate. Takes the faction ID: the authored Faction.display_name resolves HERE
 ## (Factions.by_id); an unresolved faction or blank authored name degrades to the capitalized id as before.
+const REQUIRES_STANDING := "[PH] Requires standing with {faction}"
+
+
 static func requires_standing(faction_id: String) -> String:
 	var fac := Factions.by_id(faction_id)
 	var label := fac.display_name if fac != null and not fac.display_name.is_empty() else faction_id.capitalize()
-	return TextFormat.subst("[PH] Requires standing with {faction}", {"faction": label})
+	return TextFormat.subst(REQUIRES_STANDING, {"faction": label})
+
+
+const LOCKED_REQUIRES := "[PH] Locked. Needs {label}"
 
 
 static func locked_requires(label: String) -> String:
-	return TextFormat.subst("[PH] Locked — requires {label}", {"label": label})
+	return TextFormat.subst(LOCKED_REQUIRES, {"label": label})
 
 
 ## Deny toast for a lock that is BOTH keyed AND pickable but you have neither the key nor a lockpick — name both ways in.
+const LOCKED_REQUIRES_EITHER := "[PH] Locked. Needs {key} or {pick}"
+
+
 static func locked_requires_either(key_label: String, pick_label: String) -> String:
-	return TextFormat.subst("[PH] Locked — requires {key} or {pick}", {"key": key_label, "pick": pick_label})
+	return TextFormat.subst(LOCKED_REQUIRES_EITHER, {"key": key_label, "pick": pick_label})
 
 
 static func lock_result(consumed_item: bool) -> String:
 	return TOAST_LOCK_PICKED if consumed_item else TOAST_UNLOCKED
 
 
+const REST_PROMPT := "[PH] Rest: {place}"
+
+
 static func rest_prompt(place: String) -> String:
-	return TextFormat.subst("[PH] Rest: {place}", {"place": place}) if not place.is_empty() else PROMPT_REST_AT_BONFIRE
+	return TextFormat.subst(REST_PROMPT, {"place": place}) if not place.is_empty() else PROMPT_REST_AT_BONFIRE
+
+
+const RESTED_AT := "[PH] Rested at {place}"
 
 
 static func rested_at(place: String) -> String:
-	return TextFormat.subst("[PH] Rested at {place}", {"place": place})
+	return TextFormat.subst(RESTED_AT, {"place": place})
+
+
+const RESPEC_PROMPT := "[PH] Respec: {name}"
 
 
 static func respec_prompt(station_name: String) -> String:
-	return TextFormat.subst("[PH] Respec: {name}", {"name": station_name}) if not station_name.is_empty() else PROMPT_RESPEC
+	return TextFormat.subst(RESPEC_PROMPT, {"name": station_name}) if not station_name.is_empty() else PROMPT_RESPEC
+
+
+const RESPEC_REFUNDED_ONE := "[PH] Respec: {count} perk refunded"
+const RESPEC_REFUNDED_MANY := "[PH] Respec: {count} perks refunded"
 
 
 static func respec_refunded(count: int) -> String:
 	return TextFormat.subst(TextFormat.plural(count,
-			"[PH] Respec: {count} perk refunded",
-			"[PH] Respec: {count} perks refunded"),
+			RESPEC_REFUNDED_ONE,
+			RESPEC_REFUNDED_MANY),
 			{"count": count})
 
 
-static func respec_blurb(count: int) -> String:
-	return TextFormat.subst(TextFormat.plural(count,
-			"[PH] Refund {count} perk — skill points return to re-spend at a Level Up.",
-			"[PH] Refund {count} perks — skill points return to re-spend at a Level Up."),
-			{"count": count})
+const RESPEC_STATUS := "[PH] Your zorkmids: {amount}"
 
 
 static func respec_status(cost: float, player_money: float) -> String:
-	return TextFormat.subst("[PH] Cost: {cost}\nYour zorkmids: {amount}", {"cost": Zorkmids.fmt(cost), "amount": Zorkmids.fmt(player_money)})
+	return TextFormat.subst(RESPEC_STATUS, {"cost": Zorkmids.fmt(cost), "amount": Zorkmids.fmt(player_money)})
+
+
+const RESPEC_BUTTON := "Respec  {money}"
 
 
 static func respec_button(cost: float) -> String:
-	return TextFormat.subst("Respec  —  {money}", {"money": Zorkmids.money_text(cost)})
+	return TextFormat.subst(RESPEC_BUTTON, {"money": Zorkmids.money_text(cost)})
+
+
+const BONFIRE_DEFAULT_NAME := "bonfire"
 
 
 static func bonfire_name(name: String) -> String:
-	return name if not name.is_empty() else "bonfire"
+	return name if not name.is_empty() else BONFIRE_DEFAULT_NAME
 
 
 ## Radio on/off toasts — two whole templates (Radio._toast selects by the new state), replacing the old
 ## radio_state(name, state_word) fragment seam.
+const RADIO_ON := "[PH] {name} on"
+
+
 static func radio_on(name: String) -> String:
-	return TextFormat.subst("[PH] {name} on", {"name": name})
+	return TextFormat.subst(RADIO_ON, {"name": name})
+
+
+const RADIO_OFF := "[PH] {name} off"
 
 
 static func radio_off(name: String) -> String:
-	return TextFormat.subst("[PH] {name} off", {"name": name})
+	return TextFormat.subst(RADIO_OFF, {"name": name})
+
+
+const RADIO_PROMPT_TURN_OFF := "[PH] Turn off {name}"
+const RADIO_PROMPT_TURN_ON := "[PH] Turn on {name}"
 
 
 static func radio_prompt(name: String, playing: bool) -> String:
-	return TextFormat.subst("[PH] Turn off {name}" if playing else "[PH] Turn on {name}", {"name": name})
+	return TextFormat.subst(RADIO_PROMPT_TURN_OFF if playing else RADIO_PROMPT_TURN_ON, {"name": name})
+
+
+const MONEY_PICKUP := "[PH] Take {amount} zorkmids"
 
 
 static func money_pickup(amount: float) -> String:
-	return TextFormat.subst("[PH] Take {amount} zorkmids", {"amount": Zorkmids.fmt(amount)})
+	return TextFormat.subst(MONEY_PICKUP, {"amount": Zorkmids.fmt(amount)})
 
 
 static func wallet_you(amount: float) -> String:
@@ -968,115 +1047,187 @@ static func hud_owed(owed_abs: float) -> String:
 	return TextFormat.subst(HUD_OWED, {"owed": Zorkmids.money_text(owed_abs)})
 
 
+const CLAIM_NAME_DIALOG := "[PH] Name your {name}"
+
+
 static func claim_name_dialog(name: String) -> String:
-	return TextFormat.subst("[PH] Name your {name}", {"name": name})
+	return TextFormat.subst(CLAIM_NAME_DIALOG, {"name": name})
+
+
+const BEFRIEND_NAMED := "[PH] Befriended {name}"
+const BEFRIEND := "[PH] Befriended"
 
 
 static func befriend(name: String) -> String:
-	return TextFormat.subst("[PH] Befriended {name}", {"name": name}) if not name.is_empty() else "[PH] Befriended"
+	return TextFormat.subst(BEFRIEND_NAMED, {"name": name}) if not name.is_empty() else BEFRIEND
+
+
+const RELEASED_NAMED := "[PH] Released {name}"
+const RELEASED := "[PH] Released"
 
 
 static func released(name: String) -> String:
-	return TextFormat.subst("[PH] Released {name}", {"name": name}) if not name.is_empty() else "[PH] Released"
+	return TextFormat.subst(RELEASED_NAMED, {"name": name}) if not name.is_empty() else RELEASED
+
+
+const HOLD_TO_RELEASE := "[PH] [{key}] Hold to Release"
+const HOLD_TO_RELEASE_NAMED := "[PH] [{key}] Hold to Release {name}"
 
 
 static func hold_to_release(key: String, name: String) -> String:
 	if name.is_empty():
-		return TextFormat.subst("[PH] [{key}] Hold to Release", {"key": key})
-	return TextFormat.subst("[PH] [{key}] Hold to Release {name}", {"key": key, "name": name})
+		return TextFormat.subst(HOLD_TO_RELEASE, {"key": key})
+	return TextFormat.subst(HOLD_TO_RELEASE_NAMED, {"key": key, "name": name})
 
 
 ## NOTE: the old key_prompt(key, verb, name) is GONE — a verb argument is a prose fragment the RULE
 ## forbids (and it had no callers left). Each interaction verb gets its own whole-template func
 ## (takedown_prompt / hold_to_release are the shape); add a new func here rather than resurrecting a
 ## verb parameter.
+const TAKEDOWN_PROMPT := "[PH] [{key}] Take Down"
+const TAKEDOWN_PROMPT_NAMED := "[PH] [{key}] Take Down {name}"
+
+
 static func takedown_prompt(key: String, name: String) -> String:
 	if name.is_empty():
-		return TextFormat.subst("[PH] [{key}] Take Down", {"key": key})
-	return TextFormat.subst("[PH] [{key}] Take Down {name}", {"key": key, "name": name})
+		return TextFormat.subst(TAKEDOWN_PROMPT, {"key": key})
+	return TextFormat.subst(TAKEDOWN_PROMPT_NAMED, {"key": key, "name": name})
+
+
+const LEARNED := "[PH] Learned: {perk}"
 
 
 static func learned(perk_label: String) -> String:
-	return TextFormat.subst("[PH] Learned: {perk}", {"perk": perk_label})
+	return TextFormat.subst(LEARNED, {"perk": perk_label})
+
+
+const LEARN_PROMPT := "[PH] Learn: {perk}"
 
 
 static func learn_prompt(perk_label: String) -> String:
-	return TextFormat.subst("[PH] Learn: {perk}", {"perk": perk_label})
+	return TextFormat.subst(LEARN_PROMPT, {"perk": perk_label})
+
+
+const ENTER_LEVEL := "[PH] Enter {name}"
 
 
 static func enter_level(level_name: String) -> String:
-	return TextFormat.subst("[PH] Enter {name}", {"name": level_name})
+	return TextFormat.subst(ENTER_LEVEL, {"name": level_name})
+
+
+const CHIP_INSTALLER_PROMPT := "[PH] Upgrades: {name}"
 
 
 static func chip_installer_prompt(name: String) -> String:
-	return TextFormat.subst("[PH] Upgrades: {name}", {"name": name}) if not name.is_empty() else PROMPT_MECHANIC
+	return TextFormat.subst(CHIP_INSTALLER_PROMPT, {"name": name}) if not name.is_empty() else PROMPT_MECHANIC
+
+
+const CHESS_PROMPT := "[PH] Play Chess: {name}"
 
 
 static func chess_prompt(opponent_name: String) -> String:
-	return TextFormat.subst("[PH] Play Chess: {name}", {"name": opponent_name}) if not opponent_name.is_empty() else PROMPT_PLAY_CHESS
+	return TextFormat.subst(CHESS_PROMPT, {"name": opponent_name}) if not opponent_name.is_empty() else PROMPT_PLAY_CHESS
+
+
+const CHESS_TITLE_NAMED := "{name}"
+const CHESS_TITLE := "CHESS"
 
 
 static func chess_title(opponent_name: String) -> String:
-	return TextFormat.subst("CHESS — {name}", {"name": opponent_name}) if not opponent_name.is_empty() else "CHESS"
+	return TextFormat.subst(CHESS_TITLE_NAMED, {"name": opponent_name}) if not opponent_name.is_empty() else CHESS_TITLE
+
+
+const COLLATERAL_KILL := "[PH] Collateral kill   +{money}"
 
 
 static func collateral_kill(pay: float) -> String:
-	return TextFormat.subst("[PH] Collateral kill!  +{money}", {"money": Zorkmids.money_text(pay)})
+	return TextFormat.subst(COLLATERAL_KILL, {"money": Zorkmids.money_text(pay)})
+
+
+const CONFETTI := "[PH] Confetti   +{money}"
 
 
 static func confetti(pay: float) -> String:
-	return TextFormat.subst("[PH] Confetti!  +{money}", {"money": Zorkmids.money_text(pay)})
+	return TextFormat.subst(CONFETTI, {"money": Zorkmids.money_text(pay)})
+
+
+const LONG_RANGE_KILL := "[PH] Long-range kill   {distance} m   +{money}"
 
 
 static func long_range_kill(distance_m: int, pay: float) -> String:
-	return TextFormat.subst("[PH] Long-range kill!  {distance} m  +{money}", {"distance": distance_m, "money": Zorkmids.money_text(pay)})
+	return TextFormat.subst(LONG_RANGE_KILL, {"distance": distance_m, "money": Zorkmids.money_text(pay)})
 
 
 ## The respawn toast when a KILLER pocketed your wallet (death_purse_loss_fraction). `amount` = what they took
 ## (Player._death_wallet_lost); `killer` comes pre-masked from Player._killer_display_name, so an NPC you were never
 ## introduced to arrives as the lowercase indefinite "a stranger" — which is why the name sits MID-sentence and never
 ## opens it. Mirrors the chess_loss / long_range_kill money-toast style: one [PH] marker up front.
+const PURSE_TAKEN := "[PH] Robbed of {money} by {killer}"
+
+
 static func purse_taken(killer: String, amount: float) -> String:
-	return TextFormat.subst("[PH] Robbed!  {money} taken by {killer}", {"money": Zorkmids.money_text(amount), "killer": killer})
+	return TextFormat.subst(PURSE_TAKEN, {"money": Zorkmids.money_text(amount), "killer": killer})
 
 
 ## The respawn toast when NOBODY gets credit for the death (a fall, a hazard, your own grenade): the wallet spilled
 ## on the ground as a physics money bag at the spot you died and is still sitting there. Says WHERE, because with
 ## loot beacons off that line is the only thing telling the player their zorkmids are recoverable at all.
+const PURSE_DROPPED := "[PH] Dropped {money} where you fell"
+
+
 static func purse_dropped(amount: float) -> String:
-	return TextFormat.subst("[PH] Purse dropped!  {money} where you fell", {"money": Zorkmids.money_text(amount)})
+	return TextFormat.subst(PURSE_DROPPED, {"money": Zorkmids.money_text(amount)})
+
+
+const HOLSTER_FORGIVENESS_TUTORIAL := "[PH] Hold [{key}] to holster and stand down"
 
 
 static func holster_forgiveness_tutorial(key: String) -> String:
-	return TextFormat.subst("[PH] You provoked them. Hold [{key}] to holster your weapon and ask for forgiveness.", {"key": key})
+	return TextFormat.subst(HOLSTER_FORGIVENESS_TUTORIAL, {"key": key})
+
+
+const GAINED_HP := "[PH] +{amount} HP"
 
 
 static func gained_hp(amount: int) -> String:
-	return TextFormat.subst("[PH] +{amount} HP", {"amount": amount})
+	return TextFormat.subst(GAINED_HP, {"amount": amount})
+
+
+const HEAD_CRIPPLED := "[PH] Head crippled"
 
 
 static func head_crippled() -> String:
-	return "[PH] Your head is crippled!"
+	return HEAD_CRIPPLED
 
 
 ## [PH]-marked: AI-lineage combat prose, unauthored — the release scrub must see it (it slipped through
 ## unmarked when the toast moved into this registry; the sibling crippled_self lines were always marked).
+const CRIPPLED_TARGET := "[PH] Crippled {name}'s {part}"
+
+
 static func crippled_target(target_name: String, part_name: String) -> String:
-	return TextFormat.subst("[PH] Crippled {name}'s {part}", {"name": target_name, "part": part_name})
+	return TextFormat.subst(CRIPPLED_TARGET, {"name": target_name, "part": part_name})
+
+
+const LEVEL_UP_ONE := "Level {level}   +{points} skill point"
+const LEVEL_UP_MANY := "Level {level}   +{points} skill points"
 
 
 static func level_up(level: int, points: int) -> String:
 	return TextFormat.subst(TextFormat.plural(points,
-			"Level {level}! +{points} skill point",
-			"Level {level}! +{points} skill points"),
+			LEVEL_UP_ONE,
+			LEVEL_UP_MANY),
 			{"level": level, "points": points})
 
 
 ## The character creator's points banner. Says TO SPEND rather than "remaining": the builder is zero-sum and
-## opens at zero, so "remaining" would imply an allowance was handed out and then eaten. CHARACTER_CREATE_STAT_RULE
-## is the line under it that explains how the number ever becomes non-zero.
+## opens at zero, so "remaining" would imply an allowance was handed out and then eaten. The steppers teach the
+## rest: a "−" lights every "+", and there is deliberately no sentence under the banner spelling that out.
+const POINTS_TO_SPEND := "Points to spend: {points}"
+
+
 static func points_to_spend(spare: int) -> String:
-	return TextFormat.subst("Points to spend: {points}", {"points": spare})
+	return TextFormat.subst(POINTS_TO_SPEND, {"points": spare})
 
 
 ## --- THE SIX LIVE-EFFECT LINES (the Stats screen's "Now:" row, and the same text inside a hover tooltip) ----
@@ -1092,42 +1243,64 @@ static func points_to_spend(spare: int) -> String:
 ## Keep them SHORT. They paint into a stat block in a two-column grid (six blocks on one Pip-Boy tab), the
 ## block wraps to as many lines as it needs, and the grid has no scrollbar worth the name — the longest of
 ## these, larceny's four clauses, is the one that shipped clipped at the panel's bottom edge.
+const STAT_EFFECT_STRENGTH := "melee {melee}, {carry} carry, {max_hp} max HP"
+
+
 static func stat_effect_strength(melee: String, carry: String, max_hp: String) -> String:
-	return TextFormat.subst("melee {melee}, {carry} carry, {max_hp} max HP", {"melee": melee, "carry": carry, "max_hp": max_hp})
+	return TextFormat.subst(STAT_EFFECT_STRENGTH, {"melee": melee, "carry": carry, "max_hp": max_hp})
+
+
+const STAT_EFFECT_ENDURANCE := "{stamina} max stamina, {regen} out-of-combat healing"
 
 
 static func stat_effect_endurance(stamina: String, regen: String) -> String:
-	return TextFormat.subst("{stamina} max stamina, {regen} out-of-combat healing", {"stamina": stamina, "regen": regen})
+	return TextFormat.subst(STAT_EFFECT_ENDURANCE, {"stamina": stamina, "regen": regen})
+
+
+const STAT_EFFECT_GUNPLAY := "{damage} gun damage, {steadiness} aim steadiness"
 
 
 static func stat_effect_gunplay(damage: String, steadiness: String) -> String:
-	return TextFormat.subst("{damage} gun damage, {steadiness} aim steadiness", {"damage": damage, "steadiness": steadiness})
+	return TextFormat.subst(STAT_EFFECT_GUNPLAY, {"damage": damage, "steadiness": steadiness})
 
 
-## Three clauses, not five: agility's JUMP scale rides the exact same per-point rate as move speed, and its RELOAD
+## Three clauses, not five: agility's JUMP scale (and the fall-damage stretch, which IS the jump scale) rides the
+## exact same per-point rate as move speed, and its RELOAD
 ## speed rides the same rate as its melee speed, so spelling either out would spend a line of a cramped cell
 ## restating the number beside it. Stamina recovery is its own rate on its own resource, and the hands clause
 ## ("attack & reload speed") is a whole different domain from the legs, so both earn their own clause.
 ## `quickness` is the HANDS number and reads "less is better" — a positive percentage means less time per swing
 ## and per magazine change, the same voice as gunplay's aim steadiness and larceny's takedown time.
+const STAT_EFFECT_AGILITY := "{speed} move speed, {regen} stamina recovery, {quickness} attack & reload speed"
+
+
 static func stat_effect_agility(speed: String, stamina_regen: String, quickness: String) -> String:
-	return TextFormat.subst("{speed} move speed, {regen} stamina recovery, {quickness} attack & reload speed", {"speed": speed, "regen": stamina_regen, "quickness": quickness})
+	return TextFormat.subst(STAT_EFFECT_AGILITY, {"speed": speed, "regen": stamina_regen, "quickness": quickness})
+
+
+const STAT_EFFECT_STREETWISE := "buys {buys}, sales {sales}, rep gains {rep}"
 
 
 static func stat_effect_streetwise(buys: String, sales: String, rep: String) -> String:
-	return TextFormat.subst("buys {buys}, sales {sales}, rep gains {rep}", {"buys": buys, "sales": sales, "rep": rep})
+	return TextFormat.subst(STAT_EFFECT_STREETWISE, {"buys": buys, "sales": sales, "rep": rep})
 
 
 ## `allowance` is the priciest thing a pickpocket lift may be worth, as a bare number beside the three
 ## percentages. Worded "lift limit" rather than the shipped "lift value <= 50": a maths operator in player
 ## prose is a fragment nothing can translate, and the shorter clause is what keeps the four-clause larceny
 ## block inside its cell.
+const STAT_EFFECT_LARCENY := "{detection} enemy detection speed, {takedown} takedown time, {risk}% caught risk, lift limit {allowance}"
+
+
 static func stat_effect_larceny(detection: String, takedown: String, risk: int, allowance: String) -> String:
-	return TextFormat.subst("{detection} enemy detection speed, {takedown} takedown time, {risk}% caught risk, lift limit {allowance}", {"detection": detection, "takedown": takedown, "risk": risk, "allowance": allowance})
+	return TextFormat.subst(STAT_EFFECT_LARCENY, {"detection": detection, "takedown": takedown, "risk": risk, "allowance": allowance})
+
+
+const SHOP_TITLE_NAMED := "{name}"
 
 
 static func shop_title(name: String) -> String:
-	return TextFormat.subst("TRADE — {name}", {"name": name}) if not name.is_empty() else SHOP_TITLE
+	return TextFormat.subst(SHOP_TITLE_NAMED, {"name": name}) if not name.is_empty() else SHOP_TITLE
 
 
 ## A shop sell-row for the currently-wielded weapon — the whole EQUIPPED_ROW template wrapping the composed
@@ -1136,8 +1309,11 @@ static func equipped_row(row_text: String) -> String:
 	return TextFormat.subst(EQUIPPED_ROW, {"row": row_text})
 
 
+const INSTALL_TITLE_NAMED := "{name}"
+
+
 static func install_title(name: String) -> String:
-	return TextFormat.subst("INSTALL — {name}", {"name": name}) if not name.is_empty() else INSTALL_TITLE
+	return TextFormat.subst(INSTALL_TITLE_NAMED, {"name": name}) if not name.is_empty() else INSTALL_TITLE
 
 
 ## An ARMED chip row's caption — the second half of the two-click install. The money phrase resolves HERE
@@ -1147,8 +1323,12 @@ static func chip_install_confirm(cost: float) -> String:
 	return TextFormat.subst(CHIP_INSTALL_CONFIRM, {"cost": Zorkmids.money_text(cost)})
 
 
+const HEAL_TITLE_NAMED := "{name}"
+const HEAL_TITLE := "HEAL"
+
+
 static func heal_title(name: String) -> String:
-	return TextFormat.subst("HEAL — {name}", {"name": name}) if not name.is_empty() else "HEAL"
+	return TextFormat.subst(HEAL_TITLE_NAMED, {"name": name}) if not name.is_empty() else HEAL_TITLE
 
 
 # --- THE LEDGER TERMINAL (the ATM: scripts/components/atm.gd + scripts/ui/atm_screen.gd) -------------------
@@ -1175,8 +1355,8 @@ const ATM_SETTLE := "[PH] Pay down"
 ## identical in both, so the fixed-width card can never hop mid-transaction (the heal-status padding lesson).
 ## {owed} arrives as an absolute value: Zorkmids.fmt prints its own minus, and "Owed  -240 zm" reads as a
 ## double negative.
-const ATM_STATEMENT_SOLVENT := "[PH] Cash on hand   {cash}\nOn deposit   {saved}\nOwed   nothing\nCredit line   {left} of {limit}\nCredit score   {score}   ·   {band}"
-const ATM_STATEMENT_OWING := "[PH] Cash on hand   {cash}\nOn deposit   {saved}\nOwed   {owed}\nCredit line   {left} of {limit}\nCredit score   {score}   ·   {band}"
+const ATM_STATEMENT_SOLVENT := "[PH] Cash on hand   {cash}\nOn deposit   {saved}\nOwed   nothing\nCredit line   {left} of {limit}\nCredit score   {score}, {band}"
+const ATM_STATEMENT_OWING := "[PH] Cash on hand   {cash}\nOn deposit   {saved}\nOwed   {owed}\nCredit line   {left} of {limit}\nCredit score   {score}, {band}"
 ## Short band names for the statement's score line and the score toast — the same KEYS the verdict templates
 ## use, worded tight enough to sit at the end of a line on a fixed-width card.
 ## ⭐DELIBERATELY BARE (no "[PH] "): these are VALUE tokens substituted into templates that already carry the
@@ -1202,17 +1382,23 @@ static func atm_band_short(band: StringName) -> String:
 
 
 ## Hover readout for a terminal: its authored name, else the default label (the trade_prompt mold).
+const ATM_PROMPT := "[PH] Bank at {name}"
+
+
 static func atm_prompt(station_name: String) -> String:
 	if station_name.is_empty():
 		return ATM_DEFAULT_PROMPT
-	return TextFormat.subst("[PH] Bank at {name}", {"name": station_name})
+	return TextFormat.subst(ATM_PROMPT, {"name": station_name})
 
 
 ## Card title, re-stamped per terminal on open. MenuStyle.title_text owns the casing.
+const ATM_TITLE := "[PH] {name}"
+
+
 static func atm_title(station_name: String) -> String:
 	if station_name.is_empty():
 		return ATM_CARD_TITLE
-	return TextFormat.subst("[PH] LEDGER — {name}", {"name": station_name})
+	return TextFormat.subst(ATM_TITLE, {"name": station_name})
 
 
 ## The statement: one whole template per state, five lines in both. Every amount rides in as a formatted
@@ -1231,42 +1417,6 @@ static func atm_statement(cash: float, saved: float, owed: float, credit_left: f
 	})
 
 
-## The standing explainer under the statement — the ONE place the economy is taught. Whole templates only,
-## selected by state (owing × fee × rate), never fragment appends. SOLVENT: death-safety + the savings rate.
-## OWING: the debt rate instead — the savings clause is dropped there because the one-signed-account invariant
-## means you cannot hold growing savings while in the red (deposits retire debt first), so advertising growth
-## would be a receipt the Ledger won't honour. A zeroed rate drops its clause rather than printing "0%", and a
-## zeroed DEBT rate falls back to the solvent teaching wholesale (a debt that never grows needs no warning).
-## `savings_rate`/`debt_rate` are the per-dawn fractions (EconomySettings.bank_*_interest_rate) — quoted HERE
-## because the dawn toasts are the interest's only other surface, so a player who never happened to hold a
-## balance across a dawn had no way to learn that either direction moves.
-static func atm_hint(fee_fraction: float, savings_rate: float, debt_rate: float, owing: bool) -> String:
-	var pct := TextFormat.num(snappedf(fee_fraction * 100.0, 0.1))
-	if owing and debt_rate > 0.0:
-		var drate := TextFormat.num(snappedf(debt_rate * 100.0, 0.1))
-		if fee_fraction <= 0.0:
-			return TextFormat.subst(
-				"[PH] What you owe grows {rate}% at every dawn — deposits pay it down first. This terminal charges nothing to spend.",
-				{"rate": drate})
-		return TextFormat.subst(
-			"[PH] What you owe grows {rate}% at every dawn — deposits pay it down first. Spending costs {pct}% — the cash in your pocket never does.",
-			{"rate": drate, "pct": pct})
-	var rate := TextFormat.num(snappedf(savings_rate * 100.0, 0.1))
-	if fee_fraction <= 0.0:
-		if savings_rate > 0.0:
-			return TextFormat.subst(
-				"[PH] Banked money is safe if you die and grows {rate}% at every dawn. This terminal charges nothing to spend it.",
-				{"rate": rate})
-		return "[PH] Banked money is safe if you die. This terminal charges nothing to spend it."
-	if savings_rate > 0.0:
-		return TextFormat.subst(
-			"[PH] Banked money is safe if you die and grows {rate}% at every dawn. Spending it costs {pct}% — the cash in your pocket never does.",
-			{"rate": rate, "pct": pct})
-	return TextFormat.subst(
-		"[PH] Banked money is safe if you die. Spending it costs {pct}% — the cash in your pocket never does.",
-		{"pct": pct})
-
-
 ## DEPOSIT doubles as SETTLE: two whole captions selected by whether anything is owed.
 static func atm_deposit_button(owing: bool) -> String:
 	return ATM_SETTLE if owing else ATM_DEPOSIT
@@ -1274,13 +1424,20 @@ static func atm_deposit_button(owing: bool) -> String:
 
 ## Post-transaction toasts. Depositing while in the red is REPAYMENT, and saying so is the only way the
 ## player learns the two are the same operation.
+const ATM_DEPOSITED_DEBT := "[PH] {money} off your balance"
+const ATM_DEPOSITED := "[PH] {money} deposited"
+
+
 static func atm_deposited(amount: float, was_owing: bool) -> String:
-	var template := "[PH] {money} off your balance." if was_owing else "[PH] {money} deposited."
+	var template := ATM_DEPOSITED_DEBT if was_owing else ATM_DEPOSITED
 	return TextFormat.subst(template, {"money": Zorkmids.money_text(amount)})
 
 
+const ATM_WITHDREW := "[PH] {money} withdrawn"
+
+
 static func atm_withdrew(amount: float) -> String:
-	return TextFormat.subst("[PH] {money} withdrawn.", {"money": Zorkmids.money_text(amount)})
+	return TextFormat.subst(ATM_WITHDREW, {"money": Zorkmids.money_text(amount)})
 
 
 ## The armed payment RAIL, as a button caption — TWO whole templates selected by the KEY (never by the painted
@@ -1295,35 +1452,49 @@ static func atm_withdrew(amount: float) -> String:
 ## keep it short: it has to fit inside that button's pinned width WITH the chevrons, and any shape added here
 ## would sit between two that already say "cycle". (The ATM's own rail button paints this string bare — it is
 ## not the drop-in, and a terminal whose whole subject is the account needs no discovery affordance.)
+const PAYMENT_RAIL_BUTTON_CREDIT := "Credit"
+const PAYMENT_RAIL_BUTTON_DEBIT := "Debit"
+
+
 static func payment_rail_button(method: String) -> String:
 	if method == "credit":
-		return "Paying with: Credit"
-	return "Paying with: Debit"
+		return PAYMENT_RAIL_BUTTON_CREDIT
+	return PAYMENT_RAIL_BUTTON_DEBIT
 
 
-## The top-left CREDIT SCORE announcement (CreditWatch). FOUR whole templates selected by two booleans —
+## The top-left CREDIT SCORE announcement (CreditWatch). ⭐TOASTS CARRY NO "!" AND NO TRAILING FULL STOP (2026-09-17):
+## a HUD line is a readout, and the old mix of shouted, punctuated and bare lines stacked into a ragged column. FOUR whole templates selected by two booleans —
 ## direction, and whether the move crossed into a new band. Crossing a band is the moment that actually
 ## changes what the Ledger will lend you, so it earns the longer line; a plain drift gets the short one.
 ## The delta rides in pre-signed via "%+d" (TextFormat.num would drop the plus the readout depends on) and
 ## the band arrives as a KEY, resolved here through the same short-name selector the ATM statement uses.
+const CREDIT_SCORE_TOAST_UP := "[PH] Credit score {score}   {delta}   rated {band}"
+const CREDIT_SCORE_TOAST_DOWN := "[PH] Credit score {score}   {delta}   downgraded to {band}"
+const CREDIT_SCORE_TOAST := "[PH] Credit score {score}   {delta}"
+
+
 static func credit_score_toast(score: int, delta: int, band: StringName, band_changed: bool) -> String:
 	if band_changed:
-		var crossed := "[PH] Credit score {score} ({delta}) — the Ledger now rates you {band}." if delta > 0 \
-				else "[PH] Credit score {score} ({delta}) — the Ledger has downgraded you to {band}."
+		var crossed := CREDIT_SCORE_TOAST_UP if delta > 0 \
+				else CREDIT_SCORE_TOAST_DOWN
 		return TextFormat.subst(crossed,
 			{"score": score, "delta": "%+d" % delta, "band": atm_band_short(band)})
-	return TextFormat.subst("[PH] Credit score {score} ({delta})",
+	return TextFormat.subst(CREDIT_SCORE_TOAST,
 		{"score": score, "delta": "%+d" % delta})
 
 
 ## The daily interest posting (LedgerAccrual). TWO whole templates selected by DIRECTION — the delta already
 ## carries its own sign from Zorkmids.fmt, so the debt variant takes the absolute value rather than printing
 ## a stray double minus.
+const LEDGER_INTEREST_DEBT := "[PH] The Ledger added {money} to what you owe"
+const LEDGER_INTEREST_SAVINGS := "[PH] Your deposits earned {money}"
+
+
 static func ledger_interest(delta: float) -> String:
 	if delta < 0.0:
-		return TextFormat.subst("[PH] The Ledger added {money} to what you owe.",
+		return TextFormat.subst(LEDGER_INTEREST_DEBT,
 			{"money": Zorkmids.money_text(absf(delta))})
-	return TextFormat.subst("[PH] Your deposits earned {money}.", {"money": Zorkmids.money_text(delta)})
+	return TextFormat.subst(LEDGER_INTEREST_SAVINGS, {"money": Zorkmids.money_text(delta)})
 
 
 # --- THE GUNSMITH BENCH (scripts/components/weapon_bench.gd + scripts/ui/weapon_bench_screen.gd) -----------
@@ -1346,19 +1517,19 @@ const BENCH_TITLE := "WEAPON BENCH"
 const BENCH_SCREEN_TITLE := "Weapon Bench"
 ## The two section headings. The parenthetical says what a CLICK does, because the two lists take opposite
 ## actions on rows that look identical (the shop's buy/sell heading pair is the same shape).
-const BENCH_FITTED_HEADING := "[PH] Fitted  (click to remove)"
-const BENCH_PARTS_HEADING := "[PH] Parts  (click to fit)"
+const BENCH_FITTED_HEADING := "[PH] Fitted"
+const BENCH_PARTS_HEADING := "[PH] Parts"
 ## The empty-section line in the PARTS list (you carry no fitting part and the bench stocks none). Deliberately
 ## the install screen's "(none)" rather than the shop's EMPTY_LIST "(empty)" — the two service screens read
 ## alike today, and unifying the three wordings is a copy call, not a refactor.
-const BENCH_NO_PARTS := "(none)"
+const BENCH_NO_PARTS := "None"
 ## The Notice band's &"no_weapons" sentence — nothing in the pack a bench could work on. Says PACK, not
 ## "inventory": a gun in your HANDS is in the pack too (the bench cycles the drawn weapon first).
 const BENCH_NO_GUN := "[PH] No modifiable weapon in your pack."
 ## An offered-but-empty slot's NAME column in the Fitted list. The section paints one row per offered slot
 ## ALWAYS, so this is what most rows say on a stock gun — the fixed arity that stops the card hopping as parts
 ## come and go. An EM DASH (U+2014) each side.
-const BENCH_EMPTY_SLOT := "[PH] — empty —"
+const BENCH_EMPTY_SLOT := "[PH] Empty"
 ## The PRICE column when a labour fee rounds away to nothing. Only reachable on a REMOVAL: fitting refuses a
 ## zero fee outright (a permanently-disabled "0 zm" row is the ChipInstaller lesson), while handing a part
 ## back that the player already owns must never be blocked by a rounding edge.
@@ -1380,25 +1551,35 @@ const MOD_SLOT_STOCK := "Stock"
 
 
 ## The card title, re-stamped per bench on open (the install_title mold). MenuStyle.title_text owns the casing.
+const BENCH_TITLE_NAMED := "{name}"
+
+
 static func bench_title(name: String) -> String:
-	return TextFormat.subst("WEAPON BENCH — {name}", {"name": name}) if not name.is_empty() else BENCH_TITLE
+	return TextFormat.subst(BENCH_TITLE_NAMED, {"name": name}) if not name.is_empty() else BENCH_TITLE
 
 
 ## The hover readout over a standalone bench: its authored `bench_name`, else the bare trade word. The
 ## chip_installer_prompt / atm_prompt mold — a station that names itself gets named, one that does not still
 ## says what it IS rather than falling back to a generic "Interact".
+const BENCH_PROMPT := "[PH] Gunsmith"
+const BENCH_PROMPT_NAMED := "[PH] Gunsmith: {name}"
+
+
 static func bench_prompt(name: String) -> String:
 	if name.is_empty():
-		return "[PH] Gunsmith"
-	return TextFormat.subst("[PH] Gunsmith: {name}", {"name": name})
+		return BENCH_PROMPT
+	return TextFormat.subst(BENCH_PROMPT_NAMED, {"name": name})
 
 
 ## The gun cycler's caption: the selected weapon's authored label beside its filled-slot count ("Pistol   2/6").
 ## Both halves are VALUES — the name is the Item's own display_name and the counts are numbers — so the whole
 ## line is prose-free and carries no marker (the middle-dot precedent). THREE spaces separate
 ## the columns; keep them when re-wording.
+const BENCH_GUN := "{name}   {fitted}/{total}"
+
+
 static func bench_gun(name: String, fitted: int, total: int) -> String:
-	return TextFormat.subst("{name}   {fitted}/{total}", {"name": name, "fitted": fitted, "total": total})
+	return TextFormat.subst(BENCH_GUN, {"name": name, "fitted": fitted, "total": total})
 
 
 ## One slot's display name, SELECTED by the WeaponData.ModSlot ordinal — never indexed out of an array, so a
@@ -1417,12 +1598,18 @@ static func mod_slot_name(slot: int) -> String:
 ## The success toasts, one per direction (WeaponBench._fitted / _removed). `part` and `gun` arrive as authored
 ## Item.label() display names — content VALUES, never msgids of ours — which is why the marker sits once at
 ## the front and the names ride mid-sentence.
+const MOD_FITTED := "[PH] Fitted {part} to {gun}"
+
+
 static func mod_fitted(part: String, gun: String) -> String:
-	return TextFormat.subst("[PH] Fitted {part} to {gun}.", {"part": part, "gun": gun})
+	return TextFormat.subst(MOD_FITTED, {"part": part, "gun": gun})
+
+
+const MOD_REMOVED := "[PH] Removed {part} from {gun}"
 
 
 static func mod_removed(part: String, gun: String) -> String:
-	return TextFormat.subst("[PH] Removed {part} from {gun}.", {"part": part, "gun": gun})
+	return TextFormat.subst(MOD_REMOVED, {"part": part, "gun": gun})
 
 
 ## The always-present Notice band under the bench's lists: WHY the thing you are looking at would refuse.
@@ -1439,24 +1626,39 @@ static func mod_removed(part: String, gun: String) -> String:
 ##
 ## &"" is the NO-NOTICE case and returns "" on purpose: the band keeps its height and simply says nothing, so
 ## the card never re-flows under the player's cursor mid-transaction.
+const BENCH_NOTICE_HANDS_FULL := "[PH] Put down what you're carrying first."
+const BENCH_NOTICE_SLOT_FILLED := "[PH] Remove the fitted part first."
+const BENCH_NOTICE_REQUIRES_STAT := "[PH] Requires {stat} {n}."
+const BENCH_NOTICE_NO_ROOM := "[PH] No room in your pack for the part."
+const BENCH_NOTICE_CANT_AFFORD := "[PH] You can't afford that."
+const BENCH_NOTICE_WRONG_WEAPON := "[PH] That part doesn't fit this weapon."
+
+
 static func bench_notice(reason_key: StringName, n: int = 0) -> String:
 	match reason_key:
-		&"draw_locked": return "[PH] Put down what you're carrying first."
+		&"draw_locked": return BENCH_NOTICE_HANDS_FULL
 		&"no_weapons": return BENCH_NO_GUN
-		&"slot_taken": return "[PH] That slot is filled — remove the fitted part first."
-		&"stat_gate": return TextFormat.subst("[PH] Requires {stat} {n}.", {"stat": StatInfo.title(&"gunplay"), "n": n})
-		&"bag_full": return "[PH] No room in your pack for the part."
-		&"afford": return "[PH] You can't afford that."
-		&"unfit": return "[PH] That part doesn't fit this weapon."
+		&"slot_taken": return BENCH_NOTICE_SLOT_FILLED
+		&"stat_gate": return TextFormat.subst(BENCH_NOTICE_REQUIRES_STAT, {"stat": StatInfo.title(&"gunplay"), "n": n})
+		&"bag_full": return BENCH_NOTICE_NO_ROOM
+		&"afford": return BENCH_NOTICE_CANT_AFFORD
+		&"unfit": return BENCH_NOTICE_WRONG_WEAPON
 	return ""
 
 
+const RESPEC_TITLE_NAMED := "{name}"
+const RESPEC_TITLE := "RESPEC"
+
+
 static func respec_title(name: String) -> String:
-	return TextFormat.subst("RESPEC — {name}", {"name": name}) if not name.is_empty() else "RESPEC"
+	return TextFormat.subst(RESPEC_TITLE_NAMED, {"name": name}) if not name.is_empty() else RESPEC_TITLE
+
+
+const LEVEL_UP_TITLE_NAMED := "{name}"
 
 
 static func level_up_title(name: String) -> String:
-	return TextFormat.subst("Level Up — {name}", {"name": name}) if not name.is_empty() else "Level Up"
+	return TextFormat.subst(LEVEL_UP_TITLE_NAMED, {"name": name}) if not name.is_empty() else LEVEL_UP_TITLE
 
 
 ## Selects one of the four HEAL_STATUS_* whole templates — HealScreen passes the two FACTS (limb damage,
@@ -1474,16 +1676,25 @@ static func heal_status(hp: int, max_hp: int, limb_damaged: bool, money: float, 
 
 ## `cost` is a float because HealScreen paints the ALL-IN charge_total (the rail's service charge can land on
 ## a fraction), not the healer's integer sticker price; fmt inside money_text still prints whole amounts bare.
+const HEAL_BUTTON := "[PH] Heal  {money}"
+
+
 static func heal_button(cost: float) -> String:
-	return TextFormat.subst("[PH] Heal  —  {money}", {"money": Zorkmids.money_text(cost)})
+	return TextFormat.subst(HEAL_BUTTON, {"money": Zorkmids.money_text(cost)})
+
+
+const LEVEL_LABEL := "[PH] Level {level}"
 
 
 static func level_label(level: int) -> String:
-	return TextFormat.subst("[PH] Level {level}", {"level": level})
+	return TextFormat.subst(LEVEL_LABEL, {"level": level})
+
+
+const YOUR_ZORKMIDS := "[PH] Your zorkmids: {amount}"
 
 
 static func your_zorkmids(amount: float) -> String:
-	return TextFormat.subst("[PH] Your zorkmids: {amount}", {"amount": Zorkmids.fmt(amount)})
+	return TextFormat.subst(YOUR_ZORKMIDS, {"amount": Zorkmids.fmt(amount)})
 
 
 ## The Level Up card's payment TERMS, painted where the DEBIT/CREDIT selector would sit on a station whose
@@ -1495,72 +1706,113 @@ static func your_zorkmids(amount: float) -> String:
 ## the OTHER half of the rule (`requires_settled_account`) rather than a lecture about rails. ⭐Deliberately
 ## names no station NOUN — a LevelUp is a trainer, a shrine or a bonfire depending on where a designer dropped
 ## it, and the one in shipped content rides a Medicine Person.
+const LEVEL_UP_NO_CREDIT_IN_DEBT := "[PH] The Ledger holds this counter until you are square."
+const LEVEL_UP_NO_CREDIT_CASH_OR_BANK := "[PH] No credit here. Pay with cash or banked money."
+const LEVEL_UP_NO_CREDIT_CASH := "[PH] No credit here. Pay with cash."
+
+
 static func level_up_no_credit(owing: bool, has_savings: bool) -> String:
 	if owing:
-		return "[PH] The Ledger holds this counter until you are square. Settle what you owe before buying a level."
+		return LEVEL_UP_NO_CREDIT_IN_DEBT
 	if has_savings:
-		return "[PH] No credit here — pay with the cash you carry, or the money you have banked."
-	return "[PH] No credit here — pay with the cash you carry."
+		return LEVEL_UP_NO_CREDIT_CASH_OR_BANK
+	return LEVEL_UP_NO_CREDIT_CASH
+
+
+const PERKS_HEADER_ONE := "[PH] Perks   {points} point"
+const PERKS_HEADER_MANY := "[PH] Perks   {points} points"
 
 
 static func perks_header(points: int) -> String:
 	return TextFormat.subst(TextFormat.plural(points,
-			"[PH] Perks — {points} point",
-			"[PH] Perks — {points} points"),
+			PERKS_HEADER_ONE,
+			PERKS_HEADER_MANY),
 			{"points": points})
 
 
 ## Two whole templates selected by the encumbered flag — the warning is authored into its variant, never
 ## appended. Weight/capacity keep the fixed one-decimal readout ("12.0"), so the token values are
 ## pre-formatted here (TextFormat.num would trim the ".0" the gauge look relies on).
+const INVENTORY_WEIGHT_ENCUMBERED := "Weight  {weight} / {capacity}   ENCUMBERED"
+const INVENTORY_WEIGHT := "Weight  {weight} / {capacity}"
+
+
 static func inventory_weight(weight: float, capacity: float, encumbered: bool) -> String:
-	var template := "Weight  {weight} / {capacity}   ENCUMBERED" if encumbered else "Weight  {weight} / {capacity}"
+	var template := INVENTORY_WEIGHT_ENCUMBERED if encumbered else INVENTORY_WEIGHT
 	return TextFormat.subst(template, {"weight": "%.1f" % weight, "capacity": "%.1f" % capacity})
 
 
 ## PHASE-2 DEBT: `kind` arrives as a heading fragment ("LOOTING" / "PICKPOCKETING" from LootScreen) — the
 ## loot-screen phase should replace this with one whole-template func per mode.
+const LOOT_TITLE_NAMED := "{kind} {name}"
+const LOOT_TITLE_KIND := "{kind}"
+
+
 static func loot_title(kind: String, name: String) -> String:
-	return TextFormat.subst("{kind} {name}", {"kind": kind, "name": name}) if not name.is_empty() else TextFormat.subst("{kind}", {"kind": kind})
+	return TextFormat.subst(LOOT_TITLE_NAMED, {"kind": kind, "name": name}) if not name.is_empty() else TextFormat.subst(LOOT_TITLE_KIND, {"kind": kind})
+
+
+const LOOT_EXCHANGE_TITLE_NAMED := "{name}"
 
 
 static func loot_exchange_title(name: String) -> String:
-	return TextFormat.subst("EXCHANGING GEAR — {name}", {"name": name}) if not name.is_empty() else LOOT_EXCHANGE_TITLE
+	return TextFormat.subst(LOOT_EXCHANGE_TITLE_NAMED, {"name": name}) if not name.is_empty() else LOOT_EXCHANGE_TITLE
+
+
+const CHESS_CANT_COVER := "[PH] You can't cover the {money} stake"
 
 
 static func chess_cant_cover(wager: float) -> String:
-	return TextFormat.subst("[PH] You can't cover the {money} stake.", {"money": Zorkmids.money_text(wager)})
+	return TextFormat.subst(CHESS_CANT_COVER, {"money": Zorkmids.money_text(wager)})
+
+
+const CHESS_FORFEIT_LOSS := "[PH] Forfeited   -{money}"
 
 
 static func chess_forfeit_loss(delta_abs: float) -> String:
-	return TextFormat.subst("[PH] -{money} — you forfeited the game.", {"money": Zorkmids.money_text(delta_abs)})
+	return TextFormat.subst(CHESS_FORFEIT_LOSS, {"money": Zorkmids.money_text(delta_abs)})
+
+
+const CHESS_ILLEGAL_MOVE := "[PH] {move} isn't a legal move."
 
 
 static func chess_illegal_move(text: String) -> String:
 	# Truncate the echo: the typed entry is unbounded (the move field has no max_length) and this line lives
 	# on the chess panel's single-line clipped hint — an untruncated echo would clip away the guidance suffix.
 	var shown := text if text.length() <= 24 else text.left(24) + "…"
-	return TextFormat.subst("[PH] “{move}” isn't a legal move. Try e2e4 or Nf3.", {"move": shown})
+	return TextFormat.subst(CHESS_ILLEGAL_MOVE, {"move": shown})
+
+
+const CHESS_WIN := "[PH] Won the game   +{money}"
 
 
 static func chess_win(delta: float) -> String:
-	return TextFormat.subst("[PH] +{money} — you won the game.", {"money": Zorkmids.money_text(delta)})
+	return TextFormat.subst(CHESS_WIN, {"money": Zorkmids.money_text(delta)})
+
+
+const CHESS_LOSS := "[PH] Lost the game   -{money}"
 
 
 static func chess_loss(delta_abs: float) -> String:
-	return TextFormat.subst("[PH] -{money} — you lost the game.", {"money": Zorkmids.money_text(delta_abs)})
+	return TextFormat.subst(CHESS_LOSS, {"money": Zorkmids.money_text(delta_abs)})
 
 
 static func chess_checkmate(player_wins: bool) -> String:
 	return CHESS_CHECKMATE_WIN if player_wins else CHESS_CHECKMATE_LOSS
 
 
+const CHESS_THINKING := "[PH] {name} is thinking…"
+
+
 static func chess_thinking(name: String) -> String:
-	return TextFormat.subst("[PH] {name} is thinking…", {"name": name})
+	return TextFormat.subst(CHESS_THINKING, {"name": name})
+
+
+const CHESS_TO_MOVE := "[PH] {name} to move."
 
 
 static func chess_to_move(name: String) -> String:
-	return TextFormat.subst("[PH] {name} to move.", {"name": name})
+	return TextFormat.subst(CHESS_TO_MOVE, {"name": name})
 
 
 # --- Screen composers migrated off paint sites (the PlayerText ratchet's final sweep) -------------------------
@@ -1576,28 +1828,39 @@ static func chess_to_move(name: String) -> String:
 ## belongs here too. The signed delta is formatted as a VALUE ("%+d" keeps the explicit plus sign the readout
 ## relies on — TextFormat.num would drop it), the inventory_weight precedent. Three spaces separate the
 ## columns; a modifier that rounds to zero still prints "(+0)", matching the historic readout.
+const CHARACTER_INSPECT_STAT_ROW := "{stat}   {value}"
+const CHARACTER_INSPECT_STAT_ROW_DELTA := "{stat}   {value} ({delta})"
+
+
 static func character_inspect_stat_row(stat: StringName, base: int, bonus: float) -> String:
 	if is_zero_approx(bonus):
-		return TextFormat.subst("{stat}   {value}", {"stat": StatInfo.title(stat), "value": base})
+		return TextFormat.subst(CHARACTER_INSPECT_STAT_ROW, {"stat": StatInfo.title(stat), "value": base})
 	var delta := int(roundf(bonus))
-	return TextFormat.subst("{stat}   {value} ({delta})", {"stat": StatInfo.title(stat), "value": base + delta, "delta": "%+d" % delta})
+	return TextFormat.subst(CHARACTER_INSPECT_STAT_ROW_DELTA, {"stat": StatInfo.title(stat), "value": base + delta, "delta": "%+d" % delta})
 
 
 ## The showcase's drawn-weapon line — TWO whole templates selected on `armed`, so the word "Unarmed" is
 ## authored INSIDE its variant instead of riding in as a prose fragment (THE RULE). `weapon_name` is the
 ## equipped Item's AUTHORED display_name (a value, never a msgid) and is read only in the armed variant.
 ## Two spaces follow the colon in both variants — the column look the panel relies on.
+const CHARACTER_INSPECT_WEAPON_UNARMED := "Weapon:  Unarmed"
+const CHARACTER_INSPECT_WEAPON := "Weapon:  {name}"
+
+
 static func character_inspect_weapon(weapon_name: String, armed: bool) -> String:
 	if not armed:
-		return "Weapon:  Unarmed"
-	return TextFormat.subst("Weapon:  {name}", {"name": weapon_name})
+		return CHARACTER_INSPECT_WEAPON_UNARMED
+	return TextFormat.subst(CHARACTER_INSPECT_WEAPON, {"name": weapon_name})
 
 
 ## The boot quote card's attribution byline — ONE whole template wrapping the DESIGNER-AUTHORED source name
 ## (BootQuotes.attribution, blank for StartMenu's FALLBACK_QUOTE) as a value token; replaces the old "— %s"
 ## at the StartMenu paint site. The dash is an EM DASH (U+2014) plus one space.
+const BOOT_QUOTE_ATTRIBUTION := "— {name}"
+
+
 static func boot_quote_attribution(attribution: String) -> String:
-	return TextFormat.subst("— {name}", {"name": attribution})
+	return TextFormat.subst(BOOT_QUOTE_ATTRIBUTION, {"name": attribution})
 
 
 ## The floating +N / -N money delta that rises off the top-left zorkmid readout (UI._on_money_changed) — TWO
@@ -1605,16 +1868,23 @@ static func boot_quote_attribution(attribution: String) -> String:
 ## decision, and this replaces the last `%` format operator on a player-facing string in the HUD). A negative
 ## delta already carries its own minus from Zorkmids.fmt, so the loss variant is the bare amount. Raw fmt, not
 ## money_text: this float is a bare number beside the "zm" readout it modifies.
+const MONEY_DELTA_GAIN := "+{amount}"
+const MONEY_DELTA_LOSS := "{amount}"
+
+
 static func money_delta(delta: float) -> String:
-	return TextFormat.subst("+{amount}" if delta > 0.0 else "{amount}", {"amount": Zorkmids.fmt(delta)})
+	return TextFormat.subst(MONEY_DELTA_GAIN if delta > 0.0 else MONEY_DELTA_LOSS, {"amount": Zorkmids.fmt(delta)})
 
 
 ## One stat block's header on the Stats screen ("Strength   —   4 (+1)"): the authored StatText title beside
 ## the live value. Takes the stat ID so the title resolves HERE (StatInfo.title, capitalized-id fallback built
 ## in) exactly like requires_stat — a caller never pre-resolves a display name. `value` is the numeric readout
 ## StatsScreen._stat_value_text builds ("4", "4.5 (+1)"), a VALUE token, never prose.
+const STAT_HEADER := "{title}   {value}"
+
+
 static func stat_header(stat: StringName, value: String) -> String:
-	return TextFormat.subst("{title}   —   {value}", {"title": StatInfo.title(stat), "value": value})
+	return TextFormat.subst(STAT_HEADER, {"title": StatInfo.title(stat), "value": value})
 
 
 ## The Stats screen's live-effect line under a stat block ("Now: +8% gun damage, …"). PHASE-2 DEBT: the
@@ -1625,8 +1895,11 @@ static func stat_header(stat: StringName, value: String) -> String:
 ## The VISIBLE half of that debt is paid: the six templates are authored, so the prefix no longer lands in
 ## front of a "[PH] " marker ("Now: [PH] +0% gun damage" is what shipped). ⭐Re-marking any of them puts it
 ## straight back — see the block header on stat_effect_strength.
+const STAT_NOW := "Now: {effect}"
+
+
 static func stat_now(effect_text: String) -> String:
-	return TextFormat.subst("Now: {effect}", {"effect": effect_text})
+	return TextFormat.subst(STAT_NOW, {"effect": effect_text})
 
 
 ## The Stats screen's top summary line — level + wallet, with the unspent-perk-point tail as a real
@@ -1634,12 +1907,17 @@ static func stat_now(effect_text: String) -> String:
 ## separators are MIDDLE DOTS (U+00B7) with THREE spaces each side — the middle-dot idiom;
 ## keep the spacing when re-wording. The wallet rides in as raw Zorkmids.fmt (a bare number before the
 ## authored word "zorkmids"), matching the historic readout byte-for-byte.
+const STATS_SUMMARY := "Level {level}      {amount} zorkmids"
+const STATS_SUMMARY_ONE_POINT := "Level {level}      {amount} zorkmids      {points} perk point"
+const STATS_SUMMARY_MANY_POINTS := "Level {level}      {amount} zorkmids      {points} perk points"
+
+
 static func stats_summary(level: int, money: float, points: int) -> String:
 	if points <= 0:
-		return TextFormat.subst("Level {level}   ·   {amount} zorkmids", {"level": level, "amount": Zorkmids.fmt(money)})
+		return TextFormat.subst(STATS_SUMMARY, {"level": level, "amount": Zorkmids.fmt(money)})
 	return TextFormat.subst(TextFormat.plural(points,
-			"Level {level}   ·   {amount} zorkmids   ·   {points} perk point to spend",
-			"Level {level}   ·   {amount} zorkmids   ·   {points} perk points to spend"),
+			STATS_SUMMARY_ONE_POINT,
+			STATS_SUMMARY_MANY_POINTS),
 			{"level": level, "amount": Zorkmids.fmt(money), "points": points})
 
 
@@ -1648,32 +1926,48 @@ static func stats_summary(level: int, money: float, points: int) -> String:
 ## appended at the QuestJournal call site; it also drops the old '%' operator, which would error on a
 ## designer title containing a literal '%'. The active row returns the authored quest title VERBATIM — a
 ## content value, never a msgid of ours.
+const QUEST_ENTRY_TITLE_FAILED := "{title}   Failed"
+const QUEST_ENTRY_TITLE_DONE := "{title}   Done"
+
+
 static func quest_entry_title(title: String, done: bool, failed: bool) -> String:
 	if failed:
-		return TextFormat.subst("{title}   (failed)", {"title": title})
+		return TextFormat.subst(QUEST_ENTRY_TITLE_FAILED, {"title": title})
 	if done:
-		return TextFormat.subst("{title}   (done)", {"title": title})
+		return TextFormat.subst(QUEST_ENTRY_TITLE_DONE, {"title": title})
 	return title
 
 
 ## One objective row in the quest Journal — EIGHT whole templates (the HEAL_STATUS_* multi-variant
-## precedent) selected by (done, counted, optional): the checkbox, the " ({progress}/{required})" counter
+## precedent) selected by (done, counted, optional). No ASCII "[ ]"/"[x]" checkbox any more: QuestJournal inks a
+## finished objective DIM, which is the whole signal, so the done/open pairs are the same words today (kept as
+## separate consts so a locale can still mark them differently); the the " ({progress}/{required})" counter
 ## (counted = required > 1), and the "  (optional)" tag are each authored INSIDE their variants, never
 ## appended. Output is byte-identical to QuestJournal.objective_line for every state — the pins in
 ## tests/test_quest_journal.gd hold verbatim.
+const JOURNAL_OBJECTIVE_DONE_COUNTED_OPTIONAL := "{desc} ({progress}/{required})  (optional)"
+const JOURNAL_OBJECTIVE_DONE_COUNTED := "{desc} ({progress}/{required})"
+const JOURNAL_OBJECTIVE_DONE_OPTIONAL := "{desc}  (optional)"
+const JOURNAL_OBJECTIVE_DONE := "{desc}"
+const JOURNAL_OBJECTIVE_COUNTED_OPTIONAL := "{desc} ({progress}/{required})  (optional)"
+const JOURNAL_OBJECTIVE_COUNTED := "{desc} ({progress}/{required})"
+const JOURNAL_OBJECTIVE_OPTIONAL := "{desc}  (optional)"
+const JOURNAL_OBJECTIVE := "{desc}"
+
+
 static func journal_objective(desc: String, done: bool, progress: int, required: int, optional: bool) -> String:
 	var counted := required > 1
 	var template: String
 	if done:
 		if counted:
-			template = "[x] {desc} ({progress}/{required})  (optional)" if optional else "[x] {desc} ({progress}/{required})"
+			template = JOURNAL_OBJECTIVE_DONE_COUNTED_OPTIONAL if optional else JOURNAL_OBJECTIVE_DONE_COUNTED
 		else:
-			template = "[x] {desc}  (optional)" if optional else "[x] {desc}"
+			template = JOURNAL_OBJECTIVE_DONE_OPTIONAL if optional else JOURNAL_OBJECTIVE_DONE
 	else:
 		if counted:
-			template = "[ ] {desc} ({progress}/{required})  (optional)" if optional else "[ ] {desc} ({progress}/{required})"
+			template = JOURNAL_OBJECTIVE_COUNTED_OPTIONAL if optional else JOURNAL_OBJECTIVE_COUNTED
 		else:
-			template = "[ ] {desc}  (optional)" if optional else "[ ] {desc}"
+			template = JOURNAL_OBJECTIVE_OPTIONAL if optional else JOURNAL_OBJECTIVE
 	return TextFormat.subst(template, {"desc": desc, "progress": progress, "required": required})
 
 
@@ -1681,43 +1975,62 @@ static func journal_objective(desc: String, done: bool, progress: int, required:
 ## may swap the glyph or drop it) instead of being prepended at the call site, and subst replaces the old '%'
 ## operator. `perk_label` is the already-resolved authored Perk.display_name (or the raw id) — a content
 ## value the caller passes in, never a msgid of ours.
+const RESPEC_PERK_ROW := "•  {perk}"
+
+
 static func respec_perk_row(perk_label: String) -> String:
-	return TextFormat.subst("•  {perk}", {"perk": perk_label})
+	return TextFormat.subst(RESPEC_PERK_ROW, {"perk": perk_label})
 
 
 ## An already-owned perk's row on the Level-Up screen — the marker wraps the row as a whole template (the
 ## EQUIPPED_ROW / quest_entry_title THREE-space idiom; a deliberate one-space widening of the old two-space
 ## append). `perk_label` is the resolved authored Perk.display_name — a content value, never a msgid of ours.
+const PERK_OWNED_ROW := "{perk}   Owned"
+
+
 static func perk_owned_row(perk_label: String) -> String:
-	return TextFormat.subst("{perk}   (owned)", {"perk": perk_label})
+	return TextFormat.subst(PERK_OWNED_ROW, {"perk": perk_label})
 
 
 ## The Level-Up screen's right-aligned cost cell — the whole parenthesised money phrase, with the amount
 ## riding in via Zorkmids.money_text (the currency word lives there, never appended here).
+const LEVEL_UP_COST_CELL := "{money}"
+
+
 static func level_up_cost_cell(cost: float) -> String:
-	return TextFormat.subst("({money})", {"money": Zorkmids.money_text(cost)})
+	return TextFormat.subst(LEVEL_UP_COST_CELL, {"money": Zorkmids.money_text(cost)})
 
 
 ## The reputation screen's standing column ("+12", "-5", and a zero standing as "+0"). TWO whole templates
 ## SELECTED on sign — the explicit plus is a DISPLAY convention a locale may drop or move, never a fragment the
 ## screen appends. Replaces the in-screen `"%+d" % …` paint-site literal (and its % operator, which the
 ## TextFormat RULE forbids); rendering is byte-identical, signed zero included.
+const REPUTATION_STANDING_POSITIVE := "+{value}"
+const REPUTATION_STANDING_NEGATIVE := "{value}"
+
+
 static func reputation_standing(standing: int) -> String:
-	return TextFormat.subst("+{value}" if standing >= 0 else "{value}", {"value": standing})
+	return TextFormat.subst(REPUTATION_STANDING_POSITIVE if standing >= 0 else REPUTATION_STANDING_NEGATIVE, {"value": standing})
 
 
-## The shop's hovered-item line: the item breakdown with the PRICE this deal would trade at appended on its own
-## line. Prices moved here when the shop's rows became grid tiles (a cell has no price column), so this line is
+## The shop's hovered-item line: the item breakdown with the PRICE this deal would trade at appended to its LAST
+## line (the weight line — the shop asks ItemInfo for no list value, so the price is the only number there). Prices moved here when the shop's rows became grid tiles (a cell has no price column), so this line is
 ## now the ONLY place a price is shown — it must never silently drop one. FOUR whole templates selected by
 ## side (buying from the stock vs selling from your bag) and affordability, so the "can't afford" / "won't pay"
 ## wording is authored INSIDE its variant rather than appended as a fragment. `body` is the composed
 ## ItemInfo.tooltip (a value, never a msgid of ours) and the money phrase comes from Zorkmids.money_text.
+const SHOP_PRICE_LINE_BUY := "{body}      Buy  {amount}"
+const SHOP_PRICE_LINE_BUY_UNAFFORDABLE := "{body}      Buy  {amount}   Can't afford"
+const SHOP_PRICE_LINE_SELL := "{body}      Sell  {amount}"
+const SHOP_PRICE_LINE_SELL_UNWANTED := "{body}      Sell  {amount}   Won't buy"
+
+
 static func shop_price_line(body: String, price: float, buying: bool, affordable: bool) -> String:
 	var money := Zorkmids.money_text(price)
 	if buying:
-		return TextFormat.subst("{body}\nBuy — {amount}" if affordable else "{body}\nBuy — {amount}  (you can't afford it)",
+		return TextFormat.subst(SHOP_PRICE_LINE_BUY if affordable else SHOP_PRICE_LINE_BUY_UNAFFORDABLE,
 				{"body": body, "amount": money})
-	return TextFormat.subst("{body}\nSell — {amount}" if affordable else "{body}\nSell — {amount}  (they won't pay for it)",
+	return TextFormat.subst(SHOP_PRICE_LINE_SELL if affordable else SHOP_PRICE_LINE_SELL_UNWANTED,
 			{"body": body, "amount": money})
 
 
@@ -1725,25 +2038,19 @@ static func shop_price_line(body: String, price: float, buying: bool, affordable
 ## "click to continue" tail was UI tutorializing (and unmarked AI prose the release scrub could not
 ## catch) — the bound-key glyph is affordance enough, and a rebind still repaints it (DialogueView
 ## re-queries InputManager.get_action_binding on every show).
+const DIALOGUE_CONTINUE_HINT := "[{key}]"
+
+
 static func dialogue_continue_hint(key: String) -> String:
-	return TextFormat.subst("[{key}]", {"key": key})
-
-
-## The response-menu header hint: which keys select a reply and which backs out. Pure bindings-as-glyphs,
-## no prose (the dialogue_continue_hint rule) — the keys come from the LIVE hotbar-slot bindings the
-## digit selection rides (DialogueManager passes get_action_binding results, never literals).
-static func dialogue_menu_hint(first_key: String, last_key: String, exit_key: String) -> String:
-	return TextFormat.subst("[{first}–{last}] · [{exit}]", {"first": first_key, "last": last_key, "exit": exit_key})
-
-
-## The menu hint when only synthesized rows are up (no digit-selectable authored replies): just the exit key.
-static func dialogue_menu_hint_exit_only(exit_key: String) -> String:
-	return TextFormat.subst("[{exit}]", {"exit": exit_key})
+	return TextFormat.subst(DIALOGUE_CONTINUE_HINT, {"key": key})
 
 
 ## The digit gutter painted inside a response row ("1." / "0." — the row's live selection-key binding).
+const DIALOGUE_CHOICE_NUMBER := "{key}."
+
+
 static func dialogue_choice_number(key: String) -> String:
-	return TextFormat.subst("{key}.", {"key": key})
+	return TextFormat.subst(DIALOGUE_CHOICE_NUMBER, {"key": key})
 
 
 ## One manual save slot's row name on the SaveLoadScreen ("Slot 1"). The number is a VALUE token in the one

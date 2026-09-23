@@ -165,7 +165,11 @@ func test_plural_selects_whole_variants() -> void:
 	assert_eq(TextFormat.plural(1, "{n} item", "{n} items"), "{n} item", "count 1 -> the singular template")
 	assert_eq(TextFormat.plural(2, "{n} item", "{n} items"), "{n} items", "count 2 -> the plural template")
 	assert_eq(TextFormat.plural(0, "{n} item", "{n} items"), "{n} items", "English: zero takes the plural form")
-	assert_eq(TextFormat.plural(-1, "{n} item", "{n} items"), "{n} items", "a negative count takes the plural form")
+	assert_eq(TextFormat.plural(-1, "{n} item", "{n} items"), "{n} item",
+		"a negative count picks by its magnitude (CLDR rules use the absolute value) — and never reaches the engine as n < 0")
+	assert_eq(TextFormat.plural(-3, "{n} item", "{n} items"), "{n} items", "-3 reads like 3")
+	assert_eq(TextFormat.plural(-1, "[PH] {n} thing", "[PH] {n} things"), "[PH] {n} thing",
+		"a placeholder pair (no lookup) takes the same magnitude rule")
 
 
 # --- pad2: the clock-face zero-pad --------------------------------------------------------------------
