@@ -37,6 +37,13 @@ var _raise_until_msec: int = 0
 var base_position: Vector3
 var base_rotation: Vector3
 var _aiming: bool = false   ## true while the player holds ADS (driven by ScopeIn.scoped_in); read by GunPose
+## True while the view has pulled out to THIRD person — set by the Player off ThirdPersonCamera.view_changed,
+## read by GunPose's per-frame visibility write (see view_model_visible_now). A first-person gun is authored
+## hanging in front of the lens with depth testing off, so from behind the character it would draw as a rifle
+## floating in mid-air through their back; the weapon you see out there is ThirdPersonBody's, in their hands.
+## ⭐It is set from the camera's INTENT, not its blend, so the gun is gone before the lens has moved far enough
+## to see it — and it comes straight back for an ADS (which returns the view to first person).
+var third_person: bool = false
 var _recoil_pos: Vector3 = Vector3.ZERO  ## fire/reload/land kick, added ON TOP of the rest pose by GunPose
 var _recoil_rot: Vector3 = Vector3.ZERO
 
@@ -172,6 +179,13 @@ func fire() -> void:
 	var kick_rot: Vector3 = fx.punch_kick_rotation if punch else fx.view_model_kick_rotation
 	var in_time: float = fx.punch_kick_in_time if punch else fx.view_model_kick_in_time
 	var out_time: float = fx.punch_kick_out_time if punch else fx.view_model_kick_out_time
+	# Aiming down sights shrinks the kick (view_model_kick_ads_mult): centred and zoomed, the full hip kick
+	# drove the muzzle — and the muzzle-flash sphere on it — into the lens every round, a full-screen white
+	# strobe on an automatic weapon (measured on the SMG, 2026-09-16). Blended by GunPose's eased ADS t so
+	# the shrink tracks the gun sliding onto the sights. A punch weapon can't ADS, so its blend is always 0.
+	var ads_scale := GunPose.kick_scale_for_aim(_pose.aim_blend() if _pose != null else 0.0, fx.view_model_kick_ads_mult)
+	kick_pos *= ads_scale
+	kick_rot *= ads_scale
 	tween = create_tween().set_parallel()
 	tween.set_trans(Tween.TRANS_CUBIC)
 	tween.tween_property(self, "_recoil_pos", kick_pos, in_time)
@@ -352,8 +366,15 @@ func _on_aim_changed(tf: bool) -> void:
 ## is unit-testable (GunPose owns the live host.visible write and calls this each frame). The accessibility
 ## toggle (view_model_setting) gates everything; on top of it a "crisp scope" weapon (the sniper —
 ## disable_dof_while_scoped) hides its model while AIMING so you sight THROUGH the scope. Every other weapon
-## keeps its model out for iron-sight ADS, and a null weapon never hides.
-static func view_model_visible_now(view_model_setting: bool, aiming: bool, weapon: WeaponData) -> bool:
+## keeps its model out for iron-sight ADS, and a null weapon never hides. THIRD PERSON hides it outright — this
+## is a FIRST-person view model and there is a real gun in the character's hands out there instead.
+##
+## The third_person argument is last and defaults false so every existing caller (and every existing truth-table
+## test) keeps its exact meaning.
+static func view_model_visible_now(view_model_setting: bool, aiming: bool, weapon: WeaponData,
+		third_person: bool = false) -> bool:
+	if third_person:
+		return false
 	var scope_hidden := aiming and weapon != null and weapon.disable_dof_while_scoped
 	return view_model_setting and not scope_hidden
 

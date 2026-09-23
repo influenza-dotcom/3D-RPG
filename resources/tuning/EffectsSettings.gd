@@ -467,6 +467,13 @@ extends Resource
 @export var view_model_kick_in_time: float = 0.05
 ## Seconds to settle back to rest (the recovery).
 @export var view_model_kick_out_time: float = 0.1
+## How much of the kick (position AND rotation) survives while AIMING DOWN SIGHTS, blended over GunPose's ADS
+## ease. Scoped, the gun sits centred a hand's width from the lens and the FOV is narrowed ~2x, so the full
+## hip kick drives the MUZZLE (and the muzzle-flash sphere riding it) to within centimetres of the camera:
+## measured on the SMG, the flash grew from a ~10% disc to ~80% of the screen and back EIGHT times a second —
+## a full-screen white strobe. 0.25 keeps the flash under ~15% of the frame at the peak of the kick. 1 = the
+## hip kick unchanged while aiming; 0 = no kick at all while aiming.
+@export_range(0.0, 1.0, 0.01) var view_model_kick_ads_mult: float = 0.25
 ## The same four for a weapon whose WeaponData sets `view_model_punch` — a PUNCH, which must extend AWAY from
 ## you rather than recoil into you, or the rig slides backwards while the arm thrusts forward and the whole
 ## swing reads mushy. Note the NEGATIVE Z.

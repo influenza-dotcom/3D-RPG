@@ -296,7 +296,8 @@ const BLAST_REF_RADIUS := 4.0
 ## inspector, which runs in the EDITOR where the GameSettings autoload does not exist — so this must never read a
 ## global. That is also why the blast term is a flat credit scaled by radius rather than a read of explosion_damage
 ## (whose -1 sentinel would need GameSettings.physics_damage to resolve). The economy half of the price — the
-## global cost per unit of effort and the sustained-drain clamp — lives in Attack._shot_stamina_cost().
+## global cost per unit of effort and the sustained-drain clamp — lives in the pure static
+## Attack.shot_stamina_cost_for(), which Attack._shot_stamina_cost() feeds from the live tuning.
 ##
 ## Distinct from power_score() below, which is a RATE for AI equip-ranking: dividing by cadence would price the
 ## SMG's bullet highest and the one-shot-kill sniper lowest, which is backwards for a PER-SHOT cost.
