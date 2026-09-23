@@ -1,7 +1,8 @@
 [gd_resource type="Resource" script_class="WanderMusicSettings" format=3]
 
 [ext_resource type="Script" path="res://resources/tuning/WanderMusicSettings.gd" id="1"]
+[ext_resource type="AudioStream" path="res://assets/audio/music/wander/Santa Monica Theme.mp3" id="2_santamonica"]
 
 [resource]
 script = ExtResource("1")
-tracks = Array[AudioStream]([])
+tracks = Array[AudioStream]([ExtResource("2_santamonica")])
