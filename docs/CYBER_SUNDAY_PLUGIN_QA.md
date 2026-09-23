@@ -570,6 +570,11 @@ constants in `scripts/ui/player_text.gd` and nothing else.
 - `player_text.gd.bak` is written before the new bytes land, by hand —
   `ResourceSaver` cannot write a script, so this follows `ContentSaveGuard`'s rule
   the way `panel_audit/fix_ops.gd` does.
+- The status line's "N more lines are in code" count must read **0**. Every
+  prose template that used to sit inside a `PlayerText` function body was lifted
+  to a `const NAME := "..."` declared directly above its function on 2026-09-15,
+  and `tests/test_devtools_ui_copy.gd` holds the inline count at zero — a new
+  inline literal fails that test by name. Lift it; never grow a baseline.
 - Prose literals written INSIDE function bodies are out of scope and must stay
   read-only: they sit in ternaries, match arms and multi-line call expressions
   where a line-based rewrite would corrupt code. The tab must still SHOW them
@@ -1180,3 +1185,30 @@ Acceptance:
 - Every `EditorInterface` call sits behind `Engine.is_editor_hint()` so the whole
   control is constructed bare and its handler driven off-tree by
   `tests/test_devtools_toolbar.gd`.
+
+## Translation Parser (POT generation)
+
+Not a tab: an `EditorTranslationParserPlugin` (`core/translation_parser.gd`) registered
+by `plugin.gd`, feeding Godot's own **Project Settings → Localization → POT
+Generation**. All decisions live in the pure model `core/translation_extract.gd`;
+the plugin class cannot be instantiated headless, so it carries no logic of its own.
+
+- Claims `gd`, `tres` and `tscn`. A custom parser REPLACES the engine's for those
+  extensions, so it also extracts `tr("…")` / `atr("…")` calls from scripts and the
+  `text` / `tooltip_text` properties from scenes the engine would have found.
+- From `scripts/ui/player_text.gd` every `const NAME := "…"` becomes a msgid; the
+  two consts a `TextFormat.plural(n, ONE, MANY)` call names (wrapped over lines or
+  not) become ONE `[msgid, "", msgid_plural]` entry, never two singulars.
+- From `.tres` / `.tscn`: `display_name`, `description`, `title`, `label`,
+  `tab_label`, `text`, `tooltip_text`, `hint`, `caption`, `blurb`, `member_noun`,
+  `placeholder_text`, and any property ending in `_message`, `_template`,
+  `_prompt`, `_label`, `_text`, `_title`, `_description`, `_name`, `_hint`,
+  `_caption`, `_blurb`, `_line` — except `resource_name` / `node_name` /
+  `scene_file_path` / `script_class`.
+- Never extracted: a `[PH]` placeholder, a `&"…"` StringName, a `res://` / `uid://`
+  / `user://` path, a value with no cased letter, a duplicate msgid.
+- Acceptance: with the plugin on, add `scripts/ui/player_text.gd` and
+  `resources/settings/SettingsCatalog.tres` to the POT file list and Generate POT —
+  the file contains `msgid "Back"`, `msgid "Window Mode"`, `msgid "Language"`, a
+  `msgid_plural` block, and no `[PH]`. `tests/test_devtools_translation_extract.gd`
+  pins the same on the model.

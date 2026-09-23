@@ -561,7 +561,8 @@ children and its visual is a mounted subtree. Pinned by `tests/test_gore_gib_pre
 **`ThrowTrail` draws its ribbon OUTSIDE the prop it follows, and that is not tidiness.** Child one to a
 `Throwable` and a real throw drags a white tracer behind it (`throw_trail.gd`; a weapon drop gets one stamped from
 `WeaponData.thrown_trail`, the `PickupBeacon.always_lit` idiom one section up, except this stamp adds a NODE). The
-`MeshInstance3D` it draws into is parented to the **tree root**, because every `MeshInstance3D` *under* a
+`MeshInstance3D` it draws into is parented OUTSIDE the prop — to the level root (`WorldSpawn.parent_for`; the tree
+root when there is no level) — because every `MeshInstance3D` *under* a
 `Throwable` is swept by `_setup_overlay_chain` — which stamps the black inverted hull **and** the
 `InkOutline.ACTOR_INK_MASK_LAYER` bit, so a ribbon childed to the prop would wear a black rim and be re-rendered
 in the ink mask's second scene pass — and again by `_set_carried_transparency`. Child `_ready` runs *before* the

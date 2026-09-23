@@ -226,7 +226,7 @@ html{scroll-behavior:smooth}
     <h1>CYBERSUNDAY<span class="sub">How to play</span></h1>
     <p class="dek">A first-person cyberpunk RPG about debt. You start with four hit points, no abilities, no money, and rent due at dawn. This manual covers every control and the mechanics that are not obvious from playing.</p>
     <div class="meta-strip">
-      <span>Controls <b>45 actions</b></span>
+      <span>Controls <b>44 actions</b></span>
       <span>Starting HP <b>4</b></span>
       <span>In-game day <b>600s real</b></span>
       <span>Rent <b>20 zm / day</b></span>
@@ -299,7 +299,6 @@ html{scroll-behavior:smooth}
       <tr><td>Silent takedown / pet</td><td class="k"><kbd>Q</kbd> hold</td><td><strong>Takedown needs the Takedown implant.</strong> Petting an animal does not.</td></tr>
       <tr><td>Grab / throw prop</td><td class="k"><kbd>Z</kbd></td><td>Press to grab; press again then release — tap sets it down, hold hurls it.</td></tr>
       <tr><td>Hold weapon in hands</td><td class="k"><kbd>H</kbd></td><td>Pulls your drawn weapon into your hands so you can throw it. Press again to stow.</td></tr>
-      <tr><td>Night vision</td><td class="k"><kbd>N</kbd></td><td>Fades in and out.</td></tr>
     </tbody>
   </table></div>
 
@@ -344,11 +343,11 @@ html{scroll-behavior:smooth}
 
   <h3>Controller</h3>
   <p>Left stick moves, right stick looks. <strong>A</strong> jump · <strong>B</strong> crouch · <strong>X</strong> reload · <strong>Y</strong> interact · <strong>RT</strong> fire · <strong>LT</strong> aim · <strong>L1/R1</strong> lean · <strong>L3</strong> flashlight · <strong>R3</strong> grapple · <strong>D-pad</strong> hotbar 1–4.</p>
-  <p>Everything else — takedown, adopt, wait, throw, hold-weapon, minimap zoom, waypoint, all six tabs, quicksave, night vision, slots 5–10 and wheel cycling — has no pad default. Leaning on a pad is unconditional, since L1/R1 aren't shared. The pad goes silent when the window loses focus.</p>
+  <p>In menus <strong>A</strong> confirms and <strong>START</strong> backs out — START rather than B, because B is crouch and the pause menu would otherwise pop every time you ducked. Character creation is fully pad-navigable, and the name field opens an on-screen keyboard when the last input came from a pad. Everything else — takedown, adopt, wait, throw, hold-weapon, minimap zoom, waypoint, all six tabs, quicksave, slots 5–10 and wheel cycling — has no pad default. Leaning on a pad is unconditional, since L1/R1 aren't shared. The pad goes silent when the window loses focus.</p>
 
-  <div class="note warn">
-    <span class="lbl">Avoid the End key</span>
-    <p><kbd>End</kbd> instantly restarts the current level and loses unsaved progress. It is a leftover developer key and it is live in this build. <kbd>Home</kbd> prints a harmless technical readout. <kbd>F1</kbd>–<kbd>F4</kbd> and <kbd>`</kbd> are developer tools and do nothing in a normal build.</p>
+  <div class="note">
+    <span class="lbl">Developer keys</span>
+    <p><kbd>Home</kbd>, <kbd>F1</kbd>–<kbd>F4</kbd> and <kbd>`</kbd> are developer tools and do nothing in a normal build. There is no key that restarts the level.</p>
   </div>
 </section>
 
@@ -402,7 +401,7 @@ html{scroll-behavior:smooth}
   </table></div>
 
   <h3>Stamina — the resource that will surprise you</h3>
-  <p>The pool is 100. The ring around your crosshair is the readout; Accessibility can move it to a bottom-left bar instead.</p>
+  <p>The pool is 100. The ring around your crosshair is the readout; HUD → Crosshair Stamina Ring can move it to a bottom-left bar instead.</p>
 
   <div class="tw"><table>
     <thead><tr><th>Drain</th><th class="num">Cost</th><th>Regen</th><th class="num">Rate</th></tr></thead>
@@ -419,11 +418,14 @@ html{scroll-behavior:smooth}
 
   <p><strong>Empty the bar by sprinting and you lose sprint for three full seconds</strong> no matter how fast it refills. Jumping is not locked that long — it fails only while the pool is actually at zero and returns about a third of a second later. At zero, jump, slide, dash, grapple and <strong>fists</strong> all refuse. Guns are the deliberate exception: they keep firing.</p>
 
+  <p><strong>You can't shoot while sprinting.</strong> While you sprint, your weapon is carried across your body. Pull the trigger and the sprint ends on the spot: the gun comes back up and the shot goes off a split second later. The knife and the spray can work the same way. Bare fists punch at once, but the punch still ends the sprint. After any attack you can't sprint again for <strong>0.6 seconds</strong>, so holding <kbd>Shift</kbd> through a burst keeps you at walking pace until you stop firing.</p>
+
   <h3>Falling</h3>
   <ul>
     <li>Below 16 m/s of impact speed: <strong>free</strong>.</li>
     <li>Above that: 0.5 HP per m/s over the threshold <em>at the 4 max HP you start with</em> — <strong>the cost scales with your max HP</strong>, so a drop always takes the same slice of your bar and a Strength build pays proportionally more per m/s rather than growing out of the danger.</li>
     <li>With 4 HP a <strong>24 m/s landing kills you instantly</strong>; at 1 HP that drops to 18 m/s.</li>
+    <li><strong>Agility stretches all of these by the same amount it raises your jump</strong> (+5% a point): at Agility 10 you&rsquo;re safe up to 24 m/s and a full-health landing kills at 36 m/s. However high Agility makes you jump, landing from your own jump never hurts.</li>
     <li><strong>Falling for four unbroken seconds kills you regardless of impact</strong>, even with Fall Immunity.</li>
     <li>Crouching on landing does <strong>not</strong> reduce fall damage. It only softens the camera.</li>
   </ul>
@@ -457,7 +459,7 @@ html{scroll-behavior:smooth}
 
   <div class="note warn">
     <span class="lbl">Shooting costs stamina — and freezes its recovery</span>
-    <p>Every shot spends stamina: SMG ~1.2, pistol ~1.8, sniper ~2.3, shotgun ~7.2, grenade launcher ~14.4 out of a pool of 100. Worse, <strong>you never regenerate between your own shots</strong> — one trigger pull locks recovery for at least 1.5 seconds, and for the whole reload if that shot emptied the magazine. The sniper locks it for 3.5 seconds every single shot. Movement only locks recovery for 0.35 s; firing is in a different league.</p>
+    <p>Every shot spends stamina: SMG ~1.2, pistol ~1.8, sniper ~2.3, shotgun ~7.2, grenade launcher ~14.4 out of a pool of 100. Worse, <strong>you never regenerate between your own shots</strong> — one trigger pull locks recovery for at least 1.5 seconds, and for the whole reload if that shot emptied the magazine. The sniper locks it for 3.5 seconds every single shot. Movement locks recovery for one second — the white shard that appears on the ring is the stamina you just spent, and it fades as recovery resumes.</p>
   </div>
 
   <div class="note warn">
@@ -494,6 +496,8 @@ html{scroll-behavior:smooth}
     <span class="lbl">Fences and windows are not cover</span>
     <p>Anything drawn as mesh, wire, glass or foliage stops bullets from neither side. Enemies see you through a fence and shoot you through it — and so can you. It still blocks walking, thrown objects, the grapple and the interact ray. Find solid cover.</p>
   </div>
+
+  <p><strong>Doors have hit points.</strong> Shoot one enough and it breaks off its hinges for good; melee thuds off. Enemies open unlocked doors by walking into them, and one carrying the right key will unlock a locked door and come through — a closed door buys you time, not safety.</p>
 
   <h3>Three things worth knowing</h3>
   <div class="note tip">
@@ -549,13 +553,13 @@ html{scroll-behavior:smooth}
 
   <div class="note">
     <span class="lbl">Money is not an inventory item</span>
-    <p>Zorkmids are a <strong>wallet number</strong>, not a tile — they never eat backpack space. The amount sits above the grid and top-left on the HUD, with a floating +N/−N on every change, turning red while negative. To drop cash use the "Drop…" button on the wallet row. Loot money on corpses <em>is</em> a coin tile, which converts when you take it. There is no Sort button in your own bag — Sort exists on the shop screen only.</p>
+    <p>Zorkmids are a <strong>wallet number</strong>, not a tile — they never eat backpack space. The amount sits above the grid, turning red while negative. On the HUD it stays hidden until it changes, then flashes top-left with a floating +N/−N and fades out after a moment. To drop cash use the "Drop…" button on the wallet row. Loot money on corpses <em>is</em> a coin tile, which converts when you take it. There is no Sort button in your own bag — Sort exists on the shop screen only.</p>
   </div>
 
   <h3>The HUD</h3>
   <ul>
     <li><strong>Bottom-left</strong> — HP bar with the ammo line "clip / reserve" above it.</li>
-    <li><strong>Top-left</strong> — zorkmids, plus an "Owed" figure whenever you're in the red.</li>
+    <li><strong>Top-left</strong> — zorkmids, shown for a moment with a +N/−N whenever they change, plus an "Owed" figure if you're in the red.</li>
     <li><strong>Top-right</strong> — minimap, clock below it.</li>
     <li><strong>Top-centre</strong> — heading tape, stealth badge, detection meter, enemy health bar.</li>
     <li><strong>Centre</strong> — crosshair with the stamina arc around it, and the name of what you're looking at.</li>
@@ -563,11 +567,11 @@ html{scroll-behavior:smooth}
   <p>Every hit pops an X and a confirm ding. <strong>The ding's pitch drops as the target nears death, and drops deeper on a headshot</strong> — you can hear how close they are without looking.</p>
 
   <h3>The map</h3>
-  <p>The corner minimap is north-up by default — the plan stays axis-locked while your caret spins; Accessibility → Rotate Minimap flips it to heading-up — and <kbd>K</kbd> cycles three zoom steps. The Map tab is always north-up. On the Map tab: wheel zooms about your cursor, left-drag pans, clicking empty ground places a pin, clicking a pin selects it, and clicking again opens its editor for name, note, mark and colour. <kbd>X</kbd> in the world pins whatever you're looking at, auto-names it, and makes it your tracked marker.</p>
+  <p>The corner minimap is north-up by default — the plan stays axis-locked while your caret spins; HUD → Rotate Minimap flips it to heading-up — and <kbd>K</kbd> cycles three zoom steps. The Map tab is always north-up. On the Map tab: wheel zooms about your cursor, left-drag pans, clicking empty ground places a pin, clicking a pin selects it, and clicking again opens its editor for name, note, mark and colour. <kbd>X</kbd> in the world pins whatever you're looking at, auto-names it, and makes it your tracked marker.</p>
 
   <div class="note warn">
     <span class="lbl">You need a scanner implant to see people on the map</span>
-    <p>Without a scanner chip installed <strong>and switched on</strong>, the map draws <strong>no bodies at all</strong> — at any zoom, on both the corner minimap and the Map tab. Bio Scanner shows bodies within 22 m, Deep Scanner within 55 m; own both and the widest enabled one wins. Also check Accessibility → NPCs On Minimap.</p>
+    <p>Without a scanner chip installed <strong>and switched on</strong>, the map draws <strong>no bodies at all</strong> — at any zoom, on both the corner minimap and the Map tab. Bio Scanner shows bodies within 22 m, Deep Scanner within 55 m; own both and the widest enabled one wins. Also check HUD → NPCs On Minimap.</p>
   </div>
 
   <h4>Glyph alphabet — shape first, colour second</h4>
@@ -607,7 +611,7 @@ html{scroll-behavior:smooth}
       <tr><td><strong>Strength</strong></td><td>+2.0 carry, +1.5 max HP (stamped at spawn), +5% melee damage</td></tr>
       <tr><td><strong>Endurance</strong></td><td>+10 max stamina, +10% out-of-combat HP regen</td></tr>
       <tr><td><strong>Gunplay</strong></td><td>+5% ranged damage, +5% headshot damage, aim sway 8% steadier</td></tr>
-      <tr><td><strong>Agility</strong></td><td>+5% move speed, +5% jump velocity, +5% stamina regen (endurance sizes the pool, agility refills it), melee swings 5% quicker, reloads 5% quicker</td></tr>
+      <tr><td><strong>Agility</strong></td><td>+5% move speed, +5% jump velocity (fall-damage thresholds stretch with it), +5% stamina regen (endurance sizes the pool, agility refills it), melee swings 5% quicker, reloads 5% quicker</td></tr>
       <tr><td><strong>Streetwise</strong></td><td>Buy 4% cheaper / sell 4% dearer, rep gains +8% and losses −8%, gates dialogue skill checks</td></tr>
       <tr><td><strong>Larceny</strong></td><td>Enemy detection 5% slower, takedown wind-up 5% quicker, pickpocket odds and value ceiling</td></tr>
     </tbody>
@@ -653,7 +657,7 @@ html{scroll-behavior:smooth}
   </div>
 
   <h3>Time</h3>
-  <p>A full in-game day is <strong>600 real seconds</strong>. A new game opens at noon; day runs 06:00–20:00. NPC schedules, streetlights and the sky all key off it. <kbd>T</kbd> opens the Wait panel (1–24 hours), which heals 2 HP per hour but does <strong>not</strong> mend limbs — and it is not free, since the hours genuinely pass and rent falls due exactly as if you'd lived them. Waiting is refused while a hostile is aware of you.</p>
+  <p>A full in-game day is <strong>600 real seconds</strong>. A new game opens at noon; day runs 06:00–20:00. NPC schedules, streetlights and the sky all key off it. <kbd>T</kbd> opens the Wait panel (1–24 hours), which heals 2 HP per hour but does <strong>not</strong> mend limbs — and it is not free, since the hours genuinely pass and rent falls due exactly as if you'd lived them. Waiting is refused while a hostile is aware of you, and while you are in the air.</p>
 
   <h3>Reputation</h3>
   <p>Every faction scores −100 to +100, starting at 0. <strong>Provoking a member costs 30 points; killing one costs 12 — even a hostile one.</strong> Saving someone by killing their attacker pays 15. <strong>At −25 a faction turns hostile and attacks on sight; at +25 it can turn friendly.</strong> Standing also bends merchant prices and can unlock stock a low-rep player never sees. A kill penalty is never reversed; a provoke can be, once, via the holster pardon. Press <kbd>V</kbd> for a live bar per faction.</p>
@@ -696,9 +700,9 @@ html{scroll-behavior:smooth}
   <h2><span class="n">08</span> Settings &amp; Comfort</h2>
   <div class="h2rule"></div>
 
-  <div class="note warn">
-    <span class="lbl">Nothing applies until you press Apply</span>
-    <p>Every slider, toggle and cycler is <strong>staged</strong>. Revert — or just closing and reopening — throws your edits away. Two exceptions apply instantly: key rebinds, and the Audio music-folder picker. Note that dragging a volume slider doesn't move the bus until Apply, so its audible tick auditions the volume you're <em>leaving</em>.</p>
+  <div class="note">
+    <span class="lbl">Changes apply as you make them</span>
+    <p>Every slider, toggle and cycler takes effect the moment you change it, and is saved. There is no Apply button; close the menu when you are done.</p>
   </div>
 
   <h3>If the retro look makes you ill</h3>
@@ -708,15 +712,13 @@ html{scroll-behavior:smooth}
     <tbody>
       <tr><td><strong>Lens Curve</strong></td><td>Removes the fisheye bend of the whole world — <strong>the strongest one, start here</strong></td></tr>
       <tr><td>World Ghosting</td><td>Removes the full-screen motion trail</td></tr>
-      <tr><td>Vertex Warp (PS1)</td><td>Stops world geometry wobbling — <em>already off by default</em>; raising the slider is how you opt in</td></tr>
       <tr><td>View Bobbing</td><td>No head bob</td></tr>
       <tr><td>Camera Tilt</td><td>No strafe roll, and no lean roll</td></tr>
       <tr><td>FOV Effects</td><td>No zoom kicks when you fall, sprint or dash</td></tr>
-      <tr><td>Screen Shake</td><td>Scales 0–200% (this one needs Apply)</td></tr>
-      <tr><td>HUD Ghosting / Curve / Sway</td><td>The same effects on the HUD</td></tr>
+      <tr><td>Screen Shake</td><td>Scales 0–200%</td></tr>
     </tbody>
   </table></div>
-  <p>Under <strong>Video</strong>, Presentation flips between <em>Crisp</em> (real resolution) and <em>Retro</em> (a ~792×444 buffer blown up — the chunky pixel look). Dithering to 0%, Color Depth to "24-bit (Off)", Ink Outline to 0% and Muzzle Smoke to 0% each remove a distinct layer of the effect.</p>
+  <p>Under <strong>Video</strong>, Presentation flips between <em>Crisp</em> (real resolution) and <em>Retro</em> (a ~792×444 buffer blown up — the chunky pixel look). That one switch is the whole retro question; the dither, colour depth and ink layers are not separate settings.</p>
 
   <h4>Photosensitivity</h4>
   <p><strong>Screen Flashes</strong> off kills <em>every</em> full-screen flash at once — hurt, dash, kill, sky pop, muzzle. <strong>Hit Stop</strong> off removes the micro-freeze on impacts. <strong>Low-HP Heartbeat</strong> off silences just the heartbeat without touching any volume slider.</p>
@@ -736,7 +738,7 @@ html{scroll-behavior:smooth}
       <tr><td>Hard</td><td class="num">×1.75</td><td class="num">×0.85</td><td class="num">×1.35</td><td class="num">×1.0</td><td class="num">×1.25</td></tr>
     </tbody>
   </table></div>
-  <p>Difficulty applies immediately, mid-run. Two rows on the Game tab are prefixed <strong>"Debug:"</strong> — leave those alone.</p>
+  <p>Difficulty applies immediately, mid-run.</p>
 
   <h4>Where your files live</h4>
   <p><code>%APPDATA%\Godot\app_userdata\CYBERSUNDAY</code> — holding <code>settings.cfg</code>, <code>gamestate.cfg</code> (the autosave), <code>quicksave.cfg</code>, three save slots and a <code>screenshots</code> folder. There is no "Reset to Defaults" button; deleting <code>settings.cfg</code> resets every option, but also clears your Terms acceptance so the first-launch gate returns.</p>
@@ -773,9 +775,6 @@ html{scroll-behavior:smooth}
     <details><summary>My reload wasted ammo.</summary>
       <div class="a"><p>By design. Ammo is counted in whole magazines, so reloading a partial mag discards it. Reload when empty.</p></div></details>
 
-    <details><summary>The level restarted itself.</summary>
-      <div class="a"><p>Did you hit <kbd>End</kbd>? It reloads the current level and is not gated out of this build. Avoid it.</p></div></details>
-
     <details><summary>I got shot through a fence.</summary>
       <div class="a"><p>Mesh, wire, glass and foliage stop bullets from neither side. Not a bug — find solid cover.</p></div></details>
 
@@ -785,17 +784,17 @@ html{scroll-behavior:smooth}
     <details><summary>My mouse feels sluggish when I'm moving fast.</summary>
       <div class="a"><p>Deliberate. Look sensitivity scales down above 6.5 m/s, reaching half at 12 m/s, so hop-runs stay controllable.</p></div></details>
 
-    <details><summary>I changed a setting and nothing happened.</summary>
-      <div class="a"><p>Did you press <strong>Apply</strong>? Everything except key rebinds and the music folder is staged until you do.</p></div></details>
-
     <details><summary>I loaded my autosave and the world was reset.</summary>
       <div class="a"><p>The autosave is a <em>profile</em> checkpoint. It doesn't restore looted containers, dead NPCs, dropped loot, spawned enemies or NPC positions, and all guns come back full. Only <kbd>F5</kbd> and the three manual slots carry the exact-world layer.</p></div></details>
 
-    <details><summary>All the item names say [PH].</summary>
-      <div class="a"><p>Placeholder copy. Chips, weapon mods, quests and perks all currently ship with <code>[PH]</code>-prefixed names, and chip descriptions are empty. Not worth reporting.</p></div></details>
+    <details><summary>Some names read like placeholders, and chip descriptions are blank.</summary>
+      <div class="a"><p>Known. Chips, weapon mods, quest titles and perks still carry first-draft names and chip descriptions are empty. Not worth reporting.</p></div></details>
 
     <details><summary>Everything says the game is connected to the internet.</summary>
       <div class="a"><p>That's the first-launch warning card and the joke Terms screen. You can't skip them on a first launch; later launches let any key through.</p></div></details>
+
+    <details><summary>The game crashed and showed me a report screen.</summary>
+      <div class="a"><p>That screen is the game noticing the last run ended badly. It is exactly what to send — copy the text it shows and include it in your report.</p></div></details>
   </div>
 </section>
 
@@ -810,7 +809,7 @@ html{scroll-behavior:smooth}
   </div>
 
   <h4>Known placeholder copy</h4>
-  <p>Implant chips, weapon mods, quest titles and perks all display a <code>[PH]</code> prefix, and chip descriptions are blank. The Controls tab has one placeholder hint row. These are known.</p>
+  <p>Implant chips, weapon mods, quest titles and perks still carry first-draft names, and chip descriptions are blank. The Controls tab has one placeholder hint row. These are known.</p>
 
   <h4>Worth reporting</h4>
   <ul>
@@ -824,7 +823,7 @@ html{scroll-behavior:smooth}
   <p style="color:var(--ink-3);font-size:15px;margin-top:30px">Everything in this manual was read from the game's source rather than observed in play, so treat specific numbers as the intended tuning rather than a measurement.</p>
 </section>
 
-<footer>CYBERSUNDAY · Playtest field manual · Godot 4.7.1</footer>
+<footer>CYBERSUNDAY · Playtest field manual · Godot 4.7 · revised 2026-09-15</footer>
 </main>
 </div>
 

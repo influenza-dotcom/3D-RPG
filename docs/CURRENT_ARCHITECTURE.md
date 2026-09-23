@@ -35,6 +35,94 @@ from a `TriggerVolume`/cutscene). The `LevelDoor` prefab wiring is pinned by
 The level scene itself does not contain the Player. Play levels through
 `game.tscn` unless you are intentionally inspecting a bare level.
 
+### More than one level in memory — the level cache and streamed worldspaces
+
+Two independent mechanisms, modelled on Fallout's interior cell buffer and exterior cell grid.
+
+**The level cache (`GameRoot.cached_levels`, default 2; `scripts/world/level_cache.gd`).** `load_level` no
+longer frees the level the player leaves: it captures it into the world ledger exactly as before, then PARKS it —
+renamed `_LevelParked`, detached, kept in an LRU keyed by `LevelData.resource_path`. Loading that path again takes
+the very instance back (`_restore_parked_level`): renamed `Level`, re-attached, music applied, player placed — and
+deliberately NO ledger apply, NO dead-NPC sweep and NO prewarm, because the instance already IS its state (an apply
+would only rewind whatever the capture can't see: corpses, dropped items, NPCs mid-patrol). Rules:
+- Parked only when GameRoot loaded it (`_level_node`), its path is non-blank, the new level is a DIFFERENT path (a
+  same-level load — the console's `resurrect` reload — is a reset), `cached_levels > 0`, and
+  `LevelData.keep_in_memory` is on. Otherwise it is freed as before.
+- Overflow evicts the least-recently-left level (`queue_free`); its ledger bucket was captured on the way out, so a
+  save loses nothing. `GameRoot._notification(PREDELETE)` frees every parked level — they are out of the tree, so
+  nothing else would, and every `reload_current_scene` (death, quickload, Continue, menu) would leak them.
+- A parked level is out of the tree but ALIVE. SceneTree timers and autoload signals still reach it, so level
+  content must read "not inside the tree" as "away", not "gone": `NPC._complete_death` waits for `tree_entered`
+  before its gore burst + death record; `EncounterSpawner._on_spawn_gone` ignores a `tree_exited` whose body still
+  has its parent and isn't queued for deletion (a whole-subtree detach) — otherwise `cleared` would fire doors in a
+  level the player isn't in; `QuestMarkerSync` defers its rebuild to `_enter_tree`; `RayCast` (the carry) drops a
+  held prop that left the tree. Tweens bound to parked nodes pause on their own. New level-content scripts that
+  untrack, free or record on `tree_exited` alone need the same care (pinned in `tests/test_level_cache.gd`).
+- `NavLink` projection waits for a nav-map iteration NEWER than the one it (re)entered the tree at
+  (`_entered_iteration`): a returning level's links otherwise measured against a map still holding the level it
+  replaced (248 bogus off-mesh warnings on one return, measured).
+- **World spawns travel with their level (`WorldSpawn`, `scripts/world/world_spawn.gd`).** Everything the running
+  game adds to the 3D world — `GoreSpawner` corpses / gibs / blood decals, `BloodyMess` bursts and blood rain,
+  bullet / rock / scorch / paint decals, player drops (`WorldItem`, money bags, pulled props), NPC `LootableCorpse` +
+  `Corpse` markers, `SpawnOnDestroy` loot, projectiles, explosions, `GunFX` tracers and sparks, decoy `NoiseSource`s,
+  dust, bark icons, damage numbers, radio notes, `EffectFactory` spawns — goes through `WorldSpawn.add(context, node,
+  at, fallback)` or `parent_for`: the streamed chunk under `at`, else the active `Level` (`Groups.level_node`), else the
+  site's old parent (the tree root, the Player's parent, `current_scene`) when there is no level. So a door parks the
+  gore with its level and brings it back, a reload frees it with the scene, and a chunk unloading takes its decals and
+  drops with it. `add` converts the node's pre-set transform into the parent's space BEFORE `add_child` (sites were
+  written for "root, local == world"), stamps `WorldSpawn.META`, and falls back to `fallback` for an off-tree spawner.
+  Deliberate exceptions: one-shot SOUNDS stay on the tree root (`AudioManager`, `weapon_audio`, `death.gd`, the impact
+  sfx a dying projectile / blood drop / explosion reparents) — a sound must outlive its source, and an
+  `AudioStreamPlayer` parked with a level stops without emitting `finished`, so it would never free; the cutscene
+  camera stays on `current_scene`. `PlayerLightLevel` skips lights under a `WorldSpawn.META` node (blood-splat glows,
+  muzzle flashes used to sit outside its `current_scene` scan). `tests/test_world_spawn.gd` ratchets production source
+  against new `get_tree().root.add_child` / `current_scene.add_child` / `reparent(root)` calls, pinned per line.
+- Dropped items and money bags are still dynamic spawns in neither save tier: parked with their level they survive a
+  door round trip, but a chunk unloading, an eviction from the cache, a reload or a quit loses them. The debug
+  console's `warp` reports parking and `levels` marks parked levels with `~`.
+
+**Streamed worldspaces (`ChunkStreamer`, `scripts/world/chunk_streamer.gd`).** A worldspace is an ordinary
+`LevelData` whose scene is the PERSISTENT layer (sky, sun, `WorldEnvironment`, `PlayerSpawn`s, `QuestMarkerSync`,
+anything that must exist wherever the player stands) plus a `ChunkStreamer`. The ground and content live in chunk
+scenes — root `WorldChunk` (`scripts/world/world_chunk.gd`, extends `LevelRoot`), one per grid cell, named by
+`file_pattern` (`chunk_{x}_{z}.tscn`) in `chunk_folder`. Grid math is `scripts/world/chunk_grid.gd` (pure, Chebyshev
+rings, hysteresis plan).
+- Each physics step (priority −100, before the Player) the streamer finds the player's cell, loads the cell under the
+  player synchronously if missing, loads the rest of `load_radius` (threaded while walking; synchronously on an
+  ARRIVAL — first step, door, teleport), and frees chunks past `unload_radius`. A chunk whose NPC stands within
+  `load_radius` of the player is pinned. A streamer that entered the tree during a physics step skips that step
+  (the door's deferred player placement hasn't run). Threaded requests that stop being wanted are parked in
+  `_abandoned` and still collected with `load_threaded_get`, or ResourceLoader would keep them forever.
+- Chunks are named `Chunk_<x>_<z>` (part of every fallback save key inside them) and default to WORLD-space
+  authoring (`offset_chunks_to_grid` off). Each landed chunk gets `Ps1Warp.cover` (it is a `LevelRoot`) and its own
+  runtime `BrushZFightClean` from `LevelRoot._ready`.
+- **Saves:** `world_objects` needs nothing new (level path + stable node path). The world ledger gives each chunk a
+  bucket of its own: the streamer stamps `WorldSnapshot.SCOPE_META` on the chunk root, `WorldSnapshot.bucket_for`
+  maps any node to `"<level>#Chunk_x_z"`, `capture`/`apply` take the chunk as `scope`, and a level-wide pass skips
+  chunk content. The chunk bucket is applied (deferred, queued before `add_child`) when it streams in, captured
+  right before it streams out, and captured for every loaded chunk by `GameState.capture_level_state` (which returns
+  the keys it wrote so `fold_dead_ledger` skips them). `NPC._record_snapshot_death` files deaths under
+  `GameState.ledger_bucket_for(self)`. A chunk whose apply is still queued is never captured (`ledger_chunks`).
+- **Navigation:** one region per chunk; regions join on the map where border edges coincide. Bakes must be fitted
+  to the cell (`WorldChunk.apply_cell_fit`: `filter_baking_aabb` = cell grown by `nav_border` on X/Z,
+  `border_size = nav_border`, height fitted to the chunk's geometry because Recast's 13-bit span height wraps a box
+  taller than ~8000 × `cell_height` — measured: a 2 km box baked a floor at y=0 as y=−942). Ground must run past the
+  cell edge by more than `nav_border`. Pinned: two separately baked chunks route one path across the seam
+  (`tests/test_worldspace_builder.gd`).
+- **Minimap:** the region SET's signature replaces the single region id; a change under the same level root is a
+  restream (decks re-slice from every region, `FloorplanSource.sync_roots` walks only new chunk roots, found via
+  `Groups.CHUNK_STREAMER`), a different root is a full rebake.
+- **Validators:** `LevelRoot` skips navmesh checks when it holds a streamer (duck-typed — never `is ChunkStreamer`
+  in a `@tool` script) and never walks into the streamer; `WorldChunk` wants no sky/spawn, flags an unfitted bake,
+  an over-tall bake, a moved region and a `cell` that disagrees with the file name.
+- **Scaffold:** File → Run `scripts/tools/new_worldspace.gd` (builder `scripts/world/worldspace_builder.gd`, which
+  bakes each chunk from its OWN subtree so the open scene never leaks in). Shipped sample:
+  `resources/levels/SampleWasteland.tres` (5×5 × 48 m, `warp SampleWasteland`).
+- Known limits: an actor belongs to its authored chunk (it unloads with it once no longer pinned, and comes back
+  where it was captured); CSG added in the same frame as a scripted bake is not parsed; debug commands keyed on
+  `current_level_path` (`wipeobjects`, `resurrect`) do not reach chunk buckets; the CYBER SUNDAY Reach tab follows
+  path references, so chunk scenes (found by file name) read as unreachable there.
+
 ### Effect prewarm — two stages (boot SubViewport + in-level `EffectPrewarmer`)
 
 The first kill and the first hit used to hitch — a real-renderer probe measured the first-kill frame at
@@ -379,7 +467,23 @@ their motion) is likewise a
 component, not `player.gd` code: **`FirstPersonBody`** (`scripts/player/first_person_body.gd`),
 a scene-wired Player.tscn child on the Landing `host = NodePath("..")` idiom, which also
 carries the authored `fp_*` pose overrides (see
-[Extraction idioms](#extraction-idioms-and-their-load-bearing-invariants) under Components for the ordering invariants). The stamina/sprint economy lives in a
+[Extraction idioms](#extraction-idioms-and-their-load-bearing-invariants) under Components for the ordering invariants).
+**Third person is a second pair of components over that same rig, and it adds no branch to `player.gd`:**
+**`ThirdPersonCamera`** (`scripts/camera/third_person_camera.gd`) is a `SpringArm3D` authored BESIDE `ScreenShake`
+in `camera_rig.tscn` — never above it, because `Head.camera` / `Head.screen_shake` resolve `"ScreenShake/Camera3D"`
+and `"ScreenShake"` by name — used purely as a collision probe whose settled length is written onto
+`ScreenShake.position` (the one node in that chain nobody else owns: `ScreenShake` writes only its rotation and
+`CameraEffects` owns the camera's position one level below, so the pull-out composes with shake and bob instead of
+fighting them). **`ThirdPersonBody`** (`scripts/player/third_person_body.gd`) is the character you then look at:
+the whole customizer look through `CharacterAppearanceCatalog.configure_swap`, on a `BodyModelSwap` whose parent is
+this component rather than the Player — a PROXY HOST, because the poses `BodyModelSwap` can strike are chosen by
+what its parent answers (`is_holding_gun` / `is_fists_out` / `aim_pitch_degrees`) and the Player deliberately
+answers none of them (teaching it those would swing the FIRST-person arms through the view model; see
+`FirstPersonBody._configure_fp_body_arms`). One session-only field (`Settings.third_person_camera`) is the single
+source of truth, written by the `ToggleView` key alone (Options carries no row for the mode, nor for the pull-out
+distance the wheel steps); ADS and dialogue take the view back to the eye,
+and the flip relays through `Player._on_view_changed` to the view model's visibility flag and the whole FP body.
+The stamina/sprint economy lives in a
 **Player-owned `StaminaManager`** (`scripts/player/stamina_manager.gd`, a `RefCounted` on
 the same built-at-var-init / wired-in-`_init` idiom, preloaded by path — no class_name):
 the Player keeps the `stamina_changed` signal, a raw `stamina` property alias, and 1-line
@@ -389,6 +493,13 @@ their exact positions; every stamina RATE and per-verb COST remains on
 per weapon: `WeaponData.stamina_effort()` (damage, pellets, blast payload) sets how much a
 trigger pull is worth, `stamina_shot_cost` prices one unit of it, `WeaponData.stamina_cost_mult`
 trims the result, and `stamina_shot_drain_ceiling` clamps it so no weapon can out-drain sprinting.
+Its one sprint-lockout timer has two writers through `StaminaManager.lock_out_sprint` (a max, so neither
+shortens the other): running the pool dry (`stamina_sprint_lockout`) and ATTACKING (`sprint_attack_lockout`,
+via `Player.interrupt_sprint`, which `Player.on_weapon_fired` calls on every committed attack). You can't
+shoot while sprinting: `GunPose` (the view model's Sprint pose) mirrors the pose into `Attack.sprint_lowered`
+every frame, the same idiom as `gun_raised`, and `Attack._sprint_out_gate` turns a player trigger pull made
+mid-sprint into interrupt-the-sprint plus a buffered shot that `Attack._physics_process` fires once the gun is
+up (a punch weapon swings at once instead: the fists rig has no sprint pose).
 
 **Installed vs active (the Implants tab's on/off switch).** An `Ability` node's presence is
 INSTALLED; its `enabled` flag is ACTIVE. The player switches an installed implant off from
@@ -537,9 +648,15 @@ carried a snapshot, and only of the level saved in):
   apply lands, so an autosave queued by the new level cannot overwrite the saved
   bucket with the fresh authored seed. No disk write. Only a `Level` GameRoot
   itself loaded is captured (a hand-placed one has no `LevelData` path).
+- **A parked level** (GameRoot's level cache, above) is captured on the way out like
+  any other and is NOT re-applied when it comes back: the re-attached instance is the
+  state. Its bucket only matters again if it is evicted or the scene reloads.
+- **Streamed chunks** each keep a bucket of their own (`"<level>#Chunk_x_z"`, see
+  *Streamed worldspaces* above): applied as a chunk streams in, captured as it streams
+  out and at every save; the level bucket never holds chunk content.
 - **Every save.** `autosave` and `_capture_and_write` (quicksave/slots) call
-  `capture_world_state()`: capture the current level, then `fold_dead_ledger` for
-  every other level. `save_to_disk` writes the whole ledger as a sibling
+  `capture_world_state()`: capture the current level (and its loaded chunks), then
+  `fold_dead_ledger` for every other bucket. `save_to_disk` writes the whole ledger as a sibling
   `[world_snapshot]` cfg section; an empty ledger writes no section.
 - **Every load.** `load_from_disk` rebuilds the ledger and the live death map
   (`_dead_authored`) from it, and GameRoot applies the booted level's bucket.
@@ -626,9 +743,10 @@ code comments point at — keep it current as phases land):
 - **REMAINING — corpse rebuild**: a dead authored NPC currently just VANISHES on
   a load (`WorldSnapshot.apply` silently frees the fresh spawn — no corpse, no
   loot). Rebuilding = capture runtime `LootableCorpse` state (position + bag via
-  the same `serialize_stacks` shape) and re-instantiate on apply; must first WIPE
-  root-parented gore/corpses (they deliberately survive `reload_current_scene`)
-  or a load duplicates them. Keep keys aligned with the profile's
+  the same `serialize_stacks` shape) and re-instantiate on apply. Gore and corpses
+  now live in the level (`WorldSpawn`), so `reload_current_scene` frees them with the
+  scene — no wipe step is needed before a rebuild (a parked level returning from
+  GameRoot's cache still carries its own, and is not re-applied). Keep keys aligned with the profile's
   `GameState.discovered_corpses` (`Corpse.save_id`).
 - **REMAINING — loot drops + money bags**: dropped `CanPickUp`s / money bags are
   re-INSTANTIATE-on-drop props (live state in `Item` meta + `preset_*`), which is
@@ -1360,8 +1478,9 @@ clearing `freeze` on an overlapping body lets solver depenetration fire it acros
 `Throwable.unpin` restore a clear pose *first*.
 (3) **The blade holds the limb up.** Pull the knife (`PickupRay._pick_up` unpins before it snapshots physics state)
 and the limb drops off the wall — polled in `_physics_process`, because the blade can also leave by being freed.
-(4) **The trophy belongs to its wall.** Gore is parented under the tree root and survives a level swap, which frees
-only the `Level` child — so a seated pin watches the collider it is stapled to and takes itself with it.
+(4) **The trophy belongs to its wall.** Gore lives in the level (`WorldSpawn`), so a door parks or frees the limb
+together with its wall; a seated pin still watches the collider it is stapled to and takes itself with it, for when ONLY
+the wall goes (a destructible surface, or a neighbouring streamed chunk unloading).
 Geometry and policy are pure statics in `PartPinner` (`scripts/effects/part_pinner.gd`, pinned by
 `tests/test_part_pinner.gd`); it picks the limb by **nearest live part centre**, not `Character.body_part_at`,
 because that classifier has no left/right and desyncs by ~0.28 m on a seated actor. Feel numbers: the
@@ -3017,19 +3136,28 @@ The engine cannot report its own native crash — the process is gone before any
 player-facing crash report is the marker-file pattern, split across two autoloads at the two ends of the
 `[autoload]` list:
 
-- **`CrashGuard`** (`managers/CrashGuard.gd`, the FIRST autoload) writes `user://crash_guard/session.cfg` in
-  its `_init` — before any other autoload's `_init` — heartbeats it every 5 s (uptime, current scene, the
-  error/warning tally and the last 30 errors from an `ErrorSink` it installs in EVERY build), rewrites it on
-  every `breadcrumb(text)` a system drops, marks it on `NOTIFICATION_CRASH` when the engine's own handler
-  fires, and sets `clean_exit = true` only in `_exit_tree`. A marker found NOT clean at the next boot means the
-  previous run died: `_ready` then composes ONE report (build + GPU + renderer, uptime, last scene, breadcrumbs,
-  errors with GDScript traces, the Windows `Application Error` event for that executable via `wevtutil`, and
-  the last 80 lines of the crashed run's rotated engine log `user://logs/godot<stamp>.log`) to
-  `user://crash_reports/crash_<start>.txt` (ten kept), prints its path to stdout, and hands it out through
-  `previous_crash()`.
+- **`CrashGuard`** (`managers/CrashGuard.gd`, the FIRST autoload) writes this process's own marker,
+  `user://crash_guard/session_<pid>.cfg`, in its `_init` — before any other autoload's `_init` — heartbeats it
+  every 5 s (uptime, current scene, the error/warning tally and the last 30 errors from an `ErrorSink` it
+  installs in EVERY build), rewrites it on every `breadcrumb(text)` a system drops, marks it on
+  `NOTIFICATION_CRASH` when the engine's own handler fires, and sets `clean_exit = true` only in `_exit_tree`.
+  At boot `_ready` sweeps the folder (`finished_runs`): a clean marker is deleted; a NOT-clean one is a death only
+  once the OS no longer lists its pid (`run_is_alive`: `tasklist` with the image name on Windows, `ps` elsewhere —
+  Godot's `OS.is_process_running` only knows processes the engine itself spawned). A not-clean marker whose
+  process still runs is another live instance sharing `user://` — a second copy of the game, or on a dev box the
+  editor, headless test runs and an export at once — and is left alone; one shared marker used to report each of
+  those as a crash. For each dead run it composes a report (build + GPU + renderer, uptime, last scene,
+  breadcrumbs, errors with GDScript traces, the Windows `Application Error` event for that executable via
+  `wevtutil`, and the last 80 lines of the newest rotated engine log `user://logs/godot<stamp>.log`) to
+  `user://crash_reports/crash_<start>.txt` (ten kept), prints its path to stdout, deletes the marker, and hands
+  the newest out through `previous_crash()` — except that an exported run is never handed an EDITOR run's death
+  (`surfaces_in_this_run`: a Stop press or a killed probe, which no player produces).
 - **`CrashReportScreen`** (`scenes/ui/crash_report_screen.tscn`, the LAST autoload so its `ui_cancel` wins
   the unhandled-input walk; a `blocks_tabs` row in `InputManager`'s modal registry) asks `previous_crash()`
-  once in `_ready` and opens over the boot scene with the report in a read-only `TextEdit` and **Copy report**
+  once in `_ready` and HOLDS it; `StartMenu.reveal_hosted_menu` calls `show_pending_report()`, which opens the card
+  (deferred, one-shot) over the just-revealed menu — never over the warning cards / CRT turn-on, whose `_input`
+  press-anything skips ate the card's clicks and whose HIDDEN cursor the card stashed and restored on close (the
+  2026-09-16 "no cursor on the main menu" export bug). It opens with the report in a read-only `TextEdit` and **Copy report**
   (`DisplayServer.clipboard_set`), **Open report folder**, **Report online** (`report_url` export) and Close.
   It auto-opens only when `not OS.has_feature("editor")` — the editor's Stop button kills the game process,
   which is indistinguishable from a crash, and a dev pressing Stop must not be nagged; the file and the Output
@@ -3078,9 +3206,46 @@ guarded, and what is deliberately deferred.
   `NpcBarkUi.bubble_tail_glyph` `@export` (art, not copy), and the F3 developer
   HUD joined `ScanText.SKIP_FILES` (the dev-surface twin of the existing
   `scripts/tools` skip; the test and `text_debt.gd` honour that const too, so
-  the three consumers can never disagree). The `tr()` sweep PROPER is still
-  deferred — what this buys is that when it happens, `PlayerText` is the only
-  file it has to touch.
+  the three consumers can never disagree). The `tr()` sweep PROPER landed on
+  2026-09-15 — see *The locale seam* below; `PlayerText` was indeed the only
+  copy file it had to touch, and it touched it by lifting every in-function
+  template to a `const` rather than by wrapping call sites.
+- **The locale seam (2026-09-15): `Localization` (`scripts/ui/localization.gd`).**
+  Pure statics, the one place game code asks the `TranslationServer` anything.
+  Three paths reach the screen translated: (1) an auto-translated Control
+  (`label.text = PlayerText.X`) is translated by the engine's own atr against the
+  catalogs listed under Project Settings → Localization → Translations — no code;
+  (2) a COMPOSED string is translated TEMPLATE-FIRST inside `TextFormat.subst` /
+  `TextFormat.plural` (`Localization.t` / `t_plural`), so every `PlayerText`
+  function and every designer `{token}` template is covered with no call-site
+  edit, and a translator may re-order tokens freely; `t_plural` is the real
+  `tr_n()` — a catalog may carry as many plural forms as its language needs, the
+  engine's rule for the locale picks one, and with no entry the English shape
+  applies; (3) the four atr opt-out painters that show a bare const (the toast
+  stack, hotbar names, the compass cardinals, a grid tile's initial) call
+  `Localization.t` before `PlayerText.display`. A `"[PH]"` placeholder is NEVER
+  looked up (`t` returns it untouched, the POT parser never extracts it), which is
+  also what keeps the marker on a composed string's `.text` property for the tests
+  that compare it. `Settings.language` (`""` = follow the OS, else a code from
+  `Localization.available_locales()`, which reads the ProjectSettings catalog
+  list — never `get_loaded_locales`, which the scrub pollutes) is the Options →
+  Game → **Language** row (`OptionsMenu._emit_language`, a dynamic CUSTOM cycler
+  captioned with the engine's own language names); `set_language` applies at once
+  (`TranslationServer.set_locale` repaints every auto-translated Control) and
+  persists; an unknown code degrades to System on set AND on load. The `"[PH]"`
+  scrub follows a locale switch — `MenuStyle.relocate_scrub` re-keys it, because
+  the server matches a Translation by its `locale` field. Catalogs are Godot's
+  own: the CYBER SUNDAY plugin registers an `EditorTranslationParserPlugin`
+  (`addons/cybersunday_tools/core/translation_parser.gd`, pure model
+  `core/translation_extract.gd`) so Project Settings → Localization → POT
+  Generation extracts PlayerText's constants (plural pairs as `msgid_plural`
+  entries) and every authored `.tres`/`.tscn` copy field; a translator returns
+  `translations/<locale>.po`. Pinned by `tests/test_localization.gd` (a
+  throw-away "xx" catalog: template-first subst, catalog plurals, placeholder
+  immunity, atr + scrub under the switched locale, Settings degrade) and
+  `tests/test_devtools_translation_extract.gd`. Composed strings already on
+  screen keep their text until next painted — the documented "takes effect on the
+  next screen" behaviour of a language switch.
 - **Designer templates substitute named tokens, never the `%` operator.**
   `{amount}` (`RentCollector.paid_message`), `{part}`
   (`CrippleCallout.self_bark_template`), `[mph]`
@@ -3164,8 +3329,11 @@ guarded, and what is deliberately deferred.
   the labels that paint a renamed pet's name (look-at readout, toasts, hotbar slots,
   item tooltips) — set
   `auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED`, so a player's text is
-  never looked up as a message id. A no-op today (no Translations ship), a guard
-  the moment one does.
+  never looked up as a message id. The toast painter is the deliberate nuance: it
+  calls `Localization.t` on the whole toast, which is safe because a composed
+  toast was translated at template level and misses as a whole string, a typed
+  name never forms a whole toast on its own, and the only strings that can hit
+  are the bare `PlayerText` consts that need it.
 - **Script-scope decision (recorded 2026-07): CJK is a possible future SKU, and
   it cannot be "just add a font".** The UI renders at 792x444 (396x216 base,
   stretch scale 0.5) with 11–15 px type and tracked uppercase titles — CJK is
@@ -3173,9 +3341,10 @@ guarded, and what is deliberately deferred.
   (bigger sizes, `uppercase_titles = false`, `title_tracking = 0`) plus a
   legibility pass. `MenuSkin.uppercase_titles` is the first such knob. Do not
   "fix" `title_tracking` without knowing this.
-- **Known gaps, deliberately deferred (recorded as gaps, not TODOs):** the
-  locale seam itself does not exist yet (no `[internationalization]` config, no
-  `Settings.locale`, no CSV export tool); `item_info.gd` composes tooltips from
+- **Known gaps, deliberately deferred (recorded as gaps, not TODOs):** no
+  catalog SHIPS yet (the seam is live; the first `.po` under Project Settings →
+  Localization → Translations makes the Language row grow an entry); the
+  `MenuSkin` pixel budgets are still English-measured; `item_info.gd` composes tooltips from
   English-shaped fragments pending a target language; chess SAN input parses
   English piece letters only; the boot level's sign texture
   (`tb_textures/textures/sign.png`) is Swedish-language art; the TOS prose ships

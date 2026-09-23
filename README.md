@@ -5,7 +5,10 @@ a selectable colour depth (24-bit down to 3-bit, with the PlayStation's own
 15-bit RGB555 on the list) resolved through an ordered Bayer dither, film
 grain, a Borderlands-style black ink outline over every surface,
 and PS1-style material warping — rides on a dense first-person movement and
-combat sandbox. It **presents at native resolution by default** (Options ->
+combat sandbox, which the camera can also pull back from: **third person** follows
+your own customised character over the shoulder. Tap **middle mouse** to toggle it,
+scroll to move the camera in and out,
+and hold middle mouse to swing it around your character. It **presents at native resolution by default** (Options ->
 Video -> Presentation: *Crisp*, the HIGH FIDELITY mode in code and the other docs — crisp text, native-res world, the
 retro effects scale-compensated), with the original chunky low-internal-
 resolution pipeline preserved as the *Retro* option
@@ -89,7 +92,7 @@ the current `LevelData` as the runtime `Level` child. Run levels through
 | Look | Mouse |
 | Jump | `Space` |
 | Crouch / slide | `Ctrl` |
-| Run (sprint; walking is the default; ignored while aiming down sights) | `Shift` |
+| Run (sprint; walking is the default; ignored while aiming down sights; attacking ends it) | `Shift` |
 | Lean left / right — peek round cover (hold) | `Q` / `E` |
 | Attack / fire — throws the prop while carrying, and **hurls the knife** while aiming down sights | Left mouse |
 | Aim down sights | Right mouse |
@@ -200,7 +203,12 @@ rpg/
   Colorblind-Safe Cues on. A hostile that has noticed *you* grows a ring.
 - **Level seam.** `GameRoot` loads a `LevelData` resource, instantiates its scene
   as `Level`, applies level music/ambience, and places the player at a
-  `PlayerSpawn`. `LevelDoor` swaps levels at runtime.
+  `PlayerSpawn`. `LevelDoor` swaps levels at runtime, and the levels you leave stay
+  parked in memory (`GameRoot.cached_levels`) so going back finds them exactly as left.
+- **Streamed open worlds.** A `ChunkStreamer` in a level streams a grid of `WorldChunk`
+  scenes around the player (Fallout-style cells): threaded loads while walking, per-chunk
+  navmeshes that join at the seams, and a per-chunk slot in the save's world ledger.
+  `warp SampleWasteland` in the debug console walks the shipped sample.
 - **Profile save model.** `GameState` writes a profile/checkpoint save covering
   progression, inventory, reputation, flags/quests/perks, status, clock, level
   identity, respawn, discovered corpses, and an additive per-object ledger
@@ -250,6 +258,10 @@ the authoring guide current.
 **Make a level:** start from `scenes/levels/LevelTemplate.tscn` or
 `scripts/tools/new_level.gd`, bake navigation, create a `LevelData`, then point
 `GameRoot.level` or a `LevelDoor.target_level` at it.
+
+**Make an open world:** File → Run `scripts/tools/new_worldspace.gd` (set `WORLD_NAME`) to
+scaffold a persistent scene, a grid of baked chunk scenes and their `LevelData`; build each
+cell in its `chunk_X_Z.tscn` and re-bake with the `WorldChunk` root's `bake_and_audit`.
 
 **Make an NPC archetype:** author an `NpcData` in `resources/characters/`, set
 its faction, stats, weapon, barks, GOAP profile, perception, movement, and loot,
@@ -331,15 +343,18 @@ The tag runs the gates, then the export job attaches the zip to a GitHub Release
 
 ## Reporting a Crash
 
-The game watches for its own crashes. `CrashGuard` (the first autoload) writes a session marker at boot and
-only a clean exit clears it; on the next launch, if the marker survived, `CrashReportScreen` opens over the
-boot screen with a report already written to `%APPDATA%\Godot\app_userdata\CYBERSUNDAY\crash_reports\`
+The game watches for its own crashes. `CrashGuard` (the first autoload) writes a per-process session marker at
+boot and only a clean exit clears it; on the next launch, if a marker survived and its process is gone,
+`CrashReportScreen` opens over the
+main menu (the moment it becomes clickable — never over the warning cards) with a report already written to `%APPDATA%\Godot\app_userdata\CYBERSUNDAY\crash_reports\`
 and three buttons: **Copy report** (to the clipboard — paste it into an issue), **Open report folder**, and
 **Report online** (the tracker URL, an `@export` on the screen). A report carries the build and GPU, the last
 scene and breadcrumbs, the last errors with their GDScript traces, the Windows Application-Error event for
 the crashed process (exception code, faulting module), and the tail of the crashed run's engine log
 (`logs/godot*.log` in the same folder). Under the editor the card never opens — the Stop button is
-indistinguishable from a crash — and you get one Output line naming the report file instead.
+indistinguishable from a crash — and you get one Output line naming the report file instead. An exported build
+never opens it for an editor run's death either, and a copy that is still running (a second instance, or the
+editor and test runs beside an export) is never reported as a crash.
 
 If the game dies before it can draw anything — before the first autoload runs — no marker exists and the
 screen cannot help. Ask for the console instead: `CYBERSUNDAY.console.exe` keeps a window open with the

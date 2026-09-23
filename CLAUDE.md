@@ -34,6 +34,10 @@ autoload state.
   quest id, container id, or scene path.
 - For level-flow work, cover the seam between `LevelDoor`, `GameRoot`, `LevelData`, `PlayerSpawn`, and `GameState`.
 - Do not rely on "playtested" for a seam that can be checked cheaply off-tree or with a tiny in-tree harness.
+- Anything spawned into the 3D world at runtime (gore, corpses, decals, drops, projectiles, world FX) goes through
+  `WorldSpawn.add` / `parent_for` (`scripts/world/world_spawn.gd`: the chunk / level under it), never
+  `get_tree().root` or `current_scene` — so it parks, streams and reloads with its level. Only one-shot sounds stay on
+  the root. `tests/test_world_spawn.gd` ratchets it line by line.
 
 ## Save semantics must be explicit
 Keep one clear answer for what a save means. Every save file (the autosave behind Continue, the F5 quicksave, the
@@ -52,8 +56,10 @@ must not imply that a quick/slot save restores more of the world than Continue d
 - The per-level WORLD LEDGER (`GameState.world_snapshot`, one `WorldSnapshot`) is a separate store with its own seam:
   a bucket per visited level holding authored-NPC alive/pos/hp, deaths, and every authored `ItemContainer`'s exact
   contents + grid layout + `Lock` state (keyed by `snapshot_key`: `save_id`, see the identity bullet below).
-  `GameRoot.load_level` captures the outgoing level before freeing it and applies the incoming level's bucket; every
-  save captures the current level first. Never merge it into the profile fields or into `world_objects`. Its roadmap
+  `GameRoot.load_level` captures the outgoing level before parking or freeing it and applies the incoming level's bucket
+  (a level returning from GameRoot's level cache is NOT re-applied — the parked instance is the state); every save captures
+  the current level first. A `ChunkStreamer` chunk has a bucket of its own (`WorldSnapshot.SCOPE_META` / `bucket_for`),
+  and a level-wide capture never holds chunk content. Never merge it into the profile fields or into `world_objects`. Its roadmap
   and per-level size budget live in `docs/CURRENT_ARCHITECTURE.md` (Save Model).
 - Corpse discovery is the narrow exception already handled: `Corpse.discovered` persists through
   `GameState.discovered_corpses`, keyed like every other persistable.
@@ -92,7 +98,14 @@ The Options menu is **data-driven**: every row is a `SettingSpec` in `resources/
   `godot --headless -s scripts/tools/text_debt.gd` (`validate_all` reports it too). A genuinely non-prose
   paint (a separator, a shape glyph, a dev-only HUD) is fixed at the root — compose it in a local, make it a
   designer `@export`, or add the dev file to `ScanText.SKIP_FILES` — never by parking art in `PlayerText`.
-  `[PH] ` marks unauthored placeholder copy; only `PlayerText.prefixed`/`strip_prefix`/`display` touch the prefix.
+  `[PH] ` marks unauthored placeholder copy; only `PlayerText.prefixed`/`strip_prefix`/`display` touch the prefix
+  (and `Localization.PH_MARK` mirrors it for the never-translate-a-placeholder rule).
+- **Translation is automatic once a string follows the rules above.** `TextFormat.subst`/`plural` translate the whole
+  template first (`Localization.t` / `t_plural`, `scripts/ui/localization.gd`); auto-translated Controls go through the
+  engine; catalogs are Godot's own (Project Settings → Localization; the plugin's `core/translation_parser.gd` feeds
+  POT Generation with `PlayerText` consts + authored `.tres`/`.tscn` fields). Never call `tr()` at a paint site, never
+  translate a player-typed string, never look up a `[PH]` string. A PlayerText template must be a `const` — an inline
+  literal is invisible to the POT and fails `test_devtools_ui_copy`.
   The SOURCE keeps the marker; the PLAYER never sees it — `scripts/ui/placeholder_translation.gd` (registered by
   `MenuStyle._enter_tree`) scrubs it from every auto-translated Control at run time, and the atr opt-outs + `draw_string`
   painters call `PlayerText.display`. Judge what is still unauthored in the editor / `text_debt`, never on screen.
@@ -166,6 +179,9 @@ NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in pla
   CSG with `use_collision` feeds the `navmesh`-group bake in every parser mode, so it drops straight into this same
   bake + audit + validator — no new pipeline. The CYBER SUNDAY **Place** tab has one-click buttons
   (Building Shell / Floor / Wall / Ramp) via `addons/cybersunday_tools/dock_place/csg_blockout.gd`.
+- **Streamed worldspaces bake PER CHUNK.** Each `WorldChunk` has its own region; bake it with the root's
+  `bake_and_audit` (it fits `filter_baking_aabb` + `border_size` to the cell first) and let the ground run past the cell
+  edge, or the edge erodes and NPCs stop at every chunk border. Scaffold a world with `scripts/tools/new_worldspace.gd`.
 - **Seamless interiors: doorways need ≥ ~2.4 m clear.** With `agent_radius` 0.6 the bake erodes openings; a narrower
   door pinches shut and the interior bakes as its OWN island (NPCs can't enter). `build_room_shell()` floors the door
   to 2.4 m. This is the #1 gotcha for an open map with enter-able buildings on one navmesh.
