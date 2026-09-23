@@ -54,8 +54,8 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 @export var destroy_particle_scene: PackedScene
 ## Camera kick when this prop is destroyed (trauma units). Higher = a bigger jolt; null data uses the global interactable-destroy shake.
 @export var destroy_screen_shake: float = 0.35
-## Leave a scorch/blast decal on the floor when destroyed (e.g. crates). Gibs set this false since they
-## spawn their own blood decals.
+## Leave a scorch/blast decal when destroyed (e.g. crates): on the surface the prop shattered against when it
+## broke on impact, else on the floor below. Gibs set this false since they spawn their own blood decals.
 @export var spawns_destroy_decal: bool = true
 
 @export_group("Behaviour")

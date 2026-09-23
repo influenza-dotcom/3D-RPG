@@ -3,6 +3,7 @@ class_name Throwable
 extends RigidBody3D
 
 const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 const DamageNumberPopupScript = preload("res://scripts/combat/damage_number_popup.gd")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
 const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
@@ -11,7 +12,12 @@ const DESTROY_DECAL = preload("uid://dh1ydtvwvgiqg")  # bullet_hole / scorch dec
 const DESTROY_DECAL_SIZE: Vector3 = Vector3(2.0, 1.0, 2.0)
 const DESTROY_DECAL_PROBE: float = 3.0
 const DESTROY_DECAL_CULL_MASK: int = 2
-const DESTROY_DECAL_PARALLEL_THRESHOLD: float = 0.99
+## A prop travelling slower than this when it breaks gets NO travel-direction probe (a resting crate smashed by
+## something else has no "surface it hit" — the floor under it is the honest answer, via the down probe).
+const DESTROY_DECAL_IMPACT_MIN_SPEED: float = 0.5
+## Extra reach past the collider's half-diagonal for the travel probe: body_entered fires on FIRST overlap, so the
+## struck surface sits about one half-extent from the origin, plus a little for the physics margin and a bounce.
+const DESTROY_DECAL_IMPACT_MARGIN: float = 0.5
 
 ## The at-rest and hovered outline COLOURS a prop used to author on its own inverted-hull material. Kept as
 ## documentation of the intended look and as the default `_persistent_outline_color`, but they no longer paint
@@ -249,6 +255,11 @@ const GIB_HELD_DESPAWN_RECHECK: float = 0.5
 
 var hp: int
 var _impact_cooldown: float = 0.0
+## The velocity this prop carried INTO the strike whose self-damage is being resolved right now. Set only for the
+## span of _on_body_entered's self-damage call and zeroed after, so a destroy that fires from inside that call
+## (a bottle shattering on a wall) can probe for its decal ALONG the throw and scar the surface it broke on. Every
+## other destroy (shot, blast, ram from a resting pose) sees zero here and takes the floor probe.
+var _impact_travel: Vector3 = Vector3.ZERO
 var _damage_cooldown: float = 0.0
 var _flash_material: ShaderMaterial
 var _flash_tween: Tween
@@ -630,7 +641,9 @@ func _on_body_entered(body: Node) -> void:
 	_play_impact(body, impact_speed)
 	_emit_decoy_noise()  # stealth: a thrown decoy prop drops a lure-noise where it lands
 	_try_damage_character(body, my_speed)
+	_impact_travel = _pre_step_velocity  # arm the decal's travel probe for a break that happens INSIDE this strike
 	_try_self_damage(impact_speed)
+	_impact_travel = Vector3.ZERO
 
 func _try_damage_character(body: Node, my_speed: float) -> void:
 	if not body is Character:
@@ -1235,7 +1248,7 @@ func _emit_decoy_noise() -> void:
 	src.radius = float(cfg[&"radius"])
 	src.decay = float(cfg[&"decay"])
 	src.lifetime = maxf(float(cfg[&"lifetime"]), MIN_DECOY_LIFETIME)  # always one-shot — never a persistent (leaking) source
-	get_tree().root.add_child(src)
+	WorldSpawn.add(self, src, global_position)  # the decoy is heard in THIS level only
 	src.global_position = global_position
 
 ## Mark this throwable as a GORE GIB with a limited lifetime: register it in the &"gib" group (for the
@@ -1443,40 +1456,57 @@ static func build_confetti_burst(amount: int, lifetime: float, velocity_min: flo
 func _spawn_confetti() -> void:
 	var p := build_confetti_burst(confetti_amount, confetti_lifetime, confetti_velocity_min,
 			confetti_velocity_max, confetti_scale_min, confetti_scale_max)
-	get_tree().root.add_child(p)
+	WorldSpawn.add(self, p, global_position)
 	p.global_position = global_position
 	p.emitting = true
 	p.finished.connect(p.queue_free)
 
 func _spawn_destroy_decal() -> void:
-	# Leave a scorch/blast decal on the floor below, oriented to the surface.
-	# Covers destruction by any means (shot, explosion, ram). Opt-out via the
-	# data resource's spawns_destroy_decal (gibs disable it — they bleed instead).
+	# Leave a scorch/blast decal on the surface this prop broke on, oriented to it. Covers destruction by any
+	# means (shot, explosion, ram): a prop that shatters ON IMPACT (its self-damage inside _on_body_entered)
+	# probes along the velocity it carried into the strike first, so a bottle thrown at a wall scars the WALL;
+	# everything else — and a travel probe that finds nothing, or only a character — falls back to the floor
+	# below. _on_body_entered is a physics callback, so the ray answers are real (see _probe_pin_surface).
+	# Opt-out via the data resource's spawns_destroy_decal (gibs disable it — they bleed instead).
 	if data and not data.spawns_destroy_decal:
 		return
 	var space_state := get_world_3d().direct_space_state
-	var query := PhysicsRayQueryParameters3D.create(
-		global_position,
-		global_position + Vector3.DOWN * DESTROY_DECAL_PROBE
-	)
-	query.exclude = [get_rid()]
-	var result := space_state.intersect_ray(query)
+	var result := {}
+	for probe_end in destroy_decal_probe_ends(global_position, _impact_travel, collider_size()):
+		var query := PhysicsRayQueryParameters3D.create(global_position, probe_end)
+		query.exclude = [get_rid()]
+		result = space_state.intersect_ray(query)
+		# A character is not a surface: a scorch hanging in the air where an NPC stood is worse than none, so
+		# the strike probe yields to the floor probe instead.
+		if not result.is_empty() and not result["collider"] is Character:
+			break
+		result = {}
 	if result.is_empty():
 		return
 	var decal = DESTROY_DECAL.instantiate()
-	get_tree().root.add_child(decal)
+	WorldSpawn.add(self, decal, result["position"])
 	decal.size = DESTROY_DECAL_SIZE
 	decal.cull_mask = DESTROY_DECAL_CULL_MASK
 	var normal: Vector3 = result["normal"]
 	decal.global_position = result["position"] + normal * GameSettings.effects.decal_normal_offset
-	var up := normal
-	var z: Vector3
-	if absf(up.dot(Vector3.UP)) > DESTROY_DECAL_PARALLEL_THRESHOLD:
-		z = Vector3.FORWARD.slide(up).normalized()
-	else:
-		z = Vector3.UP.slide(up).normalized()
-	var x := up.cross(z).normalized()
-	decal.global_transform.basis = Basis(x, up, z)
+	decal.global_transform.basis = destroy_decal_basis(normal)
+
+## Where the destroy decal looks for its surface, as ray END points from `origin` in priority order: along `travel`
+## first when the prop was actually moving (reach = the collider's half-diagonal + a margin, enough to cross from
+## the origin to the face it just struck), then straight down. Static + pure so the choice is unit-testable.
+static func destroy_decal_probe_ends(origin: Vector3, travel: Vector3, collider_extents: Vector3) -> Array[Vector3]:
+	var ends: Array[Vector3] = []
+	if travel.length() >= DESTROY_DECAL_IMPACT_MIN_SPEED:
+		var reach := collider_extents.length() * 0.5 + DESTROY_DECAL_IMPACT_MARGIN
+		ends.append(origin + travel.normalized() * reach)
+	ends.append(origin + Vector3.DOWN * DESTROY_DECAL_PROBE)
+	return ends
+
+## The destroy decal's basis for a surface `normal`: local Y along the normal (a Decal projects down -Y), local Z
+## from world FORWARD on a floor/ceiling and from world UP on a wall. A named seam only — the rule itself is
+## Projectile.decal_basis_for_normal, shared by every splat in the game, so never grow a copy of the math here.
+static func destroy_decal_basis(normal: Vector3) -> Basis:
+	return Projectile.decal_basis_for_normal(normal)
 
 func _wake_contacts() -> void:
 	# Wake any rigid bodies currently in contact so a stack of crates above
