@@ -144,7 +144,13 @@ func drain_stamina(rate: float, delta: float) -> bool:
 	return stamina > STAMINA_EPS
 
 func _begin_sprint_lockout() -> void:
-	_sprint_lockout_left = maxf(_sprint_lockout_left, GameSettings.player_movement.stamina_sprint_lockout)
+	lock_out_sprint(GameSettings.player_movement.stamina_sprint_lockout)
+
+## Keep sprint unavailable for at least `seconds` from now. The ONE writer both lockouts share — running the pool
+## dry (stamina_sprint_lockout) and attacking (sprint_attack_lockout, via Player.interrupt_sprint) — and a max, so
+## a short post-shot lockout can never cut a long exhaustion lockout short.
+func lock_out_sprint(seconds: float) -> void:
+	_sprint_lockout_left = maxf(_sprint_lockout_left, seconds)
 
 func _update_sprint_lockout(delta: float) -> void:
 	if _sprint_lockout_left > 0.0:

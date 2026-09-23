@@ -38,6 +38,10 @@ const SHOW_ANCHOR := false
 ## through the baked 90° yaw (GunPose.apply_idle_lower), so it is applied through that same static, never by
 ## hand; the hands turn with it exactly as FirstPersonBody._gun_delta_basis does live.
 const IDLE_LOWERED := true
+## Render the gun in its full SPRINT pose (GunPose's Sprint group: sprint_offset + the pitch / yaw / roll through
+## GunPose.apply_sprint_pose) INSTEAD of idle-lowered, since in game the sprint pose replaces the droop. PNGs get a
+## `_sprint` suffix so a sprint run sits beside the idle one. Flip it on to tune the Sprint knobs by sight.
+const SPRINT_POSE := false
 const GUN_POSE_SCRIPT := "res://scripts/effects/gun_pose.gd"
 
 ## The authoritative sources (see header). If the FP rig or the gun mount moves homes again, repoint these.
@@ -121,7 +125,22 @@ func _run() -> void:
 	var gun := Node3D.new()
 	gun.transform = gun_xf
 	var rest_basis: Basis = (gun_xf as Transform3D).basis.orthonormalized()
-	if IDLE_LOWERED:
+	if SPRINT_POSE:
+		var GunPoseScript = load(GUN_POSE_SCRIPT)
+		var knobs := {}
+		for prop in ["sprint_offset", "sprint_pitch_deg", "sprint_yaw_deg", "sprint_roll_deg"]:
+			knobs[prop] = _authored(prop, {}, GUN_POSE_SCRIPT)
+			if knobs[prop] == null:
+				push_error("preview_weapon_hands_frame: gun_pose.gd no longer authors " + prop)
+				quit(1)
+				return
+		var rest_deg: Vector3 = rest_basis.get_euler() * (180.0 / PI)
+		var sprint_deg: Vector3 = GunPoseScript.apply_sprint_pose(rest_deg, float(knobs["sprint_pitch_deg"]),
+				float(knobs["sprint_yaw_deg"]), float(knobs["sprint_roll_deg"]), 1.0)
+		gun.transform = Transform3D(Basis.from_euler(sprint_deg * (PI / 180.0)),
+				(gun_xf as Transform3D).origin + (knobs["sprint_offset"] as Vector3))
+		print("preview_weapon_hands_frame: SPRINT_POSE — ", knobs)
+	elif IDLE_LOWERED:
 		var GunPoseScript = load(GUN_POSE_SCRIPT)
 		var pitch: Variant = _authored("idle_lower_pitch_deg", {}, GUN_POSE_SCRIPT)
 		var drop: Variant = _authored("idle_lower_drop", {}, GUN_POSE_SCRIPT)
@@ -240,7 +259,7 @@ func _run() -> void:
 				"  anchor=", anchor.snapped(Vector3.ONE * 0.001),
 				"  shoulder_z=", snappedf(shoulder.z, 0.001))
 		var img := root.get_texture().get_image()
-		var path := OUT_DIR + "weapon_hands_" + String(cfg[0]) + ".png"
+		var path := OUT_DIR + "weapon_hands_" + String(cfg[0]) + ("_sprint" if SPRINT_POSE else "") + ".png"
 		img.save_png(path)
 		print("preview_weapon_hands_frame: saved ", ProjectSettings.globalize_path(path))
 	quit(0)

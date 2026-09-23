@@ -151,6 +151,14 @@ extends Resource
 @export var stamina_sprint_drain: float = 18.0
 ## Seconds sprint stays unavailable after running drains stamina to empty.
 @export var stamina_sprint_lockout: float = 3.0
+## Seconds sprint stays unavailable after ANY attack — a shot, a swing, a punch. You can't shoot while
+## sprinting: pulling the trigger mid-sprint ends the sprint, the gun comes up out of its sprint pose (GunPose's
+## Sprint group) and the shot leaves once it's up, and then this keeps you off the run tier so you can't
+## immediately break back into a sprint. Every committed attack re-arms it (Player.interrupt_sprint), so holding
+## Run through sustained fire keeps you at the walk tier until you stop shooting for this long. It shares the
+## sprint lockout timer with stamina_sprint_lockout and never SHORTENS a longer lockout already running. It also
+## caps how long a trigger pull made mid-sprint is remembered (Attack's sprint-out buffer).
+@export var sprint_attack_lockout: float = 0.6
 ## One-time stamina cost when a buffered/coyote jump actually launches.
 @export var stamina_jump_cost: float = 10.0
 ## One-time stamina cost to fire the grappling hook, including a miss.

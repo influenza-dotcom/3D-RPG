@@ -72,6 +72,35 @@ extends Node3D
 ## Fraction of the hip-fire sway/bob kept while aiming. 0 = rock steady, 1 = full sway.
 @export var ads_sway_mult: float = 0.35
 
+@export_group("Sprint")
+## While sprinting the weapon swings into a SPRINT pose: carried across your body, canted on its side, with the
+## hands still on it. You can't fire from it — a trigger pull ends the sprint and the shot leaves once the gun is back up
+## (Attack reads the sprint_lowered mirror this pose writes). The whole group is read live, so tune it in the
+## editor's REMOTE inspector mid-game, then author the numbers back here. To judge the pose on every weapon at
+## once, flip SPRINT_POSE on in scripts/tools/probes/preview_weapon_hands_frame.gd and render it (the defaults
+## were picked from that tool's renders at the player's 120° FOV: a bigger pitch sinks the pistol and knife
+## out of frame, a negative roll pulls the hands off the SMG).
+## How far (metres, camera space: +X right, +Y up, +Z back toward you) the gun shifts at the full sprint pose.
+@export var sprint_offset: Vector3 = Vector3(-0.04, 0.02, 0.0)
+## Degrees the MUZZLE tips down at the full sprint pose. (Applied through apply_sprint_pose, which knows which
+## euler channel really pitches this rig. See apply_idle_lower for that trap.)
+@export_range(-60.0, 60.0, 0.5) var sprint_pitch_deg: float = 3.0
+## Degrees the muzzle swings LEFT, across your body, at the full sprint pose. Negative swings it out to the right.
+@export_range(-60.0, 60.0, 0.5) var sprint_yaw_deg: float = 50.0
+## Degrees the gun cants about its own barrel at the full sprint pose.
+@export_range(-60.0, 60.0, 0.5) var sprint_roll_deg: float = 40.0
+## How fast the gun eases INTO the sprint pose once you start sprinting. Higher = snappier.
+@export var sprint_in_speed: float = 8.0
+## How fast the gun comes back UP out of the sprint pose when the sprint ends. This is the delay between pulling the
+## trigger mid-sprint and the shot leaving, so keep it fast.
+@export var sprint_out_speed: float = 24.0
+## How far into the sprint pose (0-1) the gun can still be and fire. The trigger waits until the gun has come up
+## past this. 0 = only fire from the exact hip pose (it never quite gets there, so don't); 1 = never wait.
+## At the defaults a full sprint pose comes up past 0.15 in about 80 ms.
+@export_range(0.0, 1.0, 0.01) var sprint_fire_ready_blend: float = 0.15
+## Walk-bob size multiplier at the full sprint pose. The run gait swings the gun harder than a walk.
+@export var sprint_bob_mult: float = 3.0
+
 @export_group("Left-handed")
 ## Extra vertical raise (metres) when the view model is mirrored to the left hand — the mirror alone
 ## leaves it sitting a little low. Tune to taste.
@@ -107,14 +136,30 @@ var _bob_time: float = 0.0
 var _breath_time: float = 0.0
 var _breath_t: float = 0.0
 var _mouse_sway: Vector2 = Vector2.ZERO
-var _aim_t: float = 0.0      ## eased 0->1 aim-pose blend
+var _aim_t: float = 0.0      ## eased 0->1 aim-pose blend; read by GunMesh.fire() through aim_blend()
 var _idle_lower_t: float = 0.0  ## eased 0->1 idle-lowered (not-alert) blend
+var _sprint_t: float = 0.0  ## eased 0->1 sprint-pose blend; mirrored into attack.sprint_lowered
+var _sprint_held: bool = false  ## the sprint pose is WANTED — latched through the airborne frames of a sprint (see sprint_pose_wanted)
 var _smoothed_base: Vector3              ## the swayed/aimed rest pose, smoothed
 var _smoothed_base_rot: Vector3
 
 ## Seed the smoothed rest pose from the host's just-captured base pose, the moment this child enters the tree.
 ## GunMesh._ready sets base_position/base_rotation BEFORE building this child, exactly as the monolith seeded
 ## _smoothed_base = base_position right after base_position = position.
+## The eased 0..1 aim-down-sights blend this frame (0 = hip, 1 = fully aimed). GunMesh.fire() scales the
+## per-shot kick by it (see kick_scale_for_aim) so the kick shrinks in step with the gun easing onto the
+## sights, never a hard step on the scope toggle.
+func aim_blend() -> float:
+	return _aim_t
+
+
+## How much of the hip kick a shot gets at ADS blend `aim_t`: the full kick at the hip, `ads_mult` of it on
+## the sights, linear between. Pure and static so the contract test can pin it without a tree. `aim_t` is
+## clamped — a settling lerp can overshoot by a hair and must not ever ENLARGE the kick.
+static func kick_scale_for_aim(aim_t: float, ads_mult: float) -> float:
+	return lerpf(1.0, ads_mult, clampf(aim_t, 0.0, 1.0))
+
+
 func _ready() -> void:
 	_smoothed_base = host.base_position
 	_smoothed_base_rot = host.base_rotation
@@ -156,6 +201,26 @@ static func barrel_direction(rot_deg: Vector3) -> Vector3:
 static func apply_idle_lower(rot_deg: Vector3, pitch_deg: float, t: float) -> Vector3:
 	return rot_deg - Vector3(0.0, 0.0, pitch_deg * t)
 
+## Add `t` of the sprint pose's rotation to a `rotation_degrees` triple: the muzzle tips DOWN by `pitch_deg`, swings
+## LEFT by `yaw_deg` and cants about the barrel by `roll_deg`. Pure, so tests/test_gun_pose.gd can ask where the
+## barrel really points. The channels follow the baked 90° yaw, like apply_idle_lower: `.z` is the muzzle pitch
+## (negative = down), `.y` the yaw (positive = muzzle left), `.x` the roll about the barrel.
+static func apply_sprint_pose(rot_deg: Vector3, pitch_deg: float, yaw_deg: float, roll_deg: float, t: float) -> Vector3:
+	return rot_deg + Vector3(roll_deg, yaw_deg, -pitch_deg) * t
+
+## Should the gun be in its sprint pose this frame? `sprinting` is Player.is_sprinting(). The latch is needed
+## because is_sprinting() requires the floor: it goes false for every sprint-jump and bunny hop, and for single
+## frames on brush seams and risers. The pose would dip on every one of those (the gun jitters on a fast sprint-out),
+## so while `airborne` the pose stays held as long as the player `still_wants` to sprint (Run held, moving, and
+## allowed: not locked out, not scoped). A trigger pull locks sprint out, so it drops the latch mid-air too.
+static func sprint_pose_wanted(was_wanted: bool, sprinting: bool, airborne: bool, still_wants: bool) -> bool:
+	return sprinting or (was_wanted and airborne and still_wants)
+
+## Can the trigger fire at sprint-pose blend `sprint_t`? Pure mirror of the rule Attack enforces through
+## `sprint_lowered`. The pose must be un-wanted (no sprint in progress) AND come up past `ready_blend`.
+static func sprint_lowered_now(wanted: bool, sprint_t: float, ready_blend: float) -> bool:
+	return wanted or sprint_t > ready_blend
+
 func _process(delta: float) -> void:
 	var player: Character = host.player
 	if !is_instance_valid(player) or !player:
@@ -171,11 +236,24 @@ func _process(delta: float) -> void:
 	if climbing:
 		horizontal_speed = maxf(horizontal_speed, absf(player.velocity.y))
 
+	# Sprint pose: wanted while the player sprints (held through the airborne frames of a sprint — see
+	# sprint_pose_wanted), never while aiming. Eased on its own blend, slow in and fast out: the out-speed is the
+	# delay on a trigger pull made mid-sprint. Solved BEFORE the bob, which it enlarges.
+	var sprinting := false
+	var still_wants_sprint := false
+	if climber != null and not host._aiming:
+		sprinting = climber.is_sprinting()
+		still_wants_sprint = climber.can_sprint() and not climber.sprint_blocked_by_scope() \
+			and climber.input_dir.length() > 0.1 and Input.is_action_pressed(InputManager.action_run)
+	_sprint_held = GunPose.sprint_pose_wanted(_sprint_held, sprinting, not on_floor and not climbing, still_wants_sprint)
+	var sprint_rate := sprint_in_speed if _sprint_held else sprint_out_speed
+	_sprint_t = lerpf(_sprint_t, 1.0 if _sprint_held else 0.0, 1.0 - exp(-sprint_rate * delta))
+
 	var bob_factor := 0.0
 	# Accessibility: skip the walk-bob entirely when view bobbing is off (read live).
 	if Settings.view_bob_enabled and (on_floor or climbing) and horizontal_speed > GameSettings.player_movement.footstep_min_horizontal_speed:
 		_bob_time += delta * GameSettings.camera.bob_speed
-		bob_factor = clampf(horizontal_speed / GameSettings.player_movement.max_speed, 0.0, 1.0)
+		bob_factor = clampf(horizontal_speed / GameSettings.player_movement.max_speed, 0.0, 1.0) * lerpf(1.0, sprint_bob_mult, _sprint_t)
 	else:
 		_bob_time = lerpf(_bob_time, 0.0, 1.0 - exp(-motion_smooth * delta))
 
@@ -222,7 +300,9 @@ func _process(delta: float) -> void:
 	# player is typed Character (no seconds_since_combat); call it dynamically, guarded by has_method.
 	var recent_combat: bool = player.has_method(&"seconds_since_combat") \
 		and float(player.call(&"seconds_since_combat")) < idle_combat_grace
-	var idle_lowered := attack != null and not host._aiming and not recent_combat and attack.seconds_since_fire() >= idle_lower_time
+	# (Not while sprinting: the sprint pose REPLACES the idle droop. Stacked, the two swing the gun out of frame.)
+	var idle_lowered := attack != null and not host._aiming and not recent_combat and not _sprint_held \
+		and attack.seconds_since_fire() >= idle_lower_time
 	_idle_lower_t = lerpf(_idle_lower_t, 1.0 if idle_lowered else 0.0, 1.0 - exp(-idle_lower_speed * delta))
 
 	var target_pos := aim_pos + Vector3(sway_x + bob_x + mouse_off_x, sway_y + bob_y + breath_y + mouse_off_y, forward_off) * sway_damp
@@ -238,8 +318,11 @@ func _process(delta: float) -> void:
 	# are relative to wherever the gun is now (hip OR ADS-centred) instead of snapping to the hip.
 	_smoothed_base = _smoothed_base.lerp(target_pos, t)
 	_smoothed_base_rot = _smoothed_base_rot.lerp(target_rot, t)
-	var final_pos := _smoothed_base + host._recoil_pos
-	var final_rot := _smoothed_base_rot + host._recoil_rot
+	# The sprint pose goes on AFTER that smoothing, eased by _sprint_t alone. Inside the motion lerp it would trail
+	# its own blend, and the fire gate (sprint_lowered, read off _sprint_t) would open while the gun was still low.
+	var final_pos := _smoothed_base + sprint_offset * _sprint_t + host._recoil_pos
+	var final_rot := GunPose.apply_sprint_pose(_smoothed_base_rot, sprint_pitch_deg, sprint_yaw_deg, sprint_roll_deg, _sprint_t) \
+		+ host._recoil_rot
 	# Accessibility (read live so the menu toggles apply instantly): mirror the view model to the LEFT hand
 	# as a YZ-plane reflection of the POSE — x offset negated, yaw + roll negated, pitch kept — NOT a
 	# negative scale.x. A negative scale doesn't survive Node3D's rotation/scale property decomposition:
@@ -259,8 +342,10 @@ func _process(delta: float) -> void:
 	# — a `visible = false` written in GunMesh._on_aim_changed would just get clobbered here next frame.
 	var inv: Inventory = host.inventory
 	var weapon: WeaponData = inv.equipped_weapon if inv != null else null
-	host.visible = GunMesh.view_model_visible_now(Settings.view_model_visible, host._aiming, weapon)
+	host.visible = GunMesh.view_model_visible_now(Settings.view_model_visible, host._aiming, weapon, host.third_person)
 	# Tell Attack whether the gun has finished raising into view, so it won't fire mid-raise
 	# (which would shoot from the still-lowered muzzle — e.g. into the floor at your feet).
 	if attack:
 		attack.gun_raised = host.is_raised()
+		# ...and whether it's still in the sprint pose, which holds a trigger pull until the gun is up (Attack._sprint_out_gate).
+		attack.sprint_lowered = GunPose.sprint_lowered_now(_sprint_held, _sprint_t, sprint_fire_ready_blend)

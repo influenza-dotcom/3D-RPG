@@ -66,6 +66,7 @@ var _air_dash: AirDash = null        ## owns the look-direction dash; ticked at 
 signal stamina_changed(current: float, maximum: float)
 ## Preloaded BY PATH (the manager has no class_name — the StatBudgetRef idiom below).
 const StaminaManagerRef := preload("res://scripts/player/stamina_manager.gd")
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 ## The Mark Waypoint verb (X). Preloaded BY PATH for the same reason as the two refs around it — it carries
 ## no class_name, so this file's parse never waits on the editor's global class cache to register one.
 const WAYPOINT_MARKER_SCRIPT := preload("res://scripts/player/waypoint_marker.gd")
@@ -217,6 +218,11 @@ var _rewield_in_flight: bool = false
 ## FirstPersonBody child. Null (an off-tree test Player) simply means no first-person body — every forward
 ## below null-guards, and the weapon half of the carry dance (_on_carry_changed) works without it.
 @export var fp_body: FirstPersonBody
+## The ThirdPersonBody component: the character you SEE once the camera pulls out — the customizer look at full
+## height, walking on the real gait, with the equipped weapon in its hands (scripts/player/third_person_body.gd).
+## Wire to the player's ThirdPersonBody child. Null (an off-tree test Player, or a rig that simply doesn't want
+## one) means third person still works and you are invisible in it.
+@export var tp_body: ThirdPersonBody
 ## The MouseInput component that turns mouse motion into look/aim and feeds this player's yaw. Wire to the player's MouseInput child.
 @export var mouse_input: MouseInput
 
@@ -439,6 +445,13 @@ func _enter_tree() -> void:
 		camera_effects = head.camera
 		screen_shake = head.screen_shake
 		head.setup(self, mouse_input, ui)
+		# FIRST/THIRD person is announced from the rig (ThirdPersonCamera owns the state) and relayed from HERE,
+		# because the two things that must react to it are both the host's: the view model's visibility flag and
+		# the whole first-person body. Connected in _enter_tree so the very first flip — a save that booted with
+		# third person already on — is already wired when the arm's first frame runs.
+		var arm := head.camera_arm
+		if arm != null:
+			arm.view_changed.connect(_on_view_changed)
 	crouch.player = self
 	crouch.head = head
 	crouch.collision_shape = player_collision_shape
@@ -460,6 +473,22 @@ func _enter_tree() -> void:
 	bullet_time.attack = weapon_system.attack
 	bunnyhop.character = self
 	mouse_input.player = self
+
+## THE VIEW MODE FLIPPED (ThirdPersonCamera.view_changed, fired on the INTENT — before the camera has actually
+## slid anywhere). Two relays, both of them "get first-person-only cosmetics off the screen":
+##   • the view model: a first-person gun is authored in front of the lens with depth testing off, so from
+##     behind the character it draws as a rifle floating through their back. GunPose owns the per-frame
+##     `visible` write, so the answer is a FLAG it reads, never a `visible = false` here (that is the same
+##     clobbering GunMesh._on_aim_changed documents).
+##   • the first-person body: the FP legs/torso rig is scaled to 0.60 and mounted under the lens, so with the
+##     third-person character standing at full height in the same spot you would see two bodies.
+## The third-person body needs no relay — it polls the camera's blend, because it fades in PART WAY through the
+## pull-out rather than at the flip (see ThirdPersonBody.reveal_blend).
+func _on_view_changed(third: bool) -> void:
+	if gun_mesh != null:
+		gun_mesh.third_person = third
+	if fp_body != null:
+		fp_body.set_third_person(third)
 
 ## Grabbing/dropping a carried prop drives the weapon AND the view-model hands. On grab: holster + LOCK the weapon
 ## away (you can't take a gun out with your hands full), then (after a short beat so the holster reads) bring the hands
@@ -665,6 +694,10 @@ func _ready() -> void:
 	# hidden and appear while carrying a physics prop (weapon holsters first) or as the bare fists.
 	if fp_body != null:
 		fp_body.build()
+	# ...and the THIRD-person body, on the same ordering contract and for the same reason: it resolves the whole
+	# look (head included) out of `appearance`, which only exists from a few lines above this.
+	if tp_body != null:
+		tp_body.build()
 	# Drive the carry dance off the pickup ray (PickupRay lives under the camera: Head/ScreenShake/Camera3D/RayCast).
 	# ONE connection, on the PLAYER: _on_carry_changed keeps the weapon-state half (holster + draw-lock) and
 	# tails into the component's cosmetic half, so the holster restore always lands before the fists decision.
@@ -702,6 +735,10 @@ func _ready() -> void:
 	if fp_body != null:
 		weapon_system.attack.swap_finished.connect(fp_body.refresh_unarmed_hands)
 		weapon_system.attack.play_animation.connect(fp_body.on_attack_play_animation)
+	# The third-person character re-mounts its held model off the SAME swap_finished beat the first-person hands
+	# re-pose on — the point at which the gun rig has actually swapped its model, not when the inventory changed.
+	if tp_body != null:
+		weapon_system.attack.swap_finished.connect(tp_body.refresh_weapon)
 	# TWO-FISTED input: left click throws the LEFT fist, right click the RIGHT. MouseInput polls the second
 	# button; Attack refuses it for anything that isn't a punch weapon, so right-click stays ADS for guns.
 	if mouse_input != null:
@@ -1237,7 +1274,7 @@ func drop_money(amount: float) -> void:
 ## Deliberately does NOT touch the wallet — each caller owns its own debit, and each does it exactly once.
 func _place_money_bag(world: Node, amount: float, at: Vector3) -> void:
 	var bag := MoneyBagBuilder.build(amount)
-	world.add_child(bag)
+	WorldSpawn.add(self, bag, at, world)  # the level / chunk it lands in; `world` (our parent) only without a level
 	bag.global_position = at
 
 ## Drop the EXACT backpack stack the inventory UI right-clicked — identified by its stable grid `key` — into the
@@ -1261,8 +1298,9 @@ func _spawn_drop(world: Node, item: Item, removed: int) -> void:
 	if removed <= 0:
 		return
 	var pickup := WorldItem.build(item, removed)
-	world.add_child(pickup)
-	pickup.global_position = _drop_position()
+	var at := _drop_position()
+	WorldSpawn.add(self, pickup, at, world)  # the level / chunk it lands in; `world` (our parent) only without a level
+	pickup.global_position = at
 
 ## The dropped/placed world item (a Throwable carrying a CanPickUp) is built by WorldItem.build() -- shared with
 ## the editor item-placer so a dropped item and a hand-placed one are byte-for-byte identical. (Was the
@@ -1420,11 +1458,12 @@ func set_mechanic_active(id: StringName, on: bool) -> bool:
 ## take_damage), so a profiled fall-damage knob on the player is finally live.
 ##
 ## The dmg re-computation here is a PREVIEW — it decides whether to arm the fall death card before super() deals the
-## blow — so it must use the same scaled cost the base will, or a lethal fall could land with a generic death card.
+## blow — so it must use the same max-HP- and agility-scaled curve the base will, or a lethal fall could land with a
+## generic death card.
 func _apply_fall_damage(fall_speed: float) -> void:
 	if has_mechanic(&"fall_immunity"):
 		return
-	var dmg := FallDamage.hp_loss(fall_speed, fall_damage_min_speed, effective_fall_damage_per_speed())
+	var dmg := FallDamage.hp_loss(fall_speed, effective_fall_damage_min_speed(), effective_fall_damage_per_speed())
 	if dmg <= 0:
 		return
 	_has_death_card_override = true
@@ -1630,7 +1669,21 @@ func use_consumable(item: Item) -> bool:
 	return true
 
 func get_aim_origin() -> Vector3:
+	if _free_looking():
+		return head.global_position
 	return camera_effects.project_ray_origin(get_viewport().get_visible_rect().size / 2.0)
+
+## True while the third-person FREE-LOOK orbit is held (middle mouse, camera swinging around the character).
+## The three aim accessors below fall back to the HEAD rig while it is, because the camera is no longer pointing
+## where the character is: it has been swung off to the side and the body never turned with it. Shooting down
+## the swung lens would send the round off at right angles to the gun the character is visibly holding — so free
+## look is looking, not aiming, exactly as it is in the Fallout camera this borrows from. Cheap and null-safe:
+## a rig with no third-person arm (or an off-tree Player) answers false and every accessor is untouched.
+func _free_looking() -> bool:
+	if not is_instance_valid(head):
+		return false
+	var arm := head.camera_arm
+	return arm != null and arm.free_look_active()
 
 ## World point an NPC's head/aim uses to "look at the player" -- the Head rig's position (the player's eye on
 ## their BODY). Unlike get_aim_origin (the camera RAY origin), this stays put during a dialogue camera cinematic
@@ -1640,7 +1693,7 @@ func look_target_position() -> Vector3:
 	return head.global_position if is_instance_valid(head) else global_position
 
 func get_aim_direction() -> Vector3:
-	var dir := camera_effects.project_ray_normal(get_viewport().get_visible_rect().size / 2.0)
+	var dir := -head.global_basis.z if _free_looking() else camera_effects.project_ray_normal(get_viewport().get_visible_rect().size / 2.0)
 	# Deus Ex aim wander (AimSway): the SHOT direction drifts around the camera centre — steadier standing
 	# still, steadier again crouched, settling further the longer you hold still — instead of landing exactly
 	# on the camera ray. ⭐THE LASER SIGHT IS WHAT SHOWS IT. scenes/player/laser_sight_rig.gd reads THIS function
@@ -1654,7 +1707,7 @@ func get_aim_direction() -> Vector3:
 	return _aim_sway.apply(dir, camera_effects.global_transform.basis) if _aim_sway != null else dir
 
 func get_aim_basis() -> Basis:
-	return camera_effects.global_transform.basis
+	return head.global_basis if _free_looking() else camera_effects.global_transform.basis
 
 @export_group("NPC reactions")
 ## A gunshot within this of a calm (non-hostile, out-of-combat) talker makes them remark on the reckless
@@ -1750,6 +1803,13 @@ func sprint_blocked_by_scope() -> bool:
 func is_sprinting() -> bool:
 	return can_sprint() and _wants_sprint(input_dir)
 
+## You can't attack while sprinting. Ends the sprint this frame and keeps you off the run tier for
+## sprint_attack_lockout. Called twice per attack, on purpose: by Attack on the trigger pull that lands
+## mid-sprint (so the gun can come up out of its sprint pose while you slow down), and by on_weapon_fired
+## on every committed attack (so held automatic fire keeps you at the walk tier).
+func interrupt_sprint() -> void:
+	_stamina_mgr.lock_out_sprint(GameSettings.player_movement.sprint_attack_lockout)
+
 func spend_stamina(cost: float, regen_delay: float = -1.0) -> bool:
 	return _stamina_mgr.spend_stamina(cost, regen_delay)
 
@@ -1827,6 +1887,7 @@ func _update_wall_shadow(delta: float) -> void:
 
 func on_weapon_fired(weapon: WeaponData) -> void:
 	note_combat()
+	interrupt_sprint()  # every attack keeps you off the run tier for a moment — see interrupt_sprint
 	if _aim_sway != null:
 		_aim_sway.add_recoil(weapon)  # CT-1: per-weapon recoil kick + firing bloom (inert for a weapon with none set)
 	if screen_shake:
@@ -2018,13 +2079,14 @@ const FALL_GREY_EPSILON: float = 0.002
 ## The whole mechanic is one number (`_fall_grey`) pushed into the post-process `fall_grey` uniform. What makes it
 ## honest rather than decorative is where that number comes from: it is the fraction of your REMAINING HP the
 ## landing would cost, scored by the very formula that will score it (FallDamage.lethal_fraction reads the same
-## fall_damage_min_speed and the same MAX-HP-SCALED effective_fall_damage_per_speed() that Landing.on_land hands to
-## _apply_fall_damage — ⭐ the raw export in either place and the warning drifts off the damage). So the screen
+## AGILITY-stretched effective_fall_damage_min_speed() and MAX-HP-and-agility-scaled effective_fall_damage_per_speed()
+## that Landing.on_land's _apply_fall_damage uses — ⭐ a raw export in either place and the warning drifts off the
+## damage). So the screen
 ## cannot lie — full grey means the next contact with the ground kills you, at the HP you have this instant, and a
 ## drop that is a scratch at full health greys out completely when you are down to your last point.
 ##
 ## Two channels, combined with a max because either one alone is a way to die:
-##   • IMPACT — speed vs. the fall-damage curve. Silent below fall_damage_min_speed (no hop ever tints), and dead
+##   • IMPACT — speed vs. the fall-damage curve. Silent below the safe speed (no hop ever tints, at any agility), and dead
 ##     silent under the fall-immunity implant, which genuinely makes every landing free.
 ##   • THE VOID — the continuous-fall death timer, which kills you for falling too long regardless of impact. It
 ##     is the ONLY channel a fall-immune player has, so gating it on immunity would send them into a bottomless
@@ -2069,7 +2131,7 @@ func _fall_grey_target() -> float:
 	# a landing that costs nothing would train the player to ignore the one that doesn't.
 	var t := 0.0
 	if not has_mechanic(&"fall_immunity"):
-		t = FallDamage.lethal_fraction(-velocity.y, fall_damage_min_speed, effective_fall_damage_per_speed(), hp)
+		t = FallDamage.lethal_fraction(-velocity.y, effective_fall_damage_min_speed(), effective_fall_damage_per_speed(), hp)
 	# VOID channel. Not gated on immunity — see the header.
 	t = maxf(t, FallDamage.void_fraction(
 			_continuous_fall_time,
@@ -2281,7 +2343,7 @@ func _pull_and_hold(item: Item) -> bool:
 	_held_inv_prev_destructible = throwable.destructible
 	throwable.destructible = false
 	inventory.remove(item, 1)
-	world.add_child(prop)
+	WorldSpawn.add(self, prop, ray.hold_anchor.global_position, world)
 	prop.global_position = ray.hold_anchor.global_position
 	ray.carry(throwable)
 	return true
@@ -2633,7 +2695,9 @@ func _physics_process(delta: float) -> void:
 	if coyote_time.can_jump() and jump_buffer.wants_jump() and not InputManager.gameplay_suppressed() \
 			and spend_stamina(GameSettings.player_movement.stamina_jump_cost):
 		# Heavier = lower hop (gradual), instead of the old hard "can't jump while over-encumbered" block.
-		# AGILITY springs you higher (jump_mult), the same stat that makes you faster on foot.
+		# AGILITY springs you higher (jump_mult), the same stat that makes you faster on foot. ⭐The fall-damage curve
+		# stretches by that same factor (CharacterStats.landing_mult), which is what keeps a high jump from killing
+		# you when you land. Scale the jump by anything else agility-derived and that pairing breaks.
 		velocity.y = GameSettings.player_movement.jump_velocity * encumbrance_jump_multiplier() * stats_or_default().jump_mult(status_stat_modifier(&"agility"))
 		# one-shot through AudioManager (self-freeing); play_sfx no-ops on a null stream
 		AudioManager.play_sfx(global_position, jump_sound, jump_sound_volume_db)
@@ -3288,7 +3352,8 @@ func _death_purse_anchor() -> Variant:
 ## claim a loss that did not happen.
 ## KNOWN LIMIT, shared with the killer branch: the debit autosaves (add_money is a save milestone) but the BAG does
 ## not persist — it is a dynamic spawn in neither save tier (see WorldSnapshot's roadmap), exactly like every other
-## loot drop. So a quicksave/level-change/quit before the player walks back destroys the purse. Fixing it properly
+## loot drop. So a quicksave/quit before the player walks back destroys the purse (a level change only does once the
+## level falls out of GameRoot's level cache — the bag is parked with it, WorldSpawn). Fixing it properly
 ## means persisting money bags (and NPC wallets, for the other branch), which is a save-format change, not a patch
 ## here. Until then this is a same-session errand — the AUTHORING_GUIDE Death callout says so in as many words.
 func _spill_death_purse(amount: float, anchor: Vector3) -> void:

@@ -100,6 +100,16 @@ var holstered: bool = false  ## weapon put away (hidden; can't fire or reload) u
 ## wielders and normal empty-handed play are unaffected. Cleared on drop / on the in-place revive (die/revive symmetry).
 var draw_locked: bool = false
 var gun_raised: bool = true  ## false while the view-model tweens into view (set by GunMesh); blocks firing mid-raise
+## True while the player's view model is in (or still coming up out of) its SPRINT pose — mirrored every frame by
+## GunPose, like gun_raised. You can't shoot from the sprint pose: a trigger pull that lands while this is up (or
+## while the wielder is_sprinting()) ends the sprint and is BUFFERED until the gun is back up — see
+## _sprint_out_gate. Stays false for AI wielders, which have no view model.
+var sprint_lowered: bool = false
+## The sprint-out buffer: Time.get_ticks_msec() of a trigger pull made mid-sprint that is waiting for the gun to
+## come up (0 = nothing waiting), and which button pulled it. _physics_process fires it the moment sprint_lowered
+## clears, so a quick semi-auto click during the sprint-out isn't eaten by the just-pressed rule.
+var _sprint_out_fire_msec: int = 0
+var _sprint_out_fire_alt: bool = false
 var _drew_on_press: bool = false  ## the PRIMARY click that drew the weapon must not also fire; cleared on release
 ## The alt button's own copy of _drew_on_press. Kept SEPARATE because the two buttons are routinely held at the
 ## same time and mean different things: alt is ADS on a gun but a real attack on the fists, and the ADS weapon
@@ -109,6 +119,7 @@ var _drew_on_press: bool = false  ## the PRIMARY click that drew the weapon must
 var _alt_drew_on_press: bool = false
 var _is_scoped: bool = false
 var _last_fire_msec: int = 0  ## Time.get_ticks_msec() of the last shot; 0 = never fired (reads as long-idle)
+const WorldSpawn = preload("res://scripts/world/world_spawn.gd")  # runtime world spawns belong to the level / chunk, not the tree root
 
 ## Seconds since this weapon last fired (huge if it never has) — drives the view-model idle-lower in GunPose.
 func seconds_since_fire() -> float:
@@ -162,6 +173,18 @@ func _physics_process(_delta: float) -> void:
 		_drew_on_press = false
 	if _alt_drew_on_press and not Input.is_action_pressed(alt_attack_action):
 		_alt_drew_on_press = false
+	# A trigger pull made mid-sprint fires once the gun is back up — or is dropped if it isn't up within the
+	# post-attack sprint lockout (long enough that only a stuck pose could get there), or if a menu opened over
+	# the game in the meantime (MouseInput stops emitting trigger pulls then, and a buffered one must too).
+	if _sprint_out_fire_msec != 0:
+		if InputManager.gameplay_suppressed():
+			_sprint_out_fire_msec = 0
+		elif not sprint_lowered:
+			var alt := _sprint_out_fire_alt
+			_sprint_out_fire_msec = 0
+			_on_mouse_input_attack(null, false, alt, true)
+		elif Time.get_ticks_msec() - _sprint_out_fire_msec > int(GameSettings.player_movement.sprint_attack_lockout * 1000.0):
+			_sprint_out_fire_msec = 0
 
 ## A carried prop was just released while the fire button MAY still be held — e.g. LEFT-CLICK throws the prop
 ## (see PickupRay's alternate-throw). Dropping the prop re-draws the holstered weapon, so treat this exactly like
@@ -371,11 +394,12 @@ func _do_spray_paint() -> void:
 	proj.velocity = character.get_aim_direction() * current_weapon.projectile_speed
 	proj.shooter = character
 	proj.paint_color = col
-	get_tree().root.add_child(proj)
 	var muzzle_pos: Vector3 = muzzle.global_position if muzzle else character.get_aim_origin()
+	var fx_root := WorldSpawn.add(self, proj, muzzle_pos)
 	proj.global_position = muzzle_pos
 	# Coloured muzzle flash to match the paint — reuses the bullet-hit spark, tinted (like the splat).
-	GunFX.spawn_muzzle_flash(get_tree().root, muzzle_pos, col)
+	if fx_root != null:
+		GunFX.spawn_muzzle_flash(fx_root, muzzle_pos, col)
 	# Spray hiss: play the weapon's audio but don't restart it every tick (that would stutter). Varied per
 	# BURST, not per tick — the `playing` guard means each squeeze of the trigger gets one fresh pitch roll.
 	if current_weapon.audio and not attack_audio.playing:
@@ -444,20 +468,33 @@ func _try_scoped_weapon_throw(from_ai: bool) -> bool:
 ## stamina_shot_drain_ceiling x stamina_sprint_drain x this weapon's cadence, so cost/attack_speed can never
 ## exceed 0.95 x 18.0 = 17.1/sec for ANY weapon a designer can author — "shooting never costs more per second
 ## than sprinting" is a theorem here, not something the .tres files happen to respect. The max(attack_speed, 0.05)
-## floor mirrors the divisor tests/test_combat_data.gd uses, so the bound is exact even at attack_speed 0.
+## floor keeps the ceiling positive for an attack_speed-0 weapon, whose drain is then bounded per 0.05s of cadence
+## (the same floor WeaponData.power_score divides by).
 ## Break-even cadence for a 1.0-effort weapon is stamina_shot_cost / (ceiling x sprint_drain) = 1.8 / 17.1 =
 ## 0.105s — note WeaponData's DEFAULT attack_speed (0.1) sits just under it, so a bare unauthored weapon is
 ## mildly clamped; every shipped gun is well clear.
 ##
-## GameSettings is an untyped autoload Node, so its property reads come back Variant — the tuning resource is
-## bound to an explicitly TYPED local rather than inferred with `:=` (the house no-`:=`-from-a-Variant rule).
+## The arithmetic lives in the pure static shot_stamina_cost_for below; this is it fed from the live tuning.
 func _shot_stamina_cost() -> float:
-	if current_weapon == null or current_weapon.is_melee:
+	return Attack.shot_stamina_cost_for(current_weapon, GameSettings.player_movement)
+
+## Pure + static (the melee_time_scale_for idiom — the tuning arrives as an argument, so nothing here reads the
+## GameSettings autoload): the stamina price of ONE ranged shot from `weapon` under the movement tuning `mv`.
+## THE single source of truth for the shot price — _shot_stamina_cost() above is only this fed from
+## GameSettings.player_movement, and tests/test_combat_data.gd sweeps every shipped .tres through it, so a folder
+## guard and the live trigger can never disagree about what a shot costs. 0 for a null or melee weapon; see
+## _shot_stamina_cost() for the design (effort x trim, the sprint-drain clamp, the refund-proof 0 floor).
+static func shot_stamina_cost_for(weapon: WeaponData, mv: PlayerMovementSettings) -> float:
+	if weapon == null or weapon.is_melee:
 		return 0.0
-	var mv: PlayerMovementSettings = GameSettings.player_movement
-	var raw := mv.stamina_shot_cost * current_weapon.stamina_effort() * current_weapon.stamina_cost_mult
-	var ceiling := mv.stamina_shot_drain_ceiling * mv.stamina_sprint_drain * maxf(current_weapon.attack_speed, 0.05)
-	return maxf(minf(raw, ceiling), 0.0)
+	var raw := mv.stamina_shot_cost * weapon.stamina_effort() * weapon.stamina_cost_mult
+	return maxf(minf(raw, Attack.shot_stamina_ceiling_for(weapon, mv)), 0.0)
+
+## The cadence clamp on shot_stamina_cost_for: the MOST one shot from `weapon` may ever cost, whatever its power,
+## so cost / attack_speed stays under stamina_shot_drain_ceiling x stamina_sprint_drain. Public so the shipped-
+## weapon sweep can tell a weapon priced BY its effort from one silently railed against this ceiling.
+static func shot_stamina_ceiling_for(weapon: WeaponData, mv: PlayerMovementSettings) -> float:
+	return mv.stamina_shot_drain_ceiling * mv.stamina_sprint_drain * maxf(weapon.attack_speed, 0.05)
 
 ## Charge the wielder for a shot that is ALREADY committed (ammo consumed) — the ranged twin of
 ## _spend_melee_attack_stamina(), called from the same beat so a dry click, a blocked click and a spray-paint blob
@@ -502,19 +539,37 @@ func _spend_shot_stamina() -> void:
 ## "you never regenerate between your own shots" true BY CONSTRUCTION, for any weapon anyone authors later.
 ##
 ## Reads the post-shot clip (this runs after clip.consume_ammo() succeeded), so current_ammo == 0 means THIS shot
-## was the one that emptied it.
+## was the one that emptied it. The rule itself is the pure static shot_regen_hold_for below.
 func _shot_regen_hold() -> float:
 	var base: float = GameSettings.player_movement.stamina_regen_delay_after_shot
 	if current_weapon == null:
 		return base
-	# Both halves read the EFFECTIVE (agility-scaled) durations, not the authored ones. A quick wielder's real
+	# Both durations are the EFFECTIVE (agility-scaled) ones, not the authored ones. A quick wielder's real
 	# gap is genuinely shorter, and holding regen for the authored reload instead would punish agility with a
 	# stamina lockout it no longer earns — the hold must track the gap it is derived from, or the "you never
 	# regenerate between your own shots" theorem stops being tight and starts being arbitrary.
-	var gap := effective_attack_speed()
-	if clip != null and clip.current_ammo <= 0 and not current_weapon.is_infinite_ammo:
-		gap = maxf(gap, GameSettings.weapon_general.auto_reload_delay + effective_reload_time())
-	return maxf(base, gap)
+	var emptied := clip != null and clip.current_ammo <= 0
+	# The reload wait only matters for a clip-emptying shot, so the wielder's stat sheet is only consulted then.
+	var reload_wait := 0.0
+	if emptied:
+		reload_wait = GameSettings.weapon_general.auto_reload_delay + effective_reload_time()
+	return Attack.shot_regen_hold_for(current_weapon, emptied, base, effective_attack_speed(), reload_wait)
+
+## Pure + static (the melee_time_scale_for idiom): how long a shot from `weapon` holds off stamina recovery.
+## `clip_emptied` = this shot used the last round in the magazine; `base_hold` = stamina_regen_delay_after_shot;
+## `cadence` = the wielder's cooldown before the next shot; `reload_wait` = auto_reload_delay + the wielder's
+## reload time, which a clip-emptying shot of a weapon that actually reloads must wait out first. The hold is the
+## real gap to the next possible shot, never shorter than `base_hold` — see _shot_regen_hold() for why.
+## THE single source of truth for the rule. tests/test_combat_data.gd pins it directly on synthetic weapons, and
+## sweeps every shipped .tres through _shot_regen_hold() on a bare Attack + Ammo clip, so the glue above is held too.
+static func shot_regen_hold_for(weapon: WeaponData, clip_emptied: bool, base_hold: float, cadence: float,
+		reload_wait: float) -> float:
+	if weapon == null:
+		return base_hold
+	var gap := cadence
+	if clip_emptied and not weapon.is_infinite_ammo:
+		gap = maxf(gap, reload_wait)
+	return maxf(base_hold, gap)
 
 ## --- Spray-paint colour picker facade (forwards to the SprayPainter child) ---
 
@@ -542,7 +597,28 @@ func _fire_should_abort(from_ai: bool) -> bool:
 		return false
 	return holstered or draw_locked or DialogueManager.is_active()
 
-func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false, alt := false) -> void:
+## You can't attack while sprinting. Called on a PLAYER trigger pull that got past the holster / draw-click gates.
+## If the wielder is sprinting, or the view model is still in its sprint pose, this ends the sprint
+## (Player.interrupt_sprint) and returns true. A gun then waits: the pull is buffered and _physics_process fires it
+## once the gun is up, so no round leaves a sprint-lowered muzzle. A PUNCH weapon returns false and swings at once:
+## the fists rig has no sprint pose to come up out of, so a wait would only be input lag. A wielder with no
+## is_sprinting (a test double) never trips it.
+func _sprint_out_gate(alt: bool) -> bool:
+	var sprinting := character != null and character.has_method(&"is_sprinting") and bool(character.call(&"is_sprinting"))
+	if not sprinting and not sprint_lowered:
+		return false
+	if character != null and character.has_method(&"interrupt_sprint"):
+		character.call(&"interrupt_sprint")
+	if current_weapon != null and current_weapon.view_model_punch:
+		return false
+	if _sprint_out_fire_msec == 0:
+		_sprint_out_fire_msec = maxi(Time.get_ticks_msec(), 1)  # 0 means "nothing buffered"
+	_sprint_out_fire_alt = alt
+	return true
+
+## `sprint_out` = this call is the buffered trigger pull from _sprint_out_gate being fired now that the gun is up.
+## It skips the semi-auto just-pressed rule (the click happened frames ago); every other gate still applies.
+func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false, alt := false, sprint_out := false) -> void:
 	if not current_weapon:
 		return
 	# ALT FIRE (the second attack button, MouseInput.alt_attack). Only a weapon that declares its swing a PUNCH
@@ -570,6 +646,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false, alt := f
 		return
 	if (_alt_drew_on_press if alt else _drew_on_press):
 		return  # still holding the click that drew this weapon — release THAT button and click again to fire
+	if not from_ai:
+		if _sprint_out_gate(alt):
+			return  # sprinting — the sprint just ended, and this pull fires once the gun is up
+		_sprint_out_fire_msec = 0  # this pull goes through the gates below; nothing left to buffer
 	if not from_ai and not gun_raised:
 		return  # view-model still raising in (reload / swap / draw) — don't fire from the low muzzle
 	if !attack.is_stopped() or !reload.is_stopped() or !swap.is_stopped():
@@ -577,7 +657,7 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false, alt := f
 	# Semi-auto weapons (e.g. melee) fire once per click instead of continuously
 	# while held (MouseInput emits `attack` every frame the button is down). An AI
 	# wielder (from_ai) sets its own cadence, so it skips the player input check.
-	if not from_ai and not current_weapon.auto_fire and not Input.is_action_just_pressed(alt_attack_action if alt else &"Attack"):
+	if not from_ai and not sprint_out and not current_weapon.auto_fire and not Input.is_action_just_pressed(alt_attack_action if alt else &"Attack"):
 		return
 	# Bank WHICH button threw this attack, for anything that poses off it — the player's fists read it to pick
 	# the leading hand. Set only once every gate above has passed, so a refused click never re-poses the arms.
@@ -722,14 +802,14 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false, alt := f
 			var _far_target: Vector3 = _ray_origin + pellet_direction * GameSettings.weapon_general.visual_tracer_fallback_distance
 			spawn_projectile.emit(_spawn_point, (_far_target - _spawn_point).normalized(), false, apply_status)
 			if current_weapon.has_tracer:
-				GunFX.spawn_tracer(get_tree().root, _spawn_point, _far_target, _active_camera)
+				GunFX.spawn_tracer(WorldSpawn.parent_for(self), _spawn_point, _far_target, _active_camera)
 			continue
 		# The pellet's whole pierce-trace walk lives in DamageTrace (a stateless static, like ShotResolver /
 		# GunFX / DamageApplier): raycast, damage application, overkill pierce-through, hit FX + impact
 		# audio. Tree-dependent handles (space state, FX root, camera) were sampled ONCE above and are
 		# passed in; the per-pellet RESULT comes back so the emits below stay on this Attack node
 		# (weapon.tscn wires spawn_projectile from here) and the post-shot reaction sees the whole shot.
-		var traced := DamageTrace.run_pellet(_space_state, get_tree().root, _active_camera, current_weapon,
+		var traced := DamageTrace.run_pellet(_space_state, WorldSpawn.parent_for(self), _active_camera, current_weapon,
 				character, _ray_origin, pellet_direction, from_ai, _audio, _range_mult, apply_status)
 		if traced["hit_npc"]:
 			_hit_npc = true
@@ -738,7 +818,7 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false, alt := f
 		var _visual_direction := (_visual_target - _spawn_point).normalized()
 		spawn_projectile.emit(_spawn_point, _visual_direction, traced["hit_anything"], apply_status)
 		if current_weapon.has_tracer:
-			GunFX.spawn_tracer(get_tree().root, _spawn_point, _visual_target, _active_camera)
+			GunFX.spawn_tracer(WorldSpawn.parent_for(self), _spawn_point, _visual_target, _active_camera)
 
 	# Post-shot reaction now that every pellet's trace has resolved: the player remarks on a reckless
 	# discharge ONLY if this shot didn't connect with an NPC (an enemy who needs no reaction no-ops).
