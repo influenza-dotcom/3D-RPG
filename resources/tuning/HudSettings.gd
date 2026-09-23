@@ -292,7 +292,12 @@ extends Resource
 @export_group("Money readout")
 @export var money_font_size: int = 16
 @export var money_delta_font_size: int = 15
-## Gold for the persistent zorkmid readout.
+## Seconds the top-left zorkmid total stays fully lit after a wallet change. The total is hidden at rest and
+## only flashes with each +N/-N (UI.SHOW_MONEY_READOUT); a change mid-flash restarts this hold.
+@export var money_readout_hold: float = 1.5
+## Seconds the flashed total then takes to fade back out.
+@export var money_readout_fade: float = 0.6
+## Gold for the zorkmid readout.
 @export var money_color: Color = Color(1.0, 0.86, 0.3)
 ## Green +N on a gain.
 @export var money_gain_color: Color = Color(0.45, 1.0, 0.5)

@@ -27,7 +27,7 @@ extends CanvasLayer
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border around the panel (any resolution) — AUTHORED into the scene's Panel anchors (0.12..0.88); this const documents the contract (test-pinned)
+const PANEL_MARGIN := 0.05  ## fraction of the screen left as a border around the panel (any resolution) — AUTHORED into the scene's Panel anchors (0.05..0.95); this const documents the contract (test-pinned). The TALL band, not the Pip-Boy tabs' 0.12: two item grids plus a detail line overflowed 0.12 and scrolled
 const _DEFAULT_HINT := ""  ## resting detail line: BLANK — how-to-use prose is tutorializing (user call); the footer speaks only on hover
 
 ## How the SOURCE carries money — decides how cash is TAKEN / DEPOSITED (see _wallet_mode):

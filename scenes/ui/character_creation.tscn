@@ -58,11 +58,6 @@ custom_minimum_size = Vector2(240, 0)
 layout_mode = 2
 context_menu_enabled = false
 
-[node name="NameHint" type="Label" parent="Panel/Column"]
-unique_name_in_owner = true
-layout_mode = 2
-horizontal_alignment = 1
-
 [node name="TopSeparator" type="HSeparator" parent="Panel/Column"]
 layout_mode = 2
 
@@ -96,7 +91,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/h_separation = 8
 theme_override_constants/v_separation = 4
-columns = 4
+columns = 8
 
 [node name="LookTab" type="HBoxContainer" parent="Panel/Column/Tabs"]
 unique_name_in_owner = true

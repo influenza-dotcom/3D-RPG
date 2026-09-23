@@ -5,8 +5,8 @@ extends CanvasLayer
 ## The rows are DATA: every tab is generated from resources/settings/SettingsCatalog.tres (an ordered list
 ## of SettingSpec), so adding an option is "add a typed var + setter to Settings.gd, then add one row to the
 ## catalog" — never hand-wiring UI here. This file only reads/writes the Settings autoload, never gameplay.
-## Each control STAGES its edit into _pending and nothing touches Settings until APPLY (Revert / reopening
-## drops them). (Key rebinds are the one exception — they bind live, since the key-press itself confirms.)
+## Every control APPLIES its value the moment it changes (see _stage) — there is no Apply button; key rebinds
+## bind live the same way.
 ##
 ## It does NOT pause the SceneTree — the world keeps simulating, as requested. To stop menu clicks from
 ## leaking into gameplay (poll-based input ignores GUI focus), the player's CONTROL is suppressed instead
@@ -37,7 +37,7 @@ const PANEL_MARGIN := 0.07  ## fraction of the screen left as a border around th
 ## out two-up (see _page_columns) so it fits the ~245px tab page without scrolling. Accessibility is the only
 ## tab over the threshold (18 rows today, and it keeps growing — don't re-pin the exact count here); every
 ## other tab is <=7 rows and stays single-column.
-const TWO_UP_ROW_THRESHOLD := 8
+const TWO_UP_ROW_THRESHOLD := 7
 
 ## The inset (px) between a tab page's edge and its rows, on all four sides — the "another 20" in the
 ## column fit math quoted by MenuSkin.slider_width_dense / setting_label_col_width_dense. The RIGHT side
@@ -67,8 +67,6 @@ var _tab_cue_muted := false
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 ## Staged settings edits (setter Callable -> pending value); flushed to Settings on Apply, dropped on Revert.
-var _pending: Dictionary = {}
-var _apply_btn: Button = null
 var _save_load_btn: Button = null  ## "Save / Load" (the manual slot screen) — only shown in-game, like Main Menu (see open())
 var _main_menu_btn: Button = null  ## "Main Menu" (return to start screen) — only shown in-game (see open())
 var _quit_confirm: Control = null  ## the Quit Game confirmation overlay (dim + dialog) — see _bind_ui
@@ -115,9 +113,7 @@ func open() -> void:
 		return
 	_is_open = true
 	# Rebuild the tabs fresh from the CURRENT Settings each open, dropping any edits left unapplied last time.
-	_pending.clear()
 	_rebuild_tabs()
-	_refresh_apply_state()
 	# Only offer "Main Menu" + "Save / Load" while in-game (a player exists) — at the start menu the first is a
 	# redundant reload and the second has no player to capture (the menu's own "Load Game" covers loading there).
 	var in_game := _find_real_player() != null
@@ -233,12 +229,6 @@ func _bind_ui() -> void:
 	_main_menu_btn.text = PlayerText.OPTIONS_MAIN_MENU
 	MenuStyle.set_button_sound(_main_menu_btn, &"")
 	_main_menu_btn.pressed.connect(_on_main_menu)
-	_apply_btn = %ApplyButton
-	_apply_btn.text = PlayerText.OPTIONS_APPLY
-	_apply_btn.pressed.connect(_apply_pending)
-	var revert_btn: Button = %RevertButton
-	revert_btn.text = PlayerText.OPTIONS_REVERT
-	revert_btn.pressed.connect(_revert)
 	var close_btn: Button = %CloseButton
 	close_btn.text = PlayerText.CLOSE
 	# close() already plays the back cue; without this the button would ALSO fire the generic click.
@@ -247,7 +237,6 @@ func _bind_ui() -> void:
 	var quit_btn: Button = %QuitButton
 	quit_btn.text = PlayerText.OPTIONS_QUIT_GAME
 	quit_btn.pressed.connect(_show_quit_confirm)
-	_refresh_apply_state()
 
 	# Quit-confirm overlay adoption (see the header bullet): dim + centered fixed-width card, both authored.
 	_quit_confirm = %QuitConfirm
@@ -255,10 +244,10 @@ func _bind_ui() -> void:
 	MenuStyle.style_compact_card(%QuitCard)
 	var quit_title: Label = MenuStyle.cap_label(%QuitTitle)
 	MenuStyle.style_title(quit_title)
-	quit_title.text = MenuStyle.title_text(PlayerText.OPTIONS_QUIT_GAME)
+	quit_title.text = MenuStyle.title_text(PlayerText.OPTIONS_QUIT_CONFIRM_TITLE)
 	MenuStyle.style_button_row(%ConfirmRow)  # CENTER alignment is authored
 	var confirm_btn: Button = %ConfirmButton
-	confirm_btn.text = PlayerText.CONFIRM
+	confirm_btn.text = PlayerText.QUIT
 	confirm_btn.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)
 	MenuStyle.set_button_sound(confirm_btn, &"commit")  # leaving the session is the heaviest button in the menu
 	confirm_btn.pressed.connect(_on_quit)
@@ -385,7 +374,7 @@ func _spec_current(spec: Variant) -> Variant:
 		return Settings.call(spec.getter, spec.bind)
 	return Settings.get(spec.getter)
 
-## A Callable that applies this spec's value to Settings — staged through _pending, committed on Apply. A
+## A Callable that applies this spec's value to Settings (called straight away by _stage). A
 ## `bind` becomes the LEADING arg so set_volume(bus, value) keeps its order; `as_int` narrows the slider's
 ## float for an int setter (Max FPS). Everything else is a direct Callable onto the named Settings setter.
 func _spec_setter(spec: Variant) -> Callable:
@@ -473,6 +462,39 @@ func _emit_colorblind_mode(parent: VBoxContainer, spec: Variant) -> Control:
 func _emit_difficulty(parent: VBoxContainer, spec: Variant) -> Control:
 	return _option_row(parent, spec.label, [PlayerText.OPTIONS_DIFFICULTY_EASY, PlayerText.OPTIONS_DIFFICULTY_NORMAL, PlayerText.OPTIONS_DIFFICULTY_HARD], int(_spec_current(spec)), _spec_setter(spec))
 
+## Language chooser (Game) — items are built at menu-open from Localization.available_locales(), i.e. the catalogs
+## listed under Project Settings → Localization → Translations, so shipping a new `.po` adds an entry with no code
+## or catalog edit. CUSTOM rather than a generic DROPDOWN because the list is dynamic (and for the re-save reason
+## window mode cites). Entry 0 is "System default" (Settings.language = ""); the rest are locale codes captioned
+## with the engine's own language names. The cycler stages an INDEX (its contract); the bound setter maps that
+## back to the code — never _spec_setter, whose Settings.set_language takes the code, not the index.
+##
+## ENGLISH-ONLY BUILD: with no `.po` added under Localization → Translations, available_locales() returns the
+## source locale ALONE, so the live cycler would offer exactly two entries that render the same English —
+## "System" and "English" — which reads as a language menu that does nothing. So the row is built GREYED at
+## its one true value (the source locale's own name) and returns null, keeping it out of D-pad nav and off
+## _first_focus. It answers the question the row raises ("what languages are there?") with "English", visibly,
+## instead of a cycler that buzzes at the player. Ship one catalog and the live path below takes over with no
+## other edit — this branch is a count check, not a hardcoded language.
+func _emit_language(parent: VBoxContainer, spec: Variant) -> Control:
+	var locales := Localization.available_locales()
+	if locales.size() <= 1:
+		var only := Localization.locale_label(locales[0] if not locales.is_empty() else Localization.source_locale())
+		_option_row(parent, spec.label, [only], 0, Callable(), false)
+		return null
+	var codes := PackedStringArray([Localization.SYSTEM])
+	var items: Array = [PlayerText.OPTIONS_LANGUAGE_SYSTEM]
+	for code in locales:
+		codes.append(code)
+		items.append(Localization.locale_label(code))
+	var current := maxi(codes.find(String(Settings.language)), 0)
+	return _option_row(parent, spec.label, items, current, _apply_language_index.bind(codes))
+
+## The Language row's setter: cycler index -> locale code -> Settings.set_language (staged + committed on Apply
+## like every other row). A bound method, not a capturing lambda (the freed-capture rule).
+func _apply_language_index(index: int, codes: PackedStringArray) -> void:
+	Settings.set_language(codes[clampi(index, 0, codes.size() - 1)])
+
 ## Colour Depth chooser (Video) — how many colours the screen post-process is allowed to use. Code-defined
 ## items for the same reason as window mode: a generic DROPDOWN's options do not survive an editor re-save of
 ## SettingsCatalog.tres. ARRAY ORDER IS BEHAVIOUR — index-mapped straight into Settings.COLOR_QUANTIZE_LEVELS,
@@ -506,8 +528,10 @@ func _emit_music_folder(parent: VBoxContainer, spec: Variant) -> Control:
 	path_btn.pressed.connect(_open_music_folder_dialog.bind(path_btn))
 	box.add_child(path_btn)
 	var clear_btn := Button.new()
-	clear_btn.text = PlayerText.DEFAULT
+	clear_btn.text = PlayerText.OPTIONS_MUSIC_FOLDER_CLEAR
 	clear_btn.pressed.connect(_clear_music_folder.bind(path_btn))
+	clear_btn.disabled = Settings.music_folder.is_empty()  # nothing to clear on the default
+	path_btn.set_meta(&"clear_btn", clear_btn)
 	box.add_child(clear_btn)
 	_row(parent, spec.label, box)
 	return path_btn
@@ -548,6 +572,7 @@ func _on_music_folder_picked(d: String, dlg: FileDialog, path_btn) -> void:
 	Settings.set_music_folder(d)                 # persist FIRST — the pick must survive a freed row button
 	if is_instance_valid(path_btn):
 		path_btn.text = _music_folder_label()    # refresh the caption only if the row still exists
+		_sync_clear_btn(path_btn)
 	_free_dialog(dlg)
 
 ## Free the one-shot picker (on select OR cancel), guarded so a double-signal / already-freed dialog is a no-op.
@@ -559,6 +584,13 @@ func _free_dialog(dlg: FileDialog) -> void:
 func _clear_music_folder(path_btn: Button) -> void:
 	Settings.set_music_folder("")
 	path_btn.text = _music_folder_label()
+	_sync_clear_btn(path_btn)
+
+## The Clear button is live only while a custom folder is set.
+func _sync_clear_btn(path_btn: Button) -> void:
+	var clear_btn: Variant = path_btn.get_meta(&"clear_btn", null)
+	if clear_btn is Button and is_instance_valid(clear_btn):
+		(clear_btn as Button).disabled = Settings.music_folder.is_empty()
 
 # ---------------------------------------------------------------------------------------------------
 # Keybind rebinding (binds LIVE — the key-press itself is the confirmation)
@@ -676,7 +708,7 @@ func _add_tab(key: String, title: String) -> VBoxContainer:
 	var scroll := ScrollContainer.new()
 	scroll.name = key  # the KEY, never display prose — TabContainer would otherwise title the tab from it
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO  # a bar only where the page really overflows (Controls); the gutter below is still reserved on every page so the rows never shift
 	# clampi, not a bare subtraction: a skin that widens the bar past the page margin would otherwise hand
 	# MarginContainer a NEGATIVE margin (rows drawn under the bar) instead of just closing the gutter.
 	var gutter: int = clampi(MenuStyle.skin.scrollbar_width, 0, PAGE_MARGIN)
@@ -698,13 +730,17 @@ func _add_tab(key: String, title: String) -> VBoxContainer:
 ## layout: true (the choice cyclers, the music-folder picker; sliders build their own row) fills the remaining width;
 ## false (toggles, rebind buttons) shrinks the control onto a right-aligned rail — the LABEL absorbs the
 ## slack instead — so small controls form one clean right-edge column across every tab instead of stretching
-## into full-width bars.
-func _row(parent: VBoxContainer, label_text: String, control: Control, expand: bool = true) -> void:
+## into full-width bars. `enabled` false greys the NAME to match a disabled control beside it (the shared
+## disabled_text_color the theme paints button captions with) — the row still occupies its slot, it just
+## reads as dead; the caller owns disabling the control itself.
+func _row(parent: VBoxContainer, label_text: String, control: Control, expand: bool = true, enabled: bool = true) -> void:
 	var h := HBoxContainer.new()
 	h.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_theme_constant_override("separation", 10)
 	var l := Label.new()
 	l.text = label_text
+	if not enabled:
+		l.add_theme_color_override(&"font_color", MenuStyle.skin.disabled_text_color)
 	l.custom_minimum_size.x = _label_col_width(parent)
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER  # sit on the control's centerline, not riding high beside taller widgets
 	h.add_child(l)
@@ -775,8 +811,6 @@ func _on_slider_changed(value: float, slider: Control, val_label: Label, setter:
 	val_label.text = formatter.call(value)
 	# Every slider in the game funnels through here. MenuStyle quantises the drag into a fixed number of
 	# ticks, so a 0..360 Max FPS slider and a 0..1 accessibility slider feel the same instead of one buzzing.
-	# NOTE the staged-apply gotcha: dragging a VOLUME slider doesn't move the bus until Apply, so the tick
-	# auditions the volume you're leaving, not the one you're choosing.
 	MenuStyle.play_slider_step(slider as Range, value)
 	_stage(slider, setter, value)
 
@@ -791,7 +825,13 @@ func _on_slider_changed(value: float, slider: Control, val_label: Label, setter:
 ## button, the row's ONE focus target (_emit_row/_first_focus contract): prev/next are FOCUS_NONE so D-pad
 ## vertical nav lands on a single control per row. Press = step forward; ui_left/ui_right on it step
 ## back/forward (the HSlider rows are the precedent for a focused row control eating left/right).
-func _option_row(parent: VBoxContainer, label_text: String, items: Array, selected: int, on_select: Callable) -> Button:
+##
+## `enabled` false builds the row GREYED and inert: the three surfaces take the theme's disabled styleboxes
+## and font_disabled_color, NO signal is connected (so `on_select` is never consulted — pass an empty
+## Callable), and the value button drops to FOCUS_NONE so D-pad nav walks past it. That is for a setting with
+## exactly one real value in this build (the Language row on an English-only catalog set): the player sees the
+## setting exists and sees what it is stuck at, instead of a live cycler that buzzes.
+func _option_row(parent: VBoxContainer, label_text: String, items: Array, selected: int, on_select: Callable, enabled: bool = true) -> Button:
 	var box := HBoxContainer.new()
 	box.add_theme_constant_override("separation", 6)
 	var prev_btn := Button.new()
@@ -817,12 +857,20 @@ func _option_row(parent: VBoxContainer, label_text: String, items: Array, select
 	MenuStyle.set_button_sound(prev_btn, &"")
 	MenuStyle.set_button_sound(next_btn, &"")
 	MenuStyle.set_button_sound(value_btn, &"")
-	# Bound-method Callables, not capturing lambdas (project rule: a freed-capture lambda errors before any guard).
-	prev_btn.pressed.connect(_cycle_option.bind(-1, value_btn, items, on_select))
-	next_btn.pressed.connect(_cycle_option.bind(1, value_btn, items, on_select))
-	value_btn.pressed.connect(_cycle_option.bind(1, value_btn, items, on_select))  # Enter/Space/click on the value = next
-	value_btn.gui_input.connect(_on_cycler_gui_input.bind(value_btn, items, on_select))
-	_row(parent, label_text, box)
+	if enabled:
+		# Bound-method Callables, not capturing lambdas (project rule: a freed-capture lambda errors before any guard).
+		prev_btn.pressed.connect(_cycle_option.bind(-1, value_btn, items, on_select))
+		next_btn.pressed.connect(_cycle_option.bind(1, value_btn, items, on_select))
+		value_btn.pressed.connect(_cycle_option.bind(1, value_btn, items, on_select))  # Enter/Space/click on the value = next
+		value_btn.gui_input.connect(_on_cycler_gui_input.bind(value_btn, items, on_select))
+	else:
+		# Greyed + inert. gui_input is left UNCONNECTED on purpose: a disabled Button stops emitting `pressed`,
+		# but the Control still forwards gui_input, so a connected keyboard path would keep cycling a dead row.
+		prev_btn.disabled = true
+		next_btn.disabled = true
+		value_btn.disabled = true
+		value_btn.focus_mode = Control.FOCUS_NONE
+	_row(parent, label_text, box, true, enabled)
 	return value_btn
 
 ## Step a cycler row by `dir` (+1/-1, wrapping): repaint the value caption and STAGE the new index —
@@ -873,40 +921,26 @@ func _check_row(parent: VBoxContainer, label_text: String, pressed: bool, on_tog
 	_row(parent, label_text, c, false)
 	return c
 
-## --- Staged apply: controls write to _pending; nothing reaches Settings until Apply (Revert / reopen drops
-## it). Keyed by the CONTROL node, so re-touching a control overwrites its own pending value. ---
+## --- Immediate apply: every control commits its value the moment it changes. ---
+## There used to be a staged Apply (and a Revert): nothing reached Settings until Apply, so a dragged volume slider
+## auditioned the level you were LEAVING, and the manual had to carry a "did you press Apply?" FAQ. A game menu
+## applies as you go. Each Settings setter applies AND persists, so closing the card is all "keep" means now.
 
 func _stage(control: Object, setter: Callable, value: Variant) -> void:
-	_pending[control] = func(): setter.call(value)  # closure captures THIS setter+value; re-touch overwrites
-	_refresh_apply_state()
+	setter.call(value)
+	# A window-size / window-mode pick can be re-fitted by Settings (a 1920x1080 pick on a 1080p screen lands as
+	# 1600x900), so those two rows rebuild from the live values once the window has actually moved. Deferred: the
+	# cycler button that made the pick is still on the call stack.
+	var m := setter.get_method()
+	if m == &"_on_resolution_selected" or m == &"set_window_mode":
+		_rebuild_preserving_tab.call_deferred()
 
-## Signal-friendly stager: the emitting control's value arrives first; the control + setter are bound last
-## via connect(_stage_signal.bind(control, setter)) — used for the checkboxes (the cyclers stage directly
-## in _cycle_option, since their "value" is metadata rather than a signal payload).
+## Signal-friendly form for the checkboxes: the emitting control's value arrives first; control + setter are bound.
 func _stage_signal(value: Variant, control: Object, setter: Callable) -> void:
 	_stage(control, setter, value)
 
-## Commit every staged change (each Settings setter applies to the engine + persists), then clear and REBUILD
-## the rows from the live Settings. Keyed by the CONTROL node (a reliable Dictionary key), so each control
-## contributes exactly one pending apply. The rebuild matters because a setter may not land exactly what was
-## staged: Settings.set_windowed_size / set_window_mode re-fit a preset that does not fit the screen (a 1920x1080
-## pick on a 1080p monitor becomes 1600x900) — without the rebuild the Resolution cycler would keep showing the
-## staged value while the window is visibly another size, until the next open() or Revert.
-func _apply_pending() -> void:
-	for apply_cb in _pending.values():
-		(apply_cb as Callable).call()
-	_pending.clear()
-	_rebuild_preserving_tab()
-
-## Drop the staged changes and rebuild the controls from the unchanged Settings.
-func _revert() -> void:
-	_pending.clear()
-	_rebuild_preserving_tab()
-
-## Rebuild every row from the live Settings while the menu is ON SCREEN (open()'s _rebuild_tabs runs before
-## _root turns visible). A TabContainer whose pages are all freed + re-added resets to tab 0 — so the current tab
-## is captured and restored, or Revert/Apply would visibly bounce the player back to the first tab. Tab order is
-## deterministic across rebuilds (catalog insertion order), so the same index lands on the same tab.
+## Rebuild every row from the live Settings while the menu is ON SCREEN. A TabContainer whose pages are all freed +
+## re-added resets to tab 0, so the current tab is captured and restored.
 func _rebuild_preserving_tab() -> void:
 	var cur := _tabs.current_tab if _tabs != null else 0
 	_rebuild_tabs()
@@ -914,12 +948,6 @@ func _rebuild_preserving_tab() -> void:
 		_tab_cue_muted = true  # restoring the remembered tab is bookkeeping, not a player tab press
 		_tabs.current_tab = clampi(cur, 0, _tabs.get_tab_count() - 1)
 		_tab_cue_muted = false
-	_refresh_apply_state()
-
-## Apply is enabled only while there's something staged to commit.
-func _refresh_apply_state() -> void:
-	if _apply_btn != null:
-		_apply_btn.disabled = _pending.is_empty()
 
 ## `choices` is the exact preset list the row was built from (bound in _emit_resolution — .bind APPENDS, so it
 ## arrives after the cycler's index), never re-read from Settings here.

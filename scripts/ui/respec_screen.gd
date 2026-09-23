@@ -149,7 +149,6 @@ func _refresh() -> void:
 	# Prose and facts are SEPARATE labels: the 64-char explainer wraps in _blurb, while _status keeps the
 	# cost + funds as two short lines (the old single-label "Cost: X     Your zorkmids: Y" space-run plus
 	# no-autowrap prose was exactly what dragged the card wide).
-	_blurb.text = PlayerText.respec_blurb(perks.size())
 	# Heal-screen parity, for real this time (heal_screen._refresh's `cant`): ONE local feeds the danger tint AND
 	# the Confirm gate below, so the card can never paint a refusal over a live button. It has to be can_pay, not
 	# `money < cost`: the wallet is CASH-ONLY now, so the old cash-only test reddened the facts line for anyone
@@ -170,7 +169,7 @@ func _refresh() -> void:
 	# fixed-width ("Respec — N zm"); can't-afford just greys it out rather than appending a long "(… — can't
 	# afford)" caption that would be the one string long enough to clip on the fixed-width card.
 	if perks.is_empty():
-		_confirm_btn.text = PlayerText.RESPEC_NOTHING
+		_confirm_btn.text = PlayerText.CONFIRM
 		_confirm_btn.disabled = true
 	else:
 		_confirm_btn.text = PlayerText.respec_button(shown_cost)  # the same all-in number the status line quotes
@@ -212,6 +211,7 @@ func _bind_ui() -> void:
 	# to the card's width instead of forcing the card as wide as the sentence.
 	_blurb = %Blurb
 	MenuStyle.style_hint(_blurb)
+	_blurb.visible = false  # the "what a respec does" explainer is gone; the card is the cost line, the perk list and the button
 
 	_status = %Status  # autowrap authored: cost / zorkmids wrap within the fixed card, never widen it
 	_status.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)

@@ -176,26 +176,35 @@ static func recovery_for(hp: float, max_hp: float, per_hour: float, cap_fraction
 # ---------------------------------------------------------------------------------------------------
 
 ## Why waiting is refused right now, or Block.NONE. The two combat reasons are designer-switchable
-## (GameSettings.wait); the frozen-clock one is not, because it is not a balance call — see below.
+## (GameSettings.wait); the frozen-clock one is not, because it is not a balance call — see refusal_for.
+## This half only gathers the live inputs (the clock, the human player, the `npc` group); the rule is refusal_for.
 func _blocked_reason() -> int:
-	var cfg: WaitSettings = GameSettings.wait
+	var tree := get_tree()
+	return refusal_for(WorldClock.day_length_seconds, Groups.human_player(tree),
+			tree.get_nodes_in_group(Groups.NPC), GameSettings.wait)
+
+
+## Pure: the refusal rule over the inputs _blocked_reason gathers — the world clock's day length, the human
+## player (null when there is none), the NPCs to poll and the wait tuning. Checked in this order: frozen clock,
+## no player, something hunting you, airborne. A static seam so the whole ladder can be driven with stand-in
+## NPCs and a stand-in player: a real Player's _ready can never run in a unit test.
+static func refusal_for(day_length_seconds: float, player: Node, npcs: Array, cfg: WaitSettings) -> int:
 	# ⭐A FROZEN CLOCK MEANS TIME DOES NOT PASS HERE. `WorldClock.day_length_seconds = 0` is the documented way
 	# to pin a level to one hour, and letting T unpin it would quietly break that authoring promise — including
 	# the one the day/night docs make explicitly, that rent never comes due on a frozen level. The guard lives
 	# HERE rather than inside advance_by on purpose: advance_by is the mechanism ("move the clock and emit"),
 	# and whether waiting is legal is policy that belongs to the screen offering it.
-	if WorldClock.day_length_seconds <= 0.0:
+	if day_length_seconds <= 0.0:
 		return Block.CLOCK_FROZEN
-	var p := Groups.human_player(get_tree())
-	if p == null or not is_instance_valid(p):
+	if player == null or not is_instance_valid(player):
 		return Block.NONE
 	if cfg.hostile_awareness_blocks:
-		var snap := StealthStatus.of_player(p, get_tree().get_nodes_in_group(Groups.NPC))
+		var snap := StealthStatus.of_player(player, npcs)
 		if hostile_blocks(int(snap.get(&"level", StealthStatus.Level.HIDDEN))):
 			return Block.HOSTILE
 	# Duck-typed: only a CharacterBody3D has is_on_floor, and a test/no-clip host degrades to "grounded"
 	# rather than a crash (the minimap._update_ground_reference idiom).
-	if cfg.airborne_blocks and p.has_method(&"is_on_floor") and p.call(&"is_on_floor") != true:
+	if cfg.airborne_blocks and player.has_method(&"is_on_floor") and player.call(&"is_on_floor") != true:
 		return Block.AIRBORNE
 	return Block.NONE
 

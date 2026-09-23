@@ -171,10 +171,23 @@ func _make_faction_row(f: Faction) -> Control:
 
 	# Themed meter: neutral track + col-tinted FILL. The old `bar.modulate = col` tinted track, border
 	# and fill alike, which collapsed the fill/track contrast the meter exists to show.
-	var bar := MenuStyle.make_meter(col)
-	bar.min_value = GameSettings.reputation.rep_min
-	bar.max_value = GameSettings.reputation.rep_max
-	bar.value = standing
-	bar.custom_minimum_size.y = 14
-	box.add_child(bar)
+	# CENTRE-ORIGIN: two halves meeting in the middle. One bar spanning rep_min..rep_max drew a +0 standing as a HALF-FULL
+	# bar, which reads as "halfway there" rather than "neither". The left half fills leftward for a negative standing,
+	# the right half rightward for a positive one, so +0 is two empty tracks.
+	var meter := HBoxContainer.new()
+	meter.add_theme_constant_override(&"separation", 2)
+	var neg := MenuStyle.make_meter(col)
+	neg.fill_mode = ProgressBar.FILL_END_TO_BEGIN
+	neg.min_value = 0.0
+	neg.max_value = maxf(-GameSettings.reputation.rep_min, 1.0)
+	neg.value = maxf(-standing, 0.0)
+	var pos := MenuStyle.make_meter(col)
+	pos.min_value = 0.0
+	pos.max_value = maxf(GameSettings.reputation.rep_max, 1.0)
+	pos.value = maxf(standing, 0.0)
+	for half: ProgressBar in [neg, pos]:
+		half.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		half.custom_minimum_size.y = 14
+		meter.add_child(half)
+	box.add_child(meter)
 	return box

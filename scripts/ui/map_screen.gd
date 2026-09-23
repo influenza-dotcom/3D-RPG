@@ -131,8 +131,6 @@ var _input: Control = null        ## full-rect, MOUSE_FILTER_STOP: the ONLY poin
 var _pressing := false            ## a left button is down on the plan
 var _panning := false             ## ...and it has travelled past PAN_DRAG_SLOP_PX, so the release is not a click
 var _press_at := Vector2.ZERO     ## where that press landed, in overlay-local pixels
-## The EMPTY-STATE tutorial, painted over the plan while this level has nothing on it — see _build_map_tutorial.
-var _tutorial: Label = null
 ## --- the floating selection card (code-built into %MapHost — see _build_pin_card) ---
 var _prompt = null                ## the WaypointPrompt editor; untyped for the preload-by-path reason above
 var _card: PanelContainer = null  ## the whole card — hidden whenever nothing is selected
@@ -471,7 +469,6 @@ func _bind_ui() -> void:
 		# tutorial moved onto the plan (see _build_map_tutorial) and the footer kept the one fact it can state in
 		# three words and the one the player genuinely needs down here — this tab is north-up while the corner
 		# box they already know is heading-up.
-		hint.text = PlayerText.MAP_NORTH_UP
 		MenuStyle.style_hint(hint)
 		# ⭐ONE LINE, ALWAYS — this label is the FOOTER's height. style_hint turns autowrap ON, and in the
 		# width the buttons leave over, a wrapped hint's minimum height sets the whole HBox row; the buttons
@@ -506,7 +503,6 @@ func _bind_ui() -> void:
 	# ORDER INSIDE %MapHost, and it is load-bearing twice over: the overlay first (it must be under everything
 	# that wants a click), then the tutorial (mouse-transparent, so it only has to be under the card in DRAW
 	# order), then the card last of all — Godot picks the mouse against the LAST matching child.
-	_build_map_tutorial()
 	_build_pin_card()
 	_build_prompt()
 	_refresh_card()
@@ -596,24 +592,6 @@ func _ink_over_the_plan(l: Label, dim: bool = false) -> void:
 ##
 ## MOUSE_FILTER_IGNORE is non-negotiable: it sits ON the surface whose entire job is receiving clicks, and a
 ## tutorial that ate the click it is teaching would be its own punchline.
-func _build_map_tutorial() -> void:
-	var host := get_node_or_null(^"%MapHost") as Control
-	if host == null:
-		return
-	_tutorial = Label.new()
-	_tutorial.name = &"MapTutorial"
-	_tutorial.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_tutorial.offset_bottom = -TUTORIAL_BOTTOM_PX  # low, clear of the centred %Empty notice — see the const
-	_tutorial.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_tutorial.text = PlayerText.MAP_HINT
-	MenuStyle.style_hint(_tutorial)   # the hint SIZE and wrapping: it floats over a picture, so it may take two lines freely
-	# ...and then the PLAN's ink over style_hint's, at full weight. This is the only thing on screen when it is
-	# up — an empty map with nothing selected — so it is the reader's whole subject, not a footnote.
-	_ink_over_the_plan(_tutorial)
-	_tutorial.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_tutorial.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-	_tutorial.visible = false
-	host.add_child(_tutorial)
 
 ## THE FLOATING PIN CARD: the selected pin's name, note and verbs, overlaid on the map's bottom-left corner
 ## rather than stacked under it. Stacking is what broke this screen (see THE MAP IS THE PAGE) — a details row
@@ -950,7 +928,7 @@ func _place_at(pos: Vector3, select_after: bool) -> void:
 	if select_after:
 		_select(idx)
 	else:
-		_refresh_tutorial()  # the tutorial's "no pins yet" condition just changed; a selection would refresh it, this path must too
+		pass
 
 ## The automatic label for the pin at 1-based ordinal `n` — the name a placement seeds and the one an edit
 ## falls back to when the player clears the field. ONE composition site for both, because it is the one
@@ -1138,7 +1116,6 @@ func _focus_in_card() -> bool:
 ## INHERIT) in turn, and a blanket DISABLED would freeze that authored string out of every translation
 ## forever. The NAME line is player text in every state, so it stays DISABLED from birth.
 func _refresh_card() -> void:
-	_refresh_tutorial()  # FIRST: this function has two early returns, and the tutorial owes an answer on every path
 	if _next_btn != null:
 		_next_btn.disabled = GameState.waypoints_for(GameState.current_level_path).is_empty()
 	if _card == null or _card_name == null or _card_note == null:
@@ -1166,8 +1143,3 @@ func _refresh_card() -> void:
 ##
 ## Driven by _refresh_card rather than polled: those three facts change exactly where the selection and the
 ## ledger do, and _refresh_card is already the one function every such path ends in.
-func _refresh_tutorial() -> void:
-	if _tutorial == null:
-		return
-	_tutorial.visible = _is_open and _selected < 0 \
-			and GameState.waypoints_for(GameState.current_level_path).is_empty()

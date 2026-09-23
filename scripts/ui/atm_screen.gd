@@ -293,13 +293,13 @@ func _refresh() -> void:
 	# rates are the same story: LedgerAccrual posts them globally at dawn with no terminal in scope, so every
 	# terminal advertises the true numbers — the savings rate while solvent, the debt rate while in the red
 	# (the hint swaps whole templates on the account's sign, exactly like the statement above it).
-	_hint.text = PlayerText.atm_hint(GameSettings.economy.bank_noncash_fee_fraction,
-			GameSettings.economy.bank_savings_interest_rate,
-			GameSettings.economy.bank_debt_interest_rate, owed > 0.0)
 	# Deposit doubles as "settle" — the caption is the ONLY difference, selected by the account's sign.
 	_deposit_btn.text = PlayerText.atm_deposit_button(owed > 0.0)
 	_withdraw_btn.text = PlayerText.ATM_WITHDRAW
-	_rail_btn.text = PlayerText.payment_rail_button(GameState.payment_method)
+	# The same "< Credit >" shape as every till's drop-in: bare on a full-width button it read as a heading, not a toggle.
+	var rail_parts := PackedStringArray([String(MenuStyle.skin.cycler_prev_glyph), PlayerText.payment_rail_button(GameState.payment_method), String(MenuStyle.skin.cycler_next_glyph)])
+	var rail_caption := " ".join(rail_parts)  # composed in a local: a glyph join is layout, not copy (the text-debt rule)
+	_rail_btn.text = rail_caption
 	# ⭐THE ENABLE PREDICATE MIRRORS Atm.deposit/withdraw's OWN GUARDS, the MINIMUM included. The component
 	# silently returns 0.0 below bank_min_transaction, and a live button that takes a click and does nothing —
 	# no toast, no hint, and no "denied" clip to borrow — is the worst refusal of the three. Inert while the
@@ -336,6 +336,7 @@ func _bind_ui() -> void:
 
 	_hint = %Hint
 	MenuStyle.style_hint(_hint)
+	_hint.visible = false  # the statement carries the numbers; the paragraph that used to explain them is gone
 
 	_amount_edit = %AmountEdit
 	_amount_edit.placeholder_text = PlayerText.ATM_AMOUNT_PLACEHOLDER

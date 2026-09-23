@@ -165,7 +165,6 @@ func _bind_ui() -> void:
 	# it would paint English into an otherwise localized screen. Disabled in the scene (and on every other
 	# LineEdit this project builds); the keyboard shortcuts it duplicates keep working.
 	_line.max_length = MAX_NAME_LENGTH
-	_line.placeholder_text = PlayerText.CHARACTER_NAME_PLACEHOLDER
 	_line.text_submitted.connect(_on_text_submitted)
 
 	MenuStyle.style_button_row(%Buttons)

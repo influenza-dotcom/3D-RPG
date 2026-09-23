@@ -9,7 +9,7 @@ extends RefCounted
 ##     pad focus — the bench wires focus_entered alongside mouse_entered), built from WeaponModKit.diff so the
 ##     preview can only ever report a change the fold actually produced.
 ##
-## ⭐The labeled stat vocabulary below (STAT_LABELS, the on/off words, the "  ·  " joins) is COMPOSED INSIDE
+## ⭐The labeled stat vocabulary below (STAT_LABELS, the on/off words, the JOIN column gap) is COMPOSED INSIDE
 ## this formatter and is deliberately NOT routed through PlayerText — exactly like ItemInfo._weapon_block's
 ## "Damage / Rate / Range / Headshot" labels. The PlayerText chokepoint is about paint SITES (a label.text, a
 ## toast, a title); a formatter that RETURNS a string to a caller which then paints it is the sanctioned way
@@ -94,9 +94,10 @@ const PERCENT_STATS: Array[StringName] = [
 	&"recoil_recovery",
 ]
 
-## The separator between labeled parts — ItemInfo's exact glyph (U+00B7 with two spaces each side), which is
-## also what compare_block folds overflow rows together with.
-const JOIN := "  ·  "
+## The gap between labeled parts: THREE SPACES, a column gap rather than a glyph. The same gap ItemInfo lays a weapon's
+## stats out with, and what compare_block folds overflow rows together with. It used to be a middle dot with two
+## spaces each side — the machine-formatted separator every other menu had already been cleaned of (2026-09-17).
+const JOIN := "   "
 
 ## BOOL targets have no arithmetic, so they read as a state word. Composed here for the same reason the labels
 ## are (see the header note); kept to one word each so a bool row fits the same column as a number.
@@ -113,8 +114,8 @@ static var _type_probe: WeaponData = null
 
 # --- The part one-liner (fed into ItemInfo._effect_lines) --------------------------------------------------
 
-## `part`'s slot, effects and stat gate as ONE "  ·  "-joined labeled line — "Barrel part  ·  Range +8  ·
-## Spread -25%  ·  Move -4%  ·  Hip Sway +10%". Returns "" for anything that is not a weapon part, so the
+## `part`'s slot, effects and stat gate as ONE JOIN-gapped labeled line — "Barrel part   Range +8   Spread -25%
+## Move -4%   Hip Sway +10%". Returns "" for anything that is not a weapon part, so the
 ## ItemInfo branch can append it unconditionally.
 ##
 ## The SLOT leads because it is the first thing that decides whether the part is any use to you (one part per
@@ -141,7 +142,7 @@ static func part_line(part: Item) -> String:
 	# (the requires_stat idiom) so renaming the stat in resources/stats/gunplay.tres reaches this line; the
 	# stat ID is fixed here because WeaponMod's gate field is (min_gunplay).
 	if mod.min_gunplay > 0:
-		parts.append("needs %s %d" % [StatInfo.title(&"gunplay"), mod.min_gunplay])
+		parts.append("Needs %s %d" % [StatInfo.title(&"gunplay"), mod.min_gunplay])
 	return JOIN.join(parts)
 
 
@@ -180,7 +181,7 @@ static func _delta_text(d: WeaponStatDelta) -> String:
 ## the two lists; if its height tracked the number of changes, the lists above it would re-flow every time the
 ## cursor crossed a row and the card would hop out from under the player mid-transaction. That is the shipped
 ## list-screen bug this shape exists to avoid, and it is why the padding is not an oversight.
-## Overflow past the last body line is FOLDED into it, joined with "  ·  ", so a part that moves eight stats
+## Overflow past the last body line is FOLDED into it, joined with JOIN, so a part that moves eight stats
 ## still reports all eight rather than silently truncating the tail.
 ##
 ## The rows come from WeaponModKit.diff, which measures only the mod-targetable scalars — so the preview can

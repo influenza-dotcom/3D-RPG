@@ -90,7 +90,6 @@ func _ready() -> void:
 	_note.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_note.scroll_fit_content_height = false
 	_note.custom_minimum_size.y = MenuStyle.skin.hint_size * NOTE_ROWS * 2.0
-	_note.placeholder_text = PlayerText.WAYPOINT_NOTE_PLACEHOLDER
 	_note.context_menu_enabled = false
 	_note.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	# FOCUS_CLICK, not the default ALL: a TextEdit consumes every arrow key for its caret, so pad/keyboard

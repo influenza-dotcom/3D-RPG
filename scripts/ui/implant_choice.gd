@@ -67,7 +67,7 @@ signal confirmed(ability_ids: Array, total_cost: float)
 signal cancelled
 
 var _begin_btn: Button            ## the PINNED confirm; never gated — an empty cart is a legal (debt-free) start
-var _chip_list: VBoxContainer     ## the authored container the roster rows are code-built into
+var _chip_list: GridContainer     ## the authored three-column grid the roster rows are code-built into
 var _rows: Array[Button] = []     ## independent toggle rows, each carrying "ability_id" + "price" metas (tests drive these)
 var _tally: Label                 ## the PINNED footer: running bill + resulting starting balance (danger-tinted in debt)
 var _hint: Label                  ## the standing on-credit explainer (no build data — that's %Verdict's job)
@@ -83,7 +83,7 @@ func _ready() -> void:
 	MenuStyle.apply(self)  # shared menu Theme + button sounds
 	_compute_credit()  # score the (possibly absent) build BEFORE binding — _bind_ui paints the verdict line
 	_bind_ui()
-	_refresh_tally()  # boots at "bill: 0 · balance: base · credit left: full" — nothing checked yet
+	_refresh_tally()  # boots at a zero bill, the base balance and the full credit line — nothing checked yet
 	_seed_focus()     # AFTER the tally, which is what decides which rows are still affordable (and focusable)
 
 ## Seed pad/keyboard focus on the first roster row — the implants_screen / chip_install_screen idiom. Runs at
@@ -171,7 +171,7 @@ func _bind_ui() -> void:
 
 	_hint = %Hint
 	MenuStyle.style_hint(_hint)
-	_hint.text = PlayerText.IMPLANT_CHOICE_HINT  # the standing explainer; the build-specific verdict is below it
+	_hint.visible = false  # no standing explainer — the verdict + filed reason below are the whole preamble
 	# The Ledger's verdict + the one filed reason. Hint-styled like the line above so the three read as one
 	# block; _paint_credit_hint then tints the verdict (gold while it lends, danger when it declines).
 	_verdict = %Verdict
@@ -215,8 +215,9 @@ func _build_rows() -> void:
 	_rows.clear()
 	for item: Item in _chip_roster():
 		var price: float = snappedf(_price_of(item), Zorkmids.QUANTUM)
-		var row := _make_row(item.label(), AbilityRegistry.display_name_for(item.installs_ability),
-				Zorkmids.money_text(price))
+		# No ability column: "Air-Dash Chip ... Air Dash" said the same thing twice on every row and cost the roster
+		# the width that now lets it sit in three columns with no scrollbar. The ability is in the hover tip.
+		var row := _make_row(item.label(), "", Zorkmids.money_text(price))
 		row.set_meta("ability_id", item.installs_ability)
 		row.set_meta("price", price)
 		row.toggled.connect(_on_row_toggled)

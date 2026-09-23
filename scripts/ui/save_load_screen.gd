@@ -36,6 +36,9 @@ signal closed
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## for the shared player_alive mid-death gate
 
 const QUICKSAVE_SLOT := 0    ## row key for the quicksave (real slots are 1..GameState.SLOT_COUNT; 0 never collides)
+## The Save / Load cell width. NOT the skin's 160px dialog-button width: two of those beside a 110px slot name left the
+## caption — the level and time, the only thing telling saves apart — about 90px, and it read "Headshot ...".
+const RAIL_CELL_WIDTH := 84.0
 const ROW_LABEL_WIDTH := 110 ## px floor for the slot-name column so every row's metadata starts on one rail (layout, not text)
 
 var _root: Control
@@ -147,7 +150,7 @@ static func slot_metadata(path: String) -> Dictionary:
 			if dn is String:
 				level_name = dn
 	var mtime := FileAccess.get_modified_time(path)
-	var time_text := Time.get_datetime_string_from_unix_time(mtime, true) if mtime > 0 else ""
+	var time_text := Time.get_datetime_string_from_unix_time(mtime, true).left(16) if mtime > 0 else ""  # minutes, no seconds
 	return {"exists": true, "level_name": level_name, "time_text": time_text}
 
 # ---------------------------------------------------------------------------------------------------
@@ -214,7 +217,7 @@ func _bind_ui() -> void:
 	confirm_title.text = MenuStyle.title_text(PlayerText.SAVE_LOAD_OVERWRITE_TITLE)
 	MenuStyle.style_button_row(%ConfirmRow)
 	var confirm_btn: Button = %ConfirmButton
-	confirm_btn.text = PlayerText.CONFIRM
+	confirm_btn.text = PlayerText.SAVE_LOAD_OVERWRITE
 	confirm_btn.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)
 	confirm_btn.pressed.connect(_on_confirm_overwrite)
 	# An overwrite can still FAIL (a refused disk write), so the commit cue lives in _do_save's success tail —
@@ -304,7 +307,7 @@ func _add_row(slot: int, label_text: String, path: String) -> void:
 ## Returns the Button it built (null for a spacer) so the caller can re-point or MUTE its sound — the row's
 ## sound depends on the row's disk state, which only _add_row knows.
 func _add_rail_cell(row: HBoxContainer, caption: String, cb: Callable, present: bool) -> Button:
-	var w := float(MenuStyle.skin.dialog_button_min_width)
+	var w := RAIL_CELL_WIDTH
 	if not present:
 		var spacer := Control.new()
 		spacer.custom_minimum_size.x = w

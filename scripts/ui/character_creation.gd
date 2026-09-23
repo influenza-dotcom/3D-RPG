@@ -71,6 +71,11 @@ const STAT_MAX := StatBudget.STAT_MAX
 ## here would silently drop a stat from the builder); the value labels/steppers are keyed by these.
 const STATS: Array[StringName] = CharacterStats.STAT_NAMES
 
+## Names the field opens filled with (one picked at random per open). Player DATA, never copy: the pick is what
+## the run is called if the player never touches the field, and a cleared field falls back to it. The screen
+## therefore never has to gate Begin on a name or explain that a name is required.
+const SEED_NAMES: PackedStringArray = ["Ash", "Kit", "Rook", "Vale", "Nico", "Sable", "Jude", "Wren", "Cass", "Rae", "Tam", "Lux"]
+
 var _name_edit: LineEdit
 var _pad_kb: PanelContainer = null  ## the pad on-screen keyboard (pad_keyboard.gd), built in _ready, hidden until A on the name field
 var _budget: StatBudget                ## the zero-sum allocator (pure; see stat_budget.gd) — the widgets mirror it
@@ -79,8 +84,8 @@ var _name_labels: Dictionary = {}     ## stat -> Label (the name cell; its hover
 var _plus_buttons: Dictionary = {}    ## stat -> Button (disabled when no spare points OR the stat is at STAT_MAX)
 var _minus_buttons: Dictionary = {}   ## stat -> Button (disabled when the stat is at STAT_MIN)
 var _points_label: Label
-var _begin_btn: Button                 ## the PINNED confirm button; gated OFF until the name is non-blank (a run must be named)
-var _name_hint: Label                  ## the "name required" line under the name field; visible only while the name is blank
+var _begin_btn: Button                 ## the PINNED confirm button; always live — a blank field falls back to the seeded name
+var _seed_name: String = ""            ## the name the field opened with (a random pick from SEED_NAMES); Begin's fallback for a cleared field
 
 # --- Appearance (the "Look" tab) ------------------------------------------------------------------------------
 var _catalog: CharacterAppearanceCatalog
@@ -124,7 +129,7 @@ func _ready() -> void:
 	_bind_ui()
 	_refresh()
 	_refresh_look()
-	_refresh_begin()  # initial state: the name starts blank, so Begin boots DISABLED and the "name required" hint shows
+	_refresh_begin()
 	_sync_previews()  # initial tab is Stats -> both 3D previews start inactive (nothing rendering off-screen)
 
 ## Seed the appearance from the catalog defaults (the shipped look). The pickers edit this dict in place; Begin
@@ -164,24 +169,24 @@ func _bind_ui() -> void:
 	# by Godot's automatic Control-text translation (atr), so the field opts out wholesale. Both opt-outs are
 	# AUTHORED in the scene (auto_translate_mode = Disabled + context_menu_enabled = false, the engine
 	# right-click menu being untranslatable English — the name_entry_dialog.tscn idiom); the scene test pins them.
-	_name_edit.placeholder_text = PlayerText.CHARACTER_NAME_PLACEHOLDER
 	_name_edit.max_length = NAME_MAX_LENGTH
-
-	# A run MUST be named before it can begin. This hint sits under the name field and shows only while the name is
-	# blank; the Begin button below is gated OFF in lockstep (see _refresh_begin). Both react to text_changed and
-	# use strip_edges(), so a whitespace-only entry still counts as unnamed.
-	# The hint stays `visible` FOREVER and is hidden by ALPHA (self_modulate) instead: a VBox drops a hidden child
-	# from layout, so a visible-toggle made the separator + the whole tab block jump up ~a hint-line on the FIRST
-	# keystroke of every New Game (and back down when the name cleared). Alpha keeps the line's space reserved.
-	_name_hint = %NameHint
-	MenuStyle.style_hint(_name_hint)
-	_name_hint.text = PlayerText.CHARACTER_CREATE_NAME_REQUIRED
+	# The field opens FILLED with a seeded name (see SEED_NAMES), so Begin is live from the first frame and the
+	# screen carries no "name required" line. Selected on focus so one keystroke replaces it.
+	_seed_name = SEED_NAMES[randi() % SEED_NAMES.size()]
+	_name_edit.text = _seed_name
+	_name_edit.select_all_on_focus = true
 	_name_edit.text_changed.connect(_on_name_changed)
 	# A pad has no way to type: A (ui_accept) on the focused name field opens a small on-screen keyboard. Added
 	# LAST so its _input runs before this screen's (ui_cancel closes the keyboard, not the screen). Runtime
 	# load(): pad_keyboard.gd names PlayerText, and a const preload here would be one more parse-time edge.
 	_pad_kb = load("res://scripts/ui/pad_keyboard.gd").new()
 	_pad_kb.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	# Grow UP and out from the bottom-centre anchor. The preset leaves grow_vertical at END, so the keyboard's
+	# minimum height hung DOWN off the bottom of the screen and the Space / Delete / Done row was never visible.
+	_pad_kb.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_pad_kb.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_pad_kb.offset_top = -8.0
+	_pad_kb.offset_bottom = -8.0
 	add_child(_pad_kb)
 
 	# --- Tabs: Stats | Look | Shirt (authored EXPAND_FILL to fill the slack between name and the pinned
@@ -219,37 +224,16 @@ func _bind_ui() -> void:
 	MenuStyle.set_button_sound(_begin_btn, &"")
 	_begin_btn.pressed.connect(_on_begin)
 
-## The "Stats" tab: the spare-points banner + the one-line rule, then the zero-sum stat grid in an authored
-## SCROLL region (vertical-only, so a tall list never buries the pinned buttons). The stepper rows are DYNAMIC
+## The "Stats" tab: the spare-points banner, then the zero-sum stat grid (two stats per row, so the six fit
+## without scrolling; the authored scroll host only ever scrolls if a locale's row heights overflow). The stepper rows are DYNAMIC
 ## (one per CharacterStats.STAT_NAMES entry) and stay code-built into the authored 4-column %StatGrid.
 func _bind_stats_tab() -> void:
 	_points_label = %PointsLabel
 	_points_label.add_theme_color_override(&"font_color", MenuStyle.gold())
 
-	# THE ZERO-SUM RULE, one line, directly under the points banner. Without it this tab reads as BROKEN on the
-	# very first screen of a new game: every stat sits at 0, the banner says "Points to spend: 0", and every "+"
-	# is painted disabled — and nothing anywhere admits that pressing "−" on ANOTHER stat is what funds one. This
-	# line is the only thing on the screen that teaches the mechanic; the per-stat hover tip below answers the
-	# different question of what a stat DOES (and a pad never sees it at all).
-	# CODE-BUILT and inserted between the two authored children (banner, then the stat scroll): the scene owns
-	# STRUCTURE and carries no text, and a label whose entire job is to hang one PlayerText const is chrome this
-	# script owns — the same split every other dynamic row on this screen already follows.
-	# ⭐NOT make_hint, which autowraps: a wrapping label OWNS ITS ROW'S HEIGHT, so a second line would push the
-	# stat list down AND grow the Stats page's minimum — the menus-must-not-resize-with-text failure that
-	# SHIRT_PAGE_HEIGHT_BUDGET above exists to police. Clipped to ONE line instead (cap_label also drops its
-	# horizontal minimum to ~0, so an l10n'd line can never widen the card), which is why the const itself is
-	# marked one-line-only in PlayerText.
-	var rule := MenuStyle.cap_label(Label.new())
-	MenuStyle.style_hint(rule)  # dim footnote ink at hint size — the gold belongs to the banner above it
-	rule.autowrap_mode = TextServer.AUTOWRAP_OFF  # style_hint switches wrapping ON; see the one-line rule above
-	rule.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER  # centred under the centred banner
-	rule.text = PlayerText.CHARACTER_CREATE_STAT_RULE
-	var stats_tab: VBoxContainer = %StatsTab
-	stats_tab.add_child(rule)
-	stats_tab.move_child(rule, _points_label.get_index() + 1)  # between the banner and the authored %StatScroll
-
-	# Columns (authored: columns = 4): name | − | value | +. The name column is the EXPAND_FILL rail, so
-	# the stepper cluster right-aligns against the panel edge (the options-row label-left/control-right
+	# Columns (authored: columns = 8): TWO stat rows per grid row — name | − | value | + | name | − | value | + —
+	# so all six stats sit on three rows and the tab needs no scroll region. Each name column is an EXPAND_FILL
+	# rail, so both stepper clusters right-align inside their half (the options-row label-left/control-right
 	# idiom). No effect column and no PER-STAT prose: what a stat does lives in the hover tip on its
 	# name/value (see _stat_tip — the CK3-style breakdown), never inline in a row. (The rule line above is
 	# not an exception — it names the ALLOCATOR's mechanic, which belongs to the tab, not to any one stat.)
@@ -909,7 +893,10 @@ func _refresh() -> void:
 ## actually doing (the live derived effect line). Both halves are the same derived surfaces the in-game
 ## Stats screen uses — never fresh prose (the effect-tooltips-derived rule).
 func _stat_tip(stat: StringName, value: int) -> String:
-	return StatInfo.blurb(stat) + "\n" + _effect_for(stat, value)
+	var b := StatInfo.blurb(stat)
+	if b.strip_edges().is_empty():
+		return _effect_for(stat, value)  # no authored blurb (all ship blank): never lead the tip with an empty line
+	return b + "\n" + _effect_for(stat, value)
 
 ## This one stat's live effect string — a throwaway sheet with only this stat set, run through the SAME StatInfo
 ## formatter the in-game Stats screen uses (so the wording never drifts). No baseline special case: at 0 the
@@ -990,27 +977,19 @@ func _on_back() -> void:
 func _on_name_changed(_new_text: String) -> void:
 	_refresh_begin()
 
-## Gate Begin on a NON-BLANK name (a run must be named). strip_edges() so a whitespace-only entry still counts as
-## unnamed. Mirrors the stepper .disabled idiom — the button's own disabled state is the visible "can't progress
-## yet" signal, backed by the "name required" hint. The _on_begin emit-guard is the belt-and-suspenders backstop.
+## Begin is ALWAYS live: a cleared field falls back to the seeded name at commit (_on_begin), so nothing here
+## has to gate on the text. Kept as the one place the button's state is (re)asserted after a name edit.
 func _refresh_begin() -> void:
-	var named := not _name_edit.text.strip_edges().is_empty()
 	if _begin_btn != null:
-		_begin_btn.disabled = not named
-	if _name_hint != null:
-		# Alpha, not `visible`: the hint must KEEP its layout slot or the tabs below jump on the first keystroke.
-		_name_hint.self_modulate.a = 0.0 if named else 1.0
+		_begin_btn.disabled = false
 
 ## Confirm: hand the chosen name (trimmed) + a fresh {stat -> int} dict + the appearance dict to StartMenu, which
-## writes them onto GameState and boots the game. REFUSES a blank name outright — Begin is already disabled while
-## unnamed, but this backstops any other trigger (a programmatic press, a future keyboard shortcut) so a nameless
-## run can never reach GameState; on refusal it focuses the field and re-asserts the gate.
+## writes them onto GameState and boots the game. A BLANK field (the player cleared the seed and typed nothing)
+## falls back to the seeded name, so a run can never reach GameState unnamed and Begin never has to refuse.
 func _on_begin() -> void:
 	var character_name := _name_edit.text.strip_edges()
 	if character_name.is_empty():
-		_name_edit.grab_focus()
-		_refresh_begin()
-		return
+		character_name = _seed_name
 	var appearance := _appearance.duplicate()
 	# Emit the drawn shirt as SAVE-FRIENDLY PNG bytes (never the live ImageTexture the canvas holds — the config
 	# can't serialise a Texture); drop the key entirely if the player didn't paint one (keep their base shirt).

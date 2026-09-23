@@ -262,8 +262,7 @@ func _reseat_focus(prev_idx: int) -> void:
 ## Rows for the INSTALLED section: one TOGGLE row per implant — the AUTHORED ability name leads in the accent,
 ## the chip that carries it dimmed on the right (chips share one model — the name is the differentiator).
 ## Pressed (accent bar + fill, the theme's persistent `pressed` stylebox) = switched ON; an OFF implant's
-## caption dims to 40% (the implant_choice broke-row look). Clicking flips it live (_on_row_toggled). A dim
-## hint under the rows teaches the verb.
+## caption dims to 40% (the implant_choice broke-row look). Clicking flips it live (_on_row_toggled).
 func _installed_rows() -> Array:
 	var rows: Array = []
 	var chip_by_ability := _chip_by_ability()
@@ -271,20 +270,14 @@ func _installed_rows() -> Array:
 		var chip: Item = chip_by_ability.get(id)
 		var chip_name := chip.label() if chip != null else ""
 		rows.append(_make_toggle_row(id, AbilityRegistry.display_name_for(id), chip_name, _player.has_mechanic(id)))
-	if not rows.is_empty():
-		rows.append(MenuStyle.make_hint(PlayerText.IMPLANTS_TOGGLE_HINT))
 	return rows
 
 ## Rows for the CARRIED section: the chip's item label leads (that's what sits in the bag), the ability it
-## would install right-aligned in the accent (the implant_choice column layout), and a dim "get it fitted"
-## hint under the rows — the one actionable fact this section can teach (unlike the INSTALLED rows above,
-## a carried chip has nothing to toggle: it isn't fitted yet).
+## would install right-aligned in the accent (the implant_choice column layout).
 func _carried_rows() -> Array:
 	var rows: Array = []
 	for item in carried_chips(_player):
 		rows.append(_make_row(item.label(), MenuStyle.text_color(), AbilityRegistry.display_name_for(item.installs_ability), MenuStyle.accent()))
-	if not rows.is_empty():
-		rows.append(MenuStyle.make_hint(PlayerText.IMPLANTS_CARRIED_HINT))
 	return rows
 
 ## One section: a heading (cased by the single casing seam + header-sized, the chip-install heading idiom)

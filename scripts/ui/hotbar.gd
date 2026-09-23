@@ -156,7 +156,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	# and to a variable-zoom scope's magnification dial while those weapons are AIMED (they own the wheel
 	# then), explicitly rather than relying on which _unhandled_input runs first.
 	if event.is_action_pressed(InputManager.action_hotbar_next) or event.is_action_pressed(InputManager.action_hotbar_prev):
-		if not _spray_owns_wheel() and not _scope_owns_wheel(event):
+		if not _spray_owns_wheel() and not _scope_owns_wheel(event) and not _third_person_owns_wheel(event):
 			_wake()  # scrolling the bar wakes it even if it lands on the same weapon
 			_cycle(1 if event.is_action_pressed(InputManager.action_hotbar_next) else -1)
 			get_viewport().set_input_as_handled()
@@ -193,6 +193,24 @@ func _scope_owns_wheel(event: InputEvent) -> bool:
 	if ws == null:
 		return false
 	return ScopeIn.wheel_owns_scope_zoom(ws.attack)
+
+## True while the view is pulled out to THIRD person: the wheel then moves the CAMERA in and out
+## (ThirdPersonCamera.owns_wheel) instead of switching weapons. The third owner of this wheel, declared the same
+## explicit way as the two above rather than left to `_unhandled_input` ordering.
+##
+## The weapon slots stay on their number keys throughout, so this costs the CYCLE, not the ability to switch
+## weapons. And it can never fight the other two owners: both of those require AIMING, and aiming takes the view
+## back to first person, where this predicate is false by construction.
+##
+## Yields ONLY for a real wheel notch, the `_scope_owns_wheel` rule: Hotbar Next/Prev are rebindable, and a
+## rebound KEY has no camera-distance meaning — yielding it would leave that key silently dead in third person.
+func _third_person_owns_wheel(event: InputEvent) -> bool:
+	if not (event is InputEventMouseButton):
+		return false
+	if _player == null or not is_instance_valid(_player.head):
+		return false
+	var arm := _player.head.camera_arm
+	return arm != null and arm.owns_wheel(event)
 
 ## Step the equipped weapon to the next/previous OCCUPIED weapon slot (wrapping). From bare fists, wheel
 ## down starts at the first weapon and wheel up at the last. A single carried weapon has nowhere to go.
@@ -419,7 +437,7 @@ func _refresh_display() -> void:
 			_slot_counts[i].text = ""
 			_slot_names[i].add_theme_color_override(&"font_color", GameSettings.hud.hotbar_empty_color)
 			continue
-		_slot_names[i].text = PlayerText.display(it.label())  # full name, [PH] scrubbed by hand (atr opt-out) — clip_text + the ellipsis trim handle overflow
+		_slot_names[i].text = PlayerText.display(Localization.t(it.label()))  # full name: an item's authored display_name is a catalog msgid (atr opt-out, so resolve it by hand), then [PH] scrubbed — clip_text + the ellipsis trim handle overflow
 		# Gold "in hand / drawn" tint: the equipped weapon's slot OR the holdable prop currently pulled into your hands.
 		var active := (inv != null and _is_equipped_kind(it, inv)) or (it == held)
 		_slot_names[i].add_theme_color_override(&"font_color",

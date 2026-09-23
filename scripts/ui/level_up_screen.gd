@@ -158,7 +158,7 @@ func _rebuild() -> void:
 		# SERVE THE TERMS (the RentCollector notice doctrine). GameState.payment_method is GLOBAL persisted run
 		# state, so the player may have armed CREDIT at an ATM and walked in here; without a word, the selector
 		# has simply vanished and rows they could afford a minute ago are dim. Say why, once, in its place.
-		_credit_notice.visible = not takes_credit or barred
+		_credit_notice.visible = barred  # only the shut counter earns a sentence; a cash-only station just prices in cash
 		if _credit_notice.visible:
 			_credit_notice.text = PlayerText.level_up_no_credit(barred, GameState.account > 0.0)
 	# Cost is FLAT (Dark Souls) — the same for every stat at a given total level — so each row shows the identical
@@ -216,7 +216,6 @@ func _rebuild() -> void:
 		cols.modulate.a = 1.0 if affordable else 0.4  # dim the whole row when you can't afford it
 		cols.add_child(_stat_col(StatInfo.title(stat), float(MenuStyle.skin.stat_name_col_width), HORIZONTAL_ALIGNMENT_LEFT))    # name (authored StatText title; English-measured skin budget)
 		cols.add_child(_stat_col(str(s.get_stat(stat)), 22, HORIZONTAL_ALIGNMENT_LEFT))  # current value
-		cols.add_child(_stat_col("+1", 20, HORIZONTAL_ALIGNMENT_LEFT))                   # the increment
 		# Paint the ALL-IN number (_player.charge_total — the SAME formula the station's player.charge() debits): a
 		# rail-funded raise carries the account's service charge, so the sticker price alone would under-quote what
 		# actually leaves the player (the shop_screen pattern). The affordability gate above stays on the RAW cost —
@@ -269,9 +268,8 @@ func _rebuild_perks() -> void:
 		_perks.visible = false
 		return
 	_perks.visible = true
-	# The stats/perks divider lives INSIDE _perks (rebuilt with the rows) so it appears and disappears WITH
-	# the section — a perk-less station previously left this hairline orphaned under the stat list.
-	_perks.add_child(MenuStyle.make_separator())
+	# No hairline over the section: the accent "Perks  N points" header already divides it from the stat rows, and the
+	# separator's height was what tipped a two-perk station into a scrollbar.
 	var pm: PerkManager = _player_perk_manager()
 	var points: int = pm.skill_points if pm != null else 0
 	var head := Label.new()

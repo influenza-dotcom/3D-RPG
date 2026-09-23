@@ -116,6 +116,7 @@ func _bind_ui() -> void:
 	_scroll_hint = %ScrollHint
 	MenuStyle.style_hint(_scroll_hint)
 	_scroll_hint.text = _terms.scroll_hint_unread
+	_scroll_hint.visible = _has_scroll_hint()  # blank by default: an empty footnote row would still cost the body its height
 
 	# --- Decline / Agree (PINNED below the scroll — always visible) ---
 	# Skin-driven dialog row: shared separation + the skin's dialog button width floor, applied here so the pair
@@ -164,6 +165,11 @@ func _update_scroll_state() -> void:
 	_agree_btn.disabled = not at_end
 	if _scroll_hint != null:
 		_scroll_hint.text = _terms.scroll_hint_read if at_end else _terms.scroll_hint_unread
+		_scroll_hint.visible = _has_scroll_hint()
+
+## Whether the document authors ANY scroll footnote text (both strings ship blank).
+func _has_scroll_hint() -> bool:
+	return not (_terms.scroll_hint_unread.strip_edges().is_empty() and _terms.scroll_hint_read.strip_edges().is_empty())
 
 ## The decline nag: a dim + centered dialog raised over the agreement — just the two choices, no prompt text. Back
 ## hides it, Quit leaves the game. Its only purpose is to make clear there is no path forward but consent — while
@@ -174,6 +180,14 @@ func _bind_nag() -> void:
 	MenuStyle.style_dim(%NagDim)
 	MenuStyle.style_compact_card(%NagCard)  # fixed-width card + skin.compact_panel (too short for the screen-card art)
 	MenuStyle.style_button_row(%NagButtons)
+	# The card's question, code-built above the buttons (the quit / overwrite confirms' title idiom).
+	var nag_title := MenuStyle.cap_label(Label.new())
+	MenuStyle.style_title(nag_title)
+	nag_title.text = MenuStyle.title_text(_terms.decline_title)
+	nag_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	nag_title.visible = not _terms.decline_title.strip_edges().is_empty()
+	(%NagCard as VBoxContainer).add_child(nag_title)
+	(%NagCard as VBoxContainer).move_child(nag_title, 0)
 
 	var back: Button = %BackButton
 	back.text = _terms.reconsider_label

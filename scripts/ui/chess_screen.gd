@@ -244,7 +244,7 @@ func _submit_move() -> void:
 		# Enter it is the only sound the keystroke makes.)
 		MenuStyle.play_denied()
 		_error_hint = true
-		_hint.text = PlayerText.chess_illegal_move(text)
+		_hint.text = PlayerText.display(PlayerText.chess_illegal_move(text))  # this label opts out of atr, so scrub the marker here
 		_hint.add_theme_color_override(&"font_color", MenuStyle.danger())
 		return
 	_apply_and_log(m)
@@ -414,7 +414,7 @@ func _rebuild_log() -> void:
 	# a non-translatable separator out of the `.text =` idiom the PlayerText ratchet scans, WITHOUT loosening that
 	# scanner (a lookahead that ignored `"…".method()` would also stop catching a real `.text = "Score: {n}".format(…)`).
 	var body := "\n".join(lines) if not lines.is_empty() else PlayerText.CHESS_NO_MOVES
-	_log.text = body
+	_log.text = PlayerText.display(body)  # the log opts out of atr (player-typed moves), so the empty-state marker is scrubbed here
 	# Follow the tail so the newest move is always visible.
 	_log.scroll_to_line.call_deferred(maxi(0, _log.get_line_count() - 1))
 
@@ -446,12 +446,9 @@ func _rebuild_board() -> void:
 				base = base.lerp(LAST_MOVE_TINT, LAST_MOVE_TINT.a)  # tint the last move's squares
 			(_cell_panels[idx] as Panel).add_theme_stylebox_override(&"panel", _cell_style(base))
 
+## The hint row at rest is EMPTY: it exists for the illegal-move error only. The old input coaching (type e2e4, Enter to play, Esc to leave) is what the field's placeholder and the Move button already say.
 func _default_hint() -> String:
-	if _finished:
-		return ""  # game over needs no "Esc leaves" coaching — Esc closes every screen in the game
-	if _has_board:
-		return PlayerText.CHESS_INPUT_HINT
-	return PlayerText.CHESS_BLINDFOLD_HINT
+	return ""
 
 # ---------------------------------------------------------------------------------------------------
 # UI binding (the layout is AUTHORED in scenes/ui/chess_screen.tscn — this adopts it)
@@ -500,7 +497,8 @@ func _bind_ui() -> void:
 	eye.add_theme_color_override(&"font_color", MenuStyle.dim_color())
 	var sub: Label = %BlindfoldHint
 	MenuStyle.style_hint(sub)
-	sub.text = PlayerText.CHESS_NO_BOARD_HINT
+	sub.text = PlayerText.display(PlayerText.CHESS_NO_BOARD_HINT)
+	sub.visible = false  # the badge says it; how to buy the board is not this screen's business
 
 	var log_head: Label = %LogHeading
 	log_head.text = PlayerText.CHESS_MOVES_HEADING
@@ -509,7 +507,7 @@ func _bind_ui() -> void:
 	_log = %Log
 
 	_move_input = %MoveInput
-	_move_input.placeholder_text = PlayerText.CHESS_MOVE_PLACEHOLDER
+	_move_input.placeholder_text = PlayerText.display(PlayerText.CHESS_MOVE_PLACEHOLDER)
 	_move_input.text_submitted.connect(func(_t: String) -> void: _submit_move())
 	_move_input.text_changed.connect(func(_t: String) -> void: _clear_error_hint())
 	_move_btn = %MoveButton

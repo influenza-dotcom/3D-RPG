@@ -247,8 +247,8 @@ func _current_stat_signature(s: CharacterStats) -> String:
 		sig += "%s:%d:%s|" % [String(stat), s.get_stat(stat), _stat_num(_stat_modifier(stat))]
 	return sig
 
-## One stat block (one 2-column-grid cell): a bright "Title — value" header line, then the dim what-it-does
-## blurb and the live effect.
+## One stat block (one 2-column-grid cell): the bright "Title   value" header line, with the blurb and the live
+## effect in its hover tip.
 func _make_stat_row(stat: StringName, s: CharacterStats) -> Control:
 	var box := VBoxContainer.new()
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # each cell claims half the grid's width so the two columns split evenly
@@ -259,15 +259,9 @@ func _make_stat_row(stat: StringName, s: CharacterStats) -> Control:
 	head.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
 	head.add_theme_color_override(&"font_color", MenuStyle.accent())
 	box.add_child(head)
-	var blurb_text := StatInfo.blurb(stat)
-	if not blurb_text.is_empty():  # an unauthored blurb (StatText prose is optional) adds no blank line
-		var blurb := MenuStyle.make_hint(blurb_text)  # make_hint autowraps — long blurbs reflow to the cell width
-		box.add_child(blurb)
-	var effect := Label.new()
-	effect.text = PlayerText.stat_now(StatInfo._effect(stat, s, bonus))
-	# Wrap like the blurb: a long two-part effect ("rep gains +10%, penalties -5%") must collapse its min-width
-	# to the ~180px grid cell instead of forcing the whole grid wider than the scroll (h-scroll is disabled).
-	effect.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	effect.add_theme_color_override(&"font_color", MenuStyle.gold())
-	box.add_child(effect)
+	# ⭐ONE LINE PER STAT. The block used to stack the blurb and a gold "Now: +0% melee, +0 carry, +0 max HP" line
+	# under every header, which made six stats overflow a 179px body and put a scrollbar on a six-item sheet. The
+	# breakdown is still one hover away (StatInfo.tooltip carries the blurb AND the live "Now:" line), which is
+	# where a sheet that is read at a glance keeps its detail.
+	MenuStyle.attach_tip(head, StatInfo.tooltip(stat, s))
 	return box

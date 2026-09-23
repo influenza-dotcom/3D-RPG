@@ -36,7 +36,7 @@ var _ph_translation: Translation = null  ## the registered scrub; added in _ente
 func _enter_tree() -> void:
 	if _ph_translation == null:
 		_ph_translation = load(PLACEHOLDER_TRANSLATION_PATH).new()
-		TranslationServer.add_translation(_ph_translation)
+		_add_scrub_first()
 
 ## ⭐The scrub must LEAVE the TranslationServer before the script system shuts down. The server is a core
 ## singleton torn down after GDScript is; a script-backed Translation still registered there is destroyed with
@@ -54,6 +54,30 @@ func _unregister_scrub() -> void:
 	if _ph_translation != null:
 		TranslationServer.remove_translation(_ph_translation)
 		_ph_translation = null
+
+## Re-key the scrub to the ACTIVE locale (Localization.apply calls this after TranslationServer.set_locale).
+## The server matches a Translation by its `locale` field, so a scrub still keyed to the boot locale would go
+## silent — and paint "[PH]" — the moment the player picks another language in Options → Game → Language.
+## Remove-then-add rather than assigning `locale` in place: the server indexes the entry at add time.
+## Runs even when the locale is unchanged, so a catalog added since boot is pushed back BEHIND the scrub.
+func relocate_scrub() -> void:
+	if _ph_translation == null:
+		return
+	TranslationServer.remove_translation(_ph_translation)
+	_ph_translation.locale = TranslationServer.get_locale()
+	_add_scrub_first()
+
+## ⭐The scrub must be the FIRST translation registered: the server answers with the first catalog of the
+## locale that has the msgid (engine-probed 4.7.2), so a real catalog registered ahead of it — Project
+## Settings catalogs load before any autoload — that carried a "[PH]" line would paint that line instead of
+## the scrubbed source. Every other translation is lifted off and re-added behind it, in its original order.
+func _add_scrub_first() -> void:
+	var others := TranslationServer.get_translations()
+	for t in others:
+		TranslationServer.remove_translation(t)
+	TranslationServer.add_translation(_ph_translation)
+	for t in others:
+		TranslationServer.add_translation(t)
 ## The IN-GAME HUD's artist skin (the MenuSkin twin for gameplay-time paint: combat indicators,
 ## compass/minimap tints, crosshair art, HUD label chrome). Consumers read MenuStyle.hud.<field>;
 ## swap it at runtime via set_hud_skin. Gameplay-TUNING numbers stay on GameSettings.hud — this is

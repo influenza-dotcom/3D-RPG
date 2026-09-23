@@ -8,7 +8,10 @@ extends RefCounted
 ## trinket's passive buff, a chip's installed ability, and a prop's hold/throw. Item `description`s ship blank (the
 ## Steam AI-text scrub — no authored prose), so these GENERATED, purely-mechanical lines are what speak. Functional
 ## labels, unmarked — the "labeled language" the retired ItemRow row formatter once shared with this composer.
-## LOCALIZATION NOTE: the composer still joins English-shaped fragments ("  ·  ", labeled parts) — a recorded
+## ⭐NO MIDDLE DOTS, NO BRACKETED ASIDES (2026-09-17). Stats sit in columns three spaces apart (WeaponModInfo.JOIN)
+## and a clause's own sub-parts join with commas; "(2 spare)", "On hit (50%)", a raw caliber id and
+## the dotted hold/throw line were the machine-formatted tells the menus had already been cleaned of.
+## LOCALIZATION NOTE: the composer still joins English-shaped fragments (column gaps, labeled parts) — a recorded
 ## deferred gap (CURRENT_ARCHITECTURE → Localization Readiness) pending a target language. What IS wired: numbers
 ## through TextFormat.num, money through Zorkmids.money_text, ability names through AbilityRegistry.
 
@@ -16,7 +19,8 @@ extends RefCounted
 const AbilityRegistry := preload("res://scripts/components/abilities/ability_registry.gd")
 
 ## A multi-line tooltip for `item`. `holder` (the bag the row belongs to) adds a weapon's spare-ammo readout; null skips it.
-static func tooltip(item: Item, holder: CharacterInventory = null) -> String:
+## `show_value` false drops the list value from the weight line — the shop, whose price line quotes the real deal.
+static func tooltip(item: Item, holder: CharacterInventory = null, show_value: bool = true) -> String:
 	if item == null:
 		return ""
 	var lines: Array[String] = [item.label()]
@@ -26,16 +30,16 @@ static func tooltip(item: Item, holder: CharacterInventory = null) -> String:
 		lines.append(_weapon_block(item.weapon, holder))
 	elif item.is_consumable() and item.heal_amount > 0.0:
 		lines.append("Heals %s HP" % _num(item.heal_amount))
-	elif item.is_ammo():
-		lines.append("Ammo · %s" % item.caliber)
+	# (No ammo line: the ammo item's own name — "Pistol Clip" — already says which guns it feeds, and the old
+	# old ammo line printed the raw caliber id beside it.)
 	# EFFECT block — WHAT THE ITEM DOES, derived from its structured fields (installs_ability / held_passive_effect /
 	# consumable_effect). Item `description`s ship EMPTY (the Steam AI-text scrub: no authored prose), so for a trinket
 	# like the Chrome Grin these generated, purely-mechanical stat lines are the ONLY thing telling the player it grants
 	# "+3 Streetwise while carried". Empty for a plain weapon/ammo/junk item, so their tooltips are unchanged.
 	lines.append_array(_effect_lines(item))
 	var foot: String = "Weight %s" % _num(item.weight)
-	if item.value > 0.0:
-		foot += "  ·  %s" % Zorkmids.money_text(item.value)  # the whole money phrase — the "zm" word lives in Zorkmids.MONEY_TEMPLATE, never here
+	if show_value and item.value > 0.0:
+		foot += WeaponModInfo.JOIN + Zorkmids.money_text(item.value)  # the whole money phrase — the "zm" word lives in Zorkmids.MONEY_TEMPLATE, never here
 	lines.append(foot)
 	return "\n".join(lines)
 
@@ -65,10 +69,11 @@ static func _weapon_block(w: WeaponData, holder: CharacterInventory) -> String:
 		if w.is_infinite_ammo:
 			parts.append("Ammo ∞")
 		elif w.caliber != &"":
-			var reserve: String = ""
+			parts.append("Clip %d" % w.max_ammo)
+			# The rounds of this caliber in the bag the row belongs to, as its own column. Not the caliber id: the
+			# ammo is named on its own item ("Pistol Clip"), and the id is an internal key, never display text.
 			if holder != null:
-				reserve = " (%d spare)" % holder.ammo_count(w.caliber)
-			parts.append("%s · clip %d%s" % [w.caliber, w.max_ammo, reserve])
+				parts.append("Reserve %d" % holder.ammo_count(w.caliber))
 		elif w.max_ammo > 0:
 			parts.append("Clip %d" % w.max_ammo)  # a real self-contained clip; max_ammo 0 (spray paint) has none to show
 	# (No laser-sight tag on purpose: WeaponData.has_laser_sight is a cosmetic "render the beam" flag that DEFAULTS TRUE
@@ -80,17 +85,17 @@ static func _weapon_block(w: WeaponData, holder: CharacterInventory) -> String:
 	var move_pct := roundi((w.move_speed_multiplier - 1.0) * 100.0)
 	if move_pct != 0:
 		parts.append("Move %s" % _signed_pct(move_pct))
-	# A weapon that inflicts a StatusEffect on hit (poison / burn rounds, a slowing tag) — summarise it like a consumable.
-	# The chance rides the LABEL and the sub-parts join with COMMAS (not the outer "  ·  "), so the clause stays visually
-	# scoped instead of dissolving into the top-level weapon stats.
+	# A weapon that inflicts a StatusEffect on hit (poison / burn rounds, a slowing tag) — summarised like a consumable.
+	# The chance LEADS the label ("50% on hit:") rather than riding in brackets, and the clause's sub-parts join with
+	# COMMAS (not the column gap) so it stays visually scoped instead of dissolving into the top-level weapon stats.
 	if w.on_hit_effect != null:
-		var eff := _timed_effect_parts(w.on_hit_effect)
-		if not eff.is_empty():
+		var clause := _timed_clause(w.on_hit_effect)
+		if not clause.is_empty():
 			var lead := "On hit"
 			if w.on_hit_chance < 1.0:
-				lead += " (%d%%)" % roundi(w.on_hit_chance * 100.0)
-			parts.append("%s: %s" % [lead, ", ".join(eff)])
-	return "  ·  ".join(parts)
+				lead = "%d%% on hit" % roundi(w.on_hit_chance * 100.0)
+			parts.append("%s: %s" % [lead, clause])
+	return WeaponModInfo.JOIN.join(parts)
 
 ## The data-derived "what it does" lines: an upgrade chip's installed ability, a carried item's passive buff, and a
 ## consumable's applied effect — each generated from the item's STRUCTURED fields, never from authored prose, so a
@@ -111,21 +116,20 @@ static func _effect_lines(item: Item) -> Array[String]:
 	if item.held_passive_effect != null:
 		var parts := _held_effect_parts(item.held_passive_effect)
 		if not parts.is_empty():
-			var line := "While carried: " + "  ·  ".join(parts)
 			# The stacking rule only matters when you could actually hold more than one copy.
 			if item.max_stack > 1:
-				line += "  ·  " + ("counts once" if item.passive_unique else "per copy")
-			out.append(line)
+				parts.append("doesn't stack" if item.passive_unique else "stacks")
+			out.append("While carried: " + ", ".join(parts))
 	# Consumable's applied StatusEffect (a stim / buff / poison) — shown ALONGSIDE any "Heals N HP" line above.
 	if item.consumable_effect != null:
-		var parts := _timed_effect_parts(item.consumable_effect)
-		if not parts.is_empty():
-			out.append("When used: " + "  ·  ".join(parts))
+		var clause := _timed_clause(item.consumable_effect)
+		if not clause.is_empty():
+			out.append("When used: " + clause)
 	# A holdable prop (the dog crate, any world_prop / world_model item that isn't a weapon/consumable/ammo/chip/coin)
 	# can be pulled into the hands from the hotbar and thrown — otherwise its tooltip is just a name, saying nothing
 	# about the one thing you can DO with it. is_holdable() already encodes all those exclusions.
 	if item.is_holdable():
-		out.append("Hold in hand · throwable")
+		out.append("Can be held and thrown")
 	return out
 
 ## A carried item's passive buff (Item.held_passive_effect) as labeled parts. Mirrors PassiveItemBuffs' fold EXACTLY:
@@ -172,8 +176,19 @@ static func _held_effect_parts(fx: StatusEffect) -> Array[String]:
 		parts.append("%s Move Speed" % _signed_pct(speed_pct))
 	return parts
 
+## One timed effect as a comma-joined clause with its duration trailing as prose: "+2 Agility, +25% Move Speed for 8 s".
+## "" when the effect moves nothing (a duration alone is not an effect worth a line).
+static func _timed_clause(fx: StatusEffect) -> String:
+	var parts := _timed_effect_parts(fx)
+	if parts.is_empty():
+		return ""
+	var clause := ", ".join(parts)
+	if fx.duration > 0.0:
+		clause += " for %s s" % _num(fx.duration)
+	return clause
+
 ## A consumable's applied StatusEffect (Item.consumable_effect) as labeled parts — the TIMED path, so unlike a held
-## buff it reads duration + periodic damage, and strength IS shown raw (a timed strength buff DOES fold into melee, so
+## buff it reads periodic damage (the duration is _timed_clause's trailing "for N s"), and strength IS shown raw (a timed strength buff DOES fold into melee, so
 ## it behaves like the stat). Poison / burn (positive damage_per_tick over tick_interval) reads as damage-per-second.
 static func _timed_effect_parts(fx: StatusEffect) -> Array[String]:
 	var parts: Array[String] = []
@@ -192,8 +207,6 @@ static func _timed_effect_parts(fx: StatusEffect) -> Array[String]:
 		parts.append("%s Move Speed" % _signed_pct(speed_pct))
 	if fx.damage_per_tick > 0.0 and fx.tick_interval > 0.0:
 		parts.append("%s HP/s damage" % _num(fx.damage_per_tick / fx.tick_interval))
-	if fx.duration > 0.0:
-		parts.append("for %s s" % _num(fx.duration))
 	return parts
 
 ## The player-facing name for an installs_ability mechanic id — routed through AbilityRegistry.display_name_for,

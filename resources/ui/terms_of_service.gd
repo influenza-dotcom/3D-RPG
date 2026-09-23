@@ -112,19 +112,22 @@ ARTICLE VIII — ACCEPTANCE; SEVERABILITY; SURVIVAL
 
 By continuing, You consent to being remembered. You have always consented. Welcome back."""
 
-## Force the player to scroll the entire document before "I Agree" unlocks (the classic wall-of-text dark pattern —
-## on-theme for a deliberately unreadable agreement). Off = "I Agree" is live immediately.
-@export var require_scroll: bool = true
+## Force the player to scroll the entire document before "I Agree" unlocks (the classic wall-of-text dark pattern).
+## OFF by default: the gate plus its "scroll to the end" footnote read as friction, not as the joke. Off = "I Agree"
+## is live immediately; the footnote strings below are blank for the same reason and only paint when authored.
+@export var require_scroll: bool = false
 
 ## The scroll footnote shown WHILE the player has not yet reached the end of the body.
-@export var scroll_hint_unread: String = "Scroll to the end of the agreement to continue."
+@export var scroll_hint_unread: String = ""
 ## The scroll footnote shown ONCE the player has read to the bottom (and "I Agree" has unlocked).
-@export var scroll_hint_read: String = "You have reached the end. You may now agree."
+@export var scroll_hint_read: String = ""
 
 ## The accept button caption (the ONLY way forward — it records consent and starts the game).
 @export var accept_label: String = "Accept"
 ## The decline button caption. Declining never lets the player through — it raises a bare Back / Quit-to-Desktop nag.
 @export var decline_label: String = "Decline"
+## The decline card's question (a card of two bare buttons with nothing on it read as a broken dialog).
+@export var decline_title: String = "Quit without accepting?"
 ## On the decline nag: the button that returns to the agreement.
 @export var reconsider_label: String = "Back"
 ## On the decline nag: the button that actually exits the game (You may leave — You just may not play unconsented).

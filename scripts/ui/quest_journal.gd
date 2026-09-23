@@ -199,5 +199,5 @@ static func closed_objectives(quest: Quest) -> Array[QuestObjective]:
 ## fallback resolves here; the eight whole templates live in PlayerText.journal_objective (byte-identical
 ## output). e.g. "[x] Kill the boss" or "[ ] Collect parts (2/5)  (optional)".
 func objective_line(obj: QuestObjective, done: bool, progress: int) -> String:
-	var desc := obj.description if obj.description != "" else String(obj.id)
+	var desc := obj.description if obj.description != "" else String(obj.id).capitalize()  # blank-description degrade only: never a raw snake_case id on screen
 	return PlayerText.journal_objective(desc, done, progress, obj.required_count, obj.optional)

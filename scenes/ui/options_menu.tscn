@@ -66,14 +66,6 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="ApplyButton" type="Button" parent="Root/Panel/VBox/Bottom"]
-unique_name_in_owner = true
-layout_mode = 2
-
-[node name="RevertButton" type="Button" parent="Root/Panel/VBox/Bottom"]
-unique_name_in_owner = true
-layout_mode = 2
-
 [node name="CloseButton" type="Button" parent="Root/Panel/VBox/Bottom"]
 unique_name_in_owner = true
 layout_mode = 2

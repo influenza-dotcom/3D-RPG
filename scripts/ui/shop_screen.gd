@@ -262,7 +262,7 @@ func _on_hover(item: Item, from_stock: bool = false) -> void:
 		_detail.text = _DEFAULT_HINT
 		return
 	var holder: CharacterInventory = _merchant_stock() if from_stock else _player.inventory
-	var body := ItemInfo.tooltip(item, holder)
+	var body := ItemInfo.tooltip(item, holder, false)  # no list value: the deal price rides the same last line
 	var price: float = _merchant.buy_price(item, _player) if from_stock else _merchant.sell_price(item, _player)
 	var affordable: bool
 	var shown_price := price
@@ -402,7 +402,7 @@ func _bind_ui() -> void:
 	# which is the half that decides WHICH end an overflow is clipped at.
 	_detail = %Detail
 	MenuStyle.style_hint(_detail)  # dim wrap-friendly footnote styling from the skin
-	MenuStyle.size_hint_footer(%Footer as Control, _detail, 4)
+	MenuStyle.size_hint_footer(%Footer as Control, _detail, 3)
 	_detail.text = _DEFAULT_HINT
 
 ## Adopt one authored grid COLUMN — `column` (wallet heading + scroll slot, authored in the scene) gets the

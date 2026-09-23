@@ -24,6 +24,9 @@ extends Node
 ## flattening it to 0 dB.
 
 const CONFIG_PATH := "user://settings.cfg"
+## Where load_settings / save_settings read and write. Always CONFIG_PATH in the game; a test points an off-tree
+## instance at a scratch cfg so the REAL load/save code runs without touching this machine's settings.
+var config_path: String = CONFIG_PATH
 
 ## Window-mode menu index -> Window.Mode. Order matches the Video tab dropdown.
 const WINDOW_MODES: Array[int] = [
@@ -54,6 +57,12 @@ const DEFAULT_VOLUMES: Dictionary = {&"ambient": 0.34}
 
 const FOV_MIN := 60.0
 const FOV_MAX := 120.0
+## Travel limits for the third-person camera distance — the mouse wheel's clamp AND the Options slider's range,
+## which must stay in step (the FOV_MIN/FOV_MAX + SettingsCatalog rule). The floor is deliberately not zero:
+## inside ~0.6 m the lens is through the back of the character's head, which is a worse first person, not a
+## closer third one. Whoever wants the eye back has the toggle.
+const TP_DISTANCE_MIN := 0.8
+const TP_DISTANCE_MAX := 4.0
 const RENDER_SCALE_MIN := 0.5
 const RENDER_SCALE_MAX := 2.0
 ## Presentation (Options -> Video): HOW the finished frame reaches the screen. Index order = the Video cycler
@@ -142,6 +151,7 @@ var dither_strength: float = 1.0               ## 0..1 scale on the ORDERED (Bay
 var color_quantization: int = 4                ## index into COLOR_QUANTIZE_LEVELS: how many COLOURS the screen post-process is allowed to use, per channel. 0 = Authored (the material's own `color_steps` — the pre-08-31 out-of-box frame); the rest are named colour depths, 24-bit (off) down to 3-bit. Ships at index 4 (12-bit RGB444) since the 08-31 defaults retune — the dev-authored look; a stored cfg index always wins, so only fresh installs see the change. An INDEX rather than a scale because the useful values are not a continuum: they are hardware formats, and the gap between RGB555 and RGB565 is a bit on ONE channel, not a slider position. Pairs with `dither_strength`: the quantiser decides which colours exist, the dither decides how the ones in between are faked, and at the coarse end the dither is the only thing keeping the image readable at all. Lives on VIDEO rather than Accessibility because it is a look, not a comfort setting. Read live each frame by the player's post-process driver (player.gd _update_low_hp), like contrast / colorblind_mode, so the dropdown bites with no level reload
 var volumes: Dictionary = {}                   ## StringName bus -> float (0..1; 1.0 = authored level)
 var music_folder: String = ""                  ## the player's OWN music folder (user:// or an OS path) for in-world radios; blank = each radio uses its curated res:// folder. Read live by Radio to override its music_folder export.
+var dialogue_music_enabled: bool = true        ## ON by default (the authored mix): a conversation plays the looping dialogue music bed under the voices. OFF = conversations run DRY — the bed never starts, exactly as if GameSettings.dialogue.dialogue_music had been left unauthored. Scoped to that ONE layer on purpose: the conversation duck (MusicDucker, which pulls the `music` bus down under a voice) and a station terminal's own tinny shop radio (StationMusic) are untouched, so a person-vendor still sounds exactly like the kiosk two metres away — turning this off removes the added layer, it does not change how anything else is mixed. A separate row from the Music slider because it is not a LEVEL preference: a player who wants their own radio (or plain silence) under a conversation would otherwise have to pull every other music source down with it. Read live by DialogueMusicBed.set_bed_playing at the one fire time that matters — a conversation opening — so the toggle bites on the very next conversation with no level reload
 var mouse_sensitivity: float = 0.00115         ## -> GameSettings.camera.mouse_sensitivity; radians per SCREEN pixel (see SENS_MIN); _ready reseeds this from the CameraSettings script default, the true owner
 var controller_look_sensitivity: float = 3.0   ## right-stick look speed (rad/s-ish), read live by MouseInput
 var invert_look_y: bool = false                ## invert vertical look (mouse + controller)
@@ -154,6 +164,8 @@ var colorblind_safe_cues: bool = false          ## recolor disposition / rep cue
 var view_bob_enabled: bool = true               ## off = no camera/weapon head-bob (motion comfort); read live by CameraEffects/GunPose
 var view_model_visible: bool = true             ## off = hide the first-person weapon (view model); read live by GunPose
 var view_model_left_handed: bool = false        ## true = mirror the view model to the LEFT side; read live by GunPose
+var third_person_camera: bool = false           ## true = pull the camera back over the shoulder and show your own character; read LIVE by ThirdPersonCamera.wants_third_person (never cached). WRITTEN ONLY BY THE `ToggleView` BIND — there is no Options row: a menu toggle for a mode you flip mid-fight, and which deliberately never persists, was a slower duplicate of the key. Aiming down sights and a conversation still take the view back to the eye; see that node. ⭐THE ONE SETTING ON THIS AUTOLOAD THAT IS DELIBERATELY NOT PERSISTED: it is absent from BOTH load_settings and save_settings, so every launch starts in FIRST person whatever the last session ended in (see save_settings for the reasoning). The DISTANCE below does persist — that is a framing preference, not a mode
+var third_person_distance: float = 2.2      ## -> GameSettings.camera.third_person_distance; how far behind the eye the third-person lens rests (metres). MOVED BY THE PLAYER, not just the designer: the mouse wheel steps it while the view is pulled out (ThirdPersonCamera consumes the notch, the hotbar explicitly yields it) and that is the ONLY way in — the Options slider that used to mirror it is gone. `_ready` reseeds this from the CameraSettings script default, the true owner
 var detection_meter_enabled: bool = true        ## off = hide the crouch-gated stealth detection "heat" bar (HUD declutter); read live by PlayerHud
 var loot_beacons_enabled: bool = true           ## off = hide the colour-coded item lights over world pickups / dropped loot sacks; polled live by PickupBeacon
 var enemy_health_bar_enabled: bool = true       ## off = hide the top-centre enemy HP bar that pops when you damage something (HUD declutter); polled live by EnemyHealthBar
@@ -182,6 +194,7 @@ var compass_enabled: bool = true                 ## OFF = hide the top-centre HE
 var tts_enabled: bool = true                    ## ON by default (2026-09-01 design call: players must HEAR an NPC when they talk to them) — barks + dialogue read aloud via the offline Flite addon on the "voice" bus; OFF = silent text only. ⭐The shipped Flite DLL used to crash every release-export QUIT (a template_debug godot-cpp build-flavour bug, rebuilt 2026-09-01 — see addons/text_to_speech/REBUILD_WINDOWS.md); the rebuilt DLL caches voices process-wide and both SpeechTts pools pin one voice per player — read the SpeechTts header before touching that seam
 var heartbeat_enabled: bool = true              ## off = silence JUST the low-HP heartbeat pulse (the SFX bus volume is unaffected); read live by the player's _update_low_hp
 var difficulty_level: int = DifficultySettings.Level.NORMAL  ## 0 Easy / 1 Normal / 2 Hard -> GameSettings.difficulty.apply_level (ML-3)
+var language: String = Localization.SYSTEM     ## Options → Game → Language: a locale code from Localization.available_locales() ("fr") or "" = follow the OS locale (the default). Applied through Localization.apply on boot (apply_all) and on every set_language; the "[PH]" scrub follows the locale (MenuStyle.relocate_scrub). A code with no shipped catalog degrades to "" on load AND on set, so a settings.cfg from a build that had more languages can't strand the player in a locale with nothing in it
 var auto_equip_pickups: bool = true             ## ON = a WEAPON picked up off the ground with Interact (F) is drawn immediately, but ONLY while the player is UNARMED (bare fists / equipped_item null) — an already-armed player keeps what they're holding, so a floor pipe can't swap the rifle away mid-fight (CanPickUp.start_talk -> CharacterInventory.equip_item -> the swap anim). OFF = it always just lands in the backpack. Polled live at pickup time, so a change takes effect on the very next F. Per-pickup designer veto: CanPickUp.auto_equip_weapon
 ## The first-launch Terms-of-Service gate: false until the player consents to the (fake, comedic) TOS the very first
 ## time they boot (StartMenu shows terms_of_service_screen.gd while this is false, then calls accept_tos()). Persisted
@@ -212,6 +225,7 @@ func _ready() -> void:
 	_capture_baselines()
 	# Seed stored fields from the live design defaults so a MISSING cfg reproduces the authored game.
 	fov = GameSettings.camera.default_fov
+	third_person_distance = GameSettings.camera.third_person_distance
 	mouse_sensitivity = GameSettings.camera.mouse_sensitivity
 	var win := get_window()
 	if win != null:
@@ -247,6 +261,7 @@ func apply_all() -> void:
 	apply_accessibility()
 	apply_keybinds()
 	apply_difficulty()
+	apply_language()
 
 ## Push the chosen difficulty into the live mults the combat/spawn/reward seams read (ML-3). Done on boot (via
 ## apply_all) and on every set_difficulty, so the run starts at the saved level and a change takes effect at once.
@@ -294,6 +309,7 @@ func apply_video() -> void:
 	win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS if presentation == PRESENTATION_HIGH_FIDELITY else Window.CONTENT_SCALE_MODE_VIEWPORT
 	win.scaling_3d_scale = render_scale
 	GameSettings.camera.default_fov = fov
+	GameSettings.camera.third_person_distance = third_person_distance  # ...and the pull-out distance, same seam, same reason (see set_third_person_distance)
 
 ## Render pixels per LOGICAL canvas pixel on the root viewport — the unit converter for effects whose knobs are
 ## authored in canvas px (ink line widths, ghost drag offsets, dither cells): push authored_value * native_scale().
@@ -695,6 +711,13 @@ func set_music_folder(path: String) -> void:
 	music_folder = path.strip_edges()
 	save_settings()
 
+## Does a conversation get its own looping music bed? No apply step — DialogueMusicBed polls this when a
+## conversation OPENS (the heartbeat_enabled / screen_flash_enabled "read it live at fire time" shape), so a
+## conversation already under way keeps its bed and the next one honours the new answer.
+func set_dialogue_music_enabled(on: bool) -> void:
+	dialogue_music_enabled = on
+	save_settings()
+
 ## Radians per SCREEN pixel (see SENS_MIN) — the Options slider hands in this unit; the 1..100 readout is cosmetic.
 func set_mouse_sensitivity(f: float) -> void:
 	mouse_sensitivity = clampf(f, SENS_MIN, SENS_MAX)
@@ -779,6 +802,17 @@ func set_view_model_visible(on: bool) -> void:
 func set_view_model_left_handed(on: bool) -> void:
 	view_model_left_handed = on
 	save_settings()
+
+func set_third_person_camera(on: bool) -> void:
+	third_person_camera = on
+	# No apply step (ThirdPersonCamera polls this live and eases the view across the same frame) and NO SAVE
+	# either — this mode is session-only on purpose, so writing the whole cfg here would be work that persists
+	# nothing. See the note in save_settings.
+
+func set_third_person_distance(f: float) -> void:
+	third_person_distance = clampf(f, TP_DISTANCE_MIN, TP_DISTANCE_MAX)
+	GameSettings.camera.third_person_distance = third_person_distance
+	save_settings()  # no apply step — the camera reads GameSettings.camera.third_person_distance live each frame
 
 func set_camera_tilt_enabled(on: bool) -> void:
 	camera_tilt_enabled = on
@@ -874,6 +908,20 @@ func set_debug_always_show_tos(on: bool) -> void:
 	debug_always_show_tos = on
 	save_settings()
 
+## Options → Game → Language. `code` is a locale from Localization.available_locales() or "" (System). Applied at
+## once — every auto-translated Control repaints on TranslationServer.set_locale — and persisted; composed strings
+## already on screen (a toast, a subst'd title) keep their text until they are next painted, which is the
+## documented "takes effect on the next screen" behaviour. An unknown code degrades to System, never errors.
+func set_language(code: String) -> void:
+	language = code if Localization.available_locales().has(code) else Localization.SYSTEM
+	apply_language()
+	save_settings()
+
+## Push the chosen language into the TranslationServer (and re-key the "[PH]" scrub). On boot via apply_all and
+## on every set_language; SYSTEM re-asserts the OS locale the engine booted with, so the default is a no-op.
+func apply_language() -> void:
+	Localization.apply(language)
+
 ## ML-3: pick the difficulty (0 Easy / 1 Normal / 2 Hard). Copies the level's preset into the live mults
 ## immediately (apply_difficulty) and persists, so the menu is pure data-binding like every other setter.
 func set_difficulty(level: int) -> void:
@@ -903,7 +951,7 @@ func get_volume(bus: StringName) -> float:
 
 func load_settings() -> void:
 	var cfg := ConfigFile.new()
-	if cfg.load(CONFIG_PATH) != OK:
+	if cfg.load(config_path) != OK:
 		_loaded = true  # no file yet — keep the design defaults seeded in _ready
 		return
 	window_mode = int(cfg.get_value("video", "window_mode", window_mode))
@@ -931,6 +979,7 @@ func load_settings() -> void:
 	for bus in VOLUME_BUSES:
 		volumes[bus] = float(cfg.get_value("audio", String(bus), volumes.get(bus, DEFAULT_VOLUMES.get(bus, 1.0))))
 	music_folder = str(cfg.get_value("audio", "music_folder", music_folder))
+	dialogue_music_enabled = _cfg_bool(cfg, "audio", "dialogue_music_enabled", dialogue_music_enabled)
 	# Clamped on load (like contrast / ps1_warp_intensity): a legacy value at the old ceiling rescales to ~3% over
 	# SENS_MAX, and a hand-edited number outside the slider must not drive the camera faster than the slider allows.
 	mouse_sensitivity = clampf(read_mouse_sensitivity(cfg, mouse_sensitivity), SENS_MIN, SENS_MAX)
@@ -948,6 +997,7 @@ func load_settings() -> void:
 	view_bob_enabled = _cfg_bool(cfg, "accessibility", "view_bob_enabled", view_bob_enabled)
 	view_model_visible = _cfg_bool(cfg, "accessibility", "view_model_visible", view_model_visible)
 	view_model_left_handed = _cfg_bool(cfg, "accessibility", "view_model_left_handed", view_model_left_handed)
+	third_person_distance = clampf(float(cfg.get_value("accessibility", "third_person_distance", third_person_distance)), TP_DISTANCE_MIN, TP_DISTANCE_MAX)
 	detection_meter_enabled = _cfg_bool(cfg, "accessibility", "detection_meter_enabled", detection_meter_enabled)
 	loot_beacons_enabled = _cfg_bool(cfg, "accessibility", "loot_beacons_enabled", loot_beacons_enabled)
 	enemy_health_bar_enabled = _cfg_bool(cfg, "accessibility", "enemy_health_bar_enabled", enemy_health_bar_enabled)
@@ -976,6 +1026,10 @@ func load_settings() -> void:
 	debug_skip_menu = _cfg_bool(cfg, "debug", "skip_menu", debug_skip_menu)
 	debug_always_show_tos = _cfg_bool(cfg, "debug", "always_show_tos", debug_always_show_tos)
 	difficulty_level = clampi(int(cfg.get_value("gameplay", "difficulty_level", difficulty_level)), 0, 2)
+	# A locale with no shipped catalog (a hand edit, or a cfg from a build that had more languages) degrades to
+	# System rather than leaving the player in a locale the game has nothing to say in.
+	var lang := str(cfg.get_value("gameplay", "language", language))
+	language = lang if Localization.available_locales().has(lang) else Localization.SYSTEM
 	auto_equip_pickups = _cfg_bool(cfg, "gameplay", "auto_equip_pickups", auto_equip_pickups)
 	tos_accepted = _cfg_bool(cfg, "legal", "tos_accepted", tos_accepted)
 	_sanitize_debug_flags(OS.is_debug_build())
@@ -1056,6 +1110,7 @@ func save_settings() -> void:
 	for bus in VOLUME_BUSES:
 		cfg.set_value("audio", String(bus), float(volumes.get(bus, DEFAULT_VOLUMES.get(bus, 1.0))))
 	cfg.set_value("audio", "music_folder", music_folder)
+	cfg.set_value("audio", "dialogue_music_enabled", dialogue_music_enabled)
 	cfg.set_value("input", MOUSE_SENS_KEY, mouse_sensitivity)  # screen-px units; the legacy key is deliberately NOT written (read_mouse_sensitivity)
 	cfg.set_value("input", "controller_look_sensitivity", controller_look_sensitivity)
 	cfg.set_value("input", "invert_look_y", invert_look_y)
@@ -1068,6 +1123,15 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "view_bob_enabled", view_bob_enabled)
 	cfg.set_value("accessibility", "view_model_visible", view_model_visible)
 	cfg.set_value("accessibility", "view_model_left_handed", view_model_left_handed)
+	# ⭐THIRD PERSON IS DELIBERATELY NOT SAVED HERE, and this comment is the reason a future pass should not
+	# "finish" the pair by adding it. The game is authored first-person — the HUD, the sight picture, the view
+	# model and every framing decision in it — so third person is a look-at-yourself mode you opt into for a
+	# while, not a mode you want to be silently living in three launches later because you toggled it once.
+	# Booting into it (with the view model gone and a character in the middle of the screen) reads as a bug
+	# rather than a restored preference. The camera DISTANCE below is saved: that is framing, and framing is a
+	# taste you keep. `third_person_camera` is therefore absent from load_settings too — the two must stay in
+	# step, or a stale key would restore a mode nothing wrote.
+	cfg.set_value("accessibility", "third_person_distance", third_person_distance)
 	cfg.set_value("accessibility", "detection_meter_enabled", detection_meter_enabled)
 	cfg.set_value("accessibility", "loot_beacons_enabled", loot_beacons_enabled)
 	cfg.set_value("accessibility", "enemy_health_bar_enabled", enemy_health_bar_enabled)
@@ -1096,9 +1160,10 @@ func save_settings() -> void:
 	cfg.set_value("debug", "skip_menu", debug_skip_menu)
 	cfg.set_value("debug", "always_show_tos", debug_always_show_tos)
 	cfg.set_value("gameplay", "difficulty_level", difficulty_level)
+	cfg.set_value("gameplay", "language", language)
 	cfg.set_value("gameplay", "auto_equip_pickups", auto_equip_pickups)
 	cfg.set_value("legal", "tos_accepted", tos_accepted)
-	cfg.save(CONFIG_PATH)
+	cfg.save(config_path)
 
 ## Window.Mode -> our dropdown index (defaults to Exclusive Fullscreen if it's an unlisted mode).
 func _mode_to_index(mode: int) -> int:

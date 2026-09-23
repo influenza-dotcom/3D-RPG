@@ -52,19 +52,6 @@ getter = &"presentation"
 setter = &"set_presentation"
 custom_handler = &"_emit_presentation"
 
-[sub_resource type="Resource" id="render_scale"]
-script = ExtResource("1")
-key = &"render_scale"
-tab = &"Video"
-control = 2
-label = "Render Scale"
-getter = &"render_scale"
-setter = &"set_render_scale"
-min_value = 0.5
-max_value = 2.0
-step = 0.05
-value_format = 1
-
 [sub_resource type="Resource" id="fov"]
 script = ExtResource("1")
 key = &"fov"
@@ -91,48 +78,21 @@ max_value = 1.5
 step = 0.05
 value_format = 1
 
-[sub_resource type="Resource" id="ink_outline"]
+[sub_resource type="Resource" id="view_model_visible"]
 script = ExtResource("1")
-key = &"ink_outline"
+key = &"view_model_visible"
 tab = &"Video"
-control = 2
-label = "Ink Outline"
-getter = &"ink_outline_intensity"
-setter = &"set_ink_outline_intensity"
-step = 0.05
-value_format = 1
+label = "Show Weapon"
+getter = &"view_model_visible"
+setter = &"set_view_model_visible"
 
-[sub_resource type="Resource" id="color_quantization"]
+[sub_resource type="Resource" id="view_model_left"]
 script = ExtResource("1")
-key = &"color_quantization"
+key = &"view_model_left"
 tab = &"Video"
-control = 5
-label = "Color Depth"
-getter = &"color_quantization"
-setter = &"set_color_quantization"
-custom_handler = &"_emit_color_quantization"
-
-[sub_resource type="Resource" id="dither"]
-script = ExtResource("1")
-key = &"dither"
-tab = &"Video"
-control = 2
-label = "Dithering"
-getter = &"dither_strength"
-setter = &"set_dither_strength"
-step = 0.05
-value_format = 1
-
-[sub_resource type="Resource" id="muzzle_smoke"]
-script = ExtResource("1")
-key = &"muzzle_smoke"
-tab = &"Video"
-control = 2
-label = "Muzzle Smoke"
-getter = &"muzzle_smoke_scale"
-setter = &"set_muzzle_smoke_scale"
-step = 0.05
-value_format = 1
+label = "Left-Handed Weapon"
+getter = &"view_model_left_handed"
+setter = &"set_view_model_left_handed"
 
 [sub_resource type="Resource" id="vol_master"]
 script = ExtResource("1")
@@ -207,6 +167,16 @@ getter = &"difficulty_level"
 setter = &"set_difficulty"
 custom_handler = &"_emit_difficulty"
 
+[sub_resource type="Resource" id="language"]
+script = ExtResource("1")
+key = &"language"
+tab = &"Game"
+control = 5
+label = "Language"
+getter = &"language"
+setter = &"set_language"
+custom_handler = &"_emit_language"
+
 [sub_resource type="Resource" id="mouse_sensitivity"]
 script = ExtResource("1")
 key = &"mouse_sensitivity"
@@ -245,7 +215,7 @@ setter = &"set_invert_look_y"
 script = ExtResource("1")
 key = &"auto_equip_pickups"
 tab = &"Game"
-label = "Auto-Equip Weapons When Unarmed"
+label = "Auto-Equip Pickups"
 getter = &"auto_equip_pickups"
 setter = &"set_auto_equip_pickups"
 
@@ -267,13 +237,106 @@ debug_only = true
 getter = &"debug_always_show_tos"
 setter = &"set_debug_always_show_tos"
 
-[sub_resource type="Resource" id="controls_hint"]
+[sub_resource type="Resource" id="minimap"]
 script = ExtResource("1")
-key = &"controls_hint"
-tab = &"Controls"
-control = 5
-label = "[PH] Click a binding, then press a key or button (Esc cancels)."
-custom_handler = &"_emit_hint"
+key = &"minimap"
+tab = &"HUD"
+label = "Minimap"
+getter = &"minimap_enabled"
+setter = &"set_minimap_enabled"
+
+[sub_resource type="Resource" id="minimap_rotate"]
+script = ExtResource("1")
+key = &"minimap_rotate"
+tab = &"HUD"
+label = "Rotate Minimap"
+getter = &"minimap_rotates"
+setter = &"set_minimap_rotates"
+
+[sub_resource type="Resource" id="minimap_npcs"]
+script = ExtResource("1")
+key = &"minimap_npcs"
+tab = &"HUD"
+label = "NPCs On Minimap"
+getter = &"minimap_show_npcs"
+setter = &"set_minimap_show_npcs"
+
+[sub_resource type="Resource" id="minimap_stations"]
+script = ExtResource("1")
+key = &"minimap_stations"
+tab = &"HUD"
+label = "Stations On Minimap"
+getter = &"minimap_show_stations"
+setter = &"set_minimap_show_stations"
+
+[sub_resource type="Resource" id="minimap_zoom"]
+script = ExtResource("1")
+key = &"minimap_zoom"
+tab = &"HUD"
+control = 2
+label = "Minimap Zoom"
+getter = &"minimap_zoom"
+setter = &"set_minimap_zoom"
+min_value = 0.5
+max_value = 3.0
+step = 0.1
+value_format = 5
+
+[sub_resource type="Resource" id="clock"]
+script = ExtResource("1")
+key = &"clock"
+tab = &"HUD"
+label = "HUD Clock"
+getter = &"clock_enabled"
+setter = &"set_clock_enabled"
+
+[sub_resource type="Resource" id="clock_24_hour"]
+script = ExtResource("1")
+key = &"clock_24_hour"
+tab = &"HUD"
+label = "24-Hour Clock"
+getter = &"clock_24_hour"
+setter = &"set_clock_24_hour"
+
+[sub_resource type="Resource" id="compass"]
+script = ExtResource("1")
+key = &"compass"
+tab = &"HUD"
+label = "HUD Compass"
+getter = &"compass_enabled"
+setter = &"set_compass_enabled"
+
+[sub_resource type="Resource" id="enemy_health_bar"]
+script = ExtResource("1")
+key = &"enemy_health_bar"
+tab = &"HUD"
+label = "Enemy Health Bar"
+getter = &"enemy_health_bar_enabled"
+setter = &"set_enemy_health_bar_enabled"
+
+[sub_resource type="Resource" id="detection_meter"]
+script = ExtResource("1")
+key = &"detection_meter"
+tab = &"HUD"
+label = "Show Detection Meter"
+getter = &"detection_meter_enabled"
+setter = &"set_detection_meter_enabled"
+
+[sub_resource type="Resource" id="loot_beacons"]
+script = ExtResource("1")
+key = &"loot_beacons"
+tab = &"HUD"
+label = "Item Lights"
+getter = &"loot_beacons_enabled"
+setter = &"set_loot_beacons_enabled"
+
+[sub_resource type="Resource" id="stamina_ring"]
+script = ExtResource("1")
+key = &"stamina_ring"
+tab = &"HUD"
+label = "Crosshair Stamina Ring"
+getter = &"stamina_ring_enabled"
+setter = &"set_stamina_ring_enabled"
 
 [sub_resource type="Resource" id="screen_shake"]
 script = ExtResource("1")
@@ -287,6 +350,28 @@ max_value = 2.0
 step = 0.05
 value_format = 1
 
+[sub_resource type="Resource" id="lens_curve"]
+script = ExtResource("1")
+key = &"lens_curve"
+tab = &"Accessibility"
+control = 2
+label = "Lens Curve"
+getter = &"lens_curve"
+setter = &"set_lens_curve"
+step = 0.05
+value_format = 1
+
+[sub_resource type="Resource" id="world_ghost"]
+script = ExtResource("1")
+key = &"world_ghost"
+tab = &"Accessibility"
+control = 2
+label = "World Ghosting"
+getter = &"world_ghost_scale"
+setter = &"set_world_ghost_scale"
+step = 0.05
+value_format = 1
+
 [sub_resource type="Resource" id="screen_flash"]
 script = ExtResource("1")
 key = &"screen_flash"
@@ -294,6 +379,38 @@ tab = &"Accessibility"
 label = "Screen Flashes"
 getter = &"screen_flash_enabled"
 setter = &"set_screen_flash_enabled"
+
+[sub_resource type="Resource" id="hitstop"]
+script = ExtResource("1")
+key = &"hitstop"
+tab = &"Accessibility"
+label = "Hit Stop"
+getter = &"hitstop_enabled"
+setter = &"set_hitstop_enabled"
+
+[sub_resource type="Resource" id="view_bob"]
+script = ExtResource("1")
+key = &"view_bob"
+tab = &"Accessibility"
+label = "View Bobbing"
+getter = &"view_bob_enabled"
+setter = &"set_view_bob_enabled"
+
+[sub_resource type="Resource" id="camera_tilt"]
+script = ExtResource("1")
+key = &"camera_tilt"
+tab = &"Accessibility"
+label = "Camera Tilt"
+getter = &"camera_tilt_enabled"
+setter = &"set_camera_tilt_enabled"
+
+[sub_resource type="Resource" id="fov_effects"]
+script = ExtResource("1")
+key = &"fov_effects"
+tab = &"Accessibility"
+label = "FOV Effects"
+getter = &"fov_effects_enabled"
+setter = &"set_fov_effects_enabled"
 
 [sub_resource type="Resource" id="dialogue_text_scale"]
 script = ExtResource("1")
@@ -307,25 +424,6 @@ min_value = 0.75
 max_value = 1.5
 step = 0.05
 value_format = 1
-
-[sub_resource type="Resource" id="ps1_warp"]
-script = ExtResource("1")
-key = &"ps1_warp"
-tab = &"Accessibility"
-control = 2
-label = "Vertex Warp (PS1)"
-getter = &"ps1_warp_intensity"
-setter = &"set_ps1_warp_intensity"
-step = 0.05
-value_format = 1
-
-[sub_resource type="Resource" id="hitstop"]
-script = ExtResource("1")
-key = &"hitstop"
-tab = &"Accessibility"
-label = "Hit Stop"
-getter = &"hitstop_enabled"
-setter = &"set_hitstop_enabled"
 
 [sub_resource type="Resource" id="colorblind_mode"]
 script = ExtResource("1")
@@ -345,223 +443,6 @@ label = "Colorblind-Safe Cues"
 getter = &"colorblind_safe_cues"
 setter = &"set_colorblind_safe_cues"
 
-[sub_resource type="Resource" id="view_bob"]
-script = ExtResource("1")
-key = &"view_bob"
-tab = &"Accessibility"
-label = "View Bobbing"
-getter = &"view_bob_enabled"
-setter = &"set_view_bob_enabled"
-
-[sub_resource type="Resource" id="detection_meter"]
-script = ExtResource("1")
-key = &"detection_meter"
-tab = &"Accessibility"
-label = "Show Detection Meter"
-getter = &"detection_meter_enabled"
-setter = &"set_detection_meter_enabled"
-
-[sub_resource type="Resource" id="enemy_health_bar"]
-script = ExtResource("1")
-key = &"enemy_health_bar"
-tab = &"Accessibility"
-label = "Enemy Health Bar"
-getter = &"enemy_health_bar_enabled"
-setter = &"set_enemy_health_bar_enabled"
-
-[sub_resource type="Resource" id="loot_beacons"]
-script = ExtResource("1")
-key = &"loot_beacons"
-tab = &"Accessibility"
-label = "Item Lights"
-getter = &"loot_beacons_enabled"
-setter = &"set_loot_beacons_enabled"
-
-[sub_resource type="Resource" id="stamina_ring"]
-script = ExtResource("1")
-key = &"stamina_ring"
-tab = &"Accessibility"
-label = "Crosshair Stamina Ring"
-getter = &"stamina_ring_enabled"
-setter = &"set_stamina_ring_enabled"
-
-[sub_resource type="Resource" id="minimap"]
-script = ExtResource("1")
-key = &"minimap"
-tab = &"Accessibility"
-label = "Minimap"
-getter = &"minimap_enabled"
-setter = &"set_minimap_enabled"
-
-[sub_resource type="Resource" id="minimap_rotate"]
-script = ExtResource("1")
-key = &"minimap_rotate"
-tab = &"Accessibility"
-label = "Rotate Minimap"
-getter = &"minimap_rotates"
-setter = &"set_minimap_rotates"
-
-[sub_resource type="Resource" id="minimap_npcs"]
-script = ExtResource("1")
-key = &"minimap_npcs"
-tab = &"Accessibility"
-label = "NPCs On Minimap"
-getter = &"minimap_show_npcs"
-setter = &"set_minimap_show_npcs"
-
-[sub_resource type="Resource" id="minimap_stations"]
-script = ExtResource("1")
-key = &"minimap_stations"
-tab = &"Accessibility"
-label = "Stations On Minimap"
-getter = &"minimap_show_stations"
-setter = &"set_minimap_show_stations"
-
-[sub_resource type="Resource" id="minimap_noise"]
-script = ExtResource("1")
-key = &"minimap_noise"
-tab = &"Accessibility"
-label = "Noise On Minimap"
-getter = &"minimap_show_noise"
-setter = &"set_minimap_show_noise"
-
-[sub_resource type="Resource" id="minimap_zoom"]
-script = ExtResource("1")
-key = &"minimap_zoom"
-tab = &"Accessibility"
-control = 2
-label = "Minimap Zoom"
-getter = &"minimap_zoom"
-setter = &"set_minimap_zoom"
-min_value = 0.5
-max_value = 3.0
-step = 0.1
-value_format = 5
-
-[sub_resource type="Resource" id="map_zoom"]
-script = ExtResource("1")
-key = &"map_zoom"
-tab = &"Accessibility"
-control = 2
-label = "Map Zoom"
-getter = &"map_zoom"
-setter = &"set_map_zoom"
-min_value = 0.5
-max_value = 3.0
-step = 0.1
-value_format = 5
-
-[sub_resource type="Resource" id="clock"]
-script = ExtResource("1")
-key = &"clock"
-tab = &"Accessibility"
-label = "HUD Clock"
-getter = &"clock_enabled"
-setter = &"set_clock_enabled"
-
-[sub_resource type="Resource" id="clock_24_hour"]
-script = ExtResource("1")
-key = &"clock_24_hour"
-tab = &"Accessibility"
-label = "24-Hour Clock"
-getter = &"clock_24_hour"
-setter = &"set_clock_24_hour"
-
-[sub_resource type="Resource" id="compass"]
-script = ExtResource("1")
-key = &"compass"
-tab = &"Accessibility"
-label = "HUD Compass"
-getter = &"compass_enabled"
-setter = &"set_compass_enabled"
-
-[sub_resource type="Resource" id="view_model_visible"]
-script = ExtResource("1")
-key = &"view_model_visible"
-tab = &"Accessibility"
-label = "Show Weapon"
-getter = &"view_model_visible"
-setter = &"set_view_model_visible"
-
-[sub_resource type="Resource" id="view_model_left"]
-script = ExtResource("1")
-key = &"view_model_left"
-tab = &"Accessibility"
-label = "Left-Handed Weapon"
-getter = &"view_model_left_handed"
-setter = &"set_view_model_left_handed"
-
-[sub_resource type="Resource" id="camera_tilt"]
-script = ExtResource("1")
-key = &"camera_tilt"
-tab = &"Accessibility"
-label = "Camera Tilt"
-getter = &"camera_tilt_enabled"
-setter = &"set_camera_tilt_enabled"
-
-[sub_resource type="Resource" id="fov_effects"]
-script = ExtResource("1")
-key = &"fov_effects"
-tab = &"Accessibility"
-label = "FOV Effects"
-getter = &"fov_effects_enabled"
-setter = &"set_fov_effects_enabled"
-
-[sub_resource type="Resource" id="hud_sway"]
-script = ExtResource("1")
-key = &"hud_sway"
-tab = &"Accessibility"
-control = 2
-label = "HUD Sway"
-getter = &"hud_sway_scale"
-setter = &"set_hud_sway_scale"
-step = 0.05
-value_format = 1
-
-[sub_resource type="Resource" id="hud_ghost"]
-script = ExtResource("1")
-key = &"hud_ghost"
-tab = &"Accessibility"
-control = 2
-label = "HUD Ghosting"
-getter = &"hud_ghost_scale"
-setter = &"set_hud_ghost_scale"
-step = 0.05
-value_format = 1
-
-[sub_resource type="Resource" id="world_ghost"]
-script = ExtResource("1")
-key = &"world_ghost"
-tab = &"Accessibility"
-control = 2
-label = "World Ghosting"
-getter = &"world_ghost_scale"
-setter = &"set_world_ghost_scale"
-step = 0.05
-value_format = 1
-
-[sub_resource type="Resource" id="hud_curve"]
-script = ExtResource("1")
-key = &"hud_curve"
-tab = &"Accessibility"
-control = 2
-label = "HUD Curve"
-getter = &"hud_curve_scale"
-setter = &"set_hud_curve_scale"
-step = 0.05
-value_format = 1
-
-[sub_resource type="Resource" id="lens_curve"]
-script = ExtResource("1")
-key = &"lens_curve"
-tab = &"Accessibility"
-control = 2
-label = "Lens Curve"
-getter = &"lens_curve"
-setter = &"set_lens_curve"
-step = 0.05
-value_format = 1
-
 [sub_resource type="Resource" id="tts"]
 script = ExtResource("1")
 key = &"tts"
@@ -578,6 +459,14 @@ label = "Low-HP Heartbeat"
 getter = &"heartbeat_enabled"
 setter = &"set_heartbeat_enabled"
 
+[sub_resource type="Resource" id="dialogue_music"]
+script = ExtResource("1")
+key = &"dialogue_music"
+tab = &"Audio"
+label = "Dialogue Music"
+getter = &"dialogue_music_enabled"
+setter = &"set_dialogue_music_enabled"
+
 [resource]
 script = ExtResource("2")
-specs = Array[ExtResource("1")]([SubResource("window_mode"), SubResource("resolution"), SubResource("vsync"), SubResource("max_fps"), SubResource("presentation"), SubResource("render_scale"), SubResource("fov"), SubResource("contrast"), SubResource("ink_outline"), SubResource("color_quantization"), SubResource("dither"), SubResource("muzzle_smoke"), SubResource("vol_master"), SubResource("vol_music"), SubResource("vol_sfx"), SubResource("vol_ambient"), SubResource("vol_voice"), SubResource("music_folder"), SubResource("difficulty"), SubResource("mouse_sensitivity"), SubResource("controller_look"), SubResource("invert_look_y"), SubResource("auto_equip_pickups"), SubResource("debug_skip_menu"), SubResource("debug_always_show_tos"), SubResource("controls_hint"), SubResource("screen_shake"), SubResource("screen_flash"), SubResource("dialogue_text_scale"), SubResource("ps1_warp"), SubResource("hitstop"), SubResource("colorblind_mode"), SubResource("colorblind_cues"), SubResource("view_bob"), SubResource("detection_meter"), SubResource("enemy_health_bar"), SubResource("loot_beacons"), SubResource("stamina_ring"), SubResource("minimap"), SubResource("minimap_rotate"), SubResource("minimap_npcs"), SubResource("minimap_stations"), SubResource("minimap_noise"), SubResource("minimap_zoom"), SubResource("map_zoom"), SubResource("clock"), SubResource("clock_24_hour"), SubResource("compass"), SubResource("view_model_visible"), SubResource("view_model_left"), SubResource("camera_tilt"), SubResource("fov_effects"), SubResource("hud_sway"), SubResource("hud_ghost"), SubResource("world_ghost"), SubResource("hud_curve"), SubResource("lens_curve"), SubResource("tts"), SubResource("heartbeat")])
+specs = Array[ExtResource("1")]([SubResource("window_mode"), SubResource("resolution"), SubResource("vsync"), SubResource("max_fps"), SubResource("presentation"), SubResource("fov"), SubResource("contrast"), SubResource("view_model_visible"), SubResource("view_model_left"), SubResource("vol_master"), SubResource("vol_music"), SubResource("vol_sfx"), SubResource("vol_ambient"), SubResource("vol_voice"), SubResource("music_folder"), SubResource("dialogue_music"), SubResource("difficulty"), SubResource("language"), SubResource("mouse_sensitivity"), SubResource("controller_look"), SubResource("invert_look_y"), SubResource("auto_equip_pickups"), SubResource("debug_skip_menu"), SubResource("debug_always_show_tos"), SubResource("minimap"), SubResource("minimap_rotate"), SubResource("minimap_npcs"), SubResource("minimap_stations"), SubResource("minimap_zoom"), SubResource("clock"), SubResource("clock_24_hour"), SubResource("compass"), SubResource("enemy_health_bar"), SubResource("detection_meter"), SubResource("loot_beacons"), SubResource("stamina_ring"), SubResource("screen_shake"), SubResource("lens_curve"), SubResource("world_ghost"), SubResource("screen_flash"), SubResource("hitstop"), SubResource("view_bob"), SubResource("camera_tilt"), SubResource("fov_effects"), SubResource("dialogue_text_scale"), SubResource("colorblind_mode"), SubResource("colorblind_cues"), SubResource("tts"), SubResource("heartbeat")])

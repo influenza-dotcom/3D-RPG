@@ -243,12 +243,21 @@ func _refresh_stats() -> void:
 	for c in _stat_list.get_children():
 		c.queue_free()
 	var s: CharacterStats = _player.stats_or_default()
-	for stat in STATS:
+	# TWO PER LINE: six single-column lines overflowed the info column's slot and painted a scrollbar beside a
+	# six-item list. Pairs fit three lines, and the StatList stays the authored VBox (each line is an HBox).
+	var line: HBoxContainer = null
+	for i in STATS.size():
+		if i % 2 == 0:
+			line = HBoxContainer.new()
+			line.add_theme_constant_override(&"separation", 8)
+			_stat_list.add_child(line)
+		var stat: StringName = STATS[i]
 		var row := MenuStyle.cap_label(Label.new())  # clip, don't squeeze the preview (see _name_label)
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # the two cells split the line evenly
 		var base := s.get_stat(stat)
 		var bonus := _stat_modifier(stat)
 		row.text = PlayerText.character_inspect_stat_row(stat, base, bonus)
-		_stat_list.add_child(row)
+		line.add_child(row)
 
 func _stat_modifier(stat: StringName) -> float:
 	if is_instance_valid(_player) and _player.has_method(&"status_stat_modifier"):

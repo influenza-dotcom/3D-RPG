@@ -80,6 +80,21 @@ expand_margin_right = 5.0
 expand_margin_bottom = 5.0
 modulate_color = Color(0.88, 0.86, 0.82, 1)
 
+[sub_resource type="StyleBoxTexture" id="sb_compact_panel"]
+content_margin_left = 22.0
+content_margin_top = 16.0
+content_margin_right = 22.0
+content_margin_bottom = 18.0
+texture = ExtResource("15_tip")
+texture_margin_left = 12.0
+texture_margin_top = 12.0
+texture_margin_right = 12.0
+texture_margin_bottom = 14.0
+expand_margin_left = 3.0
+expand_margin_top = 3.0
+expand_margin_right = 3.0
+expand_margin_bottom = 3.0
+
 [sub_resource type="StyleBoxTexture" id="sb_dialogue"]
 content_margin_left = 14.0
 content_margin_top = 15.0
@@ -115,21 +130,6 @@ content_margin_left = 12.0
 content_margin_top = 10.0
 content_margin_right = 12.0
 content_margin_bottom = 11.0
-texture = ExtResource("15_tip")
-texture_margin_left = 12.0
-texture_margin_top = 12.0
-texture_margin_right = 12.0
-texture_margin_bottom = 14.0
-expand_margin_left = 3.0
-expand_margin_top = 3.0
-expand_margin_right = 3.0
-expand_margin_bottom = 3.0
-
-[sub_resource type="StyleBoxTexture" id="sb_compact_panel"]
-content_margin_left = 22.0
-content_margin_top = 16.0
-content_margin_right = 22.0
-content_margin_bottom = 18.0
 texture = ExtResource("15_tip")
 texture_margin_left = 12.0
 texture_margin_top = 12.0

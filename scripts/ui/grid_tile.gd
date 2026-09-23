@@ -211,7 +211,7 @@ func _draw_glyph(r: Rect2, col: Color) -> void:
 		if font != null and _item != null:
 			var fs := int(minf(r.size.x, r.size.y) * 0.5)
 			# The INITIAL of the scrubbed label: draw_string bypasses atr, and an unscrubbed "[PH] Chrome Grin" painted "[".
-			draw_string(font, Vector2(0.0, c.y + float(fs) * 0.35), PlayerText.display(_item.label()).substr(0, 1), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, fs, col)
+			draw_string(font, Vector2(0.0, c.y + float(fs) * 0.35), PlayerText.display(Localization.t(_item.label())).substr(0, 1), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, fs, col)
 
 ## True when this tile is a zorkmids stack — a LOOT source's cash (a corpse / container / frozen pickpocket
 ## pocket; the player's own money is a float, never a tile). It renders the BAG mesh (Item.world_model = bag.glb)

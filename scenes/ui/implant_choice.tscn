@@ -66,11 +66,13 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="ChipList" type="VBoxContainer" parent="Panel/Column/ChipScroll"]
+[node name="ChipList" type="GridContainer" parent="Panel/Column/ChipScroll"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/separation = 4
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 4
+columns = 3
 
 [node name="BottomSeparator" type="HSeparator" parent="Panel/Column"]
 layout_mode = 2

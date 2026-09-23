@@ -110,7 +110,16 @@ var QUEST_TOAST_COLOR: Color = GameSettings.hud.quest_toast_color        ## new-
 var QUEST_TRACKER_COLOR: Color = GameSettings.hud.quest_tracker_color    ## top-right objective tracker line
 var LOAD_WARNING_COLOR: Color = GameSettings.hud.load_warning_color      ## amber save-load caveat toast
 var _rep_toasts: VBoxContainer
-var _money_label: Label  ## persistent top-left zorkmid readout
+## The top-left zorkmid readout + OWED row no longer sit on screen 24/7 (2026-09-16, owner's call: "let me see my
+## total for a brief moment, have it fade out"). false = the row rests at alpha 0 and FLASHES on every wallet
+## change — lit with the +N/-N float, held money_readout_hold s, faded over money_readout_fade s
+## (_flash_money_readout). true = the old always-on readout. Either way the row is BUILT, stamped and keeps its
+## slot (hidden by ALPHA, never `visible`), so the rail layout below is identical in both modes.
+const SHOW_MONEY_READOUT := false
+
+var _money_label: Label  ## top-left zorkmid readout (flashes on change unless SHOW_MONEY_READOUT pins it on)
+var _money_row: HBoxContainer = null  ## the readout + OWED row's container — the node the flash fades
+var _money_row_tw: Tween = null       ## its hold+fade tween, killed + restarted by every wallet change
 var _owed_label: Label   ## the OWED row BESIDE it — shown ONLY while GameState.account is negative (see _stamp_owed_row)
 ## The LIVE floating +N/-N money delta: rapid deltas accumulate into this one label (re-stamped, rise+fade
 ## restarted) instead of stacking unreadable copies at the same spot; a flurry that nets to zero frees it.
@@ -259,6 +268,8 @@ var MONEY_LOSS_COLOR: Color = GameSettings.hud.money_loss_color    ## red -N on 
 var MONEY_DEBT_COLOR: Color = GameSettings.hud.money_debt_color    ## readout red while the wallet is NEGATIVE (in debt)
 var MONEY_DELTA_RISE: float = GameSettings.hud.money_delta_rise    ## pixels the +N/-N floats up as it fades
 var MONEY_DELTA_TIME: float = GameSettings.hud.money_delta_time    ## seconds for that float + fade
+var MONEY_READOUT_HOLD: float = GameSettings.hud.money_readout_hold  ## seconds the flashed total stays fully lit
+var MONEY_READOUT_FADE: float = GameSettings.hud.money_readout_fade  ## seconds it then takes to fade out
 ## THE TOP-LEFT MONEY RAIL'S VERTICAL PADDING — the first row's inset from the top edge AND the gap between every
 ## row below it, so the whole rail derives from this ONE number instead of three hand-typed y literals that can
 ## drift into each other. Three rows, top to bottom:
@@ -453,9 +464,10 @@ func _ready() -> void:
 	# ROW 1 OF THE MONEY RAIL: the persistent zorkmid readout with the OWED row beside it, carried by ONE
 	# HBoxContainer rather than two hand-placed labels — the zorkmid text is variable-width, so only a container
 	# can put a second readout after it, and hiding the (usually hidden) OWED label collapses the gap for free.
-	# Refreshed + a floating +N/-N spawned on Player.money_changed (wired in setup). Outlined like the toasts so
-	# it reads over any backdrop. On the weight carrier (it's corner furniture) but NOT under _notices —
-	# dialogue hides notifications, and this readout deliberately stays visible through a conversation.
+	# Refreshed + a floating +N/-N spawned on Player.money_changed (wired in setup), which also FLASHES the row
+	# (see SHOW_MONEY_READOUT). Outlined like the toasts so it reads over any backdrop. On the weight carrier
+	# (it's corner furniture) but NOT under _notices — dialogue hides notifications, and a fee or reward paid
+	# mid-conversation should still flash the total.
 	var money_row := HBoxContainer.new()
 	money_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	money_row.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
@@ -483,6 +495,9 @@ func _ready() -> void:
 	_owed_label.add_theme_constant_override(&"outline_size", MenuStyle.hud.toast_outline_size)
 	_owed_label.visible = false
 	money_row.add_child(_owed_label)
+	# Hidden by ALPHA, not `visible`: the flash fades modulate, and the row keeps its slot either way.
+	money_row.modulate.a = 1.0 if SHOW_MONEY_READOUT else 0.0
+	_money_row = money_row
 	_stamp_money_readout(0.0)  # placeholder until the first poll/signal; the stamp owns text + debt tint + the OWED row
 	# THE OWED ROW'S REAL DRIVER. GameState.account moves on two paths the WALLET never sees — a credit purchase
 	# that draws nothing from an empty wallet (Player.charge debits the account alone, so money_changed never
@@ -1174,9 +1189,9 @@ func restore_hud_after_death() -> void:
 	# Must run AFTER the clear — the apply no-ops while the death list is non-empty.
 	_apply_crosshair_visibility()
 
-## Free every transient top-left notification that predates this restore — the toast labels under _rep_toasts
-## and the +N/-N money float. Their hold/fade tweens are deliberately NOT ignore_time_scale, so the death
-## cinematic's slow-mo stretches them: a toast born on the killing-blow frame (a cripple line, a dialogue-abort
+## Free every transient top-left notification that predates this restore — the toast labels under _rep_toasts,
+## the +N/-N money float, and the flashed money readout (dimmed, not freed). Their hold/fade tweens are
+## deliberately NOT ignore_time_scale, so the death cinematic's slow-mo stretches them: a toast born on the killing-blow frame (a cripple line, a dialogue-abort
 ## flush) or pushed invisibly mid-cinematic by a POSTHUMOUS kill (collateral/long-range bounty, a kill-quest
 ## objective, a faction hit) is often still alive when the HUD returns, popping half-faded over the spawn
 ## fade-in. The fresh life starts with a clean stack; the deliberate revive receipts (wallet / grudge / tutorial
@@ -1196,6 +1211,11 @@ func _purge_transient_notices() -> void:
 	_money_delta_label = null
 	_money_delta_tw = null
 	_money_delta_sum = 0.0
+	if not SHOW_MONEY_READOUT and _money_row != null:
+		if _money_row_tw != null:
+			_money_row_tw.kill()
+		_money_row_tw = null
+		_money_row.modulate.a = 0.0
 
 ## One HUD readout label pinned to the bottom-LEFT (right_side=false) or bottom-RIGHT (true) corner,
 ## white with a black outline so it reads over any scene, mouse-ignoring, above the rest of the HUD.
@@ -1720,9 +1740,12 @@ func _push_toast(text: String, color: Color) -> void:
 		return
 	var label := Label.new()
 	# Toasts are composed runtime strings that can carry a player-TYPED pet name (Claimable's befriend /
-	# released toasts) — typed text must never be looked up as a translation msgid (atr opt-out).
+	# released toasts) — typed text must never be looked up as a translation msgid (atr opt-out). The one
+	# Localization.t here is safe for that: a composed toast was translated at TEMPLATE level (TextFormat.subst)
+	# and misses the lookup as a whole string, and a typed name never forms a whole toast on its own — so the only
+	# strings that can hit are BARE PlayerText consts (UI.toast(PlayerText.X)), which is exactly what needs it.
 	label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	label.text = PlayerText.display(text)  # atr opt-out: scrub the [PH] marker by hand
+	label.text = PlayerText.display(Localization.t(text))  # atr opt-out: resolve a bare const, scrub the [PH] marker by hand
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.add_theme_font_size_override(&"font_size", REP_TOAST_FONT_SIZE)
 	label.add_theme_color_override(&"font_color", color)
@@ -1755,7 +1778,7 @@ func _refresh_quest_tracker() -> void:
 		for obj in QuestTracker.current_objectives(qid):
 			if obj == null or obj.optional or GameState.is_objective_done(qid, obj.id):
 				continue
-			var desc: String = obj.description if obj.description != "" else String(obj.id)
+			var desc: String = obj.description if obj.description != "" else String(obj.id).capitalize()  # blank-description degrade: never a raw id on the HUD
 			_quest_tracker.text = quest_tracker_line(quest.title, desc, GameState.objective_progress(qid, obj.id), obj.required_count)
 			_quest_tracker.visible = true
 			return
@@ -1770,7 +1793,7 @@ func _on_quest_started(quest: Quest) -> void:
 ## Toast only when an objective FULLY completes (not on every increment of a kill-N), then refresh the tracker.
 func _on_quest_objective(quest: Quest, objective: QuestObjective) -> void:
 	if quest != null and objective != null and GameState.is_objective_done(quest.id, objective.id):
-		var desc: String = objective.description if objective.description != "" else String(objective.id)
+		var desc: String = objective.description if objective.description != "" else String(objective.id).capitalize()  # blank-description degrade
 		_push_quest_toast(PlayerText.objective_complete(desc), CBPalette.gain())
 	_refresh_quest_tracker()
 
@@ -1838,6 +1861,7 @@ func _on_money_changed(total: float, delta: float) -> void:
 	_stamp_money_readout(total)
 	if is_zero_approx(delta):
 		return
+	_flash_money_readout()
 	if is_instance_valid(_money_delta_label) and not _money_delta_label.is_queued_for_deletion():
 		_money_delta_sum += delta
 		if is_zero_approx(_money_delta_sum):
@@ -1868,6 +1892,20 @@ func _on_money_changed(total: float, delta: float) -> void:
 	_notices.add_child(ind)  # under the notification layer, so dialogue hides the float with the toasts
 	_money_delta_label = ind
 	_money_delta_tw = _money_delta_float(ind)
+
+## Light the resting-hidden readout row, hold it, fade it back out. A change mid-hold or mid-fade snaps it back
+## to full and RESTARTS the hold, so a coin-pile flurry reads as one long flash rather than a flicker. A no-op
+## while SHOW_MONEY_READOUT pins the row on. Not ignore_time_scale, like the float it rides with (see
+## _purge_transient_notices for why that matters on respawn).
+func _flash_money_readout() -> void:
+	if SHOW_MONEY_READOUT or _money_row == null:
+		return
+	if _money_row_tw != null:
+		_money_row_tw.kill()
+	_money_row.modulate.a = 1.0
+	_money_row_tw = _money_row.create_tween()
+	_money_row_tw.tween_interval(MONEY_READOUT_HOLD)
+	_money_row_tw.tween_property(_money_row, "modulate:a", 0.0, MONEY_READOUT_FADE)
 
 ## The +N/-N float's rise+fade, shared by the fresh-label and re-stamp paths so both cycles look identical.
 func _money_delta_float(ind: Label) -> Tween:

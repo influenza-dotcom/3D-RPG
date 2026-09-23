@@ -14,7 +14,14 @@ const StatTextResource := preload("res://scripts/ui/stat_text.gd")
 static func tooltip(stat: StringName, sheet: CharacterStats) -> String:
 	var s: CharacterStats = sheet if sheet != null else CharacterStats.new()
 	var v: int = s.get_stat(stat)
-	return "%s  ·  %d\n%s\nNow: %s" % [title(stat), v, blurb(stat), _effect(stat, s)]
+	# Title and value in columns (no middle dot), then the blurb ONLY when one is authored — every shipped StatText
+	# description is blank, and an unconditional middle line painted an empty gap in every stat tooltip.
+	var lines: Array[String] = ["%s   %d" % [title(stat), v]]
+	var b := blurb(stat)
+	if not b.strip_edges().is_empty():
+		lines.append(b)
+	lines.append("Now: %s" % _effect(stat, s))
+	return "\n".join(lines)
 
 ## The authored title for `stat` (e.g. "Strength"), or a bare capitalized id when no StatText is authored yet.
 ## The ONE place stat title text resolves — the stats screen + character creation read through here, not a local

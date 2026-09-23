@@ -203,9 +203,8 @@ func _disarm_unless(item: Item, is_buy: bool) -> void:
 	_armed_item = null
 	_paint_rows()
 
-## Repaint every row recorded by the last _fill for the current arm state. ARMED rows swap their NAME cell for
-## the confirm caption in the accent ink and BLANK the price column — the money phrase now lives inside the
-## caption, and printing it twice on one row reads as two separate numbers. Nothing moves: both cells keep their
+## Repaint every row recorded by the last _fill for the current arm state. ARMED rows ink their NAME in the accent
+## and swap the PRICE cell for the confirm caption (which carries the money phrase, so it is still printed once). Nothing moves: both cells keep their
 ## size flags and the price column keeps its skin-budget minimum width, so the swap can never shift the list.
 func _paint_rows() -> void:
 	for r: Dictionary in _rows:
@@ -221,9 +220,11 @@ func _paint_row(r: Dictionary) -> void:
 	if not is_instance_valid(name_l) or not is_instance_valid(price_l):
 		return
 	if r["item"] == _armed_item and bool(r["is_buy"]) == _armed_is_buy:
-		name_l.text = PlayerText.chip_install_confirm(float(r["charge"]))
+		# The NAME stays: an armed row used to swap its chip name for "Confirm  200 zm", so the one moment the player is
+		# about to spend was the one moment the row stopped saying WHAT they were buying. The confirm rides the price cell.
+		name_l.text = String(r["label"])
 		name_l.add_theme_color_override(&"font_color", MenuStyle.accent())  # the one accent row on the card = "this is the press that spends"
-		price_l.text = ""
+		price_l.text = PlayerText.chip_install_confirm(float(r["charge"]))
 	else:
 		name_l.text = String(r["label"])
 		name_l.add_theme_color_override(&"font_color", MenuStyle.text_color() if bool(r["affordable"]) else MenuStyle.skin.disabled_text_color)

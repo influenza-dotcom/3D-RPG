@@ -81,6 +81,32 @@ func _run() -> void:
 	print("QA_MENU_READY=", menu_up)
 	await _shot("01_start_menu")
 
+	# THE FADE CARDS. The internet-warning card and the New Game boot quote are the first and last things a new
+	# player reads before the world, and neither was ever in this pack (the reveal above skips straight past them).
+	# Painted at full alpha on the start menu's own card nodes, then put back exactly as the reveal left them.
+	var sm0: Node = get_tree().current_scene
+	if sm0 != null and sm0.get(&"_quote_label") != null:
+		var q_label: Label = sm0.get(&"_quote_label")
+		var q_root: Control = sm0.get(&"_quote_root")
+		var q_black: Control = sm0.get(&"_black")
+		var q_attrib: Label = sm0.get(&"_attrib_label")
+		var cards: PackedStringArray = sm0.get_script().get_script_constant_map().get("INTERNET_WARNING_CARDS", PackedStringArray())
+		q_black.visible = true
+		q_root.modulate.a = 1.0
+		q_attrib.visible = false
+		q_label.text = cards[0] if not cards.is_empty() else ""
+		await _frames(4)
+		await _shot("01b_warning_card")
+		var quote: Dictionary = sm0.call(&"_pick_quote")
+		q_label.text = str(quote.get("text", ""))
+		q_attrib.text = PlayerText.boot_quote_attribution(str(quote.get("attribution", "")))
+		q_attrib.visible = true
+		await _frames(4)
+		await _shot("01c_boot_quote")
+		q_root.modulate.a = 0.0
+		q_black.visible = false
+		await _frames(2)
+
 	var cc: Control = (load("res://scenes/ui/character_creation.tscn") as PackedScene).instantiate()
 	get_tree().root.add_child(cc)
 	await _frames(10)
@@ -90,6 +116,25 @@ func _run() -> void:
 		(tabs[0] as TabContainer).current_tab = 1
 		await _frames(12)  # SubViewport preview needs frames to render
 		await _shot("03_char_create_look")
+		(tabs[0] as TabContainer).current_tab = 2
+		await _frames(12)
+		await _shot("03b_char_create_shirt")
+		if cc.has_method(&"_on_shirt_custom_open"):
+			cc.call(&"_on_shirt_custom_open")
+			await _frames(6)
+			await _shot("03c_char_create_colour_wheel")
+			var layer: Variant = cc.get(&"_shirt_picker_layer")
+			if layer is CanvasLayer:
+				(layer as CanvasLayer).visible = false
+		(tabs[0] as TabContainer).current_tab = 0
+		await _frames(4)
+	var pad_kb: Variant = cc.get(&"_pad_kb")
+	if pad_kb is Control and cc.get(&"_name_edit") is LineEdit:
+		pad_kb.call(&"open", cc.get(&"_name_edit"))
+		await _frames(6)
+		await _shot("03d_char_create_pad_keyboard")
+		pad_kb.call(&"close")
+		await _frames(2)
 	cc.queue_free()
 	await _frames(2)
 
@@ -101,6 +146,17 @@ func _run() -> void:
 				ot.current_tab = i
 			await _frames(6)
 			await _shot("04_options_tab%d" % i)
+			# A page that overflows gets a second shot at its END, so a row clipped below the fold is in the pack.
+			var page: ScrollContainer = (ot.get_tab_control(i) as ScrollContainer) if ot != null else null
+			if page != null and page.get_v_scroll_bar().max_value > page.get_v_scroll_bar().page + 1.0:
+				page.scroll_vertical = int(page.get_v_scroll_bar().max_value)
+				await _frames(4)
+				await _shot("04_options_tab%d_end" % i)
+				page.scroll_vertical = 0
+		OptionsMenu.call(&"_show_quit_confirm")
+		await _frames(4)
+		await _shot("04q_options_quit_confirm")
+		(OptionsMenu.get(&"_quit_confirm") as Control).visible = false
 		OptionsMenu.close()
 		await _frames(2)
 
@@ -110,6 +166,10 @@ func _run() -> void:
 	get_tree().root.add_child(tos)
 	await _frames(8)
 	await _shot("05_terms_of_service")
+	if tos.has_method(&"_on_decline"):
+		tos.call(&"_on_decline")
+		await _frames(4)
+		await _shot("05b_terms_decline_nag")
 	tos.queue_free()
 	await _frames(2)
 
@@ -124,6 +184,13 @@ func _run() -> void:
 	await _frames(6)
 	await _shot("07_name_entry")
 	NameEntryDialog.close()
+	await _frames(2)
+
+	# The CRASH REPORT card — shown on the launch after a crash. Fed a short fake report (never a real file).
+	CrashReportScreen.open("QA sample crash report\nengine 4.7 | level alive.map\nbreadcrumbs: (sample)", "user://crash_reports/qa_sample.txt")
+	await _frames(6)
+	await _shot("07b_crash_report")
+	CrashReportScreen.close()
 	await _frames(2)
 
 	# --- In-game screens (need the live Player from game.tscn) ----------------------------------
@@ -158,6 +225,12 @@ func _run() -> void:
 	if _try_open(InventoryScreen):
 		await _frames(20)  # icon tiles bake over a few frames
 		await _shot("08_inventory")
+		var hover_item: Item = ItemDb.item_by_id(&"healthpack")
+		if hover_item != null:
+			InventoryScreen.call(&"_on_grid_hover_changed", hover_item)
+			await _frames(4)
+			await _shot("08a_inventory_hover_detail")
+			InventoryScreen.call(&"_on_grid_hover_changed", null)
 		# The WALLET ROW's amount card (AmountPrompt) — a real menu surface with no screen of its own, so it
 		# only ever appears on top of this one. Seed some cash first: the prompt refuses a 0 wallet outright
 		# (nothing to divide up), which is correct behaviour but shoots an empty frame.
@@ -188,6 +261,11 @@ func _run() -> void:
 	ShopScreen.open_shop(m, player)
 	await _frames(8)
 	await _shot("10_shop")
+	var shop_pistol: Item = ItemDb.item_by_id(&"pistol")
+	if shop_pistol != null:
+		ShopScreen.call(&"_on_hover", shop_pistol, true)
+		await _frames(4)
+		await _shot("10b_shop_hover_price")
 	ShopScreen.close()
 	await _frames(2)
 	m.free()
@@ -202,12 +280,15 @@ func _run() -> void:
 	await _frames(2)
 	h.free()
 
+	var qa_pm: Variant = player.call(&"_perk_manager") if player.has_method(&"_perk_manager") else null
+	if qa_pm != null:
+		qa_pm.set(&"skill_points", 2)
 	var lu := LevelUp.new()
 	lu.set(&"station_name", "QA Station")
-	var perks: Array = []
+	var perks: Array[Perk] = []
 	for p in ["res://resources/perks/deadeye.tres", "res://resources/perks/tough_hide.tres"]:
 		var r := load(p)
-		if r != null:
+		if r is Perk:
 			perks.append(r)
 	lu.set(&"available_perks", perks)
 	LevelUpScreen.open_level_up(lu, player)
@@ -217,6 +298,10 @@ func _run() -> void:
 	await _frames(2)
 	lu.free()
 
+	if qa_pm != null:
+		var qa_perk: Resource = load("res://resources/perks/tough_hide.tres")
+		if qa_perk != null:
+			qa_pm.call(&"unlock_perk", qa_perk)
 	var rs := RespecStation.new()
 	rs.set(&"station_name", "QA Shrine")
 	RespecScreen.open_respec(rs, player)
@@ -236,9 +321,51 @@ func _run() -> void:
 	LootScreen.open_for(corpse, player)
 	await _frames(20)  # two grids of icon tiles
 	await _shot("14_loot")
+	var loot_hover: Item = ItemDb.item_by_id(&"pistol")
+	if loot_hover != null:
+		LootScreen.call(&"_on_hover", loot_hover, true)
+		await _frames(4)
+		await _shot("14a_loot_hover")
 	LootScreen.close()
 	await _frames(2)
 	corpse.free()
+
+	var crate := ItemContainer.new()
+	crate.set(&"container_name", "Footlocker")
+	crate.set(&"money", 20.0)
+	get_tree().root.add_child(crate)
+	await _frames(2)
+	if crate.get(&"inventory") != null:
+		for id: StringName in [&"ammo_pistol", &"rock"]:
+			var it: Item = ItemDb.item_by_id(id)
+			if it != null:
+				crate.inventory.add(it, 2)
+	LootScreen.open_container(crate, player)
+	await _frames(20)
+	if LootScreen.is_open():
+		await _shot("14c_container")
+		LootScreen.close()
+		await _frames(2)
+	else:
+		print("QA_SKIP 14c_container")
+	crate.queue_free()
+
+	var live_npc: Node = null
+	for n in get_tree().get_nodes_in_group(Groups.NPC):
+		if is_instance_valid(n) and n.get(&"inventory") is CharacterInventory:
+			live_npc = n
+			break
+	if live_npc != null:
+		LootScreen.pickpocket(live_npc, player)
+		await _frames(20)
+		if LootScreen.is_open():
+			await _shot("14b_pickpocket")
+			LootScreen.close()
+			await _frames(2)
+		else:
+			print("QA_SKIP 14b_pickpocket (refused)")
+	else:
+		print("QA_SKIP 14b_pickpocket (no NPC with an inventory in the level)")
 
 	# --- The player-menu TAB FAMILY siblings + the remaining in-game modals ----------------------
 	# Reputation / Journal live here rather than in the boot flow above: they are PlayerMenus group
@@ -252,6 +379,23 @@ func _run() -> void:
 	if _try_open(QuestJournal):  # unseeded on purpose: no GameState mutations -> no autosave writes
 		await _frames(8)
 		await _shot("16_journal_empty")
+		QuestJournal.close()
+		await _frames(2)
+
+	# ...and POPULATED: one active quest and one completed. Safe against the profile: enable_sandbox() above routes
+	# every save this run triggers into user://sandbox/.
+	var qa_q1: Resource = load("res://resources/quests/clear_the_block.tres")
+	var qa_q2: Resource = load("res://resources/quests/recover_the_package.tres")
+	if qa_q1 != null:
+		QuestTracker.start_quest(qa_q1)
+	if qa_q2 != null:
+		QuestTracker.start_quest(qa_q2)
+		QuestTracker.complete_quest(qa_q2.get(&"id"))
+	await _frames(4)
+	await _shot("16a_hud_quest_toasts")
+	if _try_open(QuestJournal):
+		await _frames(8)
+		await _shot("16b_journal_quests")
 		QuestJournal.close()
 		await _frames(2)
 
@@ -273,9 +417,16 @@ func _run() -> void:
 			e.count = 1
 			chip_stock.append(e)
 	ci.set(&"stock_counts", chip_stock)
+	var carried_chip: Item = ItemDb.item_by_id(&"chip_takedown")
+	if inv != null and carried_chip != null:
+		inv.add(carried_chip, 1)
 	ChipInstallScreen.open_install(ci, player)
 	await _frames(8)
 	await _shot("18_chip_install")
+	if carried_chip != null and ChipInstallScreen.has_method(&"_on_row_pressed"):
+		ChipInstallScreen.call(&"_on_row_pressed", carried_chip, false)
+		await _frames(4)
+		await _shot("18a_chip_install_armed")
 	ChipInstallScreen.close()
 	await _frames(2)
 	ci.free()
@@ -348,6 +499,16 @@ func _run() -> void:
 	# placeholder instead, which is both a different picture and (much) less layout — and the sighted one is
 	# the one whose 8x8 grid decides whether the card fits its anchor band. Grant the chip and cover the
 	# stake, or this shot is a toast ("you can't cover the 50 zm stake") over an unopened screen.
+	player.call(&"add_money", 500.0)
+	var cm0 := ChessMatch.new()
+	cm0.set(&"opponent_name", "QA Grandmaster")
+	cm0.set(&"wager", 50)
+	ChessScreen.open_match(cm0, player)
+	await _frames(12)
+	await _shot("19a_chess_blindfold")
+	ChessScreen.close()
+	await _frames(2)
+	cm0.free()
 	player.call(&"unlock_mechanic", &"chess_visualizer")
 	player.call(&"add_money", 500.0)
 	var cm := ChessMatch.new()
@@ -356,6 +517,12 @@ func _run() -> void:
 	ChessScreen.open_match(cm, player)
 	await _frames(12)  # the board grid builds its 64 cells
 	await _shot("19_chess")
+	var mi: Variant = ChessScreen.get(&"_move_input")
+	if mi is LineEdit:
+		(mi as LineEdit).text = "zz9"
+		ChessScreen.call(&"_submit_move")
+		await _frames(4)
+		await _shot("19b_chess_illegal_move")
 	ChessScreen.close()
 	await _frames(2)
 	cm.free()
@@ -417,10 +584,174 @@ func _run() -> void:
 		MapScreen._nudge_zoom(-1)
 		await _frames(6)
 		await _shot("23_map_zoomed_out")
+		var lvl: String = GameState.current_level_path
+		GameState.add_waypoint(lvl, player.global_position, "Stash", "Under the stairs", 0, 0)
+		await _frames(4)
+		MapScreen.call(&"_select", 0)
+		await _frames(6)
+		await _shot("22b_map_pin_selected")
+		MapScreen.call(&"_on_edit_pressed")
+		await _frames(6)
+		await _shot("22c_map_pin_editor")
+		var pr: Variant = MapScreen.get(&"_prompt")
+		if pr != null and pr.has_method(&"close"):
+			pr.call(&"close")
+		GameState.remove_waypoint(lvl, 0)
+		await _frames(2)
 		Settings.set_map_zoom(was_map_zoom)
 		MapScreen.close()
 		await _frames(2)
 
+
+	# --- Screens this pack never photographed before (09-17 "check EVERY menu") ------------------------------
+	var atm := Atm.new()
+	atm.set(&"standalone", false)
+	atm.set(&"station_name", "QA Terminal")
+	get_tree().root.add_child(atm)
+	await _frames(2)
+	AtmScreen.open_atm(atm, player)
+	await _frames(8)
+	if AtmScreen.is_open():
+		await _shot("24_atm")
+		AtmScreen.close()
+		await _frames(2)
+	else:
+		print("QA_SKIP 24_atm")
+	atm.queue_free()
+
+	if _try_open(WaitScreen):
+		await _frames(6)
+		await _shot("25_wait")
+		WaitScreen.close()
+		await _frames(2)
+
+	SaveLoadScreen.open(true)
+	await _frames(8)
+	await _shot("26_save_load_in_game")
+	SaveLoadScreen.call(&"_on_save_pressed", 1)   # empty slot: writes (into the sandbox) and repaints
+	await _frames(6)
+	SaveLoadScreen.call(&"_on_save_pressed", 1)   # occupied now: arms the overwrite confirm
+	await _frames(6)
+	await _shot("26b_save_overwrite_confirm")
+	SaveLoadScreen.close()
+	await _frames(2)
+
+	if _try_open(OptionsMenu):
+		await _frames(6)
+		await _shot("27_options_in_game")
+		OptionsMenu.close()
+		await _frames(2)
+
+	UI.toast(PlayerText.TOAST_QUICKSAVED)
+	await _frames(4)
+	await _shot("28_hud_plain")
+
+	# --- THE HUD's WORDS (09-17 "check the HUD"): every text-carrying HUD state, driven through the same HUD
+	# methods the gameplay drivers call. The per-frame drivers are PAUSED for the block (the player's own
+	# _physics_process re-asserts the stealth badge, and the takedown / pet / claim nodes re-assert their cues
+	# every frame), then restored. Nothing here writes a save: every call is a HUD paint, not a state change.
+	var hud_ui: Node = player.get(&"ui")
+	var hud_ph: Variant = player.get(&"_hud")
+	var paused_drivers: Array[Node] = [player]
+	for c in player.get_children():
+		if c is SilentTakedown or c is PetInteraction or c is ClaimInteraction:
+			paused_drivers.append(c)
+	for n in paused_drivers:
+		n.set_physics_process(false)
+	var pickup_key: String = InputManager.get_action_binding(InputManager.action_pickup)
+	if hud_ui != null:
+		hud_ui.call(&"set_look_name", "[%s] %s" % [pickup_key, PlayerText.talk_to(PlayerText.JOB_MERCHANT)], Color(0.92, 0.92, 0.95))
+		await _frames(3)
+		await _shot("30_hud_look_talk")
+		hud_ui.call(&"set_look_name", "[%s] %s" % [pickup_key, PlayerText.pick_up("Health Pack")], Color(0.92, 0.92, 0.95))
+		await _frames(3)
+		await _shot("30b_hud_look_pickup")
+		hud_ui.call(&"set_look_name", "", Color.WHITE)
+	if hud_ph != null:
+		hud_ph.call(&"set_takedown_cue", true, PlayerText.takedown_prompt(InputManager.get_action_binding(&"Takedown"), PlayerText.STRANGER), 0.45)
+		await _frames(3)
+		await _shot("31_hud_takedown_cue")
+		hud_ph.call(&"clear_interaction_cues")
+		hud_ph.call(&"set_stealth_level", StealthStatus.Level.HIDDEN, true)
+		await _frames(3)
+		await _shot("32_hud_stealth_hidden")
+		hud_ph.call(&"set_stealth_level", StealthStatus.Level.DANGER, true)
+		await _frames(3)
+		await _shot("32b_hud_stealth_danger")
+		hud_ph.call(&"clear_stealth_readout")
+		var target_npc: Node = null
+		for n in get_tree().get_nodes_in_group(Groups.NPC):
+			if is_instance_valid(n):
+				target_npc = n
+				break
+		hud_ph.call(&"show_enemy_health", target_npc, 40.0, 100.0, 65.0)
+		await _frames(3)
+		await _shot("33_hud_enemy_health")
+		hud_ph.call(&"clear_enemy_health")
+	var hb: Variant = hud_ui.get(&"_hotbar") if hud_ui != null else null
+	if hb != null:
+		hb.call(&"_wake")
+		await _frames(12)
+		await _shot("34_hud_hotbar")
+	# Toast stacks. Each batch is shot, then allowed to clear (hold + fade) before the next, so a shot shows one family.
+	var toast_hold: float = GameSettings.hud.rep_toast_hold + GameSettings.hud.rep_toast_fade + 0.3
+	var fb = GameSettings.player_feedback
+	for batch: Array in [
+			["35_hud_toasts_combat", [
+				[PlayerText.TOAST_SNEAK_ATTACK, fb.sneak_toast_color],
+				[PlayerText.TOAST_TAKEDOWN, Color(0.72, 0.86, 0.92)],
+				[PlayerText.head_crippled(), fb.cripple_toast_color],
+				[PlayerText.crippled_target("Raider", "Leg"), Color(1.0, 0.7, 0.3)],
+				[PlayerText.collateral_kill(25.0), Color(1.0, 0.86, 0.3)],
+				[PlayerText.long_range_kill(48, 30.0), Color(1.0, 0.86, 0.3)],
+				[PlayerText.TOAST_CAUGHT, CBPalette.loss()],
+			]],
+			["35b_hud_toasts_progress", [
+				[PlayerText.level_up(3, 1), Color(0.7, 0.9, 1.0)],
+				[PlayerText.acquired("Grapple Chip"), Color(0.5, 0.85, 1.0)],
+				[PlayerText.installed("Grapple Chip"), Color(0.5, 0.85, 1.0)],
+				[PlayerText.learned("Deadeye"), Color(0.6, 0.85, 1.0)],
+				[PlayerText.gained_hp(25), Color(0.4, 1.0, 0.45)],
+				[PlayerText.reputation_changed("Townsfolk", true), Color(0.5, 1.0, 0.5)],
+				[PlayerText.alignment_changed("Raiders", PlayerText.ALIGNMENT_HOSTILE_WORD), Color(1.0, 0.4, 0.4)],
+			]],
+			["35c_hud_toasts_money", [
+				[PlayerText.purse_taken("a stranger", 40.0), fb.death_wallet_toast_color],
+				[PlayerText.purse_dropped(40.0), fb.death_wallet_toast_color],
+				[PlayerText.credit_score_toast(612, -24, &"subprime", true), Color(1.0, 0.6, 0.4)],
+				[PlayerText.ledger_interest(-12.0), Color(1.0, 0.6, 0.4)],
+				[PlayerText.atm_deposited(100.0, true), Color(0.6, 0.85, 1.0)],
+				[PlayerText.chess_win(50.0), GameSettings.hud.money_gain_color],
+			]],
+			["35d_hud_toasts_world", [
+				[PlayerText.holster_forgiveness_tutorial(InputManager.get_action_binding(InputManager.action_reload)), Color(1.0, 0.85, 0.4)],
+				[TextFormat.subst(PlayerText.WAYPOINT_MARKED, {"name": "Pin 1"}), Color.WHITE],
+				[PlayerText.locked_requires("Vault Key"), Color(1.0, 0.55, 0.4)],
+				[PlayerText.TOAST_BACKPACK_PARTIAL, Color(0.85, 0.85, 0.85)],
+				[PlayerText.radio_on("Jukebox"), Color(0.5, 0.8, 1.0)],
+				[PlayerText.befriend("Rex"), Color(1.0, 0.6, 0.7)],
+				[PlayerText.inventory_full(2), Color(1.0, 0.6, 0.3)],
+			]],
+		]:
+		await get_tree().create_timer(toast_hold).timeout
+		for t: Array in batch[1]:
+			player.call(&"notify_toast", String(t[0]), t[1] as Color)
+		await _frames(4)
+		await _shot(String(batch[0]))
+	await get_tree().create_timer(toast_hold).timeout
+	for n in paused_drivers:
+		if is_instance_valid(n):
+			n.set_physics_process(true)
+
+	if player.has_method(&"_show_death_card") and player.has_method(&"_compose_death_message"):
+		player.set(&"_death_card_text", player.call(&"_compose_death_message"))
+		player.call(&"_show_death_card")
+		var dc: Variant = player.get(&"_death_card")
+		if dc is Control:
+			(dc as Control).modulate.a = 1.0
+			await _frames(4)
+			await _shot("29_death_card")
+			(dc as Control).visible = false
 	_finish()
 
 func _finish() -> void:
@@ -446,6 +777,22 @@ func _shot(name: String) -> void:
 	var err := img.save_png(ProjectSettings.globalize_path(path))
 	print("QA_SHOT " if err == OK else "QA_SHOT_FAIL ", path)
 	_report_card_rect(name)
+	_report_scrollbars(name)
+
+## Print EVERY scrollbar actually painted in this shot, with how far the content overflows its slot. A menu that
+## shows a bar for a list of six rows is a layout defect (the 09-16 "you included a scrolling bar?" review), so the
+## pack reports them as numbers instead of leaving a 6px track for a reviewer's eye to catch or miss.
+func _report_scrollbars(shot_name: String) -> void:
+	for n in get_tree().root.find_children("*", "ScrollContainer", true, false):
+		var sc := n as ScrollContainer
+		if sc == null or not sc.is_visible_in_tree():
+			continue
+		var bar := sc.get_v_scroll_bar()
+		if bar == null or not bar.visible:
+			continue
+		var over := bar.max_value - bar.page
+		print("QA_SCROLLBAR ", shot_name, " ", sc.get_parent().name, "/", sc.name,
+			" slot=", sc.size, " overflow_px=", snappedf(over, 0.1))
 
 ## Print the on-screen rect of every visible menu CARD in this shot, so a sibling screen that resizes or
 ## re-centres its panel shows up as a number here and not just as a "hmm, that moved" in the PNGs. A card

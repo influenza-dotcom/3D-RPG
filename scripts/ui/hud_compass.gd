@@ -279,7 +279,7 @@ func _draw_graduations(heading: float, span: float, w: float, hud: HudSettings, 
 			continue
 		if font == null:
 			continue
-		var label := PlayerText.display(PlayerText.compass_cardinal(idx))  # draw_string bypasses atr: scrub by hand
+		var label := PlayerText.display(Localization.t(PlayerText.compass_cardinal(idx)))  # draw_string bypasses atr: translate + scrub by hand
 		var fs: int = hud.compass_font_size if major else hud.compass_minor_font_size
 		# Centre the glyph run on the bearing: draw_string anchors at BASELINE-LEFT, so the run is measured
 		# and shifted by half its width. The baseline is inset from the band's BOTTOM, which is why

@@ -84,7 +84,7 @@ extends Resource
 ## for the pickpocket odds line that rides on top of it in pickpocket mode. Verified against the shipped pistol
 ## and microchip tooltips by screenshot; 6 visibly shrank the tiles for no gain. The height is snapped to a
 ## whole number of RENDERED lines, so a longer-than-budget tooltip clips between lines, never through glyphs.
-@export var footer_hint_lines: int = 5
+@export var footer_hint_lines: int = 3
 ## Extra glyph spacing (px) on titles for the tracked-uppercase look. 0 = none.
 @export var title_tracking: int = 4
 ## UPPERCASE titles + section headers (the sleek look). Off = leave the author's casing. Consulted ONLY by
