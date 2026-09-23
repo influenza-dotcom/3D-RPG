@@ -10,7 +10,10 @@ extends Resource
 ## Two ways it's consumed, both via configure_swap() feeding a BodyModelSwap's OWN exports (never a host `look`,
 ## which would leak a head/body into the player's first-person legs rig):
 ##   • the creation-screen + Stats-screen live 3D preview (CharacterPreview),
-##   • (future) any real third-person player body.
+##   • the THIRD-PERSON player body (scripts/player/third_person_body.gd) — the whole look, head included,
+##     which is what the "(future) any real third-person body" note here used to promise.
+## (The first-person body takes a narrower slice of the same catalog by hand — the BODY only, never the head,
+## which would sit inside the camera; see FirstPersonBody._configure_fp_torso.)
 ##
 ## The shipped default is built IN CODE (default(), via preload — always-correct uids). A project can override it
 ## by authoring `res://resources/characters/PlayerAppearanceCatalog.tres`; get_catalog() prefers that when present.

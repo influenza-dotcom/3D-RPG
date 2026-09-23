@@ -5,6 +5,7 @@
 [ext_resource type="Script" path="res://scripts/components/credit_watch.gd" id="38_credit"]
 [ext_resource type="Script" path="res://scripts/player/landing.gd" id="39_landg"]
 [ext_resource type="Script" path="res://scripts/player/first_person_body.gd" id="40_fpbody"]
+[ext_resource type="Script" path="res://scripts/player/third_person_body.gd" id="41_tpbody"]
 [ext_resource type="AudioStream" uid="uid://cgci6nkj0hxol" path="res://assets/audio/sfx/Footstep3.mp3" id="2_2n1s8"]
 [ext_resource type="AudioStream" uid="uid://budx7vymim0j0" path="res://assets/audio/sfx/PinballDing.mp3" id="2_4ntn1"]
 [ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://scripts/components/mouse_input.gd" id="2_kpjcp"]
@@ -54,7 +55,7 @@ return_shake = 0.0
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 height = 1.5292969
 
-[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("walking_sfx", "falling_air_sfx", "crouch", "lean", "head", "weapon_system", "coyote_time", "jump_buffer", "bullet_time", "bunnyhop", "landing", "fp_body", "mouse_input", "ui", "player_collision_shape", "grapple_hook_origin") groups=["Player"]]
+[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("walking_sfx", "falling_air_sfx", "crouch", "lean", "head", "weapon_system", "coyote_time", "jump_buffer", "bullet_time", "bunnyhop", "landing", "fp_body", "tp_body", "mouse_input", "ui", "player_collision_shape", "grapple_hook_origin") groups=["Player"]]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
@@ -73,6 +74,7 @@ bullet_time = NodePath("BulletTime")
 bunnyhop = NodePath("Bunnyhop")
 landing = NodePath("Landing")
 fp_body = NodePath("FirstPersonBody")
+tp_body = NodePath("ThirdPersonBody")
 mouse_input = NodePath("MouseInput")
 ui = NodePath("UI")
 player_collision_shape = NodePath("PlayerCollisionShape")
@@ -109,6 +111,10 @@ fp_arm_unarmed_spread = 0.5
 fp_arm_unarmed_bob_pos = 0.127
 fp_arm_punch_pitch = -2.23
 fp_arm_punch_thrust = Vector3(-0.0019, 0.0013, -0.3185)
+
+[node name="ThirdPersonBody" type="Node3D" parent="." node_paths=PackedStringArray("host")]
+script = ExtResource("41_tpbody")
+host = NodePath("..")
 
 [node name="Head" parent="." unique_id=1864373220 instance=ExtResource("3_kswpp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.008165896, 0.014009297, 0.0040890574)

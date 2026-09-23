@@ -70,6 +70,22 @@ extends Resource
 ## How fast the dynamic fall/rise/forward/sprint FOV kicks ease toward their target each frame (higher = snappier FOV response).
 @export var fov_lerp_speed: float = 5.0
 
+@export_group("Third Person")
+## How far behind the eye the third-person camera rests (metres, before wall collision) — the ONE source of
+## truth for the pull-out distance, and the same shape `default_fov` above has: the player MOVES it (the mouse
+## wheel while pulled out, the only way in), `Settings.set_third_person_distance` writes it
+## here and persists it, and `ThirdPersonCamera` reads it LIVE every frame. Never cache it in the camera — that
+## is the exact bug `CameraEffects.base_fov` documents at length.
+##
+## ⭐PICKED BY RENDER, NOT ARITHMETIC. The resting FOV is 120 degrees, which is very wide, so distance buys far
+## less apparent size here than in a normal-FOV game. Against the NPC-sized character (1.86 m —
+## `ThirdPersonBody.character_scale`) 2.2 m puts them at ~24% of the frame height: clearly readable with the
+## street still legible around them. 1.6 m crowds the frame, 3.4 m starts to read as a distant figure. Swept
+## windowed with `scripts/tools/probes/__third_person_probe.gd`; re-run it rather than reasoning about the
+## number — and re-sweep it if the character's size ever changes, because the two are one decision.
+## The wheel's travel is clamped to Settings.TP_DISTANCE_MIN/MAX.
+@export var third_person_distance: float = 2.2
+
 @export_group("Head Bob")
 ## Bob cadence — how fast the head bobs while moving (higher = quicker steps). Scales with speed.
 @export var bob_speed: float = 8.0

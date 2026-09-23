@@ -66,6 +66,10 @@ signal alt_attack(_camera: Camera3D)
 ## transition; while a latch is armed its button's signal is NOT emitted. Each clears in tick_refocus_latches()
 ## the first frame ITS button reads released. Read-only from outside (fire_blocked_by_refocus /
 ## alt_fire_blocked_by_refocus); tests drive them through notification() + tick_refocus_latches().
+## The THIRD-PERSON camera arm, injected by `Head.setup()`. While it answers `free_look_active()`, mouse motion
+## is handed to its `orbit()` instead of driving the body yaw / head pitch (see _unhandled_input). Null on any
+## rig without a third-person arm, which is simply the old behaviour.
+var orbit_consumer: Node = null
 var _attack_latch: bool = false
 var _alt_latch: bool = false
 
@@ -127,6 +131,15 @@ func alt_fire_blocked_by_refocus() -> bool:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var mm := event as InputEventMouseMotion
+		# FREE LOOK (third person, middle mouse held) takes the motion INSTEAD of the look: the camera swings
+		# around the character and the character does not turn, which is the whole point of the gesture. Routed
+		# through an injected consumer rather than a second signal, because `rotate` fans out to BOTH the Head
+		# (pitch) and the Player (yaw) and a signal cannot be un-emitted for one listener. RAW screen pixels are
+		# handed over, unscaled by look sensitivity — an orbit is a camera gesture, not aiming, and it has its
+		# own speed knob (ThirdPersonCamera.free_look_speed).
+		if orbit_consumer != null and is_instance_valid(orbit_consumer) and orbit_consumer.free_look_active():
+			orbit_consumer.orbit(mm.screen_relative)
+			return
 		var sensitivity := GameSettings.camera.mouse_sensitivity * speed_sensitivity_multiplier()
 		# screen_relative (unscaled OS pixels), not `relative` — see the header: `relative` rides the window size.
 		var pitch := -mm.screen_relative.y * sensitivity

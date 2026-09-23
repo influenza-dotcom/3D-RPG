@@ -29,6 +29,15 @@ var screen_shake: ScreenShake:
 	get:
 		return get_node_or_null("ScreenShake") as ScreenShake
 
+## The THIRD-PERSON arm — a SpringArm3D beside the shake pivot, not above it, which is why the two getters
+## above still resolve the same paths they always did (see ThirdPersonCamera's class doc). Exposed off the rig
+## root like its siblings so the body half of the feature can read the pull-out blend without walking a
+## NodePath into the rig. Null on an older camera_rig that has no arm authored — every reader treats that as
+## "first person only", so the rig degrades rather than breaking.
+var camera_arm: ThirdPersonCamera:
+	get:
+		return get_node_or_null("CameraArm") as ThirdPersonCamera
+
 ## Inject the wielder into the rig parts that reference back out of it — the camera
 ## (CameraEffects.player) and the pickup raycast (PickupRay.player) — and re-wire the
 ## pitch-look signal into this Head. Extracting the rig drops the MouseInput.rotate ->
@@ -46,6 +55,13 @@ func setup(player: Character, mouse_input: MouseInput, ui: CanvasLayer = null) -
 	var rc := get_node_or_null("ScreenShake/Camera3D/RayCast") as PickupRay
 	if rc:
 		rc.player = player
+	var arm := camera_arm
+	if arm:
+		arm.setup(player)
+		# ...and hand the arm to MouseInput as the FREE-LOOK consumer: while the orbit is held, look motion goes
+		# to the camera instead of down the `rotate` signal (which fans out to both this Head's pitch and the
+		# Player's yaw, and so cannot be withheld from one listener).
+		mouse_input.orbit_consumer = arm
 	mouse_input.rotate.connect(_on_mouse_input_rotate)
 
 ## Create the dedicated view-model camera in code (house pref: code over a new .tscn) as a child

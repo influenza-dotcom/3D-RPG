@@ -98,6 +98,13 @@ var action_implants: StringName = &"Implants"
 ## binding (both fire during gameplay, so one press would open the map AND re-zoom the HUD box). Rebindable;
 ## no controller default (the obvious pads are taken — matches Stats/Journal/Factions/Implants).
 var action_map: StringName = &"Map"
+## Toggle FIRST / THIRD person (default P — "perspective"; BACK/Select on a pad, the only face button nothing
+## else claims). Polled by `ThirdPersonCamera._unhandled_input`, which flips the same `Settings.third_person_camera`
+## field the Options → Video row writes, so the key and the menu can never disagree. Rebindable.
+## ⭐P, not V or F, because both of the obvious keys are already taken (V = Factions, F = Light/Interact) and this
+## project shares a binding only where a component can arbitrate the press (the Q lean/takedown pair); a camera
+## toggle has nothing to arbitrate against.
+var action_toggle_view: StringName = &"ToggleView"
 ## Grab-to-throw (Z): picks up the aimed throwable to CARRY/THROW it. Distinct from PickUp/Interact (F),
 ## which adds a dual item to the inventory instead — so an item that's both takeable AND throwable uses E
 ## to stash and Z to throw.
@@ -367,6 +374,9 @@ func _add_default_controller_bindings() -> void:
 	_bind_button(action_weapon_slot_2, JOY_BUTTON_DPAD_RIGHT)
 	_bind_button(action_weapon_slot_3, JOY_BUTTON_DPAD_DOWN)
 	_bind_button(action_weapon_slot_4, JOY_BUTTON_DPAD_LEFT)
+	# BACK/Select is the one remaining face button with nothing on it, and "Select toggles the camera" is a
+	# console habit going back decades. START is spoken for (ui_cancel, above).
+	_bind_button(action_toggle_view, JOY_BUTTON_BACK)
 	# MENU confirm / cancel. Godot 4.7's built-in ui_accept is Enter / KP Enter / Space and ui_cancel is Escape —
 	# NO pad event on either (engine probe 2026-09-12), while ui_up/down/left/right DO ship D-pad + left stick. So
 	# a pad could walk every menu but never pick or leave anything. A = confirm (the same clash Space has with jump

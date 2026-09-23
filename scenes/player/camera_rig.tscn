@@ -13,6 +13,7 @@
 [ext_resource type="Shader" path="res://resources/shaders/laser.gdshader" id="13_laser"]
 [ext_resource type="Script" path="res://scenes/player/laser_mesh.gd" id="14_lasermesh"]
 [ext_resource type="Script" path="res://scenes/player/laser_sight_rig.gd" id="15_lasersight"]
+[ext_resource type="Script" path="res://scripts/camera/third_person_camera.gd" id="16_tpcam"]
 
 [sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_u3hyo"]
 dof_blur_near_distance = 0.5
@@ -44,6 +45,9 @@ transparency = 1
 no_depth_test = true
 shading_mode = 0
 vertex_color_use_as_albedo = true
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_tpcam"]
+radius = 0.2
 
 [node name="Head" type="Node3D" unique_id=1864373220 node_paths=PackedStringArray("pickup_ray")]
 script = ExtResource("1_rocmw")
@@ -141,3 +145,10 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.015579186, -0.1348719, 0.01
 
 [node name="InkOutline" type="MeshInstance3D" parent="ScreenShake/Camera3D"]
 script = ExtResource("12_inkol")
+
+[node name="CameraArm" type="SpringArm3D" parent="."]
+collision_mask = 1
+shape = SubResource("SphereShape3D_tpcam")
+spring_length = 0.0
+margin = 0.1
+script = ExtResource("16_tpcam")

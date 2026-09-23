@@ -198,6 +198,10 @@ extends Node
 ## this only sets how far. Lower it toward 0 if the feet still clip into the wall. PLAYTEST + TUNE.
 @export var fp_leg_wall_pitch: float = 20.0
 var _fp_legs: BodyModelSwap = null
+## The two latches behind the legs/torso rig's visibility — see _apply_legs_visible. `_legs_alive` is the
+## death/revive one (the host's), `_third_person` is the view mode's.
+var _legs_alive: bool = true
+var _third_person: bool = false
 ## Show your own HANDS holding a carried object in first person. They appear ONLY while you're carrying a physics
 ## prop (PickupRay.held_object): grabbing one HOLSTERS the weapon first, then the hands come out; dropping it hides
 ## the hands and restores the weapon. Rendered in the gun's view-model camera pass (no wall clipping), parented to
@@ -774,8 +778,10 @@ func on_carry_changed(holding: bool) -> void:
 	if holding:
 		await get_tree().create_timer(fp_arm_draw_delay).timeout
 		# Still holding after the holster beat AND not dead — don't pop hands into the death cinematic
-		# (dying mid-carry would otherwise show the FP arms over the keel-over/fade-to-black).
-		if host._carrying and not host._dying and not host._dead and is_instance_valid(_fp_arms):
+		# (dying mid-carry would otherwise show the FP arms over the keel-over/fade-to-black). ...and not in
+		# THIRD person, where these view-model hands would hang in mid-screen in front of the character who is
+		# actually carrying the thing; set_third_person brings them back if the view returns mid-carry.
+		if host._carrying and not host._dying and not host._dead and not _third_person and is_instance_valid(_fp_arms):
 			_weapon_hands_up = false  # the CARRY hold owns the rig now — stand the grip solve down before the slide
 			_slide_fp_arms(true)  # RISE up into frame instead of popping in
 	else:
@@ -923,6 +929,8 @@ func _ease_fp_arms_to_rest() -> void:
 func _unarmed_hands_wanted() -> bool:
 	if host == null:  # a bare component (no host wired) wants nothing on screen — the null-guard contract
 		return false
+	if _third_person:
+		return false  # your real fists are on the character behind the camera now (see set_third_person)
 	if not fp_arm_unarmed or host._carrying or host._dying or host._dead:
 		return false
 	# A REAL weapon is mid-draw: the H put-back reads "FISTS equipped, unholstered" for the beat between the
@@ -982,6 +990,8 @@ func refresh_unarmed_hands() -> void:
 func _weapon_hands_wanted() -> bool:
 	if host == null or not weapon_hands:
 		return false
+	if _third_person:
+		return false  # the character out there is holding the real gun in its own two hands (set_third_person)
 	if host._carrying or host._dying or host._dead:
 		return false
 	if not is_instance_valid(_fp_arms):
@@ -1505,5 +1515,42 @@ func _fp_legs_basis(rotation: Basis = Basis()) -> Basis:
 ## HOST owns the order (die() / _respawn_at_checkpoint author the full death choreography and its comments);
 ## this just wraps the rig access so the host never reaches into component internals.
 func set_legs_visible(v: bool) -> void:
+	_legs_alive = v
+	_apply_legs_visible()
+
+## THIRD PERSON TAKES THE WHOLE FIRST-PERSON BODY OFF THE SCREEN — the legs/torso rig AND all three poses of
+## the hands rig. Host-relayed from ThirdPersonCamera.view_changed the moment the view starts pulling out,
+## before the camera is far enough back to see any of it.
+##
+## Each half for its own reason. The BODY: this rig is scaled to 0.60 and mounted under the lens, so with
+## ThirdPersonBody's character standing at full height in the same spot you would see two of yourself. The
+## HANDS: they are drawn on the VIEW-MODEL layer with no depth relationship to the world, so from behind the
+## character a carried crate's hands would hang in the middle of the screen, in front of everything.
+##
+## ⭐THE GATES ARE ON THE `_wanted` PREDICATES, NOT ON gun.visible, AND THAT IS DELIBERATE. The view model does
+## hide itself in third person (GunPose → GunMesh.view_model_visible_now), and `_weapon_hands_wanted()` does
+## read `gun.visible` — but that write lands on GunPose's NEXT frame, while this runs synchronously off the
+## signal. Leaning on it would make the handoff frame-order dependent, and the refresh below would re-draw the
+## weapon hands on the very frame we asked them to leave.
+func set_third_person(on: bool) -> void:
+	if _third_person == on:
+		return
+	_third_person = on
+	_apply_legs_visible()
+	if on:
+		# The CARRY hold is the one hand pose nothing else stands down — it is owned by on_carry_changed, not by
+		# the _wanted predicates — so it is dropped by hand here rather than left to the refresh.
+		_kill_fp_arm_tween()
+		_unarmed_hands_up = false
+		_weapon_hands_up = false
+		_hide_fp_arms()
+	elif host != null and host._carrying:
+		_slide_fp_arms(true)  # back to first person mid-carry: the same hands come up onto the prop again
+	refresh_unarmed_hands()
+
+## The legs/torso rig's visibility is TWO latches — alive (death/revive) and first-person (the view mode) — so
+## the composite is settled in one place. Writing `_fp_legs.visible` from either caller alone is how a revive
+## in third person would put a second body on the screen.
+func _apply_legs_visible() -> void:
 	if is_instance_valid(_fp_legs):
-		_fp_legs.visible = v
+		_fp_legs.visible = _legs_alive and not _third_person

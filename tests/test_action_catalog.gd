@@ -12,7 +12,8 @@ const CATALOG_PATH := "res://resources/input/ActionCatalog.tres"
 ## The rebindable actions the ActionCatalog covers (originally the SettingsCatalog's KEYBIND rows; "Run" added
 ## by stealth Slice 3b; "Quicksave"/"Quickload" added by ML-1's save loop; "Takedown" by stealth Slice 6b; "Claim" (Befriend Pet) by the pet system; "DropHeld" by the drop-held feature; "Implants" by the implants
 ## tab; "AirDash" when the air dash stopped being an ADS-the-knife gesture and took Left Alt; "Map" by the map tab — which also pushed "MinimapZoom" off M onto K, a DEFAULT-BINDING move that this
-## list cannot see, because the action NAME is the stable key and rebinding only swaps the bound event).
+## list cannot see, because the action NAME is the stable key and rebinding only swaps the bound event;
+## "ToggleView" by the third-person camera).
 ## Pinned here so a transcription
 ## mistake (a dropped or renamed action) fails this test instead of quietly removing a player's ability to
 ## rebind it. Keep in sync ONLY with a deliberate add/remove.
@@ -21,7 +22,7 @@ const EXPECTED_REBINDABLE := [
 	&"LeanLeft", &"LeanRight",
 	&"Attack", &"Zoom", &"Reload", &"Throw", &"Light", &"Grapple", &"Takedown", &"DropHeld",
 	&"PickUp", &"Inventory", &"Stats", &"Factions", &"Journal", &"Implants", &"Map", &"RotateItem", &"Claim", &"Wait",
-	&"MinimapZoom", &"MarkWaypoint",
+	&"MinimapZoom", &"MarkWaypoint", &"ToggleView",
 	&"Weapon Slot 1", &"Weapon Slot 2", &"Weapon Slot 3", &"Weapon Slot 4", &"Weapon Slot 5",
 	&"Weapon Slot 6", &"Weapon Slot 7", &"Weapon Slot 8", &"Weapon Slot 9", &"Weapon Slot 10",
 	&"Hotbar Next", &"Hotbar Prev", &"Quicksave", &"Quickload",
