@@ -59,7 +59,7 @@ signal closed
 
 ## Shared modal inset (matches shop / loot / chess / install chrome). The Panel's anchor fractions are AUTHORED
 ## in the scene; this const is the pin the scene test checks them against.
-const PANEL_MARGIN := 0.12
+const PANEL_MARGIN := 0.05  ## the TALL band (loot/shop share it): six slot rows beside the parts list only fit here without a scrollbar
 
 ## The fold engine, for the FOOTER PREVIEW only — this screen never writes a stat block (WeaponBench._refit is the
 ## single writer). Const-preloaded because the kit carries no class_name (it takes a `resolve` Callable precisely
@@ -76,6 +76,8 @@ var _money: Label                 ## your wallet — the header readout (spendab
 var _notice: Label                ## the always-present refusal band; NEVER hidden with `visible`
 var _detail: Label                ## the fixed-height footer: the hovered/focused row's before→after preview
 var _footer: Control              ## _detail's clip host — its height is pinned to whole rendered lines
+const FOOTER_LINES := 3  ## header + two change rows — see _footer_lines
+
 var _gun_btn: Button              ## the CYCLER: captions the selected gun, advances to the next on press (rides the wallet row)
 var _rail_btn: PaymentRailButton  ## DEBIT/CREDIT selector; rail_changed drives _rebuild (every row re-prices)
 var _list_scroll: ScrollContainer  ## the ONE viewport both sections share — see the header's arithmetic
@@ -489,7 +491,7 @@ func _make_row(slot: int, part: Item, price: int, enabled: bool, preview_id: Str
 	row.add_child(price_l)
 
 	if part != null:
-		# Hover a row to see the part's derived breakdown — "Barrel part · Range +8 · Spread -25%" + weight/value
+		# Hover a row to see the part's derived breakdown — "Barrel part   Range +8   Spread -25%" + weight/value
 		# (ItemInfo._effect_lines -> WeaponModInfo.part_line). This IS the surface where you decide to fit a part,
 		# so it must say what the part DOES, not just its name; a disabled, can't-afford row tips too.
 		MenuStyle.attach_tip(btn, ItemInfo.tooltip(part, _player.inventory))
@@ -550,14 +552,14 @@ func _preview_clear() -> void:
 	if _detail == null:
 		return
 	var block: WeaponData = _sel_gun.weapon if _sel_gun != null else null
-	_detail.text = WeaponModInfo.compare_block(block, block, _gun_caption(), _footer_lines())
+	_detail.text = WeaponModInfo.compare_block(block, block, "", _footer_lines())  # blank at rest: the cycler above already names the gun
 	if is_instance_valid(_bench) and is_instance_valid(_player):
 		_notice.text = PlayerText.bench_notice(_bench.refusal_reason(_sel_gun, null, _player), 0)
 
-## The footer's line budget — a designer knob (MenuSkin.footer_hint_lines), floored at 1 so a misconfigured skin
-## degrades to a bare header rather than an empty footer.
+## The footer's line budget. Smaller than the skin's shared footer_hint_lines on purpose: this card also carries a
+## gun cycler and a notice band, and the shared five-line footer left room for two of the six fitted slots.
 func _footer_lines() -> int:
-	return maxi(MenuStyle.skin.footer_hint_lines, 1)
+	return FOOTER_LINES
 
 # ---------------------------------------------------------------------------------------------------
 # UI binding (the layout is AUTHORED in scenes/ui/weapon_bench_screen.tscn — this adopts it)
@@ -619,13 +621,17 @@ func _bind_ui() -> void:
 	MenuStyle.set_button_sound(_gun_btn, &"tab")
 	_gun_btn.pressed.connect(_cycle_gun)
 
-	# The NOTICE band. Hint-styled and pinned to exactly ONE rendered line: it is ALWAYS present and says nothing
-	# when there is nothing to say (bench_notice returns "" for the no-reason key), so the card's height never
-	# moves as reasons come and go.
+	# The NOTICE. Hint-styled and pinned to exactly ONE rendered line: it is ALWAYS present and says nothing when
+	# there is nothing to say (bench_notice returns "" for the no-reason key), so the card's height never moves as
+	# reasons come and go. ⭐It rides the PARTS heading's line (authored inside %PartsInset, right-aligned over the
+	# left-aligned heading) instead of a band of its own: that band's line was the last 20px between the six slot rows
+	# and a scrollbar. %NoticeInset keeps zero margins — it already sits inside the heading's inset.
 	_notice = %Notice
 	MenuStyle.style_hint(_notice)
+	_notice.autowrap_mode = TextServer.AUTOWRAP_OFF  # style_hint turns wrapping on; this is one clipped line
+	MenuStyle.cap_label(_notice)  # a long reason clips instead of widening the parts column
+	_notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_notice.custom_minimum_size.y = MenuStyle.hint_block_height(_notice, 1)
-	_style_row_inset(%NoticeInset)
 
 	# BOTH sections ride ONE ScrollContainer (see the header): the headings are inside it and scroll away with
 	# their own rows. follow_focus is what makes that safe for a pad — with two viewports each list scrolled its
@@ -646,7 +652,7 @@ func _bind_ui() -> void:
 	_footer = %Footer
 	_detail = %Detail
 	MenuStyle.style_hint(_detail)  # dim wrap-friendly footnote styling from the skin
-	MenuStyle.size_hint_footer(_footer, _detail)  # clip + TOP align + grow END + the true N-line height
+	MenuStyle.size_hint_footer(_footer, _detail, FOOTER_LINES)  # clip + TOP align + grow END + the true N-line height
 
 ## Adopt one authored section heading: PlayerText string through the single casing seam (headings case with their
 ## shop/loot/install siblings) + header size, and row-inset its Margin wrapper so the heading's left edge sits

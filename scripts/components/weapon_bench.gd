@@ -229,8 +229,21 @@ func moddable_weapons(player_node: Node) -> Array:
 		var tmpl := ItemDb.item_by_id(it.id)
 		if tmpl == null or not tmpl.is_weapon() or tmpl.weapon == null:
 			continue
+		# A weapon NO registered part fits is not moddable: the rock (a thrown weapon on the grenade-launcher
+		# frame) used to lead the cycler with six empty slots and an empty parts list, a screen with nothing to do.
+		if not _any_part_fits(it):
+			continue
 		out.append(it)
 	return out
+
+## Whether ANY registered, priced weapon part in an offered slot fits `gun` — the same filter _offered_parts
+## applies to a real inventory, run over the whole ItemDb, so the cycler only offers a gun a part could go on.
+func _any_part_fits(gun: Item) -> bool:
+	for item: Item in ItemDb.all_items():
+		if item != null and item.is_weapon_mod() and item.value > 0.0 \
+				and _slot_offered(item.weapon_mod.slot) and WeaponModKit.fits(item.weapon_mod, gun):
+			return true
+	return false
 
 ## Parts in the PLAYER's pack that fit `gun` and sit in a slot this bench works on — the "fit what you carry"
 ## section. Deduped by Item.id (carrying two identical barrels still shows one row; fitting consumes one).

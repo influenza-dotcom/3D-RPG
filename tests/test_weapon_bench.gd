@@ -21,7 +21,6 @@ extends GutTest
 ## part's `value` would turn a balance retune into a red suite.
 
 const PLAYER_PATH := "res://scripts/player/player.gd"
-const BENCH_SOURCE := "res://scripts/components/weapon_bench.gd"
 const BENCH_SCENE := "res://scenes/characters/weapon_mechanic.tscn"
 ## The authored bench CARD — test_a_paid_fit_shows_up_on_the_card_immediately drives the real thing.
 const SCREEN_SCENE := "res://scenes/ui/weapon_bench_screen.tscn"
@@ -455,7 +454,7 @@ func test_remove_returns_the_shared_template_part_and_clears_the_slot() -> void:
 
 # --- The payment seam ------------------------------------------------------------------------------------
 
-func test_can_afford_mirrors_can_pay_on_the_RAW_base() -> void:
+func test_can_afford_is_fed_the_RAW_base_and_agrees_with_the_till() -> void:
 	# ⭐Fed the RAW base: Player.can_pay folds the ledger service charge in itself, so passing quoted_total's
 	# output would fee the fee and falsely refuse a purchase the till would actually serve.
 	var b := _bench()
@@ -463,16 +462,30 @@ func test_can_afford_mirrors_can_pay_on_the_RAW_base() -> void:
 	assert_true(b.can_afford(0.0, p), "a free service always clears (the Character.charge convention)")
 	assert_true(b.can_afford(100.0, p), "exactly affordable in cash")
 	assert_false(b.can_afford(101.0, p), "a zorkmid over is refused")
-	assert_eq(b.can_afford(100.0, p), p.can_pay(100.0, b.accepts_ledger),
-			"the bench must not have a second opinion — it defers to the player's rails")
 	assert_false(b.can_afford(10.0, null), "a null player affords nothing")
+	# ⭐THE RAW-BASE EDGE, made executable: a player whose savings hold EXACTLY the all-in number the row quotes
+	# must be served. Fee-the-fee (can_afford fed the quote) refuses precisely this player.
+	p.money = 0.0
+	GameState.account = 10000.0  # quote under a comfortable balance; the service charge depends on the split, not the balance
+	var all_in := b.quoted_total(100.0, p)
+	assert_gt(all_in, 100.0, "precondition: an account-funded job carries a service charge, or this edge proves nothing")
+	GameState.account = all_in
+	assert_true(b.can_afford(100.0, p),
+			"⭐a player holding exactly the quoted all-in total must NOT be dimmed out — the bench feeds the raw base, never the quote")
+	assert_true(b.take_payment(100.0, p), "...because the till really does serve them")
+	assert_almost_eq(GameState.account, 0.0, 0.001, "and it takes exactly the quoted all-in total, no more")
 	# ⭐accepts_ledger rides through as can_pay's `allow_credit`: cash and banked savings are reachable either
 	# way, and what the flag gates is whether the till will LEND (LevelUp.accepts_credit's semantics).
+	p.money = 100.0
 	GameState.account = 500.0
 	assert_true(b.can_afford(400.0, p), "a bench reaches banked savings")
 	b.accepts_ledger = false
 	assert_true(b.can_afford(400.0, p), "...and still does with credit refused — savings are not borrowed money")
-	assert_eq(b.can_afford(400.0, p), p.can_pay(400.0, false), "the bench never has a second opinion; the flag is passed through")
+	var purse_before: float = p.money + GameState.account
+	assert_true(b.take_payment(400.0, p), "a non-lending till still actually charges a job its savings cover")
+	assert_true(GameState.account >= 0.0, "...without carrying the account past zero (%s)" % GameState.account)
+	assert_lt(p.money + GameState.account, purse_before, "...and the money really left")
+	p.money = 100.0
 	# Now put the account in the red and arm CREDIT: only a lending bench can serve.
 	GameState.account = 0.0
 	GameState.payment_method = "credit"
@@ -491,8 +504,21 @@ func test_quoted_total_is_the_all_in_number() -> void:
 	GameState.account = 1000.0
 	# All of it rides the ledger, so the quote carries the service charge the dim does NOT price.
 	var base := 100.0
-	assert_eq(b.quoted_total(base, p), p.charge_total(base, true), "the row paints what actually leaves the player")
-	assert_gte(b.quoted_total(base, p), base, "an account-funded charge is never cheaper than its sticker price")
+	var quote := b.quoted_total(base, p)
+	assert_gte(quote, base, "an account-funded charge is never cheaper than its sticker price")
+	# ROUND TRIP: the number painted on the row is the number that leaves the player when the till runs.
+	assert_true(b.take_payment(base, p), "the quoted job is served")
+	assert_almost_eq(1000.0 - GameState.account, quote, 0.001, "the row paints exactly what actually leaves the player (all-ledger)")
+	# ...and on a SPLIT tender too: cash first (fee-free), the rest off the account.
+	p.money = 40.0
+	GameState.account = 1000.0
+	var split_quote := b.quoted_total(base, p)
+	assert_true(split_quote < quote, "cash covers part of the job fee-free, so the split quote is cheaper than the all-ledger one")
+	assert_true(b.take_payment(base, p), "the split job is served")
+	assert_almost_eq((40.0 - p.money) + (1000.0 - GameState.account), split_quote, 0.001,
+			"cash spent plus account spent is exactly the quoted total")
+	p.money = 0.0
+	GameState.account = 1000.0
 	assert_eq(b.quoted_total(0.0, p), 0.0, "a free service quotes nothing")
 	assert_eq(b.quoted_total(base, null), base, "a null player degrades to the raw base, never to a crash")
 	_teardown(b, p)
@@ -561,25 +587,53 @@ func test_duck_type_surface() -> void:
 	b.stock.free()
 	b.free()
 
-func test_source_asks_for_its_minimap_pin() -> void:
-	# The zero-authoring minimap promise: a station that forgets its ensure() line is invisible on the map with
-	# nothing failing. Read from SOURCE because _ready is exactly what a unit test must not run here.
-	var src := FileAccess.get_file_as_string(BENCH_SOURCE)
-	assert_false(src.is_empty(), "the bench source must be readable at %s" % BENCH_SOURCE)
-	# ⭐assert_string_contains takes NO message argument (a third String is silently read as match_case).
-	assert_true(src.contains("StationMarker.ensure(self, StationMarker.Kind.TECH)"),
-			"WeaponBench must put itself on the minimap as a TECH station, UNGATED by `standalone`")
-	assert_true(src.contains("if standalone:"),
-			"the StationSpeaker chirp must stay gated on `standalone` — a bench riding a talking NPC does not beep")
+## A WeaponBench driven through its REAL _ready. Parented to a throwaway Node3D rather than straight to the GUT
+## scene (the test_atm idiom), so _build_outline's host-mesh walk stays inside an empty two-node subtree. A bench
+## is a plain station component — unlike a Player or NPC, its _ready builds only a stock inventory, a hitbox
+## layer, a speaker and a map pin, all headless-safe.
+func _bench_in_tree(standalone: bool) -> WeaponBench:
+	var host := Node3D.new()
+	var b := WeaponBench.new()
+	b.standalone = standalone
+	host.add_child(b)
+	add_child_autofree(host)  # tree entry fires _ready
+	return b
 
-func test_dialogue_order_is_55() -> void:
-	# 55 is the free slot between ChipInstaller 50 and ChessMatch 60. A const, not an @export: two authored
-	# instances must not be able to collide and silently reshuffle the speaker's menu.
-	assert_eq(WeaponBench.DIALOGUE_ORDER, 55, "the bench sorts between Install (50) and Play Chess (60)")
+## ⭐THE ZERO-AUTHORING MINIMAP PROMISE: a station that forgets to ask for its pin is invisible on the map with
+## nothing else failing. The pin is UNGATED by `standalone` (a gunsmith riding a walking NPC is still somewhere to
+## modify a gun), while the talk-layer hitbox and the kiosk chirp ARE gated on it (the NPC's Talkable owns the ray,
+## and people do not beep). Both flavours, so a pin moved inside the `standalone` branch fails here.
+func test_both_bench_flavours_pin_the_minimap_but_only_the_kiosk_takes_the_ray_and_beeps() -> void:
+	var kiosk := _bench_in_tree(true)
+	var smith := _bench_in_tree(false)
+	for b: WeaponBench in [kiosk, smith]:
+		var flavour := "standalone" if b.standalone else "dialogue-hosted"
+		var pin := StationMarker.find_marker(b)
+		assert_true(pin != null,
+				"⭐the %s bench must put itself on the minimap — without its pin the gunsmith is invisible on the map" % flavour)
+		if pin != null:
+			assert_eq(pin.kind, StationMarker.Kind.TECH, "the %s bench's pin is a TECH station glyph" % flavour)
+	var kiosk_pin := StationMarker.find_marker(kiosk)
+	var smith_pin := StationMarker.find_marker(smith)
+	if kiosk_pin != null and smith_pin != null:
+		assert_true(kiosk_pin.pin_offscreen, "a fixed bench points at itself from the minimap rim")
+		assert_false(smith_pin.pin_offscreen, "a gunsmith riding an NPC is a body: clipped to the box like every other body")
+	assert_eq(kiosk.collision_layer, TalkHelpers.TALK_LAYER, "a standalone bench sits on the talk layer so aiming + Interact opens it")
+	assert_eq(smith.collision_layer, 0, "a dialogue-hosted bench must NOT catch the ray — the NPC's Talkable drives access")
+	assert_true(StationSpeaker.find_speaker(kiosk) != null, "a self-serve bench answers with the shared panel chirp")
+	assert_true(StationSpeaker.find_speaker(smith) == null, "a bench riding a talking NPC does not beep")
+	assert_true(kiosk.stock != null and smith.stock != null, "both flavours build their shelf inventory in _ready")
+
+func test_dialogue_order_sits_between_install_and_play_chess() -> void:
+	# The free slot between ChipInstaller and ChessMatch: "Modify" (chrome for your gear) right after "Install"
+	# (chrome for yourself). A const, not an @export: two authored instances must not be able to collide and
+	# silently reshuffle the speaker's menu. The real sort is proven in test_dialogue_speaker_contracts.gd; here
+	# the RELATION is stated against the neighbours' own consts, so renumbering the whole band stays green.
+	assert_gt(WeaponBench.DIALOGUE_ORDER, ChipInstaller.DIALOGUE_ORDER, "Modify must sort after Install")
+	assert_lt(WeaponBench.DIALOGUE_ORDER, ChessMatch.DIALOGUE_ORDER, "Modify must sort before Play Chess")
 	var b := _bench()
 	var opt := b.dialogue_station_option()
-	assert_eq(int(opt.get("order", -1)), 55, "the option carries the same order it advertises")
-	assert_eq(str(opt.get("reason", "")), "modify", "the suspend reason DialogueManager records")
+	assert_eq(int(opt.get("order", -1)), WeaponBench.DIALOGUE_ORDER, "the painted option carries the order the bench advertises")
 	assert_eq(typeof(opt.get("closed")), TYPE_SIGNAL, "a suspending station must hand over a resume Signal")
 	b.stock.free()
 	b.free()
@@ -603,18 +657,50 @@ func test_a_modded_weapon_data_never_reaches_ItemDb_by_weapon() -> void:
 	assert_null(ItemDb.weapon_item_for(gun.weapon), "a folded block is not in the _by_weapon registry")
 	assert_null(ItemDb.make_weapon_item(gun.weapon), "...so make_weapon_item on it yields null, as the seeds would see")
 	assert_not_null(ItemDb.item_by_id(gun.id), "but the Item.id still resolves — which is why the save keys on the ID")
-	# Both production make_weapon_item call sites feed AUTHORED templates only. Pinned from SOURCE so a future
-	# refactor that hands one of them a live gun's folded block is caught here rather than by a player who
-	# spawns unarmed and an NPC whose gun is invisible.
-	var seed_src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
-	assert_true(seed_src.contains("for res in weapon_system.weapon_loadout():"),
-			"the player seed must build from the AUTHORED SwapWeapons.weapon_slots loadout, never from a live (possibly modded) block")
-	var npc_src := FileAccess.get_file_as_string("res://scripts/npc/npc.gd")
-	assert_true(npc_src.contains("ItemDb.make_weapon_item(weapon_data)"),
-			"the NPC seed must build from its AUTHORED weapon_data export — a folded block there returns null and leaves the NPC unarmed")
+	# Both production seeds must keep building from AUTHORED templates. Driven for real (both seed functions run
+	# off-tree): a fresh player whose weapon hub is currently HOLDING the folded block, and whose authored
+	# SwapWeapons loadout is the pistol template, must still spawn with a pistol in the pack — a seed that read the
+	# live block would get null back and spawn the player unarmed.
+	var tmpl_weapon: WeaponData = ItemDb.item_by_id(GUN_ID).weapon
+	var fresh := _player(0.0)
+	var sw := SwapWeapons.new()
+	sw.name = "SwapWeapons"
+	var slots: Array[Resource] = [tmpl_weapon]
+	sw.weapon_slots = slots
+	var ws := Weapon.new()
+	ws.add_child(sw)
+	ws.inventory = Inventory.new()
+	ws.inventory.equipped_weapon = gun.weapon  # the live, MODDED block is what the hub holds
+	fresh.weapon_system = ws
+	fresh._seed_starting_inventory()
+	assert_eq(_weapon_ids_in(fresh.inventory), [GUN_ID],
+			"⭐a player spawned after a refit still seeds the authored pistol from the loadout, never from the live folded block")
+	fresh.weapon_system = null
+	ws.inventory.free()
+	ws.free()  # frees the SwapWeapons child
+	fresh.inventory.free()
+	fresh.free()
+	# ...and an NPC authored with the pistol template still arms itself after a bench has modded some other pistol.
+	var npc: NPC = load("res://scripts/npc/npc.gd").new()  # never added to the tree: NPC._ready must not run
+	npc.inventory = CharacterInventory.new()
+	npc.weapon_data = tmpl_weapon
+	npc._equip_initial_weapon()
+	assert_eq(_weapon_ids_in(npc.inventory), [GUN_ID],
+			"⭐an NPC authored with the pistol template still seeds its gun after a refit — a modding session must never leave an NPC unarmed")
+	npc.inventory.free()
+	npc.free()
 	_teardown(b, p)
 	gun = null
 	barrel = null
+
+## The Item ids of every WEAPON stack in `inv`, in bag order.
+func _weapon_ids_in(inv: CharacterInventory) -> Array:
+	var out: Array = []
+	for e in inv.contents():
+		var it: Item = e.get("item")
+		if it != null and it.is_weapon():
+			out.append(it.id)
+	return out
 
 
 # --- The paint the player actually sees ------------------------------------------------------------------------

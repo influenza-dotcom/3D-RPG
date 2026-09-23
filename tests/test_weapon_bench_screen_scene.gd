@@ -11,19 +11,20 @@ extends GutTest
 ## Prefab WIRING tests — the silent-when-broken seams: the autoload points at the SCENE (not the bare script, or
 ## the authored layout never loads and _bind_ui null-derefs at BOOT), every %node the script binds exists, no
 ## text is authored in the scene (strings belong to PlayerText / l10n, never a .tscn), and the layout discipline
-## survives an editor rearrange. Behaviour (open / fit / buy / remove) is in-tree and lives in a playtest plus
-## tests/test_weapon_bench.gd against the component.
+## survives an editor rearrange. The transaction arithmetic (fit / buy / remove) lives in tests/test_weapon_bench.gd
+## against the component.
 ##
 ## ⭐AND IT PINS CONTROLLER PARITY, both halves. The scene half: the two authored Buttons must keep Button's
 ## default FOCUS_ALL (an authored `focus_mode = 0` is the regression — atm_screen's chips and chip_install's rows
 ## both shipped a card with NO focusable control, where `ui_*` navigation has nowhere to start and every action
-## is pad-unreachable). The runtime half is a SOURCE pin, because a unit test must not run this autoload's
-## open_bench (it wants a live WeaponBench, a live Player and a real viewport).
+## is pad-unreachable). The runtime half is DRIVEN: the real card is instanced into a SubViewport and opened for
+## real through open_bench against a bare off-tree WeaponBench and Player (neither one's _ready runs — the
+## tests/test_weapon_bench.gd card idiom), then asked where the pad's focus actually landed.
 ##
-## What is NEW here versus the install screen, and pinned below because nothing else can catch it: this screen's
-## THIRD parity part — the stat-delta footer is wired to `focus_entered` as well as `mouse_entered`, so a pad
-## player gets the same before→after preview a mouse player does. A preview surface a pad can never reach is not
-## a preview surface, and the omission is invisible in a mouse playtest.
+## What is NEW here versus the install screen, and driven below because nothing else can catch it: this screen's
+## THIRD parity part — the stat-delta footer answers FOCUS as well as hover, so a pad player gets the same
+## before→after preview a mouse player does. A preview surface a pad can never reach is not a preview surface,
+## and the omission is invisible in a mouse playtest.
 
 const SCENE := "res://scenes/ui/weapon_bench_screen.tscn"
 const SCREEN_SOURCE := "res://scripts/ui/weapon_bench_screen.gd"
@@ -40,6 +41,38 @@ const BOUND := ["Root", "Dim", "Content", "Title", "MoneyInset", "GunButton", "M
 ## adds width instead) and is therefore the one the budget must survive — see test_the_card_actually_fits.
 const CANVAS_SHORT := Vector2i(792, 432)
 const CANVAS_16_9 := Vector2i(792, 445)
+
+## The driven-card fixtures (see _open_card). A bare Player: no _ready, so a backpack and a wallet and nothing else.
+const PLAYER_PATH := "res://scripts/player/player.gd"
+## A REAL registered weapon template: the footer preview folds from ItemDb.item_by_id(gun.id).
+const GUN_ID := &"pistol"
+## Minted part ids, namespaced away from test_weapon_bench.gd's and every shipped mod_*.tres.
+const P_BARREL := &"test_bench_card_barrel"
+const P_SIGHT := &"test_bench_card_sight"
+
+## Shared state the driven card touches, restored in after_each: the bench gates on the payment seam, which reads
+## GameState's banking fields, and open_bench / close move the global mouse mode.
+var _prev_account: float
+var _prev_method: String
+var _prev_mouse: Input.MouseMode
+
+
+func before_each() -> void:
+	_prev_account = GameState.account
+	_prev_method = GameState.payment_method
+	_prev_mouse = Input.mouse_mode
+	GameState.account = 0.0
+	GameState.payment_method = "debit"
+
+
+func after_each() -> void:
+	for id in [P_BARREL, P_SIGHT]:
+		ItemDb._by_id.erase(id)
+	GameState.account = _prev_account
+	GameState.payment_method = _prev_method
+	Input.mouse_mode = _prev_mouse
+	if MenuStyle._denied_player != null:
+		MenuStyle._denied_player.stop()
 
 
 func test_autoload_is_the_authored_scene() -> void:
@@ -153,84 +186,333 @@ func test_every_authored_button_is_reachable_by_a_pad() -> void:
 	inst.free()
 
 
-func test_the_pad_landing_spot_is_seeded_when_the_card_opens() -> void:
-	# The other half of parity is RUNTIME (rows built in _make_row, focus grabbed in open_bench on a live
-	# viewport), which a unit test must not run — this autoload's _ready binds real chrome and open_bench wants a
-	# live WeaponBench and Player. So it is pinned by SOURCE, the tests/test_payment_rail_selector.gd idiom.
-	#
-	# ⭐Every offset below is GUARDED before it is sliced or compared: find() answers -1 for a needle that has been
-	# renamed away, substr(-1, …) silently slices from the END of the file, and a contains() over that garbage
-	# reads as "absent" — a pin that retires itself in silence is worse than no pin at all.
-	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
-	assert_gt(src.length(), 0, "weapon_bench_screen.gd must be readable")
-	assert_true(src.contains("btn.focus_mode = Control.FOCUS_ALL"),
-		"_make_row must build every row FOCUS_ALL — including a disabled one; the rows ARE the pad path, and a control a pad can never land on is not a path")
-	assert_true(src.contains("_first_focus = row"),
-		"the first row built must be recorded as the screen's landing spot (re-recorded every _rebuild — the old rows are freed)")
-	assert_true(src.contains("_first_focus = null"),
-		"_rebuild must clear the landing spot BEFORE the fills re-record it, or open_bench is handed a queue_freed Button")
-	var open_at := src.find("func open_bench(")
-	assert_gt(open_at, -1, "func open_bench( no longer present — the pin is stale")
-	assert_eq(src.rfind("func open_bench("), open_at,
-		"open_bench must be defined exactly ONCE, or the body sliced below is not the one that runs")
-	var open_end := src.find("\nfunc ", open_at + 1)
-	assert_gt(open_end, open_at, "open_bench's body must end at the next function — the pin is stale")
-	var body := src.substr(open_at, open_end - open_at)
-	var shown := body.find("_root.visible = true")
-	assert_gt(shown, -1, "_root.visible = true no longer present in open_bench — the pin is stale")
-	var grabbed := body.find("_first_focus.grab_focus()")
-	assert_gt(grabbed, -1,
-		"open_bench must SEED focus on the first row — with no focus owner, ui navigation has nowhere to start and every control is pad-unreachable")
-	assert_gt(grabbed, shown,
-		"and it must grab AFTER the card is shown — grab_focus on a hidden Control does nothing, so seeding first would leave the pad with no owner anyway")
-	# The three-step fallback chain, each candidate checked for VISIBILITY as well as validity: set_available(false)
-	# HIDES the rail selector on a cash-only bench, and grab_focus on a hidden Control is a silent no-op.
-	assert_true(body.contains("_gun_btn.grab_focus()"),
-		"with no rows at all (empty bag — both lists hold hint Labels), the gun cycler must take the seed: it is the one control that exists in every state")
-	assert_true(body.contains("_rail_btn.grab_focus()"),
-		"and the rail selector is the last resort behind it")
-	assert_true(body.contains("_gun_btn.visible"),
-		"each focus candidate must be checked for .visible too — a hidden Control cannot take focus, so an unchecked chain lands the pad nowhere")
+# --- Controller parity and the card's own discipline, DRIVEN ---------------------------------------------------
+## Everything below instances the REAL card and opens it for REAL (see _open_card), then asks the viewport, the
+## rows and MenuStyle what a player would actually get — never the script's source text.
+
+## A bare bench with an empty shelf (off-tree, so _ready never seeded one); every slot offered, the shipped default.
+func _bench() -> WeaponBench:
+	var b := WeaponBench.new()
+	b.stock = CharacterInventory.new()
+	return b
 
 
-func test_the_detail_footer_is_wired_to_focus_as_well_as_hover() -> void:
-	# ⭐THE THIRD PART OF PARITY, and the one unique to this screen: the before→after stat preview must reach a PAD
-	# player. Every shipped hover-footer screen is mouse-only, so the omission would look normal in review and be
-	# invisible in a mouse playtest — the pad player simply never learns what a part does before paying for it.
-	# One connect per row is the whole cost.
-	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
-	assert_gt(src.length(), 0, "weapon_bench_screen.gd must be readable")
-	for wiring in ["btn.mouse_entered.connect(_preview", "btn.focus_entered.connect(_preview",
-			"btn.mouse_exited.connect(_preview_clear)", "btn.focus_exited.connect(_preview_clear)"]:
-		assert_true(src.contains(wiring),
-			"_make_row must wire `%s` — the pad gets the same detail the mouse does, and the footer must clear on BOTH exits or it strands a stale preview" % wiring)
+func _player(money: float = 5000.0) -> Player:
+	var p = load(PLAYER_PATH).new()  # no _ready -> bare backpack, no weapon component
+	p.inventory = CharacterInventory.new()
+	p.money = money
+	return p
 
 
-func test_the_notice_band_is_never_hidden_and_the_rows_are_muted() -> void:
-	# Two invariants that are pure source discipline — nothing about the scene or a live viewport can catch either.
-	#
-	# 1. The Notice band keeps CONSTANT HEIGHT: bench_notice returns "" for the no-reason key precisely so the band
-	#    can say nothing without vanishing. Hiding it with `visible` would re-flow the VBox and hop the card under
-	#    the player's cursor mid-transaction (the heal_screen constant-line-count lesson).
-	# 2. Every code-built row MUTES its auto-wired generic click: MenuStyle.apply() + the global node_added hook
-	#    put a click on every BaseButton under a menu root, and the commit cue already fires from the bench's
-	#    shared success tail. Unmuted, a success sounds twice and a refusal once — precisely backwards.
-	var src := FileAccess.get_file_as_string(SCREEN_SOURCE)
-	assert_gt(src.length(), 0, "weapon_bench_screen.gd must be readable")
-	assert_false(src.contains("_notice.visible"),
-		"the Notice band must never be hidden with `visible` — it holds a constant one-line height and simply says nothing when there is nothing to say")
-	assert_true(src.contains("MenuStyle.set_button_sound(btn, &\"\")"),
-		"_make_row must mute the row's generic click — the commit cue lives on WeaponBench's shared success tail, and both would double it")
-	assert_true(src.contains("MenuStyle.set_button_sound(_gun_btn, &\"tab\")"),
-		"the gun cycler is a sideways VIEW swap, so it wears the tab cue, never a commit cue")
-	assert_true(src.contains("MenuStyle.play_denied()"),
-		"the REFUSAL half of the sound pair lives here, at the one place each of the bench's bools comes back")
-	assert_false(src.contains("get_tree().paused"),
-		"a station screen is REAL-TIME — it must never touch get_tree().paused (the atm_screen.gd header carries the argument)")
+## A UNIQUE pistol Item — its own WeaponData, so a fit never writes through to the registered template.
+func _gun() -> Item:
+	var tmpl := ItemDb.item_by_id(GUN_ID)
+	assert_true(tmpl != null, "resources/items/ must still ship a '%s' weapon item — the driven card mods it" % GUN_ID)
+	return tmpl.clone_unique()
 
 
-## ⭐⭐THE PIN THIS FILE EXISTS FOR. Every other assertion here is a wiring check — it reads a flag and says the
-## flag is set. Not one of them could see the bug this screen SHIPPED with: the card was authored exactly as
+## A minted weapon part, REGISTERED with ItemDb so the footer's fold resolves it. One ADD line is enough: the preview
+## only has to CHANGE something, and the fold itself is pinned in tests/test_weapon_mods.gd.
+func _part(id: StringName, display: String, slot: int, min_gunplay: int = 0) -> Item:
+	var line := WeaponStatDelta.new()
+	line.property = &"effective_range"
+	line.op = WeaponStatDelta.Op.ADD
+	line.amount = 8.0
+	var lines: Array[WeaponStatDelta] = []
+	lines.append(line)
+	var mod := WeaponMod.new()
+	mod.slot = slot
+	mod.deltas = lines
+	mod.min_gunplay = min_gunplay
+	var part := Item.new()
+	part.id = id
+	part.display_name = display
+	part.category = Item.Category.MISC
+	part.max_stack = 10
+	part.value = 100.0
+	part.weapon_mod = mod
+	ItemDb._by_id[id] = part
+	return part
+
+
+## THE REAL CARD, OPENED FOR REAL: the authored scene in a SubViewport at the shipped canvas, its own _ready binding
+## the chrome, then open_bench itself — every refuse guard, the gun pick, _rebuild and the focus seed. Two frames
+## after, so layout has settled before anything is measured.
+func _open_card(b: WeaponBench, p: Player) -> CanvasLayer:
+	var vp := SubViewport.new()
+	vp.size = CANVAS_16_9
+	vp.disable_3d = true
+	add_child_autofree(vp)
+	var card: CanvasLayer = (load(SCENE) as PackedScene).instantiate()
+	vp.add_child(card)
+	await wait_process_frames(1)
+	card.open_bench(b, p)
+	await wait_process_frames(2)
+	return card
+
+
+## Close through the card's own close() (unbinds the bag / stock signals, restores the mouse) and free the off-tree
+## rig. The SubViewport and the card itself go with add_child_autofree.
+func _close_card(card: CanvasLayer, b: WeaponBench, p: Player) -> void:
+	card.close()
+	b.stock.free()
+	b.free()
+	p.inventory.free()
+	p.free()
+
+
+## Every row Button painted in one section, in paint order (a section holding only its hint Label has none).
+func _rows(card: Node, list_name: String) -> Array[Button]:
+	var out: Array[Button] = []
+	for c in card.get_node("%" + list_name).get_children():
+		if c is Button:
+			out.append(c as Button)
+	return out
+
+
+## The row in `list_name` whose NAME column reads `label` (the _make_row shape: Button > HBox > [slot, name, price]).
+func _row_named(card: Node, list_name: String, label: String) -> Button:
+	for row in _rows(card, list_name):
+		if row.get_child_count() == 0:
+			continue
+		var hb: Node = row.get_child(0)
+		if hb.get_child_count() >= 2 and hb.get_child(1) is Label and (hb.get_child(1) as Label).text == label:
+			return row
+	return null
+
+
+## ⭐THE PAD HAS SOMEWHERE TO START. Opening the card must leave a focus owner, and it must be the TOP row — which on
+## a fresh gun is an EMPTY slot, dim and DISABLED. That one fact carries the three runtime parity parts at once: rows
+## hold focus even when disabled (atm_screen's chips and chip_install's rows both shipped without), the first row
+## built is recorded as the landing spot, and the seed lands after the card is SHOWN (grab_focus on a hidden Control
+## is a silent no-op). From that spot, walking focus forward must reach every row on the card.
+func test_opening_the_card_hands_the_pad_its_top_row() -> void:
+	var b := _bench()
+	var p := _player()
+	var gun := _gun()
+	var barrel := _part(P_BARREL, "Card Test Barrel", WeaponData.ModSlot.BARREL)
+	p.inventory.add(gun, 1)
+	p.inventory.add(barrel, 1)
+	var card := await _open_card(b, p)
+	assert_true(card.is_open(), "precondition: open_bench accepted a real bench and a player carrying a gun")
+	var rows: Array[Button] = _rows(card, "FittedList")
+	rows.append_array(_rows(card, "PartsList"))
+	assert_gt(rows.size(), 1, "precondition: the card painted its slot rows and the carried part's row")
+	if rows.size() < 2:
+		_close_card(card, b, p)
+		return
+	var top: Button = rows[0]
+	assert_true(top.disabled, "precondition: the top row is an EMPTY slot, painted dim and disabled")
+	assert_eq(card.get_viewport().gui_get_focus_owner(), top,
+		"opening the card must hand the pad the TOP row, disabled or not — with no focus owner ui_* navigation has nowhere to start and every control is pad-unreachable")
+	var reached := {}
+	var at: Control = top
+	for i in 64:
+		reached[at] = true
+		at = at.find_next_valid_focus()
+		if at == null or at == top:
+			break
+	for row in rows:
+		assert_true(reached.has(row),
+			"row %d of %d must be reachable by walking focus forward from the landing spot — a row a pad can never land on is not a path" % [rows.find(row), rows.size()])
+	assert_false(get_tree().paused, "a station screen is REAL-TIME: opening the card must never pause the world")
+	_close_card(card, b, p)
+	gun = null
+	barrel = null
+
+
+## ...AND WITH NOTHING TO LIST. An empty bag has no gun, so FITTED paints no slot rows and PARTS holds only its hint:
+## there is no row to seed. The gun cycler is the one control present in every state, so the pad lands there.
+func test_an_empty_bag_hands_the_pad_the_gun_cycler() -> void:
+	var b := _bench()
+	var p := _player()
+	var card := await _open_card(b, p)
+	assert_true(card.is_open(), "precondition: an empty bag still opens the card (the Notice band says why nothing is listed)")
+	assert_eq(_rows(card, "FittedList").size() + _rows(card, "PartsList").size(), 0, "precondition: no rows at all")
+	assert_eq(card.get_viewport().gui_get_focus_owner(), card.get_node("%GunButton"),
+		"with no rows the gun cycler must take the pad's focus — it exists in every state, and a seed that stopped at the rows would leave the pad nowhere")
+	_close_card(card, b, p)
+
+
+## ⭐A COMMIT FREES THE ROW THE PAD WAS ON. Every fit repaints both lists, destroying the focused row AND the landing
+## spot the last paint recorded. The repaint must re-record the spot before it refills the lists and hand focus to a
+## LIVE row — or the pad is stranded after one action, and a stale landing spot is a queue_freed Button handed to
+## grab_focus.
+func test_a_commit_re_seats_the_pad_on_a_live_row() -> void:
+	var b := _bench()
+	var p := _player()
+	var gun := _gun()
+	var barrel := _part(P_BARREL, "Card Test Barrel", WeaponData.ModSlot.BARREL)
+	p.inventory.add(gun, 1)
+	p.inventory.add(barrel, 1)
+	var card := await _open_card(b, p)
+	var row := _row_named(card, "PartsList", barrel.label())
+	assert_true(row != null and not row.disabled, "precondition: the carried barrel paints a live FIT row")
+	if row == null:
+		_close_card(card, b, p)
+		return
+	row.grab_focus()
+	assert_eq(card.get_viewport().gui_get_focus_owner(), row, "precondition: the pad is on the barrel's row")
+	row.pressed.emit()  # what the pad's ui_accept delivers — through the row's own bound action
+	assert_true(_row_named(card, "FittedList", barrel.label()) != null, "precondition: the fit went through and the card repainted")
+	var owner: Control = card.get_viewport().gui_get_focus_owner()
+	assert_true(owner != null and owner.is_inside_tree() and not owner.is_queued_for_deletion(),
+		"after a commit the pad must be on a LIVE control — the row it pressed was just freed by the repaint")
+	var fitted := card.get_node("%FittedList")
+	var parts := card.get_node("%PartsList")
+	assert_true(owner != null and (fitted.is_ancestor_of(owner) or parts.is_ancestor_of(owner)),
+		"...and on a row of the REBUILT card, so the pad's next press does something")
+	_close_card(card, b, p)
+	await wait_process_frames(1)  # let the rows the repaints queue_freed actually go, so GUT reports no orphans
+	gun = null
+	barrel = null
+
+
+## ⭐THE PREVIEW REACHES A PAD. Focusing a part row must paint the same before→after footer hovering it does, and
+## leaving the row — by focus or by mouse — must put the footer back at rest, or a stale preview describes a row the
+## player is no longer on.
+func test_the_footer_previews_a_focused_row_exactly_as_a_hovered_one() -> void:
+	var b := _bench()
+	var p := _player()
+	var gun := _gun()
+	var barrel := _part(P_BARREL, "Card Test Barrel", WeaponData.ModSlot.BARREL)
+	p.inventory.add(gun, 1)
+	p.inventory.add(barrel, 1)
+	var card := await _open_card(b, p)
+	var detail := card.get_node("%Detail") as Label
+	var resting: String = detail.text
+	var row := _row_named(card, "PartsList", barrel.label())
+	assert_true(row != null, "precondition: the carried barrel paints a row")
+	if row == null:
+		_close_card(card, b, p)
+		return
+	row.grab_focus()
+	var focused_preview: String = detail.text
+	assert_ne(focused_preview, resting, "a pad focusing a part row must repaint the footer — the preview cannot be mouse-only")
+	assert_true(focused_preview.contains(barrel.label()),
+		"...with that part's own before→after block, headed by its name (the footer read: %s)" % focused_preview.c_escape())
+	(card.get_node("%GunButton") as Button).grab_focus()
+	assert_eq(detail.text, resting, "moving focus OFF the row must put the footer back at rest")
+	row.mouse_entered.emit()
+	assert_eq(detail.text, focused_preview, "a hover paints exactly the preview a focus does — one surface, two ways in")
+	row.mouse_exited.emit()
+	assert_eq(detail.text, resting, "...and the mouse leaving clears it too")
+	_close_card(card, b, p)
+	gun = null
+	barrel = null
+
+
+## THE NOTICE BAND HOLDS ITS LINE. It says nothing at rest and names the refusal while you are on a gated row — and in
+## both states it is ON the card at the same height, so nothing below it hops under the cursor mid-transaction (the
+## heal_screen constant-line-count lesson).
+func test_the_notice_band_keeps_its_place_whether_or_not_it_has_something_to_say() -> void:
+	var b := _bench()
+	var p := _player()
+	var gun := _gun()
+	var sight := _part(P_SIGHT, "Card Test Sight", WeaponData.ModSlot.SIGHT, 99)  # a Gunplay gate nobody meets
+	p.inventory.add(gun, 1)
+	p.inventory.add(sight, 1)
+	var card := await _open_card(b, p)
+	var notice := card.get_node("%Notice") as Label
+	var parts := card.get_node("%PartsList") as Control
+	assert_eq(notice.text, "", "precondition: at rest, with a gun in the bag and nothing refused, the band has nothing to say")
+	assert_true(notice.is_visible_in_tree(), "the SILENT band must stay on the card — hiding it re-flows everything under it")
+	var rest_h: float = notice.size.y
+	var rest_rows: Rect2 = parts.get_global_rect()
+	var row := _row_named(card, "PartsList", sight.label())
+	assert_true(row != null and row.disabled, "precondition: the gated sight paints a dim row")
+	if row == null:
+		_close_card(card, b, p)
+		return
+	row.mouse_entered.emit()
+	await wait_process_frames(2)
+	assert_ne(notice.text, "", "precondition: on the gated row the band names the refusal")
+	assert_true(notice.is_visible_in_tree(), "the SPEAKING band is on the card too")
+	assert_eq(notice.size.y, rest_h, "the band is the same height speaking as silent")
+	assert_eq(parts.get_global_rect(), rest_rows, "...so the rows under it do not move when a reason comes or goes")
+	_close_card(card, b, p)
+	gun = null
+	sight = null
+
+
+## THE BENCH IS THE ONLY VOICE OF A COMMIT. MenuStyle's node_added hook puts the generic click on every Button that
+## joins a menu root, and the success cue already fires from WeaponBench's shared tail — an unmuted row would sound
+## twice on a success and once on a refusal, precisely backwards. The gun cycler is a sideways VIEW swap and wears the
+## tab cue instead. The probe Button is the control: it proves the hook is live under THIS card, so a row without the
+## click was muted rather than simply never wired.
+func test_rows_carry_no_generic_click_and_the_cycler_wears_the_tab_cue() -> void:
+	var b := _bench()
+	var p := _player()
+	var gun := _gun()
+	var barrel := _part(P_BARREL, "Card Test Barrel", WeaponData.ModSlot.BARREL)
+	p.inventory.add(gun, 1)
+	p.inventory.add(barrel, 1)
+	var card := await _open_card(b, p)
+	var root := card.get_node("%Root")
+	var probe := Button.new()
+	root.add_child(probe)
+	assert_true(probe.pressed.is_connected(MenuStyle._play_click),
+		"precondition: an ordinary Button joining this card DOES get the generic click from the node_added hook")
+	root.remove_child(probe)
+	probe.free()
+	var rows: Array[Button] = _rows(card, "FittedList")
+	rows.append_array(_rows(card, "PartsList"))
+	assert_gt(rows.size(), 0, "precondition: the card painted rows")
+	for row in rows:
+		assert_false(row.pressed.is_connected(MenuStyle._play_click),
+			"row %d must carry NO generic click — the commit cue lives on the bench's success tail, and both would double it" % rows.find(row))
+	var gun_btn := card.get_node("%GunButton") as Button
+	assert_false(gun_btn.pressed.is_connected(MenuStyle._play_click), "the gun cycler carries no generic click either")
+	assert_eq(StringName(gun_btn.get_meta(&"_snd_semantic", &"")), &"tab",
+		"...it speaks the TAB cue: cycling the gun changes what you are LOOKING at, never what you own")
+	_close_card(card, b, p)
+	gun = null
+	barrel = null
+
+
+## THE REFUSAL HALF OF THE SOUND PAIR lives on this card, at the one place the bench's bool comes back. A commit the
+## bench refuses must SAY no — a silent refusal reads as a dead button — and a commit it honours must not.
+func test_a_refused_commit_says_no_and_an_honoured_one_does_not() -> void:
+	var b := _bench()
+	var p := _player()
+	var gun := _gun()
+	var barrel := _part(P_BARREL, "Card Test Barrel", WeaponData.ModSlot.BARREL)
+	var sight := _part(P_SIGHT, "Card Test Sight", WeaponData.ModSlot.SIGHT)
+	p.inventory.add(gun, 1)
+	p.inventory.add(barrel, 1)
+	p.inventory.add(sight, 1)
+	var card := await _open_card(b, p)
+	var denied: AudioStreamPlayer = MenuStyle._denied_player
+	assert_true(denied != null, "precondition: MenuStyle built its denial voice")
+	var barrel_row := _row_named(card, "PartsList", barrel.label())
+	assert_true(barrel_row != null and not barrel_row.disabled, "precondition: the carried barrel paints a live FIT row")
+	if denied == null or barrel_row == null:
+		_close_card(card, b, p)
+		return
+	denied.stop()
+	barrel_row.pressed.emit()
+	assert_true(_row_named(card, "FittedList", barrel.label()) != null, "precondition: the barrel fit went through")
+	assert_false(denied.playing, "an HONOURED fit must not sound the refusal cue")
+	var sight_row := _row_named(card, "PartsList", sight.label())  # the fit above repainted the list
+	assert_true(sight_row != null and not sight_row.disabled, "precondition: the sight is still offered as a live FIT row")
+	if sight_row == null:
+		_close_card(card, b, p)
+		return
+	p.money = 0.0  # the wallet empties while the card is open: no bound signal repaints the row's dim
+	sight_row.pressed.emit()
+	assert_true(_row_named(card, "FittedList", sight.label()) == null, "precondition: the unfunded fit was refused")
+	assert_true(denied.playing,
+		"a REFUSED fit must speak the denied cue — nothing else in the game answers that press, so silence reads as a dead button")
+	_close_card(card, b, p)
+	await wait_process_frames(1)  # let the rows the repaint queue_freed actually go, so GUT reports no orphans
+	gun = null
+	barrel = null
+	sight = null
+
+
+## ⭐⭐THE PIN THIS FILE EXISTS FOR. The scene pins above are wiring checks — each reads a flag and says the
+## flag is set — and the driven tests watch focus, the footer and the cues. Not one of them could see the bug this
+## screen SHIPPED with: the card was authored exactly as
 ## designed, every unique name resolved, every focus_mode was right, and BOTH row lists rendered at ZERO HEIGHT
 ## on the real canvas. The whole clickable content of the menu was invisible and unclickable, and the Panel
 ## overflowed its own anchor band on top of it (minimum 340px inside a 338px band).
